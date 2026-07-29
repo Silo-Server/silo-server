@@ -454,10 +454,15 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 
 // --- Available scan-source plugins (Add-source picker) ---
 
+// autoscanScanSourcePluginResponse describes one creatable scan source. The
+// descriptor is additive: clients that predate it keep reading the same three
+// identity fields.
 type autoscanScanSourcePluginResponse struct {
-	PluginID     string `json:"plugin_id"`
-	CapabilityID string `json:"capability_id"`
-	DisplayName  string `json:"display_name"`
+	PluginID     string                        `json:"plugin_id"`
+	CapabilityID string                        `json:"capability_id"`
+	DisplayName  string                        `json:"display_name"`
+	Description  string                        `json:"description,omitempty"`
+	Descriptor   autoscan.ScanSourceDescriptor `json:"descriptor"`
 }
 
 // HandleListAvailableScanSources returns every installed scan_source capability
@@ -474,6 +479,8 @@ func (h *AutoscanHandler) HandleListAvailableScanSources(w http.ResponseWriter, 
 			PluginID:     a.PluginID,
 			CapabilityID: a.CapabilityID,
 			DisplayName:  a.DisplayName,
+			Description:  a.Description,
+			Descriptor:   a.Descriptor,
 		})
 	}
 	writeJSON(w, http.StatusOK, struct {

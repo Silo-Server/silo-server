@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { Play } from "lucide-react";
+import { ChevronDown, ChevronRight, Play } from "lucide-react";
 import type { AutoscanSettings } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,23 @@ import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
 // Tab routing helpers
 // ---------------------------------------------------------------------------
 
-const AUTOSCAN_TABS = ["sources", "activity", "connections", "settings"] as const;
+const AUTOSCAN_TABS = ["sources", "activity"] as const;
 type AutoscanTab = (typeof AUTOSCAN_TABS)[number];
+
+/**
+ * Connections and settings used to be peer tabs, which read as "set these up
+ * first" — most operators never needed either. They now live in an Advanced
+ * section on the Sources view, so their old deep links land on Sources with
+ * that section already open rather than 404-ing into a missing tab.
+ */
+const LEGACY_ADVANCED_TABS = new Set(["connections", "settings"]);
 
 function normalizeTab(value: string | null): AutoscanTab {
   return AUTOSCAN_TABS.includes(value as AutoscanTab) ? (value as AutoscanTab) : "sources";
+}
+
+function isLegacyAdvancedTab(value: string | null): boolean {
+  return value !== null && LEGACY_ADVANCED_TABS.has(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -65,14 +77,9 @@ function SettingsTab() {
 
   return (
     <div className="max-w-lg space-y-6">
-      <p className="text-muted-foreground text-sm">
-        Autoscan can be enabled or disabled from the toggle in the page header. Tune polling
-        behavior below.
-      </p>
-
       {/* Default poll interval */}
       <div className="space-y-1.5">
-        <Label htmlFor="default-poll-interval">Default poll interval (seconds)</Label>
+        <Label htmlFor="default-poll-interval">Default check interval (seconds)</Label>
         <div className="flex items-center gap-2">
           <Input
             id="default-poll-interval"
@@ -88,7 +95,7 @@ function SettingsTab() {
           <span className="text-muted-foreground text-sm">sec</span>
         </div>
         <p className="text-muted-foreground text-xs">
-          Used for sources that have no per-source interval set.
+          Used by sources that don&apos;t set their own.
         </p>
       </div>
 
@@ -121,10 +128,15 @@ function SettingsTab() {
 
 export default function AdminAutoscan() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = normalizeTab(searchParams.get("tab"));
+  const requestedTab = searchParams.get("tab");
+  const activeTab = normalizeTab(requestedTab);
   const trigger = useTriggerAutoscan();
   const settings = useAutoscanSettings();
   const updateSettings = useUpdateAutoscanSettings();
+
+  // Open Advanced automatically when arriving from an old connections/settings
+  // link, so a bookmark still lands on the thing it pointed at.
+  const [advancedOpen, setAdvancedOpen] = useState(() => isLegacyAdvancedTab(requestedTab));
 
   const enabled = settings.data?.enabled ?? false;
 
@@ -161,9 +173,8 @@ export default function AdminAutoscan() {
               ))}
           </div>
           <p className="text-muted-foreground max-w-2xl text-sm leading-6">
-            Automatically detect library changes from installed scan-source plugins. Install them
-            from the Plugins page, configure each source, bind a connection if it needs one, and
-            tune polling intervals.
+            Silo re-scans a library as soon as something changes, instead of waiting for the next
+            scheduled scan. Add a source for each thing you want watched.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -195,24 +206,52 @@ export default function AdminAutoscan() {
         <TabsList variant="line" className="border-border w-full justify-start border-b">
           <TabsTrigger value="sources">Sources</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
-          <TabsTrigger value="connections">Connections</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="sources">
+        <TabsContent value="sources" className="space-y-6">
           <SourcesPanel />
+
+          {/* Advanced — servers and polling defaults. Collapsed by default
+              because most setups never need either: a webhook source needs no
+              server, and the default interval is usually fine. */}
+          <section className="border-border rounded-lg border">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-4 py-3 text-left"
+              onClick={() => setAdvancedOpen((open) => !open)}
+              aria-expanded={advancedOpen}
+              aria-controls="autoscan-advanced"
+            >
+              {advancedOpen ? (
+                <ChevronDown className="text-muted-foreground size-4 shrink-0" />
+              ) : (
+                <ChevronRight className="text-muted-foreground size-4 shrink-0" />
+              )}
+              <span className="text-sm font-medium">Advanced</span>
+              <span className="text-muted-foreground text-xs">
+                Saved servers and polling defaults
+              </span>
+            </button>
+
+            {advancedOpen && (
+              <div id="autoscan-advanced" className="space-y-8 border-t px-4 py-5">
+                <ConnectionsPanel />
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <h2 className="text-sm font-medium">Polling defaults</h2>
+                    <p className="text-muted-foreground text-xs">
+                      Applied to sources that don&apos;t override them.
+                    </p>
+                  </div>
+                  <SettingsTab />
+                </div>
+              </div>
+            )}
+          </section>
         </TabsContent>
 
         <TabsContent value="activity">
           <ActivityPanel />
-        </TabsContent>
-
-        <TabsContent value="connections">
-          <ConnectionsPanel />
-        </TabsContent>
-
-        <TabsContent value="settings">
-          <SettingsTab />
         </TabsContent>
       </Tabs>
     </div>

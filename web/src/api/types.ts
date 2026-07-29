@@ -2107,10 +2107,35 @@ export interface AutoscanSourcesResponse {
   sources: AutoscanSource[];
 }
 
+/** Whether a scan source needs upstream credentials to reach its provider. */
+export type AutoscanConnectionRequirement = "none" | "optional" | "required";
+
+/**
+ * The setup contract for one scan source, declared by its plugin manifest and
+ * resolved host-side. The Add-source flow builds its steps from this rather
+ * than branching on plugin ids, so a new plugin configures itself.
+ *
+ * The host always populates this, substituting defaults (poll + optional
+ * connection) for capabilities that declare nothing.
+ */
+export interface AutoscanScanSourceDescriptor {
+  delivery_modes: AutoscanDeliveryMode[];
+  connection: AutoscanConnectionRequirement;
+  connection_kinds?: string[];
+  /** Plugin already emits Silo-native paths, so path rewrites can be skipped. */
+  emits_native_paths?: boolean;
+  summary?: string;
+  icon_url?: string;
+  /** Per-source config fields, rendered by the shared plugin SchemaForm. */
+  config_form?: PluginAdminForm;
+}
+
 export interface AutoscanAvailableSource {
   plugin_id: string;
   capability_id: string;
   display_name: string;
+  description?: string;
+  descriptor: AutoscanScanSourceDescriptor;
 }
 
 export interface AutoscanAvailableSourcesResponse {
@@ -3442,6 +3467,13 @@ export interface PluginAdminFormField {
   show_when?: PluginAdminFormCondition[];
   validation?: PluginAdminFormValidation;
   exclusive_group_field?: string;
+  /**
+   * Names a host-known value this field can be populated from in one click.
+   * Used by autoscan source config so a path field can be filled from Silo's
+   * own library paths without the UI knowing which plugin owns it. Unknown
+   * values render no action.
+   */
+  fill_from?: string;
 }
 
 export interface PluginCapability {

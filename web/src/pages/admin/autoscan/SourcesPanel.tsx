@@ -6,7 +6,6 @@ import {
   ChevronRight,
   Clock,
   Copy,
-  Library as LibraryIcon,
   Plus,
   RefreshCw,
   Trash2,
@@ -16,12 +15,13 @@ import {
 import { Link } from "react-router";
 import { toast } from "sonner";
 import type {
+  AutoscanDeliveryMode,
+  AutoscanScanSourceDescriptor,
   AutoscanPathRewrite,
   AutoscanRewriteSuggestions,
   AutoscanSource,
   AutoscanSourceInput,
   AutoscanWebhookProvider,
-  Library,
 } from "@/api/types";
 import {
   AlertDialog,
@@ -73,12 +73,28 @@ import {
   useRotateAutoscanWebhook,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
-import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import {
   buildPluginDisplayNames,
   composeSourceLabel,
   pluginDisplayNameKey,
 } from "@/lib/autoscanLabels";
+import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import SourceConfigForm from "./SourceConfigForm";
+import { ChoiceCard, StepTrail } from "./ChoiceCard";
+import InlineConnectionPicker from "./InlineConnectionPicker";
+import { sourceTargets } from "./sourceTargets";
+import { WebhookInstructions, WebhookMappingEditor } from "./WebhookSetupStep";
+import { hasUsableMapping, seedMappings, usableMappings, type MappingDraft } from "./webhookSetup";
+import {
+  connectionIsMandatory,
+  connectionMatchesKinds,
+  defaultDeliveryMode,
+  DEFAULT_DESCRIPTOR,
+  descriptorFor,
+  initialConfigValues,
+  needsConnectionStep,
+  needsDeliveryChoice,
+} from "./sourceDescriptor";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -141,15 +157,25 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
   };
 }
 
-const ARR_WEBHOOK_PLUGIN_ID = "silo.autoscan.arr-webhook";
 const WEBHOOK_PROVIDER_KEY = "webhook_provider";
 
 function isWebhookSource(source: AutoscanSource): boolean {
   return source.delivery_mode === "webhook";
 }
 
-function isArrWebhookPlugin(plugin: { plugin_id: string } | undefined): boolean {
-  return plugin?.plugin_id === ARR_WEBHOOK_PLUGIN_ID;
+/**
+ * Which arr a webhook source expects, for the setup instructions. A descriptor
+ * naming exactly one connection kind tells us; anything else stays "auto",
+ * which shows the union of both services' triggers.
+ */
+function webhookProviderOf(
+  descriptor: AutoscanScanSourceDescriptor,
+): AutoscanWebhookProvider | "auto" {
+  const kinds = descriptor.connection_kinds ?? [];
+  if (kinds.length === 1 && (kinds[0] === "sonarr" || kinds[0] === "radarr")) {
+    return kinds[0];
+  }
+  return "auto";
 }
 
 /** Resolve a possibly relative webhook_url against the admin UI's own origin. */
@@ -157,35 +183,19 @@ function absoluteWebhookURL(url: string): string {
   return url.startsWith("/") ? `${window.location.origin}${url}` : url;
 }
 
-const CEPHFS_PLUGIN_ID = "silo.autoscan.cephfs";
-const CEPHFS_CAPABILITY_ID = "cephfs";
-const DEFAULT_CEPHFS_EXCLUSIONS = [
-  "*.partial",
-  "*.tmp",
-  "@eaDir",
-  "#recycle",
-  ".downloads",
-  ".recyclebin",
-  "volumes",
-];
-const CEPHFS_MOVIE_PATHS_KEY = "movie_flat_paths";
-const CEPHFS_TV_PATHS_KEY = "tv_flat_paths";
-const CEPHFS_LEGACY_MOVIE_NESTED_KEY = "movie_nested_paths";
-const CEPHFS_LEGACY_TV_NESTED_KEY = "tv_nested_paths";
+/**
+ * Legacy source_config keys that were superseded by a newer key. Rows written
+ * before the rename still carry the old key, so its lines are merged into the
+ * new one when the editor loads. Both keys are sent back on save, which is what
+ * lets an older plugin build keep reading its original key.
+ */
+const LEGACY_CONFIG_KEY_ALIASES: Record<string, string> = {
+  movie_nested_paths: "movie_flat_paths",
+  tv_nested_paths: "tv_flat_paths",
+};
 
-function isCephFSSource(source: AutoscanSource): boolean {
-  return source.plugin_id === CEPHFS_PLUGIN_ID || source.capability_id === CEPHFS_CAPABILITY_ID;
-}
-
-function isCephFSPlugin(plugin: { plugin_id: string; capability_id: string } | undefined): boolean {
-  return plugin?.plugin_id === CEPHFS_PLUGIN_ID || plugin?.capability_id === CEPHFS_CAPABILITY_ID;
-}
-
-function defaultCephFSConfig(): Record<string, string> {
-  return { exclusions: DEFAULT_CEPHFS_EXCLUSIONS.join("\n") };
-}
-
-function mergeLineValues(...values: Array<string | undefined>): string {
+/** Merge newline-separated values, de-duplicating and dropping blanks. */
+function mergeLines(...values: Array<string | undefined>): string {
   const lines = new Set<string>();
   for (const value of values) {
     (value ?? "")
@@ -197,35 +207,19 @@ function mergeLineValues(...values: Array<string | undefined>): string {
   return Array.from(lines).join("\n");
 }
 
-function mergeLineDefaults(value: string | undefined, defaults: string[]): string {
-  const lines = new Set(
-    (value ?? "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean),
-  );
-  for (const entry of defaults) {
-    lines.add(entry);
-  }
-  return Array.from(lines).join("\n");
-}
-
+/**
+ * Prepare a source's stored config for editing: pass values through as-is,
+ * folding any superseded key into its replacement so nothing an operator
+ * previously configured silently disappears from the form.
+ */
 function sourceConfigForEdit(source: AutoscanSource): Record<string, string> {
-  if (!isCephFSSource(source)) {
-    return { ...(source.source_config ?? {}) };
+  const config = { ...(source.source_config ?? {}) };
+  for (const [legacyKey, currentKey] of Object.entries(LEGACY_CONFIG_KEY_ALIASES)) {
+    if (config[legacyKey] === undefined) continue;
+    config[currentKey] = mergeLines(config[currentKey], config[legacyKey]);
+    delete config[legacyKey];
   }
-  const config = source.source_config ?? {};
-  return {
-    [CEPHFS_MOVIE_PATHS_KEY]: mergeLineValues(
-      config[CEPHFS_MOVIE_PATHS_KEY],
-      config[CEPHFS_LEGACY_MOVIE_NESTED_KEY],
-    ),
-    [CEPHFS_TV_PATHS_KEY]: mergeLineValues(
-      config[CEPHFS_TV_PATHS_KEY],
-      config[CEPHFS_LEGACY_TV_NESTED_KEY],
-    ),
-    exclusions: mergeLineDefaults(config.exclusions, DEFAULT_CEPHFS_EXCLUSIONS),
-  };
+  return config;
 }
 
 function normalizeSourceConfig(config: Record<string, string>): Record<string, string> {
@@ -236,60 +230,6 @@ function normalizeSourceConfig(config: Record<string, string>): Record<string, s
     out[trimmedKey] = value.trim();
   }
   return out;
-}
-
-function libraryKind(type: string): "movie" | "tv" | "mixed" | null {
-  switch (type.trim().toLowerCase()) {
-    case "movie":
-    case "movies":
-      return "movie";
-    case "series":
-    case "show":
-    case "shows":
-    case "tv":
-    case "tvshows":
-      return "tv";
-    case "mixed":
-      return "mixed";
-    default:
-      return null;
-  }
-}
-
-function configFromLibraries(
-  libraries: Library[],
-  current: Record<string, string>,
-): Record<string, string> {
-  const moviePaths = new Set<string>();
-  const tvPaths = new Set<string>();
-
-  for (const library of libraries) {
-    if (!library.enabled) {
-      continue;
-    }
-    const kind = libraryKind(library.type);
-    if (!kind) {
-      continue;
-    }
-    for (const path of library.paths ?? []) {
-      const trimmed = path.trim();
-      if (!trimmed) {
-        continue;
-      }
-      if (kind === "movie" || kind === "mixed") {
-        moviePaths.add(trimmed);
-      }
-      if (kind === "tv" || kind === "mixed") {
-        tvPaths.add(trimmed);
-      }
-    }
-  }
-
-  return {
-    [CEPHFS_MOVIE_PATHS_KEY]: Array.from(moviePaths).join("\n"),
-    [CEPHFS_TV_PATHS_KEY]: Array.from(tvPaths).join("\n"),
-    exclusions: mergeLineDefaults(current.exclusions, DEFAULT_CEPHFS_EXCLUSIONS),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -585,130 +525,6 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function CephFSConfigEditor({
-  config,
-  onChange,
-  onSave,
-  isSaving,
-  showSave = true,
-}: {
-  config: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
-  onSave: (next?: Record<string, string>) => void;
-  isSaving: boolean;
-  showSave?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const panelId = useId();
-  const libraries = useAdminLibraries();
-
-  function patch(key: string, value: string) {
-    onChange({ ...config, [key]: value });
-  }
-
-  function useConfiguredLibraries() {
-    const next = configFromLibraries(libraries.data ?? [], config);
-    onChange(next);
-    if (showSave) {
-      onSave(next);
-    }
-  }
-
-  const libraryPathCount =
-    libraries.data
-      ?.filter((library) => library.enabled)
-      .reduce((count, library) => count + (library.paths?.length ?? 0), 0) ?? 0;
-  const canUseLibraries = !libraries.isLoading && libraryPathCount > 0 && !isSaving;
-
-  const fields = [
-    {
-      key: CEPHFS_MOVIE_PATHS_KEY,
-      label: "Movie library roots",
-      description: "One configured movie library path per line.",
-      placeholder: "/mnt/media/movies",
-    },
-    {
-      key: CEPHFS_TV_PATHS_KEY,
-      label: "TV library roots",
-      description: "One configured TV library path per line.",
-      placeholder: "/mnt/media/television",
-    },
-    {
-      key: "exclusions",
-      label: "Ignored paths",
-      description: "One glob, directory name, or path prefix per line.",
-      placeholder: DEFAULT_CEPHFS_EXCLUSIONS.join("\n"),
-    },
-  ];
-
-  return (
-    <div className="border-border mt-3 rounded-md border">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 pt-3 text-left sm:py-2"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-controls={panelId}
-        >
-          {open ? (
-            <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
-          ) : (
-            <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
-          )}
-          <span className="truncate text-sm font-medium">CephFS paths &amp; ignores</span>
-        </button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="mx-3 mb-3 justify-center whitespace-normal sm:mr-2 sm:mb-0 sm:ml-0 sm:shrink-0 sm:whitespace-nowrap"
-          disabled={!canUseLibraries}
-          onClick={useConfiguredLibraries}
-          title={
-            libraries.isLoading
-              ? "Loading libraries"
-              : libraryPathCount === 0
-                ? "No enabled library paths"
-                : "Replace CephFS roots with enabled Silo library paths"
-          }
-        >
-          <LibraryIcon className="size-3.5" />
-          Use configured libraries
-        </Button>
-      </div>
-
-      {open && (
-        <div id={panelId} className="space-y-3 px-3 pb-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            {fields.map((field) => (
-              <div key={field.key} className="space-y-1">
-                <Label className="text-muted-foreground text-xs">{field.label}</Label>
-                <textarea
-                  value={config[field.key] ?? ""}
-                  onChange={(event) => patch(field.key, event.target.value)}
-                  placeholder={field.placeholder}
-                  rows={field.key === "exclusions" ? 6 : 3}
-                  className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring min-h-20 w-full rounded-md border px-3 py-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                  aria-label={field.label}
-                />
-                <p className="text-muted-foreground text-xs">{field.description}</p>
-              </div>
-            ))}
-          </div>
-          {showSave && (
-            <div className="flex justify-end">
-              <Button type="button" size="sm" disabled={isSaving} onClick={() => onSave()}>
-                Save CephFS settings
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // WebhookEndpointSection — webhook-mode replacement for the poll interval
 // ---------------------------------------------------------------------------
@@ -877,6 +693,7 @@ function parseInterval(intervalStr: string, current: number | null): number | nu
 
 function SourceRow({
   source,
+  descriptor,
   connectionOptions,
   pluginDisplayNames,
   globalPollInterval,
@@ -884,6 +701,8 @@ function SourceRow({
   layout = "table",
 }: {
   source: AutoscanSource;
+  /** Setup contract for this source's capability; drives its config fields. */
+  descriptor: AutoscanScanSourceDescriptor;
   connectionOptions: Array<{ id: string; name: string }>;
   pluginDisplayNames: Map<string, string>;
   globalPollInterval: number | null;
@@ -891,6 +710,7 @@ function SourceRow({
   layout?: "table" | "card";
 }) {
   const update = useUpdateAutoscanSource();
+  const libraries = useAdminLibraries();
   const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source));
   const [intervalError, setIntervalError] = useState(false);
 
@@ -1032,6 +852,30 @@ function SourceRow({
     capabilityId: source.capability_id,
     pluginId: source.plugin_id,
   });
+  // What this source keeps fresh. A source that can never resolve to a library
+  // says so here rather than running cleanly and silently doing nothing, which
+  // was the most common "I set it up and nothing happened" report.
+  const targets = sourceTargets(source, descriptor, libraries.data ?? []);
+  const targetSummary = libraries.isLoading ? null : targets.unresolvable ? (
+    <p className="text-destructive flex items-center gap-1 text-xs">
+      <AlertTriangle className="size-3 shrink-0" />
+      No paths configured — this source can&apos;t match anything yet.
+    </p>
+  ) : targets.libraries.length === 0 ? (
+    <p className="text-xs text-amber-500">
+      Paths don&apos;t match any library root — scans won&apos;t be enqueued.
+    </p>
+  ) : (
+    <p className="text-muted-foreground flex flex-wrap items-center gap-1 text-xs">
+      <span>Feeds</span>
+      {targets.libraries.map((library) => (
+        <Badge key={library.id} variant="outline" className="text-xs font-normal">
+          {library.name}
+        </Badge>
+      ))}
+    </p>
+  );
+
   const sourceIdentity = (
     <div className="min-w-0 space-y-1">
       <div className="min-w-0 space-y-0.5">
@@ -1045,6 +889,7 @@ function SourceRow({
           )}
         </p>
         <p className="text-muted-foreground text-xs">{resolvedLabel.detail}</p>
+        {targetSummary}
       </div>
       <Input
         value={edit.label}
@@ -1143,6 +988,28 @@ function SourceRow({
     />
   );
 
+  // Per-source config, rendered from the capability's declared fields. Absent
+  // for sources that declare none, which is why this can be null.
+  const sourceConfigEditor = descriptor.config_form?.fields?.length ? (
+    <div className="border-border mt-3 space-y-3 rounded-md border p-3">
+      <SourceConfigForm
+        descriptor={descriptor}
+        values={edit.sourceConfig}
+        onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
+        idPrefix={`source-config-${source.id}`}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={update.isPending}
+        onClick={() => handleSourceConfigSave()}
+      >
+        {update.isPending ? "Saving…" : "Save configuration"}
+      </Button>
+    </div>
+  ) : null;
+
   const intervalSettings = isWebhook ? (
     <>
       <WebhookEndpointSection
@@ -1177,14 +1044,7 @@ function SourceRow({
       )}
       <p className="text-muted-foreground mt-1 text-xs">{intervalHelp}</p>
       {rewriteEditor}
-      {isCephFSSource(source) && (
-        <CephFSConfigEditor
-          config={edit.sourceConfig}
-          onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
-          onSave={handleSourceConfigSave}
-          isSaving={update.isPending}
-        />
-      )}
+      {sourceConfigEditor}
     </>
   );
 
@@ -1286,26 +1146,50 @@ function SourceRow({
 
 // ---------------------------------------------------------------------------
 // Add source dialog
+//
+// The flow is built from the selected source's descriptor rather than from its
+// plugin id: a source declaring one delivery mode is never asked to choose one,
+// a source needing no credentials never sees the connection step, and its own
+// config fields come from its manifest. Adding a scan-source plugin therefore
+// needs no change here.
 // ---------------------------------------------------------------------------
 
 interface AddSourceForm {
   /** "plugin_id:capability_id" composite key of the chosen plugin. */
   pluginKey: string;
+  deliveryMode: AutoscanDeliveryMode | "";
   connectionId: string; // "" / "__none__" means no connection
   intervalStr: string;
   sourceConfig: Record<string, string>;
+  /** Webhook-only: arr path -> Silo path rows, seeded from library paths. */
+  mappings: MappingDraft[];
 }
 
 const BLANK_ADD_SOURCE: AddSourceForm = {
   pluginKey: "",
+  deliveryMode: "",
   connectionId: "",
   intervalStr: "",
   sourceConfig: {},
+  mappings: [],
 };
 
 function pluginKey(pluginId: string, capabilityId: string): string {
   return `${pluginId}:${capabilityId}`;
 }
+
+/** Human wording for a delivery mode, used on the choice cards. */
+const DELIVERY_MODE_COPY: Record<AutoscanDeliveryMode, { title: string; description: string }> = {
+  webhook: {
+    title: "The service tells Silo",
+    description:
+      "Instant. Paste one URL into the service's webhook settings. No credentials stored here.",
+  },
+  poll: {
+    title: "Silo checks the service",
+    description: "Silo asks on a schedule. Works without changing anything upstream.",
+  },
+};
 
 function AddSourceDialog({
   open,
@@ -1314,78 +1198,180 @@ function AddSourceDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  connectionOptions: Array<{ id: string; name: string }>;
+  connectionOptions: Array<{ id: string; name: string; kind: string }>;
 }) {
   const available = useAvailableScanSources();
   const createSource = useCreateAutoscanSource();
+  const createWebhook = useCreateAutoscanWebhook();
+  const libraries = useAdminLibraries();
   const [form, setForm] = useState<AddSourceForm>(BLANK_ADD_SOURCE);
+  // Set once a webhook source exists and its endpoint has been generated. The
+  // dialog then shows the paste-this-into-your-arr instructions rather than
+  // closing, so setup finishes in one place.
+  const [createdWebhookSource, setCreatedWebhookSource] = useState<AutoscanSource | null>(null);
 
   const plugins = available.data ?? [];
   const selectedPlugin = plugins.find(
     (p) => pluginKey(p.plugin_id, p.capability_id) === form.pluginKey,
   );
-  const selectedIsCephFS = isCephFSPlugin(selectedPlugin);
-  const selectedIsWebhook = isArrWebhookPlugin(selectedPlugin);
+  const descriptor = descriptorFor(selectedPlugin);
+
+  // The chosen mode, or the descriptor's default while the operator has not
+  // been asked (single-mode sources are never asked at all).
+  const deliveryMode: AutoscanDeliveryMode = form.deliveryMode || defaultDeliveryMode(descriptor);
+
+  const showDeliveryChoice = Boolean(selectedPlugin) && needsDeliveryChoice(descriptor);
+  const showConnection = Boolean(selectedPlugin) && needsConnectionStep(descriptor, deliveryMode);
+  const connectionRequired = connectionIsMandatory(descriptor, deliveryMode);
+  // Poll interval only means something when Silo is the one asking.
+  const showInterval = Boolean(selectedPlugin) && deliveryMode === "poll";
+
+  // Only offer connections this source can actually talk to.
+  const eligibleConnections = connectionOptions.filter((c) =>
+    connectionMatchesKinds(descriptor, c.kind),
+  );
+
+  const hasConfigForm = Boolean(descriptor.config_form?.fields?.length);
+
+  // A webhook source collects its path mappings in this dialog and then shows
+  // the paste-into-your-arr instructions, so it owns two extra steps.
+  const isWebhookFlow = Boolean(selectedPlugin) && deliveryMode === "webhook";
+
+  // Steps vary per source: a single-mode credential-free watcher genuinely has
+  // fewer questions than a pollable arr, so the trail is built from what this
+  // descriptor actually asks rather than being a fixed 1-2-3.
+  const stepLabels = [
+    "What changes?",
+    ...(showDeliveryChoice ? ["How do we hear about it?"] : []),
+    ...(showConnection ? ["Which server?"] : []),
+    ...(isWebhookFlow ? ["Match paths", "Connect it"] : []),
+    ...(hasConfigForm && !isWebhookFlow ? ["Set it up"] : []),
+  ];
+
+  // Highlight the first question the operator has not answered yet. Steps after
+  // the delivery choice only become current once a mode is picked, because the
+  // connection and config sections below depend on it.
+  const currentStepIndex = !selectedPlugin
+    ? 0
+    : showDeliveryChoice && !form.deliveryMode
+      ? 1
+      : Math.max(0, stepLabels.length - 1);
 
   function close() {
     setForm(BLANK_ADD_SOURCE);
+    setCreatedWebhookSource(null);
     onOpenChange(false);
+  }
+
+  function selectPlugin(value: string) {
+    const plugin = plugins.find((p) => pluginKey(p.plugin_id, p.capability_id) === value);
+    const next = descriptorFor(plugin);
+    // Reset per-source state on every change: config keys, delivery modes and
+    // eligible connections all belong to the previously selected source.
+    const nextMode = defaultDeliveryMode(next);
+    setForm({
+      ...BLANK_ADD_SOURCE,
+      pluginKey: value,
+      sourceConfig: initialConfigValues(next),
+      mappings:
+        nextMode === "webhook" ? seedMappings(webhookProviderOf(next), libraries.data ?? []) : [],
+    });
+  }
+
+  /** Seed mappings lazily when the operator switches delivery to webhook. */
+  function selectDeliveryMode(mode: AutoscanDeliveryMode) {
+    setForm((f) => ({
+      ...f,
+      deliveryMode: mode,
+      mappings:
+        mode === "webhook" && f.mappings.length === 0
+          ? seedMappings(webhookProviderOf(descriptor), libraries.data ?? [])
+          : f.mappings,
+    }));
   }
 
   function handleSubmit() {
     if (!selectedPlugin) return;
-    if (selectedIsWebhook) {
-      createSource.mutate(
-        {
-          plugin_id: selectedPlugin.plugin_id,
-          capability_id: selectedPlugin.capability_id,
-          enabled: false,
-          delivery_mode: "webhook",
-          path_rewrites: [],
-          source_config: { [WEBHOOK_PROVIDER_KEY]: "auto" },
-        },
-        { onSuccess: close },
-      );
-      return;
-    }
+
     const connectionId =
-      form.connectionId && form.connectionId !== "__none__" ? form.connectionId : null;
+      showConnection && form.connectionId && form.connectionId !== "__none__"
+        ? form.connectionId
+        : null;
     const raw = form.intervalStr.trim();
-    const pollInterval = raw === "" ? null : Number(raw);
+    const pollInterval = !showInterval || raw === "" ? null : Number(raw);
+
     createSource.mutate(
       {
         plugin_id: selectedPlugin.plugin_id,
         capability_id: selectedPlugin.capability_id,
         connection_id: connectionId,
-        enabled: false,
+        // A webhook source is created enabled: its mappings are supplied in the
+        // same dialog, so there is nothing left to configure afterwards. Poll
+        // sources stay disabled until the operator reviews them.
+        enabled: isWebhookFlow,
+        delivery_mode: deliveryMode,
         poll_interval_seconds: pollInterval,
-        path_rewrites: [],
-        source_config: selectedIsCephFS ? normalizeSourceConfig(form.sourceConfig) : {},
+        path_rewrites: isWebhookFlow ? usableMappings(form.mappings) : [],
+        source_config: normalizeSourceConfig(form.sourceConfig),
       },
-      { onSuccess: close },
+      {
+        onSuccess: (created) => {
+          if (!isWebhookFlow) {
+            close();
+            return;
+          }
+          // Generate the endpoint immediately and stay open: the operator still
+          // needs the URL, and closing here is what previously left them to
+          // hunt for a "Generate webhook URL" button on the row.
+          createWebhook.mutate(created.id, {
+            onSuccess: (withWebhook) => setCreatedWebhookSource(withWebhook),
+            onError: close,
+          });
+        },
+      },
     );
   }
 
   const intervalInvalid =
-    !selectedIsWebhook &&
+    showInterval &&
     form.intervalStr.trim() !== "" &&
     (!Number.isInteger(Number(form.intervalStr)) || Number(form.intervalStr) < 1);
-  const canSubmit = Boolean(selectedPlugin) && !intervalInvalid && !createSource.isPending;
+
+  const isCreating = createSource.isPending || createWebhook.isPending;
+
+  const canSubmit =
+    Boolean(selectedPlugin) &&
+    !intervalInvalid &&
+    !isCreating &&
+    (!connectionRequired || Boolean(form.connectionId && form.connectionId !== "__none__")) &&
+    // A webhook source with no mapping accepts deliveries and resolves nothing,
+    // so require at least one before it can be created.
+    (!isWebhookFlow || hasUsableMapping(form.mappings));
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add scan source</DialogTitle>
+          <DialogTitle>
+            {createdWebhookSource ? "Almost done — connect your service" : "Add scan source"}
+          </DialogTitle>
           <DialogDescription>
-            Create a scan source from an installed plugin. Bind a connection if the source needs to
-            reach a server (Sonarr/Radarr); a source that reads locally needs none. Add one source
-            per thing you want to watch.
+            {createdWebhookSource
+              ? "The source is created and listening. Paste this into your download manager to finish."
+              : "Pick what you want Silo to watch. Each source only asks for what it actually needs."}
           </DialogDescription>
         </DialogHeader>
 
-        {available.isLoading ? (
-          <p className="text-muted-foreground py-4 text-sm">Loading available plugins…</p>
+        {createdWebhookSource ? (
+          <div className="space-y-4">
+            <StepTrail steps={stepLabels} currentIndex={stepLabels.length - 1} />
+            <WebhookInstructions
+              url={absoluteWebhookURL(createdWebhookSource.webhook_url ?? "")}
+              provider={webhookProviderOf(descriptor)}
+            />
+          </div>
+        ) : available.isLoading ? (
+          <p className="text-muted-foreground py-4 text-sm">Loading available sources…</p>
         ) : plugins.length === 0 ? (
           <p className="text-muted-foreground py-4 text-sm">
             No scan-source plugins installed. Install one from the{" "}
@@ -1396,80 +1382,78 @@ function AddSourceDialog({
           </p>
         ) : (
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Plugin</Label>
-              <Select
-                value={form.pluginKey}
-                onValueChange={(v) => {
-                  const plugin = plugins.find((p) => pluginKey(p.plugin_id, p.capability_id) === v);
-                  setForm((f) => ({
-                    ...f,
-                    pluginKey: v,
-                    sourceConfig:
-                      isCephFSPlugin(plugin) && Object.keys(f.sourceConfig).length === 0
-                        ? defaultCephFSConfig()
-                        : f.sourceConfig,
-                  }));
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select a scan-source plugin…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {plugins.map((p) => (
-                    <SelectItem
-                      key={pluginKey(p.plugin_id, p.capability_id)}
-                      value={pluginKey(p.plugin_id, p.capability_id)}
-                    >
-                      {p.display_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <StepTrail steps={stepLabels} currentIndex={currentStepIndex} />
+
+            <div className="space-y-2">
+              <Label>What should Silo watch?</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {plugins.map((p) => {
+                  const key = pluginKey(p.plugin_id, p.capability_id);
+                  const pluginDescriptor = descriptorFor(p);
+                  return (
+                    <ChoiceCard
+                      key={key}
+                      title={p.display_name}
+                      description={pluginDescriptor.summary || p.description}
+                      icon={
+                        pluginDescriptor.delivery_modes.includes("webhook") &&
+                        pluginDescriptor.delivery_modes.length === 1 ? (
+                          <Webhook className="size-3.5" />
+                        ) : (
+                          <RefreshCw className="size-3.5" />
+                        )
+                      }
+                      selected={form.pluginKey === key}
+                      onSelect={() => selectPlugin(key)}
+                    />
+                  );
+                })}
+              </div>
             </div>
 
-            {selectedIsWebhook && (
-              <div className="border-border rounded-md border p-3">
-                <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <Webhook className="size-3.5" />
-                  Direct webhook delivery
-                </p>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  No arr API key or connection needed. After creating the source, generate its
-                  webhook URL and paste it into Sonarr/Radarr → Settings → Connect → Webhook.
-                </p>
+            {showDeliveryChoice && (
+              <div className="space-y-2">
+                <Label>How should Silo hear about changes?</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {descriptor.delivery_modes.map((mode) => {
+                    const copy = DELIVERY_MODE_COPY[mode];
+                    return (
+                      <ChoiceCard
+                        key={mode}
+                        title={copy?.title ?? mode}
+                        description={copy?.description}
+                        icon={mode === "webhook" ? <Webhook className="size-3.5" /> : undefined}
+                        badge={mode === "webhook" ? "Recommended" : undefined}
+                        selected={deliveryMode === mode}
+                        onSelect={() => selectDeliveryMode(mode)}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {!selectedIsWebhook && (
-              <div className="space-y-1.5">
-                <Label>Connection</Label>
-                <Select
-                  value={form.connectionId || "__none__"}
-                  onValueChange={(v) => setForm((f) => ({ ...f, connectionId: v }))}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="No connection" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— No connection —</SelectItem>
-                    {connectionOptions.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  Optional — bind one if the source needs to reach a server (e.g. Sonarr/Radarr).
-                  Sources that read locally need no connection.
-                </p>
-              </div>
+            {isWebhookFlow && (
+              <WebhookMappingEditor
+                mappings={form.mappings}
+                onChange={(mappings) => setForm((f) => ({ ...f, mappings }))}
+              />
             )}
 
-            {!selectedIsWebhook && (
+            {showConnection && (
+              <InlineConnectionPicker
+                value={form.connectionId}
+                onChange={(connectionId) => setForm((f) => ({ ...f, connectionId }))}
+                options={eligibleConnections}
+                required={connectionRequired}
+                connectionKinds={descriptor.connection_kinds ?? []}
+                idPrefix="add-source-conn"
+              />
+            )}
+
+            {showInterval && (
               <div className="space-y-1.5">
-                <Label htmlFor="add-source-interval">Poll interval (seconds)</Label>
+                <Label htmlFor="add-source-interval">Check interval (seconds)</Label>
                 <div className="flex items-center gap-2">
                   <Input
                     id="add-source-interval"
@@ -1485,31 +1469,38 @@ function AddSourceDialog({
                   <p className="text-destructive text-xs">Must be a positive integer.</p>
                 )}
                 <p className="text-muted-foreground text-xs">
-                  Optional — leave blank to use the global default poll interval.
+                  Optional — leave blank to use the global default.
                 </p>
               </div>
             )}
 
-            {selectedIsCephFS && (
-              <CephFSConfigEditor
-                config={form.sourceConfig}
+            {selectedPlugin && (
+              <SourceConfigForm
+                descriptor={descriptor}
+                values={form.sourceConfig}
                 onChange={(sourceConfig) => setForm((f) => ({ ...f, sourceConfig }))}
-                onSave={() => undefined}
-                isSaving={createSource.isPending}
-                showSave={false}
+                idPrefix="add-source-config"
               />
             )}
           </div>
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={close} disabled={createSource.isPending}>
-            Cancel
-          </Button>
-          {plugins.length > 0 && (
-            <Button onClick={handleSubmit} disabled={!canSubmit}>
-              {createSource.isPending ? "Adding…" : "Add source"}
-            </Button>
+          {createdWebhookSource ? (
+            // The source already exists at this point, so there is nothing to
+            // cancel — only an acknowledgement that the URL has been copied.
+            <Button onClick={close}>Done</Button>
+          ) : (
+            <>
+              <Button variant="outline" onClick={close} disabled={isCreating}>
+                Cancel
+              </Button>
+              {plugins.length > 0 && (
+                <Button onClick={handleSubmit} disabled={!canSubmit}>
+                  {isCreating ? "Adding…" : isWebhookFlow ? "Create and continue" : "Add source"}
+                </Button>
+              )}
+            </>
           )}
         </DialogFooter>
       </DialogContent>
@@ -1538,9 +1529,27 @@ export default function SourcesPanel() {
   const connectionOptions = (connections.data ?? []).map((c) => ({
     id: c.id,
     name: c.name,
+    kind: c.kind,
   }));
 
   const globalPollInterval = settings.data?.default_poll_interval_seconds ?? null;
+
+  // Descriptor per installed capability, so each row can render the config
+  // fields its own plugin declares. A source whose capability is no longer
+  // installed falls back to the defaults rather than disappearing.
+  const descriptorsByKey = useMemo(() => {
+    const map = new Map<string, AutoscanScanSourceDescriptor>();
+    for (const plugin of available.data ?? []) {
+      map.set(pluginKey(plugin.plugin_id, plugin.capability_id), descriptorFor(plugin));
+    }
+    return map;
+  }, [available.data]);
+
+  function descriptorForSource(source: AutoscanSource): AutoscanScanSourceDescriptor {
+    return (
+      descriptorsByKey.get(pluginKey(source.plugin_id, source.capability_id)) ?? DEFAULT_DESCRIPTOR
+    );
+  }
 
   const header = (
     <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1609,6 +1618,7 @@ export default function SourcesPanel() {
           <SourceRow
             key={source.id}
             source={source}
+            descriptor={descriptorForSource(source)}
             connectionOptions={connectionOptions}
             pluginDisplayNames={pluginDisplayNames}
             globalPollInterval={globalPollInterval}
@@ -1635,6 +1645,7 @@ export default function SourcesPanel() {
               <SourceRow
                 key={source.id}
                 source={source}
+                descriptor={descriptorForSource(source)}
                 connectionOptions={connectionOptions}
                 pluginDisplayNames={pluginDisplayNames}
                 globalPollInterval={globalPollInterval}

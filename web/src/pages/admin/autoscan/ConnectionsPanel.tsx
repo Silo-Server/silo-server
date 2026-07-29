@@ -130,7 +130,17 @@ export default function ConnectionsPanel() {
 
   function openAddDialog() {
     setTestResult(null);
-    setDialog({ ...BLANK_DIALOG, open: true });
+    // Default to reusing a server already configured under Requests when one
+    // exists. Silo already holds those credentials, so making "enter your own"
+    // the default was asking operators to type the same API key twice — the
+    // single most common piece of duplicated setup.
+    const firstIntegration = arrIntegrations[0];
+    setDialog({
+      ...BLANK_DIALOG,
+      open: true,
+      mode: firstIntegration ? "reuse" : "own",
+      requestIntegrationId: firstIntegration?.id ?? "",
+    });
   }
 
   function openEditDialog(conn: AutoscanConnection) {
@@ -354,8 +364,10 @@ export default function ConnectionsPanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="own">Enter own credentials</SelectItem>
-                    <SelectItem value="reuse">Reuse from Requests</SelectItem>
+                    <SelectItem value="reuse" disabled={arrIntegrations.length === 0}>
+                      Reuse a server from Requests
+                    </SelectItem>
+                    <SelectItem value="own">Enter credentials manually</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

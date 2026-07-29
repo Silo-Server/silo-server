@@ -99,20 +99,51 @@ func (l PluginScanSourceLister) ListScanSources(ctx context.Context) ([]autoscan
 				PluginID:     inst.PluginID,
 				CapabilityID: c.ID,
 				DisplayName:  scanSourceDisplayName(inst.PluginID, c),
+				Description:  scanSourceMetadataString(c, "description"),
+				Descriptor:   scanSourceDescriptor(inst.PluginID, c),
 			})
 		}
 	}
 	return out, nil
 }
 
+// scanSourceMetadataString reads a trimmed string out of a capability's
+// manifest metadata, returning "" when absent or of the wrong type.
+func scanSourceMetadataString(c *plugins.Capability, key string) string {
+	if c == nil || c.Metadata == nil {
+		return ""
+	}
+	value, ok := c.Metadata[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// scanSourceDescriptor resolves the setup contract for a discovered capability.
+// It reads whatever the manifest declares (falling back to host defaults that
+// reproduce pre-descriptor behavior), then lets a host-side compatibility
+// descriptor fill gaps for first-party plugins that have not yet published one
+// of their own.
+func scanSourceDescriptor(pluginID string, c *plugins.Capability) autoscan.ScanSourceDescriptor {
+	var metadata map[string]any
+	if c != nil {
+		metadata = c.Metadata
+	}
+	declared := autoscan.DescriptorFromMetadata(metadata)
+	capabilityID := ""
+	if c != nil {
+		capabilityID = c.ID
+	}
+	return autoscan.ApplyCompatibilityDescriptor(pluginID, capabilityID, declared)
+}
+
 // scanSourceDisplayName derives a human-friendly label for a scan_source
 // capability: the capability manifest's display_name when present, else the
 // plugin id (with the capability id appended when it adds information).
 func scanSourceDisplayName(pluginID string, c *plugins.Capability) string {
-	if c != nil && c.Metadata != nil {
-		if name, ok := c.Metadata["display_name"].(string); ok && strings.TrimSpace(name) != "" {
-			return strings.TrimSpace(name)
-		}
+	if name := scanSourceMetadataString(c, "display_name"); name != "" {
+		return name
 	}
 	switch {
 	case pluginID != "" && c != nil && c.ID != "":
