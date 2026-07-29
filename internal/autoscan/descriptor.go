@@ -66,6 +66,37 @@ type ScanSourceDescriptor struct {
 	// admin_form so plugin-specific knobs render generically instead of being
 	// hardcoded in the admin UI.
 	ConfigForm *AdminForm `json:"config_form,omitempty"`
+
+	// declared records which fields the manifest actually stated, so a
+	// compatibility descriptor can tell "the plugin chose the default" from "the
+	// plugin said nothing". Without it, a plugin explicitly declaring a value
+	// that happens to equal a host default would still be overridden — which
+	// contradicts the manifest-wins contract. Not serialized: it is an internal
+	// merge detail, and the API exposes only resolved values.
+	declared map[string]bool
+}
+
+// Field names tracked in ScanSourceDescriptor.declared.
+const (
+	fieldDeliveryModes    = "delivery_modes"
+	fieldConnection       = "connection"
+	fieldConnectionKinds  = "connection_kinds"
+	fieldEmitsNativePaths = "emits_native_paths"
+	fieldSummary          = "summary"
+	fieldIconURL          = "icon_url"
+	fieldConfigForm       = "config_form"
+)
+
+// Declared reports whether the manifest stated this field itself.
+func (d ScanSourceDescriptor) Declared(field string) bool {
+	return d.declared[field]
+}
+
+func (d *ScanSourceDescriptor) markDeclared(field string) {
+	if d.declared == nil {
+		d.declared = map[string]bool{}
+	}
+	d.declared[field] = true
 }
 
 // SupportsDeliveryMode reports whether the descriptor allows the given mode.
@@ -119,8 +150,11 @@ func DescriptorFromMetadata(metadata map[string]any) ScanSourceDescriptor {
 	// capability may describe its per-source fields through config_schema
 	// without declaring any scan-source behavior at all.
 	out.ConfigForm = configFormFromMetadata(metadata)
+	if out.ConfigForm != nil {
+		out.markDeclared(fieldConfigForm)
+	}
 
-	raw, ok := metadata["scan_source"].(map[string]any)
+	raw, ok := scanSourceBlock(metadata)
 	if !ok {
 		return out
 	}
@@ -144,23 +178,29 @@ func DescriptorFromMetadata(metadata map[string]any) ScanSourceDescriptor {
 		// otherwise keep the default so the source stays creatable.
 		if len(valid) > 0 {
 			out.DeliveryModes = valid
+			out.markDeclared(fieldDeliveryModes)
 		}
 	}
 
 	if connection, ok := raw["connection"].(string); ok {
 		out.Connection = normalizeConnectionRequirement(connection)
+		out.markDeclared(fieldConnection)
 	}
 	if kinds := stringSlice(raw["connection_kinds"]); len(kinds) > 0 {
 		out.ConnectionKinds = kinds
+		out.markDeclared(fieldConnectionKinds)
 	}
 	if native, ok := raw["emits_native_paths"].(bool); ok {
 		out.EmitsNativePaths = native
+		out.markDeclared(fieldEmitsNativePaths)
 	}
 	if summary, ok := raw["summary"].(string); ok {
 		out.Summary = strings.TrimSpace(summary)
+		out.markDeclared(fieldSummary)
 	}
 	if icon, ok := raw["icon_url"].(string); ok {
 		out.IconURL = strings.TrimSpace(icon)
+		out.markDeclared(fieldIconURL)
 	}
 
 	return out
@@ -172,12 +212,40 @@ func DescriptorFromMetadata(metadata map[string]any) ScanSourceDescriptor {
 // settings) keep rendering on the Plugins page as they do today.
 const scanSourceConfigKey = "scan_source"
 
+// scanSourceBlock locates the typed contract inside a capability's persisted
+// metadata.
+//
+// A plugin declares it in the manifest's arbitrary capability `metadata` struct,
+// which the SDK converter stores nested under the "metadata" key rather than
+// flattening into the record (see CapabilityRecordsFromManifest). Looking only
+// at the top level would therefore find nothing for every real installation, so
+// the nested location is checked first. The flat lookup is kept for host-built
+// descriptors and tests, which construct the map directly.
+func scanSourceBlock(metadata map[string]any) (map[string]any, bool) {
+	if nested, ok := metadata["metadata"].(map[string]any); ok {
+		if raw, ok := nested[scanSourceConfigKey].(map[string]any); ok {
+			return raw, true
+		}
+	}
+	raw, ok := metadata[scanSourceConfigKey].(map[string]any)
+	return raw, ok
+}
+
 // configFormFromMetadata finds the per-source admin form in a capability's
 // metadata. It prefers an explicit form nested under the typed scan_source
 // block, then falls back to the capability's config_schema entry keyed
 // "scan_source".
+// configFormFromMetadata finds the per-source admin form in a capability's
+// persisted metadata.
+//
+// The canonical location is `config_form` inside the typed scan_source block,
+// because that survives installation intact. The capability's own
+// config_schema[].admin_form does NOT: the SDK converter persists only key,
+// title, description, json_schema and required, dropping the form. It is still
+// consulted last so a host-built descriptor or a future SDK that preserves the
+// field keeps working, but a plugin must not rely on it.
 func configFormFromMetadata(metadata map[string]any) *AdminForm {
-	if raw, ok := metadata["scan_source"].(map[string]any); ok {
+	if raw, ok := scanSourceBlock(metadata); ok {
 		if form := adminFormFromMetadata(raw["config_form"]); form != nil {
 			return form
 		}

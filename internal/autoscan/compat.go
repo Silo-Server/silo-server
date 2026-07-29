@@ -100,31 +100,30 @@ func ApplyCompatibilityDescriptor(pluginID, capabilityID string, declared ScanSo
 		return declared
 	}
 
-	// A manifest that declares nothing resolves to the default descriptor, so
-	// "still default" is the signal that the plugin has not spoken. Comparing
-	// against the default (rather than the zero value) is what distinguishes
-	// "unset" from "deliberately set to the same thing".
-	def := DefaultScanSourceDescriptor()
-
-	if equalStrings(declared.DeliveryModes, def.DeliveryModes) && len(compat.DeliveryModes) > 0 {
+	// Fill only what the manifest did not state. Comparing values would be
+	// wrong: a plugin that explicitly declares a value equal to a host default
+	// is indistinguishable from one that said nothing, so the explicit choice
+	// would be silently overwritten. DescriptorFromMetadata records which fields
+	// were actually present, which is what makes "manifest wins" true.
+	if !declared.Declared(fieldDeliveryModes) && len(compat.DeliveryModes) > 0 {
 		declared.DeliveryModes = compat.DeliveryModes
 	}
-	if declared.Connection == def.Connection && compat.Connection != "" {
+	if !declared.Declared(fieldConnection) && compat.Connection != "" {
 		declared.Connection = compat.Connection
 	}
-	if len(declared.ConnectionKinds) == 0 {
+	if !declared.Declared(fieldConnectionKinds) {
 		declared.ConnectionKinds = compat.ConnectionKinds
 	}
-	if !declared.EmitsNativePaths {
+	if !declared.Declared(fieldEmitsNativePaths) {
 		declared.EmitsNativePaths = compat.EmitsNativePaths
 	}
-	if declared.Summary == "" {
+	if !declared.Declared(fieldSummary) {
 		declared.Summary = compat.Summary
 	}
-	if declared.IconURL == "" {
+	if !declared.Declared(fieldIconURL) {
 		declared.IconURL = compat.IconURL
 	}
-	if declared.ConfigForm == nil {
+	if !declared.Declared(fieldConfigForm) {
 		declared.ConfigForm = compat.ConfigForm
 	}
 
@@ -141,16 +140,4 @@ func compatibilityDescriptor(pluginID, capabilityID string) (ScanSourceDescripto
 		return cephFSCompatibilityDescriptor(), true
 	}
 	return ScanSourceDescriptor{}, false
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -145,8 +145,9 @@ export function WebhookMappingEditor({
       <div className="space-y-1">
         <Label>Match its paths to yours</Label>
         <p className="text-muted-foreground text-xs">
-          Your download manager reports the path <em>it</em> sees. If that differs from the path
-          Silo sees, map it here. Same path on both sides? Enter it twice.
+          Sonarr/Radarr report the path of the <em>imported library file</em> — their root folder,
+          not the download client&apos;s working directory. If that root differs from the path Silo
+          sees, map it here. Same path on both sides? Enter it twice.
         </p>
       </div>
 
@@ -163,11 +164,11 @@ export function WebhookMappingEditor({
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1 space-y-1">
                     <Label htmlFor={`map-from-${index}`} className="text-muted-foreground text-xs">
-                      Path your download manager reports
+                      Sonarr/Radarr root folder
                     </Label>
                     <Input
                       id={`map-from-${index}`}
-                      placeholder="/downloads/tv"
+                      placeholder="/tv"
                       className="font-mono text-xs"
                       value={row.from}
                       onChange={(e) => update(index, { from: e.target.value })}

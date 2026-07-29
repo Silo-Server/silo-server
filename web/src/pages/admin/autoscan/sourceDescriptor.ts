@@ -1,3 +1,4 @@
+import { buildSchemaValues } from "@/components/admin/plugins/schemaFormUtils";
 import type {
   AutoscanAvailableSource,
   AutoscanDeliveryMode,
@@ -112,9 +113,21 @@ export function initialConfigValues(
  * must stay typed while the renderer owns them, or `false` round-trips as the
  * truthy string "false" and an array collapses into an unreadable join.
  */
-export function serializeConfigValues(values: Record<string, unknown>): Record<string, string> {
+export function serializeConfigValues(
+  values: Record<string, unknown>,
+  descriptor?: AutoscanScanSourceDescriptor,
+): Record<string, string> {
+  // Delegate field selection to the shared plugin-config helper so this path
+  // behaves identically: it drops fields hidden by an unsatisfied show_when
+  // (whose stale values the UI presents as absent) and substitutes each
+  // untouched field's declared default, so what is stored matches what the
+  // operator was shown.
+  const resolved = descriptor?.config_form
+    ? buildSchemaValues(descriptor.config_form, values)
+    : values;
+
   const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(values)) {
+  for (const [key, value] of Object.entries(resolved)) {
     if (value === undefined || value === null) continue;
     out[key] = Array.isArray(value) ? value.map(String).join(",") : String(value);
   }

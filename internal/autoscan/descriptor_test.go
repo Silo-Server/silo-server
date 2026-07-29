@@ -105,6 +105,98 @@ func TestConfigFormDropsSecretFields(t *testing.T) {
 	}
 }
 
+// The SDK's CapabilityRecordsFromManifest stores a capability's arbitrary
+// metadata struct nested under "metadata" rather than flattening it, so a real
+// installation's contract lives at metadata.metadata.scan_source. Reading only
+// the top level silently resolved every installed plugin to host defaults.
+func TestDescriptorFromNestedInstalledMetadata(t *testing.T) {
+	got := DescriptorFromMetadata(map[string]any{
+		"display_name": "Example",
+		"metadata": map[string]any{
+			"scan_source": map[string]any{
+				"connection":       "required",
+				"connection_kinds": []any{"sonarr"},
+				"summary":          "From an installed manifest.",
+			},
+		},
+	})
+
+	if got.Connection != ConnectionRequired {
+		t.Errorf("connection = %q, nested metadata was not read", got.Connection)
+	}
+	if got.Summary != "From an installed manifest." {
+		t.Errorf("summary = %q, nested metadata was not read", got.Summary)
+	}
+}
+
+// The SDK drops admin_form when persisting config_schema, so a plugin's form
+// must travel inside the typed block to survive installation.
+func TestConfigFormFromNestedScanSourceBlock(t *testing.T) {
+	got := DescriptorFromMetadata(map[string]any{
+		"metadata": map[string]any{
+			"scan_source": map[string]any{
+				"config_form": map[string]any{
+					"fields": []any{
+						map[string]any{"key": "root", "label": "Root", "control": "TEXT"},
+					},
+				},
+			},
+		},
+	})
+
+	if got.ConfigForm == nil || len(got.ConfigForm.Fields) != 1 {
+		t.Fatalf("config form not read from the nested block: %+v", got.ConfigForm)
+	}
+	if got.ConfigForm.Fields[0].Key != "root" {
+		t.Errorf("field = %q", got.ConfigForm.Fields[0].Key)
+	}
+}
+
+// Dynamic-option fields have no option source on a scan-source form, so a
+// required one could never be satisfied. They are dropped at the contract.
+func TestConfigFormDropsDynamicOptionFields(t *testing.T) {
+	got := DescriptorFromMetadata(map[string]any{
+		"metadata": map[string]any{
+			"scan_source": map[string]any{
+				"config_form": map[string]any{
+					"fields": []any{
+						map[string]any{"key": "root", "label": "Root", "control": "TEXT"},
+						map[string]any{
+							"key": "profile", "label": "Profile", "control": "SELECT",
+							"dynamic_options": true,
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if got.ConfigForm == nil {
+		t.Fatal("expected the static field to survive")
+	}
+	for _, field := range got.ConfigForm.Fields {
+		if field.Key == "profile" {
+			t.Error("dynamic-option field must not be offered on a source form")
+		}
+	}
+}
+
+// A plugin explicitly declaring a value that equals a host default must still
+// win over the compatibility descriptor — otherwise "manifest wins" is false
+// for exactly the values a plugin is most likely to state.
+func TestCompatibilityRespectsExplicitDefaultValuedDeclaration(t *testing.T) {
+	declared := DescriptorFromMetadata(map[string]any{
+		"metadata": map[string]any{
+			"scan_source": map[string]any{"connection": "optional"},
+		},
+	})
+	got := ApplyCompatibilityDescriptor(cephFSPluginID, cephFSCapabilityID, declared)
+
+	if got.Connection != ConnectionOptional {
+		t.Errorf("connection = %q, explicit declaration was overwritten by compat", got.Connection)
+	}
+}
+
 // A malformed or unrecognized descriptor must degrade to defaults rather than
 // make an otherwise working plugin undiscoverable.
 func TestDescriptorFromMetadataToleratesBadValues(t *testing.T) {

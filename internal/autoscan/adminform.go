@@ -115,25 +115,34 @@ func adminFormFromMetadata(value any) *AdminForm {
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return nil
 	}
-	form.Fields = withoutSecretFields(form.Fields)
+	form.Fields = withoutUnsupportedFields(form.Fields)
 	if len(form.Fields) == 0 {
 		return nil
 	}
 	return &form
 }
 
-// withoutSecretFields drops fields a plugin marked as holding a credential.
+// withoutUnsupportedFields drops fields the source-config surface cannot honour.
 //
-// A source's values land in autoscan_sources.source_config, which is plain
-// JSONB and is returned verbatim by the source API — unlike connection API
-// keys, which go through the repository's encrypted path. Rendering a masked
-// input over a value stored in the clear would misrepresent how it is held, so
-// the host declines to collect it at all. Plugins needing a credential should
-// take a connection instead.
-func withoutSecretFields(fields []AdminFormField) []AdminFormField {
+// Secret fields: a source's values land in autoscan_sources.source_config,
+// which is plain JSONB and is returned verbatim by the source API — unlike
+// connection API keys, which go through the repository's encrypted path.
+// Rendering a masked input over a value stored in the clear would misrepresent
+// how it is held, so the host declines to collect it at all. Plugins needing a
+// credential should take a connection instead.
+//
+// Dynamic-option fields: the shared renderer populates those from a
+// connection-aware probe that only the plugin-config page performs. On a source
+// form they would render as an empty select, and a required one could never be
+// satisfied — permanently blocking creation. Dropping them fails visibly at the
+// contract rather than invisibly at the operator.
+func withoutUnsupportedFields(fields []AdminFormField) []AdminFormField {
 	kept := make([]AdminFormField, 0, len(fields))
 	for _, field := range fields {
 		if field.Secret || strings.EqualFold(field.Control, ControlPassword) {
+			continue
+		}
+		if field.DynamicOptions {
 			continue
 		}
 		kept = append(kept, field)

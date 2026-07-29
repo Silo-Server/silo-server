@@ -74,6 +74,11 @@ export function InlineConnectionPicker({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [reuseId, setReuseId] = useState("");
+  // Which kind a manually-entered server is. Only asked when the descriptor
+  // accepts more than one: recording every manual entry as connectionKinds[0]
+  // would label a Radarr server "sonarr", and the connection test cannot catch
+  // it because it probes only the URL and key.
+  const [manualKind, setManualKind] = useState("");
   const [testResult, setTestResult] = useState<AutoscanConnectionTestResult | null>(null);
 
   // Requests integrations this source could bind, minus any already linked by a
@@ -94,12 +99,15 @@ export function InlineConnectionPicker({
   });
 
   const defaultKind = connectionKinds[0] ?? "sonarr";
+  const kindChoices = connectionKinds.length > 1 ? connectionKinds : [];
+  const effectiveManualKind = manualKind || defaultKind;
 
   function resetDraft() {
     setName("");
     setBaseUrl("");
     setApiKey("");
     setReuseId("");
+    setManualKind("");
     setTestResult(null);
   }
 
@@ -141,7 +149,7 @@ export function InlineConnectionPicker({
         }
       : {
           name: name.trim(),
-          kind: defaultKind,
+          kind: effectiveManualKind,
           base_url: baseUrl.trim(),
           ...(apiKey.trim() ? { api_key_ref: apiKey.trim() } : {}),
         };
@@ -220,6 +228,23 @@ export function InlineConnectionPicker({
 
           {!reuseId && (
             <>
+              {kindChoices.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${idPrefix}-kind`}>Service</Label>
+                  <Select value={effectiveManualKind} onValueChange={setManualKind}>
+                    <SelectTrigger id={`${idPrefix}-kind`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {kindChoices.map((kind) => (
+                        <SelectItem key={kind} value={kind}>
+                          {kind === "sonarr" ? "Sonarr" : kind === "radarr" ? "Radarr" : kind}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor={`${idPrefix}-name`}>Name</Label>
                 <Input

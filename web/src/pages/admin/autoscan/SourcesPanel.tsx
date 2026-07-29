@@ -150,6 +150,8 @@ interface RowEdit {
   label: string;
   /** False while a required or validated config field is unsatisfied. */
   configValid: boolean;
+  /** Set once the operator changes anything, so a late re-parse cannot clobber it. */
+  dirty: boolean;
 }
 
 function sourceToRowEdit(
@@ -163,6 +165,7 @@ function sourceToRowEdit(
     sourceConfig: parseConfigValues(descriptor, sourceConfigForEdit(source)),
     label: source.label ?? "",
     configValid: true,
+    dirty: false,
   };
 }
 
@@ -210,6 +213,18 @@ const LEGACY_CONFIG_KEY_ALIASES: Record<string, string> = {
   tv_nested_paths: "tv_flat_paths",
 };
 
+/**
+ * The plugin whose keys the aliases above belong to. Applying them globally
+ * would silently rename an unrelated plugin's identically-named key on the
+ * first full-state save, losing its configuration.
+ */
+const CEPHFS_PLUGIN_ID = "silo.autoscan.cephfs";
+const CEPHFS_CAPABILITY_ID = "cephfs";
+
+function ownsLegacyAliases(source: AutoscanSource): boolean {
+  return source.plugin_id === CEPHFS_PLUGIN_ID && source.capability_id === CEPHFS_CAPABILITY_ID;
+}
+
 /** Merge newline-separated values, de-duplicating and dropping blanks. */
 function mergeLines(...values: Array<string | undefined>): string {
   const lines = new Set<string>();
@@ -227,9 +242,13 @@ function mergeLines(...values: Array<string | undefined>): string {
  * Prepare a source's stored config for editing: pass values through as-is,
  * folding any superseded key into its replacement so nothing an operator
  * previously configured silently disappears from the form.
+ *
+ * Scoped to the plugin that owns those keys — see ownsLegacyAliases.
  */
 function sourceConfigForEdit(source: AutoscanSource): Record<string, string> {
   const config = { ...(source.source_config ?? {}) };
+  if (!ownsLegacyAliases(source)) return config;
+
   for (const [legacyKey, currentKey] of Object.entries(LEGACY_CONFIG_KEY_ALIASES)) {
     if (config[legacyKey] === undefined) continue;
     config[currentKey] = mergeLines(config[currentKey], config[legacyKey]);
@@ -728,6 +747,20 @@ function SourceRow({
   const update = useUpdateAutoscanSource();
   const libraries = useAdminLibraries();
   const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source, descriptor));
+
+  // /sources and /scan-source-plugins are independent queries. When the row
+  // mounts first it parses with DEFAULT_DESCRIPTOR, leaving switch and
+  // multi-select values as raw strings — "false" would render as an enabled
+  // switch. Re-parse during render once the real descriptor arrives, rather
+  // than from an effect: setting state in an effect costs an extra render pass
+  // and is the pattern that produced a render loop here already.
+  //
+  // Only while the row is untouched, so an in-progress edit is never discarded.
+  const [parsedWith, setParsedWith] = useState(descriptor);
+  if (parsedWith !== descriptor) {
+    setParsedWith(descriptor);
+    if (!edit.dirty) setEdit(sourceToRowEdit(source, descriptor));
+  }
   const [intervalError, setIntervalError] = useState(false);
 
   const isDirty =
@@ -747,7 +780,13 @@ function SourceRow({
       enabled: source.enabled,
       poll_interval_seconds: intervalVal,
       path_rewrites,
-      source_config: normalizeSourceConfig(serializeConfigValues(edit.sourceConfig)),
+      // Unrelated mutations (enable, label, interval, rewrites) must not carry
+      // an in-progress invalid draft into a full-state save — that would bypass
+      // the validity gate and could enable a source the plugin cannot use. Send
+      // what is already persisted instead; the config button owns config saves.
+      source_config: edit.configValid
+        ? normalizeSourceConfig(serializeConfigValues(edit.sourceConfig, descriptor))
+        : { ...(source.source_config ?? {}) },
       label: edit.label.trim(),
       ...overrides,
     };
@@ -809,7 +848,9 @@ function SourceRow({
     const sourceConfig = nextConfig ?? edit.sourceConfig;
     update.mutate({
       id: source.id,
-      body: fullBody({ source_config: normalizeSourceConfig(serializeConfigValues(sourceConfig)) }),
+      body: fullBody({
+        source_config: normalizeSourceConfig(serializeConfigValues(sourceConfig, descriptor)),
+      }),
     });
   }
 
@@ -872,7 +913,9 @@ function SourceRow({
   // says so here rather than running cleanly and silently doing nothing, which
   // was the most common "I set it up and nothing happened" report.
   const targets = sourceTargets(source, descriptor, libraries.data ?? []);
-  const targetSummary = libraries.isLoading ? null : targets.unresolvable ? (
+  const targetSummary = libraries.isLoading ? null : targets.unknown ? (
+    <p className="text-muted-foreground text-xs">Targets determined at scan time</p>
+  ) : targets.unresolvable ? (
     <p className="text-destructive flex items-center gap-1 text-xs">
       <AlertTriangle className="size-3 shrink-0" />
       No paths configured — this source can&apos;t match anything yet.
@@ -1053,7 +1096,7 @@ function SourceRow({
       <SourceConfigForm
         descriptor={rowConfigDescriptor}
         values={edit.sourceConfig}
-        onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
+        onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next, dirty: true }))}
         onValidityChange={handleRowConfigValidity}
         idPrefix={`source-config-${source.id}`}
       />
@@ -1382,7 +1425,7 @@ function AddSourceDialog({
         delivery_mode: deliveryMode,
         poll_interval_seconds: pollInterval,
         path_rewrites: isWebhookFlow ? usableMappings(form.mappings) : [],
-        source_config: normalizeSourceConfig(serializeConfigValues(form.sourceConfig)),
+        source_config: normalizeSourceConfig(serializeConfigValues(form.sourceConfig, descriptor)),
       },
       {
         onSuccess: (created) => {
@@ -1549,6 +1592,11 @@ function AddSourceDialog({
 
             {showConnection && (
               <InlineConnectionPicker
+                // Remount per source: the picker holds its own draft (URL, key,
+                // reuse id, test result), and switching plugins mid-add would
+                // otherwise submit stale credentials under the new descriptor's
+                // kind, or keep a now-ineligible reuse id selected.
+                key={form.pluginKey}
                 value={form.connectionId}
                 onChange={(connectionId) => setForm((f) => ({ ...f, connectionId }))}
                 options={eligibleConnections}

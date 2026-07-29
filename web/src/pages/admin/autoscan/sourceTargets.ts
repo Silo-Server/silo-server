@@ -22,6 +22,13 @@ export interface SourceTargets {
    * source looks configured and runs cleanly, but can never match.
    */
   unresolvable: boolean;
+  /**
+   * True when the source declares emits_native_paths and has nothing configured
+   * to inspect. Its targets are simply not knowable up front — it discovers
+   * already-resolvable Silo paths while polling — so the UI must say "unknown"
+   * rather than warn that it is broken.
+   */
+  unknown: boolean;
 }
 
 /** Normalize a path for prefix comparison: trimmed, no trailing slash. */
@@ -92,7 +99,13 @@ export function sourceTargets(
 ): SourceTargets {
   const paths = resolvedPathsFor(source, descriptor);
   if (paths.length === 0) {
-    return { libraries: [], unresolvable: true };
+    // A native-path source needs no configured root: it emits Silo paths
+    // directly, discovered at poll time. Flagging that as broken would warn on
+    // exactly the case the descriptor field exists to describe.
+    if (descriptor.emits_native_paths) {
+      return { libraries: [], unresolvable: false, unknown: true };
+    }
+    return { libraries: [], unresolvable: true, unknown: false };
   }
 
   // Disabled libraries are skipped by the scanner, so counting one as a target
@@ -110,12 +123,13 @@ export function sourceTargets(
   // Paths exist but match no library root. Not "unresolvable" in the sense
   // above — the operator has said something, it just doesn't line up — so the
   // caller renders a different, more specific warning.
-  return { libraries: matched, unresolvable: false };
+  return { libraries: matched, unresolvable: false, unknown: false };
 }
 
 /** Short human summary of what a source keeps fresh. */
 export function describeTargets(targets: SourceTargets): string {
   if (targets.unresolvable) return "No paths configured";
+  if (targets.unknown) return "Determined at scan time";
   if (targets.libraries.length === 0) return "No matching library";
   return targets.libraries.map((library) => library.name).join(", ");
 }

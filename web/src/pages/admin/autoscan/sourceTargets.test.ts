@@ -136,12 +136,18 @@ describe("sourceTargets", () => {
 
 describe("describeTargets", () => {
   it("names the libraries a source feeds", () => {
-    expect(describeTargets({ libraries, unresolvable: false })).toBe("Movies, TV Shows");
+    expect(describeTargets({ libraries, unresolvable: false, unknown: false })).toBe(
+      "Movies, TV Shows",
+    );
   });
 
   it("reports the two failure states distinctly", () => {
-    expect(describeTargets({ libraries: [], unresolvable: true })).toBe("No paths configured");
-    expect(describeTargets({ libraries: [], unresolvable: false })).toBe("No matching library");
+    expect(describeTargets({ libraries: [], unresolvable: true, unknown: false })).toBe(
+      "No paths configured",
+    );
+    expect(describeTargets({ libraries: [], unresolvable: false, unknown: false })).toBe(
+      "No matching library",
+    );
   });
 });
 
