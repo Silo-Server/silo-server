@@ -17,7 +17,7 @@ import (
 
 const virtualPlaybackPrefix = "virtual://"
 
-const maxVirtualPlaybackStreams = 512
+const maxVirtualPlaybackStreams = 50
 
 type VirtualPlaybackResolver interface {
 	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string) (string, error)

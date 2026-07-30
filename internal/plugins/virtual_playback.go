@@ -15,7 +15,7 @@ import (
 const virtualPlaybackCapabilityID = "virtual-playback"
 
 const (
-	maxVirtualPlaybackStreams     = 512
+	maxVirtualPlaybackStreams     = 50
 	maxVirtualPlaybackResponseLen = 4 << 20
 	virtualStreamsCacheTTL        = 10 * time.Minute
 )
