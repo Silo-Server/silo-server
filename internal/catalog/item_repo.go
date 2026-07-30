@@ -69,6 +69,22 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 			mf.id`, collectionID); err != nil {
 		return 0, 0, fmt.Errorf("identify compatible collection libraries: %w", err)
 	}
+	// Older collection rows may no longer have a library_collection_items
+	// record (for example after a source refresh removed an entry). Keep those
+	// virtual items visible by assigning the enabled type-specific folder.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO reconcile_virtual_targets(content_id, media_folder_id)
+		SELECT mi.content_id, mf.id
+		FROM media_items mi
+		JOIN media_folders mf ON mf.enabled IS NOT FALSE
+		WHERE mi.virtual_source = 'collection'
+		  AND ((mi.type = 'movie' AND mf.type = 'movies')
+		    OR (mi.type = 'series' AND mf.type = 'series'))
+		  AND NOT EXISTS (
+			SELECT 1 FROM reconcile_virtual_targets t WHERE t.content_id = mi.content_id
+		  )`); err != nil {
+		return 0, 0, fmt.Errorf("assign fallback collection libraries: %w", err)
+	}
 	badLinks, err := tx.Exec(ctx, `
 		DELETE FROM media_item_libraries mil
 		USING media_items mi
