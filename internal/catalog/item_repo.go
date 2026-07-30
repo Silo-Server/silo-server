@@ -47,9 +47,6 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 		return 0, 0, errors.New("item repository is not configured")
 	}
 	collectionID = strings.TrimSpace(collectionID)
-	if collectionID == "" {
-		return 0, 0, errors.New("collection id is required")
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin collection virtual reconciliation: %w", err)
