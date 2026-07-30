@@ -48,17 +48,19 @@ func PlanAttemptKeyV3(plan PlanV3, outputRouteGeneration int64, localMutations [
 	sort.Strings(transformations)
 	mutations := append([]string(nil), localMutations...)
 	sort.Strings(mutations)
+	// The canonical string is a server implementation detail built from
+	// lowercase wire tokens; clients treat the resulting key as opaque.
 	parts := []string{
 		plan.PlanID,
-		plan.Delivery.KotlinName(),
-		plan.Stream.Protocol.KotlinName(),
+		string(plan.Delivery),
+		string(plan.Stream.Protocol),
 		strings.ToLower(plan.Stream.Container),
 		strings.ToLower(plan.EffectiveRecipe.VideoCodec),
 		strings.ToLower(plan.EffectiveRecipe.AudioCodec),
 		optionalIntV3(plan.EffectiveRecipe.Width) + "x" + optionalIntV3(plan.EffectiveRecipe.Height),
 		optionalIntV3(plan.EffectiveRecipe.BitrateKbps),
 		strings.ToLower(plan.EffectiveRecipe.DynamicRange),
-		plan.Subtitle.Mode.KotlinName(),
+		string(plan.Subtitle.Mode),
 		strings.Join(transformations, ","),
 	}
 	parts = appendQuirkIdentityV3(parts, plan)

@@ -48,9 +48,9 @@ func hlsEAC3AudioCorrectionV3(source SourceDescriptorV3, request StartRequestV3)
 	return &quirk, true
 }
 
-func dv8HDR10PlusRuntimeCorrectionV3(source SourceDescriptorV3, request StartRequestV3, engine EngineV3) (*AppliedQuirkV3, bool) {
+func dv8HDR10PlusRuntimeCorrectionV3(source SourceDescriptorV3, request StartRequestV3, deliveryClass string) (*AppliedQuirkV3, bool) {
 	if !deviceQuirkProtocolAvailableV3(request) || source.DVProfile != 8 || !source.HDR10Plus ||
-		!isAmazonFireTVV3(request) || !engineSupportsFeatureV3(request, engine, ClientDV8HDR10PlusSanitizerV3) {
+		!isAmazonFireTVV3(request) || !deliverySupportsFeatureV3(request, deliveryClass, ClientDV8HDR10PlusSanitizerV3) {
 		return nil, false
 	}
 	quirk := AppliedQuirkV3{
@@ -66,7 +66,7 @@ func applyCopiedVideoQuirksV3(plan *PlanV3, source SourceDescriptorV3, request S
 	if high10 != nil {
 		appendAppliedQuirkV3(plan, *high10, "")
 	}
-	if quirk, ok := dv8HDR10PlusRuntimeCorrectionV3(source, request, plan.Engine); ok {
+	if quirk, ok := dv8HDR10PlusRuntimeCorrectionV3(source, request, DeliveryClassV3(plan.Delivery)); ok {
 		appendAppliedQuirkV3(plan, *quirk, ClientDV8HDR10PlusSanitizerV3)
 	}
 }
@@ -90,8 +90,8 @@ func deviceQuirkProtocolAvailableV3(request StartRequestV3) bool {
 		HasFeatureV3(request.ClientPlaybackContext.Features, FeatureDeviceQuirksV3)
 }
 
-func engineSupportsFeatureV3(request StartRequestV3, engine EngineV3, feature string) bool {
-	value, ok := request.ClientPlaybackContext.Engines[string(engine)]
+func deliverySupportsFeatureV3(request StartRequestV3, deliveryClass string, feature string) bool {
+	value, ok := request.ClientPlaybackContext.Deliveries[deliveryClass]
 	return ok && value.Enabled && value.SupportedOnDevice && HasFeatureV3(value.Features, feature)
 }
 

@@ -151,7 +151,7 @@ func TestPlanPlaybackV3NodeToolchainDoesNotMaskTerminalForProgressiveOnlyClient(
 	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	delete(req.ClientPlaybackContext.Engines, string(EngineMedia3HLSV3))
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
 
 	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "1"}})
 	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}})

@@ -170,7 +170,7 @@ func TestHandleStartPlaybackV3ReturnsExecutableDirectPlan(t *testing.T) {
 	if response.Outcome != playback.OutcomePlayableV3 || response.PlaybackPlan == nil {
 		t.Fatalf("response = %#v", response)
 	}
-	if response.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 || response.PlaybackPlan.Engine != playback.EngineMedia3DirectV3 || response.PlaybackPlan.Stream.URL == "" {
+	if response.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 || response.PlaybackPlan.PlanAttemptKey == "" || response.PlaybackPlan.Stream.URL == "" {
 		t.Fatalf("plan = %#v", response.PlaybackPlan)
 	}
 	if response.PlaybackPlan.RequestedMediaFileID != file.ID || response.PlaybackPlan.EffectiveMediaFileID != file.ID || response.PlaybackPlan.Source.MediaFileID != file.ID {
@@ -931,7 +931,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
 	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
 	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
-	startRequest.ClientPlaybackContext.Engines[string(playback.EngineMedia3HLSV3)] = playback.EngineCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
@@ -1251,7 +1251,6 @@ func TestValidateSeekReanchorPlanV3RejectsRouteDrift(t *testing.T) {
 	current := playback.PlanV3{
 		PlanID:          "plan:seek-current",
 		Delivery:        playback.DeliveryOriginalHTTPV3,
-		Engine:          playback.EngineMedia3DirectV3,
 		Stream:          playback.StreamV3{Protocol: playback.StreamHTTPProgressiveV3, Container: "mp4", MIMEType: "video/mp4", HeaderRefresh: playback.HeaderRefreshNoneV3},
 		SelectedTracks:  playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(42, "audio", audioIndex), Index: &audioIndex}},
 		EffectiveRecipe: playback.EffectiveRecipeV3{VideoCodec: "h264", AudioCodec: "aac", FrameRate: &frameRate, AudioChannels: &audioChannels, AudioLayout: "stereo"},
@@ -1284,7 +1283,6 @@ func TestValidateSeekReanchorPlanV3RejectsRouteDrift(t *testing.T) {
 		mutate func(*playback.PlanV3)
 	}{
 		{name: "delivery recipe", mutate: func(value *playback.PlanV3) { value.Delivery = playback.DeliveryRemuxProgressiveV3 }},
-		{name: "engine", mutate: func(value *playback.PlanV3) { value.Engine = playback.EngineMedia3HLSV3 }},
 		{name: "stream MIME", mutate: func(value *playback.PlanV3) { value.Stream.MIMEType = "application/x-mpegURL" }},
 		{name: "header refresh", mutate: func(value *playback.PlanV3) { value.Stream.HeaderRefresh = playback.HeaderRefreshSessionV3 }},
 		{name: "frame rate", mutate: func(value *playback.PlanV3) {
@@ -1959,7 +1957,7 @@ func v3HandlerFixtureFile(t *testing.T) *models.MediaFile {
 }
 
 func v3HandlerStartRequest() playback.StartRequestV3 {
-	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureDetailedDecodeV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, OutputRouteGeneration: 1, Capabilities: playback.ClientCodecCapabilitiesV3{CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, Features: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureDetailedDecodeV3}, Platform: "android", FormFactor: "tv", AppVersion: "test", Output: playback.OutputContextV3{OutputRouteGeneration: 1}, Engines: map[string]playback.EngineCapabilityV3{string(playback.EngineMedia3DirectV3): {Enabled: true, SupportedOnDevice: true, Subtitles: playback.EngineSubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
+	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureDetailedDecodeV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, OutputRouteGeneration: 1, Capabilities: playback.ClientCodecCapabilitiesV3{CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, Features: []string{playback.FeaturePlaybackPlanV3, playback.FeatureDetailedDecodeV3}, Platform: "android", FormFactor: "tv", AppVersion: "test", Output: playback.OutputContextV3{OutputRouteGeneration: 1}, Deliveries: map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
 }
 
 func marshalV3StartRequest(t *testing.T, request playback.StartRequestV3) string {

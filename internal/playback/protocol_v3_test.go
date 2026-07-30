@@ -23,7 +23,6 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	second := ServerFeaturesV3()
 	expected := map[string]struct{}{
 		FeaturePlaybackPlanV3:       {},
-		FeatureMedia3Only:           {},
 		FeatureDetailedDecodeV3:     {},
 		FeatureLayoutPassthrough:    {},
 		FeatureRouteDiagnostics:     {},
@@ -174,7 +173,7 @@ func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
 	}
 }
 
-func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
+func TestPlanAttemptKeyV3Fixture(t *testing.T) {
 	type fixture struct {
 		Name                  string             `json:"name"`
 		PlanID                string             `json:"plan_id"`
@@ -263,6 +262,9 @@ func TestProtocolV3GoldenWireFixtures(t *testing.T) {
 	if response.ProtocolVersion != ProtocolV3 || response.Outcome != OutcomePlayableV3 || response.PlaybackPlan == nil || response.PlaybackPlan.Stream.Protocol != StreamHTTPProgressiveV3 {
 		t.Fatalf("golden response = %#v", response)
 	}
+	if !strings.HasPrefix(response.PlaybackPlan.PlanAttemptKey, "v3:") {
+		t.Fatalf("golden plan attempt key = %q, want an opaque server-owned v3: token", response.PlaybackPlan.PlanAttemptKey)
+	}
 }
 
 func TestPlanPlaybackV3DirectRequiresDetailedEvidence(t *testing.T) {
@@ -278,7 +280,7 @@ func TestPlanPlaybackV3DirectRequiresDetailedEvidence(t *testing.T) {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 
-	req.ClientFeatures = []string{FeaturePlaybackPlanV3, FeatureMedia3Only}
+	req.ClientFeatures = []string{FeaturePlaybackPlanV3}
 	req.ClientPlaybackContext.Features = req.ClientFeatures
 	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true}})
 	if result.Terminal == nil || result.Terminal.Reason != "transcoding_disabled" {
@@ -441,12 +443,12 @@ func TestPlanPlaybackV3Profile7UsesVersionedClientTransformationsOnSameFile(t *t
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 	direct.Transformations = []TransformationV3{
 		{Name: ClientDV7ToDV81V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3},
 		{Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3},
 	}
-	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
 
 	first := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
 	if first.Plan == nil || first.Plan.Delivery != DeliveryOriginalHTTPV3 || first.Plan.EffectiveMediaFileID != file.ID || first.Plan.DecisionReason != "client_dv7_to_dv81" {
@@ -669,7 +671,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	embeddedCombinedIndex := 1
 	req.SubtitleTrackIndex = &embeddedCombinedIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", embeddedCombinedIndex)
-	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
 	if !result.RequiresBurn || result.SelectedIndex != 1 || result.TransportIndex != 0 {
 		t.Fatalf("embedded burn-in result = %#v", result)
 	}
@@ -678,7 +680,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	req.SubtitleTrackIndex = &externalIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", externalIndex)
 	req.SubtitleFidelityPreference = SubtitleFidelityPreserveV3
-	result = ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+	result = ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_burn_in_source_unsupported" {
 		t.Fatalf("external burn-in result = %#v", result)
 	}
@@ -813,7 +815,7 @@ func TestPlanPlaybackV3CapWithoutTranscodeRouteFallsBackToOriginal(t *testing.T)
 	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	// The client has no HLS engine, so the cap-induced transcode cannot run.
-	delete(req.ClientPlaybackContext.Engines, string(EngineMedia3HLSV3))
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
@@ -907,25 +909,25 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 		{"output_dolby_vision_profiles", func(r *StartRequestV3) {
 			r.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
 		}},
-		{"engine_dolby_vision_profiles", func(r *StartRequestV3) {
-			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
-			engine.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
-			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		{"delivery_dolby_vision_profiles", func(r *StartRequestV3) {
+			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			delivery.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
+			r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
 		}},
-		{"engine_container_length", func(r *StartRequestV3) {
-			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
-			engine.Containers = []string{longValue}
-			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		{"delivery_container_length", func(r *StartRequestV3) {
+			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			delivery.Containers = []string{longValue}
+			r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
 		}},
-		{"engine_validated_claim_length", func(r *StartRequestV3) {
-			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
-			engine.ValidatedClaims = []string{longValue}
-			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		{"delivery_validated_claim_length", func(r *StartRequestV3) {
+			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			delivery.ValidatedClaims = []string{longValue}
+			r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
 		}},
-		{"engine_feature_length", func(r *StartRequestV3) {
-			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
-			engine.Features = []string{longValue}
-			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		{"delivery_feature_length", func(r *StartRequestV3) {
+			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			delivery.Features = []string{longValue}
+			r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
 		}},
 		{"audio_track_id_length", func(r *StartRequestV3) {
 			r.AudioTrackID = strings.Repeat("a", 129)
@@ -970,8 +972,8 @@ func TestPlanPlaybackV3SeekedHLSCopyPreservesVideo(t *testing.T) {
 	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.Containers = []string{"mp4"}
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
-	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = EngineCapabilityV3{}
-	req.ClientPlaybackContext.Engines[string(EngineMedia3ProgressiveRemuxV3)] = EngineCapabilityV3{}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = DeliveryCapabilityV3{}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{}
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != "copy" || result.Plan.Timeline.SourceStartSeconds != start {
 		t.Fatalf("result = %#v", result)
@@ -1010,6 +1012,9 @@ func TestPlanPlaybackV3TimelineChangePreservesRouteIdentity(t *testing.T) {
 	if first.Plan.PlanID != second.Plan.PlanID ||
 		PlanAttemptKeyV3(*first.Plan, request.OutputRouteGeneration, nil) != PlanAttemptKeyV3(*second.Plan, request.OutputRouteGeneration, nil) {
 		t.Fatalf("timeline changed route identity: first=%#v second=%#v", first.Plan, second.Plan)
+	}
+	if first.Plan.PlanAttemptKey == "" || first.Plan.PlanAttemptKey != PlanAttemptKeyV3(*first.Plan, request.OutputRouteGeneration, nil) {
+		t.Fatalf("plan attempt key not carried on the plan: %q", first.Plan.PlanAttemptKey)
 	}
 	if first.Plan.Timeline.SourceStartSeconds != 0 || second.Plan.Timeline.SourceStartSeconds != startAtSeek {
 		t.Fatalf("timeline positions: first=%#v second=%#v", first.Plan.Timeline, second.Plan.Timeline)
@@ -1067,7 +1072,7 @@ func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testi
 func validStartRequestV3() StartRequestV3 {
 	return StartRequestV3{
 		ProtocolVersion:            ProtocolV3,
-		ClientFeatures:             []string{FeaturePlaybackPlanV3, FeatureMedia3Only},
+		ClientFeatures:             []string{FeaturePlaybackPlanV3},
 		FileID:                     42,
 		ProfileID:                  "profile-1",
 		PlaybackAttemptID:          "attempt-0001",
@@ -1075,10 +1080,10 @@ func validStartRequestV3() StartRequestV3 {
 		SubtitleFidelityPreference: SubtitleFidelityCompatibleV3,
 		OutputRouteGeneration:      1,
 		Capabilities:               ClientCodecCapabilitiesV3{CodecsVideo: []string{"hevc"}, CodecsAudio: []string{"aac"}, Containers: []string{"mkv"}, MaxResolution: "2160p"},
-		ClientPlaybackContext: ClientPlaybackContextV3{ProtocolVersion: ProtocolV3, Features: []string{FeaturePlaybackPlanV3, FeatureMedia3Only}, Platform: "android", FormFactor: "tv", AppVersion: "test", Output: OutputContextV3{OutputRouteGeneration: 1}, Engines: map[string]EngineCapabilityV3{
-			string(EngineMedia3DirectV3):           {Enabled: true, SupportedOnDevice: true, Subtitles: EngineSubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}},
-			string(EngineMedia3ProgressiveRemuxV3): {Enabled: true, SupportedOnDevice: true},
-			string(EngineMedia3HLSV3):              {Enabled: true, SupportedOnDevice: true},
+		ClientPlaybackContext: ClientPlaybackContextV3{ProtocolVersion: ProtocolV3, Features: []string{FeaturePlaybackPlanV3}, Platform: "android", FormFactor: "tv", AppVersion: "test", Output: OutputContextV3{OutputRouteGeneration: 1}, Deliveries: map[string]DeliveryCapabilityV3{
+			DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}},
+			DeliveryClassProgressiveV3:  {Enabled: true, SupportedOnDevice: true},
+			DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true},
 		}},
 	}
 }
@@ -1131,9 +1136,9 @@ func TestPlanPlaybackV3KeepsTheClientTransformWhenTheSourceCannotBeStripped(t *t
 	req := hdr10OnlyProfile7RequestV3()
 	req.ClientFeatures = append(req.ClientFeatures, FeatureClientVideoTransforms)
 	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureClientVideoTransforms)
-	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 	direct.Transformations = []TransformationV3{{Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3}}
-	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
 
 	result := PlanPlaybackV3(PlannerInputV3{

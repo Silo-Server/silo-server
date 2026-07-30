@@ -18,7 +18,7 @@
     ],
     "output_route_generation": 7,
     "local_mutations": ["transport_reopen", "pcm:truehd:8"],
-    "expected": "v3:6d4724f01b6ff692"
+    "expected": "v3:a90828494166fe72"
   },
   {
     "name": "direct_client_dv81_executor_and_version",
@@ -38,7 +38,7 @@
     ],
     "output_route_generation": 9,
     "local_mutations": [],
-    "expected": "v3:2a88b5e686373440"
+    "expected": "v3:9f82315867a70b80"
   },
   {
     "name": "direct_device_quirk_and_runtime_correction_identity",
@@ -64,6 +64,6 @@
     "runtime_corrections": ["client_dv8_hdr10plus_sanitizer_v1"],
     "output_route_generation": 9,
     "local_mutations": [],
-    "expected": "v3:8d843bfffeb3adc3"
+    "expected": "v3:32a3a37d71bc4f43"
   }
 ]

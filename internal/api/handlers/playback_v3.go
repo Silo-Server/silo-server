@@ -1269,13 +1269,22 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	if !seekReanchor && (!intentChange || seekFailureRecovery) {
-		// Client attempt keys may include local mutations that the server cannot
-		// reproduce. Always exclude the durable server recipe as well so stale or
-		// malformed client history cannot immediately re-select the route that
-		// just failed and ping-pong the session.
-		currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, nil)
+		// Always exclude the durable server recipe so stale or malformed client
+		// history cannot immediately re-select the route that just failed and
+		// ping-pong the session. A client-reported local mutation (for example a
+		// PCM recovery route) is folded into the failed plan's key here — the
+		// server owns the hash; clients only echo opaque keys.
+		currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, req.LocalMutations)
 		if !containsStringExactV3(attemptedKeys, currentKey) {
 			attemptedKeys = append(attemptedKeys, currentKey)
+		}
+		if len(req.LocalMutations) > 0 {
+			// The unmutated recipe already failed before the client mutated it
+			// locally; exclude it as well.
+			unmutatedKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, nil)
+			if !containsStringExactV3(attemptedKeys, unmutatedKey) {
+				attemptedKeys = append(attemptedKeys, unmutatedKey)
+			}
 		}
 	}
 	var result playback.PlannerResultV3

@@ -73,7 +73,7 @@ func (h *PlaybackHandler) shadowLegacyPlaybackV3(ctx context.Context, req startP
 func legacyShadowRequestV3(req startPlaybackRequest, file *models.MediaFile, audioIndex int, sessionID string) playback.StartRequestV3 {
 	source := playback.SourceDescriptorFromFileV3(file, audioIndex)
 	hdr := legacyShadowHDRV3(req)
-	features := []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureDetailedDecodeV3}
+	features := []string{playback.FeaturePlaybackPlanV3, playback.FeatureDetailedDecodeV3}
 	capabilities := playback.ClientCodecCapabilitiesV3{
 		CodecsVideo:   append([]string(nil), req.CodecsVideo...),
 		CodecsAudio:   append([]string(nil), req.CodecsAudio...),
@@ -97,16 +97,16 @@ func legacyShadowRequestV3(req startPlaybackRequest, file *models.MediaFile, aud
 		}
 		capabilities.AudioPassthrough = passthrough
 	}
-	engines := map[string]playback.EngineCapabilityV3{
-		string(playback.EngineMedia3DirectV3):           {Enabled: true, SupportedOnDevice: true, Subtitles: playback.EngineSubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true, EmbeddedBitmap: true, SidecarBitmap: true}},
-		string(playback.EngineMedia3ProgressiveRemuxV3): {Enabled: true, SupportedOnDevice: true},
-		string(playback.EngineMedia3HLSV3):              {Enabled: true, SupportedOnDevice: true},
+	deliveries := map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true, EmbeddedBitmap: true, SidecarBitmap: true}},
+		playback.DeliveryClassProgressiveV3:  {Enabled: true, SupportedOnDevice: true},
+		playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true},
 	}
 	return playback.StartRequestV3{
 		ProtocolVersion: playback.ProtocolV3, ClientFeatures: features, FileID: file.ID, ProfileID: req.ProfileID,
 		PlaybackAttemptID: "shadow-" + sessionID, QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3,
 		StartPosition: req.StartPosition, AudioTrackIndex: &audioIndex, Capabilities: capabilities,
-		ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, Features: features, Platform: "legacy-shadow", Output: playback.OutputContextV3{HDRDetails: hdr, AudioPassthrough: passthrough}, Engines: engines},
+		ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, Features: features, Platform: "legacy-shadow", Output: playback.OutputContextV3{HDRDetails: hdr, AudioPassthrough: passthrough}, Deliveries: deliveries},
 	}
 }
 
