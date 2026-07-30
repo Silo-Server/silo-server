@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
@@ -16,7 +17,13 @@ const virtualPlaybackCapabilityID = "virtual-playback"
 const (
 	maxVirtualPlaybackStreams     = 512
 	maxVirtualPlaybackResponseLen = 4 << 20
+	virtualStreamsCacheTTL        = 10 * time.Minute
 )
+
+type virtualStreamsCacheEntry struct {
+	streams   []VirtualPlaybackStream
+	expiresAt time.Time
+}
 
 // VirtualPlaybackVariant is a provider-neutral profile placeholder returned
 // by a virtual playback plugin. It is safe to request during collection sync:
@@ -50,6 +57,34 @@ type VirtualPlaybackStream struct {
 // current provider candidates. It is intended for just-in-time picker
 // population at play time; collection sync must not call it.
 func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error) {
+	if s == nil {
+		return nil, ErrVirtualPlaybackResolverNotInstalled
+	}
+	now := time.Now()
+	s.virtualStreamsMu.Lock()
+	if cached, ok := s.virtualStreamsCache[virtualPath]; ok && now.Before(cached.expiresAt) {
+		streams := append([]VirtualPlaybackStream(nil), cached.streams...)
+		s.virtualStreamsMu.Unlock()
+		return streams, nil
+	}
+	s.virtualStreamsMu.Unlock()
+	v, err, _ := s.launchGroup.Do("virtual-streams:"+virtualPath, func() (any, error) {
+		return s.listVirtualPlaybackStreamsUncached(ctx, virtualPath)
+	})
+	if err != nil {
+		return nil, err
+	}
+	streams := append([]VirtualPlaybackStream(nil), v.([]VirtualPlaybackStream)...)
+	s.virtualStreamsMu.Lock()
+	if s.virtualStreamsCache == nil {
+		s.virtualStreamsCache = make(map[string]virtualStreamsCacheEntry)
+	}
+	s.virtualStreamsCache[virtualPath] = virtualStreamsCacheEntry{streams: append([]VirtualPlaybackStream(nil), streams...), expiresAt: time.Now().Add(virtualStreamsCacheTTL)}
+	s.virtualStreamsMu.Unlock()
+	return streams, nil
+}
+
+func (s *Service) listVirtualPlaybackStreamsUncached(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error) {
 	if s == nil || s.installations == nil {
 		return nil, ErrVirtualPlaybackResolverNotInstalled
 	}

@@ -95,6 +95,8 @@ type Service struct {
 	installationCacheMu  sync.RWMutex
 	installationCache    map[int]*Installation
 	installationCacheGen uint64
+	virtualStreamsMu     sync.Mutex
+	virtualStreamsCache  map[string]virtualStreamsCacheEntry
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -878,6 +880,9 @@ func (s *Service) invalidateInstallationCache() {
 	s.installationCache = nil
 	s.installationCacheGen++
 	s.installationCacheMu.Unlock()
+	s.virtualStreamsMu.Lock()
+	s.virtualStreamsCache = nil
+	s.virtualStreamsMu.Unlock()
 }
 
 // IsInstallationEnabled reports whether the given plugin installation is
