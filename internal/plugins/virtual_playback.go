@@ -167,6 +167,9 @@ func (s *Service) ConfiguredVirtualVariants(ctx context.Context, virtualPath, me
 			if err != nil || response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
 				continue
 			}
+			if len(response.GetBody()) > maxVirtualPlaybackResponseLen {
+				continue
+			}
 			var payload struct {
 				Variants []VirtualPlaybackVariant `json:"variants"`
 			}
@@ -219,6 +222,9 @@ func (s *Service) ResolveVirtualPlayback(ctx context.Context, virtualPath string
 				continue
 			}
 			if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
+				continue
+			}
+			if len(response.GetBody()) > maxVirtualPlaybackResponseLen {
 				continue
 			}
 			var payload struct {
