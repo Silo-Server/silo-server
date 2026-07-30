@@ -17,6 +17,8 @@ import (
 
 const virtualPlaybackPrefix = "virtual://"
 
+const maxVirtualPlaybackStreams = 512
+
 type VirtualPlaybackResolver interface {
 	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string) (string, error)
 }
@@ -97,6 +99,9 @@ func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, fil
 	streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(listCtx, file.FilePath)
 	if err != nil || len(streams) == 0 {
 		return
+	}
+	if len(streams) > maxVirtualPlaybackStreams {
+		streams = streams[:maxVirtualPlaybackStreams]
 	}
 	_ = h.VirtualPlaybackStreamSink(listCtx, file, streams)
 }

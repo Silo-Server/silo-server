@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
 const virtualPlaybackCapabilityID = "virtual-playback"
+
+const (
+	maxVirtualPlaybackStreams     = 512
+	maxVirtualPlaybackResponseLen = 4 << 20
+)
 
 // VirtualPlaybackVariant is a provider-neutral profile placeholder returned
 // by a virtual playback plugin. It is safe to request during collection sync:
@@ -79,6 +83,9 @@ func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath st
 			if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
 				continue
 			}
+			if len(response.GetBody()) > maxVirtualPlaybackResponseLen {
+				continue
+			}
 			var payload struct {
 				Streams []VirtualPlaybackStream `json:"streams"`
 			}
@@ -87,6 +94,9 @@ func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath st
 			}
 			if len(payload.Streams) == 0 {
 				continue
+			}
+			if len(payload.Streams) > maxVirtualPlaybackStreams {
+				payload.Streams = payload.Streams[:maxVirtualPlaybackStreams]
 			}
 			return payload.Streams, nil
 		}
@@ -152,7 +162,7 @@ func (s *Service) ResolveVirtualPlayback(ctx context.Context, virtualPath string
 		}
 		capabilities, err := s.installations.ListCapabilities(ctx, installation.ID)
 		if err != nil {
-			return "", fmt.Errorf("list plugin capabilities: %w", err)
+			continue
 		}
 		for _, capability := range capabilities {
 			if capability == nil || capability.Type != "http_routes.v1" || capability.ID != virtualPlaybackCapabilityID {
@@ -160,7 +170,7 @@ func (s *Service) ResolveVirtualPlayback(ctx context.Context, virtualPath string
 			}
 			client, err := s.HTTPRoutesClient(ctx, installation.ID, capability.ID)
 			if err != nil {
-				return "", fmt.Errorf("connect to virtual playback plugin: %w", err)
+				continue
 			}
 			response, err := client.Handle(ctx, &pluginv1.HandleHTTPRequest{
 				Method: http.MethodPost,
@@ -171,22 +181,22 @@ func (s *Service) ResolveVirtualPlayback(ctx context.Context, virtualPath string
 				},
 			})
 			if err != nil {
-				return "", fmt.Errorf("resolve virtual playback: %w", err)
+				continue
 			}
 			if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
-				return "", fmt.Errorf("virtual playback plugin returned status %d", response.GetStatusCode())
+				continue
 			}
 			var payload struct {
 				StreamURL string `json:"stream_url"`
 			}
 			if err := json.Unmarshal(response.GetBody(), &payload); err != nil {
-				return "", fmt.Errorf("decode virtual playback response: %w", err)
+				continue
 			}
-			streamURL, err := url.Parse(payload.StreamURL)
-			if err != nil || !streamURL.IsAbs() || (streamURL.Scheme != "https" && streamURL.Scheme != "http") {
-				return "", errors.New("virtual playback plugin returned an invalid stream URL")
+			streamURL, err := validateProviderStreamURL(ctx, payload.StreamURL)
+			if err != nil {
+				continue
 			}
-			return streamURL.String(), nil
+			return streamURL, nil
 		}
 	}
 	return "", ErrVirtualPlaybackResolverNotInstalled

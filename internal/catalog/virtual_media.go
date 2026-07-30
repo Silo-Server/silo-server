@@ -175,6 +175,12 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 	if installationID <= 0 || source == "" {
 		return result, errors.New("installation and source are required")
 	}
+	// pgx encodes a nil slice as SQL NULL. `x <> ALL(NULL)`/`NOT (x =
+	// ANY(NULL))` is NULL, not true, which would make reconciliation silently
+	// retain every stale row when a plugin omits keep_media_ids or libraries.
+	// Pass concrete empty arrays so the predicates have the intended semantics.
+	keepIDs = normalizeVirtualKeepIDs(keepIDs)
+	libraryIDs = normalizeVirtualLibraryIDs(libraryIDs)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return result, fmt.Errorf("begin virtual reconciliation: %w", err)
@@ -223,6 +229,20 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 		return result, fmt.Errorf("commit virtual reconciliation: %w", err)
 	}
 	return result, nil
+}
+
+func normalizeVirtualKeepIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
+func normalizeVirtualLibraryIDs(ids []int) []int {
+	if ids == nil {
+		return []int{}
+	}
+	return ids
 }
 
 func validateVirtualMedia(in VirtualMedia) error {

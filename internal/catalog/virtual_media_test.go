@@ -52,3 +52,16 @@ func TestRuntimeSeconds(t *testing.T) {
 		t.Fatalf("runtimeSeconds(0) = %d, want 0", got)
 	}
 }
+
+func TestNormalizeVirtualReconcileIDsUsesConcreteEmptyArrays(t *testing.T) {
+	if got := normalizeVirtualKeepIDs(nil); got == nil || len(got) != 0 {
+		t.Fatalf("normalizeVirtualKeepIDs(nil) = %#v, want non-nil empty slice", got)
+	}
+	if got := normalizeVirtualLibraryIDs(nil); got == nil || len(got) != 0 {
+		t.Fatalf("normalizeVirtualLibraryIDs(nil) = %#v, want non-nil empty slice", got)
+	}
+	keep := []string{"movie-tmdb-1"}
+	if got := normalizeVirtualKeepIDs(keep); len(got) != 1 || got[0] != keep[0] {
+		t.Fatalf("normalizeVirtualKeepIDs changed non-empty input: %#v", got)
+	}
+}

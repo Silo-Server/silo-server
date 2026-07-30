@@ -64,9 +64,8 @@ func (p *HTTPProxy) ResolveVirtualMedia(ctx context.Context, virtualURI string) 
 			slog.WarnContext(ctx, "virtual media resolver returned invalid JSON", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "error", unmarshalErr)
 			continue
 		}
-		resolved, parseErr := url.Parse(strings.TrimSpace(payload.StreamURL))
-		if parseErr == nil && resolved.IsAbs() && (resolved.Scheme == "http" || resolved.Scheme == "https") {
-			return resolved.String(), nil
+		if resolved, validateErr := validateProviderStreamURL(ctx, payload.StreamURL); validateErr == nil {
+			return resolved, nil
 		}
 	}
 	return "", fmt.Errorf("no installed plugin resolved virtual media URI %q", virtualURI)
