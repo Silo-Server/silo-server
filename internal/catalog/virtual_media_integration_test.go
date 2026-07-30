@@ -125,3 +125,37 @@ func TestVirtualMediaVariantsUpsert(t *testing.T) {
 		t.Fatalf("expected 2 episode variants, got %d", count)
 	}
 }
+
+// Installation-scoped purges must not delete rows belonging to another
+// installation. Ownership currently lives on media_items (one owner per
+// content ID); this test pins that invariant until per-file ownership is
+// introduced.
+func TestPurgeVirtualPlaybackItemsKeepsOtherInstallation(t *testing.T) {
+	pool := newVirtualMediaTestPool(t)
+	ctx := context.Background()
+	const contentID = "movie-tmdb-purge-owner-b"
+	if _, err := pool.Exec(ctx, `INSERT INTO media_folders(id,name,type,enabled) VALUES(998,'PurgeTest','mixed',true)`); err != nil {
+		t.Fatalf("seed purge test folder: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title,virtual_owner_installation_id,virtual_source) VALUES($1,'movie','Purge Test',22,'provider-b')`, contentID); err != nil {
+		t.Fatalf("seed other-installation item: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_files(content_id,media_folder_id,file_path,file_size,container,probe_source) VALUES($1,998,'virtual://movie/purge-owner-b',0,'virtual','virtual')`, contentID); err != nil {
+		t.Fatalf("seed other-installation virtual item: %v", err)
+	}
+
+	files, items, err := (&ItemRepository{pool: pool}).PurgeVirtualPlaybackItems(ctx, VirtualPurgeOptions{InstallationID: 11})
+	if err != nil {
+		t.Fatalf("scoped purge failed: %v", err)
+	}
+	if files != 0 || items != 0 {
+		t.Fatalf("purge of installation 11 removed files=%d items=%d owned by installation 22", files, items)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM media_files WHERE file_path='virtual://movie/purge-owner-b'").Scan(&count); err != nil {
+		t.Fatalf("check preserved file: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("other installation's virtual file count=%d, want 1", count)
+	}
+}
