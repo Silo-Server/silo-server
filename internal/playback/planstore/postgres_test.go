@@ -194,7 +194,7 @@ func TestPostgresPlanStore(t *testing.T) {
 					Event:                 name,
 					FailureClassification: "decode_error",
 					FallbackReason:        "test",
-					OutputRouteGeneration: 1,
+					OutputContextID:       "route-1",
 					Diagnostics:           map[string]string{"source": "planstore-test"},
 				},
 				UserID:        f.userID,

@@ -82,8 +82,6 @@ func TestPlanPlaybackV3TranscodeUsesHLSEngineSubtitleCapabilities(t *testing.T) 
 	// A fixed rung forces the HLS transcode route; the fixture's direct
 	// engine renders embedded text while the HLS engine cannot.
 	req.QualityPreference = "1080p"
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	index := 0
 	req.SubtitleTrackIndex = &index

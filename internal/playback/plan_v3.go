@@ -128,7 +128,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
 	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
-	videoOK := detailedVideoEligibleV3(source, input.Request)
+	videoOK, videoEvidenceInsufficient := videoEligibleV3(source, input.Request)
 	var high10Quirk *AppliedQuirkV3
 	if !videoOK {
 		if quirk, ok := high10DecodeOverrideV3(source, input.Request); ok {
@@ -219,6 +219,16 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if !detailedVideoEvidenceCompleteV3(source) {
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
+	if !videoOK && videoEvidenceInsufficient {
+		// The client's flat codec lists claim this stream, but its evidence
+		// tier could not validate it for a direct route. Distinguish that from
+		// a device that genuinely cannot play the stream so lower-tier clients
+		// see an actionable degradation instead of a mystery transcode.
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
+			Code:    EvidenceInsufficientForDirectV3,
+			Message: "The client's capability evidence tier cannot validate this stream for a direct route; an adapted route is used instead.",
+		})
+	}
 
 	// Automatic quality reductions (device resolution limit, bandwidth
 	// estimate/cap, metered fallback) are best-effort. When the only reason to
@@ -243,7 +253,14 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if quality.RequiresTranscode || !videoOK ||
 		(!rangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
 		(subtitle.RequiresBurn && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
-		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "")
+		reasonOverride := ""
+		if !quality.RequiresTranscode && !videoOK && videoEvidenceInsufficient {
+			// The only reason this route adapts is the evidence tier, not a
+			// negative device fact; name that in the decision and in any
+			// resulting terminal.
+			reasonOverride = EvidenceInsufficientForDirectV3
+		}
+		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride)
 	}
 
 	// Profile 7 is normalized on the client against the original range-capable
@@ -266,8 +283,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				Code:    "dolby_vision_enhancement_layer_discarded",
 				Message: "Dolby Vision Profile 7 is played as Profile 8.1 base-layer Dolby Vision; enhancement-layer pixel data is discarded.",
 			})
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			if !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 				return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
 			}
 		}
@@ -286,8 +303,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				Code:    "dolby_vision_removed",
 				Message: "Dolby Vision Profile 7 is played from the same 4K file as its HDR10 base layer.",
 			})
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			if !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 				return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
 			}
 		}
@@ -299,8 +316,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 		plan.DecisionReason = "validated_original_playback"
 		applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
-		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-		if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+		if !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 			return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
 		}
 	}
@@ -359,8 +376,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		if remuxSubtitleOK && progressiveExecutable {
 			plan.Subtitle = remuxSubtitle.Decision
 			plan.Claims.Subtitles = remuxSubtitle.Claims
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-			if deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) && !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			if deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}
 			}
 		}
@@ -418,8 +435,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			}
 			plan.Subtitle = hlsSubtitle.Decision
 			plan.Claims.Subtitles = hlsSubtitle.Claims
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			if !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 				targetAudio := "copy"
 				if hlsTranscodeAudio {
 					targetAudio = "aac"
@@ -495,8 +512,8 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	}
 	plan.EffectiveRecipe.DynamicRange = "sdr"
 	plan.Claims.Video = VideoClaimsV3{}
-	finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.OutputRouteGeneration)
-	if planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+	finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
@@ -531,8 +548,7 @@ func clientSupportsDVProfileV3(request StartRequestV3, profile int) bool {
 }
 
 func clientTransformationAvailableV3(request StartRequestV3, name, version string) bool {
-	if !HasFeatureV3(request.ClientFeatures, FeatureClientVideoTransforms) &&
-		!HasFeatureV3(request.ClientPlaybackContext.Features, FeatureClientVideoTransforms) {
+	if !HasFeatureV3(request.ClientFeatures, FeatureClientVideoTransforms) {
 		return false
 	}
 	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
@@ -734,15 +750,15 @@ func selectedTracksForPlanV3(file *models.MediaFile, audioIndex int, subtitle Su
 	return selected
 }
 
-func finalizePlanIdentityV3(plan *PlanV3, attemptID string, outputRouteGeneration int64) {
+func finalizePlanIdentityV3(plan *PlanV3, attemptID string, outputContextID string) {
 	plan.PlanID = DeterministicPlanIDV3(attemptID, plan.RequestedMediaFileID, plan.EffectiveMediaFileID, *plan)
-	plan.PlanAttemptKey = PlanAttemptKeyV3(*plan, outputRouteGeneration, nil)
+	plan.PlanAttemptKey = PlanAttemptKeyV3(*plan, outputContextID, nil)
 }
 
 // planAttemptedV3 compares FNV-hex attempt keys exactly after trimming
 // whitespace; the keys are case-sensitive hashes, not free-form labels.
-func planAttemptedV3(plan PlanV3, generation int64, attempted []string) bool {
-	wanted := PlanAttemptKeyV3(plan, generation, nil)
+func planAttemptedV3(plan PlanV3, outputContextID string, attempted []string) bool {
+	wanted := PlanAttemptKeyV3(plan, outputContextID, nil)
 	for _, key := range attempted {
 		if strings.TrimSpace(key) == wanted {
 			return true

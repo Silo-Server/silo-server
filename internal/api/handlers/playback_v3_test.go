@@ -250,8 +250,8 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	audioIndex := 1
 	bandwidthEstimate := 3_500
 	bandwidthCap := 4_000
-	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
-	replan := playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "replan-0001", FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "plan-attempt-0001", PlanAttemptKey: failedKey, AttemptedPlanKeys: []string{failedKey}, AttemptCount: 1, QualityPreference: "original", PositionSeconds: 12, OutputRouteGeneration: startRequest.OutputRouteGeneration, Metered: true, BandwidthEstimateKbps: &bandwidthEstimate, BandwidthCapKbps: &bandwidthCap, SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex}}, Failure: playback.FailureV3{Classification: "audio_renderer_error"}, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext}
+	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	replan := playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "replan-0001", FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "plan-attempt-0001", PlanAttemptKey: failedKey, AttemptedPlanKeys: []string{failedKey}, AttemptCount: 1, QualityPreference: "original", PositionSeconds: 12, Metered: true, BandwidthEstimateKbps: &bandwidthEstimate, BandwidthCapKbps: &bandwidthCap, SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex}}, Failure: playback.FailureV3{Classification: "audio_renderer_error"}, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext}
 	replanBody, err := json.Marshal(replan)
 	if err != nil {
 		t.Fatal(err)
@@ -335,19 +335,18 @@ func TestHandleReplanPlaybackV3RollsBackLiveSessionWhenPersistenceFails(t *testi
 	handler.PlanStoreV3 = &failingCompletePlanStoreV3{PlanStoreV3: underlyingStore}
 
 	audioIndex := 1
-	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	replan := playback.ReplanRequestV3{
-		ProtocolVersion:       playback.ProtocolV3,
-		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
-		ReplanRequestID:       "replan-rollback-0001",
-		FailedPlanID:          started.PlaybackPlan.PlanID,
-		PlanAttemptID:         "plan-attempt-rollback-0001",
-		PlanAttemptKey:        failedKey,
-		AttemptedPlanKeys:     []string{failedKey},
-		AttemptCount:          1,
-		QualityPreference:     "original",
-		PositionSeconds:       12,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
+		ProtocolVersion:   playback.ProtocolV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID,
+		ReplanRequestID:   "replan-rollback-0001",
+		FailedPlanID:      started.PlaybackPlan.PlanID,
+		PlanAttemptID:     "plan-attempt-rollback-0001",
+		PlanAttemptKey:    failedKey,
+		AttemptedPlanKeys: []string{failedKey},
+		AttemptCount:      1,
+		QualityPreference: "original",
+		PositionSeconds:   12,
 		SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{
 			ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex,
 		}},
@@ -414,7 +413,7 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 	if err := manager.UpdateProgress(started.SessionID, 12, true); err != nil {
 		t.Fatal(err)
 	}
-	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	reanchor := playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
 		PlaybackAttemptID: startRequest.PlaybackAttemptID,
@@ -424,10 +423,9 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 		// ignore it because the recipe did not fail.
 		AttemptedPlanKeys: []string{currentKey}, AttemptCount: 1,
 		QualityPreference: "original", PositionSeconds: 321,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
-		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
-		Failure:               playback.FailureV3{},
-		Capabilities:          startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		SelectedTracks: started.PlaybackPlan.SelectedTracks,
+		Failure:        playback.FailureV3{},
+		Capabilities:   startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
 	}
 	body, err := json.Marshal(reanchor)
 	if err != nil {
@@ -457,7 +455,7 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 			response.PlaybackPlan.EffectiveMediaFileID != started.PlaybackPlan.EffectiveMediaFileID ||
 			!sameSelectedTracksV3(response.PlaybackPlan.SelectedTracks, started.PlaybackPlan.SelectedTracks) ||
 			response.PlaybackPlan.Timeline.SourceStartSeconds != 321 ||
-			playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.OutputRouteGeneration, nil) != currentKey {
+			playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil) != currentKey {
 			t.Fatalf("reanchored response %d = %#v", index, response.PlaybackPlan)
 		}
 		if response.PlaybackPlan.Subtitle.Artifact == nil ||
@@ -958,7 +956,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 	seekCapabilities.VideoDecode[0].MaxBitrateKbps = 20_000
 	seekContext := startRequest.ClientPlaybackContext
 	seekContext.Device.Model = "request-only-model"
-	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	staleClientKey := "v3:0000000000000000"
 	replan := playback.ReplanRequestV3{
 		ProtocolVersion:       playback.ProtocolV3,
@@ -972,7 +970,6 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 		AttemptCount:          1,
 		QualityPreference:     startRequest.QualityPreference,
 		PositionSeconds:       417,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
 		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
 		Failure:               playback.FailureV3{Classification: "decoder_failure", Message: "reanchored route failed"},
 		Capabilities:          seekCapabilities,
@@ -1002,7 +999,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 		response.PlaybackPlan.EffectiveRecipe.Height == nil || *response.PlaybackPlan.EffectiveRecipe.Height != 2160 {
 		t.Fatalf("failed seek downgraded or video-transcoded the pinned 4K source: %#v", response.PlaybackPlan)
 	}
-	if playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.OutputRouteGeneration, nil) == currentKey {
+	if playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil) == currentKey {
 		t.Fatalf("failed seek retried the failed route: %#v", response.PlaybackPlan)
 	}
 	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
@@ -1033,7 +1030,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 		missing.Operation = operation
 		missing.ReplanRequestID = fmt.Sprintf("seek-missing-current-%04d", index)
 		missing.FailedPlanID = response.PlaybackPlan.PlanID
-		missing.PlanAttemptKey = playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+		missing.PlanAttemptKey = playback.PlanAttemptKeyV3(*response.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 		missing.AttemptedPlanKeys = []string{missing.PlanAttemptKey}
 		missing.SelectedTracks = response.PlaybackPlan.SelectedTracks
 		missing.PositionSeconds++
@@ -1102,7 +1099,7 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 	record.FrozenRecipe.PlanID = record.CurrentPlan.PlanID
 	handler.PlanStoreV3.(*playback.MemoryPlanStoreV3).ReplaceAttempt(context.Background(), *record)
 
-	currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	reanchor := playback.ReplanRequestV3{
 		ProtocolVersion:       playback.ProtocolV3,
 		Operation:             playback.ReplanOperationSeekReanchorV3,
@@ -1115,7 +1112,6 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		AttemptCount:          1,
 		QualityPreference:     record.NormalizedRequest.QualityPreference,
 		PositionSeconds:       300,
-		OutputRouteGeneration: record.NormalizedRequest.OutputRouteGeneration,
 		SelectedTracks:        record.CurrentPlan.SelectedTracks,
 		Capabilities:          record.NormalizedRequest.Capabilities,
 		ClientPlaybackContext: record.NormalizedRequest.ClientPlaybackContext,
@@ -1145,8 +1141,8 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		t.Fatal(err)
 	}
 	outputContext := current.NormalizedRequest.ClientPlaybackContext
-	outputContext.Output.OutputRouteGeneration++
-	currentKey = playback.PlanAttemptKeyV3(current.CurrentPlan, current.NormalizedRequest.OutputRouteGeneration, nil)
+	outputContext.Output.OutputContextID = "route-2"
+	currentKey = playback.PlanAttemptKeyV3(current.CurrentPlan, current.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	ordinary := playback.ReplanRequestV3{
 		ProtocolVersion:       playback.ProtocolV3,
 		PlaybackAttemptID:     current.PlaybackAttemptID,
@@ -1158,7 +1154,6 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		AttemptCount:          1,
 		QualityPreference:     current.NormalizedRequest.QualityPreference,
 		PositionSeconds:       320,
-		OutputRouteGeneration: outputContext.Output.OutputRouteGeneration,
 		SelectedTracks:        current.CurrentPlan.SelectedTracks,
 		Failure:               playback.FailureV3{Classification: "output_route_changed"},
 		Capabilities:          current.NormalizedRequest.Capabilities,
@@ -1207,7 +1202,7 @@ func TestValidateSeekRecoveryRequestV3PinsCurrentIntent(t *testing.T) {
 	request := playback.ReplanRequestV3{
 		Operation:             playback.ReplanOperationSeekReanchorV3,
 		QualityPreference:     start.QualityPreference,
-		OutputRouteGeneration: start.OutputRouteGeneration,
+		ClientPlaybackContext: start.ClientPlaybackContext,
 		SelectedTracks:        selected,
 	}
 	if err := validateSeekRecoveryRequestV3(record, request); err != nil {
@@ -1227,7 +1222,9 @@ func TestValidateSeekRecoveryRequestV3PinsCurrentIntent(t *testing.T) {
 		mutate func(*playback.ReplanRequestV3)
 	}{
 		{name: "quality", mutate: func(value *playback.ReplanRequestV3) { value.QualityPreference = "480p" }},
-		{name: "output route", mutate: func(value *playback.ReplanRequestV3) { value.OutputRouteGeneration++ }},
+		{name: "output route", mutate: func(value *playback.ReplanRequestV3) {
+			value.ClientPlaybackContext.Output.OutputContextID = "route-changed"
+		}},
 		{name: "audio track", mutate: func(value *playback.ReplanRequestV3) {
 			index := 1
 			value.SelectedTracks.Audio = &playback.TrackIdentityV3{ID: playback.TrackIDV3(start.FileID, "audio", index), Index: &index}
@@ -1270,7 +1267,7 @@ func TestValidateSeekReanchorPlanV3RejectsRouteDrift(t *testing.T) {
 		EffectiveMediaFileID: 42,
 		CurrentPlanID:        current.PlanID,
 		CurrentPlan:          current,
-		NormalizedRequest:    playback.StartRequestV3{OutputRouteGeneration: 9},
+		NormalizedRequest:    playback.StartRequestV3{ClientPlaybackContext: playback.ClientPlaybackContextV3{Output: playback.OutputContextV3{OutputContextID: "9"}}},
 	}
 	candidate := current
 	candidate.Timeline.SourceStartSeconds = 321
@@ -1902,9 +1899,9 @@ func TestSanitizeDiagnosticsV3PreservesPlayerFailureEvidence(t *testing.T) {
 
 func TestRouteEventV3AcceptsAndroidSeekEvents(t *testing.T) {
 	base := playback.RouteEventV3{
-		ProtocolVersion:       playback.ProtocolV3,
-		PlaybackAttemptID:     "attempt-route-0001",
-		OutputRouteGeneration: 1,
+		ProtocolVersion:   playback.ProtocolV3,
+		PlaybackAttemptID: "attempt-route-0001",
+		OutputContextID:   "route-1",
 	}
 	for _, event := range []string{playback.RouteEventSeekReanchorRequestedV3, playback.RouteEventSeekReanchoredV3} {
 		candidate := base
@@ -1946,7 +1943,7 @@ func TestLegacyShadowRequestV3ProducesExplicitDetailedInference(t *testing.T) {
 	if _, err := request.NormalizeAndValidate(); err != nil {
 		t.Fatalf("shadow request validation: %v", err)
 	}
-	if len(request.Capabilities.VideoDecode) != 1 || !request.Capabilities.VideoDecode[0].Hardware || !playback.HasFeatureV3(request.ClientFeatures, playback.FeatureDetailedDecodeV3) {
+	if len(request.Capabilities.VideoDecode) != 1 || !request.Capabilities.VideoDecode[0].Hardware || request.Capabilities.VideoEvidence != playback.EvidenceExactV3 {
 		t.Fatalf("shadow request = %#v", request)
 	}
 }
@@ -1957,7 +1954,7 @@ func v3HandlerFixtureFile(t *testing.T) *models.MediaFile {
 }
 
 func v3HandlerStartRequest() playback.StartRequestV3 {
-	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureDetailedDecodeV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, OutputRouteGeneration: 1, Capabilities: playback.ClientCodecCapabilitiesV3{CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, Features: []string{playback.FeaturePlaybackPlanV3, playback.FeatureDetailedDecodeV3}, Platform: "android", FormFactor: "tv", AppVersion: "test", Output: playback.OutputContextV3{OutputRouteGeneration: 1}, Deliveries: map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
+	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, Capabilities: playback.ClientCodecCapabilitiesV3{VideoEvidence: playback.EvidenceExactV3, AudioEvidence: playback.EvidenceExactV3, CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "test", Device: playback.DeviceContextV3{Platform: "android"}, Output: playback.OutputContextV3{OutputContextID: "route-1"}, Deliveries: map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
 }
 
 func marshalV3StartRequest(t *testing.T, request playback.StartRequestV3) string {

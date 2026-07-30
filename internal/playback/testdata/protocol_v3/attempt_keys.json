@@ -16,7 +16,7 @@
       {"name": "hdr_to_sdr_tonemap", "executor": "server", "recipe_version": "1"},
       {"name": "audio_to_aac", "executor": "server", "recipe_version": "1"}
     ],
-    "output_route_generation": 7,
+    "output_context_id": "7",
     "local_mutations": ["transport_reopen", "pcm:truehd:8"],
     "expected": "v3:a90828494166fe72"
   },
@@ -36,7 +36,7 @@
     "transformations": [
       {"name": "client_dv7_to_dv81", "executor": "client", "recipe_version": "1"}
     ],
-    "output_route_generation": 9,
+    "output_context_id": "9",
     "local_mutations": [],
     "expected": "v3:9f82315867a70b80"
   },
@@ -62,7 +62,7 @@
       }
     ],
     "runtime_corrections": ["client_dv8_hdr10plus_sanitizer_v1"],
-    "output_route_generation": 9,
+    "output_context_id": "9",
     "local_mutations": [],
     "expected": "v3:32a3a37d71bc4f43"
   }

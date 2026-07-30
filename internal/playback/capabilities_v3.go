@@ -97,32 +97,60 @@ func normalizeColorRangeV3(value string) string {
 	}
 }
 
-func detailedVideoEligibleV3(source SourceDescriptorV3, request StartRequestV3) bool {
-	if !HasFeatureV3(request.ClientFeatures, FeatureDetailedDecodeV3) && !HasFeatureV3(request.ClientPlaybackContext.Features, FeatureDetailedDecodeV3) {
-		return false
-	}
+// EvidenceInsufficientForDirectV3 marks a direct/copy route that was blocked
+// by the client's capability-evidence tier rather than by a negative device
+// fact, so lower-tier clients get an actionable reason instead of a mystery
+// transcode.
+const EvidenceInsufficientForDirectV3 = "evidence_insufficient_for_direct"
+
+// videoEligibleV3 reports whether the source's video stream is validated for
+// a copy/direct route under the request's video evidence tier. The second
+// result reports that the route was blocked by insufficient evidence for the
+// tier — the client claims the codec in its flat lists but the tier's
+// validation could not confirm the stream — rather than by device facts.
+func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, bool) {
 	if !detailedVideoEvidenceCompleteV3(source) {
-		return false
+		return false, false
 	}
-	for _, capability := range request.Capabilities.VideoDecode {
-		if !strings.EqualFold(capability.Codec, source.VideoCodec) || !capability.Hardware {
-			continue
+	flatClaims := containsFoldV3(request.Capabilities.CodecsVideo, source.VideoCodec) ||
+		containsFoldV3(request.Capabilities.CodecsVideoHardware, source.VideoCodec)
+	switch request.Capabilities.VideoEvidence {
+	case EvidenceDeclaredV3:
+		// Boolean support statements: copy routes are granted on a flat codec
+		// match (container and dynamic range are gated separately by the
+		// planner); there is no stricter validation to run.
+		return flatClaims, false
+	case EvidenceExactV3, EvidencePlatformAttestedV3:
+		skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3
+		matchedCodec := false
+		for _, capability := range request.Capabilities.VideoDecode {
+			if !strings.EqualFold(capability.Codec, source.VideoCodec) || !capability.Hardware {
+				continue
+			}
+			matchedCodec = true
+			if !skipProfileLevel {
+				if len(capability.Profiles) > 0 && !containsFoldV3(capability.Profiles, source.VideoProfile) {
+					continue
+				}
+				if len(capability.Levels) > 0 && !containsAtLeastV3(capability.Levels, source.VideoLevel) {
+					continue
+				}
+			}
+			if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
+				continue
+			}
+			if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps {
+				continue
+			}
+			return true, false
 		}
-		if len(capability.Profiles) > 0 && !containsFoldV3(capability.Profiles, source.VideoProfile) {
-			continue
-		}
-		if len(capability.Levels) > 0 && !containsAtLeastV3(capability.Levels, source.VideoLevel) {
-			continue
-		}
-		if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
-			continue
-		}
-		if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps {
-			continue
-		}
-		return true
+		// A flat-list claim with no validating decode entry means the tier's
+		// evidence could not confirm the stream, not that the device refused
+		// it: report the insufficiency so the degradation is explainable.
+		return false, flatClaims && !matchedCodec
+	default:
+		return false, false
 	}
-	return false
 }
 
 func detailedVideoEvidenceCompleteV3(source SourceDescriptorV3) bool {
@@ -193,8 +221,13 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 	if passthroughCaps == nil {
 		passthroughCaps = request.Capabilities.AudioPassthrough
 	}
-	if passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) &&
-		(HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) || HasFeatureV3(request.ClientPlaybackContext.Features, FeatureLayoutPassthrough)) {
+	// Passthrough claims require exact audio evidence: only a client that can
+	// attest real sink layouts (Android audio HAL enumeration) may earn a
+	// validated passthrough claim. platform_attested and declared decode
+	// evidence still qualifies for copy routes below.
+	if request.Capabilities.AudioEvidence == EvidenceExactV3 &&
+		passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) &&
+		HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) {
 		for _, entry := range passthroughCaps.Entries {
 			if !strings.EqualFold(entry.Codec, source.AudioCodec) || len(entry.ChannelCounts) == 0 || len(entry.Layouts) == 0 ||
 				!containsIntV3(entry.ChannelCounts, source.AudioChannels) || !containsFoldV3(entry.Layouts, source.AudioLayout) {

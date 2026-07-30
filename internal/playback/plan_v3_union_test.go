@@ -55,8 +55,6 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 	file.VideoTracks[0].ColorTransfer = "bt709"
 	req := validStartRequestV3()
 	req.QualityPreference = "480p"
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	local := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "video_to_h264", RecipeVersion: "1"},
@@ -87,8 +85,6 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
 	file.CodecAudio = "truehd"
 	req := validStartRequestV3()
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "1"}})
@@ -120,8 +116,6 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 func TestPlanPlaybackV3DirectPlayNeverConsultsNodeCapabilities(t *testing.T) {
 	file := detailedFixtureFileV3()
 	req := validStartRequestV3()
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 
@@ -147,8 +141,6 @@ func TestPlanPlaybackV3NodeToolchainDoesNotMaskTerminalForProgressiveOnlyClient(
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
 	file.CodecAudio = "truehd"
 	req := validStartRequestV3()
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
@@ -177,8 +169,6 @@ func TestPlanPlaybackV3Profile7StripOffloadsToHLSRemux(t *testing.T) {
 	file.VideoTracks[0].VideoRange = "DolbyVision"
 	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
 	req := validStartRequestV3()
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails

@@ -40,7 +40,7 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 	return "plan:" + hex.EncodeToString(sum[:16])
 }
 
-func PlanAttemptKeyV3(plan PlanV3, outputRouteGeneration int64, localMutations []string) string {
+func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []string) string {
 	transformations := make([]string, 0, len(plan.Transformations))
 	for _, transformation := range plan.Transformations {
 		transformations = append(transformations, transformation.Executor+":"+transformation.Name+":"+transformation.RecipeVersion)
@@ -65,7 +65,7 @@ func PlanAttemptKeyV3(plan PlanV3, outputRouteGeneration int64, localMutations [
 	}
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts,
-		strconv.FormatInt(outputRouteGeneration, 10),
+		outputContextID,
 		strings.Join(mutations, ","),
 	)
 	canonical := strings.Join(parts, "|")

@@ -84,10 +84,7 @@ func appendAppliedQuirkV3(plan *PlanV3, quirk AppliedQuirkV3, runtimeCorrection 
 }
 
 func deviceQuirkProtocolAvailableV3(request StartRequestV3) bool {
-	// Like every other dual-location feature check, either advertisement
-	// location proves the client speaks the quirk protocol.
-	return HasFeatureV3(request.ClientFeatures, FeatureDeviceQuirksV3) ||
-		HasFeatureV3(request.ClientPlaybackContext.Features, FeatureDeviceQuirksV3)
+	return HasFeatureV3(request.ClientFeatures, FeatureDeviceQuirksV3)
 }
 
 func deliverySupportsFeatureV3(request StartRequestV3, deliveryClass string, feature string) bool {
@@ -97,14 +94,13 @@ func deliverySupportsFeatureV3(request StartRequestV3, deliveryClass string, fea
 
 func isAmazonModelV3(request StartRequestV3, model string) bool {
 	device := request.ClientPlaybackContext.Device
-	return strings.EqualFold(device.Model, model) &&
-		(strings.EqualFold(device.Manufacturer, "Amazon") || strings.EqualFold(device.Brand, "Amazon"))
+	return strings.EqualFold(device.Model, model) && strings.EqualFold(device.Manufacturer, "Amazon")
 }
 
 func isAmazonFireTVV3(request StartRequestV3) bool {
 	device := request.ClientPlaybackContext.Device
 	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(device.Model)), "AFT") &&
-		(strings.EqualFold(device.Manufacturer, "Amazon") || strings.EqualFold(device.Brand, "Amazon"))
+		strings.EqualFold(device.Manufacturer, "Amazon")
 }
 
 func isHigh10ProfileV3(profile string) bool {

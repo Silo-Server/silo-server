@@ -13,7 +13,6 @@ import (
 const (
 	ProtocolV3                    = 3
 	FeaturePlaybackPlanV3         = "playback_plan_v3"
-	FeatureDetailedDecodeV3       = "detailed_decode_capabilities"
 	FeatureLayoutPassthrough      = "layout_aware_passthrough"
 	FeatureClientVideoTransforms  = "client_video_transformations_v1"
 	FeatureRouteDiagnostics       = "playback_route_diagnostics"
@@ -21,7 +20,7 @@ const (
 	FeatureSeekReanchorV3         = "seek_reanchor_v1"
 	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
 	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
-	PlanRecipeVersionV3           = "v3.3"
+	PlanRecipeVersionV3           = "v3.4"
 	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
 	ClientDVTransformVersionV3    = "1"
@@ -37,7 +36,6 @@ const (
 func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
-		FeatureDetailedDecodeV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
@@ -166,7 +164,35 @@ type VideoDecodeCapabilityV3 struct {
 	Hardware       bool     `json:"hardware"`
 }
 
+// Capability evidence tiers. Each area (video, audio) declares how its
+// capability facts were produced, and planner strictness follows the tier:
+//
+//   - exact: per-codec profiles/levels/bit-depths/bounds from a real platform
+//     probe (Android MediaCodecList). Full strict validation.
+//   - platform_attested: platform-level decoder attestation without
+//     profile/level enumeration (Apple VideoToolbox). Codec, resolution, bit
+//     depth, frame rate, and dynamic range are validated; profile/level
+//     matching is skipped instead of failing conservative.
+//   - declared: boolean support statements (web MediaSource.isTypeSupported).
+//     Copy routes are granted on codec+container+range match from the flat
+//     codec lists; no strict direct claims are made.
+type CapabilityEvidenceV3 string
+
+const (
+	EvidenceExactV3            CapabilityEvidenceV3 = "exact"
+	EvidencePlatformAttestedV3 CapabilityEvidenceV3 = "platform_attested"
+	EvidenceDeclaredV3         CapabilityEvidenceV3 = "declared"
+)
+
+func validCapabilityEvidenceV3(v CapabilityEvidenceV3) bool {
+	return v == EvidenceExactV3 || v == EvidencePlatformAttestedV3 || v == EvidenceDeclaredV3
+}
+
 type ClientCodecCapabilitiesV3 struct {
+	// VideoEvidence and AudioEvidence are required closed enums declaring the
+	// provenance of the respective capability facts.
+	VideoEvidence       CapabilityEvidenceV3      `json:"video_evidence"`
+	AudioEvidence       CapabilityEvidenceV3      `json:"audio_evidence"`
 	CodecsVideo         []string                  `json:"codecs_video"`
 	CodecsVideoHardware []string                  `json:"codecs_video_hardware"`
 	CodecsAudio         []string                  `json:"codecs_audio"`
@@ -178,27 +204,29 @@ type ClientCodecCapabilitiesV3 struct {
 	VideoDecode         []VideoDecodeCapabilityV3 `json:"video_decode,omitempty"`
 }
 
+// DeviceContextV3 is platform-neutral device identity. Manufacturer and model
+// stay first-class because the quirk registry matches on them; everything
+// platform-specific (Android sdk_int, soc_model, build fields, …) travels in
+// PlatformDetails as opaque bounded strings.
 type DeviceContextV3 struct {
-	Manufacturer    string   `json:"manufacturer,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	Brand           string   `json:"brand,omitempty"`
-	Device          string   `json:"device,omitempty"`
-	Product         string   `json:"product,omitempty"`
-	SoCManufacturer string   `json:"soc_manufacturer,omitempty"`
-	SoCModel        string   `json:"soc_model,omitempty"`
-	BuildID         string   `json:"build_id,omitempty"`
-	BuildDisplay    string   `json:"build_display,omitempty"`
-	SecurityPatch   string   `json:"security_patch,omitempty"`
-	SDKInt          int      `json:"sdk_int,omitempty"`
-	ABIs            []string `json:"abis,omitempty"`
+	Platform        string            `json:"platform,omitempty"`
+	OSVersion       string            `json:"os_version,omitempty"`
+	Manufacturer    string            `json:"manufacturer,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	PlatformDetails map[string]string `json:"platform_details,omitempty"`
 }
 
 type OutputContextV3 struct {
-	HDRDetails            *HDRCapabilitiesV3  `json:"hdr_details,omitempty"`
-	AudioPassthrough      *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
-	CurrentSink           string              `json:"current_sink,omitempty"`
-	SinkType              string              `json:"sink_type,omitempty"`
-	OutputRouteGeneration int64               `json:"output_route_generation"`
+	HDRDetails       *HDRCapabilitiesV3  `json:"hdr_details,omitempty"`
+	AudioPassthrough *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
+	CurrentSink      string              `json:"current_sink,omitempty"`
+	SinkType         string              `json:"sink_type,omitempty"`
+	// OutputContextID is an optional opaque token identifying the current
+	// output route. The server only ever compares it for equality — in attempt
+	// keys and plan invalidation — so any stable platform-native identity
+	// works: Android supplies its route generation stringified, Apple its
+	// synthetic sink hash, web omits it.
+	OutputContextID string `json:"output_context_id,omitempty"`
 }
 
 type DeliverySubtitleCapabilitiesV3 struct {
@@ -227,10 +255,11 @@ type DeliveryCapabilityV3 struct {
 	Transformations        []TransformationV3             `json:"transformations"`
 }
 
+// ClientPlaybackContextV3 carries the client's execution context. Feature
+// advertisement lives exclusively in the request's top-level client_features
+// list; there is deliberately no second features location here.
 type ClientPlaybackContextV3 struct {
 	ProtocolVersion int                             `json:"protocol_version"`
-	Features        []string                        `json:"features"`
-	Platform        string                          `json:"platform"`
 	FormFactor      string                          `json:"form_factor"`
 	AppVersion      string                          `json:"app_version"`
 	Device          DeviceContextV3                 `json:"device"`
@@ -251,7 +280,6 @@ type StartRequestV3 struct {
 	AudioTrackIndex            *int                      `json:"audio_track_index,omitempty"`
 	SubtitleTrackID            string                    `json:"subtitle_track_id,omitempty"`
 	SubtitleTrackIndex         *int                      `json:"subtitle_track_index,omitempty"`
-	OutputRouteGeneration      int64                     `json:"output_route_generation"`
 	Metered                    bool                      `json:"metered"`
 	BandwidthEstimateKbps      *int                      `json:"bandwidth_estimate_kbps,omitempty"`
 	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
@@ -284,7 +312,10 @@ const (
 )
 
 type ReplanRequestV3 struct {
-	ProtocolVersion   int               `json:"protocol_version"`
+	ProtocolVersion int `json:"protocol_version"`
+	// ClientFeatures is the single feature-advertisement location; the
+	// playback context deliberately carries no second features list.
+	ClientFeatures    []string          `json:"client_features,omitempty"`
 	Operation         ReplanOperationV3 `json:"operation,omitempty"`
 	PlaybackAttemptID string            `json:"playback_attempt_id"`
 	ReplanRequestID   string            `json:"replan_request_id"`
@@ -299,7 +330,6 @@ type ReplanRequestV3 struct {
 	AttemptCount          int                       `json:"attempt_count"`
 	QualityPreference     string                    `json:"quality_preference"`
 	PositionSeconds       float64                   `json:"position_seconds"`
-	OutputRouteGeneration int64                     `json:"output_route_generation"`
 	Metered               bool                      `json:"metered"`
 	BandwidthEstimateKbps *int                      `json:"bandwidth_estimate_kbps,omitempty"`
 	BandwidthCapKbps      *int                      `json:"bandwidth_cap_kbps,omitempty"`
@@ -371,7 +401,7 @@ type RouteEventV3 struct {
 	FallbackReason        string            `json:"fallback_reason,omitempty"`
 	AppliedQuirkIDs       []string          `json:"applied_quirk_ids,omitempty"`
 	QuirkRegistryRevision string            `json:"quirk_registry_revision,omitempty"`
-	OutputRouteGeneration int64             `json:"output_route_generation"`
+	OutputContextID       string            `json:"output_context_id,omitempty"`
 	Diagnostics           map[string]string `json:"diagnostics"`
 }
 
@@ -569,9 +599,6 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 	if !boundedIdentifierV3.MatchString(r.PlaybackAttemptID) {
 		return nil, errors.New("playback_attempt_id is invalid")
 	}
-	if r.OutputRouteGeneration < 0 || r.ClientPlaybackContext.Output.OutputRouteGeneration != r.OutputRouteGeneration {
-		return nil, errors.New("output_route_generation is invalid or inconsistent")
-	}
 	if r.ClientPlaybackContext.ProtocolVersion != ProtocolV3 {
 		return nil, errors.New("client_playback_context.protocol_version must be 3")
 	}
@@ -638,9 +665,6 @@ func (r ReplanRequestV3) Validate() error {
 	if len(r.FailedPlanID) < 8 || len(r.FailedPlanID) > 128 || len(r.PlanAttemptID) < 8 || len(r.PlanAttemptID) > 128 || len(r.PlanAttemptKey) < 8 || len(r.PlanAttemptKey) > 128 || !strings.HasPrefix(r.PlanAttemptKey, "v3:") || r.AttemptCount < 1 || r.AttemptCount > 8 {
 		return errors.New("invalid replan attempt")
 	}
-	if r.OutputRouteGeneration < 0 || r.ClientPlaybackContext.Output.OutputRouteGeneration != r.OutputRouteGeneration {
-		return errors.New("invalid output route generation")
-	}
 	if len(r.AttemptedPlanKeys) > 16 || len(r.Failure.Classification) > 64 || len(r.Failure.Message) > 512 || len(r.Failure.DecoderName) > 128 || !isFiniteV3(r.PositionSeconds) || r.PositionSeconds < 0 || r.PositionSeconds > 31_536_000 {
 		return errors.New("replan bounds exceeded")
 	}
@@ -681,7 +705,15 @@ func (r ReplanRequestV3) Validate() error {
 			return errors.New("invalid attempted plan key")
 		}
 	}
-	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext, nil)
+	if len(r.ClientFeatures) > 64 {
+		return errors.New("client_features exceeds supported size")
+	}
+	for _, feature := range r.ClientFeatures {
+		if len(feature) > 128 {
+			return errors.New("client feature exceeds supported size")
+		}
+	}
+	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext, r.ClientFeatures)
 }
 
 func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error {
@@ -698,24 +730,36 @@ func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error 
 }
 
 // validateCapabilitiesV3 validates and normalizes the shared capability
-// payload. topLevelFeatures carries the request's client_features when the
-// request type has one (replans do not); feature checks accept either
-// location, matching the planner's dual-source reads.
-func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3, topLevelFeatures []string) error {
-	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Features) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.ABIs) > 16 || len(ctx.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
+// payload. features carries the request's top-level client_features — the
+// only feature-advertisement location in the contract.
+func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3, features []string) error {
+	if !validCapabilityEvidenceV3(c.VideoEvidence) {
+		return errors.New("video_evidence is required and must be exact, platform_attested, or declared")
+	}
+	if !validCapabilityEvidenceV3(c.AudioEvidence) {
+		return errors.New("audio_evidence is required and must be exact, platform_attested, or declared")
+	}
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
 		return errors.New("capability list exceeds supported size")
 	}
 	deviceValues := []string{
-		ctx.Device.Manufacturer, ctx.Device.Model, ctx.Device.Brand, ctx.Device.Device,
-		ctx.Device.Product, ctx.Device.SoCManufacturer, ctx.Device.SoCModel, ctx.Device.BuildID,
-		ctx.Device.BuildDisplay, ctx.Device.SecurityPatch, ctx.Output.CurrentSink, ctx.Output.SinkType,
+		ctx.Device.OSVersion, ctx.Device.Manufacturer, ctx.Device.Model,
+		ctx.Output.CurrentSink, ctx.Output.SinkType, ctx.Output.OutputContextID,
 	}
 	for _, value := range deviceValues {
 		if len(value) > 128 {
 			return errors.New("device capability value exceeds supported size")
 		}
 	}
-	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware, c.CodecsAudio, c.Containers, ctx.Features} {
+	if len(ctx.Device.PlatformDetails) > 16 {
+		return errors.New("platform_details exceeds supported size")
+	}
+	for key, value := range ctx.Device.PlatformDetails {
+		if key == "" || len(key) > 128 || len(value) > 128 {
+			return errors.New("platform_details entry exceeds supported size")
+		}
+	}
+	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware, c.CodecsAudio, c.Containers} {
 		for i := range values {
 			values[i] = strings.ToLower(strings.TrimSpace(values[i]))
 			if len(values[i]) > 128 {
@@ -769,8 +813,7 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				return errors.New("invalid delivery transformation capability")
 			}
 			if transformation.Executor == "client" {
-				if !delivery.Enabled || !delivery.SupportedOnDevice ||
-					(!HasFeatureV3(ctx.Features, FeatureClientVideoTransforms) && !HasFeatureV3(topLevelFeatures, FeatureClientVideoTransforms)) {
+				if !delivery.Enabled || !delivery.SupportedOnDevice || !HasFeatureV3(features, FeatureClientVideoTransforms) {
 					return errors.New("client transformation capability is not enabled")
 				}
 			}
@@ -786,11 +829,6 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 			}
 		}
 		ctx.Deliveries[name] = delivery
-	}
-	for _, abi := range ctx.Device.ABIs {
-		if len(abi) > 64 {
-			return errors.New("device ABI exceeds supported size")
-		}
 	}
 	for _, passthrough := range []*AudioPassthroughV3{c.AudioPassthrough, ctx.Output.AudioPassthrough} {
 		if passthrough == nil {
