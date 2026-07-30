@@ -68,7 +68,7 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%')
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
-		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2)`, opts.LibraryID, opts.InstallationID); err != nil {
+		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))`, opts.LibraryID, opts.InstallationID); err != nil {
 		return 0, 0, fmt.Errorf("identify virtual media items: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
@@ -78,7 +78,7 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%')
 		  AND mf.content_id IN (SELECT content_id FROM purge_virtual_items)
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
-		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2)`, opts.LibraryID, opts.InstallationID)
+		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))`, opts.LibraryID, opts.InstallationID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("delete virtual files: %w", err)
 	}

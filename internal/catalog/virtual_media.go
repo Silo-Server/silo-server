@@ -192,7 +192,7 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 		WHERE mf.content_id = mi.content_id
 		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
 		  AND mi.virtual_owner_installation_id = $1
-		  AND mf.virtual_owner_installation_id = $1
+		  AND (mf.virtual_owner_installation_id = $1 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $1))
 		  AND mi.virtual_source = $2
 		  AND NOT (mi.content_id = ANY($3::text[]))
 		  AND (cardinality($4::int[]) = 0 OR EXISTS (

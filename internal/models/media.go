@@ -48,6 +48,7 @@ type MediaFile struct {
 	IdentityConfidence           string
 	IdentityJSON                 []byte
 	FilePath                     string
+	VirtualOwnerInstallationID   int // owner for zero-storage virtual files; zero for local files
 	FileSize                     int64
 	FileModifiedAt               *time.Time
 	FileHash                     string // OSHash (16-char hex)

@@ -41,19 +41,20 @@ type VirtualPlaybackVariant struct {
 // virtual file. The provider URL is deliberately not returned or persisted;
 // it is resolved again when the selected file is played.
 type VirtualPlaybackStream struct {
-	ID                string   `json:"id"`
-	Label             string   `json:"label"`
-	URI               string   `json:"uri"`
-	Resolution        string   `json:"resolution,omitempty"`
-	CodecVideo        string   `json:"codec_video,omitempty"`
-	CodecAudio        string   `json:"codec_audio,omitempty"`
-	HDR               string   `json:"hdr,omitempty"`
-	SourceType        string   `json:"source_type,omitempty"`
-	FileSize          int64    `json:"file_size,omitempty"`
-	Container         string   `json:"container,omitempty"`
-	Bitrate           int      `json:"bitrate,omitempty"`
-	AudioLanguages    []string `json:"audio_languages,omitempty"`
-	SubtitleLanguages []string `json:"subtitle_languages,omitempty"`
+	ID                  string   `json:"id"`
+	Label               string   `json:"label"`
+	URI                 string   `json:"uri"`
+	Resolution          string   `json:"resolution,omitempty"`
+	CodecVideo          string   `json:"codec_video,omitempty"`
+	CodecAudio          string   `json:"codec_audio,omitempty"`
+	HDR                 string   `json:"hdr,omitempty"`
+	SourceType          string   `json:"source_type,omitempty"`
+	FileSize            int64    `json:"file_size,omitempty"`
+	Container           string   `json:"container,omitempty"`
+	Bitrate             int      `json:"bitrate,omitempty"`
+	AudioLanguages      []string `json:"audio_languages,omitempty"`
+	SubtitleLanguages   []string `json:"subtitle_languages,omitempty"`
+	OwnerInstallationID int      `json:"-"`
 }
 
 // ListVirtualPlaybackStreams asks enabled virtual playback plugins for
@@ -135,6 +136,9 @@ func (s *Service) listVirtualPlaybackStreamsUncached(ctx context.Context, virtua
 			}
 			if len(payload.Streams) > maxVirtualPlaybackStreams {
 				payload.Streams = payload.Streams[:maxVirtualPlaybackStreams]
+			}
+			for i := range payload.Streams {
+				payload.Streams[i].OwnerInstallationID = installation.ID
 			}
 			return payload.Streams, nil
 		}

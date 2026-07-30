@@ -855,7 +855,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		edition_raw, edition_key, edition_confidence, edition_source,
 		presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 		multi_episode_start, multi_episode_end,
-		probe_source, probe_updated_at, missing_since
+		probe_source, probe_updated_at, missing_since, virtual_owner_installation_id
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
@@ -867,7 +867,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		$39, $40, $41, $42,
 		$43, $44, $45, $46,
 		$47, $48,
-		$49, $50, $51
+		$49, $50, $51, $52
 	)
 	ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO UPDATE SET
 		content_id = CASE
@@ -982,6 +982,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		probeSource,
 		mf.ProbeUpdatedAt,
 		mf.MissingSince,
+		nilIfZero(mf.VirtualOwnerInstallationID),
 	)
 
 	return scanMediaFile(row)
