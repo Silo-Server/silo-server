@@ -38,6 +38,77 @@ type VirtualPurgeOptions struct {
 	InstallationID int
 }
 
+// ReconcileCollectionVirtualLibraryLinks repairs historical collection virtual
+// items that were linked to a library incompatible with their media type. It
+// only moves database links/files; it never contacts a provider or deletes the
+// media item itself.
+func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Context, collectionID string) (int64, int64, error) {
+	if r == nil || r.pool == nil {
+		return 0, 0, errors.New("item repository is not configured")
+	}
+	collectionID = strings.TrimSpace(collectionID)
+	if collectionID == "" {
+		return 0, 0, errors.New("collection id is required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin collection virtual reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE reconcile_virtual_targets ON COMMIT DROP AS
+		SELECT DISTINCT ON (lci.media_item_id)
+			lci.media_item_id AS content_id, mf.id AS media_folder_id
+		FROM library_collection_items lci
+		JOIN media_items mi ON mi.content_id = lci.media_item_id
+		JOIN library_collection_libraries lcl ON lcl.collection_id = lci.collection_id
+		JOIN media_folders mf ON mf.id = lcl.library_id AND mf.enabled IS NOT FALSE
+		WHERE ($1 = '' OR lci.collection_id = $1)
+		  AND mi.virtual_source = 'collection'
+		  AND ((mi.type = 'movie' AND mf.type IN ('movies','mixed'))
+		    OR (mi.type = 'series' AND mf.type IN ('series','mixed')))
+		ORDER BY lci.media_item_id,
+			CASE WHEN (mi.type = 'movie' AND mf.type = 'movies') OR (mi.type = 'series' AND mf.type = 'series') THEN 0 ELSE 1 END,
+			mf.id`, collectionID); err != nil {
+		return 0, 0, fmt.Errorf("identify compatible collection libraries: %w", err)
+	}
+	badLinks, err := tx.Exec(ctx, `
+		DELETE FROM media_item_libraries mil
+		USING media_items mi
+		WHERE mil.content_id = mi.content_id
+		  AND mi.virtual_source = 'collection'
+		  AND mi.content_id IN (SELECT content_id FROM reconcile_virtual_targets)
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_folders mf
+			WHERE mf.id = mil.media_folder_id AND mf.enabled IS NOT FALSE
+			  AND ((mi.type = 'movie' AND mf.type IN ('movies','mixed'))
+			    OR (mi.type = 'series' AND mf.type IN ('series','mixed')))
+		  )`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("remove incompatible collection links: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_libraries(content_id, media_folder_id, first_seen_at)
+		SELECT content_id, media_folder_id, NOW() FROM reconcile_virtual_targets
+		ON CONFLICT DO NOTHING`); err != nil {
+		return 0, 0, fmt.Errorf("link compatible collection libraries: %w", err)
+	}
+	files, err := tx.Exec(ctx, `
+		UPDATE media_files mf
+		SET media_folder_id = t.media_folder_id, updated_at = NOW()
+		FROM reconcile_virtual_targets t
+		WHERE mf.content_id = t.content_id
+		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND mf.media_folder_id <> t.media_folder_id`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("move collection virtual files: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit collection virtual reconciliation: %w", err)
+	}
+	return badLinks.RowsAffected(), files.RowsAffected(), nil
+}
+
 // VirtualPlaybackVariant describes a provider-neutral profile variant. The
 // URI is resolved lazily by a virtual playback plugin when playback starts.
 type VirtualPlaybackVariant struct {

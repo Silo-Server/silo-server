@@ -265,6 +265,13 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	if s.items != nil {
+		if movedLinks, movedFiles, reconcileErr := s.items.ReconcileCollectionVirtualLibraryLinks(ctx, ""); reconcileErr != nil {
+			slog.WarnContext(ctx, "collection virtual library reconciliation failed", "error", reconcileErr)
+		} else if movedLinks > 0 || movedFiles > 0 {
+			slog.InfoContext(ctx, "collection virtual library links reconciled", "links_removed", movedLinks, "files_moved", movedFiles)
+		}
+	}
 	if IsLiveQueryType(collection.CollectionType) {
 		return nil, ErrLibraryCollectionSyncUnsupported
 	}
