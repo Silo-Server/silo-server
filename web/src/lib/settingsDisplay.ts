@@ -3,7 +3,7 @@ import {
   type SettingDefinition,
   type SettingKey,
 } from "@/lib/settingsContract";
-import { LANGUAGE_OPTIONS, type SettingOption } from "@/lib/languageOptions";
+import { languageOptionsFor, type SettingOption } from "@/lib/languageOptions";
 
 /**
  * Display helpers over the generated settings contract.
@@ -57,14 +57,13 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
 /**
  * The option list for a select, in manifest order.
  *
- * Enum members come straight from the contract. Language tags get the shared
- * language list instead, because the manifest declares them by type rather than
- * by enumerating every tag. A nullable definition gains a leading "unset" entry
- * so a control can express clearing the value.
+ * Enum members come straight from the contract. Open language tags use the
+ * definition's generated advisory option set. A nullable definition gains a
+ * leading, context-specific unset entry so a control can express clearing it.
  */
 export function optionsFor(definition: SettingDisplay): SettingOption[] {
   if (definition.type === "language_tag") {
-    return LANGUAGE_OPTIONS;
+    return languageOptionsFor(definition.key);
   }
   const members = (definition.values ?? []).map((member) => ({
     value: String(member.value),
@@ -92,8 +91,10 @@ export function formatSettingValue(key: string, value: string | null | undefined
     return value === "true" ? "Enabled" : "Disabled";
   }
   if (definition.type === "language_tag") {
-    const match = LANGUAGE_OPTIONS.find((option) => option.value === (value ?? ""));
-    return match?.label ?? value ?? "No preference";
+    const match = languageOptionsFor(definition.key, value).find(
+      (option) => option.value === (value ?? ""),
+    );
+    return match?.label ?? value ?? definition.unsetLabel ?? "Unset";
   }
   if (definition.values?.length) {
     const fallback = value ?? defaultValueToString(definition);

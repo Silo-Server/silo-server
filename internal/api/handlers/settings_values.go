@@ -23,8 +23,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"golang.org/x/text/language"
 )
 
 // SettingValuesHandler serves the canonical settings API: the contract itself,
@@ -36,10 +38,11 @@ import (
 // it lives at rather than being one of two hardcoded scopes, and an unknown key
 // is refused rather than stored in an open extension bag.
 type SettingValuesHandler struct {
-	storeProvider userstore.UserStoreProvider
-	contract      *settingscontract.Manifest
-	resolver      *settingsresolve.Resolver
-	libraryLookup libraryLookup
+	storeProvider  userstore.UserStoreProvider
+	contract       *settingscontract.Manifest
+	resolver       *settingsresolve.Resolver
+	libraryLookup  libraryLookup
+	languageSource languageSuggestionSource
 
 	// deviceSeen throttles device-registry refreshes, one upsert per
 	// deviceSeenThrottle window per (profile, device) — the same shape the
@@ -51,11 +54,23 @@ type SettingValuesHandler struct {
 	EventsHub *evt.Hub
 }
 
+type languageSuggestionSource interface {
+	ListAudioLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
+	ListSubtitleLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
+}
+
 // SetLibraryLookup wires the catalog lookup used to reject profile_library
 // identities that do not name a real library. The same lookup serves session
 // and admin mutations so the two routes cannot create different orphan rows.
 func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
 	h.libraryLookup = lookup
+}
+
+// SetLanguageSuggestionSource wires deployment-observed media languages into
+// effective setting responses. The contract option set remains the stable
+// floor; a missing source or failed catalog lookup simply returns that floor.
+func (h *SettingValuesHandler) SetLanguageSuggestionSource(source languageSuggestionSource) {
+	h.languageSource = source
 }
 
 // NewSettingValuesHandler builds the handler over the embedded contract.
@@ -135,6 +150,10 @@ type effectiveSettingValueResponse struct {
 	RequestedValue  json.RawMessage              `json:"requested_value,omitempty"`
 	ConstrainedBy   *settingscontract.Constraint `json:"constrained_by,omitempty"`
 	PermittedValues []json.RawMessage            `json:"permitted_values,omitempty"`
+	// SuggestedValues is advisory presentation data for an open setting. It is
+	// the stable contract floor plus values observed in this viewer's catalog
+	// and the current effective value. It never acts as a write allowlist.
+	SuggestedValues []string `json:"suggested_values,omitempty"`
 
 	DefinitionRevision int                             `json:"definition_revision"`
 	UpdatedAt          string                          `json:"updated_at,omitempty"`
@@ -579,10 +598,7 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		return
 	}
 
-	out := make([]effectiveSettingValueResponse, 0, len(resolved))
-	for _, eff := range resolved {
-		out = append(out, effectiveToResponse(eff))
-	}
+	out := h.effectiveResponses(r, resolved)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings":    out,
 		fieldRevision: h.contract.Revision,
@@ -698,13 +714,15 @@ func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *htt
 		ContextID string                          `json:"context_id"`
 		Settings  []effectiveSettingValueResponse `json:"settings"`
 	}
+	allResolved := make([]settingsresolve.Effective, 0)
+	for _, values := range resolved {
+		allResolved = append(allResolved, values...)
+	}
+	observed := h.observedLanguageSuggestions(r, allResolved)
 	out := make([]contextResponse, len(resolved))
 	for i, values := range resolved {
 		out[i].ContextID = strings.TrimSpace(body.Contexts[i].ContextID)
-		out[i].Settings = make([]effectiveSettingValueResponse, 0, len(values))
-		for _, eff := range values {
-			out[i].Settings = append(out[i].Settings, effectiveToResponse(eff))
-		}
+		out[i].Settings = h.effectiveResponsesWithObserved(values, observed)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"contexts":    out,
@@ -1013,6 +1031,132 @@ func effectiveToResponse(eff settingsresolve.Effective) effectiveSettingValueRes
 		}
 	}
 	return out
+}
+
+func (h *SettingValuesHandler) effectiveResponses(
+	r *http.Request,
+	resolved []settingsresolve.Effective,
+) []effectiveSettingValueResponse {
+	observed := h.observedLanguageSuggestions(r, resolved)
+	return h.effectiveResponsesWithObserved(resolved, observed)
+}
+
+func (h *SettingValuesHandler) effectiveResponsesWithObserved(
+	resolved []settingsresolve.Effective,
+	observed map[string][]string,
+) []effectiveSettingValueResponse {
+	out := make([]effectiveSettingValueResponse, 0, len(resolved))
+	for _, eff := range resolved {
+		response := effectiveToResponse(eff)
+		def, ok := h.contract.Lookup(eff.Key)
+		if ok && def.SuggestedOptions != "" {
+			optionSet := h.contract.OptionSets[def.SuggestedOptions]
+			floor := make([]string, 0, len(optionSet.Options))
+			for _, option := range optionSet.OptionsAtRevision(h.contract.Revision) {
+				floor = append(floor, option.Value)
+			}
+			response.SuggestedValues = mergeLanguageSuggestions(
+				floor, observed[eff.Key], eff.Value,
+			)
+		}
+		out = append(out, response)
+	}
+	return out
+}
+
+func (h *SettingValuesHandler) observedLanguageSuggestions(
+	r *http.Request,
+	resolved []settingsresolve.Effective,
+) map[string][]string {
+	result := make(map[string][]string)
+	if h.languageSource == nil {
+		return result
+	}
+
+	wantsAudio, wantsSubtitles := false, false
+	for _, eff := range resolved {
+		switch eff.Key {
+		case settingskeys.PlaybackAudioLanguage:
+			wantsAudio = true
+		case settingskeys.PlaybackSubtitleLanguage:
+			wantsSubtitles = true
+		}
+	}
+	if !wantsAudio && !wantsSubtitles {
+		return result
+	}
+
+	filters := catalog.BrowseFilters{}
+	if scope, ok := access.GetScope(r.Context()); ok {
+		filters.LibraryIDs = scope.AllowedLibraryIDs
+		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
+		filters.MaxContentRating = scope.MaxContentRating
+	}
+	if wantsAudio {
+		values, err := h.languageSource.ListAudioLanguages(r.Context(), filters)
+		if err != nil {
+			slog.WarnContext(r.Context(), "settings: listing audio language suggestions",
+				"component", "settings", "error", err)
+		} else {
+			result[settingskeys.PlaybackAudioLanguage] = values
+		}
+	}
+	if wantsSubtitles {
+		values, err := h.languageSource.ListSubtitleLanguages(r.Context(), filters)
+		if err != nil {
+			slog.WarnContext(r.Context(), "settings: listing subtitle language suggestions",
+				"component", "settings", "error", err)
+		} else {
+			result[settingskeys.PlaybackSubtitleLanguage] = values
+		}
+	}
+	return result
+}
+
+// mergeLanguageSuggestions keeps the contract's stable authored order, then
+// appends deployment-observed languages. Semantic aliases such as eng/en are
+// deduplicated through the catalog's ISO canonicalizer. When the current
+// stored value is one of those aliases it replaces the row's wire value so a
+// picker always has an exact selectable tag for its current selection.
+func mergeLanguageSuggestions(
+	floor []string,
+	observed []string,
+	current json.RawMessage,
+) []string {
+	values := make([]string, 0, len(floor)+len(observed)+1)
+	indexByLanguage := make(map[string]int, cap(values))
+	appendValue := func(value string, replace bool) {
+		normalized, ok := settingscontract.NormalizeLanguageTag(value)
+		if !ok {
+			return
+		}
+		identity := normalized
+		if tag, err := language.Parse(normalized); err == nil {
+			// x/text collapses true ISO aliases (eng/en) while retaining
+			// meaningful script and region specificity (pt/pt-BR).
+			identity = tag.String()
+		}
+		if index, exists := indexByLanguage[identity]; exists {
+			if replace {
+				values[index] = normalized
+			}
+			return
+		}
+		indexByLanguage[identity] = len(values)
+		values = append(values, normalized)
+	}
+
+	for _, value := range floor {
+		appendValue(value, false)
+	}
+	for _, value := range observed {
+		appendValue(value, false)
+	}
+	var currentValue string
+	if err := json.Unmarshal(current, &currentValue); err == nil {
+		appendValue(currentValue, true)
+	}
+	return values
 }
 
 // hashMutationRequest fingerprints what a mutation id was used for, so a reused

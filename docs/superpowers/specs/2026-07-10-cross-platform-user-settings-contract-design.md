@@ -387,6 +387,27 @@ Rules:
 - Arbitrary untyped JSON is not allowed. Existing `subtitle_appearance` becomes an `object` with a
   versioned schema.
 
+### Open language option sets
+
+`language_tag` remains an open type. The manifest may publish named advisory `option_sets`, and a
+language definition may reference one with `suggested_options` plus context-specific nullable copy
+in `unset_label`. These fields drive picker presentation; they never turn a language into a closed
+enum or make an otherwise valid BCP 47 value fail validation.
+
+Audio, subtitle, and metadata settings use separate named sets even when their initial values are
+the same. That keeps their product policy independently evolvable without teaching generators or
+clients about particular setting keys. Every option carries `introduced_in`, retains manifest
+order, and is filtered against the connected server revision like enum members and scopes.
+
+The choices rendered by a client are the stable contract floor, unioned with valid language values
+observed by the deployment and the exact current stored value. The server returns that runtime
+union as `suggested_values` on effective-value entries. Clients must retain a valid current value
+even when it is absent from both other sources, so a regional or legacy tag never leaves a picker
+with no selected row. Semantic aliases are de-duplicated for presentation, with the exact current
+wire value winning. Region and script variants are not aliases and remain distinct choices.
+Display names are localized with the platform's CLDR/ICU facilities rather
+than stored as English labels in the contract.
+
 ## Scopes and identity
 
 The remote scopes are:

@@ -8,7 +8,148 @@
  * is a manifest change plus a regeneration, never a hand-written key.
  */
 
-export const SETTINGS_REVISION = 1;
+export const SETTINGS_REVISION = 2;
+
+export interface SettingSuggestedOption {
+  value: string;
+  introducedIn: number;
+}
+
+export interface SettingOptionSet {
+  type: string;
+  options: readonly SettingSuggestedOption[];
+}
+
+export const SETTING_OPTION_SETS = {
+  catalog_metadata_languages: {
+    type: "language_tag",
+    options: [
+      { value: "ar", introducedIn: 1 },
+      { value: "bn", introducedIn: 1 },
+      { value: "bg", introducedIn: 1 },
+      { value: "zh", introducedIn: 1 },
+      { value: "hr", introducedIn: 1 },
+      { value: "cs", introducedIn: 1 },
+      { value: "da", introducedIn: 1 },
+      { value: "nl", introducedIn: 1 },
+      { value: "en", introducedIn: 1 },
+      { value: "fi", introducedIn: 1 },
+      { value: "fr", introducedIn: 1 },
+      { value: "de", introducedIn: 1 },
+      { value: "el", introducedIn: 1 },
+      { value: "he", introducedIn: 1 },
+      { value: "hi", introducedIn: 1 },
+      { value: "hu", introducedIn: 1 },
+      { value: "id", introducedIn: 1 },
+      { value: "it", introducedIn: 1 },
+      { value: "ja", introducedIn: 1 },
+      { value: "ko", introducedIn: 1 },
+      { value: "ms", introducedIn: 1 },
+      { value: "no", introducedIn: 1 },
+      { value: "fa", introducedIn: 1 },
+      { value: "pl", introducedIn: 1 },
+      { value: "pt", introducedIn: 1 },
+      { value: "ro", introducedIn: 1 },
+      { value: "ru", introducedIn: 1 },
+      { value: "sk", introducedIn: 1 },
+      { value: "sl", introducedIn: 1 },
+      { value: "es", introducedIn: 1 },
+      { value: "sv", introducedIn: 1 },
+      { value: "ta", introducedIn: 1 },
+      { value: "te", introducedIn: 1 },
+      { value: "th", introducedIn: 1 },
+      { value: "tr", introducedIn: 1 },
+      { value: "uk", introducedIn: 1 },
+      { value: "vi", introducedIn: 1 },
+    ],
+  },
+  playback_audio_languages: {
+    type: "language_tag",
+    options: [
+      { value: "ar", introducedIn: 1 },
+      { value: "bn", introducedIn: 1 },
+      { value: "bg", introducedIn: 1 },
+      { value: "zh", introducedIn: 1 },
+      { value: "hr", introducedIn: 1 },
+      { value: "cs", introducedIn: 1 },
+      { value: "da", introducedIn: 1 },
+      { value: "nl", introducedIn: 1 },
+      { value: "en", introducedIn: 1 },
+      { value: "fi", introducedIn: 1 },
+      { value: "fr", introducedIn: 1 },
+      { value: "de", introducedIn: 1 },
+      { value: "el", introducedIn: 1 },
+      { value: "he", introducedIn: 1 },
+      { value: "hi", introducedIn: 1 },
+      { value: "hu", introducedIn: 1 },
+      { value: "id", introducedIn: 1 },
+      { value: "it", introducedIn: 1 },
+      { value: "ja", introducedIn: 1 },
+      { value: "ko", introducedIn: 1 },
+      { value: "ms", introducedIn: 1 },
+      { value: "no", introducedIn: 1 },
+      { value: "fa", introducedIn: 1 },
+      { value: "pl", introducedIn: 1 },
+      { value: "pt", introducedIn: 1 },
+      { value: "ro", introducedIn: 1 },
+      { value: "ru", introducedIn: 1 },
+      { value: "sk", introducedIn: 1 },
+      { value: "sl", introducedIn: 1 },
+      { value: "es", introducedIn: 1 },
+      { value: "sv", introducedIn: 1 },
+      { value: "ta", introducedIn: 1 },
+      { value: "te", introducedIn: 1 },
+      { value: "th", introducedIn: 1 },
+      { value: "tr", introducedIn: 1 },
+      { value: "uk", introducedIn: 1 },
+      { value: "vi", introducedIn: 1 },
+    ],
+  },
+  playback_subtitle_languages: {
+    type: "language_tag",
+    options: [
+      { value: "ar", introducedIn: 1 },
+      { value: "bn", introducedIn: 1 },
+      { value: "bg", introducedIn: 1 },
+      { value: "zh", introducedIn: 1 },
+      { value: "hr", introducedIn: 1 },
+      { value: "cs", introducedIn: 1 },
+      { value: "da", introducedIn: 1 },
+      { value: "nl", introducedIn: 1 },
+      { value: "en", introducedIn: 1 },
+      { value: "fi", introducedIn: 1 },
+      { value: "fr", introducedIn: 1 },
+      { value: "de", introducedIn: 1 },
+      { value: "el", introducedIn: 1 },
+      { value: "he", introducedIn: 1 },
+      { value: "hi", introducedIn: 1 },
+      { value: "hu", introducedIn: 1 },
+      { value: "id", introducedIn: 1 },
+      { value: "it", introducedIn: 1 },
+      { value: "ja", introducedIn: 1 },
+      { value: "ko", introducedIn: 1 },
+      { value: "ms", introducedIn: 1 },
+      { value: "no", introducedIn: 1 },
+      { value: "fa", introducedIn: 1 },
+      { value: "pl", introducedIn: 1 },
+      { value: "pt", introducedIn: 1 },
+      { value: "ro", introducedIn: 1 },
+      { value: "ru", introducedIn: 1 },
+      { value: "sk", introducedIn: 1 },
+      { value: "sl", introducedIn: 1 },
+      { value: "es", introducedIn: 1 },
+      { value: "sv", introducedIn: 1 },
+      { value: "ta", introducedIn: 1 },
+      { value: "te", introducedIn: 1 },
+      { value: "th", introducedIn: 1 },
+      { value: "tr", introducedIn: 1 },
+      { value: "uk", introducedIn: 1 },
+      { value: "vi", introducedIn: 1 },
+    ],
+  },
+} as const satisfies Record<string, SettingOptionSet>;
+
+export type SettingOptionSetId = keyof typeof SETTING_OPTION_SETS;
 
 export const SETTING_KEYS = {
   /** Metadata language */
@@ -133,6 +274,8 @@ export interface SettingDefinition {
   category: string;
   control?: string;
   unit?: string;
+  suggestedOptions?: SettingOptionSetId;
+  unsetLabel?: string;
   values?: readonly { value: unknown; label: string; introducedIn: number }[];
   /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */
   ordered?: boolean;
@@ -166,6 +309,8 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Language Silo prefers for titles, descriptions, and artwork.",
     category: "catalog",
     control: "select",
+    suggestedOptions: "catalog_metadata_languages",
+    unsetLabel: "Library default",
   },
   "downloads.default_quality": {
     key: "downloads.default_quality",
@@ -250,6 +395,8 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Choose which spoken language Silo should prefer first.",
     category: "playback",
     control: "select",
+    suggestedOptions: "playback_audio_languages",
+    unsetLabel: "No preference",
   },
   "playback.auto_play_next": {
     key: "playback.auto_play_next",
@@ -442,6 +589,8 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Choose which subtitle language Silo should prefer first.",
     category: "playback",
     control: "select",
+    suggestedOptions: "playback_subtitle_languages",
+    unsetLabel: "None",
   },
   "playback.subtitle_mode": {
     key: "playback.subtitle_mode",

@@ -93,8 +93,12 @@ type Manifest struct {
 	// no revision rule can express.
 	APIVersion int `json:"api_version"`
 	// Revision is bumped by every manifest PR and is what clients filter
-	// definitions, scopes, enum members, and bounds against.
+	// definitions, scopes, enum members, option suggestions, and bounds against.
 	Revision int `json:"revision"`
+	// OptionSets are advisory presentation vocabularies. They never constrain
+	// what a value schema accepts: an open language_tag remains open even when
+	// its definition points at a suggested option set.
+	OptionSets map[string]OptionSet `json:"option_sets,omitempty"`
 	// Definitions is ordered as authored; use Lookup for access by key.
 	Definitions []Definition `json:"definitions"`
 
@@ -103,23 +107,56 @@ type Manifest struct {
 
 // Definition is the canonical contract for one setting.
 type Definition struct {
-	Key             string          `json:"key"`
-	IntroducedIn    int             `json:"introduced_in"`
-	Persistence     Persistence     `json:"persistence"`
-	AllowedScopes   []ScopeEntry    `json:"allowed_scopes"`
-	ResolutionOrder []Scope         `json:"resolution_order"`
-	ValueSchema     ValueSchema     `json:"value_schema"`
-	DefaultValue    json.RawMessage `json:"default_value"`
-	ConstrainedBy   *Constraint     `json:"constrained_by,omitempty"`
-	Platforms       []string        `json:"platforms,omitempty"`
-	Category        string          `json:"category"`
-	Label           string          `json:"label"`
-	Description     string          `json:"description"`
-	Unit            string          `json:"unit,omitempty"`
-	Control         string          `json:"recommended_control,omitempty"`
-	Deprecated      bool            `json:"deprecated,omitempty"`
+	Key              string          `json:"key"`
+	IntroducedIn     int             `json:"introduced_in"`
+	Persistence      Persistence     `json:"persistence"`
+	AllowedScopes    []ScopeEntry    `json:"allowed_scopes"`
+	ResolutionOrder  []Scope         `json:"resolution_order"`
+	ValueSchema      ValueSchema     `json:"value_schema"`
+	DefaultValue     json.RawMessage `json:"default_value"`
+	ConstrainedBy    *Constraint     `json:"constrained_by,omitempty"`
+	Platforms        []string        `json:"platforms,omitempty"`
+	Category         string          `json:"category"`
+	Label            string          `json:"label"`
+	Description      string          `json:"description"`
+	Unit             string          `json:"unit,omitempty"`
+	Control          string          `json:"recommended_control,omitempty"`
+	SuggestedOptions string          `json:"suggested_options,omitempty"`
+	UnsetLabel       string          `json:"unset_label,omitempty"`
+	Deprecated       bool            `json:"deprecated,omitempty"`
 	// Notes is maintainer commentary. It is stripped from the public manifest.
 	Notes string `json:"notes,omitempty"`
+}
+
+// OptionSet is an ordered, advisory list of values a client may present for
+// an open setting. Type must match the referring definition's value schema.
+// The options are kept in authored order so every generated client starts
+// from the same stable floor before adding deployment-observed values.
+type OptionSet struct {
+	Type    ValueType         `json:"type"`
+	Options []SuggestedOption `json:"options"`
+}
+
+// SuggestedOption is one presentation value and the earliest contract
+// revision against which it is safe to offer. It deliberately carries no
+// display label: clients localize language names with their platform locale
+// data instead of requiring a server release for every translation.
+type SuggestedOption struct {
+	Value        string `json:"value"`
+	IntroducedIn int    `json:"introduced_in"`
+}
+
+// OptionsAtRevision returns the authored suggestions visible to a peer at
+// revision. The returned slice is a copy and preserves manifest order.
+func (s OptionSet) OptionsAtRevision(revision int) []SuggestedOption {
+	options := make([]SuggestedOption, 0, len(s.Options))
+	for _, option := range s.Options {
+		if option.IntroducedIn > revision {
+			continue
+		}
+		options = append(options, option)
+	}
+	return options
 }
 
 // ScopeEntry is a scope, optionally tagged with the revision that added it to

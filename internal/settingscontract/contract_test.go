@@ -574,6 +574,46 @@ func TestPublicManifestStripsMaintainerNotes(t *testing.T) {
 	if !strings.Contains(string(raw), `"notes"`) {
 		t.Fatal("no definition carries notes, so the stripping test proves nothing")
 	}
+	if !strings.Contains(string(public), `"option_sets"`) {
+		t.Fatal("public manifest omitted advisory option_sets")
+	}
+}
+
+func TestLanguageOptionSetsAreCanonicalAndReferenced(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+
+	wantReferences := map[string]string{
+		"playback.audio_language":    "playback_audio_languages",
+		"playback.subtitle_language": "playback_subtitle_languages",
+		"catalog.metadata_language":  "catalog_metadata_languages",
+	}
+	for key, optionSetID := range wantReferences {
+		def, ok := manifest.Lookup(key)
+		if !ok {
+			t.Fatalf("%s is not registered", key)
+		}
+		if def.SuggestedOptions != optionSetID {
+			t.Errorf("%s suggested_options = %q, want %q",
+				key, def.SuggestedOptions, optionSetID)
+		}
+		optionSet, ok := manifest.OptionSets[optionSetID]
+		if !ok {
+			t.Fatalf("%s references missing option set %q", key, optionSetID)
+		}
+		if len(optionSet.Options) < 30 {
+			t.Errorf("%s has only %d suggestions; want the shared language floor",
+				optionSetID, len(optionSet.Options))
+		}
+		for _, option := range optionSet.Options {
+			normalized, valid := NormalizeLanguageTag(option.Value)
+			if !valid || normalized != option.Value {
+				t.Errorf("%s contains non-canonical value %q", optionSetID, option.Value)
+			}
+		}
+	}
 }
 
 func TestRevisionAwareFilteringHidesNewerElements(t *testing.T) {
@@ -612,6 +652,92 @@ func TestRevisionAwareFilteringHidesNewerElements(t *testing.T) {
 	}
 	if got := def.EnumValuesAtRevision(9); len(got) != 2 {
 		t.Errorf("EnumValuesAtRevision(9) = %v, want both members", got)
+	}
+
+	optionSet := OptionSet{Options: []SuggestedOption{
+		{Value: "en", IntroducedIn: 5},
+		{Value: "fr", IntroducedIn: 9},
+	}}
+	if got := optionSet.OptionsAtRevision(5); len(got) != 1 || got[0].Value != "en" {
+		t.Errorf("OptionsAtRevision(5) = %v, want [en]", got)
+	}
+	if got := optionSet.OptionsAtRevision(9); len(got) != 2 {
+		t.Errorf("OptionsAtRevision(9) = %v, want both suggestions", got)
+	}
+}
+
+func TestOptionSetValidationRejectsBrokenPresentationMetadata(t *testing.T) {
+	base := func() *Manifest {
+		return &Manifest{
+			APIVersion: 1,
+			Revision:   2,
+			OptionSets: map[string]OptionSet{
+				"languages": {
+					Type: TypeLanguageTag,
+					Options: []SuggestedOption{
+						{Value: "en", IntroducedIn: 1},
+					},
+				},
+			},
+			Definitions: []Definition{{
+				Key:              fixtureKey,
+				IntroducedIn:     1,
+				Persistence:      PersistenceRemote,
+				AllowedScopes:    []ScopeEntry{{Scope: ScopeProfile}},
+				ResolutionOrder:  []Scope{ScopeProfile, ScopeDefault},
+				ValueSchema:      ValueSchema{Type: TypeLanguageTag, Nullable: true},
+				DefaultValue:     json.RawMessage(jsonNull),
+				Category:         "playback",
+				Label:            "Example",
+				Description:      "Example.",
+				SuggestedOptions: "languages",
+				UnsetLabel:       "None",
+			}},
+		}
+	}
+
+	cases := map[string]func(*Manifest){
+		"missing reference": func(m *Manifest) {
+			m.Definitions[0].SuggestedOptions = "missing"
+		},
+		"type mismatch": func(m *Manifest) {
+			m.Definitions[0].ValueSchema.Type = TypeString
+			max := 20
+			m.Definitions[0].ValueSchema.MaxLength = &max
+			m.Definitions[0].DefaultValue = json.RawMessage(`null`)
+		},
+		"duplicate value": func(m *Manifest) {
+			set := m.OptionSets["languages"]
+			set.Options = append(set.Options, SuggestedOption{Value: "en", IntroducedIn: 1})
+			m.OptionSets["languages"] = set
+		},
+		"non-canonical tag": func(m *Manifest) {
+			set := m.OptionSets["languages"]
+			set.Options[0].Value = "EN_us"
+			m.OptionSets["languages"] = set
+		},
+		"future revision": func(m *Manifest) {
+			set := m.OptionSets["languages"]
+			set.Options[0].IntroducedIn = 3
+			m.OptionSets["languages"] = set
+		},
+		"unset on non-nullable": func(m *Manifest) {
+			m.Definitions[0].ValueSchema.Nullable = false
+			m.Definitions[0].DefaultValue = json.RawMessage(`"en"`)
+		},
+	}
+
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			manifest := base()
+			mutate(manifest)
+			if err := manifest.index(); err != nil {
+				t.Fatalf("indexing: %v", err)
+			}
+			if err := manifest.Validate(nil); err == nil {
+				t.Fatal("Validate accepted broken presentation metadata")
+			}
+		})
 	}
 }
 

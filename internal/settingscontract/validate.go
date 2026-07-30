@@ -35,13 +35,78 @@ func (m *Manifest) Validate(objectSchemas map[string]*jsonschema.Schema) error {
 		errs = append(errs, errors.New("manifest declares no definitions"))
 	}
 
+	for name, optionSet := range m.OptionSets {
+		if err := optionSet.validate(name, m.Revision); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
 	for i := range m.Definitions {
 		def := &m.Definitions[i]
 		if err := def.validate(m.Revision, objectSchemas); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", def.Key, err))
 		}
+		if err := def.validatePresentation(m.OptionSets); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", def.Key, err))
+		}
 	}
 
+	return errors.Join(errs...)
+}
+
+func (s OptionSet) validate(name string, manifestRevision int) error {
+	var errs []error
+	if s.Type != TypeLanguageTag {
+		errs = append(errs, fmt.Errorf(
+			"option set %q has unsupported type %q", name, s.Type))
+	}
+	if len(s.Options) == 0 {
+		errs = append(errs, fmt.Errorf("option set %q has no options", name))
+	}
+
+	seen := make(map[string]struct{}, len(s.Options))
+	for _, option := range s.Options {
+		if option.IntroducedIn < 1 || option.IntroducedIn > manifestRevision {
+			errs = append(errs, fmt.Errorf(
+				"option set %q value %q has introduced_in %d outside 1..%d",
+				name, option.Value, option.IntroducedIn, manifestRevision))
+		}
+		if s.Type == TypeLanguageTag {
+			normalized, ok := NormalizeLanguageTag(option.Value)
+			if !ok {
+				errs = append(errs, fmt.Errorf(
+					"option set %q value %q is not a language tag", name, option.Value))
+			} else if normalized != option.Value {
+				errs = append(errs, fmt.Errorf(
+					"option set %q value %q is not canonical; use %q",
+					name, option.Value, normalized))
+			}
+		}
+		if _, duplicate := seen[option.Value]; duplicate {
+			errs = append(errs, fmt.Errorf(
+				"option set %q repeats value %q", name, option.Value))
+		}
+		seen[option.Value] = struct{}{}
+	}
+	return errors.Join(errs...)
+}
+
+func (d *Definition) validatePresentation(optionSets map[string]OptionSet) error {
+	var errs []error
+	if d.SuggestedOptions != "" {
+		optionSet, ok := optionSets[d.SuggestedOptions]
+		if !ok {
+			errs = append(errs, fmt.Errorf(
+				"suggested_options references unknown option set %q", d.SuggestedOptions))
+		} else if optionSet.Type != d.ValueSchema.Type {
+			errs = append(errs, fmt.Errorf(
+				"suggested_options %q has type %q, want %q",
+				d.SuggestedOptions, optionSet.Type, d.ValueSchema.Type))
+		}
+	}
+	if d.UnsetLabel != "" && !d.ValueSchema.Nullable {
+		errs = append(errs, errors.New("unset_label requires a nullable value schema"))
+	}
 	return errors.Join(errs...)
 }
 

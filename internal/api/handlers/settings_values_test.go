@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -825,5 +826,29 @@ func TestCapabilitiesReportTheContractRevision(t *testing.T) {
 	}
 	if len(body.Scopes) != 5 {
 		t.Errorf("reported %d scopes, want 5", len(body.Scopes))
+	}
+}
+
+func TestMergeLanguageSuggestionsKeepsFloorObservedAndCurrent(t *testing.T) {
+	got := mergeLanguageSuggestions(
+		[]string{"en", "fr", "pt"},
+		[]string{"eng", "deu", "not a tag", "fr"},
+		json.RawMessage(`"pt-BR"`),
+	)
+	want := []string{"en", "fr", "pt", "deu", "pt-BR"}
+	if !slices.Equal(got, want) {
+		t.Errorf("mergeLanguageSuggestions() = %v, want %v", got, want)
+	}
+}
+
+func TestMergeLanguageSuggestionsUsesExactCurrentAlias(t *testing.T) {
+	got := mergeLanguageSuggestions(
+		[]string{"en", "fr"},
+		[]string{"eng", "fra"},
+		json.RawMessage(`"eng"`),
+	)
+	want := []string{"eng", "fr"}
+	if !slices.Equal(got, want) {
+		t.Errorf("mergeLanguageSuggestions() = %v, want %v", got, want)
 	}
 }

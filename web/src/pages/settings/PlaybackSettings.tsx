@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { optionsFor } from "@/lib/settingsDisplay";
-import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
+import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
@@ -173,6 +173,18 @@ export default function PlaybackSettings() {
   };
 
   const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
+  const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+  const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+  const audioLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+    audioLanguage,
+    effective?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
+  );
+  const metadataLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+    metadataLanguage,
+    effective?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
+  );
   // Whether the profile has actually chosen, which is what gates the reset
   // affordance: the resolved value is the default until a row exists.
   const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
@@ -209,7 +221,7 @@ export default function PlaybackSettings() {
           control={(id) => (
             <div className="w-full">
               <Select
-                value={read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE) ?? "none"}
+                value={audioLanguage ?? "none"}
                 onValueChange={(value) =>
                   // The contract spells "no preference" as null, where the
                   // legacy profile column spelled it as the empty string.
@@ -221,7 +233,7 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preference</SelectItem>
-                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                  {audioLanguageOptions.map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}
                     </SelectItem>
@@ -238,7 +250,7 @@ export default function PlaybackSettings() {
           control={(id) => (
             <div className="w-full">
               <Select
-                value={read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE) ?? "none"}
+                value={metadataLanguage ?? "none"}
                 onValueChange={(value) =>
                   saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, value === "none" ? null : value)
                 }
@@ -248,7 +260,7 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Library default</SelectItem>
-                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                  {metadataLanguageOptions.map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}
                     </SelectItem>

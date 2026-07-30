@@ -1,20 +1,43 @@
 import { describe, expect, it } from "vitest";
 
-import { LANGUAGES } from "@/player/utils/languageNames";
-import { LANGUAGE_OPTIONS, NAMED_LANGUAGE_OPTIONS } from "./languageOptions";
+import { SETTING_KEYS } from "./settingsContract";
+import { languageOptionsFor, namedLanguageOptionsFor } from "./languageOptions";
 
 describe("languageOptions", () => {
-  it("covers every language the shared list knows", () => {
-    // The hand-written settings registry this replaced enumerated its own
-    // subset, so a language the player could name was not always selectable in
-    // settings. Deriving the list means the two cannot drift.
-    expect(NAMED_LANGUAGE_OPTIONS.map((option) => option.value)).toEqual(
-      LANGUAGES.map((language) => language.code),
-    );
+  it("uses the definition-specific generated option set", () => {
+    const options = namedLanguageOptionsFor(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+
+    expect(options.map((option) => option.value)).toContain("en");
+    expect(options.map((option) => option.value)).toContain("te");
+    expect(options.some((option) => option.value === "")).toBe(false);
   });
 
-  it("prefixes the unset entry only on the nullable list", () => {
-    expect(LANGUAGE_OPTIONS[0]).toEqual({ value: "", label: "No preference" });
-    expect(NAMED_LANGUAGE_OPTIONS.some((option) => option.value === "")).toBe(false);
+  it("merges deployment values and preserves an exact current regional tag", () => {
+    const options = namedLanguageOptionsFor(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, "pt-BR", [
+      "eng",
+      "pt",
+      "es-MX",
+    ]);
+
+    expect(options.map((option) => option.value)).toContain("en");
+    expect(options.map((option) => option.value)).not.toContain("eng");
+    expect(options.map((option) => option.value)).toContain("es-MX");
+    expect(options.map((option) => option.value)).toContain("pt-BR");
+    expect(options.map((option) => option.value)).toContain("pt");
+  });
+
+  it("uses each nullable definition's context-specific unset copy", () => {
+    expect(languageOptionsFor(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE)[0]).toEqual({
+      value: "",
+      label: "No preference",
+    });
+    expect(languageOptionsFor(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE)[0]).toEqual({
+      value: "",
+      label: "None",
+    });
+    expect(languageOptionsFor(SETTING_KEYS.CATALOG_METADATA_LANGUAGE)[0]).toEqual({
+      value: "",
+      label: "Library default",
+    });
   });
 });

@@ -43,6 +43,8 @@ export interface EffectiveSetting<T = unknown> {
   stored_value?: T;
   constrained?: boolean;
   constraint_kind?: "ceiling" | "floor" | "allowlist" | "locked";
+  /** Advisory values: contract floor, deployment-observed tags, and current value. */
+  suggested_values?: string[];
   /** The scope holding the value, so a reset can target it exactly. */
   scope?: SettingScope;
   library_id?: number;

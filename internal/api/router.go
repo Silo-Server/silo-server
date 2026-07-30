@@ -858,6 +858,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			} else if deps.DB != nil {
 				settingValuesHandler.SetLibraryLookup(catalog.NewFolderRepository(deps.DB))
 			}
+			if deps.DB != nil {
+				settingValuesHandler.SetLanguageSuggestionSource(catalog.NewBrowseRepository(deps.DB))
+			}
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
