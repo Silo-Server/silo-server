@@ -2,13 +2,7 @@ package access
 
 import (
 	"context"
-	"encoding/json"
-	"log/slog"
-	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/settingscontract"
-	"github.com/Silo-Server/silo-server/internal/settingskeys"
-	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -35,28 +29,6 @@ func PreferredMetadataLanguage(ctx context.Context, store userstore.UserStore, p
 	if store == nil || profileID == "" {
 		return ""
 	}
-	contract, err := settingscontract.Load()
-	if err != nil {
-		slog.WarnContext(ctx, "metadata language resolution degraded to default: loading settings contract failed",
-			"component", "access", "profile_id", profileID, "error", err)
-		return ""
-	}
-	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
-		settingsresolve.Context{ProfileID: profileID},
-		[]string{settingskeys.CatalogMetadataLanguage}, nil)
-	if err != nil {
-		slog.WarnContext(ctx, "metadata language resolution degraded to default: reading setting values failed",
-			"component", "access", "profile_id", profileID, "error", err)
-		return ""
-	}
-	if len(resolved) == 0 {
-		return ""
-	}
-	// The contract default is null — "no preference" — which unmarshals to "",
-	// the same spelling the legacy column used for unset.
-	var language string
-	if json.Unmarshal(resolved[0].Value, &language) != nil {
-		return ""
-	}
-	return strings.TrimSpace(language)
+	resolved, _ := resolveCanonicalViewerPreferences(ctx, store, profileID)
+	return resolved.preferences.PreferredMetadataLanguage
 }

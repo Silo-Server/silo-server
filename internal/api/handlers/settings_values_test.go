@@ -354,6 +354,69 @@ func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
 	}
 }
 
+func TestPostEffectiveResolvesContentContexts(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	for seriesID, value := range map[string]string{"s1": `"ja"`, "s2": `"de"`} {
+		if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
+			"scope=profile_series&series_id="+seriesID,
+			[]byte(`{"value":`+value+`}`)); rec.Code != http.StatusOK {
+			t.Fatalf("seeding %s = %d: %s", seriesID, rec.Code, rec.Body.String())
+		}
+	}
+
+	body := []byte(`{
+		"keys":["playback.subtitle_language"],
+		"contexts":[
+			{"context_id":"first","library_id":"7","series_id":"s1"},
+			{"context_id":"second","library_id":7,"series_id":"s2"}
+		]
+	}`)
+	req := valuesRequest(http.MethodPost, "/settings/values/effective", body)
+	rec := httptest.NewRecorder()
+	handler.HandlePostEffective(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST effective = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Contexts []struct {
+			ContextID string                          `json:"context_id"`
+			Settings  []effectiveSettingValueResponse `json:"settings"`
+		} `json:"contexts"`
+		Revision int `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(response.Contexts) != 2 {
+		t.Fatalf("contexts = %d, want 2", len(response.Contexts))
+	}
+	if response.Contexts[0].ContextID != "first" ||
+		string(response.Contexts[0].Settings[0].Value) != `"ja"` ||
+		response.Contexts[1].ContextID != "second" ||
+		string(response.Contexts[1].Settings[0].Value) != `"de"` {
+		t.Errorf("context response = %#v", response.Contexts)
+	}
+}
+
+func TestPostEffectiveRejectsInvalidContexts(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	for name, body := range map[string]string{
+		"empty":           `{"keys":["ui.custom_css"],"contexts":[]}`,
+		"duplicate id":    `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x","series_id":"s1"},{"context_id":"x","series_id":"s2"}]}`,
+		"missing content": `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x"}]}`,
+		"invalid library": `{"keys":["ui.custom_css"],"contexts":[{"context_id":"x","library_id":"nope"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := valuesRequest(http.MethodPost, "/settings/values/effective", []byte(body))
+			rec := httptest.NewRecorder()
+			handler.HandlePostEffective(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 // TestEffectiveRejectsUnknownKeys. Omitting an unknown key silently lets a
 // client fill the gap with its own vendored default and present a value this
 // server would refuse to store.
@@ -493,6 +556,16 @@ func TestEffectiveAppliesViewerQualityCap(t *testing.T) {
 	}
 	if string(got.StoredValue) != `"2160p"` {
 		t.Errorf("stored_value = %s, want the authored \"2160p\" reported", got.StoredValue)
+	}
+	if string(got.RequestedValue) != `"2160p"` {
+		t.Errorf("requested_value = %s, want authored 2160p", got.RequestedValue)
+	}
+	if got.ConstrainedBy == nil || got.ConstrainedBy.PolicyInput != policyInputMaxPlaybackQuality ||
+		got.ConstrainedBy.Constraint != settingscontract.ConstraintCeiling {
+		t.Errorf("constrained_by = %#v", got.ConstrainedBy)
+	}
+	if len(got.PermittedValues) == 0 || string(got.PermittedValues[len(got.PermittedValues)-1]) != `"1080p"` {
+		t.Errorf("permitted_values = %q, want choices through 1080p", got.PermittedValues)
 	}
 
 	// The stored row itself was not rewritten by resolution.

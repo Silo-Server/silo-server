@@ -34,6 +34,15 @@ func scanProfile(scanner interface {
 }
 
 func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profile) error {
+	return createProfile(ctx, s.pool, s.userID, p)
+}
+
+func createProfile(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	p userstore.Profile,
+) error {
 	if p.ID == "" {
 		p.ID = generateUUID()
 	}
@@ -52,10 +61,10 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 	// rights to manage the household's other profiles without requiring a
 	// server-wide admin role.
 	var hasExisting bool
-	if err := s.pool.QueryRow(ctx,
-		"SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1)", s.userID,
+	if err := exec.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1)", userID,
 	).Scan(&hasExisting); err != nil {
-		return fmt.Errorf("checking existing profiles for user %d: %w", s.userID, err)
+		return fmt.Errorf("checking existing profiles for user %d: %w", userID, err)
 	}
 	if !hasExisting {
 		p.IsPrimary = true
@@ -63,7 +72,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 		p.IsPrimary = false
 	}
 
-	_, err := s.pool.Exec(ctx, `
+	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (
 			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
@@ -71,7 +80,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		p.ID, s.userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
+		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
 		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
@@ -80,7 +89,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 	if err != nil {
 		return fmt.Errorf("inserting profile %s: %w", p.ID, err)
 	}
-	if err := replaceProfileAllowedLibraries(ctx, s.pool, s.userID, p.ID, p.AllowedLibraryIDs); err != nil {
+	if err := replaceProfileAllowedLibraries(ctx, exec, userID, p.ID, p.AllowedLibraryIDs); err != nil {
 		return err
 	}
 	return nil

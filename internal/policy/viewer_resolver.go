@@ -79,6 +79,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 			return access.Scope{}, err
 		}
 	}
+	preferences := access.ResolveViewerPreferences(ctx, store, input.ProfileID)
 
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
@@ -89,7 +90,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   access.DisabledLibraryIDs(ctx, store, input.ProfileID),
+		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that
@@ -108,7 +109,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		// value unchanged as a preference; the manifest deliberately declares no
 		// constraint on it, since constraining a setting by a policy input fed
 		// from that same setting would be circular.
-		policyInput.ProfileMetadataLang = access.PreferredMetadataLanguage(ctx, store, input.ProfileID)
+		policyInput.ProfileMetadataLang = preferences.PreferredMetadataLanguage
 	}
 
 	if r.pdp == nil {

@@ -494,6 +494,56 @@ type viewerResolverTestStore struct {
 	settingValues []userstore.SettingValue
 }
 
+type countingViewerResolverStore struct {
+	viewerResolverTestStore
+	resolutionReads int
+}
+
+func (s *countingViewerResolverStore) ListSettingValuesForResolution(
+	ctx context.Context, query userstore.SettingResolutionQuery,
+) ([]userstore.SettingValue, error) {
+	s.resolutionReads++
+	return s.viewerResolverTestStore.ListSettingValuesForResolution(ctx, query)
+}
+
+func TestViewerResolverBatchesViewerPreferenceRead(t *testing.T) {
+	ctx := context.Background()
+	store := &countingViewerResolverStore{viewerResolverTestStore: viewerResolverTestStore{
+		profile: &userstore.Profile{ID: "prof-1"},
+		settingValues: []userstore.SettingValue{
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.UiDisabledLibraryIds, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`[3,5]`),
+			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.CatalogMetadataLanguage, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`"de"`),
+			},
+		},
+	}}
+	resolver := NewViewerResolver(
+		viewerResolverUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		viewerResolverStoreProvider{store: store}, nil, newViewerResolverTestPDP(t, ctx),
+	)
+
+	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if store.resolutionReads != 1 {
+		t.Fatalf("canonical preference reads = %d, want 1", store.resolutionReads)
+	}
+	if !reflect.DeepEqual(scope.DisabledLibraryIDs, []int{3, 5}) || scope.PreferredMetadataLanguage != "de" {
+		t.Errorf("resolved scope = %#v", scope)
+	}
+}
+
 func (s viewerResolverTestStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
 	if s.err != nil {
 		return nil, s.err

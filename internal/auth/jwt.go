@@ -20,6 +20,7 @@ type Claims struct {
 	UserID             int    `json:"user_id"`
 	Role               string `json:"role"`
 	SessionID          string `json:"session_id"`
+	ProfileID          string `json:"profile_id,omitempty"`
 	TokenType          string `json:"token_type"`
 	ImpersonatorUserID *int   `json:"impersonator_user_id,omitempty"`
 	APIKeyID           int64  `json:"api_key_id,omitempty"`
@@ -90,7 +91,9 @@ func (j *JWTService) GenerateRefreshToken(userID int, role, sessionID string) (s
 	})
 }
 
-func (j *JWTService) GeneratePluginAccessToken(userID int, role, sessionID string, ttl time.Duration) (string, error) {
+func (j *JWTService) GeneratePluginAccessToken(
+	userID int, role, sessionID, profileID string, ttl time.Duration,
+) (string, error) {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
@@ -98,6 +101,7 @@ func (j *JWTService) GeneratePluginAccessToken(userID int, role, sessionID strin
 		UserID:    userID,
 		Role:      role,
 		SessionID: sessionID,
+		ProfileID: profileID,
 	}, TokenTypePluginAccess, ttl)
 }
 

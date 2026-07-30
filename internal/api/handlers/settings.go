@@ -15,7 +15,9 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -56,6 +58,7 @@ type SettingsHandler struct {
 	storeProvider  userstore.UserStoreProvider
 	serverSettings ServerSettingReader
 	deviceSeen     *cache.TTLCache[struct{}]
+	EventsHub      *evt.Hub
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
@@ -379,7 +382,7 @@ func (h *SettingsHandler) HandleSetSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := store.SetSetting(r.Context(), key, req.Value); err != nil {
+	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, &req.Value); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set setting")
 		return
 	}
@@ -407,7 +410,7 @@ func (h *SettingsHandler) HandleDeleteSetting(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := store.DeleteSetting(r.Context(), key); err != nil {
+	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete setting")
 		return
 	}
@@ -503,25 +506,17 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := store.SetDeviceSetting(r.Context(), userstore.DeviceSettingEntry{
+	entry := userstore.DeviceSettingEntry{
 		ProfileID:      profileID,
 		DeviceID:       device.DeviceID,
 		DeviceName:     device.DeviceName,
 		DevicePlatform: device.DevicePlatform,
 		Key:            key,
 		Value:          req.Value,
-	}); err != nil {
+	}
+	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, &req.Value); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set device setting")
 		return
-	}
-	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
-		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
-			slog.WarnContext(r.Context(), "failed to clean up legacy device setting after canonical write",
-				"legacy_key", legacyKey,
-				"canonical_key", key,
-				"error", err,
-			)
-		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -558,18 +553,181 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 	}
 	h.registerRequestDevice(r.Context(), store, profileID, device)
 
-	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
-		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
-			return
-		}
-	}
-	if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, key); err != nil {
+	entry := userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: device.DeviceID, Key: key}
+	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync, error) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, fmt.Errorf("loading settings contract: %w", err)
+	}
+	planner := settingsmigrate.New(contract, settingscontract.ObjectSchemas())
+	if value == nil {
+		keys := planner.RuntimeKeys(key)
+		if len(keys) == 0 {
+			return nil, fmt.Errorf("%s has no canonical runtime target", key)
+		}
+		out := make([]profileSettingSync, 0, len(keys))
+		for _, canonicalKey := range keys {
+			out = append(out, profileSettingSync{key: canonicalKey})
+		}
+		return out, nil
+	}
+	planned, err := planner.PlanRuntimeValue(key, *value)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]profileSettingSync, 0, len(planned))
+	for _, mutation := range planned {
+		out = append(out, profileSettingSync{key: mutation.Key, value: mutation.Value})
+	}
+	return out, nil
+}
+
+// syncLegacyUserSetting commits the account-wide legacy row and its
+// profile-scoped canonical fan-out together. The old endpoint was shared by
+// every household profile, so mirroring only the active profile would change
+// its shipped semantics.
+func (h *SettingsHandler) syncLegacyUserSetting(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	key string,
+	value *string,
+) error {
+	writes, err := planLegacyRuntimeSettings(key, value)
+	if err != nil {
+		// The surviving v1 route historically accepted its registry validation.
+		// Some JSON entries are intentionally looser than the new typed schema;
+		// preserve their successful legacy write instead of changing 204 to 500.
+		slog.WarnContext(ctx, "legacy user setting has no canonical representation; preserving legacy write",
+			"component", "api", "key", key, "error", err)
+		writes = nil
+	}
+	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return fmt.Errorf("user store does not support atomic preference settings synchronization")
+	}
+	type changedProfile struct {
+		profileID string
+		keys      []string
+	}
+	var changed []changedProfile
+	err = transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if value == nil {
+			if err := tx.DeleteSetting(ctx, key); err != nil {
+				return err
+			}
+		} else if err := tx.SetSetting(ctx, key, *value); err != nil {
+			return err
+		}
+		profileIDs, err := tx.ListProfileIDs(ctx)
+		if err != nil {
+			return fmt.Errorf("listing profiles for settings synchronization: %w", err)
+		}
+		changed = make([]changedProfile, 0, len(profileIDs))
+		for _, profileID := range profileIDs {
+			keys, err := writeCanonicalSettingsSync(ctx, tx, userstore.SettingIdentity{
+				Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+			}, writes)
+			if err != nil {
+				return err
+			}
+			changed = append(changed, changedProfile{profileID: profileID, keys: keys})
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, profile := range changed {
+		for _, changedKey := range profile.keys {
+			publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.profileID,
+				changedKey, string(settingscontract.ScopeProfile))
+		}
+	}
+	return nil
+}
+
+// syncLegacyDeviceSetting mirrors a shipped device-setting mutation to its
+// profile_device canonical rows. Alias cleanup participates in the same
+// transaction, so a failure cannot leave the two spellings disagreeing.
+func (h *SettingsHandler) syncLegacyDeviceSetting(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	entry userstore.DeviceSettingEntry,
+	value *string,
+) error {
+	writes, err := planLegacyRuntimeSettings(entry.Key, value)
+	if err != nil {
+		// Keep the established loose JSON endpoint compatible when a syntactically
+		// valid legacy document cannot satisfy the stricter canonical schema.
+		slog.WarnContext(ctx, "legacy device setting has no canonical representation; preserving legacy write",
+			"component", "api", "key", entry.Key, "error", err)
+		writes = nil
+	}
+	base := userstore.SettingIdentity{
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: entry.ProfileID, DeviceID: entry.DeviceID,
+	}
+	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, base, writes,
+		func(tx userstore.PreferenceSettingsWriter) error {
+			if value == nil {
+				if legacyKey, ok := legacyDeviceSettingKey(entry.Key); ok {
+					if err := tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, legacyKey); err != nil {
+						return err
+					}
+				}
+				return tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, entry.Key)
+			}
+			entry.Value = *value
+			if err := tx.SetDeviceSetting(ctx, entry); err != nil {
+				return err
+			}
+			if legacyKey, ok := legacyDeviceSettingKey(entry.Key); ok {
+				return tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, legacyKey)
+			}
+			return nil
+		})
+}
+
+// planInheritedLegacyUserSettings captures the account-wide settings a newly
+// created profile must inherit while the old generic routes remain mounted.
+// Profile creation calls this inside the same preference transaction as the
+// insert; PostgreSQL's per-user advisory lock and SQLite's write transaction
+// serialize it with the account-setting fan-out path.
+func planInheritedLegacyUserSettings(
+	ctx context.Context,
+	store interface {
+		ListSettings(context.Context) ([]userstore.SettingEntry, error)
+	},
+) ([]profileSettingSync, error) {
+	entries, err := store.ListSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing legacy user settings: %w", err)
+	}
+	var out []profileSettingSync
+	for _, entry := range entries {
+		if !keyUsesUserScope(entry.Key) {
+			continue
+		}
+		value := entry.Value
+		planned, err := planLegacyRuntimeSettings(entry.Key, &value)
+		if err != nil {
+			slog.WarnContext(ctx, "legacy user setting cannot seed a new canonical profile",
+				"component", "api", "key", entry.Key, "error", err)
+			continue
+		}
+		out = append(out, planned...)
+	}
+	return out, nil
 }
 
 // HandleGetEffectiveSettings handles GET /settings/effective?keys=key1,key2

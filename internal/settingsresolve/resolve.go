@@ -70,6 +70,20 @@ type Effective struct {
 	// ConstraintKind names how it was narrowed, for client copy.
 	ConstraintKind settingscontract.ConstraintKind `json:"constraint_kind,omitempty"`
 
+	// RequestedValue, ConstrainedBy and PermittedValues are the public
+	// constraint contract. RequestedValue is present only when policy changed
+	// the answer; the other two describe an active policy input even when the
+	// authored value already falls inside it.
+	RequestedValue  json.RawMessage              `json:"requested_value,omitempty"`
+	ConstrainedBy   *settingscontract.Constraint `json:"constrained_by,omitempty"`
+	PermittedValues []json.RawMessage            `json:"permitted_values,omitempty"`
+
+	// DefinitionRevision lets clients relate an answer to the manifest member
+	// that defined it. UpdatedAt belongs to the winning stored row; defaults
+	// have no update timestamp.
+	DefinitionRevision int    `json:"definition_revision"`
+	UpdatedAt          string `json:"updated_at,omitempty"`
+
 	// Identity locates the row Value came from, so a client can offer "reset
 	// this device's override" against the exact scope that holds it. Empty for
 	// a default.
@@ -128,6 +142,54 @@ func (r *Resolver) Resolve(
 	}
 
 	return r.rank(known, defs, stored, rc, constraints), nil
+}
+
+// ResolveContexts resolves the same keys for several content contexts using
+// one candidate read. The contexts may vary by profile, library, or series,
+// but they must use the same device because SettingResolutionQuery represents
+// one requesting client device.
+func (r *Resolver) ResolveContexts(
+	ctx context.Context,
+	store Store,
+	contexts []Context,
+	keys []string,
+	constraints Constraints,
+) ([][]Effective, error) {
+	if r == nil || r.contract == nil {
+		return nil, fmt.Errorf("settingsresolve: no contract")
+	}
+	if len(contexts) == 0 {
+		return nil, nil
+	}
+
+	known, defs := r.knownKeys(keys)
+	if len(known) == 0 {
+		return make([][]Effective, len(contexts)), nil
+	}
+
+	deviceID := contexts[0].DeviceID
+	query := userstore.SettingResolutionQuery{Keys: known, DeviceID: deviceID}
+	for _, rc := range contexts {
+		if rc.DeviceID != deviceID {
+			return nil, fmt.Errorf("settingsresolve: batched contexts use different devices")
+		}
+		if rc.ProfileID != "" {
+			query.ProfileIDs = append(query.ProfileIDs, rc.ProfileID)
+		}
+		query.LibraryIDs = append(query.LibraryIDs, rc.LibraryIDs...)
+		query.SeriesIDs = append(query.SeriesIDs, rc.SeriesIDs...)
+	}
+
+	stored, err := store.ListSettingValuesForResolution(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
+	}
+
+	out := make([][]Effective, len(contexts))
+	for i, rc := range contexts {
+		out[i] = r.rank(known, defs, stored, rc, constraints)
+	}
+	return out, nil
 }
 
 // ResolveProfiles resolves the same keys for several profiles in one store
@@ -240,6 +302,10 @@ func (r *Resolver) resolveOne(
 		Key:    def.Key,
 		Value:  append(json.RawMessage(nil), def.DefaultValue...),
 		Source: settingscontract.ScopeDefault,
+		// Definitions can change additively after their introduced_in marker.
+		// The response therefore names the manifest revision that produced the
+		// effective definition, not merely the revision that first added its key.
+		DefinitionRevision: r.contract.Revision,
 	}
 
 	for _, scope := range def.ResolutionOrder {
@@ -252,6 +318,7 @@ func (r *Resolver) resolveOne(
 		}
 		eff.Value = append(json.RawMessage(nil), row.Value...)
 		eff.Source = scope
+		eff.UpdatedAt = row.UpdatedAt
 		identity := row.SettingIdentity
 		eff.Identity = &identity
 		break
@@ -335,15 +402,62 @@ func applyConstraint(
 		return eff
 	}
 
+	eff.ConstrainedBy = &settingscontract.Constraint{
+		PolicyInput: def.ConstrainedBy.PolicyInput,
+		Constraint:  def.ConstrainedBy.Constraint,
+	}
+	eff.PermittedValues = permittedValues(def, limit)
+
 	narrow, changed := narrowValue(def, eff.Value, limit)
 	if !changed {
 		return eff
 	}
 	eff.StoredValue = eff.Value
+	eff.RequestedValue = eff.Value
 	eff.Value = narrow
 	eff.Constrained = true
 	eff.ConstraintKind = def.ConstrainedBy.Constraint
 	return eff
+}
+
+// permittedValues returns the finite choices allowed by an active policy
+// input. Numeric ceilings and floors do not have a finite option list, so they
+// leave this absent and clients continue rendering their numeric control.
+func permittedValues(def *settingscontract.Definition, limit json.RawMessage) []json.RawMessage {
+	switch def.ConstrainedBy.Constraint {
+	case settingscontract.ConstraintAllowlist:
+		var allowed []json.RawMessage
+		if err := json.Unmarshal(limit, &allowed); err != nil || len(allowed) == 0 {
+			return nil
+		}
+		out := make([]json.RawMessage, 0, len(allowed))
+		for _, value := range allowed {
+			out = append(out, append(json.RawMessage(nil), value...))
+		}
+		return out
+
+	case settingscontract.ConstraintLocked:
+		return []json.RawMessage{append(json.RawMessage(nil), limit...)}
+
+	case settingscontract.ConstraintCeiling, settingscontract.ConstraintFloor:
+		if def.ValueSchema.Type != settingscontract.TypeEnum {
+			return nil
+		}
+		out := make([]json.RawMessage, 0, len(def.ValueSchema.Values))
+		for _, member := range def.ValueSchema.Values {
+			raw, err := json.Marshal(member.Value)
+			if err != nil {
+				continue
+			}
+			comparison := def.ValueSchema.CompareValues(raw, limit)
+			if def.ConstrainedBy.Constraint == settingscontract.ConstraintCeiling && comparison <= 0 ||
+				def.ConstrainedBy.Constraint == settingscontract.ConstraintFloor && comparison >= 0 {
+				out = append(out, raw)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // narrowValue applies one constraint kind, returning the permitted value and

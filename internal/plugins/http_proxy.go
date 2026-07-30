@@ -127,17 +127,20 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 
 	body, _ := io.ReadAll(r.Body)
 	headers := forwardedRequestHeaders(r.Header)
-	if _, _, userID := pluginAccessUserFromContext(r.Context()); userID > 0 {
+	if _, _, userID, contextProfileID := pluginAccessUserFromContext(r.Context()); userID > 0 {
 		headers["X-Silo-User-Id"] = strconv.Itoa(userID)
 		if admin {
 			headers["X-Silo-User-Role"] = "admin"
 		} else {
 			headers["X-Silo-User-Role"] = "user"
 		}
-		// The browser already sends X-Profile-Id for its own silo API
-		// calls; reuse that as the active profile for both lookups. Empty
-		// just means "no profile selected".
-		profileID := r.Header.Get("X-Profile-Id")
+		// Full-page plugin navigation cannot attach X-Profile-Id. The launch
+		// cookie carries the validated active profile in that case; direct
+		// bearer/API-key calls may still provide the header.
+		profileID := strings.TrimSpace(contextProfileID)
+		if profileID == "" {
+			profileID = strings.TrimSpace(r.Header.Get("X-Profile-Id"))
+		}
 		if p.themes != nil {
 			if theme, err := p.themes.LookupUITheme(r.Context(), userID, profileID); err == nil && theme != "" {
 				headers["X-Silo-Theme"] = theme
@@ -346,6 +349,7 @@ type pluginAccess struct {
 	authenticated bool
 	admin         bool
 	userID        int
+	profileID     string
 }
 
 func WithPluginAccess(ctx context.Context, authenticated bool, admin bool) context.Context {
@@ -358,11 +362,14 @@ func WithPluginAccess(ctx context.Context, authenticated bool, admin bool) conte
 // WithPluginAccessUser is the same as WithPluginAccess but also stores the
 // authenticated user's ID so the proxy can stamp identity headers on
 // outgoing plugin requests.
-func WithPluginAccessUser(ctx context.Context, authenticated bool, admin bool, userID int) context.Context {
+func WithPluginAccessUser(
+	ctx context.Context, authenticated bool, admin bool, userID int, profileID string,
+) context.Context {
 	return context.WithValue(ctx, pluginAccessKey, pluginAccess{
 		authenticated: authenticated,
 		admin:         admin,
 		userID:        userID,
+		profileID:     profileID,
 	})
 }
 
@@ -374,14 +381,14 @@ func pluginAccessFromContext(ctx context.Context) (bool, bool) {
 	return access.authenticated, access.admin
 }
 
-// pluginAccessUserFromContext returns (authenticated, admin, userID) for the
-// plugin call. userID is 0 when the request is unauthenticated.
-func pluginAccessUserFromContext(ctx context.Context) (bool, bool, int) {
+// pluginAccessUserFromContext returns the authenticated identity for the
+// plugin call. userID is 0 and profileID empty when unauthenticated.
+func pluginAccessUserFromContext(ctx context.Context) (bool, bool, int, string) {
 	access, ok := ctx.Value(pluginAccessKey).(pluginAccess)
 	if !ok {
-		return false, false, 0
+		return false, false, 0, ""
 	}
-	return access.authenticated, access.admin, access.userID
+	return access.authenticated, access.admin, access.userID, access.profileID
 }
 
 func queryToStruct(values url.Values) *structpb.Struct {

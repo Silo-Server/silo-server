@@ -108,6 +108,19 @@ func TestResolutionOrderIsHonored(t *testing.T) {
 	}
 }
 
+func TestEffectiveReportsCurrentManifestRevision(t *testing.T) {
+	manifest := mustContract(t)
+	got, err := New(manifest).Resolve(context.Background(), &fakeStore{},
+		Context{ProfileID: "p1"}, []string{"playback.subtitle_language"}, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(got) != 1 || got[0].DefinitionRevision != manifest.Revision {
+		t.Fatalf("definition_revision = %d, want current manifest revision %d",
+			got[0].DefinitionRevision, manifest.Revision)
+	}
+}
+
 // TestAbsentIdentityDropsItsScope covers the anonymous caller. jellycompat
 // seeds DisplayPreferences without a device, and a device override leaking into
 // that seed would hand one device's settings to every Jellyfin client.
@@ -179,6 +192,42 @@ func TestResolveIssuesOneRead(t *testing.T) {
 	}
 }
 
+func TestResolveContextsIssuesOneReadAndRanksEachContext(t *testing.T) {
+	const key = "playback.subtitle_language"
+	store := &fakeStore{rows: []userstore.SettingValue{
+		row(key, settingscontract.ScopeProfile, `"en"`,
+			userstore.SettingIdentity{ProfileID: "p1"}),
+		row(key, settingscontract.ScopeProfileSeries, `"ja"`,
+			userstore.SettingIdentity{ProfileID: "p1", SeriesID: "s1"}),
+		row(key, settingscontract.ScopeProfileSeries, `"de"`,
+			userstore.SettingIdentity{ProfileID: "p1", SeriesID: "s2"}),
+	}}
+	contexts := []Context{
+		{ProfileID: "p1", DeviceID: "d1", LibraryIDs: []int{7}, SeriesIDs: []string{"s1"}},
+		{ProfileID: "p1", DeviceID: "d1", LibraryIDs: []int{7}, SeriesIDs: []string{"s2"}},
+	}
+
+	got, err := New(mustContract(t)).ResolveContexts(
+		context.Background(), store, contexts, []string{key}, nil,
+	)
+	if err != nil {
+		t.Fatalf("ResolveContexts: %v", err)
+	}
+	if len(store.queries) != 1 {
+		t.Fatalf("issued %d candidate reads, want 1", len(store.queries))
+	}
+	query := store.queries[0].Normalized()
+	if len(query.SeriesIDs) != 2 || query.SeriesIDs[0] != "s1" || query.SeriesIDs[1] != "s2" {
+		t.Fatalf("query series ids = %#v, want both contexts", query.SeriesIDs)
+	}
+	if len(got) != 2 || len(got[0]) != 1 || len(got[1]) != 1 {
+		t.Fatalf("resolved shape = %#v", got)
+	}
+	if string(got[0][0].Value) != `"ja"` || string(got[1][0].Value) != `"de"` {
+		t.Errorf("per-context values = %s, %s; want ja, de", got[0][0].Value, got[1][0].Value)
+	}
+}
+
 // TestUnknownAndLocalKeysAreOmitted keeps a newer client's request from
 // failing wholesale. A key this server does not have, or one the contract says
 // never leaves the device, simply has no server answer.
@@ -218,6 +267,22 @@ func TestCeilingNarrowsWithoutDestroying(t *testing.T) {
 	if !got.Constrained || got.ConstraintKind != settingscontract.ConstraintCeiling {
 		t.Errorf("constrained=%v kind=%q, want true/ceiling", got.Constrained, got.ConstraintKind)
 	}
+	if string(got.RequestedValue) != `"2160p"` {
+		t.Errorf("requested_value = %s, want authored 2160p", got.RequestedValue)
+	}
+	if got.ConstrainedBy == nil || got.ConstrainedBy.PolicyInput != "max_playback_quality" ||
+		got.ConstrainedBy.Constraint != settingscontract.ConstraintCeiling {
+		t.Errorf("constrained_by = %#v", got.ConstrainedBy)
+	}
+	wantPermitted := []string{`"auto"`, `"480p"`, `"720p"`, `"1080p"`}
+	if len(got.PermittedValues) != len(wantPermitted) {
+		t.Fatalf("permitted_values = %q, want %q", got.PermittedValues, wantPermitted)
+	}
+	for i := range wantPermitted {
+		if string(got.PermittedValues[i]) != wantPermitted[i] {
+			t.Errorf("permitted_values[%d] = %s, want %s", i, got.PermittedValues[i], wantPermitted[i])
+		}
+	}
 
 	// Under the cap, nothing is touched and no constraint is reported.
 	rows[0].Value = json.RawMessage(`"720p"`)
@@ -227,6 +292,12 @@ func TestCeilingNarrowsWithoutDestroying(t *testing.T) {
 	}
 	if got.StoredValue != nil {
 		t.Errorf("stored_value = %s, want absent when nothing was narrowed", got.StoredValue)
+	}
+	if got.RequestedValue != nil {
+		t.Errorf("requested_value = %s, want absent when nothing was narrowed", got.RequestedValue)
+	}
+	if got.ConstrainedBy == nil || len(got.PermittedValues) == 0 {
+		t.Error("active ceiling metadata was omitted for an already-permitted value")
 	}
 }
 

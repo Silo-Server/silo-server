@@ -37,6 +37,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1436,6 +1438,10 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 			if err != nil {
 				return fmt.Errorf("list device settings: %w", err)
 			}
+			canonicalValues, err := store.ListAllSettingValues(gctx)
+			if err != nil {
+				return fmt.Errorf("list canonical setting values: %w", err)
+			}
 			devices, err := listRegisteredDevices(gctx, store)
 			if err != nil {
 				return fmt.Errorf("list devices: %w", err)
@@ -1453,6 +1459,7 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 				user.Username,
 				user.Email,
 				entries,
+				canonicalValues,
 				devices,
 				profileNames,
 			)
@@ -1519,6 +1526,11 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
 		return
 	}
+	canonicalValues, err := store.ListAllSettingValues(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
+		return
+	}
 	registeredDevices, err := listRegisteredDevices(r.Context(), store)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
@@ -1542,11 +1554,18 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 			deviceRegistrations = append(deviceRegistrations, entry)
 		}
 	}
+	deviceCanonicalValues := make([]userstore.SettingValue, 0)
+	for _, value := range canonicalValues {
+		if value.Scope == settingscontract.ScopeProfileDevice && value.DeviceID == deviceID {
+			deviceCanonicalValues = append(deviceCanonicalValues, value)
+		}
+	}
 	summaries := buildAdminDeviceSummaries(
 		user.ID,
 		user.Username,
 		user.Email,
 		deviceEntries,
+		deviceCanonicalValues,
 		deviceRegistrations,
 		profileNames,
 	)
@@ -1604,6 +1623,7 @@ func buildAdminDeviceSummaries(
 	username string,
 	email string,
 	entries []userstore.DeviceSettingEntry,
+	canonicalValues []userstore.SettingValue,
 	registeredDevices []userstore.DeviceEntry,
 	profileNames map[string]string,
 ) []adminDeviceSummaryResponse {
@@ -1705,12 +1725,36 @@ func buildAdminDeviceSummaries(
 		if current == nil {
 			continue
 		}
-		if profileID != "" && entry.Key != "" {
-			current.keys[profileID+":"+entry.Key] = struct{}{}
+		key := canonicalAdminDeviceSettingKey(entry.Key)
+		if profileID != "" && key != "" {
+			current.keys[profileID+":"+key] = struct{}{}
 		}
 		profile := ensureProfile(current, profileID, entry.UpdatedAt)
-		if profile != nil && entry.Key != "" {
-			profile.keys[entry.Key] = struct{}{}
+		if profile != nil && key != "" {
+			profile.keys[key] = struct{}{}
+		}
+	}
+
+	// Canonical profile_device rows are the authoritative overrides after the
+	// settings cutover. Merge them by (profile,key) with the still-mounted
+	// legacy rows so a mirrored value counts once while a canonical-only write
+	// remains visible to fleet management.
+	for _, value := range canonicalValues {
+		if value.Scope != settingscontract.ScopeProfileDevice {
+			continue
+		}
+		deviceID := strings.TrimSpace(value.DeviceID)
+		profileID := strings.TrimSpace(value.ProfileID)
+		current := ensureDevice(deviceID, "", "", value.UpdatedAt)
+		if current == nil {
+			continue
+		}
+		if profileID != "" && value.Key != "" {
+			current.keys[profileID+":"+value.Key] = struct{}{}
+		}
+		profile := ensureProfile(current, profileID, value.UpdatedAt)
+		if profile != nil && value.Key != "" {
+			profile.keys[value.Key] = struct{}{}
 		}
 	}
 
@@ -1741,6 +1785,13 @@ func buildAdminDeviceSummaries(
 		devices = append(devices, current.device)
 	}
 	return devices
+}
+
+// canonicalAdminDeviceSettingKey uses the migration's rename table so fleet
+// counts describe logical overrides and every legacy/canonical pair counts
+// once, including pre-cutover appearance rows left in the legacy table.
+func canonicalAdminDeviceSettingKey(key string) string {
+	return settingsmigrate.CanonicalKey(strings.TrimSpace(key))
 }
 
 func listProfileNamesByID(ctx context.Context, store userstore.UserStore) (map[string]string, error) {

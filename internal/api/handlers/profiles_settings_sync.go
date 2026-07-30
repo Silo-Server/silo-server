@@ -176,20 +176,43 @@ func normalizeCanonicalSettingValue(key string, raw json.RawMessage) (json.RawMe
 	return normalized, nil
 }
 
-// applyProfileSettingsSync writes the planned canonical rows for one profile
-// and publishes a user_settings.changed event for every row that moved, so
-// the target user's clients refresh exactly as they would after a
-// /settings/values write.
-func (h *ProfileHandler) applyProfileSettingsSync(
+// createProfileWithSettingsSync creates the profile, snapshots surviving
+// account-wide legacy settings, and writes every canonical row in one store
+// transaction. PostgreSQL's transaction wrapper also holds a per-user
+// advisory lock shared with legacy account-setting fan-out, closing the
+// cross-replica create/write race.
+func (h *ProfileHandler) createProfileWithSettingsSync(
 	ctx context.Context,
 	store userstore.UserStore,
 	userID int,
-	profileID string,
+	profile userstore.Profile,
 	writes []profileSettingSync,
 ) error {
-	return applyCanonicalSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
-		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
-	}, writes)
+	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return fmt.Errorf("user store does not support atomic preference settings synchronization")
+	}
+	var changedKeys []string
+	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if err := tx.CreateProfile(ctx, profile); err != nil {
+			return err
+		}
+		inherited, err := planInheritedLegacyUserSettings(ctx, tx)
+		if err != nil {
+			return err
+		}
+		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfile, ProfileID: profile.ID,
+		}, append(writes, inherited...))
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	for _, key := range changedKeys {
+		publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.ID, key, string(settingscontract.ScopeProfile))
+	}
+	return nil
 }
 
 func (h *ProfileHandler) applyProfileUpdateSettingsSync(
@@ -205,20 +228,6 @@ func (h *ProfileHandler) applyProfileUpdateSettingsSync(
 	}, writes, func(tx userstore.PreferenceSettingsWriter) error {
 		return tx.UpdateProfile(ctx, profileID, input)
 	})
-}
-
-// applyCanonicalSettingsSync writes or clears a canonical group atomically and
-// publishes change events only after the transaction commits.
-func applyCanonicalSettingsSync(
-	ctx context.Context,
-	store userstore.UserStore,
-	events *evt.Hub,
-	userID int,
-	base userstore.SettingIdentity,
-	writes []profileSettingSync,
-) error {
-	return applyLegacyPreferenceSettingsSync(ctx, store, events, userID, base, writes,
-		func(userstore.PreferenceSettingsWriter) error { return nil })
 }
 
 // applyLegacyPreferenceSettingsSync is the live-write counterpart of the

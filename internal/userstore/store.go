@@ -14,6 +14,12 @@ var ErrCollectionGroupNotFound = errors.New("collection group not found")
 // a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
 // can commit the legacy row and every canonical row as one unit.
 type PreferenceSettingsWriter interface {
+	CreateProfile(ctx context.Context, profile Profile) error
+	ListSettings(ctx context.Context) ([]SettingEntry, error)
+	// ListProfileIDs reads the current household membership inside the same
+	// transaction as a legacy account-setting mutation. This closes the
+	// create/write window where a newly committed profile could miss fan-out.
+	ListProfileIDs(ctx context.Context) ([]string, error)
 	// UpdateProfile writes the legacy profile preference columns that shipped
 	// clients still mutate during the canonical-settings cutover.
 	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
@@ -23,6 +29,10 @@ type PreferenceSettingsWriter interface {
 	DeleteAudioPreference(ctx context.Context, profileID, seriesID string) error
 	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
+	SetSetting(ctx context.Context, key, value string) error
+	DeleteSetting(ctx context.Context, key string) error
+	SetDeviceSetting(ctx context.Context, entry DeviceSettingEntry) error
+	DeleteDeviceSetting(ctx context.Context, profileID, deviceID, key string) error
 	// UpsertSettingValue writes one explicit value and increments its revision.
 	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
 	// DeleteSettingValue removes one explicit value and reports whether it existed.

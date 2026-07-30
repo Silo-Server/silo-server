@@ -4,13 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/Silo-Server/silo-server/internal/settingscontract"
-	"github.com/Silo-Server/silo-server/internal/settingskeys"
-	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -79,6 +75,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		return Scope{}, fmt.Errorf("opening user store for %d: %w", input.UserID, err)
 	}
 
+	preferences := ResolveViewerPreferences(ctx, store, input.ProfileID)
 	if input.ProfileID != "" {
 		profile, err := store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
@@ -90,7 +87,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
-		scope.PreferredMetadataLanguage = PreferredMetadataLanguage(ctx, store, input.ProfileID)
+		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
 		if err != nil {
@@ -100,7 +97,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	// Apply the profile's disabled library IDs setting.
-	disabled := DisabledLibraryIDs(ctx, store, input.ProfileID)
+	disabled := preferences.DisabledLibraryIDs
 	if len(disabled) > 0 {
 		if scope.AllowedLibraryIDs != nil {
 			// Restricted user: subtract disabled IDs from the allowed set.
@@ -159,44 +156,7 @@ func VerifyProfileForRequest(
 // unhide them. A stored canonical row always wins, so the fallback can never
 // override a post-cutover edit.
 func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
-	if ids, ok := canonicalDisabledLibraryIDs(ctx, store, profileID); ok {
-		return ids
-	}
-	raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
-	if err != nil || raw == "" {
-		return nil
-	}
-	return parseLibraryIDList(json.RawMessage(raw))
-}
-
-// canonicalDisabledLibraryIDs reads the profile-scoped canonical row. The
-// second return reports whether a stored row decided the answer: a resolution
-// that fell through to the contract default means "nothing stored", which is
-// what lets the caller consult the legacy account key.
-func canonicalDisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) ([]int, bool) {
-	if store == nil || profileID == "" {
-		return nil, false
-	}
-	contract, err := settingscontract.Load()
-	if err != nil {
-		slog.WarnContext(ctx, "disabled library resolution degraded to the legacy setting: loading settings contract failed",
-			"component", "access", "profile_id", profileID, "error", err)
-		return nil, false
-	}
-	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
-		settingsresolve.Context{ProfileID: profileID},
-		[]string{settingskeys.UiDisabledLibraryIds}, nil)
-	if err != nil {
-		slog.WarnContext(ctx, "disabled library resolution degraded to the legacy setting: reading setting values failed",
-			"component", "access", "profile_id", profileID, "error", err)
-		return nil, false
-	}
-	if len(resolved) == 0 || resolved[0].Source == settingscontract.ScopeDefault {
-		return nil, false
-	}
-	// A stored null spells "no hidden libraries" and still wins over the
-	// legacy key: the row exists, so the profile has decided.
-	return parseLibraryIDList(resolved[0].Value), true
+	return ResolveViewerPreferences(ctx, store, profileID).DisabledLibraryIDs
 }
 
 // parseLibraryIDList decodes a JSON library-id array, dropping anything that

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -87,6 +88,8 @@ const fieldValues = "values"
 // the request boundary keeps a crafted batch from failing resolution outright.
 const maxEffectiveContentIDs = 200
 
+const jsonNullLiteral = "null"
+
 // settingValueResponse is one explicit stored value.
 type settingValueResponse struct {
 	Key       string          `json:"key"`
@@ -129,9 +132,24 @@ type effectiveSettingValueResponse struct {
 	Constrained    bool            `json:"constrained,omitempty"`
 	ConstraintKind string          `json:"constraint_kind,omitempty"`
 
+	RequestedValue  json.RawMessage              `json:"requested_value,omitempty"`
+	ConstrainedBy   *settingscontract.Constraint `json:"constrained_by,omitempty"`
+	PermittedValues []json.RawMessage            `json:"permitted_values,omitempty"`
+
+	DefinitionRevision int                             `json:"definition_revision"`
+	UpdatedAt          string                          `json:"updated_at,omitempty"`
+	SourceContext      *effectiveSourceContextResponse `json:"source_context,omitempty"`
+
 	// Scope locates the row the value came from, so a client can offer a reset
 	// against exactly that scope. Empty for a contract default.
 	Scope     string `json:"scope,omitempty"`
+	ProfileID string `json:"profile_id,omitempty"`
+	DeviceID  string `json:"device_id,omitempty"`
+	LibraryID int    `json:"library_id,omitempty"`
+	SeriesID  string `json:"series_id,omitempty"`
+}
+
+type effectiveSourceContextResponse struct {
 	ProfileID string `json:"profile_id,omitempty"`
 	DeviceID  string `json:"device_id,omitempty"`
 	LibraryID int    `json:"library_id,omitempty"`
@@ -571,6 +589,169 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 	})
 }
 
+type effectiveContextRequest struct {
+	ContextID string          `json:"context_id"`
+	LibraryID json.RawMessage `json:"library_id,omitempty"`
+	SeriesID  string          `json:"series_id,omitempty"`
+}
+
+// HandlePostEffective resolves several content contexts in one prepared
+// candidate read. Each response entry preserves the caller's context_id so a
+// client can join results back to an ordered or virtualized content list.
+func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.storeFor(w, r)
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Keys     []string                  `json:"keys"`
+		Contexts []effectiveContextRequest `json:"contexts"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
+		return
+	}
+
+	keys := uniqueTrimmed(body.Keys)
+	if len(keys) == 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "keys must contain at least one setting")
+		return
+	}
+	for _, key := range keys {
+		if _, ok := h.definitionFor(w, key); !ok {
+			return
+		}
+	}
+	if len(body.Contexts) == 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "contexts must contain at least one content context")
+		return
+	}
+	if len(body.Contexts) > maxEffectiveContentIDs {
+		writeError(w, http.StatusBadRequest, "bad_request", "Too many contexts in one request; resolve in smaller batches")
+		return
+	}
+
+	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
+	deviceID := deviceMetadataFromRequest(r).DeviceID
+	if deviceID == "" {
+		for _, key := range keys {
+			if def, exists := h.contract.Lookup(key); exists && def.AllowsScope(settingscontract.ScopeProfileDevice) {
+				writeError(w, http.StatusBadRequest, "bad_request", "X-Silo-Device-Id header is required to resolve "+key)
+				return
+			}
+		}
+	}
+
+	seen := make(map[string]struct{}, len(body.Contexts))
+	contexts := make([]settingsresolve.Context, 0, len(body.Contexts))
+	contentIDs := 0
+	for _, requested := range body.Contexts {
+		contextID := strings.TrimSpace(requested.ContextID)
+		if contextID == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "Every context requires a non-empty context_id")
+			return
+		}
+		if _, exists := seen[contextID]; exists {
+			writeError(w, http.StatusBadRequest, "bad_request", "context_id values must be unique")
+			return
+		}
+		seen[contextID] = struct{}{}
+
+		libraryID, err := parseOptionalPositiveJSONInt(requested.LibraryID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "library_id must be a positive integer or numeric string")
+			return
+		}
+		seriesID := strings.TrimSpace(requested.SeriesID)
+		if libraryID == 0 && seriesID == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "Every context requires library_id or series_id")
+			return
+		}
+		rc := settingsresolve.Context{ProfileID: profileID, DeviceID: deviceID}
+		if libraryID > 0 {
+			rc.LibraryIDs = []int{libraryID}
+			contentIDs++
+		}
+		if seriesID != "" {
+			rc.SeriesIDs = []string{seriesID}
+			contentIDs++
+		}
+		if contentIDs > maxEffectiveContentIDs {
+			writeError(w, http.StatusBadRequest, "bad_request", "Too many content ids in one request; resolve in smaller batches")
+			return
+		}
+		contexts = append(contexts, rc)
+	}
+
+	resolved, err := h.resolver.ResolveContexts(r.Context(), store, contexts, keys, h.constraintsFor(r))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve settings")
+		return
+	}
+	type contextResponse struct {
+		ContextID string                          `json:"context_id"`
+		Settings  []effectiveSettingValueResponse `json:"settings"`
+	}
+	out := make([]contextResponse, len(resolved))
+	for i, values := range resolved {
+		out[i].ContextID = strings.TrimSpace(body.Contexts[i].ContextID)
+		out[i].Settings = make([]effectiveSettingValueResponse, 0, len(values))
+		for _, eff := range values {
+			out[i].Settings = append(out[i].Settings, effectiveToResponse(eff))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"contexts":    out,
+		fieldRevision: h.contract.Revision,
+	})
+}
+
+func uniqueTrimmed(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func parseOptionalPositiveJSONInt(raw json.RawMessage) (int, error) {
+	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == jsonNullLiteral {
+		return 0, nil
+	}
+	var number json.Number
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&number); err == nil {
+		value, err := strconv.Atoi(number.String())
+		if err == nil && value > 0 {
+			return value, nil
+		}
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		value, err := strconv.Atoi(strings.TrimSpace(text))
+		if err == nil && value > 0 {
+			return value, nil
+		}
+	}
+	return 0, errors.New("not a positive integer")
+}
+
 // policyInputMaxPlaybackQuality is the policy_input name the contract binds
 // playback.preferred_quality's ceiling to. It must match the manifest's
 // constrained_by.policy_input, which is how the resolver looks the limit up.
@@ -804,11 +985,16 @@ func settingValueToResponse(value userstore.SettingValue) settingValueResponse {
 
 func effectiveToResponse(eff settingsresolve.Effective) effectiveSettingValueResponse {
 	out := effectiveSettingValueResponse{
-		Key:         eff.Key,
-		Value:       eff.Value,
-		Source:      string(eff.Source),
-		StoredValue: eff.StoredValue,
-		Constrained: eff.Constrained,
+		Key:                eff.Key,
+		Value:              eff.Value,
+		Source:             string(eff.Source),
+		StoredValue:        eff.StoredValue,
+		Constrained:        eff.Constrained,
+		RequestedValue:     eff.RequestedValue,
+		ConstrainedBy:      eff.ConstrainedBy,
+		PermittedValues:    eff.PermittedValues,
+		DefinitionRevision: eff.DefinitionRevision,
+		UpdatedAt:          eff.UpdatedAt,
 	}
 	if eff.ConstraintKind != "" {
 		out.ConstraintKind = string(eff.ConstraintKind)
@@ -819,6 +1005,12 @@ func effectiveToResponse(eff settingsresolve.Effective) effectiveSettingValueRes
 		out.DeviceID = eff.Identity.DeviceID
 		out.LibraryID = eff.Identity.LibraryID
 		out.SeriesID = eff.Identity.SeriesID
+		out.SourceContext = &effectiveSourceContextResponse{
+			ProfileID: eff.Identity.ProfileID,
+			DeviceID:  eff.Identity.DeviceID,
+			LibraryID: eff.Identity.LibraryID,
+			SeriesID:  eff.Identity.SeriesID,
+		}
 	}
 	return out
 }

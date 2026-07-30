@@ -137,6 +137,10 @@ func readLegacySettingsForUser(
 	ctx context.Context, tx *sql.Tx, userID int,
 ) (settingsmigrate.Input, error) {
 	var input settingsmigrate.Input
+	// Non-nil records that the profile list was loaded even when the account
+	// has none. The planner uses nil only for callers that could not load
+	// profiles; an empty loaded list must reject every profile-scoped orphan.
+	input.Profiles = make([]settingsmigrate.LegacyProfile, 0)
 
 	// Profiles. preferred_metadata_language exists only in this schema — the
 	// SQLite profiles table never had the column — so this is the sole source

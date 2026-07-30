@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -136,6 +137,119 @@ func TestPostgresResolutionIssuesOneQuery(t *testing.T) {
 	issued := tracer.snapshot()
 	if len(issued) != 1 {
 		t.Fatalf("resolution issued %d queries, want 1:\n%v", len(issued), issued)
+	}
+}
+
+// TestPostgresPreferenceSettingsTransactionsSerializePerUser pins the lock
+// shared by profile creation and legacy account-setting fan-out. Without it,
+// profile creation can snapshot an old account value, a concurrent writer can
+// miss the uncommitted profile, and the creator can then publish the stale
+// value after the newer write has committed.
+func TestPostgresPreferenceSettingsTransactionsSerializePerUser(t *testing.T) {
+	pool, userID := newConstraintTestUser(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	store := newStore(pool, userID)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Main"}); err != nil {
+		t.Fatalf("CreateProfile p1: %v", err)
+	}
+	if err := store.SetSetting(ctx, settingskeys.SearchMediaScope, "movie"); err != nil {
+		t.Fatalf("seed legacy account setting: %v", err)
+	}
+
+	transactioner := userstore.PreferenceSettingsTransactioner(store)
+	creatorReady := make(chan struct{})
+	releaseCreator := make(chan struct{})
+	creatorErr := make(chan error, 1)
+	go func() {
+		creatorErr <- transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+			if err := tx.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Guest"}); err != nil {
+				return err
+			}
+			entries, err := tx.ListSettings(ctx)
+			if err != nil {
+				return err
+			}
+			value := ""
+			for _, entry := range entries {
+				if entry.Key == settingskeys.SearchMediaScope {
+					value = entry.Value
+					break
+				}
+			}
+			if value == "" {
+				return errors.New("legacy account setting was not visible to profile creator")
+			}
+			close(creatorReady)
+			select {
+			case <-releaseCreator:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return err
+			}
+			_, err = tx.UpsertSettingValue(ctx, userstore.SettingIdentity{
+				Key: settingskeys.SearchMediaScope, Scope: settingscontract.ScopeProfile, ProfileID: "p2",
+			}, encoded)
+			return err
+		})
+	}()
+	<-creatorReady
+
+	writerAttempted := make(chan struct{})
+	writerEntered := make(chan struct{})
+	writerErr := make(chan error, 1)
+	go func() {
+		close(writerAttempted)
+		writerErr <- transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+			close(writerEntered)
+			if err := tx.SetSetting(ctx, settingskeys.SearchMediaScope, "audiobook"); err != nil {
+				return err
+			}
+			profileIDs, err := tx.ListProfileIDs(ctx)
+			if err != nil {
+				return err
+			}
+			for _, profileID := range profileIDs {
+				if _, err := tx.UpsertSettingValue(ctx, userstore.SettingIdentity{
+					Key: settingskeys.SearchMediaScope, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+				}, json.RawMessage(`"audiobook"`)); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}()
+	<-writerAttempted
+
+	enteredBeforeRelease := false
+	select {
+	case <-writerEntered:
+		enteredBeforeRelease = true
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(releaseCreator)
+	if err := <-creatorErr; err != nil {
+		t.Fatalf("profile creator transaction: %v", err)
+	}
+	if err := <-writerErr; err != nil {
+		t.Fatalf("legacy writer transaction: %v", err)
+	}
+	if enteredBeforeRelease {
+		t.Fatal("same-user preference transaction entered while profile creation still held the lock")
+	}
+
+	legacy, err := store.GetSetting(ctx, settingskeys.SearchMediaScope)
+	if err != nil || legacy != "audiobook" {
+		t.Fatalf("legacy value = %q, err=%v; want audiobook", legacy, err)
+	}
+	canonical, err := store.GetSettingValue(ctx, userstore.SettingIdentity{
+		Key: settingskeys.SearchMediaScope, Scope: settingscontract.ScopeProfile, ProfileID: "p2",
+	})
+	if err != nil || canonical == nil || string(canonical.Value) != `"audiobook"` {
+		t.Fatalf("new profile canonical value = %+v, err=%v; want audiobook", canonical, err)
 	}
 }
 

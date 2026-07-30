@@ -21,6 +21,18 @@ type UpdateProfileInput = userstore.UpdateProfileInput
 // a new UUID is generated. CreatedAt and UpdatedAt are set to the current
 // UTC time if not already populated.
 func CreateProfile(db *sql.DB, p Profile) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction for profile insert %s: %w", p.ID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := createProfile(tx, p); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createProfile(exec preferenceSettingsExecutor, p Profile) error {
 	if p.ID == "" {
 		p.ID = generateUUID()
 	}
@@ -35,15 +47,9 @@ func CreateProfile(db *sql.DB, p Profile) error {
 		p.ShowForcedSubtitles = true
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction for profile insert %s: %w", p.ID, err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	// The first profile in this per-user database is the primary.
 	var hasExisting bool
-	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles)").Scan(&hasExisting); err != nil {
+	if err := exec.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles)").Scan(&hasExisting); err != nil {
 		return fmt.Errorf("checking existing profiles for %s: %w", p.ID, err)
 	}
 	if !hasExisting {
@@ -52,7 +58,7 @@ func CreateProfile(db *sql.DB, p Profile) error {
 		p.IsPrimary = false
 	}
 
-	_, err = tx.Exec(`
+	_, err := exec.Exec(`
 		INSERT INTO profiles (
 			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 			quality_preference, language, subtitle_language, subtitle_mode,
@@ -69,10 +75,10 @@ func CreateProfile(db *sql.DB, p Profile) error {
 	if err != nil {
 		return fmt.Errorf("inserting profile %s: %w", p.ID, err)
 	}
-	if err := replaceProfileAllowedLibrariesTx(tx, p.ID, p.AllowedLibraryIDs); err != nil {
+	if err := replaceProfileAllowedLibrariesTx(exec, p.ID, p.AllowedLibraryIDs); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // GetProfile retrieves a single profile by ID. Returns nil and no error if

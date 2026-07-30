@@ -247,6 +247,29 @@ func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
 	}
 }
 
+func TestCreateProfileInheritsSurvivingLegacyAccountSettings(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.SetSetting(context.Background(), searchMediaScopeSettingKey, "audiobook"); err != nil {
+		t.Fatalf("seeding legacy account setting: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
+		`{"name":"Guest"}`, "user", "profile-1")
+	rec := httptest.NewRecorder()
+	handler.HandleCreateProfile(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d: %s", rec.Code, rec.Body.String())
+	}
+	var created profileResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decoding create response: %v", err)
+	}
+	value := storedProfileSetting(t, store, searchMediaScopeSettingKey, created.ID)
+	if value == nil || string(value.Value) != `"audiobook"` {
+		t.Fatalf("inherited canonical value = %+v", value)
+	}
+}
+
 // failingSettingsWriteStore fails every canonical setting write, simulating a
 // store whose user_setting_values table is unavailable while profile CRUD
 // still works.
@@ -283,13 +306,10 @@ func (w failingPreferenceSettingsWriter) UpsertSettingValue(
 	return nil, errors.New("settings storage unavailable")
 }
 
-// TestCreateProfileCompensatesWhenSettingsSyncFails: CreateProfile has already
-// committed when the canonical sync fails; the preference transaction does
-// not include profile CRUD. Without the compensating delete the
-// household keeps a half-configured profile whose preferences read as contract
-// defaults forever, and the client's retry hits a name-conflict 409 instead of
-// succeeding.
-func TestCreateProfileCompensatesWhenSettingsSyncFails(t *testing.T) {
+// TestCreateProfileRollsBackWhenSettingsSyncFails pins the atomic profile and
+// canonical-settings transaction. A failed canonical write must leave no
+// half-configured profile and the client's retry must not hit a name conflict.
+func TestCreateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
 	base := newProfileTestStore(t)
 	store := failingSettingsWriteStore{UserStore: base}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
@@ -312,8 +332,7 @@ func TestCreateProfileCompensatesWhenSettingsSyncFails(t *testing.T) {
 		}
 	}
 
-	// The compensation is what lets the retry succeed once the store recovers:
-	// no leftover profile means no name-conflict 409.
+	// The rollback lets the retry succeed once the store recovers.
 	retry := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
 		`{"name":"Kids","language":"de"}`, "user", "profile-1")
 	retryRec := httptest.NewRecorder()

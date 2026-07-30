@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/jellycompat/displayprefs"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 )
 
 // LegacySetting is one row of the account-wide user_settings key/value table.
@@ -163,6 +164,63 @@ func identityJSON(fields map[string]any) json.RawMessage {
 type Result struct {
 	Rows    []Row
 	Rejects []Reject
+}
+
+// RuntimeValue is one canonical mutation implied by a write through a shipped
+// legacy generic-settings endpoint. Nil Value means the canonical row must be
+// cleared. The generic handlers use this live counterpart of the backfill so
+// aliases, typed coercion, object upgrades, and compound quality values cannot
+// drift between upgrade-time and runtime conversion.
+type RuntimeValue struct {
+	Key   string
+	Value json.RawMessage
+}
+
+// PlanRuntimeValue converts one legacy string setting into its canonical
+// mutations. Quality always returns both axes: values without a bitrate clear
+// an older max_bitrate_kbps row rather than leaving half of the previous
+// compound preference behind.
+func (p *Planner) PlanRuntimeValue(legacyKey, raw string) ([]RuntimeValue, error) {
+	key := CanonicalKey(legacyKey)
+	if key == keyPreferredQuality {
+		var result Result
+		p.addQuality(&result, sourceUserDeviceSettings, identityJSON(map[string]any{}),
+			settingscontract.ScopeProfileDevice, Row{}, raw, "")
+		if len(result.Rejects) > 0 {
+			return nil, fmt.Errorf("%s: %s", key, result.Rejects[0].Reason)
+		}
+		planned := map[string]json.RawMessage{}
+		for _, row := range result.Rows {
+			planned[row.Key] = row.Value
+		}
+		return []RuntimeValue{
+			{Key: keyPreferredQuality, Value: planned[keyPreferredQuality]},
+			{Key: settingskeys.PlaybackMaxBitrateKbps, Value: planned[settingskeys.PlaybackMaxBitrateKbps]},
+		}, nil
+	}
+
+	def, ok := p.contract.Lookup(key)
+	if !ok || !def.IsRemote() {
+		return nil, fmt.Errorf("%s has no remote contract definition", key)
+	}
+	value, err := p.coerce(def, raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	return []RuntimeValue{{Key: key, Value: value}}, nil
+}
+
+// RuntimeKeys returns every canonical row owned by a legacy generic key. It is
+// used by DELETE, where there is no value to run through PlanRuntimeValue.
+func (p *Planner) RuntimeKeys(legacyKey string) []string {
+	key := CanonicalKey(legacyKey)
+	if key == keyPreferredQuality {
+		return []string{keyPreferredQuality, settingskeys.PlaybackMaxBitrateKbps}
+	}
+	if def, ok := p.contract.Lookup(key); ok && def.IsRemote() {
+		return []string{key}
+	}
+	return nil
 }
 
 // profileColumnDefaults are the values the legacy schema wrote when nobody
@@ -308,10 +366,10 @@ func (p *Planner) Plan(in Input) Result {
 // recorded as rejects rather than discarded silently, so an operator inspecting
 // user_setting_migration_rejects sees what was left behind and why.
 func dropOrphanProfileRows(rows []Row, profiles []LegacyProfile, res *Result) []Row {
-	// No profiles at all means the caller did not read them — as
-	// planAccountSettings' fan-out already assumes — so there is nothing to
-	// check against and every row passes through.
-	if len(profiles) == 0 {
+	// Nil means the caller did not load profiles and cannot safely validate
+	// ownership. A loaded-but-empty slice means the account has no profiles, so
+	// every profile-anchored legacy row is necessarily orphaned.
+	if profiles == nil {
 		return rows
 	}
 	known := make(map[string]struct{}, len(profiles))
@@ -469,7 +527,7 @@ func (p *Planner) planAccountSettings(
 	settings []LegacySetting, profiles []LegacyProfile, res *Result,
 ) {
 	for _, setting := range settings {
-		key := canonicalKey(setting.Key)
+		key := CanonicalKey(setting.Key)
 
 		// jellycompat stashed its DisplayPreferences blobs in this table under
 		// synthetic keys. They are that subsystem's storage, not user settings:
@@ -527,7 +585,7 @@ func (p *Planner) planAccountSettings(
 
 func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result) {
 	for _, row := range devices {
-		key := canonicalKey(row.Key)
+		key := CanonicalKey(row.Key)
 		identity := identityJSON(map[string]any{
 			fieldProfileID: row.ProfileID, "device_id": row.DeviceID,
 		})
@@ -712,7 +770,7 @@ func (p *Planner) addQuality(
 	}
 	p.addValue(res, sourceTable, identity, keyPreferredQuality,
 		scope, base, jsonString(decomposed.Resolution))
-	p.addValue(res, sourceTable, identity, "playback.max_bitrate_kbps",
+	p.addValue(res, sourceTable, identity, settingskeys.PlaybackMaxBitrateKbps,
 		scope, base, json.RawMessage(strconv.Itoa(decomposed.KBPS)))
 }
 
@@ -928,7 +986,10 @@ func (p *Planner) validate(def *settingscontract.Definition, value json.RawMessa
 	return def.ValueSchema.ValidateValue(value, p.schemas)
 }
 
-func canonicalKey(legacy string) string {
+// CanonicalKey returns the contract spelling for a legacy settings key. Live
+// compatibility paths and admin projections use the same rename table as the
+// migration so newly added aliases cannot drift between them.
+func CanonicalKey(legacy string) string {
 	if canonical, ok := legacyKeyRenames[legacy]; ok {
 		return canonical
 	}

@@ -842,6 +842,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			collectionHandler.PresignTTL = 4 * time.Hour
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
+		settingsHandler.EventsHub = deps.EventsHub
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
@@ -1729,8 +1730,8 @@ func NewRouter(deps Dependencies) chi.Router {
 					http.Error(w, "invalid installation id", http.StatusBadRequest)
 					return
 				}
-				authenticated, admin, userID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo)
-				ctx := plugins.WithPluginAccessUser(r.Context(), authenticated, admin, userID)
+				authenticated, admin, userID, profileID := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, apiKeyRepo, userRepo)
+				ctx := plugins.WithPluginAccessUser(r.Context(), authenticated, admin, userID, profileID)
 				deps.PluginHTTPProxy.ServeRoute(w, r.WithContext(ctx), installationID, authenticated, admin)
 			})
 			r.Get("/plugin-assets/{installation_id}/*", func(w http.ResponseWriter, r *http.Request) {
@@ -1810,7 +1811,10 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Post("/refresh", authHandler.HandleRefresh)
 				r.Get("/signup", authHandler.HandleSignupStatus)
 				if authMiddleware != nil {
-					r.With(authMiddleware.RequireAuth).Post("/plugin-launch", authHandler.HandlePluginLaunch)
+					r.With(
+						authMiddleware.RequireAuth,
+						optionalProfileViewerAccess(viewerAccessMiddleware),
+					).Post("/plugin-launch", authHandler.HandlePluginLaunch)
 				}
 				if oauthHandler != nil {
 					r.Post("/oauth/complete", oauthHandler.HandleComplete)
@@ -2366,6 +2370,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Use(apimw.RequireProfile)
 								r.Get("/values", settingValuesHandler.HandleGetValues)
 								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
+								r.Post("/values/effective", settingValuesHandler.HandlePostEffective)
 								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
 								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)
 								r.Delete("/values/{key}", settingValuesHandler.HandleDeleteValue)
@@ -3159,6 +3164,26 @@ func NewRouter(deps Dependencies) chi.Router {
 	return r
 }
 
+// optionalProfileViewerAccess preserves the established profile-less plugin
+// launch path while validating any profile a newer caller asks the launch
+// cookie to carry. A missing viewer resolver must not remove this existing v1
+// route or add a policy/store dependency for legacy callers.
+func optionalProfileViewerAccess(viewer *apimw.ViewerAccessMiddleware) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if viewer == nil {
+			return next
+		}
+		validated := viewer.RequireViewerAccess(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.TrimSpace(r.Header.Get("X-Profile-Id")) == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			validated.ServeHTTP(w, r)
+		})
+	}
+}
+
 // pgSubtitleMediaResolver implements handlers.SubtitleMediaResolver using a direct PG query.
 type pgSubtitleMediaResolver struct {
 	pool *pgxpool.Pool
@@ -3212,7 +3237,7 @@ func resolveOptionalPluginAccess(
 	jwtService *auth.JWTService,
 	sessionRepo *auth.SessionRepository,
 ) (bool, bool) {
-	authenticated, admin, _ := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, nil, nil)
+	authenticated, admin, _, _ := resolveOptionalPluginAccessUser(r, jwtService, sessionRepo, nil, nil)
 	return authenticated, admin
 }
 
@@ -3225,9 +3250,9 @@ func resolveOptionalPluginAccessUser(
 	sessionRepo *auth.SessionRepository,
 	apiKeyRepo *auth.APIKeyRepository,
 	userRepo *auth.UserRepository,
-) (bool, bool, int) {
+) (bool, bool, int, string) {
 	if jwtService == nil || sessionRepo == nil {
-		return false, false, 0
+		return false, false, 0, ""
 	}
 
 	token := ""
@@ -3246,33 +3271,33 @@ func resolveOptionalPluginAccessUser(
 		}
 	}
 	if token == "" {
-		return false, false, 0
+		return false, false, 0, ""
 	}
 
 	if strings.HasPrefix(token, "sa_") {
 		if apiKeyRepo == nil || userRepo == nil {
-			return false, false, 0
+			return false, false, 0, ""
 		}
 		apiKey, err := apiKeyRepo.GetByKey(r.Context(), token)
 		if err != nil {
-			return false, false, 0
+			return false, false, 0, ""
 		}
 		user, err := userRepo.GetByID(r.Context(), apiKey.UserID)
 		if err != nil || !user.Enabled {
-			return false, false, 0
+			return false, false, 0, ""
 		}
-		return true, user.Role == "admin", user.ID
+		return true, user.Role == "admin", user.ID, ""
 	}
 
 	claims, err := jwtService.ValidateToken(token)
 	if err != nil || (claims.TokenType != auth.TokenTypeAccess && claims.TokenType != auth.TokenTypePluginAccess) {
-		return false, false, 0
+		return false, false, 0, ""
 	}
 	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)
 	if err != nil || !valid {
-		return false, false, 0
+		return false, false, 0, ""
 	}
-	return true, claims.Role == "admin", claims.UserID
+	return true, claims.Role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.

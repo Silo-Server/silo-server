@@ -195,7 +195,10 @@ SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode,
 // the Postgres schema, so catalog.metadata_language has no SQLite source and
 // the field stays nil here.
 func readLegacyProfiles(tx *sql.Tx) ([]settingsmigrate.LegacyProfile, error) {
-	var profiles []settingsmigrate.LegacyProfile
+	// Preserve loaded-empty versus not-loaded. The migration planner rejects
+	// profile-scoped rows against an empty loaded list, while nil means profile
+	// ownership was unavailable to check.
+	profiles := make([]settingsmigrate.LegacyProfile, 0)
 	err := eachRow(tx, `
 SELECT id, quality_preference, language, subtitle_language, subtitle_mode, show_forced_subtitles,
        auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview

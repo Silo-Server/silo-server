@@ -338,6 +338,48 @@ func TestMigrateToV16OnAnEmptyDatabase(t *testing.T) {
 	}
 }
 
+func TestMigrateToV16RejectsOrphansWhenProfileListIsEmpty(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO user_device_settings (profile_id, device_id, key, value, updated_at)
+VALUES ('deleted', 'd1', 'subtitle_appearance', '{"fontSize":"large"}',
+        '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("seeding orphan: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if err := migrateToV16(tx); err != nil {
+		t.Fatalf("migrateToV16: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var values, rejects int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM user_setting_values`).Scan(&values); err != nil {
+		t.Fatalf("counting canonical values: %v", err)
+	}
+	if err := db.QueryRow(`
+SELECT COUNT(*) FROM user_setting_migration_rejects
+ WHERE source_key = 'subtitle_appearance'
+   AND json_extract(identity, '$.profile_id') = 'deleted'`).Scan(&rejects); err != nil {
+		t.Fatalf("counting orphan rejects: %v", err)
+	}
+	if values != 0 || rejects != 1 {
+		t.Fatalf("values=%d rejects=%d, want 0/1", values, rejects)
+	}
+}
+
 // TestMigrateToV16IsIdempotentUnderReRun guards the partial-unique indexes: the
 // migration must not be runnable twice into a conflict. runMigrations gates it
 // behind user_version, so the second call is what an operator would trigger by

@@ -674,6 +674,62 @@ func TestOrphanedProfileRowsAreDropped(t *testing.T) {
 	}
 }
 
+func TestLoadedEmptyProfileListDropsEveryProfileScopedRow(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{},
+		DeviceSettings: []LegacyDeviceSetting{{
+			ProfileID: "deleted", DeviceID: "d1", Key: "subtitle_appearance",
+			Value: `{"fontSize":"large"}`,
+		}},
+	})
+
+	if len(res.Rows) != 0 {
+		t.Fatalf("profile-scoped rows survived an empty loaded profile list: %+v", res.Rows)
+	}
+	if len(res.Rejects) != 1 || !strings.Contains(string(res.Rejects[0].Identity), "deleted") {
+		t.Fatalf("orphan was not recorded as a reject: %+v", res.Rejects)
+	}
+}
+
+func TestNilProfileListLeavesOwnershipUnchecked(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: nil,
+		DeviceSettings: []LegacyDeviceSetting{{
+			ProfileID: "unknown", DeviceID: "d1", Key: "subtitle_appearance",
+			Value: `{"fontSize":"large"}`,
+		}},
+	})
+	if !hasKey(res, "playback.subtitle_appearance") {
+		t.Fatalf("nil profile list unexpectedly filtered rows: rows=%+v rejects=%+v", res.Rows, res.Rejects)
+	}
+}
+
+func TestPlanRuntimeValueUsesMigrationAliasesAndQualityDecomposition(t *testing.T) {
+	p := planner(t)
+	appearance, err := p.PlanRuntimeValue("subtitle_appearance", `{"fontSize":"large"}`)
+	if err != nil {
+		t.Fatalf("PlanRuntimeValue appearance: %v", err)
+	}
+	if len(appearance) != 1 || appearance[0].Key != "playback.subtitle_appearance" {
+		t.Fatalf("appearance plan = %+v", appearance)
+	}
+
+	quality, err := p.PlanRuntimeValue("playback.preferred_quality", "1080p-high")
+	if err != nil {
+		t.Fatalf("PlanRuntimeValue quality: %v", err)
+	}
+	if len(quality) != 2 || string(quality[0].Value) != `"1080p"` || string(quality[1].Value) != "10000" {
+		t.Fatalf("quality plan = %+v", quality)
+	}
+	auto, err := p.PlanRuntimeValue("playback.preferred_quality", "auto")
+	if err != nil {
+		t.Fatalf("PlanRuntimeValue auto: %v", err)
+	}
+	if len(auto) != 2 || string(auto[0].Value) != `"auto"` || auto[1].Value != nil {
+		t.Fatalf("auto plan = %+v", auto)
+	}
+}
+
 func TestOrphanRejectsPreserveSourceTableAndContentIdentity(t *testing.T) {
 	res := planner(t).Plan(Input{
 		Profiles: []LegacyProfile{{ID: "live"}},

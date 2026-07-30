@@ -115,6 +115,21 @@ func TestJWT_ValidateRefreshToken(t *testing.T) {
 	}
 }
 
+func TestJWT_PluginAccessTokenCarriesProfile(t *testing.T) {
+	svc := newTestJWTService()
+	token, err := svc.GeneratePluginAccessToken(42, "user", "sess-plugin", "profile-7", time.Minute)
+	if err != nil {
+		t.Fatalf("GeneratePluginAccessToken: %v", err)
+	}
+	claims, err := svc.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken: %v", err)
+	}
+	if claims.TokenType != auth.TokenTypePluginAccess || claims.ProfileID != "profile-7" {
+		t.Fatalf("plugin claims = %#v", claims)
+	}
+}
+
 func TestJWT_AccessTokenExpiry(t *testing.T) {
 	svc := newTestJWTService()
 

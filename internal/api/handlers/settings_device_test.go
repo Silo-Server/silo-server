@@ -16,6 +16,8 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -70,6 +72,35 @@ func (p mappedTestUserStoreProvider) Close() error { return nil }
 type legacyAliasFailureStore struct {
 	userstore.UserStore
 	failLegacyDelete bool
+}
+
+func (s legacyAliasFailureStore) WithPreferenceSettingsTransaction(
+	ctx context.Context, fn func(userstore.PreferenceSettingsWriter) error,
+) error {
+	transactioner, ok := s.UserStore.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return errors.New("transactioner unavailable")
+	}
+	return transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		return fn(legacyAliasFailureWriter{
+			PreferenceSettingsWriter: tx,
+			failLegacyDelete:         s.failLegacyDelete,
+		})
+	})
+}
+
+type legacyAliasFailureWriter struct {
+	userstore.PreferenceSettingsWriter
+	failLegacyDelete bool
+}
+
+func (w legacyAliasFailureWriter) DeleteDeviceSetting(
+	ctx context.Context, profileID, deviceID, key string,
+) error {
+	if w.failLegacyDelete && key == legacyAndroidNextUpPromptSettingKey {
+		return errors.New("legacy delete failed")
+	}
+	return w.PreferenceSettingsWriter.DeleteDeviceSetting(ctx, profileID, deviceID, key)
 }
 
 func (s legacyAliasFailureStore) DeleteDeviceSetting(ctx context.Context, profileID, deviceID, key string) error {
@@ -496,7 +527,7 @@ func TestAndroidNextUpSettingAliasDoesNotUseOrDeleteUserRow(t *testing.T) {
 }
 
 func TestAndroidNextUpSettingAliasCleanupFailures(t *testing.T) {
-	t.Run("PUT succeeds when legacy cleanup fails", func(t *testing.T) {
+	t.Run("PUT rolls back when legacy cleanup fails", func(t *testing.T) {
 		baseStore := newProfileTestStore(t)
 		store := legacyAliasFailureStore{UserStore: baseStore, failLegacyDelete: true}
 		handler := NewSettingsHandler(testUserStoreProvider{store: store})
@@ -512,8 +543,8 @@ func TestAndroidNextUpSettingAliasCleanupFailures(t *testing.T) {
 
 		handler.HandleSetDeviceSetting(rec, req)
 
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
 		}
 		canonical, err := baseStore.GetDeviceSetting(
 			context.Background(), "profile-1", "android-tv", canonicalNextUpPromptSettingKey,
@@ -521,8 +552,8 @@ func TestAndroidNextUpSettingAliasCleanupFailures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDeviceSetting canonical: %v", err)
 		}
-		if canonical == nil || canonical.Value != "60" {
-			t.Fatalf("canonical setting = %#v, want value 60", canonical)
+		if canonical != nil {
+			t.Fatalf("legacy/canonical transaction partially committed: %#v", canonical)
 		}
 	})
 
@@ -565,6 +596,137 @@ func TestGenericSettingsRejectInvalidRegisteredValues(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLegacyUserSettingMirrorsEveryCanonicalProfile(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Guest"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	send := func(method string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/settings/search.media_scope", bytes.NewReader(body))
+		req = withRouteParams(req, map[string]string{"key": searchMediaScopeSettingKey})
+		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}))
+		rec := httptest.NewRecorder()
+		if method == http.MethodPut {
+			handler.HandleSetSetting(rec, req)
+		} else {
+			handler.HandleDeleteSetting(rec, req)
+		}
+		return rec
+	}
+	if rec := send(http.MethodPut, []byte(`{"value":"audiobook"}`)); rec.Code != http.StatusNoContent {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, profileID := range []string{"profile-1", "profile-2"} {
+		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: searchMediaScopeSettingKey, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+		})
+		if err != nil || value == nil || string(value.Value) != `"audiobook"` {
+			t.Fatalf("canonical %s value = %+v, err=%v", profileID, value, err)
+		}
+	}
+	if rec := send(http.MethodDelete, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, profileID := range []string{"profile-1", "profile-2"} {
+		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: searchMediaScopeSettingKey, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+		})
+		if err != nil || value != nil {
+			t.Fatalf("canonical %s survived delete: %+v, err=%v", profileID, value, err)
+		}
+	}
+}
+
+func TestLegacyDeviceSettingsMirrorCanonicalRows(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	send := func(method, key string, body []byte) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/settings/device/"+key, bytes.NewReader(body))
+		req = withRouteParams(req, map[string]string{"key": key})
+		req.Header.Set(deviceIDHeader, "living-room")
+		req = req.WithContext(apimw.SetProfileID(
+			apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+		rec := httptest.NewRecorder()
+		if method == http.MethodPut {
+			handler.HandleSetDeviceSetting(rec, req)
+		} else {
+			handler.HandleDeleteDeviceSetting(rec, req)
+		}
+		return rec
+	}
+	canonical := func(key string) *userstore.SettingValue {
+		t.Helper()
+		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: key, Scope: settingscontract.ScopeProfileDevice,
+			ProfileID: "profile-1", DeviceID: "living-room",
+		})
+		if err != nil {
+			t.Fatalf("GetSettingValue(%s): %v", key, err)
+		}
+		return value
+	}
+
+	appearance := `{"fontSize":"large"}`
+	body, _ := json.Marshal(setSettingRequest{Value: appearance})
+	if rec := send(http.MethodPut, subtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
+		t.Fatalf("appearance PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	if value := canonical("playback.subtitle_appearance"); value == nil || string(value.Value) != appearance {
+		t.Fatalf("canonical appearance = %+v", value)
+	}
+
+	if rec := send(http.MethodPut, "playback.preferred_quality", []byte(`{"value":"1080p-high"}`)); rec.Code != http.StatusNoContent {
+		t.Fatalf("quality PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	if value := canonical("playback.preferred_quality"); value == nil || string(value.Value) != `"1080p"` {
+		t.Fatalf("canonical quality = %+v", value)
+	}
+	if value := canonical("playback.max_bitrate_kbps"); value == nil || string(value.Value) != `10000` {
+		t.Fatalf("canonical bitrate = %+v", value)
+	}
+	if rec := send(http.MethodPut, "playback.preferred_quality", []byte(`{"value":"auto"}`)); rec.Code != http.StatusNoContent {
+		t.Fatalf("quality auto PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	if value := canonical("playback.max_bitrate_kbps"); value != nil {
+		t.Fatalf("stale bitrate survived auto: %+v", value)
+	}
+	if rec := send(http.MethodDelete, "playback.preferred_quality", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("quality DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	if value := canonical("playback.preferred_quality"); value != nil {
+		t.Fatalf("quality survived delete: %+v", value)
+	}
+}
+
+func TestLegacyLooseJSONSettingPreservesSuccessfulStatus(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	req := httptest.NewRequest(http.MethodPut, "/settings/device/"+libraryPageStateSettingKey,
+		bytes.NewReader([]byte(`{"value":"{}"}`)))
+	req = withRouteParams(req, map[string]string{"key": libraryPageStateSettingKey})
+	req.Header.Set(deviceIDHeader, "browser-1")
+	req = req.WithContext(apimw.SetProfileID(
+		apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+	handler.HandleSetDeviceSetting(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("legacy-valid JSON status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	legacy, err := store.GetDeviceSetting(context.Background(), "profile-1", "browser-1", libraryPageStateSettingKey)
+	if err != nil || legacy == nil || legacy.Value != "{}" {
+		t.Fatalf("legacy row = %+v, err=%v", legacy, err)
+	}
+	canonical, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: libraryPageStateSettingKey, Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "browser-1",
+	})
+	if err != nil || canonical != nil {
+		t.Fatalf("unrepresentable canonical row = %+v, err=%v", canonical, err)
 	}
 }
 
@@ -772,6 +934,15 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RegisterDevice store1: %v", err)
 	}
+	canonicalBedroom, err := store1.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       "playback.subtitle_mode",
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1",
+		DeviceID:  "bedroom",
+	}, json.RawMessage(`"always"`))
+	if err != nil {
+		t.Fatalf("UpsertSettingValue canonical bedroom override: %v", err)
+	}
 	if err := store2.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
 		ProfileID:      "profile-1",
 		DeviceID:       "phone",
@@ -821,7 +992,8 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	if bedroom == nil {
 		t.Fatalf("registered device without overrides missing: %#v", listResp.Devices)
 	}
-	if bedroom.OverrideCount != 0 || bedroom.ProfileCount != 1 || bedroom.DeviceName != "Bedroom TV" {
+	if bedroom.OverrideCount != 1 || bedroom.ProfileCount != 1 || bedroom.DeviceName != "Bedroom TV" ||
+		bedroom.LastUpdated != canonicalBedroom.UpdatedAt {
 		t.Fatalf("registered device summary = %#v", bedroom)
 	}
 
@@ -853,7 +1025,8 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&detailResp); err != nil {
 		t.Fatalf("decode registered detail: %v", err)
 	}
-	if detailResp.DeviceName != "Bedroom TV" || detailResp.OverrideCount != 0 {
+	if detailResp.DeviceName != "Bedroom TV" || detailResp.OverrideCount != 1 ||
+		detailResp.LastUpdated != canonicalBedroom.UpdatedAt {
 		t.Fatalf("registered detail response = %#v", detailResp)
 	}
 	if len(detailResp.Settings) != 0 {
@@ -861,6 +1034,32 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}
 	if len(detailResp.Profiles) != 1 || detailResp.Profiles[0].ProfileID != "profile-1" {
 		t.Fatalf("registered detail profiles = %#v", detailResp.Profiles)
+	}
+}
+
+func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
+	for name, keys := range map[string][2]string{
+		"subtitle appearance": {subtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
+		"theme":               {"ui_theme", "ui.theme"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			summaries := buildAdminDeviceSummaries(7, "user", "user@example.com",
+				[]userstore.DeviceSettingEntry{{
+					ProfileID: "profile-1", DeviceID: "living-room", Key: keys[0],
+					UpdatedAt: "2026-07-30T01:00:00Z",
+				}},
+				[]userstore.SettingValue{{
+					SettingIdentity: userstore.SettingIdentity{
+						Key: keys[1], Scope: settingscontract.ScopeProfileDevice,
+						ProfileID: "profile-1", DeviceID: "living-room",
+					},
+					UpdatedAt: "2026-07-30T01:00:01Z",
+				}}, nil, map[string]string{"profile-1": "Main"})
+			if len(summaries) != 1 || summaries[0].OverrideCount != 1 ||
+				len(summaries[0].Profiles) != 1 || summaries[0].Profiles[0].OverrideCount != 1 {
+				t.Fatalf("mirrored alias summaries = %#v", summaries)
+			}
+		})
 	}
 }
 
