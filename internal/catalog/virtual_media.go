@@ -137,7 +137,7 @@ func (r *VirtualMediaRegistrar) UpsertVirtualMedia(ctx context.Context, installa
 			if ep.SeasonNumber <= 0 || ep.EpisodeNumber <= 0 || (strings.TrimSpace(ep.VirtualURI) == "" && len(ep.Variants) == 0) {
 				continue
 			}
-			if err := upsertVirtualEpisode(ctx, tx, contentID, folderID, ep); err != nil {
+			if err := upsertVirtualEpisode(ctx, tx, contentID, folderID, installationID, ep); err != nil {
 				return nil, err
 			}
 			episodes++
@@ -145,12 +145,12 @@ func (r *VirtualMediaRegistrar) UpsertVirtualMedia(ctx context.Context, installa
 	} else {
 		if len(in.Variants) > 0 {
 			for _, v := range in.Variants {
-				if err := upsertVirtualFileVariant(ctx, tx, contentID, "", folderID, v); err != nil {
+				if err := upsertVirtualFileVariant(ctx, tx, contentID, "", folderID, installationID, v); err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			if err := upsertVirtualFile(ctx, tx, contentID, "", folderID, in.VirtualURI, runtimeSeconds(in.RuntimeMinutes)); err != nil {
+			if err := upsertVirtualFile(ctx, tx, contentID, "", folderID, installationID, in.VirtualURI, runtimeSeconds(in.RuntimeMinutes)); err != nil {
 				return nil, err
 			}
 		}
@@ -192,6 +192,7 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 		WHERE mf.content_id = mi.content_id
 		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
 		  AND mi.virtual_owner_installation_id = $1
+		  AND mf.virtual_owner_installation_id = $1
 		  AND mi.virtual_source = $2
 		  AND NOT (mi.content_id = ANY($3::text[]))
 		  AND (cardinality($4::int[]) = 0 OR EXISTS (
@@ -296,7 +297,7 @@ func virtualLibraryCompatible(folderType, mediaType string) bool {
 	return folderType == "mixed" || (mediaType == "movie" && folderType == "movies") || (mediaType == "series" && folderType == "series")
 }
 
-func upsertVirtualEpisode(ctx context.Context, tx pgx.Tx, seriesID string, folderID int, ep VirtualEpisode) error {
+func upsertVirtualEpisode(ctx context.Context, tx pgx.Tx, seriesID string, folderID, installationID int, ep VirtualEpisode) error {
 	seasonID := fmt.Sprintf("%s-%d", strings.Replace(seriesID, "series-", "season-", 1), ep.SeasonNumber)
 	episodeID := fmt.Sprintf("%s-%d-%d", strings.Replace(seriesID, "series-", "episode-", 1), ep.SeasonNumber, ep.EpisodeNumber)
 	if _, err := tx.Exec(ctx, `INSERT INTO seasons(content_id,series_id,season_number,title,air_date,metadata_source) VALUES($1,$2,$3,$4,$5,'provider') ON CONFLICT(series_id,season_number) DO UPDATE SET title=EXCLUDED.title,air_date=COALESCE(EXCLUDED.air_date,seasons.air_date),updated_at=now()`, seasonID, seriesID, ep.SeasonNumber, fmt.Sprintf("Season %d", ep.SeasonNumber), nullTime(ep.AirDate)); err != nil {
@@ -310,23 +311,23 @@ func upsertVirtualEpisode(ctx context.Context, tx pgx.Tx, seriesID string, folde
 	}
 	if len(ep.Variants) > 0 {
 		for _, v := range ep.Variants {
-			if err := upsertVirtualFileVariant(ctx, tx, seriesID, episodeID, folderID, v); err != nil {
+			if err := upsertVirtualFileVariant(ctx, tx, seriesID, episodeID, folderID, installationID, v); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	return upsertVirtualFile(ctx, tx, seriesID, episodeID, folderID, ep.VirtualURI, runtimeSeconds(ep.RuntimeMinutes))
+	return upsertVirtualFile(ctx, tx, seriesID, episodeID, folderID, installationID, ep.VirtualURI, runtimeSeconds(ep.RuntimeMinutes))
 }
 
-func upsertVirtualFile(ctx context.Context, tx pgx.Tx, contentID, episodeID string, folderID int, uri string, duration int) error {
+func upsertVirtualFile(ctx context.Context, tx pgx.Tx, contentID, episodeID string, folderID, installationID int, uri string, duration int) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, uri); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO media_files(content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at)
-		VALUES($1,NULLIF($2,''),$3,$4,0,'virtual',NULLIF($5,0),'virtual',now())
-		ON CONFLICT (file_path) DO UPDATE SET
+		INSERT INTO media_files(content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at,virtual_owner_installation_id)
+		VALUES($1,NULLIF($2,''),$3,$4,0,'virtual',NULLIF($5,0),'virtual',now(),$6)
+		ON CONFLICT (file_path, virtual_owner_installation_id) WHERE virtual_owner_installation_id IS NOT NULL DO UPDATE SET
 			content_id=EXCLUDED.content_id,
 			episode_id=EXCLUDED.episode_id,
 			media_folder_id=EXCLUDED.media_folder_id,
@@ -335,16 +336,17 @@ func upsertVirtualFile(ctx context.Context, tx pgx.Tx, contentID, episodeID stri
 			duration=EXCLUDED.duration,
 			probe_source='virtual',
 			probe_updated_at=now(),
+			virtual_owner_installation_id=EXCLUDED.virtual_owner_installation_id,
 			missing_since=NULL,
 			updated_at=now()`,
-		contentID, episodeID, folderID, uri, duration)
+		contentID, episodeID, folderID, uri, duration, installationID)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file: %w", err)
 	}
 	return nil
 }
 
-func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episodeID string, folderID int, v VirtualMediaVariant) error {
+func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episodeID string, folderID, installationID int, v VirtualMediaVariant) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, v.VirtualURI); err != nil {
 		return err
 	}
@@ -359,9 +361,9 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 	_, err := tx.Exec(ctx, `
 		INSERT INTO media_files(
 			content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at,
-			resolution,codec_video,codec_audio,hdr,bitrate,edition_raw,audio_tracks,subtitle_tracks
-		) VALUES($1,NULLIF($2,''),$3,$4,$12,$13,NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),NULLIF($11,''),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($14::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($15::text[]) x),'[]'::jsonb))
-		ON CONFLICT (file_path) DO UPDATE SET 
+			resolution,codec_video,codec_audio,hdr,bitrate,edition_raw,audio_tracks,subtitle_tracks,virtual_owner_installation_id
+		) VALUES($1,NULLIF($2,''),$3,$4,$12,$13,NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),NULLIF($11,''),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($14::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($15::text[]) x),'[]'::jsonb),$16)
+		ON CONFLICT (file_path, virtual_owner_installation_id) WHERE virtual_owner_installation_id IS NOT NULL DO UPDATE SET
 			content_id=EXCLUDED.content_id,
 			episode_id=EXCLUDED.episode_id,
 			media_folder_id=EXCLUDED.media_folder_id,
@@ -380,7 +382,7 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 			edition_raw=EXCLUDED.edition_raw,
 			audio_tracks=EXCLUDED.audio_tracks,
 			subtitle_tracks=EXCLUDED.subtitle_tracks`,
-		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, fileSize, "virtual", v.AudioLanguages, v.SubtitleLanguages)
+		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, fileSize, "virtual", v.AudioLanguages, v.SubtitleLanguages, installationID)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file variant: %w", err)
 	}
