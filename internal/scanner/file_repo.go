@@ -59,7 +59,8 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	edition_raw, edition_key, edition_confidence, edition_source,
 	presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 	multi_episode_start, multi_episode_end,
-	probe_source, probe_updated_at, match_attempted_at, missing_since, created_at, updated_at`
+	probe_source, probe_updated_at, match_attempted_at, missing_since, created_at, updated_at,
+	virtual_owner_installation_id`
 
 const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
@@ -82,7 +83,8 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.edition_raw, mf.edition_key, mf.edition_confidence, mf.edition_source,
 	mf.presentation_kind, mf.presentation_group_key, mf.presentation_part_index, mf.presentation_part_total,
 	mf.multi_episode_start, mf.multi_episode_end,
-	mf.probe_source, mf.probe_updated_at, mf.match_attempted_at, mf.missing_since, mf.created_at, mf.updated_at`
+	mf.probe_source, mf.probe_updated_at, mf.match_attempted_at, mf.missing_since, mf.created_at, mf.updated_at,
+	mf.virtual_owner_installation_id`
 
 // scanMediaFile scans a single row into a *models.MediaFile.
 func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
@@ -118,6 +120,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	var presentationKind, presentationGroupKey *string
 	var chapterThumbnailRetryAfter *time.Time
 	var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, chaptersJSON []byte
+	var virtualOwnerInstallationID *int
 
 	err := row.Scan(
 		&f.ID,
@@ -202,6 +205,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.MissingSince,
 		&f.CreatedAt,
 		&f.UpdatedAt,
+		&virtualOwnerInstallationID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -225,6 +229,9 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	}
 	if episodeNumber != nil {
 		f.EpisodeNumber = *episodeNumber
+	}
+	if virtualOwnerInstallationID != nil {
+		f.VirtualOwnerInstallationID = *virtualOwnerInstallationID
 	}
 	if canonicalRootPath != nil {
 		f.CanonicalRootPath = *canonicalRootPath
