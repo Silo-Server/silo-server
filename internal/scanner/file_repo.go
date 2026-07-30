@@ -436,6 +436,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var presentationKind, presentationGroupKey *string
 		var chapterThumbnailRetryAfter *time.Time
 		var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON, chaptersJSON []byte
+		var virtualOwnerInstallationID *int
 
 		err := rows.Scan(
 			&f.ID,
@@ -520,6 +521,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.MissingSince,
 			&f.CreatedAt,
 			&f.UpdatedAt,
+			&virtualOwnerInstallationID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning media file row: %w", err)
@@ -636,6 +638,10 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		}
 		if multiEpisodeEnd != nil {
 			f.MultiEpisodeEnd = *multiEpisodeEnd
+		}
+		if virtualOwnerInstallationID != nil {
+			f.VirtualOwnerInstallationID = *virtualOwnerInstallationID
+			f.VirtualOwnerInstallationSet = true
 		}
 		f.MarkersSource = markersSource
 		f.MarkersConfidence = markersConfidence
