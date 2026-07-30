@@ -7,12 +7,18 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// AudioPrefHandler handles per-series audio preference endpoints.
+// AudioPrefHandler handles per-series audio preference endpoints. Concrete
+// track identity remains in the specialized table; the language is mirrored
+// to the canonical profile_series row consumed by playback.
 type AudioPrefHandler struct {
 	storeProvider userstore.UserStoreProvider
+	EventsHub     *evt.Hub
 }
 
 // NewAudioPrefHandler creates a new AudioPrefHandler.
@@ -100,9 +106,20 @@ func (h *AudioPrefHandler) HandleSetAudioPref(w http.ResponseWriter, r *http.Req
 		AudioLanguage:   req.AudioLanguage,
 		TrackSignature:  req.TrackSignature,
 	}
+	language := req.AudioLanguage
+	sync, err := appendStringSync(nil, settingskeys.PlaybackAudioLanguage, &language)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 
-	if err := store.SetAudioPreference(r.Context(), pref); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set audio preference")
+	if err := applyLegacyPreferenceSettingsSync(r.Context(), store, h.EventsHub, userID,
+		userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+		}, sync, func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.SetAudioPreference(r.Context(), pref)
+		}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store audio preference")
 		return
 	}
 
@@ -126,7 +143,13 @@ func (h *AudioPrefHandler) HandleDeleteAudioPref(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := store.DeleteAudioPreference(r.Context(), profileID, seriesID); err != nil {
+	if err := applyLegacyPreferenceSettingsSync(r.Context(), store, h.EventsHub, userID,
+		userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+		}, []profileSettingSync{{key: settingskeys.PlaybackAudioLanguage}},
+		func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.DeleteAudioPreference(r.Context(), profileID, seriesID)
+		}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete audio preference")
 		return
 	}

@@ -137,5 +137,5 @@ func (h *SettingValuesHandler) adminIdentityFromRequest(
 		}
 	}
 
-	return h.completeIdentity(w, query, identity)
+	return h.completeIdentity(w, r.Context(), query, identity)
 }

@@ -150,8 +150,8 @@ ON CONFLICT (user_id, key) DO NOTHING`,
 		}
 		if _, err := tx.ExecContext(ctx, `
 DELETE FROM jellycompat_displayprefs
- WHERE user_id = $1 AND prefs_id = $2 AND client = $3`,
-			row.userID, row.prefsID, row.client,
+	WHERE user_id = $1 AND prefs_id = $2 AND client = $3 AND value = $4`,
+			row.userID, row.prefsID, row.client, row.value,
 		); err != nil {
 			return fmt.Errorf("clearing moved display prefs %q/%q for user %d: %w",
 				row.prefsID, row.client, row.userID, err)

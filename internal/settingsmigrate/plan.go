@@ -69,6 +69,12 @@ type LegacyProfile struct {
 type LegacySeriesPreference struct {
 	ProfileID string
 	SeriesID  string
+	// AudioSourceTable and SubtitleSourceTable preserve which physical legacy
+	// table supplied each half of this merged record. PostgreSQL and per-user
+	// SQLite use different table names, and rejected rows must point operators
+	// back to the table that actually owns the value.
+	AudioSourceTable    string
+	SubtitleSourceTable string
 
 	AudioLanguage       *string
 	SubtitleLanguage    *string
@@ -80,6 +86,9 @@ type LegacySeriesPreference struct {
 type LegacyLibraryPreference struct {
 	ProfileID string
 	LibraryID int
+	// SourceTable is backend-specific: user_library_playback_preferences in
+	// PostgreSQL and library_playback_preferences in per-user SQLite.
+	SourceTable string
 
 	AudioLanguage       *string
 	SubtitleLanguage    *string
@@ -105,6 +114,13 @@ type Row struct {
 	LibraryID int
 	SeriesID  string
 	Value     json.RawMessage
+
+	// Source provenance is carried until the orphan-profile pass. A planned
+	// row can no longer be reconstructed from its canonical scope alone: a
+	// profile_series row may have come from either the audio or subtitle table.
+	sourceTable    string
+	sourceKey      string
+	sourceIdentity json.RawMessage
 
 	// fromRenamedKey records that this row's source was stored under a legacy
 	// spelling in legacyKeyRenames. It exists only for the dedup pass: when a
@@ -154,15 +170,8 @@ type Result struct {
 // migrating it would turn "never decided" into an explicit choice that outranks
 // the contract default forever.
 //
-// quality_preference is the one that bites: the column defaults to 1080p while
-// the contract defaults to auto, so migrating it unconditionally would pin
-// every profile in the install to 1080p having never asked for it.
-//
 // The language column's 'en' default is deliberately absent: see planProfiles.
-const (
-	defaultSubtitleMode      = "auto"
-	defaultQualityPreference = "1080p"
-)
+const defaultSubtitleMode = "auto"
 
 // Source table names, recorded on every reject so an operator can find the row
 // the migration could not convert.
@@ -170,7 +179,8 @@ const (
 	sourceUserSettings       = "user_settings"
 	sourceUserDeviceSettings = "user_device_settings"
 	sourceUserProfiles       = "user_profiles"
-	sourceSeriesPrefs        = "series_preferences"
+	sourceAudioPrefs         = "audio_preferences"
+	sourceSubtitlePrefs      = "subtitle_preferences"
 	sourceLibraryPrefs       = "library_playback_preferences"
 )
 
@@ -185,8 +195,13 @@ const keyCardOverlays = "ui.card_overlays"
 // keyAudioLanguage has a device-scope quarantine: see planDeviceSettings.
 const keyAudioLanguage = "playback.audio_language"
 
-// fieldProfileID is the identity field every non-account reject carries.
-const fieldProfileID = "profile_id"
+// These identity fields make migration rejects directly queryable by the
+// content context that owned the legacy value.
+const (
+	fieldProfileID = "profile_id"
+	fieldSeriesID  = "series_id"
+	fieldLibraryID = "library_id"
+)
 
 // accountIdentity locates a reject from the account-wide key/value table, which
 // has no profile, device or content to name.
@@ -315,15 +330,11 @@ func dropOrphanProfileRows(rows []Row, profiles []LegacyProfile, res *Result) []
 			continue
 		}
 		res.Rejects = append(res.Rejects, Reject{
-			SourceTable: sourceUserDeviceSettings,
-			SourceKey:   row.Key,
-			Identity: identityJSON(map[string]any{
-				fieldProfileID: row.ProfileID,
-				"device_id":    row.DeviceID,
-				"scope":        string(row.Scope),
-			}),
-			Value:  string(row.Value),
-			Reason: "profile no longer exists; the legacy row outlived the profile it belonged to",
+			SourceTable: row.sourceTable,
+			SourceKey:   row.sourceKey,
+			Identity:    row.sourceIdentity,
+			Value:       string(row.Value),
+			Reason:      "profile no longer exists; the legacy row outlived the profile it belonged to",
 		})
 	}
 	return kept
@@ -414,9 +425,13 @@ func (p *Planner) planProfiles(profiles []LegacyProfile, res *Result) {
 				Row{ProfileID: profile.ID}, json.RawMessage("false"))
 		}
 
+		// The legacy schema's 1080p default was also the effective playback
+		// behavior. The contract default is auto, so even an untouched legacy
+		// profile needs an explicit canonical row or the cutover silently lifts
+		// its resolution and bitrate cap.
 		p.addQuality(res, sourceUserProfiles, id("quality_preference"),
 			settingscontract.ScopeProfile, Row{ProfileID: profile.ID},
-			deref(profile.QualityPreference), defaultQualityPreference)
+			deref(profile.QualityPreference), "")
 
 		// The auto-skip switches default to false in both the columns and the
 		// contract, so only an explicit true is a decision: migrating a false
@@ -503,6 +518,8 @@ func (p *Planner) planAccountSettings(
 			res.Rows = append(res.Rows, Row{
 				Key: key, Scope: scope, ProfileID: profile.ID, Value: value,
 				fromRenamedKey: key != setting.Key,
+				sourceTable:    sourceUserSettings, sourceKey: setting.Key,
+				sourceIdentity: accountIdentity(),
 			})
 		}
 	}
@@ -575,6 +592,8 @@ func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result)
 			Key: key, Scope: settingscontract.ScopeProfileDevice,
 			ProfileID: row.ProfileID, DeviceID: row.DeviceID, Value: value,
 			fromRenamedKey: key != row.Key,
+			sourceTable:    sourceUserDeviceSettings, sourceKey: row.Key,
+			sourceIdentity: identity,
 		})
 	}
 }
@@ -583,9 +602,17 @@ func (p *Planner) planSeriesPrefs(prefs []LegacySeriesPreference, res *Result) {
 	for _, pref := range prefs {
 		base := Row{ProfileID: pref.ProfileID, SeriesID: pref.SeriesID}
 		identity := identityJSON(map[string]any{
-			fieldProfileID: pref.ProfileID, "series_id": pref.SeriesID,
+			fieldProfileID: pref.ProfileID, fieldSeriesID: pref.SeriesID,
 		})
-		p.addPlaybackTriple(res, sourceSeriesPrefs, identity,
+		audioSource := pref.AudioSourceTable
+		if audioSource == "" {
+			audioSource = sourceAudioPrefs
+		}
+		subtitleSource := pref.SubtitleSourceTable
+		if subtitleSource == "" {
+			subtitleSource = sourceSubtitlePrefs
+		}
+		p.addPlaybackTriple(res, audioSource, subtitleSource, identity,
 			settingscontract.ScopeProfileSeries, base,
 			pref.AudioLanguage, pref.SubtitleLanguage, pref.SubtitleMode, pref.ShowForcedSubtitles)
 	}
@@ -595,9 +622,13 @@ func (p *Planner) planLibraryPrefs(prefs []LegacyLibraryPreference, res *Result)
 	for _, pref := range prefs {
 		base := Row{ProfileID: pref.ProfileID, LibraryID: pref.LibraryID}
 		identity := identityJSON(map[string]any{
-			fieldProfileID: pref.ProfileID, "library_id": pref.LibraryID,
+			fieldProfileID: pref.ProfileID, fieldLibraryID: pref.LibraryID,
 		})
-		p.addPlaybackTriple(res, sourceLibraryPrefs, identity,
+		source := pref.SourceTable
+		if source == "" {
+			source = sourceLibraryPrefs
+		}
+		p.addPlaybackTriple(res, source, source, identity,
 			settingscontract.ScopeProfileLibrary, base,
 			pref.AudioLanguage, pref.SubtitleLanguage, pref.SubtitleMode, pref.ShowForcedSubtitles)
 	}
@@ -607,23 +638,23 @@ func (p *Planner) planLibraryPrefs(prefs []LegacyLibraryPreference, res *Result)
 // library rows share. Both tables carry the same columns with the same
 // semantics, so they convert identically at different scopes.
 func (p *Planner) addPlaybackTriple(
-	res *Result, sourceTable string, identity json.RawMessage,
+	res *Result, audioSourceTable, subtitleSourceTable string, identity json.RawMessage,
 	scope settingscontract.Scope, base Row,
 	audio, subtitle, mode *string, forced *bool,
 ) {
-	p.addLanguage(res, sourceTable, identity,
+	p.addLanguage(res, audioSourceTable, identity,
 		"playback.audio_language", scope, base, audio, "")
-	p.addLanguage(res, sourceTable, identity,
+	p.addLanguage(res, subtitleSourceTable, identity,
 		"playback.subtitle_language", scope, base, subtitle, "")
 
 	if m := deref(mode); m != "" {
-		p.addValue(res, sourceTable, identity,
+		p.addValue(res, subtitleSourceTable, identity,
 			"playback.subtitle_mode", scope, base, jsonString(m))
 	}
 	// Nullable at these scopes, so a non-null value is a real override in
 	// either direction — unlike the profile column, where true is the default.
 	if forced != nil {
-		p.addValue(res, sourceTable, identity,
+		p.addValue(res, subtitleSourceTable, identity,
 			"playback.show_forced_subtitles", scope, base,
 			json.RawMessage(strconv.FormatBool(*forced)))
 	}
@@ -710,6 +741,9 @@ func (p *Planner) addValue(
 	row.Key = key
 	row.Scope = scope
 	row.Value = value
+	row.sourceTable = sourceTable
+	row.sourceKey = key
+	row.sourceIdentity = append(json.RawMessage(nil), identity...)
 	res.Rows = append(res.Rows, row)
 }
 

@@ -182,6 +182,14 @@ func UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
+	return upsertSettingValue(db, id, value)
+}
+
+func upsertSettingValue(
+	exec preferenceSettingsExecutor,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+) (*userstore.SettingValue, error) {
 	if err := id.Validate(); err != nil {
 		return nil, err
 	}
@@ -194,7 +202,7 @@ func UpsertSettingValue(
 	}
 
 	now := nowRFC3339()
-	row := db.QueryRow(fmt.Sprintf(`
+	row := exec.QueryRow(fmt.Sprintf(`
 		INSERT INTO user_setting_values
 			(key, scope, profile_id, device_id, library_id, series_id, value, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -218,11 +226,15 @@ func UpsertSettingValue(
 // DeleteSettingValue removes the explicit value at one scope — the `unset`
 // operation — and reports whether a row existed.
 func DeleteSettingValue(db *sql.DB, id userstore.SettingIdentity) (bool, error) {
+	return deleteSettingValue(db, id)
+}
+
+func deleteSettingValue(exec preferenceSettingsExecutor, id userstore.SettingIdentity) (bool, error) {
 	if err := id.Validate(); err != nil {
 		return false, err
 	}
 	clause, args := settingIdentityPredicate(id)
-	result, err := db.Exec("DELETE FROM user_setting_values WHERE "+clause, args...)
+	result, err := exec.Exec("DELETE FROM user_setting_values WHERE "+clause, args...)
 	if err != nil {
 		return false, fmt.Errorf("deleting setting value %q at %s: %w", id.Key, id.Scope, err)
 	}

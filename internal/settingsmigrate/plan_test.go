@@ -46,17 +46,11 @@ func hasKey(res Result, key string) bool {
 	return false
 }
 
-// TestColumnDefaultsDoNotBecomeChoices is the trap that would have hit every
-// user in the install. quality_preference is NOT NULL DEFAULT '1080p' while the
-// contract defaults to auto, so migrating the column unconditionally would pin
-// every profile to 1080p having never chosen it — and worse, that stored value
-// then outranks the contract default forever.
-//
-// The audio language is the deliberate exception: the column's 'en' default was
-// the effective behavior — playback preferred English tracks for it — while the
-// contract default null selects no language at all, so suppressing 'en' would
-// silently change what plays. It must survive as an explicit row.
-func TestColumnDefaultsDoNotBecomeChoices(t *testing.T) {
+// TestLegacyEffectiveDefaultsArePreserved pins the two schema defaults whose
+// effective behavior differs from the contract defaults. Suppressing either
+// would change playback at cutover: audio would stop preferring English, and
+// quality would move from the legacy 1080p/6000 kbps cap to uncapped auto.
+func TestLegacyEffectiveDefaultsArePreserved(t *testing.T) {
 	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
 		ID:                  "p1",
 		Language:            str("en"),    // the column default, but see above
@@ -73,8 +67,16 @@ func TestColumnDefaultsDoNotBecomeChoices(t *testing.T) {
 	if string(language.Value) != `"en"` {
 		t.Errorf("audio language = %s, want the effective \"en\" preserved", language.Value)
 	}
-	if len(res.Rows) != 1 {
-		t.Fatalf("column defaults beyond the audio language produced rows: %+v", res.Rows)
+	quality := find(t, res, "playback.preferred_quality", nil)
+	if string(quality.Value) != `"1080p"` {
+		t.Errorf("quality = %s, want the effective \"1080p\" preserved", quality.Value)
+	}
+	bitrate := find(t, res, "playback.max_bitrate_kbps", nil)
+	if string(bitrate.Value) != `6000` {
+		t.Errorf("bitrate = %s, want the effective 6000 kbps preserved", bitrate.Value)
+	}
+	if len(res.Rows) != 3 {
+		t.Fatalf("unexpected rows for legacy defaults: %+v", res.Rows)
 	}
 }
 
@@ -669,6 +671,54 @@ func TestOrphanedProfileRowsAreDropped(t *testing.T) {
 	}
 	if !recorded {
 		t.Errorf("the orphan was dropped without a reject: %+v", res.Rejects)
+	}
+}
+
+func TestOrphanRejectsPreserveSourceTableAndContentIdentity(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "live"}},
+		SeriesPrefs: []LegacySeriesPreference{{
+			ProfileID: "deleted", SeriesID: "series-9",
+			AudioSourceTable: "user_audio_preferences", AudioLanguage: str("ja"),
+			SubtitleSourceTable: "user_subtitle_preferences", SubtitleMode: str("always"),
+		}},
+		LibraryPrefs: []LegacyLibraryPreference{{
+			ProfileID: "deleted", LibraryID: 42,
+			SourceTable: "user_library_playback_preferences", SubtitleLanguage: str("de"),
+		}},
+	})
+
+	if len(res.Rows) != 0 {
+		t.Fatalf("orphan rows survived: %+v", res.Rows)
+	}
+	want := map[string]struct {
+		table    string
+		identity string
+		value    any
+	}{
+		"playback.audio_language":    {"user_audio_preferences", "series_id", "series-9"},
+		"playback.subtitle_mode":     {"user_subtitle_preferences", "series_id", "series-9"},
+		"playback.subtitle_language": {"user_library_playback_preferences", "library_id", float64(42)},
+	}
+	for _, reject := range res.Rejects {
+		expected, ok := want[reject.SourceKey]
+		if !ok {
+			continue
+		}
+		if reject.SourceTable != expected.table {
+			t.Errorf("%s source table = %q, want %q", reject.SourceKey, reject.SourceTable, expected.table)
+		}
+		var identity map[string]any
+		if err := json.Unmarshal(reject.Identity, &identity); err != nil {
+			t.Fatalf("decoding %s identity: %v", reject.SourceKey, err)
+		}
+		if got := identity[expected.identity]; got != expected.value {
+			t.Errorf("%s identity %s = %#v, want %#v", reject.SourceKey, expected.identity, got, expected.value)
+		}
+		delete(want, reject.SourceKey)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing provenance rejects: %+v (all rejects: %+v)", want, res.Rejects)
 	}
 }
 

@@ -11,7 +11,10 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -23,6 +26,7 @@ type libraryLookup interface {
 type LibraryPlaybackPrefHandler struct {
 	storeProvider userstore.UserStoreProvider
 	libraryLookup libraryLookup
+	EventsHub     *evt.Hub
 }
 
 // NewLibraryPlaybackPrefHandler creates a new LibraryPlaybackPrefHandler.
@@ -106,6 +110,11 @@ func (h *LibraryPlaybackPrefHandler) HandleSetLibraryPlaybackPref(w http.Respons
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid subtitle_mode")
 		return
 	}
+	sync, err := planLibraryPlaybackSettingsSync(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil {
@@ -135,7 +144,10 @@ func (h *LibraryPlaybackPrefHandler) HandleSetLibraryPlaybackPref(w http.Respons
 	}
 
 	if !pref.HasAudioLanguage && !pref.HasSubtitleLanguage && !pref.HasSubtitleMode && !pref.HasShowForcedSubtitles {
-		if err := store.DeleteLibraryPlaybackPreference(r.Context(), profileID, libraryID); err != nil {
+		if err := h.applyLibraryPlaybackSettingsSync(r.Context(), store, userID,
+			profileID, libraryID, sync, func(tx userstore.PreferenceSettingsWriter) error {
+				return tx.DeleteLibraryPlaybackPreference(r.Context(), profileID, libraryID)
+			}); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete library playback preference")
 			return
 		}
@@ -143,8 +155,11 @@ func (h *LibraryPlaybackPrefHandler) HandleSetLibraryPlaybackPref(w http.Respons
 		return
 	}
 
-	if err := store.UpsertLibraryPlaybackPreference(r.Context(), pref); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set library playback preference")
+	if err := h.applyLibraryPlaybackSettingsSync(r.Context(), store, userID,
+		profileID, libraryID, sync, func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.UpsertLibraryPlaybackPreference(r.Context(), pref)
+		}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store library playback preference")
 		return
 	}
 
@@ -169,12 +184,61 @@ func (h *LibraryPlaybackPrefHandler) HandleDeleteLibraryPlaybackPref(w http.Resp
 		return
 	}
 
-	if err := store.DeleteLibraryPlaybackPreference(r.Context(), profileID, libraryID); err != nil {
+	if err := h.applyLibraryPlaybackSettingsSync(r.Context(), store, userID,
+		profileID, libraryID, []profileSettingSync{
+			{key: settingskeys.PlaybackAudioLanguage},
+			{key: settingskeys.PlaybackSubtitleLanguage},
+			{key: settingskeys.PlaybackSubtitleMode},
+			{key: settingskeys.PlaybackShowForcedSubtitles},
+		}, func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.DeleteLibraryPlaybackPreference(r.Context(), profileID, libraryID)
+		}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete library playback preference")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func planLibraryPlaybackSettingsSync(req setLibraryPlaybackPrefRequest) ([]profileSettingSync, error) {
+	out := make([]profileSettingSync, 0, 4)
+	for _, field := range []struct {
+		key string
+		raw *string
+	}{
+		{settingskeys.PlaybackAudioLanguage, req.AudioLanguage},
+		{settingskeys.PlaybackSubtitleLanguage, req.SubtitleLanguage},
+		{settingskeys.PlaybackSubtitleMode, req.SubtitleMode},
+	} {
+		if field.raw == nil {
+			out = append(out, profileSettingSync{key: field.key})
+			continue
+		}
+		var err error
+		out, err = appendStringSync(out, field.key, field.raw)
+		if err != nil {
+			return nil, err
+		}
+	}
+	forced := profileSettingSync{key: settingskeys.PlaybackShowForcedSubtitles}
+	if req.ShowForcedSubtitles != nil {
+		forced.value = json.RawMessage(strconv.FormatBool(*req.ShowForcedSubtitles))
+	}
+	return append(out, forced), nil
+}
+
+func (h *LibraryPlaybackPrefHandler) applyLibraryPlaybackSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	profileID string,
+	libraryID int,
+	writes []profileSettingSync,
+	legacyMutation func(userstore.PreferenceSettingsWriter) error,
+) error {
+	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileLibrary, ProfileID: profileID, LibraryID: libraryID,
+	}, writes, legacyMutation)
 }
 
 func parseLibraryID(w http.ResponseWriter, r *http.Request) (int, bool) {

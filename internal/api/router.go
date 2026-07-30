@@ -852,13 +852,20 @@ func NewRouter(deps Dependencies) chi.Router {
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
+			if deps.FolderRepo != nil {
+				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
+			} else if deps.DB != nil {
+				settingValuesHandler.SetLibraryLookup(catalog.NewFolderRepository(deps.DB))
+			}
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
 		subtitlePrefHandler.EventsHub = deps.EventsHub
 		audioPrefHandler = handlers.NewAudioPrefHandler(deps.UserStoreProvider)
+		audioPrefHandler.EventsHub = deps.EventsHub
 		libraryPlaybackPrefHandler = handlers.NewLibraryPlaybackPrefHandler(deps.UserStoreProvider)
+		libraryPlaybackPrefHandler.EventsHub = deps.EventsHub
 		if deps.FolderRepo != nil {
 			libraryPlaybackPrefHandler.SetLibraryLookup(deps.FolderRepo)
 		} else if deps.DB != nil {
@@ -2357,6 +2364,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/capability", settingValuesHandler.HandleGetCapabilities)
 							r.Group(func(r chi.Router) {
 								r.Use(apimw.RequireProfile)
+								r.Get("/values", settingValuesHandler.HandleGetValues)
 								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
 								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
 								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)

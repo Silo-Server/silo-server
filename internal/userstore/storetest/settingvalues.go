@@ -34,6 +34,9 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("IdentityValidation", func(t *testing.T) {
 		testSettingValueIdentityValidation(t, newStore)
 	})
+	t.Run("PreferenceTransactionRollback", func(t *testing.T) {
+		testPreferenceSettingsTransactionRollback(t, newStore)
+	})
 	t.Run("ResolutionCandidates", func(t *testing.T) {
 		testSettingValueResolution(t, newStore)
 	})
@@ -46,6 +49,79 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("MutationIdempotency", func(t *testing.T) {
 		testSettingMutationIdempotency(t, newStore)
 	})
+}
+
+// testPreferenceSettingsTransactionRollback proves that a failure after both
+// the legacy row and an earlier canonical row were written rolls the whole
+// group back. This is the failure ordering used by the shipped legacy profile,
+// audio, subtitle and library preference routes during the canonical cutover.
+func testPreferenceSettingsTransactionRollback(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	seedSettingProfiles(t, ctx, store, "p1")
+
+	legacy := userstore.AudioPreference{
+		ProfileID: "p1", SeriesID: seriesOne, AudioTrackIndex: 1, AudioLanguage: "en",
+	}
+	if err := store.SetAudioPreference(ctx, legacy); err != nil {
+		t.Fatalf("seed legacy preference: %v", err)
+	}
+	id := seriesID(audioKey, "p1", seriesOne)
+	seeded := mustUpsert(t, ctx, store, id, `"en"`)
+
+	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		t.Fatal("store does not implement PreferenceSettingsTransactioner")
+	}
+	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		language := "ja"
+		if err := tx.UpdateProfile(ctx, "p1", userstore.UpdateProfileInput{Language: &language}); err != nil {
+			return err
+		}
+		updated := legacy
+		updated.AudioTrackIndex = 2
+		updated.AudioLanguage = "ja"
+		if err := tx.SetAudioPreference(ctx, updated); err != nil {
+			return err
+		}
+		if _, err := tx.UpsertSettingValue(ctx, id, json.RawMessage(`"ja"`)); err != nil {
+			return err
+		}
+		// Fail after both writes. An invalid identity is rejected consistently by
+		// both backends and represents any later canonical-write failure.
+		_, err := tx.UpsertSettingValue(ctx, userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.Scope("invalid"),
+		}, json.RawMessage(`"fr"`))
+		return err
+	})
+	if err == nil {
+		t.Fatal("transaction with invalid final write succeeded")
+	}
+	gotProfile, err := store.GetProfile(ctx, "p1")
+	if err != nil {
+		t.Fatalf("read profile after rollback: %v", err)
+	}
+	if gotProfile == nil || gotProfile.Language != "" {
+		t.Fatalf("profile language after rollback = %+v, want empty seeded value", gotProfile)
+	}
+
+	gotLegacy, err := store.GetAudioPreference(ctx, "p1", seriesOne)
+	if err != nil {
+		t.Fatalf("read legacy preference after rollback: %v", err)
+	}
+	if gotLegacy == nil || gotLegacy.AudioTrackIndex != 1 || gotLegacy.AudioLanguage != "en" {
+		t.Fatalf("legacy preference after rollback = %+v, want seeded value", gotLegacy)
+	}
+	gotCanonical, err := store.GetSettingValue(ctx, id)
+	if err != nil {
+		t.Fatalf("read canonical value after rollback: %v", err)
+	}
+	if gotCanonical == nil || !jsonEqual(gotCanonical.Value, json.RawMessage(`"en"`)) {
+		t.Fatalf("canonical value after rollback = %+v, want seeded value", gotCanonical)
+	}
+	if gotCanonical.Revision != seeded.Revision {
+		t.Fatalf("canonical revision after rollback = %d, want %d", gotCanonical.Revision, seeded.Revision)
+	}
 }
 
 const (

@@ -16,6 +16,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -122,6 +124,91 @@ func TestSettingValuesRoundTrip(t *testing.T) {
 	if rec := routeValues(t, handler, http.MethodGet,
 		"playback.subtitle_language", "scope=profile", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("GET after delete = %d, want 404", rec.Code)
+	}
+}
+
+func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}, json.RawMessage(`"always"`)); err != nil {
+		t.Fatalf("seeding explicit value: %v", err)
+	}
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values?keys=playback.subtitle_mode,playback.subtitle_language&scope=profile", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleGetValues(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET collection = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Values   []map[string]any `json:"values"`
+		Revision int              `json:"revision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding collection: %v", err)
+	}
+	if len(body.Values) != 2 {
+		t.Fatalf("values = %d, want 2: %s", len(body.Values), rec.Body.String())
+	}
+	if body.Values[0]["key"] != "playback.subtitle_mode" || body.Values[0]["is_set"] != true ||
+		body.Values[0]["value"] != "always" {
+		t.Errorf("stored entry = %#v", body.Values[0])
+	}
+	if body.Values[1]["key"] != "playback.subtitle_language" || body.Values[1]["is_set"] != false {
+		t.Errorf("unset entry = %#v", body.Values[1])
+	}
+	if _, present := body.Values[1]["value"]; present {
+		t.Errorf("unset entry contains value: %#v", body.Values[1])
+	}
+	contract, _ := settingscontract.Load()
+	if body.Revision != contract.Revision {
+		t.Errorf("contract revision = %d, want %d", body.Revision, contract.Revision)
+	}
+}
+
+type settingValuesLibraryLookup struct {
+	existing map[int]bool
+	err      error
+}
+
+func (l settingValuesLibraryLookup) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
+	if l.err != nil {
+		return nil, l.err
+	}
+	if !l.existing[id] {
+		return nil, catalog.ErrFolderNotFound
+	}
+	return &models.MediaFolder{ID: id}, nil
+}
+
+func TestSettingValuesRejectNonexistentLibraryContext(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	handler.SetLibraryLookup(settingValuesLibraryLookup{existing: map[int]bool{7: true}})
+
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		var body []byte
+		if method == http.MethodPut {
+			body = []byte(`{"value":"de"}`)
+		}
+		rec := routeValues(t, handler, method, "playback.subtitle_language",
+			"scope=profile_library&library_id=99", body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s nonexistent library = %d, want 404: %s", method, rec.Code, rec.Body.String())
+		}
+	}
+	value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: "playback.subtitle_language", Scope: settingscontract.ScopeProfileLibrary,
+		ProfileID: "profile-1", LibraryID: 99,
+	})
+	if err != nil || value != nil {
+		t.Fatalf("nonexistent library left value (%+v, %v)", value, err)
+	}
+
+	if rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_language",
+		"scope=profile_library&library_id=7", []byte(`{"value":"de"}`)); rec.Code != http.StatusOK {
+		t.Errorf("existing library write = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

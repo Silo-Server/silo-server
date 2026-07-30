@@ -254,15 +254,38 @@ type failingSettingsWriteStore struct {
 	userstore.UserStore
 }
 
+type failingPreferenceSettingsWriter struct {
+	userstore.PreferenceSettingsWriter
+}
+
 func (s failingSettingsWriteStore) UpsertSettingValue(
 	context.Context, userstore.SettingIdentity, json.RawMessage,
 ) (*userstore.SettingValue, error) {
 	return nil, errors.New("settings storage unavailable")
 }
 
+func (s failingSettingsWriteStore) WithPreferenceSettingsTransaction(
+	ctx context.Context,
+	fn func(userstore.PreferenceSettingsWriter) error,
+) error {
+	transactioner, ok := s.UserStore.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return errors.New("wrapped store does not support preference settings transactions")
+	}
+	return transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		return fn(failingPreferenceSettingsWriter{PreferenceSettingsWriter: tx})
+	})
+}
+
+func (w failingPreferenceSettingsWriter) UpsertSettingValue(
+	context.Context, userstore.SettingIdentity, json.RawMessage,
+) (*userstore.SettingValue, error) {
+	return nil, errors.New("settings storage unavailable")
+}
+
 // TestCreateProfileCompensatesWhenSettingsSyncFails: CreateProfile has already
-// committed when the canonical sync fails, and the store interface offers no
-// cross-call transaction to roll it back. Without the compensating delete the
+// committed when the canonical sync fails; the preference transaction does
+// not include profile CRUD. Without the compensating delete the
 // household keeps a half-configured profile whose preferences read as contract
 // defaults forever, and the client's retry hits a name-conflict 409 instead of
 // succeeding.
@@ -297,6 +320,32 @@ func TestCreateProfileCompensatesWhenSettingsSyncFails(t *testing.T) {
 	NewProfileHandler(testUserStoreProvider{store: base}).HandleCreateProfile(retryRec, retry)
 	if retryRec.Code != http.StatusCreated {
 		t.Fatalf("retry POST = %d, want 201: %s", retryRec.Code, retryRec.Body.String())
+	}
+}
+
+func TestUpdateProfileRollsBackWhenSettingsSyncFails(t *testing.T) {
+	base := newProfileTestStore(t)
+	store := failingSettingsWriteStore{UserStore: base}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	before, err := base.GetProfile(context.Background(), "profile-1")
+	if err != nil || before == nil {
+		t.Fatalf("reading profile before update: profile=%+v err=%v", before, err)
+	}
+	rr := updateProfileVia(t, handler, "profile-1", `{"language":"de"}`)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("PUT = %d, want 500: %s", rr.Code, rr.Body.String())
+	}
+
+	after, err := base.GetProfile(context.Background(), "profile-1")
+	if err != nil || after == nil {
+		t.Fatalf("reading profile after rollback: profile=%+v err=%v", after, err)
+	}
+	if after.Language != before.Language {
+		t.Fatalf("legacy language after rollback = %q, want %q", after.Language, before.Language)
+	}
+	if value := storedProfileSetting(t, base, settingskeys.PlaybackAudioLanguage, "profile-1"); value != nil {
+		t.Fatalf("canonical language survived rollback: %+v", value)
 	}
 }
 

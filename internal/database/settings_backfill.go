@@ -223,6 +223,7 @@ SELECT profile_id, series_id, subtitle_language, subtitle_mode, show_forced_subt
 				return err
 			}
 			record := seriesRecord(profileID, seriesID)
+			record.SubtitleSourceTable = "user_subtitle_preferences"
 			record.SubtitleLanguage = nullableString(language)
 			record.SubtitleMode = nullableString(mode)
 			record.ShowForcedSubtitles = nullableBool(forced)
@@ -240,7 +241,9 @@ SELECT profile_id, series_id, audio_language
 			if err := scan(&profileID, &seriesID, &language); err != nil {
 				return err
 			}
-			seriesRecord(profileID, seriesID).AudioLanguage = nullableString(language)
+			record := seriesRecord(profileID, seriesID)
+			record.AudioSourceTable = "user_audio_preferences"
+			record.AudioLanguage = nullableString(language)
 			return nil
 		}, userID); err != nil {
 		return input, fmt.Errorf("reading user_audio_preferences: %w", err)
@@ -262,6 +265,7 @@ SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode,
 				&audio, &subtitle, &mode, &forced); err != nil {
 				return err
 			}
+			row.SourceTable = "user_library_playback_preferences"
 			row.AudioLanguage = nullableString(audio)
 			row.SubtitleLanguage = nullableString(subtitle)
 			row.SubtitleMode = nullableString(mode)

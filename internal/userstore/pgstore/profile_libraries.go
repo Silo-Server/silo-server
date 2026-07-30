@@ -15,6 +15,10 @@ type profileLibraryQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
+type profileLibraryExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
 func listProfileAllowedLibraries(ctx context.Context, q profileLibraryQuerier, userID int, profileID string) ([]int, error) {
 	rows, err := q.Query(ctx,
 		`SELECT library_id
@@ -82,7 +86,7 @@ func (s *PostgresUserStore) attachAllowedLibraries(ctx context.Context, profiles
 	return nil
 }
 
-func replaceProfileAllowedLibraries(ctx context.Context, q profileLibraryQuerier, userID int, profileID string, libraryIDs []int) error {
+func replaceProfileAllowedLibraries(ctx context.Context, q profileLibraryExecutor, userID int, profileID string, libraryIDs []int) error {
 	if _, err := q.Exec(ctx,
 		"DELETE FROM user_profile_allowed_libraries WHERE user_id = $1 AND profile_id = $2",
 		userID,

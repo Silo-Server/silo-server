@@ -13,6 +13,10 @@ type SubtitlePreference = userstore.SubtitlePreference
 // SetSubtitlePreference creates or replaces a subtitle preference for a
 // given profile and series. Timestamps should be ISO 8601 UTC strings.
 func SetSubtitlePreference(db *sql.DB, pref SubtitlePreference) error {
+	return setSubtitlePreference(db, pref)
+}
+
+func setSubtitlePreference(exec preferenceSettingsExecutor, pref SubtitlePreference) error {
 	if pref.ShowForcedSubtitles {
 		pref.HasShowForcedSubtitles = true
 	}
@@ -21,7 +25,7 @@ func SetSubtitlePreference(db *sql.DB, pref SubtitlePreference) error {
 		return fmt.Errorf("marshaling subtitle track signature for profile %q series %q: %w",
 			pref.ProfileID, pref.SeriesID, err)
 	}
-	_, err = db.Exec(`
+	_, err = exec.Exec(`
 		INSERT INTO subtitle_preferences (
 			profile_id, series_id, subtitle_language, subtitle_track_index,
 			external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
@@ -93,7 +97,11 @@ func GetSubtitlePreference(db *sql.DB, profileID, seriesID string) (*SubtitlePre
 // DeleteSubtitlePreference removes the subtitle preference for a profile
 // and series. It is not an error if the preference does not exist.
 func DeleteSubtitlePreference(db *sql.DB, profileID, seriesID string) error {
-	_, err := db.Exec(
+	return deleteSubtitlePreference(db, profileID, seriesID)
+}
+
+func deleteSubtitlePreference(exec preferenceSettingsExecutor, profileID, seriesID string) error {
+	_, err := exec.Exec(
 		"DELETE FROM subtitle_preferences WHERE profile_id = ? AND series_id = ?",
 		profileID, seriesID,
 	)

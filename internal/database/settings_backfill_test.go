@@ -69,6 +69,22 @@ SELECT value::text FROM user_setting_values
 		if value != `"ja"` {
 			t.Errorf("audio language = %s, want \"ja\"", value)
 		}
+		var quality, bitrate string
+		if err := pool.QueryRow(ctx, `
+SELECT value::text FROM user_setting_values
+ WHERE key = 'playback.preferred_quality' AND scope = 'profile' AND profile_id = 'mp1'`).
+			Scan(&quality); err != nil {
+			t.Fatalf("reading migrated profile quality: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `
+SELECT value::text FROM user_setting_values
+ WHERE key = 'playback.max_bitrate_kbps' AND scope = 'profile' AND profile_id = 'mp1'`).
+			Scan(&bitrate); err != nil {
+			t.Fatalf("reading migrated profile bitrate: %v", err)
+		}
+		if quality != `"1080p"` || bitrate != `6000` {
+			t.Errorf("profile quality = (%s, %s), want (\"1080p\", 6000)", quality, bitrate)
+		}
 	})
 
 	t.Run("auto-skip columns migrate only when true", func(t *testing.T) {

@@ -158,6 +158,16 @@ func (s *PostgresUserStore) UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
+	return upsertSettingValue(ctx, s.pool, s.userID, id, value)
+}
+
+func upsertSettingValue(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+) (*userstore.SettingValue, error) {
 	if err := id.Validate(); err != nil {
 		return nil, err
 	}
@@ -169,7 +179,7 @@ func (s *PostgresUserStore) UpsertSettingValue(
 		return nil, fmt.Errorf("%w: %q has no storage identity", userstore.ErrInvalidSettingIdentity, id.Scope)
 	}
 
-	row := s.pool.QueryRow(ctx, fmt.Sprintf(`
+	row := exec.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO user_setting_values
 			(user_id, key, scope, profile_id, device_id, library_id, series_id, value)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -178,7 +188,7 @@ func (s *PostgresUserStore) UpsertSettingValue(
 			revision = user_setting_values.revision + 1,
 			updated_at = now()
 		RETURNING %s`, target, settingValueColumns),
-		s.userID, id.Key, string(id.Scope),
+		userID, id.Key, string(id.Scope),
 		nullableText(id.ProfileID), nullableText(id.DeviceID),
 		nullableInt(id.LibraryID), nullableText(id.SeriesID),
 		[]byte(value),
@@ -191,11 +201,20 @@ func (s *PostgresUserStore) UpsertSettingValue(
 }
 
 func (s *PostgresUserStore) DeleteSettingValue(ctx context.Context, id userstore.SettingIdentity) (bool, error) {
+	return deleteSettingValue(ctx, s.pool, s.userID, id)
+}
+
+func deleteSettingValue(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id userstore.SettingIdentity,
+) (bool, error) {
 	if err := id.Validate(); err != nil {
 		return false, err
 	}
-	clause, args := settingIdentityPredicate(s.userID, id)
-	tag, err := s.pool.Exec(ctx, "DELETE FROM user_setting_values WHERE "+clause, args...)
+	clause, args := settingIdentityPredicate(userID, id)
+	tag, err := exec.Exec(ctx, "DELETE FROM user_setting_values WHERE "+clause, args...)
 	if err != nil {
 		return false, fmt.Errorf("deleting setting value %q at %s: %w", id.Key, id.Scope, err)
 	}

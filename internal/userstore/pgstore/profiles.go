@@ -138,6 +138,16 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 }
 
 func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u userstore.UpdateProfileInput) error {
+	return updateProfile(ctx, s.pool, s.userID, id, u)
+}
+
+func updateProfile(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id string,
+	u userstore.UpdateProfileInput,
+) error {
 	var setClauses []string
 	var args []any
 	argIdx := 1
@@ -220,7 +230,7 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 	}
 
 	var exists bool
-	if err := s.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", s.userID, id).Scan(&exists); err != nil {
+	if err := exec.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", userID, id).Scan(&exists); err != nil {
 		return fmt.Errorf("checking profile %s existence: %w", id, err)
 	}
 	if !exists {
@@ -231,10 +241,10 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 		addArg("updated_at", nowUTC())
 
 		whereClause := fmt.Sprintf("WHERE user_id = $%d AND id = $%d", argIdx, argIdx+1)
-		args = append(args, s.userID, id)
+		args = append(args, userID, id)
 
 		query := fmt.Sprintf("UPDATE user_profiles SET %s %s", strings.Join(setClauses, ", "), whereClause)
-		result, err := s.pool.Exec(ctx, query, args...)
+		result, err := exec.Exec(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("updating profile %s: %w", id, err)
 		}
@@ -244,13 +254,13 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 	}
 
 	if u.AllowedLibraryIDs != nil {
-		if err := replaceProfileAllowedLibraries(ctx, s.pool, s.userID, id, *u.AllowedLibraryIDs); err != nil {
+		if err := replaceProfileAllowedLibraries(ctx, exec, userID, id, *u.AllowedLibraryIDs); err != nil {
 			return err
 		}
 	}
 	if accessPolicyChanged {
-		if _, err := s.pool.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", s.userID); err != nil {
-			return fmt.Errorf("bumping access policy revision for user %d: %w", s.userID, err)
+		if _, err := exec.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", userID); err != nil {
+			return fmt.Errorf("bumping access policy revision for user %d: %w", userID, err)
 		}
 	}
 	return nil

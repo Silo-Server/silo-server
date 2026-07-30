@@ -12,6 +12,15 @@ import (
 )
 
 func (s *PostgresUserStore) SetSubtitlePreference(ctx context.Context, pref userstore.SubtitlePreference) error {
+	return setSubtitlePreference(ctx, s.pool, s.userID, pref)
+}
+
+func setSubtitlePreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	pref userstore.SubtitlePreference,
+) error {
 	if pref.UpdatedAt == "" {
 		pref.UpdatedAt = nowUTC()
 	}
@@ -23,7 +32,7 @@ func (s *PostgresUserStore) SetSubtitlePreference(ctx context.Context, pref user
 		return fmt.Errorf("marshaling subtitle track signature for profile %q series %q: %w",
 			pref.ProfileID, pref.SeriesID, err)
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = exec.Exec(ctx, `
 		INSERT INTO user_subtitle_preferences (
 			user_id, profile_id, series_id, subtitle_language, subtitle_track_index,
 			external_subtitle_path, subtitle_mode, subtitle_track_signature, show_forced_subtitles, updated_at
@@ -36,7 +45,7 @@ func (s *PostgresUserStore) SetSubtitlePreference(ctx context.Context, pref user
 			subtitle_track_signature = excluded.subtitle_track_signature,
 			show_forced_subtitles = excluded.show_forced_subtitles,
 			updated_at = excluded.updated_at`,
-		s.userID,
+		userID,
 		pref.ProfileID,
 		pref.SeriesID,
 		pref.SubtitleLanguage,
@@ -94,9 +103,18 @@ func (s *PostgresUserStore) GetSubtitlePreference(ctx context.Context, profileID
 }
 
 func (s *PostgresUserStore) DeleteSubtitlePreference(ctx context.Context, profileID, seriesID string) error {
-	_, err := s.pool.Exec(ctx,
+	return deleteSubtitlePreference(ctx, s.pool, s.userID, profileID, seriesID)
+}
+
+func deleteSubtitlePreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	profileID, seriesID string,
+) error {
+	_, err := exec.Exec(ctx,
 		"DELETE FROM user_subtitle_preferences WHERE user_id = $1 AND profile_id = $2 AND series_id = $3",
-		s.userID, profileID, seriesID,
+		userID, profileID, seriesID,
 	)
 	if err != nil {
 		return fmt.Errorf("deleting subtitle preference for profile %q series %q: %w",

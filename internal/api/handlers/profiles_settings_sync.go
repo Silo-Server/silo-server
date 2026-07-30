@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -186,27 +187,99 @@ func (h *ProfileHandler) applyProfileSettingsSync(
 	profileID string,
 	writes []profileSettingSync,
 ) error {
-	for _, write := range writes {
-		identity := userstore.SettingIdentity{
-			Key:       write.key,
-			Scope:     settingscontract.ScopeProfile,
-			ProfileID: profileID,
+	return applyCanonicalSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+	}, writes)
+}
+
+func (h *ProfileHandler) applyProfileUpdateSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	profileID string,
+	input userstore.UpdateProfileInput,
+	writes []profileSettingSync,
+) error {
+	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+	}, writes, func(tx userstore.PreferenceSettingsWriter) error {
+		return tx.UpdateProfile(ctx, profileID, input)
+	})
+}
+
+// applyCanonicalSettingsSync writes or clears a canonical group atomically and
+// publishes change events only after the transaction commits.
+func applyCanonicalSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	events *evt.Hub,
+	userID int,
+	base userstore.SettingIdentity,
+	writes []profileSettingSync,
+) error {
+	return applyLegacyPreferenceSettingsSync(ctx, store, events, userID, base, writes,
+		func(userstore.PreferenceSettingsWriter) error { return nil })
+}
+
+// applyLegacyPreferenceSettingsSync is the live-write counterpart of the
+// migration planner for legacy preference endpoints. The legacy mutation and
+// every canonical row commit in one store transaction; events are deliberately
+// published afterwards so subscribers can never observe uncommitted state.
+func applyLegacyPreferenceSettingsSync(
+	ctx context.Context,
+	store userstore.UserStore,
+	events *evt.Hub,
+	userID int,
+	base userstore.SettingIdentity,
+	writes []profileSettingSync,
+	legacyMutation func(userstore.PreferenceSettingsWriter) error,
+) error {
+	var changedKeys []string
+	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return fmt.Errorf("user store does not support atomic preference settings synchronization")
+	}
+	err := transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if err := legacyMutation(tx); err != nil {
+			return err
 		}
+		var err error
+		changedKeys, err = writeCanonicalSettingsSync(ctx, tx, base, writes)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	for _, key := range changedKeys {
+		publishUserSettingsEvent(ctx, events, userID, base.ProfileID, key, string(base.Scope))
+	}
+	return nil
+}
+
+func writeCanonicalSettingsSync(
+	ctx context.Context,
+	store userstore.PreferenceSettingsWriter,
+	base userstore.SettingIdentity,
+	writes []profileSettingSync,
+) ([]string, error) {
+	changedKeys := make([]string, 0, len(writes))
+	for _, write := range writes {
+		identity := base
+		identity.Key = write.key
 		if write.value == nil {
 			removed, err := store.DeleteSettingValue(ctx, identity)
 			if err != nil {
-				return fmt.Errorf("clearing %s: %w", write.key, err)
+				return nil, fmt.Errorf("clearing %s: %w", write.key, err)
 			}
 			if !removed {
 				continue // nothing was stored, so nothing changed
 			}
 		} else if _, err := store.UpsertSettingValue(ctx, identity, write.value); err != nil {
-			return fmt.Errorf("storing %s: %w", write.key, err)
+			return nil, fmt.Errorf("storing %s: %w", write.key, err)
 		}
-		publishUserSettingsEvent(ctx, h.EventsHub, userID, profileID,
-			write.key, string(settingscontract.ScopeProfile))
+		changedKeys = append(changedKeys, write.key)
 	}
-	return nil
+	return changedKeys, nil
 }
 
 // --- Read side ---

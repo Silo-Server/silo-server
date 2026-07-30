@@ -130,16 +130,19 @@ func TestMigrateToV16BackfillsCanonicalValues(t *testing.T) {
 			"profile_id = ?", "p1"); !ok || got != `"ja"` {
 			t.Errorf("p1 audio language = %q (found=%v), want \"ja\"", got, ok)
 		}
-		// p2's 'en' is the column default, but for the audio language the
-		// default was the effective behavior, so it survives as an explicit row
-		// — unlike the quality column, which p2 must not carry.
+		// These schema defaults were also the effective legacy behavior, so they
+		// survive as explicit rows where the contract defaults differ.
 		if got, ok := canonicalValue(t, db, "playback.audio_language", "profile",
 			"profile_id = ?", "p2"); !ok || got != `"en"` {
 			t.Errorf("p2 audio language = %q (found=%v), want the effective \"en\"", got, ok)
 		}
 		if got, ok := canonicalValue(t, db, "playback.preferred_quality", "profile",
-			"profile_id = ?", "p2"); ok {
-			t.Errorf("p2 got quality %q from a column still holding its default", got)
+			"profile_id = ?", "p2"); !ok || got != `"1080p"` {
+			t.Errorf("p2 quality = %q (found=%v), want the effective \"1080p\"", got, ok)
+		}
+		if got, ok := canonicalValue(t, db, "playback.max_bitrate_kbps", "profile",
+			"profile_id = ?", "p2"); !ok || got != `6000` {
+			t.Errorf("p2 bitrate = %q (found=%v), want the effective 6000", got, ok)
 		}
 	})
 

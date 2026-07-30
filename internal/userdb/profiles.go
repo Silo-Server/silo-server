@@ -143,6 +143,19 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 // in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
 // before storage.
 func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := updateProfile(tx, id, u); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
 	var setClauses []string
 	var args []any
 
@@ -225,14 +238,8 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 		return nil // nothing to update
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	var exists bool
-	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles WHERE id = ?)", id).Scan(&exists); err != nil {
+	if err := exec.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles WHERE id = ?)", id).Scan(&exists); err != nil {
 		return fmt.Errorf("checking profile %s existence: %w", id, err)
 	}
 	if !exists {
@@ -248,7 +255,7 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 		args = append(args, id)
 
 		query := fmt.Sprintf("UPDATE profiles SET %s WHERE id = ?", strings.Join(setClauses, ", "))
-		result, err := tx.Exec(query, args...)
+		result, err := exec.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("updating profile %s: %w", id, err)
 		}
@@ -262,12 +269,12 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	}
 
 	if u.AllowedLibraryIDs != nil {
-		if err := replaceProfileAllowedLibrariesTx(tx, id, *u.AllowedLibraryIDs); err != nil {
+		if err := replaceProfileAllowedLibrariesTx(exec, id, *u.AllowedLibraryIDs); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // DeleteProfile removes a profile and cascades deletion to favorites,

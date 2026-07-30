@@ -63,12 +63,12 @@ func attachAllowedLibraries(db *sql.DB, profiles []Profile) error {
 	return nil
 }
 
-func replaceProfileAllowedLibrariesTx(tx *sql.Tx, profileID string, libraryIDs []int) error {
-	if _, err := tx.Exec("DELETE FROM profile_allowed_libraries WHERE profile_id = ?", profileID); err != nil {
+func replaceProfileAllowedLibrariesTx(exec preferenceSettingsExecutor, profileID string, libraryIDs []int) error {
+	if _, err := exec.Exec("DELETE FROM profile_allowed_libraries WHERE profile_id = ?", profileID); err != nil {
 		return fmt.Errorf("clearing allowed libraries for profile %s: %w", profileID, err)
 	}
 	for _, libraryID := range libraryIDs {
-		if _, err := tx.Exec(
+		if _, err := exec.Exec(
 			"INSERT INTO profile_allowed_libraries (profile_id, library_id) VALUES (?, ?)",
 			profileID,
 			libraryID,

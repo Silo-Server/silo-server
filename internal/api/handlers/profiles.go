@@ -600,9 +600,8 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Planned before the column write so an invalid preference fails while the
-	// request is still a no-op; applied after it so the canonical rows never
-	// lead the columns on a request that ends up rejected.
+	// Planned before the transaction so an invalid preference fails while the
+	// request is still a no-op.
 	settingsSync, err := planUpdateProfileSettingsSync(req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -630,16 +629,12 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := store.UpdateProfile(r.Context(), profileID, input); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
-		return
-	}
-	// Mirror the preference fields into the canonical rows the readers
-	// resolve; the columns updated above only feed the legacy response shape.
-	// A failure is a 500 rather than a shrug: the client retries, the column
-	// write above is idempotent, and the alternative is a preference that
-	// looks saved but never applies.
-	if err := h.applyProfileSettingsSync(r.Context(), store, userID, profileID, settingsSync); err != nil {
+	// The profile columns and their canonical projections commit together. A
+	// failure cannot leave a 500 response whose legacy values look saved while
+	// canonical readers continue serving the previous preference.
+	if err := h.applyProfileUpdateSettingsSync(
+		r.Context(), store, userID, profileID, input, settingsSync,
+	); err != nil {
 		slog.ErrorContext(r.Context(), "profile update failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")

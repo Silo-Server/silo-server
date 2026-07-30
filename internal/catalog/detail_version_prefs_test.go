@@ -174,13 +174,15 @@ func TestEffectiveAudioTrackIndex_PrefersSeriesAudioPreferenceOverLibraryAndProf
 	}); err != nil {
 		t.Fatalf("UpsertLibraryPlaybackPreference: %v", err)
 	}
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileLibrary, "", 12, "es")
 	if err := store.SetAudioPreference(context.Background(), userstore.AudioPreference{
 		ProfileID:     "profile-1",
 		SeriesID:      "series-1",
-		AudioLanguage: "fr",
+		AudioLanguage: "es", // stale legacy language must not win
 	}); err != nil {
 		t.Fatalf("SetAudioPreference: %v", err)
 	}
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, "series-1", 0, "fr")
 
 	service := &DetailService{}
 	service.SetUserStoreProvider(testDetailUserStoreProvider{store: store})
@@ -465,6 +467,8 @@ func TestEffectiveAudioTrackIndex_KeepsProfileFallbackWhenLibraryOriginalIsUnres
 	}); err != nil {
 		t.Fatalf("UpsertLibraryPlaybackPreference: %v", err)
 	}
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileLibrary, "", 12,
+		playback.OriginalLanguageSentinel)
 
 	service := &DetailService{
 		originalLangFn: func(context.Context, string) string {
@@ -497,14 +501,28 @@ func TestEffectiveAudioTrackIndex_KeepsProfileFallbackWhenLibraryOriginalIsUnres
 // contract, so seeding the column would leave the resolver seeing nothing.
 func setProfileAudioLanguage(t *testing.T, store userstore.UserStore, language string) {
 	t.Helper()
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfile, "", 0, language)
+}
+
+func setScopedAudioLanguage(
+	t *testing.T,
+	store userstore.UserStore,
+	scope settingscontract.Scope,
+	seriesID string,
+	libraryID int,
+	language string,
+) {
+	t.Helper()
 	encoded, err := json.Marshal(language)
 	if err != nil {
 		t.Fatalf("encoding language: %v", err)
 	}
 	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
 		Key:       settingskeys.PlaybackAudioLanguage,
-		Scope:     settingscontract.ScopeProfile,
+		Scope:     scope,
 		ProfileID: "profile-1",
+		SeriesID:  seriesID,
+		LibraryID: libraryID,
 	}, encoded); err != nil {
 		t.Fatalf("seeding %s: %v", settingskeys.PlaybackAudioLanguage, err)
 	}

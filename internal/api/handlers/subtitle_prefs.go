@@ -153,12 +153,10 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if err := store.SetSubtitlePreference(r.Context(), pref); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set subtitle preference")
-		return
-	}
-
-	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID, sync); err != nil {
+	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID, sync,
+		func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.SetSubtitlePreference(r.Context(), pref)
+		}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store subtitle preference")
 		return
 	}
@@ -183,11 +181,6 @@ func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r 
 		return
 	}
 
-	if err := store.DeleteSubtitlePreference(r.Context(), profileID, seriesID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
-		return
-	}
-
 	// Deleting the legacy row means "no per-series preference", spelled
 	// canonically as the absence of the profile_series rows.
 	if err := h.applySeriesSubtitleSync(r.Context(), store, userID, profileID, seriesID,
@@ -195,6 +188,8 @@ func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r 
 			{key: settingskeys.PlaybackSubtitleLanguage},
 			{key: settingskeys.PlaybackSubtitleMode},
 			{key: settingskeys.PlaybackShowForcedSubtitles},
+		}, func(tx userstore.PreferenceSettingsWriter) error {
+			return tx.DeleteSubtitlePreference(r.Context(), profileID, seriesID)
 		}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete subtitle preference")
 		return
@@ -242,29 +237,11 @@ func (h *SubtitlePrefHandler) applySeriesSubtitleSync(
 	userID int,
 	profileID, seriesID string,
 	writes []profileSettingSync,
+	legacyMutation func(userstore.PreferenceSettingsWriter) error,
 ) error {
-	for _, write := range writes {
-		identity := userstore.SettingIdentity{
-			Key:       write.key,
-			Scope:     settingscontract.ScopeProfileSeries,
-			ProfileID: profileID,
-			SeriesID:  seriesID,
-		}
-		if write.value == nil {
-			removed, err := store.DeleteSettingValue(ctx, identity)
-			if err != nil {
-				return err
-			}
-			if !removed {
-				continue // nothing was stored, so nothing changed
-			}
-		} else if _, err := store.UpsertSettingValue(ctx, identity, write.value); err != nil {
-			return err
-		}
-		publishUserSettingsEvent(ctx, h.EventsHub, userID, profileID,
-			write.key, string(settingscontract.ScopeProfileSeries))
-	}
-	return nil
+	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, userstore.SettingIdentity{
+		Scope: settingscontract.ScopeProfileSeries, ProfileID: profileID, SeriesID: seriesID,
+	}, writes, legacyMutation)
 }
 
 // --- Helpers ---

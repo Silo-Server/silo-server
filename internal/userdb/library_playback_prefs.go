@@ -13,8 +13,12 @@ type LibraryPlaybackPreference = userstore.LibraryPlaybackPreference
 // UpsertLibraryPlaybackPreference creates or replaces a library playback preference
 // for a given profile and library. Timestamps should be ISO 8601 UTC strings.
 func UpsertLibraryPlaybackPreference(db *sql.DB, pref LibraryPlaybackPreference) error {
+	return upsertLibraryPlaybackPreference(db, pref)
+}
+
+func upsertLibraryPlaybackPreference(exec preferenceSettingsExecutor, pref LibraryPlaybackPreference) error {
 	normalizeLibraryPlaybackPreference(&pref)
-	_, err := db.Exec(`
+	_, err := exec.Exec(`
 		INSERT INTO library_playback_preferences (
 			profile_id, library_id, audio_language, subtitle_language,
 			subtitle_mode, show_forced_subtitles, updated_at
@@ -120,7 +124,11 @@ func ListLibraryPlaybackPreferences(db *sql.DB, profileID string) ([]LibraryPlay
 
 // DeleteLibraryPlaybackPreference removes the library playback preference for a profile and library.
 func DeleteLibraryPlaybackPreference(db *sql.DB, profileID string, libraryID int) error {
-	_, err := db.Exec(
+	return deleteLibraryPlaybackPreference(db, profileID, libraryID)
+}
+
+func deleteLibraryPlaybackPreference(exec preferenceSettingsExecutor, profileID string, libraryID int) error {
+	_, err := exec.Exec(
 		"DELETE FROM library_playback_preferences WHERE profile_id = ? AND library_id = ?",
 		profileID, libraryID,
 	)

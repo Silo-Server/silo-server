@@ -2845,7 +2845,17 @@ type audioPrefResolver struct {
 	originalDone bool
 	originalLang string
 
-	libLang map[int]string
+	resolvedLang map[int]string
+}
+
+func (r *audioPrefResolver) profileLanguage(ctx context.Context) string {
+	if !r.profileDone {
+		r.profileDone = true
+		r.profileLang = r.svc.resolvedAudioLanguage(ctx, r.store, settingsresolve.Context{
+			ProfileID: r.profileID,
+		})
+	}
+	return r.profileLang
 }
 
 // newAudioPrefResolver resolves the per-user store once and prepares the
@@ -2853,10 +2863,10 @@ type audioPrefResolver struct {
 // is intended to be threaded through a single sequential file loop.
 func (s *DetailService) newAudioPrefResolver(ctx context.Context, filter AccessFilter, audioPreferenceContentID string) *audioPrefResolver {
 	r := &audioPrefResolver{
-		svc:       s,
-		profileID: filter.ProfileID,
-		contentID: audioPreferenceContentID,
-		libLang:   map[int]string{},
+		svc:          s,
+		profileID:    filter.ProfileID,
+		contentID:    audioPreferenceContentID,
+		resolvedLang: map[int]string{},
 	}
 	if s.userStoreProvider == nil || filter.UserID == 0 || filter.ProfileID == "" {
 		return r
@@ -2893,31 +2903,24 @@ func (r *audioPrefResolver) audioPreference(ctx context.Context) *playback.Audio
 	return &cp
 }
 
-// profileLanguage is the audio language with no content context — the profile's
-// own preference, resolved through the contract rather than read off the
-// profile column it migrated from.
-func (r *audioPrefResolver) profileLanguage(ctx context.Context) string {
-	if !r.profileDone {
-		r.profileDone = true
-		r.profileLang = r.svc.resolvedAudioLanguage(ctx, r.store, settingsresolve.Context{
-			ProfileID: r.profileID,
-		})
-	}
-	return r.profileLang
-}
-
-// libraryAudioLanguage resolves with a library in context, so a library
-// override wins over the profile value and the resolver applies the same
-// precedence the manifest declares.
-func (r *audioPrefResolver) libraryAudioLanguage(ctx context.Context, libraryID int) string {
-	if lang, ok := r.libLang[libraryID]; ok {
+// audioLanguage resolves with every content identity in context. The language
+// preference lives in the canonical table at profile_series/profile_library/
+// profile scopes; the specialized audio row supplies only concrete track
+// identity. Caching by library keeps a multi-file item at one canonical read
+// per distinct folder rather than one read per file.
+func (r *audioPrefResolver) audioLanguage(ctx context.Context, libraryID int) string {
+	if lang, ok := r.resolvedLang[libraryID]; ok {
 		return lang
 	}
-	lang := r.svc.resolvedAudioLanguage(ctx, r.store, settingsresolve.Context{
+	rc := settingsresolve.Context{
 		ProfileID:  r.profileID,
 		LibraryIDs: []int{libraryID},
-	})
-	r.libLang[libraryID] = lang
+	}
+	if strings.TrimSpace(r.contentID) != "" {
+		rc.SeriesIDs = []string{r.contentID}
+	}
+	lang := r.svc.resolvedAudioLanguage(ctx, r.store, rc)
+	r.resolvedLang[libraryID] = lang
 	return lang
 }
 
@@ -2976,13 +2979,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 	}
 
 	seriesPref := r.audioPreference(ctx)
-
-	preferredLang := r.profileLanguage(ctx)
-
-	libraryAudioLang := ""
-	if seriesPref == nil {
-		libraryAudioLang = r.libraryAudioLanguage(ctx, file.MediaFolderID)
-	}
+	preferredLang := r.audioLanguage(ctx, file.MediaFolderID)
 
 	originalLanguage := ""
 	resolveOriginalLanguage := func() string {
@@ -2992,31 +2989,31 @@ func (s *DetailService) effectiveAudioSelectionWith(
 		return originalLanguage
 	}
 
-	seriesUsesOriginal := seriesPref != nil && seriesPref.AudioLanguage == playback.OriginalLanguageSentinel
-	profileUsesOriginal := preferredLang == playback.OriginalLanguageSentinel
-	libraryUsesOriginal := libraryAudioLang == playback.OriginalLanguageSentinel
-
-	if seriesUsesOriginal {
-		seriesPref.AudioLanguage = resolveOriginalLanguage()
-	}
-	if profileUsesOriginal {
+	usesOriginal := preferredLang == playback.OriginalLanguageSentinel
+	if usesOriginal {
 		preferredLang = resolveOriginalLanguage()
+		if preferredLang == "" {
+			// "original" used to fall through to the roaming profile choice
+			// when the item's original language could not be resolved. Keep that
+			// failure behavior while moving the content-scoped read to canonical
+			// storage.
+			preferredLang = r.profileLanguage(ctx)
+			if preferredLang == playback.OriginalLanguageSentinel {
+				preferredLang = resolveOriginalLanguage()
+			}
+		}
 	}
-	if libraryUsesOriginal {
-		libraryAudioLang = resolveOriginalLanguage()
+	if seriesPref != nil {
+		// The signature/index remain the concrete selection. Language comes
+		// from canonical resolution so a stale legacy language cannot outrank a
+		// profile_series write made through /settings/values.
+		seriesPref.AudioLanguage = preferredLang
 	}
-	if libraryAudioLang != "" {
-		preferredLang = libraryAudioLang
-	}
-
-	useOriginalFallback := seriesUsesOriginal ||
-		(libraryUsesOriginal && libraryAudioLang != "") ||
-		(profileUsesOriginal && libraryAudioLang == "")
 
 	index := playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
 	return effectiveAudioSelection{
 		Index:    index,
-		Language: resolveSelectedAudioLanguage(file, index, originalLanguage, useOriginalFallback),
+		Language: resolveSelectedAudioLanguage(file, index, originalLanguage, usesOriginal),
 	}
 }
 

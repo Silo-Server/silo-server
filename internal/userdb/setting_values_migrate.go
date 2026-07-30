@@ -10,6 +10,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 )
 
+const (
+	sqliteAudioPreferencesTable    = "audio_preferences"
+	sqliteSubtitlePreferencesTable = "subtitle_preferences"
+	sqliteLibraryPreferencesTable  = "library_playback_preferences"
+)
+
 // migrateSettingsToCanonical is the one-time backfill from legacy settings
 // storage into user_setting_values.
 //
@@ -121,7 +127,7 @@ func readLegacySettings(tx *sql.Tx) (settingsmigrate.Input, error) {
 
 	if err := eachRow(tx, `
 SELECT profile_id, series_id, subtitle_language, subtitle_mode, show_forced_subtitles
-  FROM subtitle_preferences`,
+	FROM `+sqliteSubtitlePreferencesTable,
 		func(scan func(...any) error) error {
 			var profileID, seriesID string
 			var language, mode sql.NullString
@@ -130,25 +136,28 @@ SELECT profile_id, series_id, subtitle_language, subtitle_mode, show_forced_subt
 				return err
 			}
 			record := seriesRecord(profileID, seriesID)
+			record.SubtitleSourceTable = sqliteSubtitlePreferencesTable
 			record.SubtitleLanguage = nullString(language)
 			record.SubtitleMode = nullString(mode)
 			record.ShowForcedSubtitles = nullBool(forced)
 			return nil
 		}); err != nil {
-		return input, fmt.Errorf("reading subtitle_preferences: %w", err)
+		return input, fmt.Errorf("reading %s: %w", sqliteSubtitlePreferencesTable, err)
 	}
 
-	if err := eachRow(tx, `SELECT profile_id, series_id, audio_language FROM audio_preferences`,
+	if err := eachRow(tx, `SELECT profile_id, series_id, audio_language FROM `+sqliteAudioPreferencesTable,
 		func(scan func(...any) error) error {
 			var profileID, seriesID string
 			var language sql.NullString
 			if err := scan(&profileID, &seriesID, &language); err != nil {
 				return err
 			}
-			seriesRecord(profileID, seriesID).AudioLanguage = nullString(language)
+			record := seriesRecord(profileID, seriesID)
+			record.AudioSourceTable = sqliteAudioPreferencesTable
+			record.AudioLanguage = nullString(language)
 			return nil
 		}); err != nil {
-		return input, fmt.Errorf("reading audio_preferences: %w", err)
+		return input, fmt.Errorf("reading %s: %w", sqliteAudioPreferencesTable, err)
 	}
 
 	for _, record := range bySeries {
@@ -157,7 +166,7 @@ SELECT profile_id, series_id, subtitle_language, subtitle_mode, show_forced_subt
 
 	if err := eachRow(tx, `
 SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode, show_forced_subtitles
-  FROM library_playback_preferences`,
+	FROM `+sqliteLibraryPreferencesTable,
 		func(scan func(...any) error) error {
 			var row settingsmigrate.LegacyLibraryPreference
 			var audio, subtitle, mode sql.NullString
@@ -166,6 +175,7 @@ SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode,
 				&audio, &subtitle, &mode, &forced); err != nil {
 				return err
 			}
+			row.SourceTable = sqliteLibraryPreferencesTable
 			row.AudioLanguage = nullString(audio)
 			row.SubtitleLanguage = nullString(subtitle)
 			row.SubtitleMode = nullString(mode)
@@ -173,7 +183,7 @@ SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode,
 			input.LibraryPrefs = append(input.LibraryPrefs, row)
 			return nil
 		}); err != nil {
-		return input, fmt.Errorf("reading library_playback_preferences: %w", err)
+		return input, fmt.Errorf("reading %s: %w", sqliteLibraryPreferencesTable, err)
 	}
 
 	return input, nil

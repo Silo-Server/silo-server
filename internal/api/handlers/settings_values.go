@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -36,6 +38,7 @@ type SettingValuesHandler struct {
 	storeProvider userstore.UserStoreProvider
 	contract      *settingscontract.Manifest
 	resolver      *settingsresolve.Resolver
+	libraryLookup libraryLookup
 
 	// deviceSeen throttles device-registry refreshes, one upsert per
 	// deviceSeenThrottle window per (profile, device) — the same shape the
@@ -45,6 +48,13 @@ type SettingValuesHandler struct {
 	// EventsHub, when set, receives a user_settings.changed event after every
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
+}
+
+// SetLibraryLookup wires the catalog lookup used to reject profile_library
+// identities that do not name a real library. The same lookup serves session
+// and admin mutations so the two routes cannot create different orphan rows.
+func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
+	h.libraryLookup = lookup
 }
 
 // NewSettingValuesHandler builds the handler over the embedded contract.
@@ -87,6 +97,22 @@ type settingValueResponse struct {
 	SeriesID  string          `json:"series_id,omitempty"`
 	Value     json.RawMessage `json:"value"`
 	Revision  int64           `json:"revision"`
+	UpdatedAt string          `json:"updated_at,omitempty"`
+}
+
+// explicitSettingValueResponse is one entry from the collection GET. Unset is
+// represented explicitly rather than as a 404 so a settings screen can fetch
+// several profile defaults or device overrides in one request.
+type explicitSettingValueResponse struct {
+	Key       string          `json:"key"`
+	Scope     string          `json:"scope"`
+	ProfileID string          `json:"profile_id,omitempty"`
+	DeviceID  string          `json:"device_id,omitempty"`
+	LibraryID int             `json:"library_id,omitempty"`
+	SeriesID  string          `json:"series_id,omitempty"`
+	IsSet     bool            `json:"is_set"`
+	Value     json.RawMessage `json:"value,omitempty"`
+	Revision  int64           `json:"revision,omitempty"`
 	UpdatedAt string          `json:"updated_at,omitempty"`
 }
 
@@ -191,6 +217,83 @@ func (h *SettingValuesHandler) HandleGetValue(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, settingValueToResponse(*value))
+}
+
+// HandleGetValues returns the explicit values for several keys at exactly one
+// scope. Missing rows remain in the response with is_set false; this is the
+// contract's read shape for independently presenting profile defaults and
+// device/content overrides.
+func (h *SettingValuesHandler) HandleGetValues(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.storeFor(w, r)
+	if !ok {
+		return
+	}
+
+	keys := parseSettingKeys(r.URL.Query().Get("keys"))
+	if len(keys) == 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "Query parameter keys is required")
+		return
+	}
+	identity, ok := h.identityForSessionKey(w, r, keys[0])
+	if !ok {
+		return
+	}
+	for _, key := range keys[1:] {
+		def, exists := h.definitionFor(w, key)
+		if !exists {
+			return
+		}
+		if !def.AllowsScope(identity.Scope) {
+			writeError(w, http.StatusBadRequest, "scope_not_allowed",
+				key+" cannot be set at "+string(identity.Scope))
+			return
+		}
+	}
+
+	query := userstore.SettingResolutionQuery{Keys: keys}
+	switch identity.Scope {
+	case settingscontract.ScopeProfile:
+		query.ProfileIDs = []string{identity.ProfileID}
+	case settingscontract.ScopeProfileDevice:
+		query.ProfileIDs = []string{identity.ProfileID}
+		query.DeviceID = identity.DeviceID
+	case settingscontract.ScopeProfileLibrary:
+		query.ProfileIDs = []string{identity.ProfileID}
+		query.LibraryIDs = []int{identity.LibraryID}
+	case settingscontract.ScopeProfileSeries:
+		query.ProfileIDs = []string{identity.ProfileID}
+		query.SeriesIDs = []string{identity.SeriesID}
+	}
+	stored, err := store.ListSettingValuesForResolution(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to read settings")
+		return
+	}
+	byKey := make(map[string]userstore.SettingValue, len(stored))
+	for _, value := range stored {
+		if sameSettingContext(value.SettingIdentity, identity) {
+			byKey[value.Key] = value
+		}
+	}
+
+	out := make([]explicitSettingValueResponse, 0, len(keys))
+	for _, key := range keys {
+		entry := explicitSettingValueResponse{
+			Key: key, Scope: string(identity.Scope), ProfileID: identity.ProfileID,
+			DeviceID: identity.DeviceID, LibraryID: identity.LibraryID, SeriesID: identity.SeriesID,
+		}
+		if value, exists := byKey[key]; exists {
+			entry.IsSet = true
+			entry.Value = value.Value
+			entry.Revision = value.Revision
+			entry.UpdatedAt = value.UpdatedAt
+		}
+		out = append(out, entry)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		fieldValues:   out,
+		fieldRevision: h.contract.Revision,
+	})
 }
 
 // HandleSetValue writes an explicit value at one scope.
@@ -555,7 +658,13 @@ func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) 
 func (h *SettingValuesHandler) identityFromRequest(
 	w http.ResponseWriter, r *http.Request,
 ) (userstore.SettingIdentity, bool) {
-	key, scope, ok := h.keyedScopeFromRequest(w, r)
+	return h.identityForSessionKey(w, r, chi.URLParam(r, "key"))
+}
+
+func (h *SettingValuesHandler) identityForSessionKey(
+	w http.ResponseWriter, r *http.Request, requestedKey string,
+) (userstore.SettingIdentity, bool) {
+	key, scope, ok := h.keyedScope(w, requestedKey, r.URL.Query())
 	if !ok {
 		return userstore.SettingIdentity{}, false
 	}
@@ -581,7 +690,7 @@ func (h *SettingValuesHandler) identityFromRequest(
 		}
 	}
 
-	return h.completeIdentity(w, r.URL.Query(), identity)
+	return h.completeIdentity(w, r.Context(), r.URL.Query(), identity)
 }
 
 // keyedScopeFromRequest parses the parts every scoped request names: a key
@@ -589,7 +698,13 @@ func (h *SettingValuesHandler) identityFromRequest(
 func (h *SettingValuesHandler) keyedScopeFromRequest(
 	w http.ResponseWriter, r *http.Request,
 ) (string, settingscontract.Scope, bool) {
-	key := chi.URLParam(r, "key")
+	return h.keyedScope(w, chi.URLParam(r, "key"), r.URL.Query())
+}
+
+func (h *SettingValuesHandler) keyedScope(
+	w http.ResponseWriter, requestedKey string, query url.Values,
+) (string, settingscontract.Scope, bool) {
+	key := strings.TrimSpace(requestedKey)
 	if strings.TrimSpace(key) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "A setting key is required")
 		return "", "", false
@@ -598,7 +713,7 @@ func (h *SettingValuesHandler) keyedScopeFromRequest(
 		return "", "", false
 	}
 
-	scope := settingscontract.Scope(strings.TrimSpace(r.URL.Query().Get("scope")))
+	scope := settingscontract.Scope(strings.TrimSpace(query.Get("scope")))
 	if scope == "" {
 		writeError(w, http.StatusBadRequest, "bad_request",
 			"A scope is required: account, profile, profile_device, profile_library or profile_series")
@@ -611,7 +726,7 @@ func (h *SettingValuesHandler) keyedScopeFromRequest(
 // checks the session and admin routes share: the identity matches its scope's
 // columns and the contract allows the key at that scope.
 func (h *SettingValuesHandler) completeIdentity(
-	w http.ResponseWriter, query url.Values, identity userstore.SettingIdentity,
+	w http.ResponseWriter, ctx context.Context, query url.Values, identity userstore.SettingIdentity,
 ) (userstore.SettingIdentity, bool) {
 	if identity.Scope == settingscontract.ScopeProfileLibrary {
 		libraryID, err := strconv.Atoi(strings.TrimSpace(query.Get("library_id")))
@@ -621,6 +736,9 @@ func (h *SettingValuesHandler) completeIdentity(
 			return userstore.SettingIdentity{}, false
 		}
 		identity.LibraryID = libraryID
+		if !h.libraryContextExists(w, ctx, libraryID) {
+			return userstore.SettingIdentity{}, false
+		}
 	}
 	if identity.Scope == settingscontract.ScopeProfileSeries {
 		identity.SeriesID = strings.TrimSpace(query.Get("series_id"))
@@ -646,6 +764,28 @@ func (h *SettingValuesHandler) completeIdentity(
 	}
 
 	return identity, true
+}
+
+func (h *SettingValuesHandler) libraryContextExists(
+	w http.ResponseWriter, ctx context.Context, libraryID int,
+) bool {
+	if h.libraryLookup == nil {
+		return true
+	}
+	if _, err := h.libraryLookup.GetByID(ctx, libraryID); err != nil {
+		if errors.Is(err, catalog.ErrFolderNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Library not found")
+			return false
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to look up library")
+		return false
+	}
+	return true
+}
+
+func sameSettingContext(a, b userstore.SettingIdentity) bool {
+	return a.Scope == b.Scope && a.ProfileID == b.ProfileID &&
+		a.DeviceID == b.DeviceID && a.LibraryID == b.LibraryID && a.SeriesID == b.SeriesID
 }
 
 func settingValueToResponse(value userstore.SettingValue) settingValueResponse {

@@ -9,6 +9,32 @@ import (
 
 var ErrCollectionGroupNotFound = errors.New("collection group not found")
 
+// PreferenceSettingsWriter is the subset of the user store that participates
+// in legacy-preference/canonical-setting synchronization. Implementations pass
+// a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
+// can commit the legacy row and every canonical row as one unit.
+type PreferenceSettingsWriter interface {
+	// UpdateProfile writes the legacy profile preference columns that shipped
+	// clients still mutate during the canonical-settings cutover.
+	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
+	SetSubtitlePreference(ctx context.Context, pref SubtitlePreference) error
+	DeleteSubtitlePreference(ctx context.Context, profileID, seriesID string) error
+	SetAudioPreference(ctx context.Context, pref AudioPreference) error
+	DeleteAudioPreference(ctx context.Context, profileID, seriesID string) error
+	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
+	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
+	// UpsertSettingValue writes one explicit value and increments its revision.
+	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	// DeleteSettingValue removes one explicit value and reports whether it existed.
+	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+}
+
+// PreferenceSettingsTransactioner is implemented by stores that can atomically
+// synchronize a shipped legacy preference row with its canonical values.
+type PreferenceSettingsTransactioner interface {
+	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
+}
+
 // UserStore defines the interface for per-user data storage.
 // Both SQLite and Postgres backends implement this interface.
 type UserStore interface {

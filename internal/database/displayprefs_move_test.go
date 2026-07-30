@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/Silo-Server/silo-server/internal/jellycompat/displayprefs"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -364,6 +365,155 @@ SELECT COUNT(*) FROM jellycompat_displayprefs
 	}
 	if copied != 1 {
 		t.Errorf("re-run copied %d late rows, want 1", copied)
+	}
+}
+
+// TestPostgresDisplayPrefsRollbackDoesNotDeleteConcurrentUpdates reproduces
+// the inverse rolling-deploy window: a new-binary app instance updates a blob
+// after the rollback has read it but before the rollback deletes it. The
+// rollback may restore its older snapshot to user_settings, but it must leave
+// the newer canonical value in place rather than deleting a value it never
+// restored.
+func TestPostgresDisplayPrefsRollbackDoesNotDeleteConcurrentUpdates(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
+		t.Fatalf("initial migration: %v", err)
+	}
+
+	var userID int
+	err = pool.QueryRow(ctx, `
+INSERT INTO users (username, email, password_hash, role)
+VALUES ('displayprefs-rollback-racetest', 'displayprefs-rollback-racetest@example.com', 'x', 'user')
+ON CONFLICT (username) DO UPDATE SET email = EXCLUDED.email
+RETURNING id`).Scan(&userID)
+	if err != nil {
+		t.Fatalf("seeding user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+	})
+	for _, stmt := range []string{
+		`DELETE FROM user_settings WHERE user_id = $1`,
+		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1`,
+		`DELETE FROM user_setting_migration_rejects WHERE user_id = $1`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, userID); err != nil {
+			t.Fatalf("clearing prior rows: %v", err)
+		}
+	}
+
+	const (
+		prefsID       = "usersettings"
+		client        = "emby"
+		originalValue = `{"SortBy":"SortName"}`
+		updatedValue  = `{"SortBy":"Runtime"}`
+	)
+	if _, err := pool.Exec(ctx, `
+INSERT INTO jellycompat_displayprefs (user_id, prefs_id, client, value)
+VALUES ($1, $2, $3, $4)`, userID, prefsID, client, originalValue); err != nil {
+		t.Fatalf("seeding moved row: %v", err)
+	}
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	// Hold the destination identity open so the rollback stalls after reading
+	// the canonical row but before its insert and delete.
+	blockerTx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin blocker: %v", err)
+	}
+	blockerReleased := false
+	defer func() {
+		if !blockerReleased {
+			_ = blockerTx.Rollback()
+		}
+	}()
+	legacyKey := displayprefs.LegacyKey(prefsID, client)
+	if _, err := blockerTx.ExecContext(ctx, `
+INSERT INTO user_settings (user_id, key, value)
+VALUES ($1, $2, 'blocker')`, userID, legacyKey); err != nil {
+		t.Fatalf("blocker insert: %v", err)
+	}
+
+	rollbackDone := make(chan error, 1)
+	go func() {
+		tx, err := sqlDB.BeginTx(ctx, nil)
+		if err != nil {
+			rollbackDone <- fmt.Errorf("begin rollback: %w", err)
+			return
+		}
+		if err := unmoveDisplayPrefs(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			rollbackDone <- fmt.Errorf("unmoveDisplayPrefs: %w", err)
+			return
+		}
+		rollbackDone <- tx.Commit()
+	}()
+
+	waitDeadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM pg_stat_activity
+ WHERE wait_event_type = 'Lock' AND query LIKE '%INSERT INTO user_settings%'`).
+			Scan(&waiting); err != nil {
+			t.Fatalf("polling pg_stat_activity: %v", err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("the rollback never blocked on the conflicting insert")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if _, err := pool.Exec(ctx, `
+UPDATE jellycompat_displayprefs SET value = $4
+ WHERE user_id = $1 AND prefs_id = $2 AND client = $3`,
+		userID, prefsID, client, updatedValue); err != nil {
+		t.Fatalf("committing the concurrent canonical update: %v", err)
+	}
+
+	blockerReleased = true
+	if err := blockerTx.Rollback(); err != nil {
+		t.Fatalf("releasing blocker: %v", err)
+	}
+	if err := <-rollbackDone; err != nil {
+		t.Fatalf("rollback under contention: %v", err)
+	}
+
+	var survivingValue string
+	if err := pool.QueryRow(ctx, `
+SELECT value FROM jellycompat_displayprefs
+ WHERE user_id = $1 AND prefs_id = $2 AND client = $3`,
+		userID, prefsID, client).Scan(&survivingValue); err != nil {
+		t.Fatalf("concurrently updated canonical row was deleted: %v", err)
+	}
+	if survivingValue != updatedValue {
+		t.Errorf("surviving canonical value = %q, want %q", survivingValue, updatedValue)
+	}
+
+	var restoredValue string
+	if err := pool.QueryRow(ctx, `
+SELECT value FROM user_settings WHERE user_id = $1 AND key = $2`,
+		userID, legacyKey).Scan(&restoredValue); err != nil {
+		t.Fatalf("reading restored legacy snapshot: %v", err)
+	}
+	if restoredValue != originalValue {
+		t.Errorf("restored legacy value = %q, want the rollback snapshot %q",
+			restoredValue, originalValue)
 	}
 }
 

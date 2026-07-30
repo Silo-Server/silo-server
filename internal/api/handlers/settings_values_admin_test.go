@@ -100,6 +100,24 @@ func TestAdminSettingValuesRefuseNonAdmins(t *testing.T) {
 	}
 }
 
+func TestAdminSettingValuesRejectNonexistentLibraryContext(t *testing.T) {
+	env := newAdminValuesEnv(t)
+	env.handler.SetLibraryLookup(settingValuesLibraryLookup{existing: map[int]bool{7: true}})
+
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		var body []byte
+		if method == http.MethodPut {
+			body = []byte(`{"value":"de"}`)
+		}
+		rec := env.do(t, "admin", method,
+			"/admin/users/7/settings/values/playback.subtitle_language?scope=profile_library&profile_id=profile-1&library_id=99",
+			body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s nonexistent library = %d, want 404: %s", method, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestAdminListShowsAnotherUsersValuesAcrossScopes(t *testing.T) {
 	env := newAdminValuesEnv(t)
 	ctx := context.Background()
