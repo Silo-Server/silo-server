@@ -106,6 +106,59 @@ const (
 	HeaderRefreshSessionV3 HeaderRefreshModeV3 = "session"
 )
 
+// AudioOnlyRemuxMIMEV3 is the content type of the fragmented MP4 the remux
+// pipeline produces for a source with no video track. The transport serves the
+// same value, so a client that gates attachment on the advertised MIME sees a
+// promise the response keeps.
+const AudioOnlyRemuxMIMEV3 = "audio/mp4"
+
+// Dynamic-range vocabulary shared by source descriptors, effective recipes and
+// the range a transformation promises to produce.
+const (
+	DynamicRangeSDRV3         = "sdr"
+	DynamicRangeHDR10V3       = "hdr10"
+	DynamicRangeDolbyVisionV3 = "dolby_vision"
+)
+
+// Server transformation names. A plan names the transformations its serving
+// executor must run; the registry keys availability by the same names.
+const (
+	TransformationAudioToAACV3     = "audio_to_aac"
+	TransformationVideoToH264V3    = "video_to_h264"
+	TransformationServerDV7HDR10V3 = "server_dv7_to_hdr10"
+)
+
+// Transformation executors: who runs the transformation. A "server"
+// transformation is performed by the serving executor before the bytes leave
+// the server; a "client" one is the client's own responsibility.
+const (
+	ExecutorServerV3 = "server"
+	ExecutorClientV3 = "client"
+)
+
+// Validated claims a server transformation asserts about its output: neutral
+// statements about the bytes, not client-framework decoder names.
+const (
+	ClaimAudioDecodeV3                = "audio_decode"
+	ClaimH264DecodeV3                 = "h264_decode"
+	ClaimDolbyVisionMetadataRemovedV3 = "dolby_vision_metadata_removed"
+	ClaimHDR10BaseLayerPreservedV3    = "hdr10_base_layer_preserved"
+	ClaimEnhancementLayerDiscardedV3  = "enhancement_layer_discarded"
+)
+
+// DV7ToHDR10ClaimsV3 returns the claims the server DV7→HDR10 transformation
+// asserts. A fresh slice keeps callers from mutating the shared contract.
+func DV7ToHDR10ClaimsV3() []string {
+	return []string{ClaimDolbyVisionMetadataRemovedV3, ClaimHDR10BaseLayerPreservedV3, ClaimEnhancementLayerDiscardedV3}
+}
+
+// Terminal reasons reported when a required conversion toolchain is absent.
+const (
+	TerminalAudioConversionUnsupportedV3 = "audio_conversion_unsupported"
+	TerminalVideoConversionUnsupportedV3 = "video_conversion_unsupported"
+	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
+)
+
 type SubtitleModeV3 string
 
 const (
@@ -309,6 +362,15 @@ const (
 	ReplanOperationFailureRecoveryV3     ReplanOperationV3 = "failure_recovery"
 	ReplanOperationSeekReanchorV3        ReplanOperationV3 = "seek_reanchor"
 	ReplanOperationSeekFailureRecoveryV3 ReplanOperationV3 = "seek_failure_recovery"
+	// ReplanOperationTrackChangeV3 replaces the legacy audio PATCH: the client
+	// sends new selected_tracks and no failure classification. It runs through
+	// the same replan transaction as failure recovery, inheriting idempotency
+	// and restart safety.
+	ReplanOperationTrackChangeV3 ReplanOperationV3 = "track_change"
+	// ReplanOperationQualityChangeV3 replaces the client-recipe half of the
+	// legacy transcode start: the client sends a quality_preference chosen from
+	// the plan's available_qualities and no failure classification.
+	ReplanOperationQualityChangeV3 ReplanOperationV3 = "quality_change"
 )
 
 type ReplanRequestV3 struct {
@@ -536,6 +598,22 @@ type DegradationWarningV3 struct {
 	Message string `json:"message"`
 }
 
+// QualityOriginalV3 is the quality preference that pins the source ladder
+// rung: the plan must preserve the source's own height and bitrate rather than
+// pick a transcode rung. Distinct from OriginalLanguageSentinel, which selects
+// a track's original language.
+const QualityOriginalV3 = "original"
+
+// AvailableQualityV3 is one server-ladder rung valid for this source and
+// client, published on the plan so clients can render a quality menu without
+// owning a bitrate table. The QualityOriginalV3 entry preserves the source.
+type AvailableQualityV3 struct {
+	Label           string `json:"label"`
+	Height          int    `json:"height,omitempty"`
+	BitrateKbps     int    `json:"bitrate_kbps,omitempty"`
+	PreservesSource bool   `json:"preserves_source"`
+}
+
 type PlanV3 struct {
 	ProtocolVersion int    `json:"protocol_version"`
 	PlanID          string `json:"plan_id"`
@@ -555,6 +633,7 @@ type PlanV3 struct {
 	Transformations        []TransformationV3     `json:"transformations"`
 	AppliedQuirks          []AppliedQuirkV3       `json:"applied_quirks"`
 	RuntimeCorrections     []string               `json:"runtime_corrections"`
+	AvailableQualities     []AvailableQualityV3   `json:"available_qualities"`
 	DegradationWarnings    []DegradationWarningV3 `json:"degradation_warnings"`
 	DecisionReason         string                 `json:"decision_reason"`
 	RequestedMediaFileID   int                    `json:"requested_media_file_id"`
@@ -643,8 +722,8 @@ func NormalizeQualityV3(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "auto":
 		return "auto", false
-	case "original", "source", "max":
-		return "original", false
+	case QualityOriginalV3, "source", "max":
+		return QualityOriginalV3, false
 	case "2160p", "4k", "uhd":
 		return "2160p", false
 	case "1080p", "fhd":
@@ -697,6 +776,16 @@ func (r ReplanRequestV3) Validate() error {
 		// An exact seek reanchor is a timeline operation, not a failed recipe.
 		// Classification remains accepted for older callers but is not required
 		// and never selects seek semantics.
+	case ReplanOperationTrackChangeV3:
+		// A user track change is not a failure; no classification is required.
+	case ReplanOperationQualityChangeV3:
+		// A user quality change is not a failure either, but it must actually
+		// name the wanted rung: an empty preference would silently mean "auto",
+		// which is a different user intent than the menu selection this
+		// operation models.
+		if strings.TrimSpace(r.QualityPreference) == "" {
+			return errors.New("quality_change requires a quality_preference")
+		}
 	default:
 		return errors.New("invalid replan operation")
 	}
@@ -812,7 +901,7 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				len(transformation.ValidatedClaims) > 32 {
 				return errors.New("invalid delivery transformation capability")
 			}
-			if transformation.Executor == "client" {
+			if transformation.Executor == ExecutorClientV3 {
 				if !delivery.Enabled || !delivery.SupportedOnDevice || !HasFeatureV3(features, FeatureClientVideoTransforms) {
 					return errors.New("client transformation capability is not enabled")
 				}

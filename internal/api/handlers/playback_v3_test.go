@@ -1966,6 +1966,195 @@ func marshalV3StartRequest(t *testing.T, request playback.StartRequestV3) string
 	return string(body)
 }
 
+// track_change is a user operation, not a failure: no classification is sent,
+// the previous route stays eligible, and duplicates replay idempotently.
+func TestHandleReplanPlaybackV3TrackChangeOperation(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+	audioIndex := 1
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	replan := playback.ReplanRequestV3{
+		ProtocolVersion:   playback.ProtocolV3,
+		Operation:         playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID,
+		ReplanRequestID:   "track-change-0001",
+		FailedPlanID:      started.PlaybackPlan.PlanID,
+		PlanAttemptID:     "plan-attempt-track-0001",
+		PlanAttemptKey:    currentKey,
+		// A defensive echo of the current key must not push the current route
+		// off the table: nothing failed.
+		AttemptedPlanKeys:     []string{currentKey},
+		AttemptCount:          1,
+		PositionSeconds:       45,
+		SelectedTracks:        playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex}},
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	}
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func() playback.DecisionResponseV3 {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+		req = withPlaybackRouteParam(req, "session_id", started.SessionID)
+		rr := httptest.NewRecorder()
+		handler.HandleReplanPlaybackV3(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("track change status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var response playback.DecisionResponseV3
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	first := call()
+	second := call()
+	if first.PlaybackPlan == nil || second.PlaybackPlan == nil || first.PlaybackPlan.PlanID != second.PlaybackPlan.PlanID {
+		t.Fatalf("first=%#v second=%#v", first, second)
+	}
+	if first.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("track change left the validated route: %#v", first.PlaybackPlan)
+	}
+	if first.PlaybackPlan.SelectedTracks.Audio == nil || first.PlaybackPlan.SelectedTracks.Audio.Index == nil || *first.PlaybackPlan.SelectedTracks.Audio.Index != audioIndex {
+		t.Fatalf("selected tracks = %#v", first.PlaybackPlan.SelectedTracks)
+	}
+	session, err := manager.GetSession(started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.AudioTrackIndex != audioIndex {
+		t.Fatalf("audio index = %d, want %d", session.AudioTrackIndex, audioIndex)
+	}
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A track change without a quality field keeps the durable quality intact.
+	if record.NormalizedRequest.QualityPreference != "original" {
+		t.Fatalf("quality after track change = %q", record.NormalizedRequest.QualityPreference)
+	}
+}
+
+// quality_change carries a new preference with no failure classification and
+// runs through the same transaction: idempotent duplicates, durable quality.
+func TestHandleReplanPlaybackV3QualityChangeOperation(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "auto"
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+	if len(started.PlaybackPlan.AvailableQualities) == 0 || started.PlaybackPlan.AvailableQualities[0].Label != "original" {
+		t.Fatalf("available qualities = %#v", started.PlaybackPlan.AvailableQualities)
+	}
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	replan := playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationQualityChangeV3,
+		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
+		ReplanRequestID:       "quality-change-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "plan-attempt-quality-0001",
+		PlanAttemptKey:        currentKey,
+		AttemptedPlanKeys:     []string{currentKey},
+		AttemptCount:          1,
+		QualityPreference:     "original",
+		PositionSeconds:       60,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	}
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func() playback.DecisionResponseV3 {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+		req = withPlaybackRouteParam(req, "session_id", started.SessionID)
+		rr := httptest.NewRecorder()
+		handler.HandleReplanPlaybackV3(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("quality change status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var response playback.DecisionResponseV3
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	first := call()
+	second := call()
+	if first.PlaybackPlan == nil || second.PlaybackPlan == nil || first.PlaybackPlan.PlanID != second.PlaybackPlan.PlanID {
+		t.Fatalf("first=%#v second=%#v", first, second)
+	}
+	if first.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("quality change plan = %#v", first.PlaybackPlan)
+	}
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.NormalizedRequest.QualityPreference != "original" {
+		t.Fatalf("durable quality = %q", record.NormalizedRequest.QualityPreference)
+	}
+}
+
+// An audio-only source (audiobook) must start over the v3 planner end to end.
+func TestHandleStartPlaybackV3AudioOnlySource(t *testing.T) {
+	file := &models.MediaFile{ID: 42, ContentID: "book-1", FilePath: writePlaybackTestMediaFile(t, "book.m4b"), Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	request := v3HandlerStartRequest()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Outcome != playback.OutcomePlayableV3 || response.PlaybackPlan == nil {
+		t.Fatalf("response = %#v", response)
+	}
+	if response.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 || response.PlaybackPlan.Stream.URL == "" {
+		t.Fatalf("plan = %#v", response.PlaybackPlan)
+	}
+	if response.PlaybackPlan.Source.VideoCodec != "" || response.PlaybackPlan.Subtitle.Mode != playback.SubtitleOffV3 {
+		t.Fatalf("audio-only plan carried video state: %#v", response.PlaybackPlan)
+	}
+}
+
 func postPlaybackReplanV3(t *testing.T, handler *PlaybackHandler, sessionID string, request playback.ReplanRequestV3) playback.DecisionResponseV3 {
 	t.Helper()
 	body, err := json.Marshal(request)

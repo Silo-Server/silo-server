@@ -153,6 +153,17 @@ func (f *MediaFile) PrimaryDVProfile() int {
 	return f.VideoTracks[0].DVProfile
 }
 
+// IsAudioOnly reports whether a probed file carries no video stream at all —
+// audiobooks and music, as opposed to a video file whose probe is incomplete.
+// Both track evidence and the flat codec column must agree, so a partially
+// probed video file is never mistaken for an audio-only source.
+func (f *MediaFile) IsAudioOnly() bool {
+	if f == nil {
+		return false
+	}
+	return len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == ""
+}
+
 // NormalizeVideoBitDepth returns an explicit probe value when available and
 // otherwise derives the bit depth from stable ffprobe fields. FFprobe commonly
 // omits bits_per_raw_sample for HEVC even though the pixel format and profile

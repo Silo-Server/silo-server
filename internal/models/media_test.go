@@ -74,3 +74,44 @@ func TestVideoTrackColorRangeJSON(t *testing.T) {
 		})
 	}
 }
+
+// An audio-only verdict drives playback planning down a route family with no
+// video, HDR, or subtitle-burn gates, so it has to distinguish a genuine
+// audiobook from a video file whose probe never filled in its track rows.
+func TestMediaFileIsAudioOnly(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		file *MediaFile
+		want bool
+	}{
+		{name: "nil file", file: nil},
+		{
+			name: "audiobook",
+			file: &MediaFile{CodecAudio: "aac", AudioTracks: []AudioTrack{{Codec: "aac"}}},
+			want: true,
+		},
+		{
+			name: "fully probed video",
+			file: &MediaFile{CodecVideo: "h264", VideoTracks: []VideoTrack{{Codec: "h264"}}},
+		},
+		{
+			name: "video with no track rows",
+			file: &MediaFile{CodecVideo: "h264"},
+		},
+		{
+			name: "video track without flat codec",
+			file: &MediaFile{VideoTracks: []VideoTrack{{Codec: "h264"}}},
+		},
+		{
+			name: "blank flat codec is not evidence of video",
+			file: &MediaFile{CodecVideo: "  ", CodecAudio: "flac"},
+			want: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.file.IsAudioOnly(); got != test.want {
+				t.Fatalf("IsAudioOnly() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}

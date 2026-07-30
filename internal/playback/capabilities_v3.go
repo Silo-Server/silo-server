@@ -82,7 +82,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		if file.HDR {
 			source.DynamicRange = "hdr_unknown"
 		} else {
-			source.DynamicRange = "sdr"
+			source.DynamicRange = DynamicRangeSDRV3
 		}
 	}
 	return source
@@ -253,7 +253,7 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 
 func normalizeDynamicRangeV3(track models.VideoTrack) string {
 	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
-		return "dolby_vision"
+		return DynamicRangeDolbyVisionV3
 	}
 	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
 		return "hdr10_plus"
@@ -263,12 +263,12 @@ func normalizeDynamicRangeV3(track models.VideoTrack) string {
 		return "hlg"
 	}
 	if strings.Contains(joined, "hdr") || strings.Contains(joined, "smpte2084") || strings.Contains(joined, "pq") {
-		return "hdr10"
+		return DynamicRangeHDR10V3
 	}
 	if joined == "  " || strings.TrimSpace(joined) == "" {
 		return ""
 	}
-	return "sdr"
+	return DynamicRangeSDRV3
 }
 
 func parseFrameRateV3(value string) float64 {

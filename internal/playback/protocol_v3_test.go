@@ -134,6 +134,22 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 		t.Fatalf("seek failure recovery operation: %v", err)
 	}
 
+	request.Operation = ReplanOperationTrackChangeV3
+	request.Failure = FailureV3{}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("track change without a failure classification: %v", err)
+	}
+
+	request.Operation = ReplanOperationQualityChangeV3
+	request.QualityPreference = ""
+	if err := request.Validate(); err == nil {
+		t.Fatal("quality change without a quality_preference was accepted")
+	}
+	request.QualityPreference = "720p"
+	if err := request.Validate(); err != nil {
+		t.Fatalf("quality change without a failure classification: %v", err)
+	}
+
 	request.Operation = "future_operation"
 	if err := request.Validate(); err == nil {
 		t.Fatal("unknown replan operation was accepted")
@@ -1260,5 +1276,164 @@ func TestPlanPlaybackV3DoesNotProbeWhenNoStripIsOnTheTable(t *testing.T) {
 	}
 	if probed {
 		t.Fatal("an ordinary SDR source paid for a Dolby Vision RPU probe")
+	}
+}
+
+// availableQualities must publish the transcode ladder below the source height
+// plus the source-preserving "original" entry, and shrink to "original" alone
+// when the transcode route cannot execute.
+func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].BitDepth = 8
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	labels := make([]string, 0, len(result.Plan.AvailableQualities))
+	for _, quality := range result.Plan.AvailableQualities {
+		labels = append(labels, quality.Label)
+	}
+	if len(labels) != 4 || labels[0] != "original" || labels[1] != "1080p" || labels[2] != "720p" || labels[3] != "480p" {
+		t.Fatalf("labels = %v", labels)
+	}
+	if !result.Plan.AvailableQualities[0].PreservesSource || result.Plan.AvailableQualities[0].Height != 2160 {
+		t.Fatalf("original entry = %#v", result.Plan.AvailableQualities[0])
+	}
+	if result.Plan.AvailableQualities[2].BitrateKbps != 2_000 {
+		t.Fatalf("720p bitrate = %#v", result.Plan.AvailableQualities[2])
+	}
+
+	// Without an HLS delivery the ladder cannot execute: menu shrinks to
+	// original only.
+	noHLS := validStartRequestV3()
+	noHLS.Capabilities.VideoDecode = req.Capabilities.VideoDecode
+	delete(noHLS.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
+	result = PlanPlaybackV3(PlannerInputV3{Request: noHLS, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || len(result.Plan.AvailableQualities) != 1 || result.Plan.AvailableQualities[0].Label != "original" {
+		t.Fatalf("no-HLS qualities = %#v (%s)", result.Plan, ExplainPlannerResultV3(result))
+	}
+}
+
+func audioOnlyFixtureFileV3() *models.MediaFile {
+	return &models.MediaFile{ID: 77, FilePath: "/media/audiobook.m4b", Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
+}
+
+// An audio-only source with client-decodable audio must plan the validated
+// original route, skipping every video/HDR/subtitle gate.
+func TestPlanPlaybackV3AudioOnlyPlansOriginalHTTP(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.Containers = []string{"mp4"}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.DecisionReason != "validated_original_playback" {
+		t.Fatalf("decision reason = %q", result.Plan.DecisionReason)
+	}
+	if result.Plan.EffectiveRecipe.VideoCodec != "" || result.Plan.Subtitle.Mode != SubtitleOffV3 {
+		t.Fatalf("audio-only plan carried video state: %#v", result.Plan)
+	}
+	if len(result.Plan.AvailableQualities) != 1 || result.Plan.AvailableQualities[0].Label != "original" || !result.Plan.AvailableQualities[0].PreservesSource {
+		t.Fatalf("audio-only qualities = %#v", result.Plan.AvailableQualities)
+	}
+	if !strings.HasPrefix(result.Plan.PlanAttemptKey, "v3:") {
+		t.Fatalf("attempt key = %q", result.Plan.PlanAttemptKey)
+	}
+}
+
+// An audio-only source whose codec the client cannot decode must take the
+// progressive audio_to_aac conversion route, and keep an accurate retryable
+// terminal when the toolchain is missing.
+func TestPlanPlaybackV3AudioOnlyConvertsUnsupportedCodec(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	file.CodecAudio = "flac"
+	file.AudioTracks[0].Codec = "flac"
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.Containers = []string{"mp4"}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.DecisionReason != "audio_adaptation" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "audio_to_aac" {
+		t.Fatalf("plan = %#v", result.Plan)
+	}
+
+	noToolchain := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "1"}})
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: noToolchain})
+	if result.Terminal == nil || result.Terminal.Reason != "audio_conversion_unsupported" || !result.Terminal.Retryable {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// A container mismatch on decodable audio is a remux, not a conversion, and a
+// client with neither route left gets an honest terminal. An audio-only file
+// with no probed audio codec keeps its own metadata terminal.
+func TestPlanPlaybackV3AudioOnlyRemuxesForeignContainerAndTerminals(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	file.Container = "ogg"
+	file.FilePath = "/media/audiobook.ogg"
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.Containers = []string{"mp4"}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.TranscodeAudio {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.DecisionReason != "container_normalization" {
+		t.Fatalf("decision reason = %q", result.Plan.DecisionReason)
+	}
+
+	progressiveless := validStartRequestV3()
+	progressiveless.FileID = file.ID
+	progressiveless.Capabilities.Containers = []string{"mkv"}
+	delete(progressiveless.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+	result = PlanPlaybackV3(PlannerInputV3{Request: progressiveless, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "adaptation_unavailable" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+
+	unprobed := audioOnlyFixtureFileV3()
+	unprobed.CodecAudio = ""
+	unprobed.AudioTracks = nil
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: unprobed, EffectiveFile: unprobed, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// Loop prevention applies to audio-only routes exactly like video routes: an
+// attempted original route falls to the conversion remux, and an exhausted
+// route family terminals.
+func TestPlanPlaybackV3AudioOnlyHonorsAttemptedKeys(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.Containers = []string{"mp4"}
+	input := PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()}
+
+	first := PlanPlaybackV3(input)
+	if first.Plan == nil || first.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("first = %s", ExplainPlannerResultV3(first))
+	}
+	input.AttemptedKeys = []string{first.Plan.PlanAttemptKey}
+	second := PlanPlaybackV3(input)
+	if second.Plan == nil || second.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("second = %s", ExplainPlannerResultV3(second))
+	}
+	input.AttemptedKeys = append(input.AttemptedKeys, second.Plan.PlanAttemptKey)
+	third := PlanPlaybackV3(input)
+	if third.Terminal == nil || third.Terminal.Reason != "adaptation_exhausted" {
+		t.Fatalf("third = %s", ExplainPlannerResultV3(third))
 	}
 }

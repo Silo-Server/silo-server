@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -196,6 +198,76 @@ func TestHandleStream_KeepsSessionWhenLookupFailsForNonMissingReason(t *testing.
 	}
 	if syncer.calls != 0 {
 		t.Fatalf("sync calls = %d, want 0", syncer.calls)
+	}
+}
+
+// A v3 plan for an audio-only source promises audio/mp4, because a
+// declared-tier client probes the advertised MIME with isTypeSupported before
+// it will attach a source buffer and "video/mp4" for a stream carrying no video
+// track is exactly the mismatch that makes that probe lie. The remux response
+// has to keep the promise the plan made.
+func TestHandleStream_AudioOnlyRemuxServesAudioContentType(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		file        *models.MediaFile
+		wantContent string
+	}{
+		{
+			name: "audio only source",
+			file: &models.MediaFile{
+				ID:         42,
+				ContentID:  "audiobook-1",
+				CodecAudio: "flac",
+				Duration:   39600,
+			},
+			wantContent: playback.AudioOnlyRemuxMIMEV3,
+		},
+		{
+			name: "video source",
+			file: &models.MediaFile{
+				ID:          42,
+				ContentID:   "movie-1",
+				CodecVideo:  "h264",
+				CodecAudio:  "flac",
+				VideoTracks: []models.VideoTrack{{Codec: "h264"}},
+				Duration:    3600,
+			},
+			wantContent: "video/mp4",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := *tc.file
+			file.FilePath = writePlaybackTestMediaFile(t, "source.mkv")
+
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayRemux, true)
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf muxed\n"), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
+			}
+			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: &file})
+			handler.PlaybackConfig = func() config.PlaybackConfig {
+				return config.PlaybackConfig{FFmpegPath: ffmpeg}
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID, nil)
+			req = req.WithContext(newAuthorizedPlaybackContext())
+			req = withPlaybackRouteParam(req, "session_id", session.ID)
+
+			rr := httptest.NewRecorder()
+			handler.HandleStream(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			if got := rr.Header().Get("Content-Type"); got != tc.wantContent {
+				t.Fatalf("Content-Type = %q, want %q", got, tc.wantContent)
+			}
+		})
 	}
 }
 

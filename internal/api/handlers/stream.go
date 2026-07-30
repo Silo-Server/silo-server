@@ -159,7 +159,19 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
-		if err := playback.ServeRemuxWithDVMode(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
+		// An audio-only source muxes an audio-only fMP4. The v3 plan promises
+		// audio/mp4 for it, and a declared-tier client refuses to attach a
+		// source buffer whose advertised type its probe rejected — so the
+		// response has to keep the same promise the plan made.
+		contentType := ""
+		if file.IsAudioOnly() {
+			contentType = playback.AudioOnlyRemuxMIMEV3
+		}
+		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
+			DVMode:      session.RemuxDVMode,
+			FFmpegPath:  h.ffmpegPath(),
+			ContentType: contentType,
+		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 

@@ -647,7 +647,7 @@ func planRequiresServerTransformationsV3(plan *playback.PlanV3) bool {
 		return false
 	}
 	for _, transformation := range plan.Transformations {
-		if !strings.EqualFold(transformation.Executor, "client") {
+		if !strings.EqualFold(transformation.Executor, playback.ExecutorClientV3) {
 			return true
 		}
 	}
@@ -1121,6 +1121,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
+	trackChange := operation == playback.ReplanOperationTrackChangeV3
+	qualityChange := operation == playback.ReplanOperationQualityChangeV3
+	// User-intent operations replace the legacy audio PATCH and client-recipe
+	// transcode start. Nothing failed, so their previous route stays eligible:
+	// neither attempted-key history nor the failed-plan exclusion applies.
+	userIntentOperation := trackChange || qualityChange
 	intentChange := false
 	if seekScopedRecovery {
 		if err := validateSeekRecoveryRequestV3(record, req); err != nil {
@@ -1148,19 +1154,25 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// effective file would reject an otherwise valid replan. Seed from
 		// the plan first, then overlay the request's explicit changes.
 		applySelectedTracksToStartV3(&start, record.CurrentPlan.SelectedTracks)
-		switch req.Failure.Classification {
-		case "quality_changed":
+		switch {
+		case trackChange:
+			intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start) ||
+				subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
+		case qualityChange:
 			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
 			intentChange = nextQuality != start.QualityPreference
-		case "audio_track_changed":
-			intentChange = req.SelectedTracks.Audio != nil &&
-				(req.SelectedTracks.Audio.ID != start.AudioTrackID || !optionalIntEqualV3(req.SelectedTracks.Audio.Index, start.AudioTrackIndex))
-		case "subtitle_track_changed":
-			intentChange = req.SelectedTracks.Subtitle == nil && start.SubtitleTrackIndex != nil ||
-				req.SelectedTracks.Subtitle != nil &&
-					(req.SelectedTracks.Subtitle.ID != start.SubtitleTrackID || !optionalIntEqualV3(req.SelectedTracks.Subtitle.Index, start.SubtitleTrackIndex))
-		case "output_route_changed":
-			intentChange = req.ClientPlaybackContext.Output.OutputContextID != start.ClientPlaybackContext.Output.OutputContextID
+		default:
+			switch req.Failure.Classification {
+			case "quality_changed":
+				nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
+				intentChange = nextQuality != start.QualityPreference
+			case "audio_track_changed":
+				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
+			case "subtitle_track_changed":
+				intentChange = subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
+			case "output_route_changed":
+				intentChange = req.ClientPlaybackContext.Output.OutputContextID != start.ClientPlaybackContext.Output.OutputContextID
+			}
 		}
 		// Failure replans use the current effective file. Explicit user/output
 		// intent changes restart source selection from the requested edition.
@@ -1168,7 +1180,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if intentChange {
 			start.FileID = record.RequestedMediaFileID
 		}
-		start.QualityPreference = req.QualityPreference
+		if !trackChange || strings.TrimSpace(req.QualityPreference) != "" {
+			// A track change with no quality field keeps the durable quality:
+			// normalizing the absent value would silently reset "original" or a
+			// fixed rung to "auto" as a side effect of switching audio tracks.
+			start.QualityPreference = req.QualityPreference
+		}
 		start.StartPosition = &req.PositionSeconds
 		start.Metered = req.Metered
 		start.BandwidthEstimateKbps = copyOptionalIntV3(req.BandwidthEstimateKbps)
@@ -1267,13 +1284,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	attemptedKeys := []string(nil)
-	if !intentChange && !seekReanchor {
+	if !intentChange && !seekReanchor && !userIntentOperation {
 		attemptedKeys = append(attemptedKeys, req.AttemptedPlanKeys...)
 		if !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
 			attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 		}
 	}
-	if !seekReanchor && (!intentChange || seekFailureRecovery) {
+	if !seekReanchor && !userIntentOperation && (!intentChange || seekFailureRecovery) {
 		// Always exclude the durable server recipe so stale or malformed client
 		// history cannot immediately re-select the route that just failed and
 		// ping-pong the session. A client-reported local mutation (for example a
@@ -1726,6 +1743,24 @@ func applySelectedTracksToStartV3(start *playback.StartRequestV3, selected playb
 	}
 }
 
+// audioSelectionDiffersFromStartV3 reports whether the replan's audio
+// selection names a track other than the start request's. An omitted audio
+// identity means "unchanged" — clients may not resend the current track.
+func audioSelectionDiffersFromStartV3(selected playback.SelectedTracksV3, start playback.StartRequestV3) bool {
+	return selected.Audio != nil &&
+		(selected.Audio.ID != start.AudioTrackID || !optionalIntEqualV3(selected.Audio.Index, start.AudioTrackIndex))
+}
+
+// subtitleSelectionDiffersFromStartV3 reports whether the replan's subtitle
+// selection differs from the start request's. Unlike audio, a nil subtitle is
+// an explicit "subtitles off" and counts as a change when one was selected.
+func subtitleSelectionDiffersFromStartV3(selected playback.SelectedTracksV3, start playback.StartRequestV3) bool {
+	if selected.Subtitle == nil {
+		return start.SubtitleTrackIndex != nil
+	}
+	return selected.Subtitle.ID != start.SubtitleTrackID || !optionalIntEqualV3(selected.Subtitle.Index, start.SubtitleTrackIndex)
+}
+
 func sameSelectedTracksV3(left, right playback.SelectedTracksV3) bool {
 	return sameTrackIdentityV3(left.Audio, right.Audio) && sameTrackIdentityV3(left.Subtitle, right.Subtitle)
 }
@@ -1750,7 +1785,15 @@ func shouldTryAlternateFileV3(qualityPreference string) bool {
 }
 
 func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
-	return operation == playback.ReplanOperationFailureRecoveryV3 && shouldTryAlternateFileV3(qualityPreference)
+	switch operation {
+	case playback.ReplanOperationFailureRecoveryV3, playback.ReplanOperationQualityChangeV3:
+		// A quality change carries the same "another version may fit better"
+		// semantics its legacy quality_changed failure classification had; seek
+		// operations and track changes stay pinned to the mounted source.
+		return shouldTryAlternateFileV3(qualityPreference)
+	default:
+		return false
+	}
 }
 
 func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
@@ -2217,7 +2260,7 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 		return ""
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Name == "server_dv7_to_hdr10" {
+		if transformation.Name == playback.TransformationServerDV7HDR10V3 {
 			return playback.RemuxDVStripToHDR10V3
 		}
 	}
@@ -2242,7 +2285,7 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 		return ""
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Executor == "server" && transformation.Name == "server_dv7_to_hdr10" && transformation.RecipeVersion == "1" {
+		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 && transformation.RecipeVersion == "1" {
 			return playback.DV7ToHDR10BitstreamFilter
 		}
 	}

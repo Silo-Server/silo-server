@@ -153,8 +153,10 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 		"-map_chapters", "-1",
 	)
 
-	// Select specific video and audio streams.
-	args = append(args, "-map", "0:v:0")
+	// Select specific video and audio streams. The video map is optional so
+	// audio-only sources (audiobooks on the v3 audio remux route) produce an
+	// audio-only fMP4 instead of aborting on a missing stream.
+	args = append(args, "-map", "0:v:0?")
 	if audioTrackIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
 	} else {
@@ -321,18 +323,38 @@ func containerMIME(format string) string {
 	}
 }
 
+// RemuxServeOptions carries the optional serving concerns that not every
+// caller sets, keeping the positional argument list from growing further.
+type RemuxServeOptions struct {
+	// DVMode is the explicitly declared Dolby Vision recipe. The zero value
+	// decodes as the legacy auto behavior, matching old stream tokens.
+	DVMode RemuxDVMode
+	// FFmpegPath selects the binary to execute (empty = global discovery).
+	FFmpegPath string
+	// ContentType overrides the container-derived response type. Audio-only
+	// sources mux an audio-only fMP4, which must not be announced as video.
+	ContentType string
+}
+
 // ServeRemux streams a remuxed file to the HTTP response.
 // It starts an ffmpeg remux session and copies the output directly to the
 // response writer. The response is streamed (chunked transfer) since the
 // total size is not known in advance.
 // When transcodeAudio is true, audio is transcoded to AAC while video is copied.
 func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) error {
-	return ServeRemuxWithDVMode(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3, "")
+	return ServeRemuxWithOptions(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxServeOptions{})
 }
 
 // ServeRemuxWithDVMode streams an explicitly declared Dolby Vision recipe.
 // ffmpegPath selects the binary to execute (empty = process-global discovery).
 func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) error {
+	return ServeRemuxWithOptions(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxServeOptions{DVMode: mode, FFmpegPath: ffmpegPath})
+}
+
+// ServeRemuxWithOptions is the full remux transport, taking its optional
+// serving concerns as a struct.
+func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, opts RemuxServeOptions) error {
+	mode, ffmpegPath := opts.DVMode, opts.FFmpegPath
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
@@ -355,7 +377,11 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 	}
 	defer session.Close()
 
-	w.Header().Set("Content-Type", containerMIME(outputFormat))
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = containerMIME(outputFormat)
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(http.StatusOK)
 
