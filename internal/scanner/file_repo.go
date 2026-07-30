@@ -232,6 +232,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	}
 	if virtualOwnerInstallationID != nil {
 		f.VirtualOwnerInstallationID = *virtualOwnerInstallationID
+		f.VirtualOwnerInstallationSet = true
 	}
 	if canonicalRootPath != nil {
 		f.CanonicalRootPath = *canonicalRootPath
@@ -989,10 +990,17 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		probeSource,
 		mf.ProbeUpdatedAt,
 		mf.MissingSince,
-		nilIfZero(mf.VirtualOwnerInstallationID),
+		virtualOwnerInstallationValue(mf),
 	)
 
 	return scanMediaFile(row)
+}
+
+func virtualOwnerInstallationValue(mf models.MediaFile) any {
+	if mf.VirtualOwnerInstallationSet || mf.VirtualOwnerInstallationID > 0 {
+		return mf.VirtualOwnerInstallationID
+	}
+	return nil
 }
 
 // identityColumnDefaults normalizes the identity/grouping zero values the way
