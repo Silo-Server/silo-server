@@ -57,6 +57,10 @@ func (p *HTTPProxy) ResolveVirtualMedia(ctx context.Context, virtualURI string) 
 			slog.WarnContext(ctx, "virtual media resolver returned an error", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "status", response.GetStatusCode(), "body", strings.TrimSpace(string(response.GetBody())))
 			continue
 		}
+		if len(response.GetBody()) > maxVirtualPlaybackResponseLen {
+			slog.WarnContext(ctx, "virtual media resolver response exceeded size limit", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID)
+			continue
+		}
 		var payload struct {
 			StreamURL string `json:"stream_url"`
 		}
