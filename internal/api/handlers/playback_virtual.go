@@ -23,16 +23,19 @@ type VirtualPlaybackResolver interface {
 // VirtualPlaybackStream is the provider-neutral candidate shape used by the
 // just-in-time picker. Implementations must never expose provider URLs here.
 type VirtualPlaybackStream struct {
-	ID         string `json:"id"`
-	Label      string `json:"label"`
-	URI        string `json:"uri"`
-	Resolution string `json:"resolution,omitempty"`
-	CodecVideo string `json:"codec_video,omitempty"`
-	CodecAudio string `json:"codec_audio,omitempty"`
-	HDR        string `json:"hdr,omitempty"`
-	SourceType string `json:"source_type,omitempty"`
-	FileSize   int64  `json:"file_size,omitempty"`
-	Container  string `json:"container,omitempty"`
+	ID                string   `json:"id"`
+	Label             string   `json:"label"`
+	URI               string   `json:"uri"`
+	Resolution        string   `json:"resolution,omitempty"`
+	CodecVideo        string   `json:"codec_video,omitempty"`
+	CodecAudio        string   `json:"codec_audio,omitempty"`
+	HDR               string   `json:"hdr,omitempty"`
+	SourceType        string   `json:"source_type,omitempty"`
+	FileSize          int64    `json:"file_size,omitempty"`
+	Container         string   `json:"container,omitempty"`
+	Bitrate           int      `json:"bitrate,omitempty"`
+	AudioLanguages    []string `json:"audio_languages,omitempty"`
+	SubtitleLanguages []string `json:"subtitle_languages,omitempty"`
 }
 
 type VirtualPlaybackStreamLister interface {

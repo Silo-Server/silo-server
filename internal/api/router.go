@@ -80,6 +80,26 @@ import (
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
 
+func languageAudioTracks(languages []string) []models.AudioTrack {
+	tracks := make([]models.AudioTrack, 0, len(languages))
+	for _, language := range languages {
+		if language = strings.TrimSpace(language); language != "" {
+			tracks = append(tracks, models.AudioTrack{Language: language})
+		}
+	}
+	return tracks
+}
+
+func languageSubtitleTracks(languages []string) []models.SubtitleTrack {
+	tracks := make([]models.SubtitleTrack, 0, len(languages))
+	for index, language := range languages {
+		if language = strings.TrimSpace(language); language != "" {
+			tracks = append(tracks, models.SubtitleTrack{Index: index, Language: language})
+		}
+	}
+	return tracks
+}
+
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
 	Config *config.Config
@@ -679,7 +699,8 @@ func NewRouter(deps Dependencies) chi.Router {
 							FileSize: fileSize, Resolution: stream.Resolution,
 							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
 							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
-							ProbeUpdatedAt: &now,
+							ProbeUpdatedAt: &now, Bitrate: stream.Bitrate,
+							AudioTracks: languageAudioTracks(stream.AudioLanguages), SubtitleTracks: languageSubtitleTracks(stream.SubtitleLanguages),
 						}); upsertErr != nil {
 							return detail, upsertErr
 						}
@@ -966,7 +987,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					out := make([]handlers.VirtualPlaybackStream, 0, len(streams))
 					for _, stream := range streams {
-						out = append(out, handlers.VirtualPlaybackStream{ID: stream.ID, Label: stream.Label, URI: stream.URI, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR, SourceType: stream.SourceType, FileSize: stream.FileSize, Container: stream.Container})
+						out = append(out, handlers.VirtualPlaybackStream{ID: stream.ID, Label: stream.Label, URI: stream.URI, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR, SourceType: stream.SourceType, FileSize: stream.FileSize, Container: stream.Container, Bitrate: stream.Bitrate, AudioLanguages: stream.AudioLanguages, SubtitleLanguages: stream.SubtitleLanguages})
 					}
 					return out, nil
 				})
@@ -987,7 +1008,8 @@ func NewRouter(deps Dependencies) chi.Router {
 							FileSize: fileSize, Resolution: stream.Resolution,
 							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
 							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
-							ProbeUpdatedAt: &now,
+							ProbeUpdatedAt: &now, Bitrate: stream.Bitrate,
+							AudioTracks: languageAudioTracks(stream.AudioLanguages), SubtitleTracks: languageSubtitleTracks(stream.SubtitleLanguages),
 						})
 						if err != nil {
 							return err
