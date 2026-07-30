@@ -869,7 +869,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		$47, $48,
 		$49, $50, $51
 	)
-	ON CONFLICT (file_path) DO UPDATE SET
+	ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO UPDATE SET
 		content_id = CASE
 			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
 			ELSE COALESCE(EXCLUDED.content_id, media_files.content_id)

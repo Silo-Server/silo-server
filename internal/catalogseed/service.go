@@ -523,9 +523,9 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 		) VALUES `,
 		fileRows, 29,
 		map[int]string{16: "::jsonb", 17: "::jsonb", 18: "::jsonb", 19: "::jsonb"},
-		` ON CONFLICT (file_path) DO NOTHING`,
+		` ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`,
 		`
-		ON CONFLICT (file_path) DO UPDATE SET
+		ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO UPDATE SET
 			content_id = EXCLUDED.content_id,
 			episode_id = EXCLUDED.episode_id,
 			season_number = EXCLUDED.season_number,
@@ -2325,7 +2325,7 @@ func importFile(ctx context.Context, tx pgx.Tx, file FileRecord, mode ConflictMo
 				$21, $22, $23, $24,
 				$25, $26, $27, $28, $29
 			)
-			ON CONFLICT (file_path) DO NOTHING`,
+			ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`,
 			contentID, episodeID, nilIfZero(file.SeasonNumber), nilIfZero(file.EpisodeNumber),
 			file.MediaFolderID, file.FilePath, file.FileSize, fileHash,
 			file.CodecVideo, file.CodecAudio, file.Resolution, nilIfZero(file.AudioChannels), file.HDR, file.Container,
@@ -2355,7 +2355,7 @@ func importFile(ctx context.Context, tx pgx.Tx, file FileRecord, mode ConflictMo
 			$21, $22, $23, $24,
 			$25, $26, $27, $28, $29
 		)
-		ON CONFLICT (file_path) DO UPDATE SET
+			ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO UPDATE SET
 			content_id = EXCLUDED.content_id,
 			episode_id = EXCLUDED.episode_id,
 			season_number = EXCLUDED.season_number,

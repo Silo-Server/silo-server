@@ -848,7 +848,7 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 			SELECT 1 FROM media_files
 			WHERE content_id = $1 AND left(file_path, 10) <> $4
 		)
-		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, folderID, virtualPath, "virtual://"); err != nil {
+		ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`, item.ContentID, folderID, virtualPath, "virtual://"); err != nil {
 		return fmt.Errorf("creating virtual playback file: %w", err)
 	}
 	for _, variant := range variants {
@@ -860,7 +860,7 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, resolution, codec_video, codec_audio, hdr, container)
 			SELECT $1, $2, $3, 0, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), CASE WHEN NULLIF($7,'') IS NULL THEN false ELSE true END, 'virtual'
 			WHERE NOT EXISTS (SELECT 1 FROM media_files WHERE content_id = $1 AND left(file_path, 10) <> 'virtual://')
-			ON CONFLICT (file_path) DO NOTHING`, item.ContentID, folderID, path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
+			ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`, item.ContentID, folderID, path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
 			return fmt.Errorf("creating virtual playback variant: %w", err)
 		}
 	}
