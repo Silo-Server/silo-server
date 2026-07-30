@@ -17,16 +17,17 @@ export interface SourceTargets {
   /** Libraries whose roots overlap this source's resolved paths. */
   libraries: Library[];
   /**
-   * True when the source has no path information at all, so nothing it reports
-   * could ever resolve to a library. This is the silent-failure case: the
-   * source looks configured and runs cleanly, but can never match.
+   * True when the source was asked for paths and given none, so nothing it
+   * reports could ever resolve to a library. This is the silent-failure case: a
+   * local watcher that looks configured and runs cleanly, but can never match.
+   * Reserved for sources that own their paths — see targetsAreKnowable.
    */
   unresolvable: boolean;
   /**
-   * True when the source declares emits_native_paths and has nothing configured
-   * to inspect. Its targets are simply not knowable up front — it discovers
-   * already-resolvable Silo paths while polling — so the UI must say "unknown"
-   * rather than warn that it is broken.
+   * True when the source's targets are not knowable up front: it learns its
+   * paths at runtime (from a provider it polls, from a webhook payload, or
+   * because it declares emits_native_paths) and has no rewrites narrowing them
+   * down. The UI must say "unknown" rather than warn that it is broken.
    */
   unknown: boolean;
 }
@@ -86,11 +87,44 @@ export function resolvedPathsFor(
 }
 
 /**
+ * Whether a source's targets could have been known from its stored
+ * configuration alone — which is what makes an empty result a misconfiguration
+ * rather than simply unknown.
+ *
+ * Three kinds of source learn their paths at runtime instead, so empty rewrites
+ * are a valid passthrough for them, not a silent failure:
+ *
+ * - a webhook source reads paths out of each delivery payload;
+ * - a source with a bound connection gets them from the provider's root folders
+ *   (`SuggestRewrites` deliberately proposes nothing when a reported root
+ *   already equals the Silo path, so "correctly configured" and "no rewrites"
+ *   are the same state);
+ * - an `emits_native_paths` source returns Silo paths directly.
+ *
+ * What remains is a source that must be handed its roots up front. It is only
+ * worth warning about when the descriptor gives the operator a field to put
+ * them in — otherwise the warning points at a control that does not exist.
+ */
+function targetsAreKnowable(
+  source: AutoscanSource,
+  descriptor: AutoscanScanSourceDescriptor,
+): boolean {
+  if (source.delivery_mode === "webhook") return false;
+  if (descriptor.emits_native_paths) return false;
+  // The bound connection is what matters, not just the descriptor's
+  // requirement: an `optional` source with nothing bound is a local watcher for
+  // this purpose, and must still be warned about when its path fields are
+  // empty. A `required` source with nothing bound is excluded because the row
+  // already reports the missing connection, and that is the fault to fix first.
+  if (source.connection_id || descriptor.connection === "required") return false;
+  return configFields(descriptor).length > 0;
+}
+
+/**
  * Match a source's resolved paths against library roots.
  *
- * A source that emits native paths but has neither rewrites nor path config is
- * still reported as unresolvable — it has genuinely told us nothing about where
- * its media lands.
+ * A source with no paths is only reported as unresolvable when it is one whose
+ * paths could have been known up front; otherwise its targets are unknown.
  */
 export function sourceTargets(
   source: AutoscanSource,
@@ -99,10 +133,7 @@ export function sourceTargets(
 ): SourceTargets {
   const paths = resolvedPathsFor(source, descriptor);
   if (paths.length === 0) {
-    // A native-path source needs no configured root: it emits Silo paths
-    // directly, discovered at poll time. Flagging that as broken would warn on
-    // exactly the case the descriptor field exists to describe.
-    if (descriptor.emits_native_paths) {
+    if (!targetsAreKnowable(source, descriptor)) {
       return { libraries: [], unresolvable: false, unknown: true };
     }
     return { libraries: [], unresolvable: true, unknown: false };

@@ -107,11 +107,95 @@ describe("sourceTargets", () => {
     expect(got.libraries.map((l) => l.name)).toEqual(["Movies", "TV Shows"]);
   });
 
-  it("flags a source with no path information as unresolvable", () => {
+  it("flags a local watcher with no path information as unresolvable", () => {
     // The silent-failure case: looks configured, can never match anything.
     const got = sourceTargets(source(), pathDescriptor, libraries);
     expect(got.unresolvable).toBe(true);
+    expect(got.unknown).toBe(false);
     expect(got.libraries).toEqual([]);
+  });
+
+  it("treats a connection-backed poll source with no rewrites as unknown", () => {
+    // Empty rewrites are a valid passthrough: the provider already reports
+    // paths that are valid Silo library paths, so nothing needs mapping.
+    const got = sourceTargets(
+      source({ connection_id: "c1" }),
+      { delivery_modes: ["poll"], connection: "optional" },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(false);
+    expect(got.unknown).toBe(true);
+  });
+
+  it("treats a webhook source with no rewrites as unknown", () => {
+    // The built-in ARR webhook descriptor does not declare emits_native_paths,
+    // but its paths arrive in the delivery payload, not from configuration.
+    const got = sourceTargets(
+      source({ delivery_mode: "webhook" }),
+      { delivery_modes: ["webhook"], connection: "none" },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(false);
+    expect(got.unknown).toBe(true);
+  });
+
+  it("treats a native-path source with no rewrites as unknown", () => {
+    const got = sourceTargets(
+      source(),
+      { delivery_modes: ["poll"], connection: "none", emits_native_paths: true },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(false);
+    expect(got.unknown).toBe(true);
+  });
+
+  it("still warns an optional-connection source with nothing bound", () => {
+    // `optional` plus no connection is a local watcher in practice: nothing
+    // will hand it paths at runtime, so empty path fields are a real fault.
+    const got = sourceTargets(
+      source({ connection_id: null }),
+      { ...pathDescriptor, connection: "optional" },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(true);
+    expect(got.unknown).toBe(false);
+  });
+
+  it("does not warn a required-connection source that has none bound", () => {
+    // The row already reports the missing connection; a second warning about
+    // paths points at the wrong fault.
+    const got = sourceTargets(
+      source({ connection_id: null }),
+      { ...pathDescriptor, connection: "required" },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(false);
+    expect(got.unknown).toBe(true);
+  });
+
+  it("does not warn a local watcher that declares no path fields", () => {
+    // Nothing for the operator to fill in, so "no paths configured" would point
+    // at a control that does not exist.
+    const got = sourceTargets(
+      source(),
+      { delivery_modes: ["poll"], connection: "none" },
+      libraries,
+    );
+    expect(got.unresolvable).toBe(false);
+    expect(got.unknown).toBe(true);
+  });
+
+  it("still matches libraries for a webhook source that has rewrites", () => {
+    const got = sourceTargets(
+      source({
+        delivery_mode: "webhook",
+        path_rewrites: [{ from: "/data/tv", to: "/mnt/media/tv" }],
+      }),
+      { delivery_modes: ["webhook"], connection: "none" },
+      libraries,
+    );
+    expect(got.unknown).toBe(false);
+    expect(got.libraries.map((l) => l.name)).toEqual(["TV Shows"]);
   });
 
   it("distinguishes configured-but-unmatched from unconfigured", () => {
