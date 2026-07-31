@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
 
 import type { UserDevice } from "@/api/types";
@@ -18,6 +18,26 @@ const GROUP_TITLES: Record<DeviceRecencyGroup, string> = {
 };
 
 const GROUP_ORDER: DeviceRecencyGroup[] = ["current", "week", "earlier"];
+
+/**
+ * A device is "dormant" when nobody has used it for three months and it carries
+ * no settings of its own.
+ *
+ * Accounts accumulate these relentlessly — every browser profile, private
+ * window, reinstall and test build registers an identity, and nothing prunes
+ * them. A real account had 260 devices, over half of them one-off sessions that
+ * had never changed a setting. Listing them alongside the living-room TV is
+ * what turned this screen into sixteen screens of scrolling, so they collapse
+ * behind a count until asked for.
+ */
+const DORMANT_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
+
+export function isDormantDevice(device: UserDevice, now: number): boolean {
+  if (device.is_current_device || device.changed_count > 0) return false;
+  const seen = Date.parse(device.last_seen_at);
+  if (Number.isNaN(seen)) return true;
+  return now - seen > DORMANT_AFTER_MS;
+}
 
 export interface DeviceListProps {
   devices: UserDevice[];
@@ -63,12 +83,13 @@ export function DeviceList({
   ownProfileId,
   now,
 }: DeviceListProps) {
+  const [showDormant, setShowDormant] = useState(false);
   // Counts come from the unfiltered list so a chip keeps showing how many
   // devices it would reveal, rather than collapsing to zero once another chip
   // is active.
   const profiles = useMemo(() => profileOptions(devices, ownProfileId), [devices, ownProfileId]);
 
-  const filtered = useMemo(() => {
+  const matching = useMemo(() => {
     const query = search.trim().toLowerCase();
     return devices.filter((device) => {
       if (profileFilter && device.profile_id !== profileFilter) return false;
@@ -82,6 +103,21 @@ export function DeviceList({
       );
     });
   }, [devices, search, profileFilter]);
+
+  // Searching means you are looking for something specific, so a search spans
+  // everything — hiding a dormant device from its own name would be a bug.
+  const searching = search.trim().length > 0;
+  const dormantCount = useMemo(
+    () => (searching ? 0 : matching.filter((device) => isDormantDevice(device, now)).length),
+    [matching, searching, now],
+  );
+  const filtered = useMemo(
+    () =>
+      searching || showDormant
+        ? matching
+        : matching.filter((device) => !isDormantDevice(device, now)),
+    [matching, searching, showDormant, now],
+  );
 
   const sections = useMemo(() => {
     if (groupByProfile && !profileFilter) {
@@ -153,29 +189,53 @@ export function DeviceList({
 
       {sections.length === 0 ? (
         <p className="text-muted-foreground px-2 py-6 text-center text-[13px]">
-          {devices.length === 0 ? "No devices yet." : "No devices match that search."}
+          {devices.length === 0
+            ? "No devices yet."
+            : searching
+              ? "No devices match that search."
+              : "Nothing here. Try showing unused devices."}
         </p>
       ) : null}
 
-      {sections.map((section) => (
-        <section key={section.title}>
-          <h3 className="text-muted-foreground px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.09em] uppercase">
-            {section.title}
-          </h3>
-          <ul>
-            {section.devices.map((device) => (
-              <li key={`${device.profile_id}:${device.device_id}`}>
-                <DeviceRow
-                  device={device}
-                  selected={device.device_id === selectedDeviceId}
-                  onSelect={onSelect}
-                  now={now}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      {/* Capped and scrollable rather than growing without limit: an account
+          with a few hundred devices produced a thirteen-thousand-pixel page,
+          so the settings never came into view. The list keeps its own scroll
+          and the page stays roughly one screen. */}
+      <div className="max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain xl:max-h-[calc(100vh-16rem)]">
+        {sections.map((section) => (
+          <section key={section.title}>
+            <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.09em] uppercase">
+              {section.title}
+            </h3>
+            <ul>
+              {section.devices.map((device) => (
+                <li key={`${device.profile_id}:${device.device_id}`}>
+                  <DeviceRow
+                    device={device}
+                    selected={device.device_id === selectedDeviceId}
+                    onSelect={onSelect}
+                    now={now}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      {/* The long tail is opt-in, and says how big it is so nobody wonders
+          whether a device is missing. */}
+      {dormantCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setShowDormant((shown) => !shown)}
+          className="text-muted-foreground hover:text-foreground mt-1 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl text-[13px] transition-colors xl:min-h-9"
+        >
+          {showDormant
+            ? "Hide unused devices"
+            : `Show ${dormantCount} unused ${dormantCount === 1 ? "device" : "devices"}`}
+        </button>
+      ) : null}
     </div>
   );
 }

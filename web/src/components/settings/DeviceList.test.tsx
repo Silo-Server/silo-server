@@ -176,6 +176,89 @@ describe("DeviceList", () => {
   });
 });
 
+describe("DeviceList at scale", () => {
+  const OLD = new Date(NOW - 200 * 24 * 60 * 60 * 1000).toISOString();
+
+  // A real account carried 260 devices, over half of them one-off sessions
+  // that had never changed a setting. Listing them all produced a
+  // thirteen-thousand-pixel page, so the settings never came into view.
+  function bigFleet(): UserDevice[] {
+    return [
+      device({ device_id: "here", device_name: "This browser", is_current_device: true }),
+      device({ device_id: "tv", device_name: "Apple TV", changed_count: 5 }),
+      // Old but configured: still worth showing, since someone set it up.
+      device({
+        device_id: "kept",
+        device_name: "Old but configured",
+        last_seen_at: OLD,
+        changed_count: 2,
+      }),
+      ...Array.from({ length: 40 }, (_, i) =>
+        device({ device_id: `junk-${i}`, device_name: `Silo-PR111-build-${i}`, last_seen_at: OLD }),
+      ),
+    ];
+  }
+
+  it("hides devices nobody has used and that carry no settings", () => {
+    renderList(bigFleet());
+
+    expect(screen.getByText("This browser")).toBeInTheDocument();
+    expect(screen.getByText("Apple TV")).toBeInTheDocument();
+    expect(screen.getByText("Old but configured")).toBeInTheDocument();
+    expect(screen.queryByText("Silo-PR111-build-0")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("says how many it is holding back, and reveals them on request", async () => {
+    renderList(bigFleet());
+
+    const toggle = screen.getByRole("button", { name: "Show 40 unused devices" });
+    await userEvent.click(toggle);
+
+    expect(screen.getByText("Silo-PR111-build-0")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(43);
+    expect(screen.getByRole("button", { name: "Hide unused devices" })).toBeInTheDocument();
+  });
+
+  // Searching means looking for something specific; hiding a device from its
+  // own name would read as the device having disappeared.
+  it("searches across hidden devices without expanding them", () => {
+    render(
+      <DeviceList
+        devices={bigFleet()}
+        selectedDeviceId={null}
+        onSelect={vi.fn()}
+        search="build-7"
+        onSearchChange={vi.fn()}
+        now={NOW}
+      />,
+    );
+
+    expect(screen.getByText("Silo-PR111-build-7")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /unused devices/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the current device visible even when it is old and unconfigured", () => {
+    renderList([
+      device({
+        device_id: "here",
+        device_name: "This browser",
+        is_current_device: true,
+        last_seen_at: OLD,
+      }),
+      device({ device_id: "junk", device_name: "Forgotten", last_seen_at: OLD }),
+    ]);
+
+    expect(screen.getByText("This browser")).toBeInTheDocument();
+    expect(screen.queryByText("Forgotten")).not.toBeInTheDocument();
+  });
+
+  it("offers no toggle when nothing is dormant", () => {
+    renderList([device({ device_id: "a", device_name: "Recent", changed_count: 1 })]);
+    expect(screen.queryByRole("button", { name: /unused devices/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("DeviceList profile filter", () => {
   it("offers one chip per profile, plus everyone, with counts", () => {
     renderList(HOUSEHOLD, { groupByProfile: true });
