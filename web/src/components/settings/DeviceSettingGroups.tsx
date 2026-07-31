@@ -14,6 +14,7 @@ import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { groupDeviceSettings } from "@/lib/deviceSettingGroups";
 import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
+import { formatQualityBitrate } from "@/player/hooks/useTranscodeQuality";
 import { controlKindFor, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
 
@@ -347,7 +348,22 @@ function permittedOptions(settingKey: SettingKey, effective: EffectiveSetting | 
  * every other one — this exists only for a numeric range declared with a
  * select control.
  */
-const BITRATE_CHOICES_KBPS = [1000, 2000, 4000, 8000, 15000, 25000, 40000];
+/**
+ * The bandwidth ladder, in kbps.
+ *
+ * The low end matches the in-player quality switcher
+ * (web/src/player/hooks/useTranscodeQuality.ts) so a cap chosen here lines up
+ * with what the player offers mid-playback. Above that it keeps climbing to
+ * the definition's own ceiling of 200 Mbps, which is what remuxed 4K HDR and
+ * untouched Blu-ray rips actually need — a ladder that stopped short would cap
+ * people below what their server can already send them.
+ *
+ * Entries outside a definition's declared range are filtered out, so this list
+ * can cover more ground than any single setting allows.
+ */
+const BITRATE_CHOICES_KBPS = [
+  1500, 2000, 4000, 6000, 10000, 15000, 20000, 30000, 40000, 60000, 80000, 100000, 150000, 200000,
+];
 
 function numericSelectChoices(
   settingKey: SettingKey,
@@ -381,7 +397,7 @@ function numericSelectChoices(
 }
 
 function formatBitrate(kbps: number): string {
-  return kbps >= 1000 ? `${Number((kbps / 1000).toFixed(1))} Mbps` : `${kbps} kbps`;
+  return formatQualityBitrate(kbps);
 }
 
 /** Selects edit strings; integers travel back as numbers. */

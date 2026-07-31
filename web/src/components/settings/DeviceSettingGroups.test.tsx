@@ -144,14 +144,34 @@ describe("DeviceSettingGroups", () => {
     expect(screen.getByText("2 Mbps")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
-    const option = await screen.findByRole("option", { name: "8 Mbps" });
+    const option = await screen.findByRole("option", { name: "10 Mbps" });
     await userEvent.click(option);
 
     // Indexed rather than .at(-1): the app tsconfig targets ES2020.
     const calls = onChange.mock.calls;
     const call = calls[calls.length - 1];
     expect(call?.[0]).toBe("playback.max_bitrate_kbps");
-    expect(call?.[1]).toBe(8000);
+    expect(call?.[1]).toBe(10000);
+  });
+
+  // The ladder is filtered by the definition's own range, which tops out at
+  // 200 Mbps. An earlier hardcoded list stopped at 40 and silently capped
+  // people below what their server could already send.
+  it("offers the full range the contract allows", async () => {
+    renderGroups({
+      "playback.max_bitrate_kbps": effective({
+        key: "playback.max_bitrate_kbps",
+        value: null,
+        source: "default",
+      }),
+    });
+
+    await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
+
+    expect(await screen.findByRole("option", { name: "200 Mbps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "100 Mbps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1.5 Mbps" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "No limit" })).toBeInTheDocument();
   });
 
   it("keeps a stored bandwidth value selectable even when it is not a preset", () => {

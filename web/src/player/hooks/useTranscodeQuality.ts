@@ -97,7 +97,11 @@ export const COMPATIBILITY_QUALITY_ID = "compatibility";
 // Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not
 // "8.0 Mbps") — a deliberately different display policy than the canonical
 // formatBitrate/formatMbpsFromKbps in @/lib/mediaFormat.
-function formatQualityBitrate(kbps: number): string {
+//
+// Exported so the device-settings bandwidth cap reads the same as the in-player
+// switcher; the two pick from the same ladder and should not disagree about how
+// to spell a number.
+export function formatQualityBitrate(kbps: number): string {
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
     return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
