@@ -201,7 +201,7 @@ export function DeviceList({
           with a few hundred devices produced a thirteen-thousand-pixel page,
           so the settings never came into view. The list keeps its own scroll
           and the page stays roughly one screen. */}
-      <div className="max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain xl:max-h-[calc(100vh-16rem)]">
+      <div className="overlay-scroll -mr-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pr-1.5 xl:max-h-[calc(100vh-16rem)]">
         {sections.map((section) => (
           <section key={section.title}>
             <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-[10.5px] font-semibold tracking-[0.09em] uppercase">
