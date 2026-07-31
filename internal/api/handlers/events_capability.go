@@ -8,12 +8,15 @@ import (
 )
 
 // eventsCapabilityResponse describes how a client may subscribe to the events
-// websocket, so it can pick a connection flow without version-sniffing.
+// websocket.
 //
-// The field that matters is DeclaredChannels. A server predating that support
-// ignores ?channels=, answers required_action:"subscribe", and closes the
-// connection after the grace period — so a client that cannot send a subscribe
-// frame has no safe way to discover the difference from the socket itself.
+// Clients are expected to run a current build rather than negotiate down to an
+// old server, so this is not a branch-on-capability contract. It is how a
+// client tells the difference between "this server does not do that" and "the
+// connection failed", which is what lets it say the deployment is out of date
+// instead of failing opaquely: a server predating declared channels ignores
+// ?channels=, answers required_action:"subscribe", and closes the connection
+// after the grace period, which is indistinguishable from a broken socket.
 type eventsCapabilityResponse struct {
 	SchemaVersion int `json:"schema_version"`
 	// SubscribeFrame reports the handshake: connect, then send a subscribe
@@ -38,6 +41,10 @@ type eventsCapabilityResponse struct {
 // Per the v1 rules, new functionality is feature-detected rather than inferred
 // from a version. This follows the existing per-subsystem convention
 // (/notifications/capability, /playback/capability, /downloads/capability).
+//
+// A client that finds declared_channels false is talking to a server older than
+// its own expectations; the useful response is to tell the user to update the
+// server, not to silently fall back.
 func (h *EventsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(eventsCapabilityResponse{
