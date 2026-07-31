@@ -176,6 +176,30 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// The reader starts before any snapshot query runs. configureWebSocket
+	// installs an absolute read deadline that only pongs extend, and gorilla
+	// processes pongs solely inside ReadMessage — so a snapshot slow enough to
+	// outlast the deadline (a loaded jobs/sessions/scans query) would kill an
+	// otherwise healthy connection the moment reading began. The handshake path
+	// is safe for free, building its snapshots downstream of an active reader;
+	// the declared path has to arrange that ordering deliberately.
+	readMessages := make(chan []byte, 8)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			_, data, readErr := conn.ReadMessage()
+			if readErr != nil {
+				return
+			}
+			select {
+			case readMessages <- data:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	subscriptions := make(map[evt.EventChannel]struct{})
 	if declared {
 		subs, accepted, rejected := resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
@@ -196,23 +220,6 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-
-	readMessages := make(chan []byte, 8)
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		for {
-			_, data, readErr := conn.ReadMessage()
-			if readErr != nil {
-				return
-			}
-			select {
-			case readMessages <- data:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 
 	// A connection that declared its channels on the URL is already subscribed
 	// and has nothing left to say, so it is never put on the grace-period
@@ -356,42 +363,46 @@ func resolveChannelSelection(
 	subs := make(map[evt.EventChannel]struct{}, len(requested))
 	accepted := make([]evt.EventChannel, 0, len(requested))
 	rejected := make([]evt.EventsRejectedChannel, 0)
+	// A repeated channel is answered once whether it was accepted or refused.
+	// Only the accepted side deduplicated before this change, so asking twice
+	// for one forbidden channel produced two identical rejections.
+	seen := make(map[evt.EventChannel]struct{}, len(requested))
+
+	reject := func(channel evt.EventChannel, code, message string) {
+		rejected = append(rejected, evt.EventsRejectedChannel{
+			Channel: channel,
+			Code:    code,
+			Message: message,
+		})
+	}
 
 	for _, channel := range requested {
-		if _, ok := validSet[channel]; !ok {
-			rejected = append(rejected, evt.EventsRejectedChannel{
-				Channel: channel,
-				Code:    "unknown_channel",
-				Message: "Unknown channel",
-			})
+		if _, dup := seen[channel]; dup {
 			continue
 		}
-		if _, ok := allowedSet[channel]; !ok {
-			rejected = append(rejected, evt.EventsRejectedChannel{
-				Channel: channel,
-				Code:    "forbidden",
-				Message: "Admin access required",
-			})
-			continue
-		}
+		seen[channel] = struct{}{}
+
+		switch {
+		case !contains(validSet, channel):
+			reject(channel, "unknown_channel", "Unknown channel")
+		case !contains(allowedSet, channel):
+			reject(channel, "forbidden", "Admin access required")
 		// The notifications channel is profile-scoped: it requires a
 		// connection bound to a profile via a websocket ticket.
-		if channel == evt.ChannelNotifications && boundProfileID == "" {
-			rejected = append(rejected, evt.EventsRejectedChannel{
-				Channel: channel,
-				Code:    "profile_required",
-				Message: "A profile-bound websocket ticket is required",
-			})
-			continue
+		case channel == evt.ChannelNotifications && boundProfileID == "":
+			reject(channel, "profile_required", "A profile-bound websocket ticket is required")
+		default:
+			subs[channel] = struct{}{}
+			accepted = append(accepted, channel)
 		}
-		if _, seen := subs[channel]; seen {
-			continue
-		}
-		subs[channel] = struct{}{}
-		accepted = append(accepted, channel)
 	}
 
 	return subs, accepted, rejected
+}
+
+func contains(set map[evt.EventChannel]struct{}, channel evt.EventChannel) bool {
+	_, ok := set[channel]
+	return ok
 }
 
 // parseDeclaredChannels reads the optional ?channels= selection a connection

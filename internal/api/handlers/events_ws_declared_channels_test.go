@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 // eventsWSTestConn dials the events websocket against a handler authenticated
@@ -29,8 +30,17 @@ func eventsWSTestConn(t *testing.T, hub *evt.Hub, claims *auth.Claims, query str
 	func(wantType string) map[string]json.RawMessage,
 ) {
 	t.Helper()
+	return eventsWSTestConnWithHandler(t, &EventsHandler{hub: hub}, claims, query)
+}
 
-	handler := &EventsHandler{hub: hub}
+func eventsWSTestConnWithHandler(
+	t *testing.T,
+	handler *EventsHandler,
+	claims *auth.Claims,
+	query string,
+) (*websocket.Conn, func(wantType string) map[string]json.RawMessage) {
+	t.Helper()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := apimw.SetClaims(r.Context(), claims)
 		handler.HandleWebSocket(w, r.WithContext(ctx))
@@ -244,6 +254,66 @@ func TestEventsWebSocketUnknownChannelDoesNotCloseConnection(t *testing.T) {
 	}
 }
 
+// slowTaskLister stalls the tasks snapshot long enough to outlast the read
+// deadline configureWebSocket installs at connect.
+type slowTaskLister struct{ delay time.Duration }
+
+func (s slowTaskLister) ListTasks(bool) []taskmanager.TaskInfo {
+	time.Sleep(s.delay)
+	return []taskmanager.TaskInfo{}
+}
+
+// TestEventsWebSocketDeclaredChannelsSurviveSlowSnapshot pins the ordering the
+// declared path depends on. configureWebSocket sets an absolute read deadline
+// that only pongs extend, and gorilla processes pongs solely inside
+// ReadMessage — so if snapshot queries ran before the reader goroutine started,
+// a snapshot slower than the deadline would kill a healthy connection the
+// instant reading began. The handshake path gets this for free by building
+// snapshots downstream of an active reader; the declared path arranges it
+// deliberately.
+func TestEventsWebSocketDeclaredChannelsSurviveSlowSnapshot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("stalls a snapshot past the websocket read deadline in real time")
+	}
+
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	handler := &EventsHandler{
+		hub:   hub,
+		tasks: slowTaskLister{delay: wsPingInterval + wsPongTimeout + 2*time.Second},
+	}
+
+	conn, readFrame := eventsWSTestConnWithHandler(t, handler,
+		&auth.Claims{UserID: 1, Role: "admin"}, "?channels=tasks")
+
+	readFrame("hello")
+	readFrame("subscribed")
+
+	// The snapshot arrives late by design; allow for the stall plus slack.
+	if err := conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout + 15*time.Second)); err != nil {
+		t.Fatalf("setting read deadline: %v", err)
+	}
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("connection died during a slow snapshot: %v", err)
+	}
+	var frame map[string]json.RawMessage
+	if err := json.Unmarshal(data, &frame); err != nil {
+		t.Fatalf("frame is not JSON: %v (%s)", err, data)
+	}
+	if string(frame["type"]) != `"snapshot"` {
+		t.Fatalf("frame type = %s, want \"snapshot\" (frame: %s)", frame["type"], data)
+	}
+
+	// And the connection is still live afterwards.
+	if err := hub.PublishJSON(context.Background(), evt.ChannelTasks, "tasks.changed",
+		map[string]string{"id": "t1"}, evt.PublishOptions{}); err != nil {
+		t.Fatalf("publishing: %v", err)
+	}
+	if event := readFrame("event"); string(event["channel"]) != `"tasks"` {
+		t.Errorf("event channel = %s, want tasks", event["channel"])
+	}
+}
+
 func TestParseDeclaredChannels(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -321,11 +391,9 @@ func TestResolveChannelSelectionDeniesByDefault(t *testing.T) {
 }
 
 func TestResolveChannelSelectionDeduplicates(t *testing.T) {
-	allowed := allowedChannelsForRole("admin")
-
 	subs, accepted, rejected := resolveChannelSelection(
 		[]evt.EventChannel{evt.ChannelJobs, evt.ChannelJobs},
-		allowed,
+		allowedChannelsForRole("admin"),
 		"",
 	)
 
@@ -334,5 +402,23 @@ func TestResolveChannelSelectionDeduplicates(t *testing.T) {
 	}
 	if len(rejected) != 0 {
 		t.Fatalf("unexpected rejections: %v", rejected)
+	}
+}
+
+// TestResolveChannelSelectionDeduplicatesRejections covers the other half of
+// dedup: a channel asked for twice is answered once whether it was accepted or
+// refused. Only the accepted side deduplicated before.
+func TestResolveChannelSelectionDeduplicatesRejections(t *testing.T) {
+	_, _, rejected := resolveChannelSelection(
+		[]evt.EventChannel{
+			evt.ChannelSessions, evt.ChannelSessions, // forbidden for a user
+			"bogus", "bogus", // unknown
+		},
+		allowedChannelsForRole("user"),
+		"",
+	)
+
+	if len(rejected) != 2 {
+		t.Fatalf("rejected = %v, want one entry per distinct channel", rejected)
 	}
 }
