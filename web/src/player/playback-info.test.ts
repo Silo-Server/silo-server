@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPlaybackInfoSections,
-  deriveDisplayedPlaybackState,
   formatProtocol,
   formatStreamType,
+  qualityOptionsFromPlanV3,
 } from "./playback-info";
-import type { PlaybackSessionPlaybackInfo, PlayerFileVersion } from "./types";
+import { fixturePlanV3 } from "./protocol-v3.fixtures";
+import type { PlayerFileVersion } from "./types";
 
 function makeVersion(overrides: Partial<PlayerFileVersion> = {}): PlayerFileVersion {
   return {
@@ -63,17 +64,19 @@ function rowValue(
 
 describe("playback info helpers", () => {
   it("formats a direct-play session with source metadata and live runtime stats", () => {
-    const playbackInfo: PlaybackSessionPlaybackInfo = {
-      stream_type: "progressive",
-      transcode_audio: false,
-      video_codec: "hevc",
-      audio_codec: "aac",
-    };
-
     const sections = buildPlaybackInfoSections({
       streamUrl: "https://app.example.com/api/v1/stream/abc123",
-      playMethod: "direct",
-      playbackInfo,
+      plan: fixturePlanV3({
+        delivery: "original_http",
+        stream: {
+          url: "/stream/session-1/original",
+          protocol: "http_progressive",
+          mime_type: "video/x-matroska",
+          headers: {},
+          header_refresh: "none",
+        },
+        effective_recipe: { video_codec: "hevc", audio_codec: "eac3" },
+      }),
       currentSourceVersion: makeVersion(),
       runtimeStats: {
         playerWidth: 2560,
@@ -87,9 +90,11 @@ describe("playback info helpers", () => {
 
     expect(rowValue(sections, "Player", "Protocol")).toBe("https");
     expect(rowValue(sections, "Player", "Play method")).toBe("Direct Play");
+    expect(rowValue(sections, "Player", "Stream type")).toBe("Progressive");
     expect(rowValue(sections, "Video Info", "Player dimensions")).toBe("2560x1277");
     expect(rowValue(sections, "Video Info", "Video resolution")).toBe("3840x2160");
     expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("HEVC (direct)");
+    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("EAC3 (direct)");
     expect(rowValue(sections, "Current Source File", "Size")).toBe("7.1 GiB");
     expect(rowValue(sections, "Current Source File", "Bitrate")).toBe("22.5 Mbps");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("HEVC Main 10");
@@ -105,16 +110,21 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("48,000 Hz");
   });
 
-  it("marks remuxed audio as transcoded while keeping video copied", () => {
+  it("reads copy-versus-transcode from the plan's transformations, not codec strings", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "https://app.example.com/api/v1/stream/remux/abc123",
-      playMethod: "remux",
-      playbackInfo: {
-        stream_type: "progressive",
-        transcode_audio: true,
-        video_codec: "h264",
-        audio_codec: "aac",
-      },
+      plan: fixturePlanV3({
+        delivery: "server_remux_hls",
+        effective_recipe: { video_codec: "h264", audio_codec: "aac" },
+        transformations: [
+          {
+            name: "audio_to_aac",
+            executor: "server",
+            recipe_version: "v3.4",
+            validated_claims: [],
+          },
+        ],
+      }),
       currentSourceVersion: makeVersion({
         codec_video: "h264",
         codec_audio: "dts",
@@ -124,15 +134,47 @@ describe("playback info helpers", () => {
     });
 
     expect(rowValue(sections, "Player", "Play method")).toBe("Direct Streaming");
+    expect(rowValue(sections, "Player", "Stream type")).toBe("HLS");
+    // The delivered video codec matches the source's, but the absence of a
+    // `video_to_h264` transformation is what says it was copied.
     expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("H.264 (copy)");
+    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("AAC (transcoded)");
+  });
+
+  it("labels a re-encoded stream as transcoded on both axes", () => {
+    const sections = buildPlaybackInfoSections({
+      streamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
+      plan: fixturePlanV3({
+        delivery: "server_transcode_hls",
+        effective_recipe: { video_codec: "h264", audio_codec: "aac", height: 720 },
+        transformations: [
+          {
+            name: "video_to_h264",
+            executor: "server",
+            recipe_version: "v3.4",
+            validated_claims: [],
+          },
+          {
+            name: "audio_to_aac",
+            executor: "server",
+            recipe_version: "v3.4",
+            validated_claims: [],
+          },
+        ],
+      }),
+      currentSourceVersion: makeVersion({ hdr: false }),
+      runtimeStats: {},
+    });
+
+    expect(rowValue(sections, "Player", "Play method")).toBe("Transcode");
+    expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("H.264 (transcoded)");
     expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("AAC (transcoded)");
   });
 
   it("shows explicit unavailable placeholders when metadata is missing", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "/api/v1/stream/test",
-      playMethod: "direct",
-      playbackInfo: null,
+      plan: fixturePlanV3({ effective_recipe: {} }),
       currentSourceVersion: makeVersion({
         container: "",
         bitrate: 0,
@@ -145,6 +187,7 @@ describe("playback info helpers", () => {
     });
 
     expect(rowValue(sections, "Video Info", "Player dimensions")).toBe("—");
+    expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("—");
     expect(rowValue(sections, "Current Source File", "Container")).toBe("—");
     expect(rowValue(sections, "Current Source File", "Size")).toBe("—");
     expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("—");
@@ -154,15 +197,13 @@ describe("playback info helpers", () => {
   it("formats full and unspecified source color ranges", () => {
     const full = buildPlaybackInfoSections({
       streamUrl: "/api/v1/stream/full",
-      playMethod: "direct",
-      playbackInfo: null,
+      plan: fixturePlanV3(),
       currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "pc" }] }),
       runtimeStats: {},
     });
     const unknown = buildPlaybackInfoSections({
       streamUrl: "/api/v1/stream/unknown",
-      playMethod: "direct",
-      playbackInfo: null,
+      plan: fixturePlanV3(),
       currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "unknown" }] }),
       runtimeStats: {},
     });
@@ -174,13 +215,7 @@ describe("playback info helpers", () => {
   it("shows the requested source when playback auto-switches to a lower version", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
-      playMethod: "transcode",
-      playbackInfo: {
-        stream_type: "hls",
-        transcode_audio: true,
-        video_codec: "h264",
-        audio_codec: "aac",
-      },
+      plan: fixturePlanV3({ requested_media_file_id: 1, effective_media_file_id: 2 }),
       currentSourceVersion: makeVersion({
         file_id: 2,
         resolution: "1080p",
@@ -199,103 +234,72 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("H.264 High");
   });
 
-  it("detects HLS from both metadata and manifest URLs", () => {
+  it("names the transport from the plan's protocol", () => {
+    expect(formatStreamType(fixturePlanV3())).toBe("HLS");
     expect(
       formatStreamType(
-        {
-          stream_type: "hls",
-          transcode_audio: false,
-          video_codec: "h264",
-          audio_codec: "aac",
-        },
-        "https://app.example.com/master.m3u8",
+        fixturePlanV3({
+          stream: {
+            url: "/stream/session-1/original",
+            protocol: "http_progressive",
+            mime_type: "video/mp4",
+            headers: {},
+            header_refresh: "none",
+          },
+        }),
       ),
-    ).toBe("HLS");
+    ).toBe("Progressive");
     expect(formatProtocol("https://app.example.com/master.m3u8")).toBe("https");
   });
+});
 
-  it("preserves remux semantics when original quality is delivered over HLS", () => {
-    const displayed = deriveDisplayedPlaybackState({
-      playMethod: "remux",
-      playbackInfo: {
-        stream_type: "progressive",
-        transcode_audio: true,
-        video_codec: "h264",
-        audio_codec: "aac",
-      },
-      selectedVersion: makeVersion({
-        codec_video: "h264",
-        codec_audio: "dts",
-        hdr: false,
-        video_tracks: [{ codec: "h264", profile: "High" }],
-        audio_tracks: [{ codec: "dts", channels: 6, default: true }],
+describe("qualityOptionsFromPlanV3", () => {
+  it("renders the plan's ladder verbatim with a locally prepended auto entry", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "original", height: 2160, bitrate_kbps: 22500, preserves_source: true },
+          { label: "1080p", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          { label: "480p", height: 480, bitrate_kbps: 1500, preserves_source: false },
+        ],
       }),
-      transcodeStreamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
-      activeQualityId: "original",
-    });
+    );
 
-    expect(displayed.playMethod).toBe("remux");
-    expect(displayed.playbackInfo).toEqual({
-      stream_type: "hls",
-      transcode_audio: true,
-      video_codec: "h264",
-      audio_codec: "aac",
+    expect(options.map((option) => option.id)).toEqual(["auto", "original", "1080p", "480p"]);
+    expect(options[1]).toMatchObject({
+      id: "original",
+      label: "Original",
+      sublabel: "22.5 Mbps",
+      resolution: "2160p",
+      bitrateKbps: 22500,
+      isOriginal: true,
+    });
+    expect(options[2]).toMatchObject({
+      id: "1080p",
+      label: "1080p",
+      sublabel: "6 Mbps",
+      isOriginal: false,
     });
   });
 
-  it("keeps transcode semantics when transcode-base session switches to original quality", () => {
-    const displayed = deriveDisplayedPlaybackState({
-      playMethod: "transcode",
-      playbackInfo: {
-        stream_type: "hls",
-        transcode_audio: true,
-        video_codec: "h264",
-        audio_codec: "aac",
-      },
-      selectedVersion: makeVersion({
-        codec_video: "h264",
-        codec_audio: "eac3",
-        hdr: false,
-        video_tracks: [{ codec: "h264", profile: "High" }],
-        audio_tracks: [{ codec: "eac3", channels: 6, default: true }],
+  it("offers no auto entry when the plan publishes a single rung", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [{ label: "original", bitrate_kbps: 128, preserves_source: true }],
       }),
-      transcodeStreamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
-      activeQualityId: "original",
-    });
+    );
 
-    expect(displayed.playMethod).toBe("transcode");
-    expect(displayed.playbackInfo).toEqual({
-      stream_type: "hls",
-      transcode_audio: true,
-      video_codec: "h264",
-      audio_codec: "aac",
-    });
-  });
-
-  it("shows full transcode semantics when quality switching creates an HLS transcode", () => {
-    const displayed = deriveDisplayedPlaybackState({
-      playMethod: "direct",
-      playbackInfo: {
-        stream_type: "progressive",
-        transcode_audio: false,
-        video_codec: "h264",
-        audio_codec: "aac",
+    // Audio-only plans and clients without HLS land here: one rung is not a
+    // choice, but the array must stay non-empty so the version switcher renders.
+    expect(options).toEqual([
+      {
+        id: "original",
+        label: "Original",
+        sublabel: "128 kbps",
+        resolution: "",
+        bitrateKbps: 128,
+        isOriginal: true,
       },
-      selectedVersion: makeVersion({
-        codec_video: "h264",
-        codec_audio: "aac",
-        hdr: false,
-      }),
-      transcodeStreamUrl: "https://app.example.com/api/v1/playback/transcode/session/master.m3u8",
-      activeQualityId: "720p",
-    });
-
-    expect(displayed.playMethod).toBe("transcode");
-    expect(displayed.playbackInfo).toEqual({
-      stream_type: "hls",
-      transcode_audio: true,
-      video_codec: "h264",
-      audio_codec: "aac",
-    });
+    ]);
   });
 });

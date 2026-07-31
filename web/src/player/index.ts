@@ -19,8 +19,6 @@ export type {
   PlayerPlaybackTransport,
   SeriesContext,
   EpisodeRef,
-  PlayMethod,
   SubtitleMode,
-  ClientCodecCapabilities,
   ResumeHints,
 } from "./types";

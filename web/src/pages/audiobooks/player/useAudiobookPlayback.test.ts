@@ -86,6 +86,55 @@ function renderAudiobookPlayback(
   );
 }
 
+/**
+ * A minimal audio-only v3 decision: the `original_http` route the planner takes
+ * when the browser can already decode the source, whose player clock starts at
+ * the requested position.
+ */
+function audioOnlyDecision(sessionId: string, startPosition: number) {
+  return {
+    protocol_version: 3,
+    server_features: ["playback_plan_v3"],
+    outcome: "playable",
+    session_id: sessionId,
+    playback_plan: {
+      protocol_version: 3,
+      plan_id: `plan:${sessionId}`,
+      plan_attempt_key: "v3:0000000000000001",
+      session_id: sessionId,
+      delivery: "original_http",
+      stream: {
+        url: `/stream/${sessionId}`,
+        protocol: "http_progressive",
+        headers: {},
+        header_refresh: "session",
+      },
+      timeline: {
+        source_start_seconds: startPosition,
+        stream_origin_seconds: 0,
+        player_start_seconds: startPosition,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+      selected_tracks: {},
+      effective_recipe: {},
+      claims: {},
+      subtitle: { mode: "off", inventory: [] },
+      transformations: [],
+      applied_quirks: [],
+      runtime_corrections: [],
+      available_qualities: [{ label: "original", preserves_source: true }],
+      degradation_warnings: [],
+      decision_reason: "validated_original_playback",
+      requested_media_file_id: 1,
+      effective_media_file_id: 1,
+      source: { media_file_id: 1, duration_seconds: 600 },
+      subtitle_fidelity_policy: "preserve",
+    },
+  };
+}
+
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -125,21 +174,14 @@ describe("useAudiobookPlayback", () => {
         const url = String(input);
         if (url.endsWith("/api/v1/playback/start") || url.endsWith("/playback/start")) {
           sessionCount += 1;
+          const body = JSON.parse(String(init?.body)) as { start_position?: number };
           return jsonResponse(
-            {
-              session_id: `session-${sessionCount}`,
-              user_id: 1,
-              profile_id: "profile-1",
-              media_file_id: 1,
-              play_method: "direct",
-              position: 0,
-              is_paused: false,
-              stream_url: `/stream/session-${sessionCount}`,
-              audio_track_index: 0,
-              duration_seconds: 600,
-            },
+            audioOnlyDecision(`session-${sessionCount}`, body.start_position ?? 0),
             { status: 201 },
           );
+        }
+        if (url.endsWith("/playback/route-events")) {
+          return new Response(null, { status: 202 });
         }
         if (url.includes("/progress") || init?.method === "DELETE") {
           return new Response(null, { status: 204 });
@@ -169,12 +211,33 @@ describe("useAudiobookPlayback", () => {
       .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
     expect(startCall).toBeTruthy();
     expect(JSON.parse(String(startCall?.[1]?.body))).toMatchObject({
+      protocol_version: 3,
       file_id: 1,
       profile_id: "profile-1",
-      play_method: "direct",
+      // Zero is sent explicitly: the book-absolute position is already resolved
+      // to this part's local clock, so an omitted value would hand resume policy
+      // back to the server for a timeline it does not own.
       start_position: 0,
-      disable_progress_persistence: true,
+      quality_preference: "original",
     });
+  });
+
+  it("advertises the delivery classes the audio-only planner routes to", async () => {
+    renderAudiobookPlayback();
+
+    await flushAsyncWork();
+
+    const startCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
+    const body = JSON.parse(String(startCall?.[1]?.body)) as {
+      client_playback_context: { deliveries: Record<string, unknown> };
+    };
+    expect(Object.keys(body.client_playback_context.deliveries).sort()).toEqual([
+      "hls",
+      "original_http",
+      "progressive",
+    ]);
   });
 
   it("starts from the part containing the initial absolute position", async () => {
@@ -195,7 +258,6 @@ describe("useAudiobookPlayback", () => {
     expect(JSON.parse(String(startCall?.[1]?.body))).toMatchObject({
       file_id: 2,
       start_position: 150,
-      disable_progress_persistence: true,
     });
   });
 

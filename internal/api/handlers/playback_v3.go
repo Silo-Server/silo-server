@@ -530,6 +530,12 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
 	}
 	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, false) }
+	if !sessionOwnsResumeTimelineV3(effectiveFile) {
+		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
+			slog.WarnContext(r.Context(), "protocol v3 start: disable progress persistence failed", "component", "api",
+				"session_id", session.ID, "file_id", effectiveFile.ID, "error", err)
+		}
+	}
 	if err := h.sessionMgr.UpdateAudioTrack(session.ID, audioIndex, result.PlayMethod); err != nil {
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to select the playback audio track.", cause: err}
@@ -694,6 +700,24 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, 
 			unlock()
 		},
 	}
+}
+
+// sessionOwnsResumeTimelineV3 reports whether the session's own position is a
+// valid resume point for the item it belongs to.
+//
+// Resume state is keyed on the item (playbackProgressTarget resolves a file to
+// its episode or content ID), but every part of a multipart presentation shares
+// that key while carrying its own file-local clock. Persisting part 4's
+// position would therefore store "12 minutes into the book" as the book's
+// resume point. The client that stitches the parts into one timeline is the
+// only party that knows the item-absolute position, and it reports that through
+// the sync/progress surface instead.
+//
+// This is derived rather than requested: the mismatch is a property of the
+// media, not of the client, so a client that forgot to ask would corrupt resume
+// exactly the same way.
+func sessionOwnsResumeTimelineV3(file *models.MediaFile) bool {
+	return file == nil || file.PresentationPartTotal <= 1
 }
 
 // A progressive remux is a freshly generated, chunked MP4 response and does

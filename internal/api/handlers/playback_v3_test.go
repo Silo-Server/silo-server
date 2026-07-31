@@ -2155,6 +2155,57 @@ func TestHandleStartPlaybackV3AudioOnlySource(t *testing.T) {
 	}
 }
 
+// Resume state is keyed on the item, so a session playing one part of a
+// multipart presentation must not write its file-local position as the item's
+// resume point. The server derives this from the media rather than trusting the
+// client to ask for it.
+func TestHandleStartPlaybackV3MultipartSuppressesProgressPersistence(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		partTotal    int
+		wantDisabled bool
+	}{
+		{name: "single part owns its item timeline", partTotal: 1, wantDisabled: false},
+		{name: "multipart shares one resume key", partTotal: 6, wantDisabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := &models.MediaFile{
+				ID: 42, ContentID: "book-1", FilePath: writePlaybackTestMediaFile(t, "book.m4b"),
+				Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600,
+				AudioTracks:           []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+				PresentationKind:      "multipart",
+				PresentationGroupKey:  "book-1",
+				PresentationPartIndex: 4,
+				PresentationPartTotal: tc.partTotal,
+			}
+			manager := playback.NewSessionManager(0, 0)
+			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, req)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			var response playback.DecisionResponseV3
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.PlaybackPlan == nil {
+				t.Fatalf("response = %#v", response)
+			}
+			session, err := manager.GetSession(response.PlaybackPlan.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if session.DisableProgressPersistence != tc.wantDisabled {
+				t.Fatalf("DisableProgressPersistence = %v, want %v", session.DisableProgressPersistence, tc.wantDisabled)
+			}
+		})
+	}
+}
+
 func postPlaybackReplanV3(t *testing.T, handler *PlaybackHandler, sessionID string, request playback.ReplanRequestV3) playback.DecisionResponseV3 {
 	t.Helper()
 	body, err := json.Marshal(request)

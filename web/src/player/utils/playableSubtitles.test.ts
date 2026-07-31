@@ -39,6 +39,26 @@ describe("resolvePlayableSubtitles", () => {
     expect(resolvePlayableSubtitles([], [detailTrack])).toEqual([]);
   });
 
+  it("keeps burn-in-only session tracks even though they have no url", () => {
+    const burnInTrack = makeSubtitle({
+      index: 3,
+      source: "embedded",
+      codec: "hdmv_pgs_subtitle",
+      burn_in_only: true,
+      url: "",
+    });
+    const sidecarTrack = makeSubtitle({
+      index: 4,
+      source: "embedded",
+      url: "/stream/session/subtitles/4",
+    });
+
+    expect(resolvePlayableSubtitles([burnInTrack, sidecarTrack], [])).toEqual([
+      burnInTrack,
+      sidecarTrack,
+    ]);
+  });
+
   it("keeps fallback tracks that already have playable urls", () => {
     const fallbackTrack = makeSubtitle({
       index: 1,

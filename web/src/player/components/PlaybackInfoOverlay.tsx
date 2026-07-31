@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { buildPlaybackInfoSections, type RuntimePlaybackStats } from "../playback-info";
-import type { PlaybackSessionPlaybackInfo, PlayMethod, PlayerFileVersion } from "../types";
+import type { PlanV3 } from "../protocol-v3";
+import type { PlayerFileVersion } from "../types";
 
 interface PlaybackInfoOverlayProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   containerRef: React.RefObject<HTMLDivElement | null>;
   streamUrl: string;
-  playMethod: PlayMethod;
-  playbackInfo: PlaybackSessionPlaybackInfo | null;
+  /** The route the server chose, and the only description of what is on the wire. */
+  plan: PlanV3;
   currentSourceVersion?: PlayerFileVersion;
   requestedVersion?: PlayerFileVersion;
   onClose: () => void;
@@ -18,8 +19,7 @@ export function PlaybackInfoOverlay({
   videoRef,
   containerRef,
   streamUrl,
-  playMethod,
-  playbackInfo,
+  plan,
   currentSourceVersion,
   requestedVersion,
   onClose,
@@ -56,13 +56,12 @@ export function PlaybackInfoOverlay({
     () =>
       buildPlaybackInfoSections({
         streamUrl,
-        playMethod,
-        playbackInfo,
+        plan,
         currentSourceVersion,
         requestedVersion,
         runtimeStats,
       }),
-    [streamUrl, playMethod, playbackInfo, currentSourceVersion, requestedVersion, runtimeStats],
+    [streamUrl, plan, currentSourceVersion, requestedVersion, runtimeStats],
   );
 
   return (

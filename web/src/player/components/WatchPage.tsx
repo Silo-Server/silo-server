@@ -124,6 +124,7 @@ export function WatchPage({
     initialPosition,
     forceInitialPosition,
     qualityPreference,
+    maxBitrateKbps,
     resumeHints,
     explicitAudioTrackIndex,
   );
@@ -364,7 +365,9 @@ export function WatchPage({
     [session.mediaFileId],
   );
 
-  if (!session.streamUrl || !session.sessionId) {
+  // The plan is the player's contract: without one there is no transport, no
+  // timeline and no track inventory to render against.
+  if (!session.plan || !session.streamUrl || !session.sessionId) {
     if (session.loading) {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
@@ -443,8 +446,10 @@ export function WatchPage({
       title={title}
       year={year}
       streamUrl={session.streamUrl}
-      playMethod={session.playMethod!}
-      playbackInfo={session.playbackInfo}
+      plan={session.plan}
+      planRevision={session.planRevision}
+      replanning={session.replanning}
+      replanError={session.error}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
       versions={playbackVersions}
@@ -453,7 +458,11 @@ export function WatchPage({
       onSwitchVersion={handleSwitchVersion}
       subtitleUrls={playableSubtitles}
       initialPosition={session.initialPosition}
-      transportRestart={session.transportRestart}
+      onQualitySelect={session.changeQuality}
+      onSubtitleTrackChange={session.changeSubtitleTrack}
+      onPlanFailure={session.recoverFromFailure}
+      onReanchorSeek={session.reanchorSeek}
+      onApplySubtitleTrack={session.applySubtitleTrack}
       preferredSubtitleLanguage={preferredSubtitleLanguage}
       preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
       subtitleMode={subtitleMode}
@@ -480,8 +489,9 @@ export function WatchPage({
         )
       }
       duration={selectedDuration}
-      qualityPreference={qualityPreference}
-      maxBitrateKbps={maxBitrateKbps}
+      // The session's preference, not the caller's: the server normalizes what
+      // was requested and the menu has to light up whatever it settled on.
+      qualityPreference={session.qualityPreference}
       seriesContext={seriesContext}
       onNavigateEpisode={onNavigateEpisode}
       displayMode={displayMode}
