@@ -24,7 +24,7 @@ func newAuthedSSERequest(t *testing.T, target string) *http.Request {
 }
 
 // newAuthedSSERequestWithRole is newAuthedSSERequest with an explicit role,
-// for tests that need to assert non-admin behaviour.
+// for tests that need to assert non-admin behavior.
 func newAuthedSSERequestWithRole(t *testing.T, target, role string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
@@ -36,7 +36,7 @@ func newAuthedSSERequestWithRole(t *testing.T, target, role string) *http.Reques
 	return req.WithContext(ctx)
 }
 
-// runSSEHandlerBriefly runs h.HandleSSE against a context that is cancelled
+// runSSEHandlerBriefly runs h.HandleSSE against a context that is canceled
 // shortly after the handler starts, so the hello frame (and streaming
 // headers) is written before HandleSSE's blocking loop is torn down.
 func runSSEHandlerBriefly(t *testing.T, h *EventsHandler, rec *httptest.ResponseRecorder, req *http.Request) {

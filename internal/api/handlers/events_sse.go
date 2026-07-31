@@ -117,7 +117,7 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 // sseEventMessage projects a hub envelope into the same wire-safe shape
-// HandleWebSocket sends (evt.EventsEventMessage), rather than marshalling the
+// HandleWebSocket sends (evt.EventsEventMessage), rather than marshaling the
 // raw evt.Envelope. The envelope carries internal plumbing and other users'
 // identifiers — source_id, admin_only, target_plugin_id, user_id, profile_id
 // — that must never reach the wire; the two transports agree on one public
@@ -169,7 +169,7 @@ func resolveSSEChannels(requested string, allowed []evt.EventChannel) map[evt.Ev
 
 // writeSSEFrame writes one named SSE event and flushes it. data is emitted as
 // a single compact JSON line, as the SSE framing requires. It returns an
-// error if the payload could not be marshalled or the frame could not be
+// error if the payload could not be marshaled or the frame could not be
 // written, so the caller can drop a dead connection promptly instead of
 // waiting on context cancellation — mirroring HandleWebSocket's frame-write
 // discipline (events_ws.go), which returns immediately on any write failure.
