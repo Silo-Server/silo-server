@@ -1,5 +1,13 @@
 # Transcode Resolution Clamp Design
 
+**Status: superseded — the invariant survives, the implementation described here
+does not.** `POST /api/v1/playback/transcode/start` and the handler-side helper
+were removed with the legacy playback protocol
+([spec](../../architecture/playback-protocol-v3.md),
+[plan](../plans/2026-07-30-playback-protocol-v3-neutral-contract.md)). The
+decision below still holds: read it for *why* the server clamps, and see
+"Where it lives now" for *where*.
+
 ## Problem
 
 When video encoding is requested for a 2160p file while 4K transcoding is
@@ -34,14 +42,29 @@ The normalization rules are:
 Recognized resolutions are the same tiers already supported by the transcode
 filter builders: 2160p, 1080p, 720p, 480p, 420p, and 328p.
 
-## Architecture and Data Flow
+## Where it lives now
 
-A small pure helper in `internal/api/handlers/playback.go` compares requested
-and effective-source resolution tiers. `HandleStartTranscode` calls it once
-after the 4K alternate guard has selected and probed the effective file.
+Under protocol v3 the client no longer names an output resolution, so there is
+no requested tier to clamp at the API boundary. The invariant moved into the
+planner, where it is enforced twice against the probed source:
 
-The normalized value replaces `req.TargetResolution`. Existing downstream
-paths then automatically use one consistent value for:
+- `availableQualitiesV3` (`internal/playback/plan_v3.go`) omits every ladder rung
+  at or above the source height, so an over-source target is never offered.
+- The encode-target path clamps `targetHeight` to `source.Height` before building
+  the recipe, so a stale or hand-built `quality_change` cannot reintroduce one.
+
+Because the plan is the only way to reach FFmpeg, one clamp now covers session
+state, activity reporting, and restart reconstruction — the paths the original
+design had to reach through `req.TargetResolution`.
+
+## Architecture and Data Flow (as originally shipped)
+
+A small pure helper in `internal/api/handlers/playback.go` compared requested
+and effective-source resolution tiers. `HandleStartTranscode` called it once
+after the 4K alternate guard had selected and probed the effective file.
+
+The normalized value replaced `req.TargetResolution`. Existing downstream
+paths then automatically used one consistent value for:
 
 - transcode-node planning and requests;
 - integrated/local `playback.TranscodeOpts`;

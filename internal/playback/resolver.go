@@ -48,12 +48,6 @@ type PlayDecision struct {
 	TranscodeAudio bool   // true when remuxing should transcode audio to AAC
 }
 
-type VersionSelectionFilter struct {
-	EditionKey           string
-	PresentationKind     string
-	PresentationGroupKey string
-}
-
 // Resolve determines the play method for a given file and client capabilities.
 // Returns direct if client supports codec+container, remux if codec matches
 // but container doesn't, transcode otherwise.
@@ -137,100 +131,6 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 	}
 }
 
-// SelectVersion chooses the best file version from a list of available files
-// based on client capabilities and admin settings.
-// Priority: direct-playable > remux > transcode, then highest quality, then smallest file.
-func SelectVersion(files []*models.MediaFile, caps ClientCapabilities, settings AdminSettings) (*PlayDecision, error) {
-	return SelectVersionFiltered(files, caps, settings, VersionSelectionFilter{})
-}
-
-// SelectVersionFiltered chooses the best interchangeable file version within
-// one edition/presentation group.
-func SelectVersionFiltered(
-	files []*models.MediaFile,
-	caps ClientCapabilities,
-	settings AdminSettings,
-	filter VersionSelectionFilter,
-) (*PlayDecision, error) {
-	if len(files) == 0 {
-		return nil, ErrNoVersions
-	}
-
-	candidates := files
-	if filter.EditionKey != "" || filter.PresentationKind != "" || filter.PresentationGroupKey != "" {
-		filtered := make([]*models.MediaFile, 0, len(files))
-		for _, f := range files {
-			if filter.EditionKey != "" && f.EditionKey != filter.EditionKey {
-				continue
-			}
-			if filter.PresentationKind != "" && f.PresentationKind != filter.PresentationKind {
-				continue
-			}
-			if filter.PresentationGroupKey != "" && f.PresentationGroupKey != filter.PresentationGroupKey {
-				continue
-			}
-			filtered = append(filtered, f)
-		}
-		if len(filtered) > 0 {
-			candidates = filtered
-		}
-	}
-
-	var directFiles, remuxFiles, transcodeFiles []*PlayDecision
-
-	for _, f := range candidates {
-		// Filter by client max resolution.
-		if !resolutionFits(f.Resolution, caps.MaxResolution) {
-			// If 4K transcoding disabled and this is 4K, skip entirely.
-			if is4K(f.Resolution) && !settings.Allow4KTranscode {
-				continue
-			}
-		}
-
-		decision := Resolve(f, caps, settings)
-
-		switch decision.Method {
-		case PlayDirect:
-			directFiles = append(directFiles, decision)
-		case PlayRemux:
-			remuxFiles = append(remuxFiles, decision)
-		case PlayTranscode:
-			transcodeFiles = append(transcodeFiles, decision)
-		}
-	}
-
-	// Prefer direct > remux > transcode.
-	if len(directFiles) > 0 {
-		return bestQuality(directFiles), nil
-	}
-	if len(remuxFiles) > 0 {
-		return bestQuality(remuxFiles), nil
-	}
-	if len(transcodeFiles) > 0 {
-		return bestQuality(transcodeFiles), nil
-	}
-
-	// Fallback: use first file with direct play.
-	return &PlayDecision{
-		Method: PlayDirect,
-		File:   candidates[0],
-		Reason: "no compatible version found; falling back to first file",
-	}, nil
-}
-
-// bestQuality picks the highest quality file. Among ties, picks smallest file.
-func bestQuality(decisions []*PlayDecision) *PlayDecision {
-	best := decisions[0]
-	for _, d := range decisions[1:] {
-		if access.CompareQuality(d.File.Resolution, best.File.Resolution) > 0 {
-			best = d
-		} else if access.CompareQuality(d.File.Resolution, best.File.Resolution) == 0 && d.File.FileSize < best.File.FileSize {
-			best = d
-		}
-	}
-	return best
-}
-
 // resolutionOrder returns a numeric value for sorting resolutions.
 func resolutionOrder(res string) int {
 	switch {
@@ -255,11 +155,6 @@ func resolutionFits(fileRes, maxRes string) bool {
 		return true // no constraint
 	}
 	return resolutionOrder(fileRes) <= resolutionOrder(maxRes)
-}
-
-// is4K returns true if the resolution is 2160p or higher.
-func is4K(res string) bool {
-	return access.CompareQuality(res, "2160p") >= 0
 }
 
 // containsStr checks if a slice contains a string.

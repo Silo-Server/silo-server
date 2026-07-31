@@ -51,16 +51,22 @@ func TestPlaybackSessionMissingResponsesUseStableErrorCode(t *testing.T) {
 			handle: playbackHandler.HandleStopPlayback,
 		},
 		{
-			name: "audio",
+			name: "replan",
 			request: func() *http.Request {
 				return playbackTestRequest(
-					http.MethodPatch,
-					"/api/v1/playback/"+missingSessionID+"/audio",
-					[]byte(`{"audio_track_index":1}`),
+					http.MethodPost,
+					"/api/v1/playback/"+missingSessionID+"/replan",
+					// A fully valid replan body: the point of this case is the
+					// missing session, so nothing earlier may reject it.
+					[]byte(`{"protocol_version":3,"playback_attempt_id":"attempt-00000001",`+
+						`"replan_request_id":"replan-00000001","failed_plan_id":"plan:00000000000000",`+
+						`"plan_attempt_id":"plan-attempt-1","plan_attempt_key":"v3:0000000000000001",`+
+						`"attempt_count":1,"failure":{"classification":"decoder_error"},`+
+						`"client_capabilities":{"video_evidence":"exact","audio_evidence":"exact"}}`),
 					map[string]string{"session_id": missingSessionID},
 				)
 			},
-			handle: playbackHandler.HandleChangeAudioTrack,
+			handle: playbackHandler.HandleReplanPlaybackV3,
 		},
 		{
 			name: "websocket",
@@ -97,18 +103,6 @@ func TestPlaybackSessionMissingResponsesUseStableErrorCode(t *testing.T) {
 				)
 			},
 			handle: streamHandler.HandleSubtitle,
-		},
-		{
-			name: "transcode start",
-			request: func() *http.Request {
-				return playbackTestRequest(
-					http.MethodPost,
-					"/api/v1/playback/transcode/start",
-					[]byte(`{"session_id":"`+missingSessionID+`","seek_seconds":0,"target_bitrate_kbps":0,"segment_duration":2,"subtitle_track_index":-1,"subtitle_burn_in":false}`),
-					nil,
-				)
-			},
-			handle: playbackHandler.HandleStartTranscode,
 		},
 		{
 			name: "transcode manifest",

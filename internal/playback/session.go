@@ -43,7 +43,8 @@ type Session struct {
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
 	// these from the live ts.Opts(); offloaded transcodes own no local runtime, so
-	// the session is the only place to recover them (see HandleChangeAudioTrack).
+	// the session is the only place to recover them (see the track_change replan
+	// operation in internal/api/handlers/playback_v3.go).
 	SubtitleTrackIndex int // -1 = no subtitles
 	SubtitleBurnIn     bool
 	SegmentDuration    int // HLS segment length in seconds (cadence)

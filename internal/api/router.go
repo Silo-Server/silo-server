@@ -2614,9 +2614,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
 							r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
 							r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
-							r.Patch("/{session_id}/audio", playbackHandler.HandleChangeAudioTrack)
 							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
-							r.Post("/transcode/start", playbackHandler.HandleStartTranscode)
 						})
 					})
 				}

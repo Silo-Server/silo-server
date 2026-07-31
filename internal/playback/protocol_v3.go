@@ -979,8 +979,4 @@ func NewTerminalResponseV3(reason, message string, retryable bool) DecisionRespo
 	}
 }
 
-func DisabledResponseV3() DecisionResponseV3 {
-	return DecisionResponseV3{ProtocolVersion: ProtocolV3, ServerFeatures: []string{}}
-}
-
 func NewPlanExpiryV3(now time.Time) string { return now.Add(MaxTokenTTL).UTC().Format(time.RFC3339) }

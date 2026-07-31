@@ -81,70 +81,64 @@ func (s *mutablePlaybackSettingsV3) Get(_ context.Context, key string) (string, 
 	return s.values[key], nil
 }
 
-func (s *mutablePlaybackSettingsV3) set(key, value string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.values[key] = value
+// A build that predates the neutral contract cannot interpret a plan, so the
+// start endpoint refuses it outright instead of allocating a session it would
+// have no way to drive.
+func TestHandleStartPlaybackRejectsRequestsThatDoNotDeclareV3(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "no protocol version", body: `{"file_id":1,"profile_id":"profile-1"}`},
+		{name: "legacy protocol version", body: `{"protocol_version":2,"file_id":1,"profile_id":"profile-1"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := playback.NewSessionManager(0, 0)
+			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(tc.body))
+			req = req.WithContext(newAuthorizedPlaybackContext())
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, req)
+
+			if rr.Code != http.StatusUpgradeRequired {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			var response errorResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error != "client_upgrade_required" {
+				t.Fatalf("error = %q, body = %s", response.Error, rr.Body.String())
+			}
+			if got := len(manager.AllSessions()); got != 0 {
+				t.Fatalf("sessions = %d, want 0", got)
+			}
+		})
+	}
 }
 
-func TestHandleStartPlaybackV3DisabledDoesNotAllocateLegacySession(t *testing.T) {
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "false"}}
+func TestHandlePlaybackCapabilityV3AdvertisesTheFinalizedContract(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest())))
-	req = req.WithContext(newAuthorizedPlaybackContext())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/playback/capability", nil).WithContext(newAuthorizedPlaybackContext())
 	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, req)
-
-	if rr.Code != http.StatusCreated {
+	handler.HandlePlaybackCapabilityV3(rr, req)
+	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	var response playback.DecisionResponseV3
+	var response playback.CapabilityResponseV3
 	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.ProtocolVersion != playback.ProtocolV3 || len(response.ServerFeatures) != 0 || response.SessionID != "" {
-		t.Fatalf("response = %#v", response)
-	}
-	if got := len(manager.AllSessions()); got != 0 {
-		t.Fatalf("sessions = %d, want 0", got)
-	}
-}
-
-func TestHandlePlaybackCapabilityV3ReadsFlagPerRequest(t *testing.T) {
-	settings := &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "false"}}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.SettingsRepo = settings
-
-	request := func() playback.CapabilityResponseV3 {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/playback/capability", nil).WithContext(newAuthorizedPlaybackContext())
-		rr := httptest.NewRecorder()
-		handler.HandlePlaybackCapabilityV3(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-		}
-		var response playback.CapabilityResponseV3
-		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		return response
-	}
-
-	if response := request(); response.Enabled || response.Reason != "disabled" {
-		t.Fatalf("disabled response = %#v", response)
-	}
-	settings.set("playback.protocol_v3_enabled", "true")
-	// The flag stays DB-backed (no restart needed for rollback) behind a
-	// short TTL cache; expiring the cache stands in for the TTL elapsing.
-	handler.v3FlagMu.Lock()
-	handler.v3Flags = nil
-	handler.v3FlagMu.Unlock()
-	if response := request(); !response.Enabled ||
+	// v3 is the only playback protocol, so the endpoint cannot report itself
+	// disabled: there is no second protocol left to fall back to.
+	if !response.Enabled || response.Reason != "" ||
+		len(response.ProtocolVersions) != 1 || response.ProtocolVersions[0] != playback.ProtocolV3 ||
 		len(response.Deliveries) != 4 ||
 		!playback.HasFeatureV3(response.Features, playback.FeatureSeekReanchorV3) ||
 		!playback.HasFeatureV3(response.Features, playback.FeatureDirectStreamResumeV3) {
-		t.Fatalf("enabled response = %#v", response)
+		t.Fatalf("capability response = %#v", response)
 	}
 }
 
@@ -152,7 +146,7 @@ func TestHandleStartPlaybackV3ReturnsExecutableDirectPlan(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest())))
@@ -185,7 +179,7 @@ func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	body := marshalV3StartRequest(t, v3HandlerStartRequest())
 
@@ -215,7 +209,7 @@ func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.
 func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	request := v3HandlerStartRequest()
 	request.ProfileID = "profile-other"
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext())
@@ -231,7 +225,7 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
@@ -310,7 +304,7 @@ func TestHandleReplanPlaybackV3RollsBackLiveSessionWhenPersistenceFails(t *testi
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
@@ -388,7 +382,7 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "ass", Language: "eng"}}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "false"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	subtitleIndex := 0
@@ -919,7 +913,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
 		source.ContentID: {source, alternate},
 	}}
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "false"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
 	startRequest := v3HandlerStartRequest()
@@ -1066,7 +1060,7 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 	effective := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, mapPlaybackFileResolver{files: map[int]*models.MediaFile{effective.ID: effective}})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
 	startRequest := v3HandlerStartRequest()
@@ -1766,42 +1760,6 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 	}
 }
 
-func TestHandleStartPlaybackUnknownProtocolUsesLegacyBranch(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(`{"protocol_version":99,"file_id":42,"profile_id":"profile-1","play_method":"direct"}`))
-	req = req.WithContext(newAuthorizedPlaybackContext())
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, req)
-
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	var response playbackSessionResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.SessionID == "" || response.PlayMethod != string(playback.PlayDirect) {
-		t.Fatalf("legacy response = %#v", response)
-	}
-}
-
-func TestHandleStartPlaybackLegacyBranchPreservesTrailingBodyBehavior(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct"} trailing`)).WithContext(newAuthorizedPlaybackContext())
-	rr := httptest.NewRecorder()
-	handler.HandleStartPlayback(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 	// A copy remux streams FFmpeg's growing playlist, so its seek window must
 	// stay open-ended even though the runtime is known. A bounded window reads
@@ -1859,13 +1817,12 @@ func TestRemuxDVModeForPlanV3ExecutesProfile8Strip(t *testing.T) {
 	}
 }
 
-func TestHandlePlaybackRouteEventV3RejectsWhileDisabled(t *testing.T) {
+func TestHandlePlaybackRouteEventV3RejectsMalformedEvents(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "false"}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/route-events", strings.NewReader(`{}`)).WithContext(newAuthorizedPlaybackContext())
 	rr := httptest.NewRecorder()
 	handler.HandlePlaybackRouteEventV3(rr, req)
-	if rr.Code != http.StatusConflict {
+	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
@@ -1936,18 +1893,6 @@ func TestRouteEventV3HasPerUserLimitAcrossAttemptIDs(t *testing.T) {
 	}
 }
 
-func TestLegacyShadowRequestV3ProducesExplicitDetailedInference(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	legacy := startPlaybackRequest{FileID: file.ID, ProfileID: "profile-1", CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p"}
-	request := legacyShadowRequestV3(legacy, file, 0, "session-1234")
-	if _, err := request.NormalizeAndValidate(); err != nil {
-		t.Fatalf("shadow request validation: %v", err)
-	}
-	if len(request.Capabilities.VideoDecode) != 1 || !request.Capabilities.VideoDecode[0].Hardware || request.Capabilities.VideoEvidence != playback.EvidenceExactV3 {
-		t.Fatalf("shadow request = %#v", request)
-	}
-}
-
 func v3HandlerFixtureFile(t *testing.T) *models.MediaFile {
 	t.Helper()
 	return &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: writePlaybackTestMediaFile(t, "movie.mp4"), Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 3600, VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
@@ -1973,7 +1918,7 @@ func TestHandleReplanPlaybackV3TrackChangeOperation(t *testing.T) {
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
@@ -2057,7 +2002,7 @@ func TestHandleReplanPlaybackV3QualityChangeOperation(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	startRequest.QualityPreference = "auto"
@@ -2131,7 +2076,7 @@ func TestHandleStartPlaybackV3AudioOnlySource(t *testing.T) {
 	file := &models.MediaFile{ID: 42, ContentID: "book-1", FilePath: writePlaybackTestMediaFile(t, "book.m4b"), Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	request := v3HandlerStartRequest()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext())
@@ -2180,7 +2125,7 @@ func TestHandleStartPlaybackV3MultipartSuppressesProgressPersistence(t *testing.
 			}
 			manager := playback.NewSessionManager(0, 0)
 			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
 			rr := httptest.NewRecorder()

@@ -86,10 +86,11 @@ Feature detection. Auth required; no profile needed.
 
 | Status | Meaning |
 | --- | --- |
-| `200` | Capability document (both shapes below) |
+| `200` | Capability document |
 | `401` `unauthorized` | No authenticated user |
 
-When the protocol is enabled:
+v3 is the server's only playback protocol, so `enabled` is constant `true` and
+the document is always the full one:
 
 ```json
 {
@@ -128,9 +129,11 @@ startup — a server without a `dovi_rpu` bitstream filter does not list
 `server_dv7_to_hdr10`. A client must not assume a transformation exists because
 this document names it.
 
-When disabled, the same 200 carries `"enabled": false`, empty `features`,
-`deliveries`, and `transformations`, and `"reason": "disabled"`. A client seeing
-this should not attempt v3 playback.
+`enabled` and `reason` survive from the rollout period, when a server could
+answer `"enabled": false` with `"reason": "disabled"`. No server does now — v3 is
+the only protocol, so "disabled" would mean "no playback at all". The fields stay
+because clients already read them; `reason` is populated only for a non-rollout
+condition a future server might report.
 
 ### 2.2 `POST /playback/start`
 
@@ -140,15 +143,23 @@ Body: `StartRequestV3`
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| `201` | — | A decision was made. Body is `DecisionResponseV3`: either `outcome: "playable"` with a `playback_plan`, or `outcome: "adaptation_unavailable"` with a `terminal`. Also the protocol-disabled body. |
+| `201` | — | A decision was made. Body is `DecisionResponseV3`: either `outcome: "playable"` with a `playback_plan`, or `outcome: "adaptation_unavailable"` with a `terminal`. |
 | `400` | `bad_request` | Malformed JSON, failed validation (the `message` is the validator's own text), missing `X-Profile-Id`, or `profile_id` disagreeing with the header |
 | `401` | `unauthorized` | No authenticated user |
 | `404` | `not_found` | `file_id` does not exist, is marked missing, or this profile cannot see it |
 | `409` | `playback_attempt_reused` | This `playback_attempt_id` was already used for a *different* request |
+| `426` | `client_upgrade_required` | The body does not declare `protocol_version: 3` |
 | `500` | `internal_error` | Session store failure |
 
 A file the profile is not allowed to see is `404`, not `403` — parental and
 library restrictions do not confirm that a hidden item exists.
+
+The `426` is what a pre-v3 client gets. There is no protocol negotiation and no
+fallback: the server decodes v3 or it refuses, and the client is expected to
+render an "update required" state rather than retry. It is deliberately not a
+`400` — the request may be perfectly well-formed for the protocol it was written
+against, and the distinction is what lets a client tell "I sent something wrong"
+apart from "I am too old to talk to this server".
 
 Note the layering: a request whose *body* is fine but whose *media* cannot be
 played is not an HTTP error. It is a `201` with `outcome:
@@ -167,6 +178,23 @@ of a plan that no longer exists.
 A client generates a fresh `playback_attempt_id` per user-initiated playback and
 reuses it only to retry a request whose response it did not receive.
 
+**Omission is a request, not a default.** Two start fields mean "you decide" when
+absent, and the server answers from stored user state rather than from a
+constant:
+
+| Field | Omitted | Present |
+| --- | --- | --- |
+| `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary) | Exactly that position. `0` means *start over* |
+| `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override | Exactly that track |
+
+Both are settled *before* planning, not after. This is not an implementation
+detail a client can ignore: the plan's timeline is cut at the start position
+(§5), and the audio track is part of the plan's identity (§9), so a route chosen
+for position zero and then seeked is a different route than the one the server
+would have chosen for the resume point. A client that resolves resume state
+itself and sends the position explicitly gets identical behaviour — that is the
+supported way to override the server's policy.
+
 ### 2.3 `POST /playback/{session_id}/replan`
 
 Asks for a different plan for an existing session — after a failure, or because
@@ -176,7 +204,7 @@ body cap: 256 KiB. Body: `ReplanRequestV3`
 
 | Status | Code | Meaning |
 | --- | --- | --- |
-| `200` | — | `DecisionResponseV3`, plan or terminal. Also the protocol-disabled body. |
+| `200` | — | `DecisionResponseV3`, plan or terminal |
 | `400` | `bad_request` | Malformed or failed validation |
 | `401` | `unauthorized` | No authenticated user, or no `X-Profile-Id` |
 | `403` | `forbidden` | The session belongs to another user or profile |
@@ -192,10 +220,12 @@ validates the body first and reports the header as one more field problem, while
 replan treats identity as a precondition. Neither is retryable, so the
 difference does not change client behaviour.
 
-Checks run in this order: auth → protocol-enabled → body decode and validation →
-concurrency slot → session lock → attempt lookup → ownership → attempt match →
-live session → lease. A client that sees `503` therefore knows nothing was read
-or written for its session, and can retry the identical request unchanged.
+Checks run in this order: auth → body decode and validation → concurrency slot →
+session lock → attempt lookup → ownership → attempt match → live session → lease.
+A client that sees `503` therefore knows nothing was read or written for its
+session, and can retry the identical request unchanged. Note that validation
+comes before every session lookup: a malformed body against a session that does
+not exist answers `400`, not `404`.
 
 **Leases.** A replan takes a 15-second lease on the session. A second request
 carrying the *same* `replan_request_id` while the lease is in flight gets `409
@@ -218,12 +248,11 @@ cap: **32 KiB**. Body: a single `RouteEventV3`, not a batch
 | `400` | `bad_request` | Malformed or failed validation |
 | `401` | `unauthorized` | No authenticated user or no profile |
 | `403` | `forbidden` | The session belongs to another profile — **or does not exist** |
-| `409` | `protocol_disabled` | v3 is off on this server |
 | `429` | `event_rate_limited` | 120 events/attempt/minute or 600/user/minute exceeded |
 | `500` | `internal_error` | Store outage |
 
-The checks run in that order: auth, then protocol-enabled, then body decode and
-validation, then the rate limit, and only then the session-ownership lookup. The
+The checks run in that order: auth, then body decode and validation, then the
+rate limit, and only then the session-ownership lookup. The
 limiter sits in front of the ownership lookup deliberately — it exists to bound
 store reads as much as writes, so it has to precede the read that would establish
 ownership.

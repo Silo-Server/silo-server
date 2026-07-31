@@ -289,9 +289,9 @@ Decision tree:
    `ErrDownloadNotAllowed` (403). Missing artifact pipeline → `ErrQualityUnavailable` (501).
 4. `remux` and `transcode` as request values are invalid public qualities.
 
-Target codec/resolution for compatibility artifacts and bitrate transcodes is chosen by reusing `playback.Resolve` /
-`playback.SelectVersion` (`internal/playback/resolver.go:60`) against the device's declared capabilities
-and the admin transcode ceilings, so download encoding matches streaming decisions exactly (no
+Target codec/resolution for compatibility artifacts and bitrate transcodes is chosen by reusing
+`playback.Resolve` (`internal/playback/resolver.go`) against the device's declared capabilities and
+the admin transcode ceilings, so download encoding matches streaming decisions exactly (no
 duplicated codec logic).
 
 ## Transcode-to-file pipeline (v1)

@@ -47,10 +47,12 @@
     },
     "start_position": {
       "type": "number",
+      "description": "Where in the source to begin, in seconds. Omitting it asks the server for the profile's saved resume point (0 when there is none, when the item is already complete, or when the file is one part of a multipart item); sending 0 explicitly means start over. Resolved before planning, because the plan's timeline is cut at the start position.",
       "minimum": 0,
       "maximum": 31536000
     },
     "audio_track_id": {
+      "description": "Omitting both audio fields asks the server for the profile's preferred track, resolved from the series preference, then the profile audio-language setting, then the library override. Sending either one selects exactly that track.",
       "$ref": "#/$defs/track_id"
     },
     "audio_track_index": {

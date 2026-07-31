@@ -4,7 +4,6 @@ import "errors"
 
 // Sentinel errors for playback operations.
 var (
-	ErrNoVersions               = errors.New("no file versions available")
 	ErrSessionNotFound          = errors.New("playback session not found")
 	ErrTooManyStreams           = errors.New("too many concurrent streams")
 	ErrTooManyTranscodes        = errors.New("too many concurrent transcodes")

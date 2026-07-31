@@ -121,45 +121,6 @@ func (e *transportErrorV3) Error() string {
 	return e.reason
 }
 
-// v3FlagCacheTTL bounds how stale a v3 feature-flag read may be. Flags stay
-// DB-backed so enabling or rolling back needs no process restart, but reading
-// them once per start/replan/event would put an uncached settings SELECT on
-// every latency-sensitive playback request.
-const v3FlagCacheTTL = 5 * time.Second
-
-type v3FlagCacheEntry struct {
-	value     bool
-	expiresAt time.Time
-}
-
-func (h *PlaybackHandler) settingFlagCachedV3(ctx context.Context, key string) bool {
-	if h == nil || h.SettingsRepo == nil {
-		return false
-	}
-	now := time.Now()
-	h.v3FlagMu.Lock()
-	entry, ok := h.v3Flags[key]
-	h.v3FlagMu.Unlock()
-	if ok && now.Before(entry.expiresAt) {
-		return entry.value
-	}
-	value, err := h.SettingsRepo.Get(ctx, key)
-	enabled := err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
-	if err == nil {
-		h.v3FlagMu.Lock()
-		if h.v3Flags == nil {
-			h.v3Flags = make(map[string]v3FlagCacheEntry)
-		}
-		h.v3Flags[key] = v3FlagCacheEntry{value: enabled, expiresAt: now.Add(v3FlagCacheTTL)}
-		h.v3FlagMu.Unlock()
-	}
-	return enabled
-}
-
-func (h *PlaybackHandler) protocolV3Enabled(ctx context.Context) bool {
-	return h.settingFlagCachedV3(ctx, "playback.protocol_v3_enabled")
-}
-
 func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playback.TransformationRegistryV3 {
 	h.v3RegistryOnce.Do(func() {
 		h.v3Registry = playback.ProbeTransformationRegistryV3(context.WithoutCancel(ctx), h.playbackConfig().FFmpegPath)
@@ -356,23 +317,15 @@ func validateAdvertisedTransformationsV3(plan *playback.PlanV3, advertised []pla
 }
 
 // HandlePlaybackCapabilityV3 reports only transformations that the installed
-// runtime has actually probed. The feature flag is read per request so rollback
-// does not require a process restart.
+// runtime has actually probed. Protocol v3 is the server's only playback
+// protocol, so `enabled` is constant; it stays in the response because clients
+// feature-detect against it and the field is part of the frozen contract.
 func (h *PlaybackHandler) HandlePlaybackCapabilityV3(w http.ResponseWriter, r *http.Request) {
 	if apimw.GetUserID(r.Context()) == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-	enabled := h.protocolV3Enabled(r.Context())
-	response := playback.CapabilityResponseV3{Enabled: enabled, ProtocolVersions: []int{playback.ProtocolV3}}
-	if !enabled {
-		response.Features = []string{}
-		response.Deliveries = []playback.DeliveryV3{}
-		response.Transformations = []playback.TransformationV3{}
-		response.Reason = "disabled"
-		writeJSON(w, http.StatusOK, response)
-		return
-	}
+	response := playback.CapabilityResponseV3{Enabled: true, ProtocolVersions: []int{playback.ProtocolV3}}
 	response.Features = playback.ServerFeaturesV3()
 	response.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3}
 	response.Transformations = h.transformationRegistryV3(r.Context()).Advertised()
@@ -397,10 +350,6 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	}
 	if req.ProfileID != profileID {
 		writeError(w, http.StatusBadRequest, "bad_request", "profile_id must match X-Profile-Id")
-		return
-	}
-	if !h.protocolV3Enabled(r.Context()) {
-		writeJSON(w, http.StatusCreated, playback.DisabledResponseV3())
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
@@ -436,11 +385,17 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
+		audioIndex = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, requestedFile)
+	}
 	effectiveFile := requestedFile
 	settings := h.plannerSettingsV3(r.Context())
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		writePlaybackFilePreflightError(w, err)
 		return
+	}
+	if req.StartPosition == nil {
+		req.StartPosition = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
@@ -595,9 +550,20 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to persist the playback plan.", cause: err}
 	}
 	transport.commit()
+	h.persistSeriesSelectionsV3(r.Context(), userID, profileID, effectiveFile, plannedAudioTrackIndexV3(result, audioIndex))
 	h.syncSessionsNow(r.Context(), "v3_start")
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
+}
+
+// persistSeriesSelectionsV3 records the version and audio-track choices this
+// plan settled on, so the next episode of the same series opens with them
+// already applied. The catalog reads both preferences back
+// (internal/catalog/detail.go), and v3 is now the only writer: the legacy start
+// and audio-PATCH endpoints that used to record them are gone.
+func (h *PlaybackHandler) persistSeriesSelectionsV3(ctx context.Context, userID int, profileID string, file *models.MediaFile, audioTrackIndex int) {
+	h.persistSeriesPlaybackPreference(ctx, userID, profileID, file)
+	h.persistAudioPreference(ctx, userID, profileID, file, audioTrackIndex)
 }
 
 func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3) (preparedTransportV3, *transportErrorV3) {
@@ -718,6 +684,90 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, 
 // exactly the same way.
 func sessionOwnsResumeTimelineV3(file *models.MediaFile) bool {
 	return file == nil || file.PresentationPartTotal <= 1
+}
+
+// preferredAudioTrackIndexV3 answers what an omitted audio track means: the
+// language this profile has settled on for this series, this library, or
+// generally — the same resolution the catalog performs when it publishes
+// `effective_audio_track_index`, so the track a client sees on the detail page
+// is the track that plays when it does not ask for one.
+//
+// The client sends a track identity only when the viewer picked one. Defaulting
+// to ordinal zero instead would silently play the first track on the reel.
+func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) int {
+	if file == nil || len(file.AudioTracks) == 0 || h.StoreProvider == nil {
+		return 0
+	}
+	store, err := h.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
+		return normalizeAudioTrackIndex(file, 0)
+	}
+	var seriesPref *playback.AudioTrackPreference
+	if seriesID := h.resolveSeriesID(ctx, file); seriesID != "" {
+		if stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID); prefErr == nil && stored != nil {
+			seriesPref = &playback.AudioTrackPreference{AudioTrackIndex: stored.AudioTrackIndex, AudioLanguage: stored.AudioLanguage, TrackSignature: stored.TrackSignature}
+			if seriesPref.AudioLanguage == playback.OriginalLanguageSentinel {
+				seriesPref.AudioLanguage = h.resolveOriginalLanguage(ctx, file)
+			}
+		}
+	}
+	preferredLang := resolvedProfileAudioLanguage(ctx, store, profileID)
+	// A library override applies only where no series-sticky choice exists;
+	// having watched this series in a language outranks the library default.
+	libraryLang := ""
+	if seriesPref == nil {
+		if stored, prefErr := store.GetLibraryPlaybackPreference(ctx, profileID, file.MediaFolderID); prefErr == nil && stored != nil {
+			libraryLang = stored.AudioLanguage
+		}
+	}
+	if preferredLang == playback.OriginalLanguageSentinel || libraryLang == playback.OriginalLanguageSentinel {
+		originalLang := h.resolveOriginalLanguage(ctx, file)
+		if preferredLang == playback.OriginalLanguageSentinel {
+			preferredLang = originalLang
+		}
+		if libraryLang == playback.OriginalLanguageSentinel {
+			libraryLang = originalLang
+		}
+	}
+	if libraryLang != "" {
+		preferredLang = libraryLang
+	}
+	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref))
+}
+
+// resumePositionV3 answers what an omitted `start_position` means: resume where
+// this profile left off. It runs before planning rather than after session
+// creation because the plan's timeline is cut at the start position — a route
+// chosen for zero and then seeked to 40 minutes is a different route.
+//
+// A client that wants to start over sends an explicit `start_position: 0`; only
+// omission asks the server for its resume policy. Parts of a multipart item are
+// skipped for the same reason their progress is not persisted: they share one
+// resume point with the whole item, so a part-local seek to it is meaningless.
+func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) *float64 {
+	if h.StoreProvider == nil || !sessionOwnsResumeTimelineV3(file) {
+		return nil
+	}
+	targetID := playbackProgressTarget(file)
+	if targetID == "" {
+		return nil
+	}
+	store, err := h.StoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "protocol v3 start: resume store lookup failed", "component", "api", "user_id", userID, "error", err)
+		return nil
+	}
+	progress, err := store.GetProgress(ctx, profileID, targetID)
+	if err != nil {
+		slog.ErrorContext(ctx, "protocol v3 start: resume progress lookup failed", "component", "api", "target", targetID, "error", err)
+		return nil
+	}
+	if progress == nil || progress.Completed || progress.PositionSeconds <= 0 {
+		return nil
+	}
+	position := progress.PositionSeconds
+	return &position
 }
 
 // A progressive remux is a freshly generated, chunked MP4 response and does
@@ -1030,10 +1080,6 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	profileID := apimw.GetProfileID(r.Context())
 	if userID == 0 || profileID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication and profile are required")
-		return
-	}
-	if !h.protocolV3Enabled(r.Context()) {
-		writeJSON(w, http.StatusOK, playback.DisabledResponseV3())
 		return
 	}
 	body, err := readBoundedV3Body(w, r, maxPlaybackV3BodyBytes)
@@ -1508,6 +1554,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	transport.afterDurableCommit = func() {
 		cancelReservation()
+		if trackChange {
+			// A deliberate track switch is the same signal the legacy audio
+			// PATCH recorded; a failure recovery is not, so its forced audio
+			// route must not be written back as a user preference.
+			h.persistAudioPreference(r.Context(), session.UserID, session.ProfileID, effectiveFile, plannedAudioTrackIndexV3(result, session.AudioTrackIndex))
+		}
 		h.syncSessionsNow(r.Context(), "v3_replan")
 		event := playback.RouteEventPlanSelectedV3
 		clientModel := req.ClientPlaybackContext.Device.Model
@@ -1936,10 +1988,6 @@ func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *h
 	profileID := apimw.GetProfileID(r.Context())
 	if userID == 0 || profileID == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication and profile are required")
-		return
-	}
-	if !h.protocolV3Enabled(r.Context()) {
-		writeError(w, http.StatusConflict, "protocol_disabled", "Playback protocol v3 is disabled")
 		return
 	}
 	body, err := readBoundedV3Body(w, r, maxPlaybackV3EventBodyBytes)

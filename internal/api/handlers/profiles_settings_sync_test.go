@@ -79,7 +79,8 @@ func TestUpdateProfileSyncsCanonicalMetadataLanguage(t *testing.T) {
 
 // TestUpdateProfileSyncsCanonicalAudioLanguage is the playback-start half: a
 // profile that never had a backfilled row chooses a spoken language, and the
-// canonical store — which handleStartPlaybackLegacy resolves — must carry it.
+// canonical store — which preferredAudioTrackIndexV3 resolves when a start omits
+// the audio track — must carry it.
 func TestUpdateProfileSyncsCanonicalAudioLanguage(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
