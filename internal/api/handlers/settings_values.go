@@ -226,6 +226,16 @@ func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *h
 		},
 		"supports_batched_effective": true,
 		"supports_idempotent_writes": true,
+		// events_sse advertises the read-only SSE transport at
+		// GET /api/v1/events/sse (internal/api/handlers/events_sse.go), so
+		// clients can detect it by capability rather than probing the URL.
+		// schema_version matches the hello frame's schema_version (see
+		// evt.EventsHelloMessage) rather than this settings contract's own
+		// revision.
+		"events_sse": map[string]any{
+			"supported":      true,
+			"schema_version": 1,
+		},
 	})
 }
 
