@@ -40,6 +40,7 @@ export default function DeviceSettings() {
 
   const [household, setHousehold] = useState(false);
   const [search, setSearch] = useState("");
+  const [profileFilter, setProfileFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // One clock for the whole screen, taken once per mount: relative labels only
   // need to be right to the minute, and reading the clock during render is not
@@ -50,12 +51,21 @@ export default function DeviceSettings() {
     household: household && canSeeHousehold,
   });
 
+  // Filtering to one person must not leave someone else's device open in the
+  // detail pane — the list and the pane would then disagree about who is being
+  // edited, which is the one thing this screen cannot afford to be vague about.
+  const selectable = useMemo(
+    () =>
+      profileFilter ? devices.filter((device) => device.profile_id === profileFilter) : devices,
+    [devices, profileFilter],
+  );
+
   // Default to the device you are on: it is the one you can check the effect of
   // immediately, and the one most people came here for.
   const selected = useMemo(() => {
-    if (devices.length === 0) return null;
-    return devices.find((device) => device.device_id === selectedId) ?? devices[0];
-  }, [devices, selectedId]);
+    if (selectable.length === 0) return null;
+    return selectable.find((device) => device.device_id === selectedId) ?? selectable[0];
+  }, [selectable, selectedId]);
 
   useEffect(() => {
     if (selected && selected.device_id !== selectedId) {
@@ -74,7 +84,14 @@ export default function DeviceSettings() {
       </header>
 
       {canSeeHousehold ? (
-        <HouseholdSwitch household={household} onChange={setHousehold} count={devices.length} />
+        <HouseholdSwitch
+          household={household}
+          onChange={(next) => {
+            setHousehold(next);
+            if (!next) setProfileFilter(null);
+          }}
+          count={devices.length}
+        />
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(230px,270px)_minmax(0,1fr)] xl:items-start">
@@ -88,6 +105,8 @@ export default function DeviceSettings() {
             search={search}
             onSearchChange={setSearch}
             groupByProfile={household && canSeeHousehold}
+            profileFilter={profileFilter}
+            onProfileFilterChange={setProfileFilter}
             now={now}
           />
         )}
@@ -202,23 +221,23 @@ function DeviceDetail({
     <div className="space-y-4">
       <section className="surface-panel rounded-[1.5rem] border-0 px-5 py-4 shadow-none">
         <div className="flex flex-wrap items-start gap-3">
-        <span className="bg-surface-raised flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
-          <PlatformIcon kind={kind} className="h-5 w-5" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-lg font-semibold tracking-tight">
-            {device.device_name || "Unknown device"}
-          </h3>
-          <p className="text-muted-foreground text-[13px]">
-            {[
-              platformKindLabel(kind),
-              device.is_current_device ? "using now" : lastSeenLabel(device.last_seen_at, now),
-              changedCount > 0
-                ? `${changedCount} ${changedCount === 1 ? "thing" : "things"} set differently`
-                : "nothing changed here",
-            ].join(" · ")}
-          </p>
-        </div>
+          <span className="bg-surface-raised flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
+            <PlatformIcon kind={kind} className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-lg font-semibold tracking-tight">
+              {device.device_name || "Unknown device"}
+            </h3>
+            <p className="text-muted-foreground text-[13px]">
+              {[
+                platformKindLabel(kind),
+                device.is_current_device ? "using now" : lastSeenLabel(device.last_seen_at, now),
+                changedCount > 0
+                  ? `${changedCount} ${changedCount === 1 ? "thing" : "things"} set differently`
+                  : "nothing changed here",
+              ].join(" · ")}
+            </p>
+          </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {changedCount > 0 ? (

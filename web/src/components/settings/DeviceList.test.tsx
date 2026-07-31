@@ -21,8 +21,16 @@ function device(overrides: Partial<UserDevice> = {}): UserDevice {
   };
 }
 
-function renderList(devices: UserDevice[], props: Partial<{ groupByProfile: boolean }> = {}) {
+function renderList(
+  devices: UserDevice[],
+  props: Partial<{
+    groupByProfile: boolean;
+    profileFilter: string | null;
+    onProfileFilterChange: (id: string | null) => void;
+  }> = {},
+) {
   const onSelect = vi.fn();
+  const onProfileFilterChange = props.onProfileFilterChange ?? vi.fn();
   render(
     <DeviceList
       devices={devices}
@@ -31,11 +39,23 @@ function renderList(devices: UserDevice[], props: Partial<{ groupByProfile: bool
       search=""
       onSearchChange={vi.fn()}
       now={NOW}
+      onProfileFilterChange={onProfileFilterChange}
       {...props}
     />,
   );
-  return { onSelect };
+  return { onSelect, onProfileFilterChange };
 }
+
+const HOUSEHOLD: UserDevice[] = [
+  device({ device_id: "a", device_name: "Sam's laptop", profile_name: "Sam" }),
+  device({ device_id: "b", device_name: "Sam's TV", profile_name: "Sam" }),
+  device({
+    device_id: "c",
+    device_name: "Robin's iPad",
+    profile_id: "profile-2",
+    profile_name: "Robin",
+  }),
+];
 
 describe("DeviceList", () => {
   it("groups by recency and marks the current device", () => {
@@ -94,8 +114,9 @@ describe("DeviceList", () => {
       { groupByProfile: true },
     );
 
-    expect(screen.getByText("Sam")).toBeInTheDocument();
-    expect(screen.getByText("Robin")).toBeInTheDocument();
+    // Scoped to headings: the profile-filter chips carry these names too.
+    expect(screen.getByRole("heading", { name: "Sam" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Robin" })).toBeInTheDocument();
     expect(screen.queryByText("Using now")).not.toBeInTheDocument();
   });
 
@@ -151,6 +172,70 @@ describe("DeviceList", () => {
     expect(items).toHaveLength(1);
     const [onlyItem] = items;
     expect(within(onlyItem!).getByText("Living Room")).toBeInTheDocument();
+  });
+});
+
+describe("DeviceList profile filter", () => {
+  it("offers one chip per profile, plus everyone, with counts", () => {
+    renderList(HOUSEHOLD, { groupByProfile: true });
+
+    expect(screen.getByRole("button", { name: "Everyone, 3 devices" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sam, 2 devices" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Robin, 1 device" })).toBeInTheDocument();
+  });
+
+  // Someone looking at their own devices has exactly one profile, so a filter
+  // with a single option would be chrome that explains nothing.
+  it("stays hidden outside the household view", () => {
+    renderList(HOUSEHOLD, { groupByProfile: false });
+    expect(screen.queryByRole("group", { name: "Filter by profile" })).not.toBeInTheDocument();
+  });
+
+  it("stays hidden when the household has only one profile", () => {
+    renderList([HOUSEHOLD[0]!, HOUSEHOLD[1]!], { groupByProfile: true });
+    expect(screen.queryByRole("group", { name: "Filter by profile" })).not.toBeInTheDocument();
+  });
+
+  it("reports the chosen profile", async () => {
+    const { onProfileFilterChange } = renderList(HOUSEHOLD, { groupByProfile: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "Robin, 1 device" }));
+
+    expect(onProfileFilterChange).toHaveBeenCalledWith("profile-2");
+  });
+
+  it("clears the filter when the active chip is clicked again", async () => {
+    const { onProfileFilterChange } = renderList(HOUSEHOLD, {
+      groupByProfile: true,
+      profileFilter: "profile-2",
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Robin, 1 device" }));
+
+    expect(onProfileFilterChange).toHaveBeenCalledWith(null);
+  });
+
+  it("shows only the filtered profile's devices", () => {
+    renderList(HOUSEHOLD, { groupByProfile: true, profileFilter: "profile-2" });
+
+    expect(screen.getByText("Robin's iPad")).toBeInTheDocument();
+    expect(screen.queryByText("Sam's laptop")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  // With one person selected, a person heading would just repeat the chip.
+  it("falls back to recency headings once a profile is chosen", () => {
+    renderList(HOUSEHOLD, { groupByProfile: true, profileFilter: "profile-2" });
+
+    expect(screen.getByText("This week")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Robin" })).not.toBeInTheDocument();
+  });
+
+  it("keeps chip counts stable while a filter is active", () => {
+    renderList(HOUSEHOLD, { groupByProfile: true, profileFilter: "profile-2" });
+
+    // Sam's chip still says 2 even though none of Sam's devices are listed.
+    expect(screen.getByRole("button", { name: "Sam, 2 devices" })).toBeInTheDocument();
   });
 });
 

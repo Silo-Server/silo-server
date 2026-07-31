@@ -28,6 +28,13 @@ export interface DeviceListProps {
   /** Group by person first. Only the household view sets this. */
   groupByProfile?: boolean;
   /**
+   * Show only this profile's devices. Null means everyone. Only meaningful
+   * alongside groupByProfile — a viewer looking at their own devices has just
+   * the one profile, so a filter with a single option would be noise.
+   */
+  profileFilter?: string | null;
+  onProfileFilterChange?: (profileId: string | null) => void;
+  /**
    * "Now" for relative-time labels. Passed in rather than read during render so
    * the component stays pure — and so a test can pin the clock.
    */
@@ -49,12 +56,20 @@ export function DeviceList({
   search,
   onSearchChange,
   groupByProfile = false,
+  profileFilter = null,
+  onProfileFilterChange,
   now,
 }: DeviceListProps) {
+  // Counts come from the unfiltered list so a chip keeps showing how many
+  // devices it would reveal, rather than collapsing to zero once another chip
+  // is active.
+  const profiles = useMemo(() => profileOptions(devices), [devices]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return devices;
     return devices.filter((device) => {
+      if (profileFilter && device.profile_id !== profileFilter) return false;
+      if (!query) return true;
       const platform = platformKindLabel(classifyPlatform(device.device_platform));
       return (
         device.device_name.toLowerCase().includes(query) ||
@@ -63,10 +78,10 @@ export function DeviceList({
         device.profile_name.toLowerCase().includes(query)
       );
     });
-  }, [devices, search]);
+  }, [devices, search, profileFilter]);
 
   const sections = useMemo(() => {
-    if (groupByProfile) {
+    if (groupByProfile && !profileFilter) {
       const byProfile = new Map<string, { title: string; devices: UserDevice[] }>();
       for (const device of filtered) {
         const existing = byProfile.get(device.profile_id);
@@ -86,7 +101,7 @@ export function DeviceList({
       title: GROUP_TITLES[group],
       devices: filtered.filter((device) => deviceRecencyGroup(device, now) === group),
     })).filter((section) => section.devices.length > 0);
-  }, [filtered, groupByProfile, now]);
+  }, [filtered, groupByProfile, profileFilter, now]);
 
   return (
     <div className="surface-panel rounded-[1.5rem] border-0 p-3 shadow-none">
@@ -100,6 +115,32 @@ export function DeviceList({
           className="h-9 pl-8 text-[13px]"
         />
       </div>
+
+      {groupByProfile && profiles.length > 1 && onProfileFilterChange ? (
+        <div
+          className="flex flex-wrap gap-1 px-0.5 pt-2 pb-1"
+          role="group"
+          aria-label="Filter by profile"
+        >
+          <ProfileChip
+            label="Everyone"
+            count={devices.length}
+            active={profileFilter === null}
+            onClick={() => onProfileFilterChange(null)}
+          />
+          {profiles.map((profile) => (
+            <ProfileChip
+              key={profile.id}
+              label={profile.name}
+              count={profile.count}
+              active={profileFilter === profile.id}
+              onClick={() =>
+                onProfileFilterChange(profileFilter === profile.id ? null : profile.id)
+              }
+            />
+          ))}
+        </div>
+      ) : null}
 
       {sections.length === 0 ? (
         <p className="text-muted-foreground px-2 py-6 text-center text-[13px]">
@@ -127,6 +168,66 @@ export function DeviceList({
         </section>
       ))}
     </div>
+  );
+}
+
+interface ProfileOption {
+  id: string;
+  name: string;
+  count: number;
+}
+
+/** One entry per profile that owns at least one device, in first-seen order. */
+function profileOptions(devices: UserDevice[]): ProfileOption[] {
+  const byId = new Map<string, ProfileOption>();
+  for (const device of devices) {
+    const existing = byId.get(device.profile_id);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      byId.set(device.profile_id, {
+        id: device.profile_id,
+        name: device.profile_name || "Other profile",
+        count: 1,
+      });
+    }
+  }
+  return [...byId.values()];
+}
+
+function ProfileChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      // The visible label and the count are separate elements, so without this
+      // a screen reader announces them run together as "Everyone3".
+      aria-label={`${label}, ${count} ${count === 1 ? "device" : "devices"}`}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors",
+        active
+          ? "border-foreground/25 bg-surface-raised text-foreground"
+          : "border-border/60 text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+      )}
+    >
+      {label}
+      <span
+        className={cn("text-[11px]", active ? "text-muted-foreground" : "text-muted-foreground/70")}
+      >
+        {count}
+      </span>
+    </button>
   );
 }
 
