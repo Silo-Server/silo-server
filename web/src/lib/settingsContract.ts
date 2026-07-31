@@ -8,7 +8,7 @@
  * is a manifest change plus a regeneration, never a hand-written key.
  */
 
-export const SETTINGS_REVISION = 2;
+export const SETTINGS_REVISION = 3;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -154,6 +154,8 @@ export type SettingOptionSetId = keyof typeof SETTING_OPTION_SETS;
 export const SETTING_KEYS = {
   /** Metadata language */
   CATALOG_METADATA_LANGUAGE: "catalog.metadata_language",
+  /** Metadata language exceptions */
+  CATALOG_METADATA_LANGUAGE_OVERRIDES: "catalog.metadata_language_overrides",
   /** Download quality */
   DOWNLOADS_DEFAULT_QUALITY: "downloads.default_quality",
   /** Keep watched downloads */
@@ -306,11 +308,26 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     resolutionOrder: ["profile", "default"],
     defaultValue: null,
     label: "Metadata language",
-    description: "Language Silo prefers for titles, descriptions, and artwork.",
+    description: "Fallback language Silo prefers for titles, descriptions, and artwork.",
     category: "catalog",
     control: "select",
     suggestedOptions: "catalog_metadata_languages",
     unsetLabel: "Library default",
+  },
+  "catalog.metadata_language_overrides": {
+    key: "catalog.metadata_language_overrides",
+    type: "object",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 3,
+    scopes: ["profile"],
+    scopeIntroducedIn: [3],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: {},
+    label: "Metadata language exceptions",
+    description: "Preferred metadata language for items in specific original languages.",
+    category: "catalog",
+    control: "panel",
   },
   "downloads.default_quality": {
     key: "downloads.default_quality",

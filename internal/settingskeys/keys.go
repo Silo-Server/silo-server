@@ -9,12 +9,14 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 2
+const Revision = 3
 
 // Setting keys, one constant per definition.
 const (
 	// Metadata language
 	CatalogMetadataLanguage = "catalog.metadata_language"
+	// Metadata language exceptions
+	CatalogMetadataLanguageOverrides = "catalog.metadata_language_overrides"
 	// Download quality
 	DownloadsDefaultQuality = "downloads.default_quality"
 	// Keep watched downloads
@@ -116,6 +118,7 @@ const (
 // Remote lists every key the server stores.
 var Remote = []string{
 	CatalogMetadataLanguage,
+	CatalogMetadataLanguageOverrides,
 	PlaybackAudioLanguage,
 	PlaybackAutoPlayNext,
 	PlaybackAutoPlayNextPreview,

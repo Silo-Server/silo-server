@@ -20,6 +20,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -850,5 +852,54 @@ func TestMergeLanguageSuggestionsUsesExactCurrentAlias(t *testing.T) {
 	want := []string{"eng", "fr"}
 	if !slices.Equal(got, want) {
 		t.Errorf("mergeLanguageSuggestions() = %v, want %v", got, want)
+	}
+}
+
+type recordingLanguageSuggestionSource struct {
+	filters  catalog.BrowseFilters
+	original []string
+}
+
+func (s *recordingLanguageSuggestionSource) ListOriginalLanguages(
+	_ context.Context, filters catalog.BrowseFilters,
+) ([]string, error) {
+	s.filters = filters
+	return s.original, nil
+}
+
+func (*recordingLanguageSuggestionSource) ListAudioLanguages(
+	context.Context, catalog.BrowseFilters,
+) ([]string, error) {
+	return nil, nil
+}
+
+func (*recordingLanguageSuggestionSource) ListSubtitleLanguages(
+	context.Context, catalog.BrowseFilters,
+) ([]string, error) {
+	return nil, nil
+}
+
+func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testing.T) {
+	source := &recordingLanguageSuggestionSource{original: []string{"is", "no"}}
+	handler, _ := newValuesTestHandler(t)
+	handler.SetLanguageSuggestionSource(source)
+
+	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
+	req = req.WithContext(access.SetScope(req.Context(), access.Scope{
+		AllowedLibraryIDs:  []int{4, 9},
+		DisabledLibraryIDs: []int{12},
+		MaxContentRating:   "PG-13",
+	}))
+	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{{
+		Key: settingskeys.CatalogMetadataLanguage,
+	}})
+
+	if !slices.Equal(observed[settingskeys.CatalogMetadataLanguage], []string{"is", "no"}) {
+		t.Fatalf("metadata suggestions = %v", observed[settingskeys.CatalogMetadataLanguage])
+	}
+	if !slices.Equal(source.filters.LibraryIDs, []int{4, 9}) ||
+		!slices.Equal(source.filters.DisabledLibraryIDs, []int{12}) ||
+		source.filters.MaxContentRating != "PG-13" {
+		t.Fatalf("catalog filters = %#v", source.filters)
 	}
 }

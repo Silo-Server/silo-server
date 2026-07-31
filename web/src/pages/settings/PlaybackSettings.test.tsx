@@ -79,6 +79,7 @@ describe("PlaybackSettings", () => {
     expect(batched?.[0].keys).toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO);
     expect(batched?.[0].keys).toContain(SETTING_KEYS.UI_NEXT_UP_MODE);
     expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+    expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES);
   });
 
   it("saves a toggle as typed JSON at profile scope", () => {

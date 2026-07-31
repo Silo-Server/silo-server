@@ -579,14 +579,24 @@ func TestResolver_MetadataLanguageResolvesCanonically(t *testing.T) {
 				ID:                        "prof-1",
 				PreferredMetadataLanguage: "fr",
 			},
-			settingValues: []userstore.SettingValue{{
-				SettingIdentity: userstore.SettingIdentity{
-					Key:       settingskeys.CatalogMetadataLanguage,
-					Scope:     settingscontract.ScopeProfile,
-					ProfileID: "prof-1",
+			settingValues: []userstore.SettingValue{
+				{
+					SettingIdentity: userstore.SettingIdentity{
+						Key:       settingskeys.CatalogMetadataLanguage,
+						Scope:     settingscontract.ScopeProfile,
+						ProfileID: "prof-1",
+					},
+					Value: json.RawMessage(`"de"`),
 				},
-				Value: json.RawMessage(`"de"`),
-			}},
+				{
+					SettingIdentity: userstore.SettingIdentity{
+						Key:       settingskeys.CatalogMetadataLanguageOverrides,
+						Scope:     settingscontract.ScopeProfile,
+						ProfileID: "prof-1",
+					},
+					Value: json.RawMessage(`{"no":"x-silo-original"}`),
+				},
+			},
 		}},
 		nil,
 	)
@@ -597,6 +607,9 @@ func TestResolver_MetadataLanguageResolvesCanonically(t *testing.T) {
 	}
 	if scope.PreferredMetadataLanguage != "de" {
 		t.Fatalf("PreferredMetadataLanguage = %q, want canonical value %q", scope.PreferredMetadataLanguage, "de")
+	}
+	if got := scope.MetadataLanguageOverrides["no"]; got != OriginalMetadataLanguage {
+		t.Fatalf("MetadataLanguageOverrides[no] = %q, want %q", got, OriginalMetadataLanguage)
 	}
 }
 

@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 2,
+  "revision": 3,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -384,11 +384,28 @@
       "default_value": null,
       "category": "catalog",
       "label": "Metadata language",
-      "description": "Language Silo prefers for titles, descriptions, and artwork.",
+      "description": "Fallback language Silo prefers for titles, descriptions, and artwork.",
       "recommended_control": "select",
       "suggested_options": "catalog_metadata_languages",
       "unset_label": "Library default",
-      "notes": "Migrates user_profiles.preferred_metadata_language; that column is NOT NULL DEFAULT '', and the empty string means unset, so migration writes a row only where it is non-empty. Deliberately carries no constrained_by. An earlier draft declared an allowlist on policy input profile_preferred_metadata_language, which is circular: internal/policy/input.go populates that field from this very column and vendor/scope.rego relays it unchanged as a preference. Policy narrows nothing here, and an allowlist bound to a scalar equal to the current value would either be a no-op or reject every change the user makes."
+      "notes": "Migrates user_profiles.preferred_metadata_language; that column is NOT NULL DEFAULT '', and the empty string means unset, so migration writes a row only where it is non-empty. Deliberately carries no constrained_by. An earlier draft declared an allowlist on policy input profile_preferred_metadata_language, which is circular: internal/policy/input.go populates that field from this very column and vendor/scope.rego relays it unchanged as a preference. Policy narrows nothing here, and an allowlist bound to a scalar equal to the current value would either be a no-op or reject every change the user makes. From revision 3, the private-use tag x-silo-original means resolve the target from each media item's original_language. It remains a valid value of the existing language_tag schema, so this is additive rather than a response-field type change."
+    },
+    {
+      "key": "catalog.metadata_language_overrides",
+      "introduced_in": 3,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "metadata-language-overrides.json"
+      },
+      "default_value": {},
+      "category": "catalog",
+      "label": "Metadata language exceptions",
+      "description": "Preferred metadata language for items in specific original languages.",
+      "recommended_control": "panel",
+      "notes": "Keys are canonical catalog original_language codes. Values are target BCP 47 language tags; x-silo-original means retain that source language. This key is separate from catalog.metadata_language so existing clients can continue changing the fallback without rewriting or discarding exceptions."
     },
     {
       "key": "player.hdr_enabled",

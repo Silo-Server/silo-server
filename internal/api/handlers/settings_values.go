@@ -55,6 +55,7 @@ type SettingValuesHandler struct {
 }
 
 type languageSuggestionSource interface {
+	ListOriginalLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
 	ListAudioLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
 	ListSubtitleLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
 }
@@ -1073,16 +1074,18 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 		return result
 	}
 
-	wantsAudio, wantsSubtitles := false, false
+	wantsMetadata, wantsAudio, wantsSubtitles := false, false, false
 	for _, eff := range resolved {
 		switch eff.Key {
+		case settingskeys.CatalogMetadataLanguage:
+			wantsMetadata = true
 		case settingskeys.PlaybackAudioLanguage:
 			wantsAudio = true
 		case settingskeys.PlaybackSubtitleLanguage:
 			wantsSubtitles = true
 		}
 	}
-	if !wantsAudio && !wantsSubtitles {
+	if !wantsMetadata && !wantsAudio && !wantsSubtitles {
 		return result
 	}
 
@@ -1091,6 +1094,15 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 		filters.LibraryIDs = scope.AllowedLibraryIDs
 		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		filters.MaxContentRating = scope.MaxContentRating
+	}
+	if wantsMetadata {
+		values, err := h.languageSource.ListOriginalLanguages(r.Context(), filters)
+		if err != nil {
+			slog.WarnContext(r.Context(), "settings: listing metadata language suggestions",
+				"component", "settings", "error", err)
+		} else {
+			result[settingskeys.CatalogMetadataLanguage] = values
+		}
 	}
 	if wantsAudio {
 		values, err := h.languageSource.ListAudioLanguages(r.Context(), filters)

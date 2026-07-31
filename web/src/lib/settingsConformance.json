@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 2,
+  "manifest_revision": 3,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -437,6 +437,27 @@
       ],
       "constraints": { "allowed_metadata_languages": ["en", "fr"] },
       "expected": [{ "key": "catalog.metadata_language", "value": "fr", "source": "profile" }]
+    },
+    {
+      "name": "metadata_language_exceptions_resolve_as_one_object",
+      "description": "The original-language exception map is a single profile-scoped value; resolution preserves every source-to-target entry together.",
+      "keys": ["catalog.metadata_language_overrides"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "catalog.metadata_language_overrides",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": { "ja": "en", "no": "x-silo-original" }
+        }
+      ],
+      "expected": [
+        {
+          "key": "catalog.metadata_language_overrides",
+          "value": { "ja": "en", "no": "x-silo-original" },
+          "source": "profile"
+        }
+      ]
     },
     {
       "name": "locked_replaces_a_differing_choice",

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sort"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -18,6 +20,7 @@ import (
 type ViewerPreferences struct {
 	DisabledLibraryIDs        []int
 	PreferredMetadataLanguage string
+	MetadataLanguageOverrides map[string]string
 }
 
 // ResolveViewerPreferences resolves the profile's viewer-scope preferences in
@@ -57,7 +60,11 @@ func resolveCanonicalViewerPreferences(
 	}
 	values, err := settingsresolve.New(contract).Resolve(ctx, store,
 		settingsresolve.Context{ProfileID: profileID},
-		[]string{settingskeys.UiDisabledLibraryIds, settingskeys.CatalogMetadataLanguage}, nil)
+		[]string{
+			settingskeys.UiDisabledLibraryIds,
+			settingskeys.CatalogMetadataLanguage,
+			settingskeys.CatalogMetadataLanguageOverrides,
+		}, nil)
 	if err != nil {
 		slog.WarnContext(ctx, "viewer preference resolution degraded: reading setting values failed",
 			"component", "access", "profile_id", profileID, "error", err)
@@ -77,9 +84,56 @@ func resolveCanonicalViewerPreferences(
 			if json.Unmarshal(value.Value, &language) == nil {
 				out.preferences.PreferredMetadataLanguage = strings.TrimSpace(language)
 			}
+		case settingskeys.CatalogMetadataLanguageOverrides:
+			out.preferences.MetadataLanguageOverrides = parseMetadataLanguageOverrides(value.Value)
 		}
 	}
 	return out, true
+}
+
+// OriginalMetadataLanguage is a private-use BCP 47 tag stored in
+// catalog.metadata_language (or as an override target) to mean "resolve this
+// media item's original language." Keeping the sentinel a valid language tag
+// preserves the existing setting's wire type.
+const OriginalMetadataLanguage = "x-silo-original"
+
+// parseMetadataLanguageOverrides normalizes source aliases and target tag
+// casing before the map reaches catalog serving. The contract only accepts
+// canonical source keys from normal clients, but normalization also makes old
+// or manually-authored rows deterministic.
+func parseMetadataLanguageOverrides(raw json.RawMessage) map[string]string {
+	var stored map[string]string
+	if json.Unmarshal(raw, &stored) != nil || len(stored) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(stored))
+	for source := range stored {
+		keys = append(keys, source)
+	}
+	sort.Strings(keys)
+
+	out := make(map[string]string, len(stored))
+	for _, source := range keys {
+		canonicalSource := lang.Canonical(source)
+		if canonicalSource == "" {
+			continue
+		}
+		// When aliases collapse (for example en and eng), the canonical key
+		// wins because it sorts first and is never overwritten.
+		if _, exists := out[canonicalSource]; exists {
+			continue
+		}
+		target, ok := settingscontract.NormalizeLanguageTag(stored[source])
+		if !ok {
+			continue
+		}
+		out[canonicalSource] = target
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func legacyDisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
