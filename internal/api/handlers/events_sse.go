@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -53,16 +54,36 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
+	// The shared server (cmd/silo/main.go) sets WriteTimeout: 120s on this
+	// listener. net/http applies that as a hard per-connection deadline set
+	// once when the request is read; handler writes and flushes never renew
+	// it, so without this the stream would be force-closed at ~120s no
+	// matter how healthy it is. Clear it for this connection only, the same
+	// way startStandaloneServer (cmd/silo/main.go) sets WriteTimeout: 0 for
+	// its own long-lived streams — HandleWebSocket never needs this because
+	// wsUpgrader.Upgrade hijacks the raw connection and escapes the server's
+	// deadline management entirely, but SSE stays on the standard
+	// ResponseWriter path.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		// Not fatal on its own: some wrapping middleware may not support
+		// per-connection deadlines (returns http.ErrNotSupported). Log and
+		// keep streaming; the connection simply remains subject to the
+		// server's WriteTimeout in that case.
+		slog.WarnContext(r.Context(), "events: sse write deadline not cleared; stream may be closed by the server's WriteTimeout", "component", "api", "error", err)
+	}
+
 	eventsCh, unsubscribe := h.hub.Subscribe()
 	defer unsubscribe()
 
-	writeSSEFrame(w, flusher, "hello", evt.EventsHelloMessage{
+	if err := writeSSEFrame(w, flusher, "hello", evt.EventsHelloMessage{
 		Type:              "hello",
 		SchemaVersion:     1,
 		ConnectionID:      ulid.Make().String(),
 		AvailableChannels: allowed,
 		RequiredAction:    "none",
-	})
+	}); err != nil {
+		return
+	}
 
 	ping := time.NewTicker(ssePingInterval)
 	defer ping.Stop()
@@ -73,9 +94,11 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ping.C:
-			writeSSEFrame(w, flusher, "ping", map[string]string{
+			if err := writeSSEFrame(w, flusher, "ping", map[string]string{
 				"type": "ping",
-			})
+			}); err != nil {
+				return
+			}
 		case env, ok := <-eventsCh:
 			if !ok {
 				return
@@ -86,15 +109,40 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 			if !allowsEventForClaims(claims, "", env) {
 				continue
 			}
-			writeSSEFrame(w, flusher, string(env.Channel), env)
+			if err := writeSSEFrame(w, flusher, string(env.Channel), sseEventMessage(env)); err != nil {
+				return
+			}
 		}
 	}
 }
 
+// sseEventMessage projects a hub envelope into the same wire-safe shape
+// HandleWebSocket sends (evt.EventsEventMessage), rather than marshalling the
+// raw evt.Envelope. The envelope carries internal plumbing and other users'
+// identifiers — source_id, admin_only, target_plugin_id, user_id, profile_id
+// — that must never reach the wire; the two transports agree on one public
+// event schema.
+func sseEventMessage(env evt.Envelope) evt.EventsEventMessage {
+	data := env.Data
+	if len(data) == 0 {
+		data = json.RawMessage("null")
+	}
+	return evt.EventsEventMessage{
+		Type:      "event",
+		Channel:   env.Channel,
+		Event:     env.Event,
+		EventID:   env.EventID,
+		Timestamp: env.Timestamp.UTC().Format(time.RFC3339Nano),
+		Data:      data,
+	}
+}
+
 // resolveSSEChannels intersects the caller's requested channels with what its
-// role allows. An empty request means "everything allowed". A requested channel
-// the role forbids is dropped silently rather than failing the whole stream, so
-// one forbidden channel does not deny a caller the rest.
+// role allows. An empty request means "everything allowed". A requested
+// channel the role forbids, or that isn't recognized at all (a malformed or
+// bogus value), is dropped silently rather than failing the whole stream or
+// widening access — deny-by-default, so a garbage `channels` value yields an
+// empty subscription (hello and pings only, no events) instead of an error.
 func resolveSSEChannels(requested string, allowed []evt.EventChannel) map[evt.EventChannel]struct{} {
 	allowedSet := make(map[evt.EventChannel]struct{}, len(allowed))
 	for _, ch := range allowed {
@@ -119,15 +167,20 @@ func resolveSSEChannels(requested string, allowed []evt.EventChannel) map[evt.Ev
 	return selected
 }
 
-// writeSSEFrame writes one named SSE event and flushes it. data is emitted as a
-// single compact JSON line, as the SSE framing requires.
-func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, event string, payload any) {
+// writeSSEFrame writes one named SSE event and flushes it. data is emitted as
+// a single compact JSON line, as the SSE framing requires. It returns an
+// error if the payload could not be marshalled or the frame could not be
+// written, so the caller can drop a dead connection promptly instead of
+// waiting on context cancellation — mirroring HandleWebSocket's frame-write
+// discipline (events_ws.go), which returns immediately on any write failure.
+func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return
+		return err
 	}
 	if _, err := w.Write([]byte("event: " + event + "\ndata: " + string(data) + "\n\n")); err != nil {
-		return
+		return err
 	}
 	flusher.Flush()
+	return nil
 }

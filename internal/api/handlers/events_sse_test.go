@@ -20,10 +20,17 @@ import (
 // websocket handler.
 func newAuthedSSERequest(t *testing.T, target string) *http.Request {
 	t.Helper()
+	return newAuthedSSERequestWithRole(t, target, "admin")
+}
+
+// newAuthedSSERequestWithRole is newAuthedSSERequest with an explicit role,
+// for tests that need to assert non-admin behaviour.
+func newAuthedSSERequestWithRole(t *testing.T, target, role string) *http.Request {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    1,
-		Role:      "admin",
+		Role:      role,
 		TokenType: auth.TokenTypeAccess,
 	})
 	return req.WithContext(ctx)
@@ -133,6 +140,75 @@ func TestHandleSSESuppressesUnsubscribedChannel(t *testing.T) {
 
 	if strings.Contains(body, "event: jobs") {
 		t.Fatalf("unsubscribed channel leaked into the stream, body = %q", body)
+	}
+}
+
+func TestHandleSSENonAdminOmitsAdminOnlyChannel(t *testing.T) {
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	h := &EventsHandler{hub: hub}
+
+	// "jobs" is admin-only per allowedChannelsForRole; a plain "user" caller
+	// requesting it must not error the request, but must never see it on the
+	// wire. This is the endpoint's core authorization guarantee.
+	req := newAuthedSSERequestWithRole(t, "/api/v1/events/sse?channels=jobs", "user")
+	rec := httptest.NewRecorder()
+
+	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
+		Channel:   evt.ChannelJobs,
+		Event:     "jobs.updated",
+		AdminOnly: true,
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (a forbidden channel request must not error)", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(body, "event: hello") {
+		t.Fatalf("hello frame missing, body = %q", body)
+	}
+	if strings.Contains(body, "event: jobs") {
+		t.Fatalf("admin-only channel leaked to a non-admin caller, body = %q", body)
+	}
+}
+
+func TestHandleSSEMalformedChannelsDenyByDefault(t *testing.T) {
+	hub := evt.NewHub("test", &cache.NoopEventBus{})
+	h := &EventsHandler{hub: hub}
+
+	// A garbage channels value must not error the request, and must not
+	// widen access: the safe outcome is an empty subscription (hello and
+	// pings only), never "everything allowed".
+	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=,,,bogus,")
+	rec := httptest.NewRecorder()
+
+	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
+		Channel: evt.ChannelSessions,
+		Event:   "sessions.replaced",
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (malformed channels must not error the request)", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(body, "event: hello") {
+		t.Fatalf("hello frame missing, body = %q", body)
+	}
+	if strings.Contains(body, "event: sessions") {
+		t.Fatalf("malformed channels widened access instead of denying by default; body = %q", body)
+	}
+}
+
+func TestResolveSSEChannelsGarbageDeniesByDefault(t *testing.T) {
+	allowed := []evt.EventChannel{evt.ChannelSessions, evt.ChannelJobs}
+
+	got := resolveSSEChannels(",,,bogus,", allowed)
+	if len(got) != 0 {
+		t.Fatalf("resolveSSEChannels(garbage) = %v, want empty map (deny-by-default)", got)
+	}
+
+	// Sanity check the other branch: an empty request means "everything the
+	// role allows", not "nothing" — malformed and absent are different.
+	got = resolveSSEChannels("", allowed)
+	if len(got) != len(allowed) {
+		t.Fatalf("resolveSSEChannels(\"\") = %v, want everything allowed (%v)", got, allowed)
 	}
 }
 
