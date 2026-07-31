@@ -48,50 +48,101 @@ func runSSEHandlerBriefly(t *testing.T, h *EventsHandler, rec *httptest.Response
 	h.HandleSSE(rec, req.WithContext(ctx))
 }
 
-// flushSignal wraps httptest.ResponseRecorder so a test can be notified the
-// instant HandleSSE performs its first flush, instead of guessing a delay.
-// writeSSEFrame flushes after every write, and the very first frame HandleSSE
-// writes is the hello frame — sent only after h.hub.Subscribe() returns — so
-// "first flush observed" is a race-free proxy for "the handler has already
-// subscribed". It still satisfies http.Flusher (required by HandleSSE) and,
-// via the embedded *httptest.ResponseRecorder, the same "not supported" path
-// through http.NewResponseController that HandleSSE already tolerates.
+// flushSignal wraps httptest.ResponseRecorder so a test can wait for the Nth
+// flush HandleSSE performs, instead of guessing a delay. writeSSEFrame
+// flushes exactly once per frame written, so counting flushes counts frames:
+// flush #1 is always the hello frame — sent only after h.hub.Subscribe() has
+// returned — and each flush after that corresponds to one more ping or event
+// frame written. Waiting for a specific count lets a test prove the handler
+// has processed everything published before it, rather than assuming so
+// after a fixed delay. It still satisfies http.Flusher (required by
+// HandleSSE) and, via the embedded *httptest.ResponseRecorder, the same "not
+// supported" path through http.NewResponseController that HandleSSE already
+// tolerates.
 type flushSignal struct {
 	*httptest.ResponseRecorder
-	once    sync.Once
-	flushed chan struct{}
+
+	mu      sync.Mutex
+	count   int
+	waiting map[int]chan struct{}
 }
 
 func newFlushSignal() *flushSignal {
 	return &flushSignal{
 		ResponseRecorder: httptest.NewRecorder(),
-		flushed:          make(chan struct{}),
+		waiting:          make(map[int]chan struct{}),
 	}
 }
 
 func (f *flushSignal) Flush() {
 	f.ResponseRecorder.Flush()
-	f.once.Do(func() { close(f.flushed) })
+	f.mu.Lock()
+	f.count++
+	for n, ch := range f.waiting {
+		if f.count >= n {
+			close(ch)
+			delete(f.waiting, n)
+		}
+	}
+	f.mu.Unlock()
 }
 
-// runSSEHandlerWithPublish runs h.HandleSSE in a goroutine, waits for its
+// waitForFlush blocks until at least n flushes have been observed, or fails
+// the test after timeout. Calling it with an n already reached returns
+// immediately.
+func (f *flushSignal) waitForFlush(t *testing.T, n int, timeout time.Duration) {
+	t.Helper()
+
+	f.mu.Lock()
+	if f.count >= n {
+		f.mu.Unlock()
+		return
+	}
+	ch := make(chan struct{})
+	f.waiting[n] = ch
+	f.mu.Unlock()
+
+	select {
+	case <-ch:
+	case <-time.After(timeout):
+		t.Fatalf("HandleSSE did not reach %d flush(es) before the timeout", n)
+	}
+}
+
+// runSSEHandlerAndAwaitFrames runs h.HandleSSE in a goroutine, waits for its
 // first flush (proof that it has already subscribed to the hub), publishes
-// env only then, and lets the request context expire so HandleSSE returns.
-// It returns the recorded body.
+// each of envs in order, waits until minFlushes total flushes have been
+// observed, cancels the context, and waits (with a bounded timeout of its
+// own) for the handler to return. It returns the recorded body.
 //
-// Publishing before HandleSSE calls hub.Subscribe() would silently lose the
-// event — hub.Publish only fans out to subscribers that already exist — so
-// this must not rely on a fixed delay and hope the handler got there first;
-// the flush signal makes the ordering deterministic instead.
-func runSSEHandlerWithPublish(
+// This closes two distinct races that a fixed delay cannot:
+//
+//  1. Publishing before HandleSSE calls hub.Subscribe() would silently lose
+//     the event — hub.Publish only fans out to subscribers that already
+//     exist — ruled out by waiting for the first flush before publishing
+//     anything.
+//  2. Canceling before HandleSSE has actually processed and written the
+//     frames a test expects would make an "absence" assertion pass for the
+//     wrong reason: the handler never got there, not that it correctly
+//     suppressed something. Waiting for minFlushes rather than a fixed delay
+//     rules this out too.
+//
+// A caller asserting an envelope is suppressed must publish, after it, one
+// that is genuinely subscribed and will produce a frame, and include that
+// frame in minFlushes — otherwise this blocks for the full timeout waiting on
+// a flush that will never arrive.
+func runSSEHandlerAndAwaitFrames(
 	t *testing.T,
 	h *EventsHandler,
 	hub *evt.Hub,
 	rec *flushSignal,
 	req *http.Request,
-	env evt.Envelope,
+	minFlushes int,
+	envs ...evt.Envelope,
 ) string {
 	t.Helper()
+	const timeout = 5 * time.Second
+
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
@@ -101,23 +152,23 @@ func runSSEHandlerWithPublish(
 		h.HandleSSE(rec, req.WithContext(ctx))
 	}()
 
+	rec.waitForFlush(t, 1, timeout)
+
+	for _, env := range envs {
+		if err := hub.Publish(context.Background(), env); err != nil {
+			t.Fatalf("hub.Publish: %v", err)
+		}
+	}
+
+	rec.waitForFlush(t, minFlushes, timeout)
+
+	cancel()
+
 	select {
-	case <-rec.flushed:
-		// The hello frame is out, which only happens after hub.Subscribe()
-		// has returned — safe to publish now.
-	case <-time.After(5 * time.Second):
-		t.Fatal("HandleSSE did not flush its hello frame before the timeout")
+	case <-done:
+	case <-time.After(timeout):
+		t.Fatal("HandleSSE did not return after its context was canceled")
 	}
-
-	if err := hub.Publish(context.Background(), env); err != nil {
-		t.Fatalf("hub.Publish: %v", err)
-	}
-
-	// The subscribe race is already ruled out above; this just gives the
-	// now-subscribed handler's select loop a moment to observe the publish
-	// and write it out before the context is canceled underneath it.
-	time.AfterFunc(30*time.Millisecond, cancel)
-	<-done
 
 	return rec.Body.String()
 }
@@ -171,8 +222,9 @@ func TestHandleSSEWritesSubscribedChannelEvent(t *testing.T) {
 	// Populate every internal-only Envelope field alongside the public ones,
 	// so this test would genuinely fail if sseEventMessage regressed to
 	// marshaling the raw envelope instead of projecting it — which is
-	// precisely the bug an earlier review round found and fixed.
-	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
+	// precisely the bug an earlier review round found and fixed. minFlushes
+	// is 2: the hello frame, then this event's frame.
+	body := runSSEHandlerAndAwaitFrames(t, h, hub, rec, req, 2, evt.Envelope{
 		Channel:        evt.ChannelSessions,
 		Event:          "sessions.replaced",
 		EventID:        "evt_test_123",
@@ -250,11 +302,21 @@ func TestHandleSSESuppressesUnsubscribedChannel(t *testing.T) {
 	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=sessions")
 	rec := newFlushSignal()
 
-	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
-		Channel: evt.ChannelJobs,
-		Event:   "jobs.updated",
-	})
+	// A suppressed envelope alone never produces a frame, so canceling after
+	// a fixed delay could pass this test for the wrong reason — the handler
+	// might simply not have reached it yet. Publishing a sentinel on
+	// "sessions" (the one channel this caller actually subscribed to) right
+	// after it, and waiting for the sentinel's frame (minFlushes: hello +
+	// sentinel = 2), proves the handler ran past the suppressed envelope
+	// rather than never getting there.
+	body := runSSEHandlerAndAwaitFrames(t, h, hub, rec, req, 2,
+		evt.Envelope{Channel: evt.ChannelJobs, Event: "jobs.updated"},
+		evt.Envelope{Channel: evt.ChannelSessions, Event: "sessions.sentinel"},
+	)
 
+	if !strings.Contains(body, "event: sessions") {
+		t.Fatalf("sentinel event missing; handler may never have run past the suppressed envelope, body = %q", body)
+	}
 	if strings.Contains(body, "event: jobs") {
 		t.Fatalf("unsubscribed channel leaked into the stream, body = %q", body)
 	}
@@ -266,21 +328,27 @@ func TestHandleSSENonAdminOmitsAdminOnlyChannel(t *testing.T) {
 
 	// "jobs" is admin-only per allowedChannelsForRole; a plain "user" caller
 	// requesting it must not error the request, but must never see it on the
-	// wire. This is the endpoint's core authorization guarantee.
-	req := newAuthedSSERequestWithRole(t, "/api/v1/events/sse?channels=jobs", "user")
+	// wire. This is the endpoint's core authorization guarantee. "catalog" is
+	// requested alongside it because a plain user genuinely is allowed that
+	// one (the design doc's own rule: "a caller asking for one forbidden
+	// channel among several should still get the rest") — it gives this test
+	// a real sentinel channel to synchronize on instead of a fixed delay.
+	req := newAuthedSSERequestWithRole(t, "/api/v1/events/sse?channels=jobs,catalog", "user")
 	rec := newFlushSignal()
 
-	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
-		Channel:   evt.ChannelJobs,
-		Event:     "jobs.updated",
-		AdminOnly: true,
-	})
+	body := runSSEHandlerAndAwaitFrames(t, h, hub, rec, req, 2,
+		evt.Envelope{Channel: evt.ChannelJobs, Event: "jobs.updated", AdminOnly: true},
+		evt.Envelope{Channel: evt.ChannelCatalog, Event: "catalog.sentinel"},
+	)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (a forbidden channel request must not error)", rec.Code, http.StatusOK)
 	}
 	if !strings.Contains(body, "event: hello") {
 		t.Fatalf("hello frame missing, body = %q", body)
+	}
+	if !strings.Contains(body, "event: catalog") {
+		t.Fatalf("sentinel event missing; handler may never have run past the admin-only envelope, body = %q", body)
 	}
 	if strings.Contains(body, "event: jobs") {
 		t.Fatalf("admin-only channel leaked to a non-admin caller, body = %q", body)
@@ -292,15 +360,24 @@ func TestHandleSSEMalformedChannelsDenyByDefault(t *testing.T) {
 	h := &EventsHandler{hub: hub}
 
 	// A garbage channels value must not error the request, and must not
-	// widen access: the safe outcome is an empty subscription (hello and
-	// pings only), never "everything allowed".
-	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=,,,bogus,")
+	// widen access. This mixes malformed tokens ("bogus", empty entries)
+	// with one legitimately requested channel ("sessions") rather than an
+	// all-garbage value: TestResolveSSEChannelsGarbageDeniesByDefault below
+	// already proves the pure "all garbage yields an empty subscription"
+	// claim as a fast, non-concurrent unit test; this end-to-end test proves
+	// the handler is actually alive and does not widen a mixed request to
+	// the caller's full allowed set — "jobs" is allowed for this admin
+	// caller but was never requested, so it must stay silent, while
+	// "sessions" (requested and allowed) must arrive and doubles as the
+	// sentinel that rules out the "canceled before the handler got there"
+	// race.
+	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=,,,bogus,sessions")
 	rec := newFlushSignal()
 
-	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
-		Channel: evt.ChannelSessions,
-		Event:   "sessions.replaced",
-	})
+	body := runSSEHandlerAndAwaitFrames(t, h, hub, rec, req, 2,
+		evt.Envelope{Channel: evt.ChannelJobs, Event: "jobs.updated"},
+		evt.Envelope{Channel: evt.ChannelSessions, Event: "sessions.sentinel"},
+	)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d (malformed channels must not error the request)", rec.Code, http.StatusOK)
@@ -308,8 +385,11 @@ func TestHandleSSEMalformedChannelsDenyByDefault(t *testing.T) {
 	if !strings.Contains(body, "event: hello") {
 		t.Fatalf("hello frame missing, body = %q", body)
 	}
-	if strings.Contains(body, "event: sessions") {
-		t.Fatalf("malformed channels widened access instead of denying by default; body = %q", body)
+	if !strings.Contains(body, "event: sessions") {
+		t.Fatalf("sentinel event missing; handler may never have run past the malformed-channel envelope, body = %q", body)
+	}
+	if strings.Contains(body, "event: jobs") {
+		t.Fatalf("malformed channels widened access to an unrequested channel; body = %q", body)
 	}
 }
 
