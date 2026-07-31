@@ -795,6 +795,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var collectionHandler *handlers.CollectionHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	var deviceHandler *handlers.DeviceHandler
 	var homeDismissalHandler *handlers.HomeDismissalHandler
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
 	var audioPrefHandler *handlers.AudioPrefHandler
@@ -853,12 +854,25 @@ func NewRouter(deps Dependencies) chi.Router {
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
+			// Household management: a primary profile acting for another
+			// profile on its own account. Without both of these the widening
+			// is unavailable rather than unguarded.
+			if userRepo != nil {
+				settingValuesHandler.UserRepo = userRepo
+			}
+			settingValuesHandler.ProfileTokens = profileTokenService
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
 			} else if deps.DB != nil {
 				settingValuesHandler.SetLibraryLookup(catalog.NewFolderRepository(deps.DB))
 			}
 		}
+		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
+		deviceHandler.EventsHub = deps.EventsHub
+		if userRepo != nil {
+			deviceHandler.UserRepo = userRepo
+		}
+		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
@@ -2159,6 +2173,19 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Put("/{id}/avatar", profileHandler.HandleUploadAvatar)
 						r.Delete("/{id}/avatar", profileHandler.HandleDeleteAvatar)
 						r.Post("/{id}/verify-pin", profileHandler.HandleVerifyPIN)
+					})
+				}
+
+				// The viewer's own device registry. Distinct from the push
+				// device routes under /notifications and from the TV login
+				// pairing flow under /auth/device: this is the installation
+				// identity that carries device-scoped settings.
+				if deviceHandler != nil {
+					r.Route("/devices", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", deviceHandler.HandleListDevices)
+						r.Delete("/{device_id}", deviceHandler.HandleForgetDevice)
+						r.Delete("/{device_id}/settings", deviceHandler.HandleClearDeviceSettings)
 					})
 				}
 

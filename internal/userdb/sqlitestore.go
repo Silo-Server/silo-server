@@ -346,6 +346,14 @@ func (s *SQLiteUserStore) ListDevices(_ context.Context) ([]userstore.DeviceEntr
 	return ListDevices(s.db)
 }
 
+func (s *SQLiteUserStore) DeviceExists(_ context.Context, profileID, deviceID string) (bool, error) {
+	return DeviceExists(s.db, profileID, deviceID)
+}
+
+func (s *SQLiteUserStore) ForgetDevice(_ context.Context, profileID, deviceID string) error {
+	return ForgetDevice(s.db, profileID, deviceID)
+}
+
 func (s *SQLiteUserStore) SetDeviceSetting(_ context.Context, entry userstore.DeviceSettingEntry) error {
 	return SetDeviceSetting(s.db, entry)
 }
