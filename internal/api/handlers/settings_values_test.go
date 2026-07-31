@@ -829,33 +829,6 @@ func TestCapabilitiesReportTheContractRevision(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesAdvertiseEventsSSE(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	rec := httptest.NewRecorder()
-	handler.HandleGetCapabilities(rec,
-		httptest.NewRequest(http.MethodGet, "/settings/contract/capabilities", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("capabilities = %d", rec.Code)
-	}
-
-	var body struct {
-		EventsSSE struct {
-			Supported     bool `json:"supported"`
-			SchemaVersion int  `json:"schema_version"`
-		} `json:"events_sse"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decoding: %v", err)
-	}
-	if !body.EventsSSE.Supported {
-		t.Errorf("events_sse.supported = false, want true")
-	}
-	if body.EventsSSE.SchemaVersion != 1 {
-		t.Errorf("events_sse.schema_version = %d, want 1", body.EventsSSE.SchemaVersion)
-	}
-}
-
 func TestMergeLanguageSuggestionsKeepsFloorObservedAndCurrent(t *testing.T) {
 	got := mergeLanguageSuggestions(
 		[]string{"en", "fr", "pt"},

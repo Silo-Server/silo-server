@@ -1997,6 +1997,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/sse", eventsHandler.HandleSSE)
+					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
 
 				// User notifications: profile-scoped inbox, preferences, and
