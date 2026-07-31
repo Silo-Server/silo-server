@@ -17,6 +17,16 @@ import (
 // otherwise time them out.
 const ssePingInterval = 25 * time.Second
 
+// sseRequiredActionNone tells clients no handshake is expected, unlike the
+// WebSocket hello which requires a subscribe frame.
+const sseRequiredActionNone = "none"
+
+// ssePingMessage is the keepalive frame. Typed rather than an inline map so
+// the ping payload has one definition, matching the other wire types here.
+type ssePingMessage struct {
+	Type string `json:"type"`
+}
+
 // HandleSSE streams hub events as Server-Sent Events.
 //
 // This is a read-only sibling of HandleWebSocket for consumers that only need
@@ -80,7 +90,7 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		SchemaVersion:     1,
 		ConnectionID:      ulid.Make().String(),
 		AvailableChannels: allowed,
-		RequiredAction:    "none",
+		RequiredAction:    sseRequiredActionNone,
 	}); err != nil {
 		return
 	}
@@ -94,9 +104,7 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ping.C:
-			if err := writeSSEFrame(w, flusher, "ping", map[string]string{
-				"type": "ping",
-			}); err != nil {
+			if err := writeSSEFrame(w, flusher, "ping", ssePingMessage{Type: "ping"}); err != nil {
 				return
 			}
 		case env, ok := <-eventsCh:
