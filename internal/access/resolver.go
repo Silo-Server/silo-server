@@ -88,6 +88,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
+		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
 		if err != nil {

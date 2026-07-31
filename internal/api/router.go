@@ -866,6 +866,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			} else if deps.DB != nil {
 				settingValuesHandler.SetLibraryLookup(catalog.NewFolderRepository(deps.DB))
 			}
+			if deps.DB != nil {
+				settingValuesHandler.SetLanguageSuggestionSource(catalog.NewBrowseRepository(deps.DB))
+			}
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub

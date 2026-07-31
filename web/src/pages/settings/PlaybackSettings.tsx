@@ -1,5 +1,6 @@
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { MetadataLanguageSetting } from "@/components/settings/MetadataLanguageSetting";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -10,7 +11,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { optionsFor } from "@/lib/settingsDisplay";
-import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
+import { namedLanguageOptionsFor } from "@/lib/languageOptions";
+import {
+  normalizeMetadataLanguageOverrides,
+  type MetadataLanguageOverrides,
+} from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
@@ -38,6 +43,7 @@ const PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
   SETTING_KEYS.UI_NEXT_UP_MODE,
 ];
 
@@ -173,10 +179,33 @@ export default function PlaybackSettings() {
   };
 
   const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
+  const audioLanguage = read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+  const metadataLanguage = read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
+  const audioLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+    audioLanguage,
+    effective?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
+  );
+  const metadataLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+    metadataLanguage,
+    effective?.[SETTING_KEYS.CATALOG_METADATA_LANGUAGE]?.suggested_values,
+  );
   // Whether the profile has actually chosen, which is what gates the reset
   // affordance: the resolved value is the default until a row exists.
   const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
   const pending = isSaving;
+
+  const saveMetadataOverrides = (overrides: MetadataLanguageOverrides) => {
+    const request =
+      Object.keys(overrides).length === 0
+        ? resetProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES)
+        : saveProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, overrides);
+    return request.catch((error) => {
+      toast.error("Failed to save metadata language exceptions");
+      throw error;
+    });
+  };
 
   async function resetNextUpMode() {
     // Nothing stored is the state a reset asks for, which the shared reset
@@ -209,7 +238,7 @@ export default function PlaybackSettings() {
           control={(id) => (
             <div className="w-full">
               <Select
-                value={read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE) ?? "none"}
+                value={audioLanguage ?? "none"}
                 onValueChange={(value) =>
                   // The contract spells "no preference" as null, where the
                   // legacy profile column spelled it as the empty string.
@@ -221,7 +250,7 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preference</SelectItem>
-                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                  {audioLanguageOptions.map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}
                     </SelectItem>
@@ -232,31 +261,17 @@ export default function PlaybackSettings() {
           )}
         />
 
-        <SettingRow
-          label="Metadata language"
-          description="Show titles and descriptions in this language when available. Descriptions can be translated automatically when the server has AI translation enabled."
-          control={(id) => (
-            <div className="w-full">
-              <Select
-                value={read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE) ?? "none"}
-                onValueChange={(value) =>
-                  saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, value === "none" ? null : value)
-                }
-              >
-                <SelectTrigger id={id} className="w-full sm:w-[220px]" disabled={pending}>
-                  <SelectValue placeholder="Library default" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Library default</SelectItem>
-                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
-                    <SelectItem key={language.value} value={language.value}>
-                      {language.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <MetadataLanguageSetting
+          fallback={metadataLanguage}
+          overrides={normalizeMetadataLanguageOverrides(
+            read<unknown>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES),
           )}
+          languageOptions={metadataLanguageOptions}
+          disabled={pending}
+          onFallbackChange={(language) =>
+            saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, language)
+          }
+          onOverridesChange={saveMetadataOverrides}
         />
 
         <SettingRow

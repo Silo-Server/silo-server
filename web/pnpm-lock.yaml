@@ -46,6 +46,9 @@ importers:
       '@fontsource/noto-sans-thai':
         specifier: ^5.2.8
         version: 5.2.8
+      '@formatjs/intl-displaynames':
+        specifier: ^7.3.13
+        version: 7.3.13
       '@tanstack/react-query':
         specifier: ^5.90.21
         version: 5.90.21(react@19.2.4)
@@ -632,6 +635,15 @@ packages:
 
   '@fontsource/noto-sans-thai@5.2.8':
     resolution: {integrity: sha512-HUQAxOzclod9PXQx4uMoGRAsor+64snW91QuBg39jT9lbsp7jJx1i3jAtHPJ7mQxHEHnhRjNp54fb8GqPPC6zg==}
+
+  '@formatjs/fast-memoize@3.1.7':
+    resolution: {integrity: sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA==}
+
+  '@formatjs/intl-displaynames@7.3.13':
+    resolution: {integrity: sha512-p+rSpn96AeUS5qW5sBAkvGFyw6oYcg8y2NNI7mrqfuyfRbIeHRLzO0+fdcKLqdXoLTHBfr3iZc/v6NPWWSdkmg==}
+
+  '@formatjs/intl-localematcher@0.8.13':
+    resolution: {integrity: sha512-kHEAFOkeJSPNi7c5PaKaRjxcBrJwzzt81ifUu+8uve1EDW/VJl83KsxmqgqNZLzcFEhSliZGvx3+pk/RH0IOmg==}
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -3540,6 +3552,16 @@ snapshots:
   '@fontsource/noto-sans-arabic@5.2.10': {}
 
   '@fontsource/noto-sans-thai@5.2.8': {}
+
+  '@formatjs/fast-memoize@3.1.7': {}
+
+  '@formatjs/intl-displaynames@7.3.13':
+    dependencies:
+      '@formatjs/intl-localematcher': 0.8.13
+
+  '@formatjs/intl-localematcher@0.8.13':
+    dependencies:
+      '@formatjs/fast-memoize': 3.1.7
 
   '@humanfs/core@0.19.1': {}
 

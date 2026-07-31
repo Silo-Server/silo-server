@@ -17,6 +17,12 @@
       "type": "integer",
       "minimum": 1
     },
+    "option_sets": {
+      "description": "Advisory ordered vocabularies for open-value controls. They suggest values but never constrain the corresponding value schema.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/optionSetName" },
+      "additionalProperties": { "$ref": "#/$defs/optionSet" }
+    },
     "definitions": {
       "type": "array",
       "items": { "$ref": "#/$defs/definition" }
@@ -33,6 +39,36 @@
       "description": "Manifest revision in which this element was introduced.",
       "type": "integer",
       "minimum": 1
+    },
+    "optionSetName": {
+      "description": "Stable snake_case identifier for a reusable presentation vocabulary.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 128
+    },
+    "suggestedOption": {
+      "description": "One advisory value. Labels are localized by clients from the stable wire value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "introduced_in"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "introduced_in": { "$ref": "#/$defs/revisionRef" }
+      }
+    },
+    "optionSet": {
+      "description": "An ordered advisory value floor for an open setting. The server validates that its type matches every referring definition.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "options"],
+      "properties": {
+        "type": { "const": "language_tag" },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/suggestedOption" }
+        }
+      }
     },
     "scopeName": {
       "description": "Storage identity a value attaches to. Whether a given scope is legal for a definition depends on its persistence class, which internal/settingscontract enforces.",
@@ -285,6 +321,15 @@
         "recommended_control": {
           "type": "string",
           "enum": ["switch", "select", "slider", "stepper", "text", "color", "panel"]
+        },
+        "suggested_options": {
+          "description": "Advisory option-set reference for an open-value control. It does not turn the value schema into an enum.",
+          "$ref": "#/$defs/optionSetName"
+        },
+        "unset_label": {
+          "description": "Context-specific label for the nullable/unset row in a generated control.",
+          "type": "string",
+          "minLength": 1
         },
         "deprecated": { "type": "boolean", "default": false },
         "notes": {

@@ -525,6 +525,13 @@ func TestViewerResolverBatchesViewerPreferenceRead(t *testing.T) {
 				},
 				Value: json.RawMessage(`"de"`),
 			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.CatalogMetadataLanguageOverrides, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`{"no":"x-silo-original"}`),
+			},
 		},
 	}}
 	resolver := NewViewerResolver(
@@ -541,6 +548,9 @@ func TestViewerResolverBatchesViewerPreferenceRead(t *testing.T) {
 	}
 	if !reflect.DeepEqual(scope.DisabledLibraryIDs, []int{3, 5}) || scope.PreferredMetadataLanguage != "de" {
 		t.Errorf("resolved scope = %#v", scope)
+	}
+	if got := scope.MetadataLanguageOverrides["no"]; got != access.OriginalMetadataLanguage {
+		t.Errorf("metadata language override = %q, want %q", got, access.OriginalMetadataLanguage)
 	}
 }
 

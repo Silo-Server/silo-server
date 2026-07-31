@@ -159,6 +159,30 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 
 	fmt.Fprintf(&out, "export const SETTINGS_REVISION = %d;\n\n", contract.Revision)
 
+	out.WriteString("export interface SettingSuggestedOption {\n")
+	out.WriteString("  value: string;\n")
+	out.WriteString("  introducedIn: number;\n")
+	out.WriteString("}\n\n")
+	out.WriteString("export interface SettingOptionSet {\n")
+	out.WriteString("  type: string;\n")
+	out.WriteString("  options: readonly SettingSuggestedOption[];\n")
+	out.WriteString("}\n\n")
+	out.WriteString("export const SETTING_OPTION_SETS = {\n")
+	for _, name := range sortedOptionSetNames(contract) {
+		optionSet := contract.OptionSets[name]
+		fmt.Fprintf(&out, "  %s: {\n", name)
+		fmt.Fprintf(&out, "    type: %q,\n", optionSet.Type)
+		out.WriteString("    options: [\n")
+		for _, option := range optionSet.Options {
+			fmt.Fprintf(&out, "      { value: %q, introducedIn: %d },\n",
+				option.Value, option.IntroducedIn)
+		}
+		out.WriteString("    ],\n")
+		out.WriteString("  },\n")
+	}
+	out.WriteString("} as const satisfies Record<string, SettingOptionSet>;\n\n")
+	out.WriteString("export type SettingOptionSetId = keyof typeof SETTING_OPTION_SETS;\n\n")
+
 	out.WriteString("export const SETTING_KEYS = {\n")
 	for _, def := range sortedDefinitions(contract) {
 		fmt.Fprintf(&out, "  /** %s */\n", def.Label)
@@ -189,6 +213,8 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  category: string;\n")
 	out.WriteString("  control?: string;\n")
 	out.WriteString("  unit?: string;\n")
+	out.WriteString("  suggestedOptions?: SettingOptionSetId;\n")
+	out.WriteString("  unsetLabel?: string;\n")
 	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number }[];\n")
 	out.WriteString("  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */\n")
 	out.WriteString("  ordered?: boolean;\n")
@@ -227,6 +253,12 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		}
 		if def.Unit != "" {
 			fmt.Fprintf(&out, "    unit: %q,\n", def.Unit)
+		}
+		if def.SuggestedOptions != "" {
+			fmt.Fprintf(&out, "    suggestedOptions: %q,\n", def.SuggestedOptions)
+		}
+		if def.UnsetLabel != "" {
+			fmt.Fprintf(&out, "    unsetLabel: %s,\n", jsString(def.UnsetLabel))
 		}
 		if len(def.ValueSchema.Values) > 0 {
 			out.WriteString("    values: [\n")
@@ -274,6 +306,19 @@ func generateKotlin(contract *settingscontract.Manifest, pkg string) ([]byte, er
 		out.WriteString(strings.TrimRight("// "+line, " ") + "\n")
 	}
 	fmt.Fprintf(&out, "\npackage %s\n\n", pkg)
+
+	out.WriteString("data class SettingSuggestedOption(\n")
+	out.WriteString("    val value: String,\n")
+	out.WriteString("    val introducedIn: Int,\n")
+	out.WriteString(")\n\n")
+	out.WriteString("data class SettingOptionSet(\n")
+	out.WriteString("    val type: String,\n")
+	out.WriteString("    val options: List<SettingSuggestedOption>,\n")
+	out.WriteString(")\n\n")
+	out.WriteString("data class SettingPresentation(\n")
+	out.WriteString("    val suggestedOptions: String? = null,\n")
+	out.WriteString("    val unsetLabel: String? = null,\n")
+	out.WriteString(")\n\n")
 
 	out.WriteString("object SettingKeys {\n")
 	fmt.Fprintf(&out, "    const val REVISION = %d\n\n", contract.Revision)
@@ -330,6 +375,46 @@ func generateKotlin(contract *settingscontract.Manifest, pkg string) ([]byte, er
 		out.WriteString("    )\n")
 	}
 
+	out.WriteString("}\n\n")
+
+	out.WriteString("object SettingPresentationMetadata {\n")
+	out.WriteString("    val OPTION_SETS: Map<String, SettingOptionSet> = mapOf(\n")
+	for _, name := range sortedOptionSetNames(contract) {
+		optionSet := contract.OptionSets[name]
+		fmt.Fprintf(&out, "        %q to SettingOptionSet(\n", name)
+		fmt.Fprintf(&out, "            type = %q,\n", optionSet.Type)
+		out.WriteString("            options = listOf(\n")
+		for _, option := range optionSet.Options {
+			fmt.Fprintf(&out, "                SettingSuggestedOption(%q, %d),\n",
+				option.Value, option.IntroducedIn)
+		}
+		out.WriteString("            ),\n")
+		out.WriteString("        ),\n")
+	}
+	out.WriteString("    )\n\n")
+
+	out.WriteString("    val DEFINITIONS: Map<String, SettingPresentation> = mapOf(\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.SuggestedOptions == "" && def.UnsetLabel == "" {
+			continue
+		}
+		fmt.Fprintf(&out, "        SettingKeys.%s to SettingPresentation(\n", screamingCase(def.Key))
+		if def.SuggestedOptions != "" {
+			fmt.Fprintf(&out, "            suggestedOptions = %q,\n", def.SuggestedOptions)
+		}
+		if def.UnsetLabel != "" {
+			fmt.Fprintf(&out, "            unsetLabel = %q,\n", def.UnsetLabel)
+		}
+		out.WriteString("        ),\n")
+	}
+	out.WriteString("    )\n\n")
+	out.WriteString("    fun suggestedValues(key: String, revision: Int = SettingKeys.REVISION): List<String> {\n")
+	out.WriteString("        val setId = DEFINITIONS[key]?.suggestedOptions ?: return emptyList()\n")
+	out.WriteString("        return OPTION_SETS[setId]?.options\n")
+	out.WriteString("            ?.filter { it.introducedIn <= revision }\n")
+	out.WriteString("            ?.map { it.value }\n")
+	out.WriteString("            .orEmpty()\n")
+	out.WriteString("    }\n")
 	out.WriteString("}\n")
 	return out.Bytes(), nil
 }
@@ -340,6 +425,19 @@ func generateSwift(contract *settingscontract.Manifest) ([]byte, error) {
 		out.WriteString(strings.TrimRight("// "+line, " ") + "\n")
 	}
 	out.WriteString("\nimport Foundation\n\n")
+
+	out.WriteString("public struct SettingSuggestedOption: Hashable, Sendable {\n")
+	out.WriteString("    public let value: String\n")
+	out.WriteString("    public let introducedIn: Int\n")
+	out.WriteString("}\n\n")
+	out.WriteString("public struct SettingOptionSet: Hashable, Sendable {\n")
+	out.WriteString("    public let type: String\n")
+	out.WriteString("    public let options: [SettingSuggestedOption]\n")
+	out.WriteString("}\n\n")
+	out.WriteString("public struct SettingPresentation: Hashable, Sendable {\n")
+	out.WriteString("    public let suggestedOptions: String?\n")
+	out.WriteString("    public let unsetLabel: String?\n")
+	out.WriteString("}\n\n")
 
 	out.WriteString("/// Every setting the contract defines.\n")
 	out.WriteString("public enum SettingKey: String, CaseIterable, Sendable {\n")
@@ -368,6 +466,53 @@ func generateSwift(contract *settingscontract.Manifest) ([]byte, error) {
 		}
 	}
 	out.WriteString("    ]\n")
+	out.WriteString("}\n\n")
+
+	out.WriteString("public enum SettingPresentationMetadata {\n")
+	out.WriteString("    public static let optionSets: [String: SettingOptionSet] = [\n")
+	for _, name := range sortedOptionSetNames(contract) {
+		optionSet := contract.OptionSets[name]
+		fmt.Fprintf(&out, "        %q: SettingOptionSet(\n", name)
+		fmt.Fprintf(&out, "            type: %q,\n", optionSet.Type)
+		out.WriteString("            options: [\n")
+		for _, option := range optionSet.Options {
+			fmt.Fprintf(&out, "                SettingSuggestedOption(value: %q, introducedIn: %d),\n",
+				option.Value, option.IntroducedIn)
+		}
+		out.WriteString("            ]\n")
+		out.WriteString("        ),\n")
+	}
+	out.WriteString("    ]\n\n")
+
+	out.WriteString("    public static let definitions: [SettingKey: SettingPresentation] = [\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.SuggestedOptions == "" && def.UnsetLabel == "" {
+			continue
+		}
+		fmt.Fprintf(&out, "        .%s: SettingPresentation(\n", lowerFirst(identifierFor(def.Key)))
+		if def.SuggestedOptions != "" {
+			fmt.Fprintf(&out, "            suggestedOptions: %q,\n", def.SuggestedOptions)
+		} else {
+			out.WriteString("            suggestedOptions: nil,\n")
+		}
+		if def.UnsetLabel != "" {
+			fmt.Fprintf(&out, "            unsetLabel: %q\n", def.UnsetLabel)
+		} else {
+			out.WriteString("            unsetLabel: nil\n")
+		}
+		out.WriteString("        ),\n")
+	}
+	out.WriteString("    ]\n\n")
+	out.WriteString("    public static func suggestedValues(\n")
+	out.WriteString("        for key: SettingKey,\n")
+	out.WriteString("        revision: Int = SettingKey.revision\n")
+	out.WriteString("    ) -> [String] {\n")
+	out.WriteString("        guard let setID = definitions[key]?.suggestedOptions,\n")
+	out.WriteString("              let optionSet = optionSets[setID] else { return [] }\n")
+	out.WriteString("        return optionSet.options\n")
+	out.WriteString("            .filter { $0.introducedIn <= revision }\n")
+	out.WriteString("            .map(\\.value)\n")
+	out.WriteString("    }\n")
 	out.WriteString("}\n")
 	return out.Bytes(), nil
 }
@@ -377,6 +522,15 @@ func lowerFirst(value string) string {
 		return value
 	}
 	return strings.ToLower(value[:1]) + value[1:]
+}
+
+func sortedOptionSetNames(contract *settingscontract.Manifest) []string {
+	names := make([]string, 0, len(contract.OptionSets))
+	for name := range contract.OptionSets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func quotedScopes(def *settingscontract.Definition) string {

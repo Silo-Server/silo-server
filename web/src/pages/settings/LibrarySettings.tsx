@@ -48,7 +48,7 @@ import {
   NONE_VALUE,
   SUBTITLE_MODE_OPTIONS,
 } from "./libraryPlaybackPreferences";
-import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
+import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, RotateCcw } from "lucide-react";
 import {
@@ -241,6 +241,20 @@ function LibraryCard({
   const playbackPending = setValue.isPending || clearValue.isPending;
   const summaryText = buildLibraryPlaybackSummaryFromState(editorState);
   const hasOverride = hasLibraryPlaybackOverride(editorState);
+  const audioLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+    editorState.audioLanguage === INHERIT_VALUE || editorState.audioLanguage === NONE_VALUE
+      ? undefined
+      : editorState.audioLanguage,
+    effective?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.suggested_values,
+  );
+  const subtitleLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+    editorState.subtitleLanguage === INHERIT_VALUE || editorState.subtitleLanguage === NONE_VALUE
+      ? undefined
+      : editorState.subtitleLanguage,
+    effective?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.suggested_values,
+  );
 
   /**
    * Applies an editor state as canonical per-key writes at profile_library.
@@ -367,7 +381,7 @@ function LibraryCard({
               <SelectItem value={INHERIT_VALUE}>
                 {buildInheritedLanguageLabel(profileDefaults.audioLanguage ?? "")}
               </SelectItem>
-              {NAMED_LANGUAGE_OPTIONS.map((language) => (
+              {audioLanguageOptions.map((language) => (
                 <SelectItem key={language.value} value={language.value}>
                   {language.label}
                 </SelectItem>
@@ -385,7 +399,7 @@ function LibraryCard({
                 {buildInheritedSubtitleLanguageLabel(profileDefaults.subtitleLanguage ?? "")}
               </SelectItem>
               <SelectItem value={NONE_VALUE}>None</SelectItem>
-              {NAMED_LANGUAGE_OPTIONS.map((language) => (
+              {subtitleLanguageOptions.map((language) => (
                 <SelectItem key={language.value} value={language.value}>
                   {language.label}
                 </SelectItem>

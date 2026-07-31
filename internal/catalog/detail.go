@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -750,27 +751,146 @@ func cloneEpisode(ep *models.Episode) *models.Episode {
 	return &cp
 }
 
-// resolvePresentationLanguage picks the display language for a request:
-// explicit request language → viewer profile preference → the presentation
-// library's metadata language.
-func (s *DetailService) resolvePresentationLanguage(ctx context.Context, filter AccessFilter) (string, error) {
-	if strings.TrimSpace(filter.PresentationLanguage) != "" {
-		return strings.TrimSpace(filter.PresentationLanguage), nil
+type presentationLanguageBase struct {
+	target          string
+	libraryFallback string
+	explicit        bool
+}
+
+// resolvePresentationLanguageBase picks the request-wide fallback once. The
+// item-specific original-language rule is applied separately, because one
+// result page can contain several source languages and therefore several
+// localization targets.
+func (s *DetailService) resolvePresentationLanguageBase(ctx context.Context, filter AccessFilter) (presentationLanguageBase, error) {
+	base := presentationLanguageBase{}
+	if explicit := strings.TrimSpace(filter.PresentationLanguage); explicit != "" {
+		base.target = explicit
+		base.explicit = true
+	} else {
+		base.target = strings.TrimSpace(filter.ProfilePreferredLanguage)
 	}
-	if strings.TrimSpace(filter.ProfilePreferredLanguage) != "" {
-		return strings.TrimSpace(filter.ProfilePreferredLanguage), nil
+
+	// A concrete profile/explicit target never needs the library fallback. The
+	// original-language sentinel does: items with no known original language
+	// should still inherit the library rather than lose localization entirely.
+	if base.target != "" && !sameMetadataLanguage(base.target, access.OriginalMetadataLanguage) {
+		return base, nil
 	}
 	if filter.PresentationLibraryID == nil || s.folderRepo == nil {
-		return "", nil
+		return base, nil
 	}
 	folder, err := s.folderRepo.GetByID(ctx, *filter.PresentationLibraryID)
 	if err != nil {
 		if errors.Is(err, ErrFolderNotFound) {
-			return "", ErrItemNotFound
+			return presentationLanguageBase{}, ErrItemNotFound
 		}
+		return presentationLanguageBase{}, err
+	}
+	base.libraryFallback = strings.TrimSpace(folder.MetadataLanguage)
+	if base.target == "" {
+		base.target = base.libraryFallback
+	}
+	return base, nil
+}
+
+// presentationLanguageForOriginal applies a profile's per-source exception,
+// then resolves the original-language sentinel to the item's concrete catalog
+// language. An explicit request language remains authoritative and bypasses
+// profile exceptions.
+func presentationLanguageForOriginal(base presentationLanguageBase, originalLanguage string, filter AccessFilter) string {
+	original := lang.Canonical(originalLanguage)
+	target := base.target
+	if !base.explicit && original != "" {
+		if override := strings.TrimSpace(filter.MetadataLanguageOverrides[original]); override != "" {
+			target = override
+		}
+	}
+	if sameMetadataLanguage(target, access.OriginalMetadataLanguage) {
+		if original != "" {
+			return original
+		}
+		return base.libraryFallback
+	}
+	return strings.TrimSpace(target)
+}
+
+func (s *DetailService) resolvePresentationLanguage(ctx context.Context, filter AccessFilter, originalLanguage string) (string, error) {
+	base, err := s.resolvePresentationLanguageBase(ctx, filter)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(folder.MetadataLanguage), nil
+	return presentationLanguageForOriginal(base, originalLanguage, filter), nil
+}
+
+func metadataLanguageMayUseOriginal(filter AccessFilter) bool {
+	if explicit := strings.TrimSpace(filter.PresentationLanguage); explicit != "" {
+		return sameMetadataLanguage(explicit, access.OriginalMetadataLanguage)
+	}
+	return sameMetadataLanguage(filter.ProfilePreferredLanguage, access.OriginalMetadataLanguage) ||
+		len(filter.MetadataLanguageOverrides) > 0
+}
+
+// seriesOriginalLanguage supplies the source language for season and episode
+// rows, which deliberately inherit original_language from their parent series
+// instead of duplicating it in each table.
+func (s *DetailService) seriesOriginalLanguage(ctx context.Context, seriesID string, filter AccessFilter) string {
+	if original := strings.TrimSpace(filter.PresentationOriginalLanguage); original != "" {
+		return original
+	}
+	if !metadataLanguageMayUseOriginal(filter) || s.itemRepo == nil || strings.TrimSpace(seriesID) == "" {
+		return ""
+	}
+	series, err := s.itemRepo.GetByID(ctx, seriesID)
+	if err != nil || series == nil {
+		return ""
+	}
+	return series.OriginalLanguage
+}
+
+// seriesOriginalLanguages is the batch equivalent of seriesOriginalLanguage.
+// A season or episode page usually contains many children of one series; load
+// each distinct parent once so original-language preferences do not introduce
+// an N+1 query on those pages.
+func (s *DetailService) seriesOriginalLanguages(
+	ctx context.Context,
+	seriesIDs []string,
+	filter AccessFilter,
+) (map[string]string, error) {
+	originalBySeries := make(map[string]string)
+	seen := make(map[string]struct{}, len(seriesIDs))
+	distinct := make([]string, 0, len(seriesIDs))
+	for _, seriesID := range seriesIDs {
+		seriesID = strings.TrimSpace(seriesID)
+		if seriesID == "" {
+			continue
+		}
+		if _, exists := seen[seriesID]; exists {
+			continue
+		}
+		seen[seriesID] = struct{}{}
+		distinct = append(distinct, seriesID)
+	}
+
+	if supplied := strings.TrimSpace(filter.PresentationOriginalLanguage); supplied != "" {
+		for _, seriesID := range distinct {
+			originalBySeries[seriesID] = supplied
+		}
+		return originalBySeries, nil
+	}
+	if len(distinct) == 0 || !metadataLanguageMayUseOriginal(filter) || s.itemRepo == nil {
+		return originalBySeries, nil
+	}
+
+	series, err := s.itemRepo.GetByIDs(ctx, distinct)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range series {
+		if item != nil {
+			originalBySeries[item.ContentID] = item.OriginalLanguage
+		}
+	}
+	return originalBySeries, nil
 }
 
 // PendingTranslationLanguage reports the presentation language the item's
@@ -783,7 +903,7 @@ func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *mo
 	if item == nil || strings.TrimSpace(item.Overview) == "" || s.itemLocRepo == nil {
 		return ""
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
 	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
 		return ""
 	}
@@ -815,7 +935,7 @@ func (s *DetailService) PendingSeasonTranslationLanguage(ctx context.Context, se
 	if season == nil || strings.TrimSpace(season.Overview) == "" || s.seasonLocRepo == nil {
 		return ""
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, season.SeriesID, filter))
 	if err != nil || language == "" || sameMetadataLanguage(season.DefaultMetadataLanguage, language) {
 		return ""
 	}
@@ -832,7 +952,7 @@ func (s *DetailService) PendingEpisodeTranslationLanguage(ctx context.Context, e
 	if episode == nil || strings.TrimSpace(episode.Overview) == "" || s.episodeLocRepo == nil {
 		return ""
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, s.seriesOriginalLanguage(ctx, episode.SeriesID, filter))
 	if err != nil || language == "" || sameMetadataLanguage(episode.DefaultMetadataLanguage, language) {
 		return ""
 	}
@@ -865,7 +985,7 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 	if item == nil {
 		return nil, nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
 	if err != nil || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) || s.itemLocRepo == nil {
 		return cloneMediaItem(item), err
 	}
@@ -874,6 +994,64 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 		return cloneMediaItem(item), err
 	}
 	return s.localizeItemModelWith(item, language, loc), nil
+}
+
+// loadItemLocalizations resolves each item's target and groups repository reads
+// by that language. The former single-language lookup was correct only while a
+// profile had one global target; source-language exceptions make the grouping
+// necessary to preserve batching without serving one item's localization to
+// another language group.
+func (s *DetailService) loadItemLocalizations(
+	ctx context.Context,
+	items []*models.MediaItem,
+	filter AccessFilter,
+) (map[string]string, map[string]*models.MediaItemLocalization, error) {
+	base, err := s.resolvePresentationLanguageBase(ctx, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	targets := make(map[string]string, len(items))
+	if s.itemLocRepo == nil {
+		return targets, nil, nil
+	}
+
+	idsByLanguage := make(map[string][]string)
+	seenByLanguage := make(map[string]map[string]struct{})
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		target := presentationLanguageForOriginal(base, item.OriginalLanguage, filter)
+		targets[item.ContentID] = target
+		if target == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, target) {
+			continue
+		}
+		if seenByLanguage[target] == nil {
+			seenByLanguage[target] = make(map[string]struct{})
+		}
+		if _, seen := seenByLanguage[target][item.ContentID]; seen {
+			continue
+		}
+		seenByLanguage[target][item.ContentID] = struct{}{}
+		idsByLanguage[target] = append(idsByLanguage[target], item.ContentID)
+	}
+
+	languages := make([]string, 0, len(idsByLanguage))
+	for language := range idsByLanguage {
+		languages = append(languages, language)
+	}
+	sort.Strings(languages)
+	localizations := make(map[string]*models.MediaItemLocalization)
+	for _, language := range languages {
+		rows, err := s.itemLocRepo.GetByContentIDs(ctx, idsByLanguage[language], language)
+		if err != nil {
+			return nil, nil, err
+		}
+		for contentID, localization := range rows {
+			localizations[contentID] = localization
+		}
+	}
+	return targets, localizations, nil
 }
 
 // localizeItemModelWith applies a pre-resolved localization to item, returning a
@@ -899,29 +1077,8 @@ func (s *DetailService) LocalizeItemModels(ctx context.Context, items []*models.
 	for i, item := range items {
 		localized[i] = cloneMediaItem(item)
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
-	if err != nil || language == "" || s.itemLocRepo == nil {
-		return localized, err
-	}
-
-	ids := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item == nil || item.ContentID == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
-			continue
-		}
-		if _, ok := seen[item.ContentID]; ok {
-			continue
-		}
-		seen[item.ContentID] = struct{}{}
-		ids = append(ids, item.ContentID)
-	}
-	if len(ids) == 0 {
-		return localized, nil
-	}
-
-	locs, err := s.itemLocRepo.GetByContentIDs(ctx, ids, language)
-	if err != nil || len(locs) == 0 {
+	targets, locs, err := s.loadItemLocalizations(ctx, items, filter)
+	if err != nil || s.itemLocRepo == nil {
 		return localized, err
 	}
 	for i, item := range items {
@@ -929,7 +1086,7 @@ func (s *DetailService) LocalizeItemModels(ctx context.Context, items []*models.
 			continue
 		}
 		if loc := locs[item.ContentID]; loc != nil {
-			localized[i] = applyItemLocalization(item, loc)
+			localized[i] = s.localizeItemModelWith(item, targets[item.ContentID], loc)
 		}
 	}
 	return localized, nil
@@ -939,7 +1096,8 @@ func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.
 	if season == nil {
 		return nil, nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	original := s.seriesOriginalLanguage(ctx, season.SeriesID, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, original)
 	if err != nil || language == "" || sameMetadataLanguage(season.DefaultMetadataLanguage, language) || s.seasonLocRepo == nil {
 		return cloneSeason(season), err
 	}
@@ -950,11 +1108,89 @@ func (s *DetailService) LocalizeSeasonModel(ctx context.Context, season *models.
 	return applySeasonLocalization(season, loc), nil
 }
 
+// LocalizeSeasonModels applies presentation-language localization to a batch
+// of seasons. Parent series and localization rows are fetched in batches, so
+// original-language preferences do not add one query per season. The result
+// preserves input order and length.
+func (s *DetailService) LocalizeSeasonModels(ctx context.Context, seasons []*models.Season, filter AccessFilter) ([]*models.Season, error) {
+	if len(seasons) == 0 {
+		return seasons, nil
+	}
+	localized := make([]*models.Season, len(seasons))
+	seriesIDs := make([]string, 0, len(seasons))
+	for i, season := range seasons {
+		localized[i] = cloneSeason(season)
+		if season != nil {
+			seriesIDs = append(seriesIDs, season.SeriesID)
+		}
+	}
+
+	base, err := s.resolvePresentationLanguageBase(ctx, filter)
+	if err != nil || s.seasonLocRepo == nil {
+		return localized, err
+	}
+	originalBySeries, err := s.seriesOriginalLanguages(ctx, seriesIDs, filter)
+	if err != nil {
+		return localized, err
+	}
+
+	targets := make(map[string]string, len(seasons))
+	idsByLanguage := make(map[string][]string)
+	seenByLanguage := make(map[string]map[string]struct{})
+	for _, season := range seasons {
+		if season == nil || season.ContentID == "" {
+			continue
+		}
+		target := presentationLanguageForOriginal(base, originalBySeries[season.SeriesID], filter)
+		targets[season.ContentID] = target
+		if target == "" || sameMetadataLanguage(season.DefaultMetadataLanguage, target) {
+			continue
+		}
+		if seenByLanguage[target] == nil {
+			seenByLanguage[target] = make(map[string]struct{})
+		}
+		if _, seen := seenByLanguage[target][season.ContentID]; seen {
+			continue
+		}
+		seenByLanguage[target][season.ContentID] = struct{}{}
+		idsByLanguage[target] = append(idsByLanguage[target], season.ContentID)
+	}
+
+	languages := make([]string, 0, len(idsByLanguage))
+	for language := range idsByLanguage {
+		languages = append(languages, language)
+	}
+	sort.Strings(languages)
+	locs := make(map[string]*models.SeasonLocalization)
+	for _, language := range languages {
+		rows, err := s.seasonLocRepo.GetBySeasonIDs(ctx, idsByLanguage[language], language)
+		if err != nil {
+			return localized, err
+		}
+		for seasonID, localization := range rows {
+			locs[seasonID] = localization
+		}
+	}
+	for i, season := range seasons {
+		if season == nil {
+			continue
+		}
+		if loc := locs[season.ContentID]; loc != nil {
+			target := targets[season.ContentID]
+			if target != "" && !sameMetadataLanguage(season.DefaultMetadataLanguage, target) {
+				localized[i] = applySeasonLocalization(season, loc)
+			}
+		}
+	}
+	return localized, nil
+}
+
 func (s *DetailService) LocalizeEpisodeModel(ctx context.Context, episode *models.Episode, filter AccessFilter) (*models.Episode, error) {
 	if episode == nil {
 		return nil, nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	original := s.seriesOriginalLanguage(ctx, episode.SeriesID, filter)
+	language, err := s.resolvePresentationLanguage(ctx, filter, original)
 	if err != nil || language == "" || sameMetadataLanguage(episode.DefaultMetadataLanguage, language) || s.episodeLocRepo == nil {
 		return cloneEpisode(episode), err
 	}
@@ -972,23 +1208,50 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 	if len(episodes) == 0 {
 		return episodes, nil
 	}
-	language, err := s.resolvePresentationLanguage(ctx, filter)
-	if err != nil || language == "" || s.episodeLocRepo == nil {
+	base, err := s.resolvePresentationLanguageBase(ctx, filter)
+	if err != nil || s.episodeLocRepo == nil {
 		return episodes, err
 	}
-	ids := make([]string, 0, len(episodes))
+
+	seriesIDs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil {
+			seriesIDs = append(seriesIDs, episode.SeriesID)
+		}
+	}
+	originalBySeries, err := s.seriesOriginalLanguages(ctx, seriesIDs, filter)
+	if err != nil {
+		return episodes, err
+	}
+
+	targets := make(map[string]string, len(episodes))
+	idsByLanguage := make(map[string][]string)
 	for _, ep := range episodes {
-		if ep == nil || sameMetadataLanguage(ep.DefaultMetadataLanguage, language) {
+		if ep == nil || ep.ContentID == "" {
 			continue
 		}
-		ids = append(ids, ep.ContentID)
+		target := presentationLanguageForOriginal(base, originalBySeries[ep.SeriesID], filter)
+		targets[ep.ContentID] = target
+		if target == "" || sameMetadataLanguage(ep.DefaultMetadataLanguage, target) {
+			continue
+		}
+		idsByLanguage[target] = append(idsByLanguage[target], ep.ContentID)
 	}
-	if len(ids) == 0 {
-		return episodes, nil
+
+	languages := make([]string, 0, len(idsByLanguage))
+	for language := range idsByLanguage {
+		languages = append(languages, language)
 	}
-	locs, err := s.episodeLocRepo.GetByEpisodeIDs(ctx, ids, language)
-	if err != nil || len(locs) == 0 {
-		return episodes, err
+	sort.Strings(languages)
+	locs := make(map[string]*models.EpisodeLocalization)
+	for _, language := range languages {
+		rows, err := s.episodeLocRepo.GetByEpisodeIDs(ctx, idsByLanguage[language], language)
+		if err != nil {
+			return episodes, err
+		}
+		for episodeID, localization := range rows {
+			locs[episodeID] = localization
+		}
 	}
 	localized := make([]*models.Episode, len(episodes))
 	for i, ep := range episodes {
@@ -997,7 +1260,10 @@ func (s *DetailService) LocalizeEpisodeModels(ctx context.Context, episodes []*m
 			continue
 		}
 		if loc := locs[ep.ContentID]; loc != nil {
-			localized[i] = applyEpisodeLocalization(ep, loc)
+			target := targets[ep.ContentID]
+			if target != "" && !sameMetadataLanguage(ep.DefaultMetadataLanguage, target) {
+				localized[i] = applyEpisodeLocalization(ep, loc)
+			}
 		}
 	}
 	return localized, nil
@@ -1287,20 +1553,12 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		return result, nil
 	}
 
-	// Localization: resolve the presentation language once, then one bulk
-	// localization lookup. A resolution failure surfaces the same wrapped error
-	// GetItemDetail would produce from buildMediaItemDetail, so the caller
-	// degrades to the per-item path.
-	language, err := s.resolvePresentationLanguage(ctx, filter)
+	// Localization keeps one lookup per target language. Most profiles still
+	// produce one query; profiles with source-language exceptions produce one
+	// query for each target represented on this page.
+	targetByID, locByID, err := s.loadItemLocalizations(ctx, visible, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing item detail: %w", err)
-	}
-	var locByID map[string]*models.MediaItemLocalization
-	if language != "" && s.itemLocRepo != nil {
-		locByID, err = s.itemLocRepo.GetByContentIDs(ctx, visibleIDs, language)
-		if err != nil {
-			return nil, fmt.Errorf("localizing item detail: %w", err)
-		}
 	}
 
 	// Credits for the whole page in one query.
@@ -1361,6 +1619,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 
 	for _, item := range visible {
 		id := item.ContentID
+		language := targetByID[id]
 		loc := locByID[id]
 		pending := ""
 		if s.itemLocRepo != nil {
@@ -2319,17 +2578,19 @@ func clearSentinel(s string) string {
 }
 
 func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Season, filter AccessFilter) (*ItemDetail, error) {
-	pendingTranslation := s.PendingSeasonTranslationLanguage(ctx, season, filter)
-	localizedSeason, err := s.LocalizeSeasonModel(ctx, season, filter)
-	if err != nil {
-		return nil, fmt.Errorf("localizing season detail: %w", err)
-	}
-	season = localizedSeason
 	series, err := s.itemRepo.GetByID(ctx, season.SeriesID)
 	if err != nil {
 		return nil, fmt.Errorf("loading parent series: %w", err)
 	}
-	series, err = s.LocalizeItemModel(ctx, series, filter)
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = series.OriginalLanguage
+	pendingTranslation := s.PendingSeasonTranslationLanguage(ctx, season, localizationFilter)
+	localizedSeason, err := s.LocalizeSeasonModel(ctx, season, localizationFilter)
+	if err != nil {
+		return nil, fmt.Errorf("localizing season detail: %w", err)
+	}
+	season = localizedSeason
+	series, err = s.LocalizeItemModel(ctx, series, localizationFilter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing season series detail: %w", err)
 	}
@@ -2384,8 +2645,10 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 }
 
 func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.Episode, seriesCtx *seriesDetailContext, filter AccessFilter) (*ItemDetail, error) {
-	pendingTranslation := s.PendingEpisodeTranslationLanguage(ctx, episode, filter)
-	localizedEpisode, err := s.LocalizeEpisodeModel(ctx, episode, filter)
+	localizationFilter := filter
+	localizationFilter.PresentationOriginalLanguage = seriesCtx.series.OriginalLanguage
+	pendingTranslation := s.PendingEpisodeTranslationLanguage(ctx, episode, localizationFilter)
+	localizedEpisode, err := s.LocalizeEpisodeModel(ctx, episode, localizationFilter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing episode detail: %w", err)
 	}
@@ -2520,7 +2783,15 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
 		return nil, err
 	}
-	episode, err = s.LocalizeEpisodeModel(ctx, episode, filter)
+	// Seasons and episodes inherit original_language from the parent series.
+	// Load it before localization and reuse the same row for SeriesTitle below,
+	// avoiding an extra lookup only for profiles that use language exceptions.
+	series, seriesErr := s.itemRepo.GetByID(ctx, episode.SeriesID)
+	localizationFilter := filter
+	if seriesErr == nil && series != nil {
+		localizationFilter.PresentationOriginalLanguage = series.OriginalLanguage
+	}
+	episode, err = s.LocalizeEpisodeModel(ctx, episode, localizationFilter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing episode watch detail: %w", err)
 	}
@@ -2557,8 +2828,8 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 	}
 
-	if series, err := s.itemRepo.GetByID(ctx, episode.SeriesID); err == nil {
-		series, err = s.LocalizeItemModel(ctx, series, filter)
+	if seriesErr == nil && series != nil {
+		series, err = s.LocalizeItemModel(ctx, series, localizationFilter)
 		if err != nil {
 			return nil, fmt.Errorf("localizing series watch detail: %w", err)
 		}

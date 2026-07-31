@@ -148,6 +148,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		MaxContentRating:          decision.MaxContentRating,
 		MaxPlaybackQuality:        decision.MaxPlaybackQuality,
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
+		MetadataLanguageOverrides: preferences.MetadataLanguageOverrides,
 		PolicyRevision:            user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
 		// custom override may revoke verification but never grant it. ANDing

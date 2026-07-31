@@ -17,7 +17,7 @@ import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
-import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
+import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
 import {
   BACKGROUND_STYLE_OPTIONS,
@@ -140,6 +140,11 @@ export default function SubtitleAppearanceSettings() {
   // control can read its value straight off the answer without a local literal.
   const subtitleLanguage =
     (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.value as string | null | undefined) ?? "";
+  const subtitleLanguageOptions = namedLanguageOptionsFor(
+    SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+    subtitleLanguage,
+    behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.suggested_values,
+  );
   const subtitleMode =
     (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as string | undefined) ?? "auto";
   const showForcedSubtitles =
@@ -250,7 +255,7 @@ export default function SubtitleAppearanceSettings() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                {subtitleLanguageOptions.map((language) => (
                   <SelectItem key={language.value} value={language.value}>
                     {language.label}
                   </SelectItem>
