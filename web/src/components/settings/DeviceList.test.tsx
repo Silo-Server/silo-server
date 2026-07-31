@@ -27,6 +27,7 @@ function renderList(
     groupByProfile: boolean;
     profileFilter: string | null;
     onProfileFilterChange: (id: string | null) => void;
+    ownProfileId: string;
   }> = {},
 ) {
   const onSelect = vi.fn();
@@ -182,6 +183,25 @@ describe("DeviceList profile filter", () => {
     expect(screen.getByRole("button", { name: "Everyone, 3 devices" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sam, 2 devices" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Robin, 1 device" })).toBeInTheDocument();
+  });
+
+  // At eight profiles, arrival order buried the person actually using the
+  // screen; the rest sort by name so a chip does not move as devices are used.
+  it("leads with the viewer's own profile, then sorts by name", () => {
+    renderList(
+      [
+        device({ device_id: "z", profile_id: "profile-9", profile_name: "Zoe" }),
+        device({ device_id: "c", profile_id: "profile-3", profile_name: "Casey" }),
+        device({ device_id: "a", profile_id: "profile-1", profile_name: "Sam" }),
+      ],
+      { groupByProfile: true, ownProfileId: "profile-1" },
+    );
+
+    const chips = screen
+      .getByRole("group", { name: "Filter by profile" })
+      .querySelectorAll("button");
+    const names = [...chips].map((chip) => chip.getAttribute("aria-label")?.split(",")[0]);
+    expect(names).toEqual(["Everyone", "Sam", "Casey", "Zoe"]);
   });
 
   // Someone looking at their own devices has exactly one profile, so a filter

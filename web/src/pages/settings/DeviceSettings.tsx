@@ -107,6 +107,7 @@ export default function DeviceSettings() {
             groupByProfile={household && canSeeHousehold}
             profileFilter={profileFilter}
             onProfileFilterChange={setProfileFilter}
+            ownProfileId={profile?.id}
             now={now}
           />
         )}

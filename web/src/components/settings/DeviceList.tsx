@@ -34,6 +34,8 @@ export interface DeviceListProps {
    */
   profileFilter?: string | null;
   onProfileFilterChange?: (profileId: string | null) => void;
+  /** The viewer's own profile, so their chip leads the row. */
+  ownProfileId?: string;
   /**
    * "Now" for relative-time labels. Passed in rather than read during render so
    * the component stays pure — and so a test can pin the clock.
@@ -58,12 +60,13 @@ export function DeviceList({
   groupByProfile = false,
   profileFilter = null,
   onProfileFilterChange,
+  ownProfileId,
   now,
 }: DeviceListProps) {
   // Counts come from the unfiltered list so a chip keeps showing how many
   // devices it would reveal, rather than collapsing to zero once another chip
   // is active.
-  const profiles = useMemo(() => profileOptions(devices), [devices]);
+  const profiles = useMemo(() => profileOptions(devices, ownProfileId), [devices, ownProfileId]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -177,8 +180,15 @@ interface ProfileOption {
   count: number;
 }
 
-/** One entry per profile that owns at least one device, in first-seen order. */
-function profileOptions(devices: UserDevice[]): ProfileOption[] {
+/**
+ * One entry per profile that owns at least one device.
+ *
+ * The viewer's own profile comes first — at eight profiles the arrival order
+ * put the person actually using the screen last — and the rest are alphabetical
+ * so a chip stays where someone last saw it, rather than moving whenever a
+ * device is used.
+ */
+function profileOptions(devices: UserDevice[], ownProfileId?: string): ProfileOption[] {
   const byId = new Map<string, ProfileOption>();
   for (const device of devices) {
     const existing = byId.get(device.profile_id);
@@ -192,7 +202,11 @@ function profileOptions(devices: UserDevice[]): ProfileOption[] {
       });
     }
   }
-  return [...byId.values()];
+  return [...byId.values()].sort((a, b) => {
+    if (a.id === ownProfileId) return -1;
+    if (b.id === ownProfileId) return 1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 function ProfileChip({
