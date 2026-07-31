@@ -186,6 +186,17 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	for _, s := range raw.Streams {
 		switch s.CodecType {
 		case "video":
+			// Embedded cover art is a "video" stream to ffprobe, but it is a
+			// still image, not a playable video track. Recording it as one
+			// misreports the file twice: an audio file with a cover picks up a
+			// video track and stops satisfying MediaFile.IsAudioOnly, so the
+			// planner routes an audiobook through the video path; and when the
+			// picture is ordered ahead of the real stream, the flat
+			// codec_video/resolution/hdr columns describe the poster instead of
+			// the movie.
+			if !isMainVideoStream(s) {
+				continue
+			}
 			dvProfile := dolbyVisionProfileNumber(s.SideDataList)
 			// ffprobe omits unspecified optional fields by default; "unknown" is
 			// FFmpeg's canonical name for AVCOL_RANGE_UNSPECIFIED.
