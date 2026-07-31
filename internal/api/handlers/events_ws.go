@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
@@ -29,6 +31,19 @@ type taskInfoLister interface {
 }
 
 const maxRealtimeScanSnapshotRuns = 500
+
+// subscribeGracePeriod bounds how long a connection that did not declare its
+// channels on the URL may stay silent before it is closed. It exists to
+// distinguish a client mid-handshake from one that connected and stalled;
+// connections that arrived with ?channels= are never put on this clock.
+const subscribeGracePeriod = 5 * time.Second
+
+// required_action values in the hello frame: whether the client still owes a
+// subscribe frame, or already declared its channels on the URL.
+const (
+	requiredActionSubscribe = "subscribe"
+	requiredActionNone      = "none"
+)
 
 type activeScanLister interface {
 	ListActiveSnapshot(ctx context.Context, limit int) ([]evt.ScanRun, error)
@@ -138,15 +153,48 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	})
 
 	allowedChannels := allowedChannelsForRole(claims.Role)
+
+	// A connection may declare its channels on the URL instead of sending a
+	// subscribe frame. That is all an observer needs — subscribe is the only
+	// inbound message this endpoint accepts — so declaring up front lets a
+	// read-only client skip the handshake, the grace period, and the write
+	// half of the socket entirely.
+	declaredChannels, declared := parseDeclaredChannels(r.URL.Query())
+
+	requiredAction := requiredActionSubscribe
+	if declared {
+		requiredAction = requiredActionNone
+	}
 	connectionID := ulid.Make().String()
 	if err := writeWebSocketJSON(conn, evt.EventsHelloMessage{
 		Type:              "hello",
 		SchemaVersion:     1,
 		ConnectionID:      connectionID,
 		AvailableChannels: allowedChannels,
-		RequiredAction:    "subscribe",
+		RequiredAction:    requiredAction,
 	}); err != nil {
 		return
+	}
+
+	subscriptions := make(map[evt.EventChannel]struct{})
+	if declared {
+		subs, accepted, rejected := resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
+		subscriptions = subs
+		// The same subscribed frame the handshake produces, so a client sees
+		// one acknowledgement shape however it selected its channels — and
+		// still learns which of its requests were refused, and why.
+		if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
+			Type:     "subscribed",
+			Channels: accepted,
+			Rejected: rejected,
+		}); err != nil {
+			return
+		}
+		for _, channel := range accepted {
+			if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
+				return
+			}
+		}
 	}
 
 	readMessages := make(chan []byte, 8)
@@ -166,11 +214,16 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}()
 
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-
-	subscriptions := make(map[evt.EventChannel]struct{})
-	subscribedOnce := false
+	// A connection that declared its channels on the URL is already subscribed
+	// and has nothing left to say, so it is never put on the grace-period
+	// clock. Only a connection still owing a subscribe frame is. A nil channel
+	// blocks forever, which is exactly the disarmed case.
+	var deadlineC <-chan time.Time
+	if !declared {
+		deadline := time.NewTimer(subscribeGracePeriod)
+		defer deadline.Stop()
+		deadlineC = deadline.C
+	}
 
 	for {
 		select {
@@ -178,11 +231,8 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			return
 		case <-readDone:
 			return
-		case <-deadline.C:
-			if subscribedOnce {
-				continue
-			}
-			writeWebSocketError(conn, "bad_request", "subscribe is required within 5 seconds")
+		case <-deadlineC:
+			writeWebSocketError(conn, "bad_request", "subscribe is required within "+subscribeGracePeriod.String())
 			_ = writeWebSocketControl(
 				conn,
 				websocket.CloseMessage,
@@ -197,13 +247,10 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			if !handled {
 				continue
 			}
-			subscribedOnce = true
-			if !deadline.Stop() {
-				select {
-				case <-deadline.C:
-				default:
-				}
-			}
+			// Obligation discharged: detach the timer so a later tick cannot
+			// close a connection that has since subscribed. The timer itself
+			// is stopped by the deferred Stop above.
+			deadlineC = nil
 			subscriptions = nextSubs
 		case env, ok := <-eventsCh:
 			if !ok {
@@ -263,6 +310,40 @@ func (h *EventsHandler) handleEventsClientMessage(
 		return nil, false, false
 	}
 
+	nextSubs, accepted, rejected := resolveChannelSelection(message.Channels, allowed, boundProfileID)
+
+	if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
+		Type:      "subscribed",
+		RequestID: message.RequestID,
+		Channels:  accepted,
+		Rejected:  rejected,
+	}); err != nil {
+		return nil, false, false
+	}
+
+	for _, channel := range accepted {
+		if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
+			return nil, false, false
+		}
+	}
+
+	return nextSubs, true, true
+}
+
+// resolveChannelSelection decides which of the requested channels a connection
+// may subscribe to. It is the single place that answers that question, shared
+// by the URL-declared path and the subscribe frame so the two cannot drift.
+//
+// Every rejection is reported rather than fatal: an unknown, forbidden, or
+// profile-requiring channel costs the caller that channel and nothing else.
+// Closing the connection instead would take down every other channel it holds
+// over one bad name, and a client cannot always know which channels its role
+// allows before it asks.
+func resolveChannelSelection(
+	requested []evt.EventChannel,
+	allowed []evt.EventChannel,
+	boundProfileID string,
+) (map[evt.EventChannel]struct{}, []evt.EventChannel, []evt.EventsRejectedChannel) {
 	allowedSet := make(map[evt.EventChannel]struct{}, len(allowed))
 	for _, channel := range allowed {
 		allowedSet[channel] = struct{}{}
@@ -272,19 +353,18 @@ func (h *EventsHandler) handleEventsClientMessage(
 		validSet[channel] = struct{}{}
 	}
 
-	nextSubs := make(map[evt.EventChannel]struct{}, len(message.Channels))
-	accepted := make([]evt.EventChannel, 0, len(message.Channels))
+	subs := make(map[evt.EventChannel]struct{}, len(requested))
+	accepted := make([]evt.EventChannel, 0, len(requested))
 	rejected := make([]evt.EventsRejectedChannel, 0)
 
-	for _, channel := range message.Channels {
+	for _, channel := range requested {
 		if _, ok := validSet[channel]; !ok {
-			writeWebSocketError(conn, "bad_request", "Invalid channel")
-			_ = writeWebSocketControl(
-				conn,
-				websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "invalid channel"),
-			)
-			return nil, false, false
+			rejected = append(rejected, evt.EventsRejectedChannel{
+				Channel: channel,
+				Code:    "unknown_channel",
+				Message: "Unknown channel",
+			})
+			continue
 		}
 		if _, ok := allowedSet[channel]; !ok {
 			rejected = append(rejected, evt.EventsRejectedChannel{
@@ -304,29 +384,35 @@ func (h *EventsHandler) handleEventsClientMessage(
 			})
 			continue
 		}
-		if _, seen := nextSubs[channel]; seen {
+		if _, seen := subs[channel]; seen {
 			continue
 		}
-		nextSubs[channel] = struct{}{}
+		subs[channel] = struct{}{}
 		accepted = append(accepted, channel)
 	}
 
-	if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
-		Type:      "subscribed",
-		RequestID: message.RequestID,
-		Channels:  accepted,
-		Rejected:  rejected,
-	}); err != nil {
-		return nil, false, false
+	return subs, accepted, rejected
+}
+
+// parseDeclaredChannels reads the optional ?channels= selection a connection
+// may declare on the URL, letting a read-only observer skip the subscribe
+// handshake entirely. An absent parameter returns ok=false, which keeps the
+// handshake (and its grace period) in force; an empty or all-blank value is a
+// deliberate declaration of nothing, so it returns ok=true and no channels.
+func parseDeclaredChannels(query url.Values) ([]evt.EventChannel, bool) {
+	if !query.Has("channels") {
+		return nil, false
 	}
 
-	for _, channel := range accepted {
-		if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
-			return nil, false, false
+	channels := make([]evt.EventChannel, 0, 4)
+	for _, raw := range strings.Split(query.Get("channels"), ",") {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
 		}
+		channels = append(channels, evt.EventChannel(name))
 	}
-
-	return nextSubs, true, true
+	return channels, true
 }
 
 func allowedChannelsForRole(role string) []evt.EventChannel {
