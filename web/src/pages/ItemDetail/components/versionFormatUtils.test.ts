@@ -26,6 +26,10 @@ describe("formatLanguageName", () => {
     expect(formatLanguageName("english subtitles")).toBe("English Subtitles");
   });
 
+  it("preserves an already readable language name", () => {
+    expect(formatLanguageName("English")).toBe("English");
+  });
+
   it("returns empty string for undefined", () => {
     expect(formatLanguageName(undefined)).toBe("");
   });

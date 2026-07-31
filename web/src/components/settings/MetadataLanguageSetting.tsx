@@ -10,14 +10,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { SettingOption } from "@/lib/languageOptions";
+import { withCurrentLanguageOption, type SettingOption } from "@/lib/languageOptions";
+import { getLanguageName } from "@/lib/languageNames";
 import {
   ORIGINAL_METADATA_LANGUAGE,
   withMetadataLanguageOverride,
   withoutMetadataLanguageOverride,
   type MetadataLanguageOverrides,
 } from "@/lib/metadataLanguagePreferences";
-import { getLanguageName } from "@/player/utils/languageNames";
 
 interface MetadataLanguageSettingProps {
   fallback: string | null;
@@ -72,13 +72,8 @@ export function MetadataLanguageSetting({
   );
   const availableSources = namedOptions.filter((language) => !(language.value in currentOverrides));
   const optionsForTarget = (target: string) => {
-    if (
-      target === ORIGINAL_METADATA_LANGUAGE ||
-      namedOptions.some((language) => language.value === target)
-    ) {
-      return namedOptions;
-    }
-    return [{ value: target, label: getLanguageName(target) }, ...namedOptions];
+    if (target === ORIGINAL_METADATA_LANGUAGE) return namedOptions;
+    return withCurrentLanguageOption(namedOptions, target);
   };
 
   const changeOverrides = async (next: MetadataLanguageOverrides) => {

@@ -1,4 +1,4 @@
-import { normalizeLanguageCode } from "@/player/utils/languageNames";
+import { normalizeLanguageCode } from "@/lib/languageNames";
 
 /** Valid private-use BCP 47 tag understood by the server as item-original. */
 export const ORIGINAL_METADATA_LANGUAGE = "x-silo-original";

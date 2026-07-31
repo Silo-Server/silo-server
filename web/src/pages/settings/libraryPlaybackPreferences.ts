@@ -1,8 +1,8 @@
 import type { EffectiveSettingsMap, SettingIdentity } from "@/hooks/queries/settingValues";
+import { getLanguageName } from "@/lib/languageNames";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
-import { getLanguageName } from "@/player/utils/languageNames";
 
 export const INHERIT_VALUE = "inherit";
 export const NONE_VALUE = "none";
