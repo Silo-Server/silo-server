@@ -6,21 +6,28 @@ Status: approved, ready for implementation planning
 ## Problem
 
 Silo's realtime events hub is reachable only over WebSocket
-(`GET /api/v1/events/ws`). That transport is a poor fit for external
-integrations:
+(`GET /api/v1/events/ws`). That transport is the right choice for the
+first-party clients, which need bidirectional control — but it is an expensive
+way to *observe*.
 
-- It requires a `subscribe` frame within 5 seconds or the server closes the
-  connection with a policy violation. A client that connects and waits silently
-  receives nothing and never learns why.
-- Consumers must implement handshake, ping/pong, reconnect and backoff
-  themselves.
-- Ecosystem tooling in this space is overwhelmingly SSE-based. Tracearr, a
-  monitoring dashboard for self-hosted media servers, drives Plex, Jellyfin and
-  Emby entirely over SSE and has no WebSocket client at all; supporting Silo
-  currently forces a new transport and a new runtime dependency into it.
+A read-only consumer currently has to:
+
+- send a `subscribe` frame within 5 seconds or be closed with a policy
+  violation. A client that connects and waits silently receives nothing and is
+  given no reason;
+- implement the handshake, ping/pong, reconnect and backoff itself;
+- carry a WebSocket client library, in ecosystems where SSE is the norm for
+  one-way server push and is available in the standard library or the platform
+  itself.
+
+That cost is paid by every observer: dashboards, companion apps, home-automation
+glue, CI and contract tests that assert on live server behaviour, and any future
+first-party surface that only needs to watch. It is a barrier to writing a
+five-line integration against Silo.
 
 The hub itself is transport-agnostic — `events.Hub.Subscribe()` returns a plain
-channel of envelopes. Only the delivery layer is WebSocket-bound.
+channel of envelopes. Only the delivery layer is WebSocket-bound, so the cost is
+incidental rather than inherent.
 
 ## Approach
 
