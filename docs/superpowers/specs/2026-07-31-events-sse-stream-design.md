@@ -73,7 +73,7 @@ event: sessions
 data: {"channel":"sessions","event":"sessions.replaced","data":[…]}
 
 event: ping
-data: {"type":"ping","ts":"2026-07-31T10:00:00Z"}
+data: {"type":"ping"}
 ```
 
 - `hello` is sent immediately on connect, mirroring the WebSocket hello but with
@@ -100,10 +100,30 @@ stalling the hub, which matches the WebSocket path's existing behaviour.
 
 ## Capability discovery
 
-`docs/` requires new features to be discoverable rather than version-sniffed. The
-existing capability endpoint gains a flag advertising the SSE stream and its
-schema version, so a client can detect support without probing the URL or
-comparing release numbers.
+`docs/` requires new features to be discoverable rather than version-sniffed.
+No existing capability endpoint described the events subsystem, so this ships
+a dedicated one instead of overloading an unrelated surface:
+
+`GET /api/v1/events/capability`
+
+```json
+{
+  "schema_version": 1,
+  "sse": { "supported": true, "path": "/api/v1/events/sse" },
+  "websocket": { "supported": true, "path": "/api/v1/events/ws" }
+}
+```
+
+- `schema_version` matches the `schema_version` every hello frame already
+  sends (`evt.EventsHelloMessage`), not a version for this response's own
+  shape — a client that has already parsed one transport's hello frame can
+  skip re-deriving compatibility from this field.
+- `sse` and `websocket` each report whether the transport is available and
+  the path to reach it, so a client can detect the SSE stream without probing
+  the URL or comparing release numbers.
+- The response deliberately does not repeat the caller's available
+  channels — the hello frame both transports send already carries those, and
+  duplicating them here would invite the two to drift.
 
 ## Testing
 

@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,14 +48,46 @@ func runSSEHandlerBriefly(t *testing.T, h *EventsHandler, rec *httptest.Response
 	h.HandleSSE(rec, req.WithContext(ctx))
 }
 
-// runSSEHandlerWithPublish runs h.HandleSSE, publishes env to the hub shortly
-// after the handler subscribes, then lets the request context expire so
-// HandleSSE returns. It returns the recorded body.
+// flushSignal wraps httptest.ResponseRecorder so a test can be notified the
+// instant HandleSSE performs its first flush, instead of guessing a delay.
+// writeSSEFrame flushes after every write, and the very first frame HandleSSE
+// writes is the hello frame — sent only after h.hub.Subscribe() returns — so
+// "first flush observed" is a race-free proxy for "the handler has already
+// subscribed". It still satisfies http.Flusher (required by HandleSSE) and,
+// via the embedded *httptest.ResponseRecorder, the same "not supported" path
+// through http.NewResponseController that HandleSSE already tolerates.
+type flushSignal struct {
+	*httptest.ResponseRecorder
+	once    sync.Once
+	flushed chan struct{}
+}
+
+func newFlushSignal() *flushSignal {
+	return &flushSignal{
+		ResponseRecorder: httptest.NewRecorder(),
+		flushed:          make(chan struct{}),
+	}
+}
+
+func (f *flushSignal) Flush() {
+	f.ResponseRecorder.Flush()
+	f.once.Do(func() { close(f.flushed) })
+}
+
+// runSSEHandlerWithPublish runs h.HandleSSE in a goroutine, waits for its
+// first flush (proof that it has already subscribed to the hub), publishes
+// env only then, and lets the request context expire so HandleSSE returns.
+// It returns the recorded body.
+//
+// Publishing before HandleSSE calls hub.Subscribe() would silently lose the
+// event — hub.Publish only fans out to subscribers that already exist — so
+// this must not rely on a fixed delay and hope the handler got there first;
+// the flush signal makes the ordering deterministic instead.
 func runSSEHandlerWithPublish(
 	t *testing.T,
 	h *EventsHandler,
 	hub *evt.Hub,
-	rec *httptest.ResponseRecorder,
+	rec *flushSignal,
 	req *http.Request,
 	env evt.Envelope,
 ) string {
@@ -61,12 +95,30 @@ func runSSEHandlerWithPublish(
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
-	time.AfterFunc(10*time.Millisecond, func() {
-		_ = hub.Publish(context.Background(), env)
-	})
-	time.AfterFunc(50*time.Millisecond, cancel)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.HandleSSE(rec, req.WithContext(ctx))
+	}()
 
-	h.HandleSSE(rec, req.WithContext(ctx))
+	select {
+	case <-rec.flushed:
+		// The hello frame is out, which only happens after hub.Subscribe()
+		// has returned — safe to publish now.
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleSSE did not flush its hello frame before the timeout")
+	}
+
+	if err := hub.Publish(context.Background(), env); err != nil {
+		t.Fatalf("hub.Publish: %v", err)
+	}
+
+	// The subscribe race is already ruled out above; this just gives the
+	// now-subscribed handler's select loop a moment to observe the publish
+	// and write it out before the context is canceled underneath it.
+	time.AfterFunc(30*time.Millisecond, cancel)
+	<-done
+
 	return rec.Body.String()
 }
 
@@ -114,16 +166,81 @@ func TestHandleSSEWritesSubscribedChannelEvent(t *testing.T) {
 	h := &EventsHandler{hub: hub}
 
 	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=sessions")
-	rec := httptest.NewRecorder()
+	rec := newFlushSignal()
 
+	// Populate every internal-only Envelope field alongside the public ones,
+	// so this test would genuinely fail if sseEventMessage regressed to
+	// marshaling the raw envelope instead of projecting it — which is
+	// precisely the bug an earlier review round found and fixed.
 	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
-		Channel: evt.ChannelSessions,
-		Event:   "sessions.replaced",
+		Channel:        evt.ChannelSessions,
+		Event:          "sessions.replaced",
+		EventID:        "evt_test_123",
+		SourceID:       "node-a",
+		UserID:         42,
+		ProfileID:      "profile_1",
+		AdminOnly:      true,
+		TargetPluginID: "plugin.example",
+		Data:           json.RawMessage(`{"foo":"bar"}`),
 	})
 
-	if !strings.Contains(body, "event: sessions") {
-		t.Fatalf("subscribed channel event was not written, body = %q", body)
+	data := sseFrameData(t, body, "event: sessions")
+
+	var msg evt.EventsEventMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		t.Fatalf("decoding sessions event payload: %v; data = %s", err, data)
 	}
+	const wantType = "event"
+	if msg.Type != wantType {
+		t.Fatalf("type = %q, want %q", msg.Type, wantType)
+	}
+	if msg.Channel != evt.ChannelSessions {
+		t.Fatalf("channel = %q, want %q", msg.Channel, evt.ChannelSessions)
+	}
+	if msg.Event != "sessions.replaced" {
+		t.Fatalf("event = %q, want %q", msg.Event, "sessions.replaced")
+	}
+	if msg.EventID != "evt_test_123" {
+		t.Fatalf("event_id = %q, want %q", msg.EventID, "evt_test_123")
+	}
+	if msg.Timestamp == "" {
+		t.Fatal("timestamp missing")
+	}
+	if string(msg.Data) != `{"foo":"bar"}` {
+		t.Fatalf("data = %s, want %s", msg.Data, `{"foo":"bar"}`)
+	}
+
+	// The wire projection (evt.EventsEventMessage) has no field for any of
+	// these — decoding into it above already drops them silently — so assert
+	// their absence on the raw JSON instead, where a regression to
+	// marshaling evt.Envelope directly would actually show up.
+	for _, forbidden := range []string{"source_id", "admin_only", "target_plugin_id", "user_id", "profile_id"} {
+		if strings.Contains(string(data), `"`+forbidden+`"`) {
+			t.Fatalf("internal field %q leaked onto the wire, data = %s", forbidden, data)
+		}
+	}
+}
+
+// sseFrameData extracts the JSON payload of the "data:" line belonging to
+// the frame introduced by eventLine (e.g. "event: sessions") from a raw SSE
+// response body.
+func sseFrameData(t *testing.T, body, eventLine string) []byte {
+	t.Helper()
+	idx := strings.Index(body, eventLine+"\n")
+	if idx == -1 {
+		t.Fatalf("frame %q not found, body = %q", eventLine, body)
+	}
+	rest := body[idx+len(eventLine)+1:]
+	const dataPrefix = "data: "
+	if !strings.HasPrefix(rest, dataPrefix) {
+		t.Fatalf("frame %q missing a data: line, body = %q", eventLine, body)
+	}
+	rest = rest[len(dataPrefix):]
+	end := strings.IndexByte(rest, '\n')
+	if end == -1 {
+		t.Fatalf("frame %q data line unterminated, body = %q", eventLine, body)
+	}
+	return []byte(rest[:end])
 }
 
 func TestHandleSSESuppressesUnsubscribedChannel(t *testing.T) {
@@ -131,7 +248,7 @@ func TestHandleSSESuppressesUnsubscribedChannel(t *testing.T) {
 	h := &EventsHandler{hub: hub}
 
 	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=sessions")
-	rec := httptest.NewRecorder()
+	rec := newFlushSignal()
 
 	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
 		Channel: evt.ChannelJobs,
@@ -151,7 +268,7 @@ func TestHandleSSENonAdminOmitsAdminOnlyChannel(t *testing.T) {
 	// requesting it must not error the request, but must never see it on the
 	// wire. This is the endpoint's core authorization guarantee.
 	req := newAuthedSSERequestWithRole(t, "/api/v1/events/sse?channels=jobs", "user")
-	rec := httptest.NewRecorder()
+	rec := newFlushSignal()
 
 	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
 		Channel:   evt.ChannelJobs,
@@ -178,7 +295,7 @@ func TestHandleSSEMalformedChannelsDenyByDefault(t *testing.T) {
 	// widen access: the safe outcome is an empty subscription (hello and
 	// pings only), never "everything allowed".
 	req := newAuthedSSERequest(t, "/api/v1/events/sse?channels=,,,bogus,")
-	rec := httptest.NewRecorder()
+	rec := newFlushSignal()
 
 	body := runSSEHandlerWithPublish(t, h, hub, rec, req, evt.Envelope{
 		Channel: evt.ChannelSessions,

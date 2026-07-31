@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,18 @@ import (
 // ssePingInterval keeps idle connections alive through proxies that would
 // otherwise time them out.
 const ssePingInterval = 25 * time.Second
+
+// sseFrameWriteDeadline bounds how long a single frame write is allowed to
+// block. HandleSSE clears the connection's write deadline entirely so a
+// healthy long-lived stream survives past the server's 120s WriteTimeout, but
+// that alone would let a stalled-but-not-closed client hold a hub
+// subscription (and its buffered channel) open forever. writeSSEFrame renews
+// a bounded deadline before every write instead. ssePingInterval is used as
+// the bound: a client that cannot absorb a single frame within one ping
+// interval is not keeping up, so this catches a stalled peer about as
+// promptly as the ping cadence itself would notice one, without cutting off
+// a merely slow-but-healthy connection mid-write.
+const sseFrameWriteDeadline = ssePingInterval
 
 // sseRequiredActionNone tells clients no handshake is expected, unlike the
 // WebSocket hello which requires a subscribe frame.
@@ -85,7 +98,9 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	eventsCh, unsubscribe := h.hub.Subscribe()
 	defer unsubscribe()
 
-	if err := writeSSEFrame(w, flusher, "hello", evt.EventsHelloMessage{
+	ctx := r.Context()
+
+	if err := writeSSEFrame(ctx, w, flusher, "hello", evt.EventsHelloMessage{
 		Type:              "hello",
 		SchemaVersion:     1,
 		ConnectionID:      ulid.Make().String(),
@@ -98,13 +113,12 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	ping := time.NewTicker(ssePingInterval)
 	defer ping.Stop()
 
-	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ping.C:
-			if err := writeSSEFrame(w, flusher, "ping", ssePingMessage{Type: "ping"}); err != nil {
+			if err := writeSSEFrame(ctx, w, flusher, "ping", ssePingMessage{Type: "ping"}); err != nil {
 				return
 			}
 		case env, ok := <-eventsCh:
@@ -117,7 +131,7 @@ func (h *EventsHandler) HandleSSE(w http.ResponseWriter, r *http.Request) {
 			if !allowsEventForClaims(claims, "", env) {
 				continue
 			}
-			if err := writeSSEFrame(w, flusher, string(env.Channel), sseEventMessage(env)); err != nil {
+			if err := writeSSEFrame(ctx, w, flusher, string(env.Channel), sseEventMessage(env)); err != nil {
 				return
 			}
 		}
@@ -181,10 +195,26 @@ func resolveSSEChannels(requested string, allowed []evt.EventChannel) map[evt.Ev
 // written, so the caller can drop a dead connection promptly instead of
 // waiting on context cancellation — mirroring HandleWebSocket's frame-write
 // discipline (events_ws.go), which returns immediately on any write failure.
-func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
+//
+// Before writing, it renews a bounded per-write deadline (sseFrameWriteDeadline).
+// HandleSSE clears the connection's write deadline once so the server's
+// WriteTimeout doesn't kill a healthy stream at 120s, but that must not mean
+// no deadline ever applies again — otherwise a stalled-but-not-closed peer
+// would block this Write forever and hold its hub subscription open
+// indefinitely. Renewing a short deadline before every write bounds each
+// individual frame instead of the whole connection.
+func writeSSEFrame(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, event string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
+	}
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(sseFrameWriteDeadline)); err != nil {
+		// Not fatal on its own, same as the initial clear in HandleSSE: some
+		// wrapping middleware doesn't support per-connection deadlines, and
+		// httptest.ResponseRecorder (used throughout events_sse_test.go)
+		// returns http.ErrNotSupported. Log and write anyway; the frame just
+		// isn't individually bounded in that case.
+		slog.WarnContext(ctx, "events: sse frame write deadline not set", "component", "api", "error", err)
 	}
 	if _, err := w.Write([]byte("event: " + event + "\ndata: " + string(data) + "\n\n")); err != nil {
 		return err

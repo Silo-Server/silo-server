@@ -328,55 +328,65 @@ git commit -m "feat(events): add server-sent events transport for the events hub
 
 ### Task 2: Advertise SSE through capability discovery
 
-**Files:**
+**Files (as actually built):**
 
-- Modify: the events capability surface (locate it in Step 1)
-- Test: the matching capability test file
+- Created: `internal/api/handlers/events_capability.go`
+- Created: `internal/api/handlers/events_capability_test.go`
+- Modified: `internal/api/router.go` (route registration)
 
 **Interfaces:**
 
 - Consumes: `HandleSSE` from Task 1.
-- Produces: a capability flag reporting SSE support and its schema version.
+- Produces: `GET /api/v1/events/capability`, a dedicated capability endpoint for
+  the events subsystem.
 
-`docs/` requires new features to be discoverable through a capability endpoint rather than by version sniffing, so a client can detect SSE support without probing the URL.
+`docs/` requires new features to be discoverable through a capability endpoint
+rather than by version sniffing, so a client can detect SSE support without
+probing the URL. Step 1 of the original plan asked to locate an existing
+capability surface to extend (`/device/capability`,
+`/notifications/capability`, `/collections/capabilities`,
+`/settings/contract/capabilities`) — none of those describe the events
+subsystem or its transports, and overloading an unrelated surface with an
+SSE flag would have been a worse fit than a small, dedicated endpoint. What
+shipped instead:
 
-- [ ] **Step 1: Locate the right capability surface**
+- [x] **`eventsCapabilityResponse`** (`events_capability.go`) reports
+  `schema_version` (matching the `schema_version` every hello frame already
+  sends via `evt.EventsHelloMessage`, not a version for this response's own
+  shape) plus one `eventsTransportCapability{supported, path}` per transport:
 
-Run:
+  ```json
+  {
+    "schema_version": 1,
+    "sse": { "supported": true, "path": "/api/v1/events/sse" },
+    "websocket": { "supported": true, "path": "/api/v1/events/ws" }
+  }
+  ```
 
-```bash
-grep -rn "capabilit" internal/api/router.go | head -20
-grep -rln "Capabilit" internal/api/handlers/ | head -10
-```
+  It deliberately omits the caller's available channels — the hello frame
+  both transports send already carries those
+  (`evt.EventsHelloMessage.AvailableChannels`), and duplicating them here
+  would invite the two to drift.
 
-Candidates seen already: `/device/capability`, `/notifications/capability`, `/collections/capabilities`, `/settings/contract/capabilities`. Choose the one that already describes server-wide or realtime capabilities. If an events-related capability response already exists, extend it. If none fits, extend the broadest server-capability response rather than creating a new endpoint — a new endpoint for one boolean is worse than a new field.
+- [x] **`HandleCapability`** (`events_capability.go`) handles
+  `GET /events/capability`, writing the response above.
 
-Record which surface you chose and why in your report.
+- [x] **Route** registered in `internal/api/router.go` alongside
+  `/events/sse` and `/events/ws`, inside the same authenticated route group:
 
-- [ ] **Step 2: Write the failing test**
+  ```go
+  r.Get("/events/ws", eventsHandler.HandleWebSocket)
+  r.Get("/events/sse", eventsHandler.HandleSSE)
+  r.Get("/events/capability", eventsHandler.HandleCapability)
+  ```
 
-Add a case to that surface's existing test file asserting the response advertises the SSE stream — for example that the capability payload reports `events_sse` supported with `schema_version: 1`. Mirror the assertions the neighbouring capability tests already use; do not invent a new response shape.
+- [x] **Tests** in `events_capability_test.go` assert the response shape,
+  both transports reported as supported, and their paths.
 
-- [ ] **Step 3: Run it and confirm it fails**
-
-Run: `go test ./internal/api/handlers/ -run <YourCapabilityTest> -v`
-Expected: FAIL — the field is absent.
-
-- [ ] **Step 4: Add the capability field**
-
-Add the field to the capability response struct and populate it. Follow the naming style already used by its neighbours in the same struct. Per the v1 API rules this is additive only — do not rename, retype, or remove any existing field.
-
-- [ ] **Step 5: Run the tests**
-
-Run: `go test ./internal/api/handlers/`
-Expected: PASS
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add -A internal/api
-git commit -m "feat(events): advertise the SSE stream through capability discovery"
-```
+- [x] **Commit:** `fix(events): move SSE capability flag to a dedicated
+  events endpoint` (and the preceding `feat(events): advertise the SSE
+  stream through capability discovery`, which first added it as a flag
+  before it was pulled out into its own endpoint).
 
 ---
 
