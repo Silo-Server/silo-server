@@ -104,7 +104,7 @@ export function MetadataLanguageSetting({
       label="Metadata language"
       description="Choose the fallback for titles and descriptions, then add exceptions based on each item's original language. Missing descriptions can be translated automatically when AI translation is enabled."
       control={(id) => (
-        <div className="w-full space-y-3 md:w-[430px]">
+        <div className="w-full min-w-0 space-y-3 md:w-[430px]">
           <Select
             value={fallback ?? NO_PREFERENCE}
             onValueChange={(value) => onFallbackChange(value === NO_PREFERENCE ? null : value)}
@@ -128,7 +128,7 @@ export function MetadataLanguageSetting({
               {entries.map(([source, target]) => (
                 <div
                   key={source}
-                  className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_auto] items-center gap-2 py-2"
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_auto]"
                 >
                   <span className="truncate text-sm">{getLanguageName(source)}</span>
                   <Select
@@ -141,7 +141,7 @@ export function MetadataLanguageSetting({
                   >
                     <SelectTrigger
                       aria-label={`Metadata language for ${getLanguageName(source)}`}
-                      className="h-8 w-full"
+                      className="col-span-2 col-start-1 row-start-2 h-9 w-full sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-8"
                       disabled={disabled}
                     >
                       <SelectValue />
@@ -159,7 +159,7 @@ export function MetadataLanguageSetting({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="size-8"
+                    className="col-start-2 row-start-1 size-9 sm:col-start-3 sm:size-8"
                     disabled={disabled}
                     aria-label={`Remove ${getLanguageName(source)} exception`}
                     onClick={() =>
@@ -176,11 +176,11 @@ export function MetadataLanguageSetting({
           ) : null}
 
           {availableSources.length > 0 ? (
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
               <Select value={newSource} onValueChange={setNewSource}>
                 <SelectTrigger
                   aria-label="Original language for new exception"
-                  className="h-9 min-w-0 flex-1"
+                  className="h-10 w-full min-w-0 flex-1 sm:h-9 sm:w-auto"
                   disabled={disabled}
                 >
                   <SelectValue placeholder="Choose original language" />
@@ -197,6 +197,7 @@ export function MetadataLanguageSetting({
                 type="button"
                 variant="outline"
                 size="sm"
+                className="h-10 w-full sm:h-8 sm:w-auto"
                 disabled={disabled || !newSource}
                 onClick={addException}
               >
