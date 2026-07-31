@@ -636,7 +636,10 @@ flags, a `url` when deliverable, and a `font_bundle_url` for embedded ASS tracks
 with attachments. `default` reflects the source container's own default flag, so
 only embedded and external tracks can carry it — a downloaded subtitle is never
 `default`. `url` is present only on `sidecar` tracks, and only once a session
-exists to scope it to.
+exists to scope it to — but it does not depend on the current selection: a start
+or replan that resolves to `subtitle.mode: "off"` still publishes every sidecar
+entry with its fetchable `url`, so a client can build its full subtitle menu
+without first asking for a plan it does not want.
 
 `subtitle.mode` is `off`, `render` (client draws the sidecar), `convert` (server
 transcodes it to a client-renderable format first — always to WebVTT, served as

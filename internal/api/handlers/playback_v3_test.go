@@ -175,6 +175,64 @@ func TestHandleStartPlaybackV3ReturnsExecutableDirectPlan(t *testing.T) {
 	}
 }
 
+// The inventory is the authoritative subtitle menu, so it has to be fetchable
+// before the user has picked anything. A start that resolves to `off` still
+// publishes session-scoped URLs on every sidecar entry; gating them on the
+// current selection left clients that build their picker from the inventory —
+// the Cast receiver's text tracks, for one — with nothing to offer.
+func TestHandleStartPlaybackV3PublishesSubtitleURLsWithSubtitlesOff(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.eng.srt", Language: "eng", Format: "srt"}}
+	file.SubtitleTracks = []models.SubtitleTrack{
+		{Index: 0, Codec: "ass", Language: "jpn"},
+		{Index: 1, Codec: "dvd_subtitle", Language: "fra"},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest())))
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.PlaybackPlan == nil {
+		t.Fatalf("response = %#v", response)
+	}
+	if response.PlaybackPlan.Subtitle.Mode != playback.SubtitleOffV3 || response.PlaybackPlan.Subtitle.Artifact != nil {
+		t.Fatalf("subtitle decision = %#v, want off with no artifact", response.PlaybackPlan.Subtitle)
+	}
+	inventory := response.PlaybackPlan.Subtitle.Inventory
+	if len(inventory) != 3 {
+		t.Fatalf("inventory = %#v, want all three tracks", inventory)
+	}
+	for _, item := range inventory {
+		switch item.Delivery {
+		case playback.SubtitleDeliverySidecarV3:
+			if !strings.HasPrefix(item.URL, "/stream/"+response.SessionID+"/subtitles/") {
+				t.Errorf("track %d (%s) url = %q, want a session-scoped sidecar URL", item.CombinedIndex, item.Codec, item.URL)
+			}
+		case playback.SubtitleDeliveryBurnInOnlyV3:
+			if item.URL != "" {
+				t.Errorf("track %d (%s) is burn-in only but published url %q", item.CombinedIndex, item.Codec, item.URL)
+			}
+		default:
+			t.Errorf("track %d has unknown delivery %q", item.CombinedIndex, item.Delivery)
+		}
+	}
+	if inventory[1].FontBundleURL == "" {
+		t.Errorf("embedded ASS track published no font bundle: %#v", inventory[1])
+	}
+}
+
 func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)

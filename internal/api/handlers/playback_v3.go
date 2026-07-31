@@ -964,7 +964,8 @@ func transportGenerationV3(sessionID, planID string) string {
 // a `url` "once a session exists to scope it to" — which is true here for every
 // entry, whatever the current selection is. Gating it on the selection published
 // a URL-less menu whenever playback started with subtitles off, so a client
-// building its picker from the inventory had nothing fetchable to offer.
+// building its picker from the inventory (the Cast receiver's text tracks, for
+// one) had nothing fetchable to offer.
 func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionID string, file *models.MediaFile, plan *playback.PlanV3, selectedIndex int, recipe *playback.ExecutableRecipeV3) error {
 	if plan == nil || file == nil {
 		return nil
