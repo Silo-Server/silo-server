@@ -25,10 +25,21 @@ interface MetadataLanguageSettingProps {
   languageOptions: readonly SettingOption[];
   disabled?: boolean;
   onFallbackChange: (language: string | null) => void;
-  onOverridesChange: (overrides: MetadataLanguageOverrides) => void;
+  onOverridesChange: (overrides: MetadataLanguageOverrides) => void | Promise<void>;
 }
 
 const NO_PREFERENCE = "__library_default";
+
+function overridesEqual(
+  left: MetadataLanguageOverrides,
+  right: MetadataLanguageOverrides,
+): boolean {
+  const leftEntries = Object.entries(left);
+  return (
+    leftEntries.length === Object.keys(right).length &&
+    leftEntries.every(([source, target]) => right[source] === target)
+  );
+}
 
 export function MetadataLanguageSetting({
   fallback,
@@ -39,18 +50,27 @@ export function MetadataLanguageSetting({
   onOverridesChange,
 }: MetadataLanguageSettingProps) {
   const [newSource, setNewSource] = useState("");
+  const [optimisticOverrides, setOptimisticOverrides] = useState<{
+    base: MetadataLanguageOverrides;
+    value: MetadataLanguageOverrides;
+  } | null>(null);
+  const currentOverrides =
+    optimisticOverrides !== null && overridesEqual(overrides, optimisticOverrides.base)
+      ? optimisticOverrides.value
+      : overrides;
+
   const entries = useMemo(
     () =>
-      Object.entries(overrides).sort(([left], [right]) =>
+      Object.entries(currentOverrides).sort(([left], [right]) =>
         getLanguageName(left).localeCompare(getLanguageName(right)),
       ),
-    [overrides],
+    [currentOverrides],
   );
   const namedOptions = useMemo(
     () => languageOptions.filter((language) => language.value !== ORIGINAL_METADATA_LANGUAGE),
     [languageOptions],
   );
-  const availableSources = namedOptions.filter((language) => !(language.value in overrides));
+  const availableSources = namedOptions.filter((language) => !(language.value in currentOverrides));
   const optionsForTarget = (target: string) => {
     if (
       target === ORIGINAL_METADATA_LANGUAGE ||
@@ -61,10 +81,20 @@ export function MetadataLanguageSetting({
     return [{ value: target, label: getLanguageName(target) }, ...namedOptions];
   };
 
+  const changeOverrides = async (next: MetadataLanguageOverrides) => {
+    const pending = { base: overrides, value: next };
+    setOptimisticOverrides(pending);
+    try {
+      await onOverridesChange(next);
+    } catch {
+      setOptimisticOverrides((current) => (current === pending ? null : current));
+    }
+  };
+
   const addException = () => {
     if (!newSource) return;
-    onOverridesChange(
-      withMetadataLanguageOverride(overrides, newSource, ORIGINAL_METADATA_LANGUAGE),
+    void changeOverrides(
+      withMetadataLanguageOverride(currentOverrides, newSource, ORIGINAL_METADATA_LANGUAGE),
     );
     setNewSource("");
   };
@@ -104,7 +134,9 @@ export function MetadataLanguageSetting({
                   <Select
                     value={target}
                     onValueChange={(value) =>
-                      onOverridesChange(withMetadataLanguageOverride(overrides, source, value))
+                      void changeOverrides(
+                        withMetadataLanguageOverride(currentOverrides, source, value),
+                      )
                     }
                   >
                     <SelectTrigger
@@ -131,7 +163,9 @@ export function MetadataLanguageSetting({
                     disabled={disabled}
                     aria-label={`Remove ${getLanguageName(source)} exception`}
                     onClick={() =>
-                      onOverridesChange(withoutMetadataLanguageOverride(overrides, source))
+                      void changeOverrides(
+                        withoutMetadataLanguageOverride(currentOverrides, source),
+                      )
                     }
                   >
                     <Trash2 className="size-3.5" aria-hidden="true" />

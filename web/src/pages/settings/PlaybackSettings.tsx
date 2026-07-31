@@ -201,7 +201,10 @@ export default function PlaybackSettings() {
       Object.keys(overrides).length === 0
         ? resetProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES)
         : saveProfileDefault(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES, overrides);
-    request.catch(() => toast.error("Failed to save metadata language exceptions"));
+    return request.catch((error) => {
+      toast.error("Failed to save metadata language exceptions");
+      throw error;
+    });
   };
 
   async function resetNextUpMode() {

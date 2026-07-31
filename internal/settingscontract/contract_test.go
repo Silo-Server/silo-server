@@ -1570,10 +1570,10 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 	// Each schema must actually constrain something, or it is decoration.
 	invalid := map[string]string{
 		"catalog.metadata_language_overrides": `{"Norwegian":"not a language tag"}`,
-		"ui.card_overlays":        `{"version":2,"preset":"nonesuch","order":[],"items":{}}`,
-		"ui.sidebar_pins":         `{"7":[{"type":"bogus","id":"x","label":"L"}]}`,
-		"ui.disabled_library_ids": `[0,-1]`,
-		"ui.library_order":        `[1,1]`,
+		"ui.card_overlays":                    `{"version":2,"preset":"nonesuch","order":[],"items":{}}`,
+		"ui.sidebar_pins":                     `{"7":[{"type":"bogus","id":"x","label":"L"}]}`,
+		"ui.disabled_library_ids":             `[0,-1]`,
+		"ui.library_order":                    `[1,1]`,
 	}
 	for key, value := range invalid {
 		t.Run(key+" rejects", func(t *testing.T) {
