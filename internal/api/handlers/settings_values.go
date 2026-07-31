@@ -581,6 +581,23 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
 	}
 
+	// A device-settings screen resolves what some *other* device sees, so this
+	// read accepts the same explicit identity the write path does, under the
+	// same guards: the device must belong to the profile, and naming another
+	// profile requires the household parent.
+	if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" && named != rc.ProfileID {
+		if !h.mayActForProfile(w, r, named) {
+			return
+		}
+		rc.ProfileID = named
+	}
+	if named := strings.TrimSpace(r.URL.Query().Get("device_id")); named != "" {
+		if !h.deviceBelongsToProfile(w, r, rc.ProfileID, named) {
+			return
+		}
+		rc.DeviceID = named
+	}
+
 	// The SQLite backend expands these into IN lists, whose host-parameter
 	// budget is finite; an unbounded request could fail the whole resolution.
 	// The bound is far above any real batch — a season view resolves a

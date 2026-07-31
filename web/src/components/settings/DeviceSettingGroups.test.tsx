@@ -1,0 +1,141 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
+import type { EffectiveSetting } from "@/hooks/queries/settingValues";
+import type { SettingKey } from "@/lib/settingsContract";
+
+// Radix Slider and Select read element sizes via ResizeObserver, which jsdom
+// does not provide. A no-op polyfill is enough to render them.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+
+function renderGroups(
+  settings: Partial<Record<SettingKey, EffectiveSetting>>,
+  props: Partial<{ ownerLabel: string }> = {},
+) {
+  const onChange = vi.fn();
+  const onReset = vi.fn();
+  render(
+    <DeviceSettingGroups
+      settings={settings}
+      ownerLabel={props.ownerLabel ?? "your"}
+      onChange={onChange}
+      onReset={onReset}
+    />,
+  );
+  return { onChange, onReset };
+}
+
+function effective(overrides: Partial<EffectiveSetting> = {}): EffectiveSetting {
+  return { key: "player.hdr_enabled", value: true, source: "default", ...overrides };
+}
+
+describe("DeviceSettingGroups", () => {
+  it("groups settings under headings a viewer would look under", () => {
+    renderGroups({});
+
+    // Scoped to headings: "Subtitles" is also a setting label inside the group.
+    const headings = screen.getAllByRole("heading").map((node) => node.textContent);
+    expect(headings).toEqual(["Picture", "Sound", "Subtitles", "Episodes"]);
+  });
+
+  // The screen is for people who do not know what a manifest key is. Matching
+  // on the dotted key shape rather than the prefix alone, because a manifest
+  // description may legitimately end a sentence with the word "playback".
+  it("never shows a raw setting key", () => {
+    const { container } = render(
+      <DeviceSettingGroups settings={{}} ownerLabel="your" onChange={vi.fn()} onReset={vi.fn()} />,
+    );
+    expect(container.textContent).not.toMatch(/\b(?:player|playback|ui)\.[a-z0-9_]+/);
+  });
+
+  it("marks a value stored on this device and offers to clear it", async () => {
+    const { onReset } = renderGroups({
+      "player.hdr_enabled": effective({
+        value: false,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByText("Changed here")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Use your setting/ }));
+    expect(onReset).toHaveBeenCalledWith("player.hdr_enabled");
+  });
+
+  it("names the person when the household parent is acting for someone else", () => {
+    renderGroups(
+      {
+        "player.hdr_enabled": effective({ source: "profile_device", scope: "profile_device" }),
+      },
+      { ownerLabel: "Robin's" },
+    );
+
+    expect(screen.getByRole("button", { name: /Use Robin's setting/ })).toBeInTheDocument();
+  });
+
+  it("does not offer a reset when nothing is stored on this device", () => {
+    renderGroups({ "player.hdr_enabled": effective({ source: "profile" }) });
+
+    expect(screen.queryByText("Changed here")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Use your setting/ })).not.toBeInTheDocument();
+  });
+
+  it("sends typed values rather than strings", async () => {
+    const { onChange } = renderGroups({
+      "player.hdr_enabled": effective({ value: true, source: "default" }),
+    });
+
+    const [firstToggle] = screen.getAllByRole("switch");
+    await userEvent.click(firstToggle!);
+
+    expect(onChange).toHaveBeenCalled();
+    const [firstCall] = onChange.mock.calls;
+    expect(typeof firstCall![1]).toBe("boolean");
+  });
+
+  // A capped setting explains the cap. A disabled control with no reason is
+  // exactly what the settings contract's UX rules forbid.
+  it("explains a household limit instead of silently narrowing", () => {
+    renderGroups({
+      "playback.preferred_quality": effective({
+        key: "playback.preferred_quality",
+        value: "1080p",
+        stored_value: "2160p",
+        source: "profile_device",
+        scope: "profile_device",
+        constrained: true,
+        constraint_kind: "ceiling",
+      }),
+    });
+
+    expect(screen.getByText("Household limit")).toBeInTheDocument();
+    expect(screen.getByText(/limit this to 1080p/)).toBeInTheDocument();
+    expect(screen.getByText(/your choice of 2160p isn't available/)).toBeInTheDocument();
+  });
+
+  it("states who set a locked value rather than disabling it silently", () => {
+    renderGroups({
+      "playback.preferred_quality": effective({
+        key: "playback.preferred_quality",
+        value: "720p",
+        source: "profile",
+        constrained: true,
+        constraint_kind: "locked",
+      }),
+    });
+
+    expect(
+      screen.getByText(/set for your household and can't be changed here/),
+    ).toBeInTheDocument();
+  });
+});

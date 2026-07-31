@@ -1254,3 +1254,108 @@ func TestSetValue_DoesNotAuditOwnWrite(t *testing.T) {
 		t.Errorf("audited an ordinary self-service write: %+v", records)
 	}
 }
+
+func TestGetEffective_ResolvesNamedDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry := store.(userstore.DeviceRegistry)
+	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "apple-tv",
+	}); err != nil {
+		t.Fatalf("registering apple-tv: %v", err)
+	}
+	// The Apple TV overrides subtitle mode; this browser does not.
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       "playback.subtitle_mode",
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "apple-tv",
+	}, json.RawMessage(`"always"`)); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	read := func(query string) map[string]any {
+		t.Helper()
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET effective?%s = %d: %s", query, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Settings []map[string]any `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("resolved %d settings, want 1", len(body.Settings))
+		}
+		return body.Settings[0]
+	}
+
+	named := read("keys=playback.subtitle_mode&device_id=apple-tv")
+	if named["value"] != "always" || named["source"] != "profile_device" {
+		t.Errorf("named device resolved %v from %v, want always from profile_device",
+			named["value"], named["source"])
+	}
+
+	// Without the parameter this browser still resolves its own answer.
+	own := read("keys=playback.subtitle_mode")
+	if own["source"] == "profile_device" {
+		t.Errorf("this browser resolved a device override it does not have: %v", own)
+	}
+}
+
+func TestGetEffective_RejectsDeviceNotOwnedByCaller(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values/effective?keys=playback.subtitle_mode&device_id=not-mine", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleGetEffective(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("effective read of a foreign device = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values/effective?keys=playback.subtitle_mode&profile_id=profile-1", nil)
+	req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
+	rec := httptest.NewRecorder()
+	handler.HandleGetEffective(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-primary effective read of a sibling = %d, want 403: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// A server admin may act for any profile, including from a non-primary active
+// profile: apimw.IsAdmin short-circuits the household check by design. Pinned
+// because it is easy to mistake for the non-primary refusal above — the
+// difference is the account's role, not the profile's.
+func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	target := "/settings/values/player.hdr_enabled" +
+		"?scope=profile_device&profile_id=profile-2&device_id=robin-ipad"
+	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
+	// Acting as the *non-primary* profile, but on an admin account.
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
+
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("key", "player.hdr_enabled")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	handler.HandleSetValue(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin naming a profile = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
+		t.Errorf("stored on device %q, want robin-ipad", got)
+	}
+}

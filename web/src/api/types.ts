@@ -2986,6 +2986,24 @@ export interface AdminDeviceProfileSummary {
   last_updated: string;
 }
 
+/** One device the signed-in viewer watches on. */
+export interface UserDevice {
+  device_id: string;
+  device_name: string;
+  device_platform: string;
+  last_seen_at: string;
+  profile_id: string;
+  profile_name: string;
+  /** True for the device this browser is. */
+  is_current_device: boolean;
+  /** How many settings this (profile, device) pair overrides. */
+  changed_count: number;
+}
+
+export interface UserDeviceListResponse {
+  devices: UserDevice[];
+}
+
 export interface AdminDeviceSummary {
   user_id: number;
   username: string;
