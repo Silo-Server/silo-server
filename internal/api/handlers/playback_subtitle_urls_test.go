@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -120,6 +121,82 @@ func TestBuildSubtitleURLs_PGSIndexAccountsForExternalOffset(t *testing.T) {
 	pgs := urls[1]
 	if pgs.Index != 1 || pgs.URL != "/stream/sess-2/subtitles/1.sup?file_id=44" {
 		t.Errorf("PGS track index should include the external offset, got %+v", pgs)
+	}
+}
+
+// A downloaded track's ordinal follows every embedded track, including the
+// bitmap ones that buildSubtitleURLs hides from native clients. This is the
+// case the old client-side `max(visible index)+1` reconstruction got wrong.
+func TestBuildSubtitleURLs_DownloadedOffsetCountsHiddenBitmapTracks(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 45,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/movie.en.srt", Language: "en", Format: "srt"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "ja", Codec: "hdmv_pgs_subtitle"},
+			// Last embedded track is burn-in only, so it never appears in the
+			// native listing — but it still consumes ordinal 2.
+			{Index: 1, Language: "de", Codec: "dvd_subtitle"},
+		},
+	}
+	downloaded := []subtitles.DownloadedSubtitle{
+		{ID: 1, MediaFileID: file.ID, Language: "es", Format: subtitles.SubtitleFormat("srt"), Provider: "opensubtitles", ReleaseName: "Movie.2020"},
+	}
+
+	urls := buildSubtitleURLs("sess-3", file, downloaded, false)
+
+	if len(urls) != 3 {
+		t.Fatalf("expected external + PGS + downloaded, got %d: %+v", len(urls), urls)
+	}
+	got := urls[len(urls)-1]
+	if got.Index != 3 {
+		t.Errorf("downloaded track index = %d, want 3 (1 external + 2 embedded); a hidden bitmap track must still consume its ordinal", got.Index)
+	}
+	if got.URL != "/stream/sess-3/subtitles/3.vtt?file_id=45" {
+		t.Errorf("downloaded track URL = %q, want the ordinal-3 sidecar URL", got.URL)
+	}
+	if got.Source != playback.SubtitleSourceDownloadedV3 {
+		t.Errorf("downloaded track source = %q, want %q", got.Source, playback.SubtitleSourceDownloadedV3)
+	}
+	// The listing is intentionally sparse for native clients; the ordinals it
+	// does publish must still be the plan's ordinals.
+	if urls[0].Index != 0 || urls[1].Index != 1 {
+		t.Errorf("visible track ordinals drifted: %+v", urls)
+	}
+}
+
+// buildSubtitleURLs projects the same inventory the v3 plan publishes, so every
+// entry it emits must appear at the same ordinal in the plan's dense list.
+func TestBuildSubtitleURLs_MatchesPlanInventoryOrdinals(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 46,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/movie.fr.srt", Language: "fr", Format: "srt"},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "en", Codec: "subrip"},
+			{Index: 1, Language: "de", Codec: "dvb_subtitle"},
+			{Index: 2, Language: "ja", Codec: "hdmv_pgs_subtitle"},
+		},
+	}
+	downloaded := []subtitles.DownloadedSubtitle{
+		{ID: 1, MediaFileID: file.ID, Language: "es", Format: subtitles.SubtitleFormat("srt")},
+	}
+
+	inventory := playback.SubtitleInventoryV3("sess-4", file, downloadedSubtitleEntriesV3(file, downloaded))
+	if len(inventory) != 5 {
+		t.Fatalf("expected a dense 5-track inventory, got %d: %+v", len(inventory), inventory)
+	}
+
+	for _, url := range buildSubtitleURLs("sess-4", file, downloaded, true) {
+		item, ok := playback.SubtitleInventoryItemAtV3(inventory, url.Index)
+		if !ok {
+			t.Fatalf("subtitle_urls advertises ordinal %d, which the plan inventory does not contain", url.Index)
+		}
+		if item.Codec != url.Codec || item.Language != url.Language {
+			t.Errorf("ordinal %d disagrees: listing %+v, inventory %+v", url.Index, url, item)
+		}
 	}
 }
 

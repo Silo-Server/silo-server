@@ -18,11 +18,20 @@ type SubtitlePolicyResultV3 struct {
 	Terminal             *TerminalV3
 }
 
+// SubtitleInventoryEntryV3 is one subtitle track that exists for the file but
+// is not carried on models.MediaFile — today, downloaded and AI-generated
+// tracks. Callers supply them in the order that defines their ordinals (see
+// BuildSubtitleInventoryV3); CombinedIndex records the ordinal each entry was
+// assigned so a caller holding an entry alone can still address it.
 type SubtitleInventoryEntryV3 struct {
 	CombinedIndex        int
 	Codec                string
 	Source               string
-	DownloadedSubtitleID int
+	Language             string
+	Label                string
+	Forced               bool
+	HearingImpaired      bool
+	DownloadedSubtitleID int `json:"-"`
 }
 
 // ResolveSubtitlePolicyV3 decides how the selected subtitle is delivered when
@@ -118,7 +127,13 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 	return subtitleTerminalV3("subtitle_conversion_unsupported", fmt.Sprintf("Subtitle format %s cannot meet the selected fidelity policy.", codec))
 }
 
+// subtitleEntryAtCombinedIndexV3 resolves a combined ordinal through the same
+// three inventory ranges the plan publishes while retaining the stable row ID
+// of a downloaded subtitle for frozen seek recipes.
 func subtitleEntryAtCombinedIndexV3(file *models.MediaFile, index int, additional []SubtitleInventoryEntryV3) (SubtitleInventoryEntryV3, bool) {
+	if file == nil || index < 0 {
+		return SubtitleInventoryEntryV3{}, false
+	}
 	if index < len(file.ExternalSubtitles) {
 		return SubtitleInventoryEntryV3{CombinedIndex: index, Codec: normalizeCodecV3(file.ExternalSubtitles[index].Format), Source: "external"}, true
 	}

@@ -231,10 +231,16 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// New subtitle artifact URLs bind downloaded subtitles by their stable row
+	// trackIndex is a combined ordinal, resolved through the same three
+	// consecutive ranges playback.BuildSubtitleInventoryV3 assigns them from:
+	// externals, then embedded container tracks, then downloaded ones. The
+	// ranges cover the full track arrays — including bitmap tracks that have no
+	// sidecar shape — so an ordinal always names the same track here as it does
+	// in the published inventory.
+	// Downloaded subtitle URLs additionally bind that ordinal to a stable row
 	// identity. The path ordinal remains for compatibility and display, but it
 	// must not be re-resolved against a mutable inventory after a seek reanchor.
-	if rawID := strings.TrimSpace(r.URL.Query().Get(downloadedSubtitleIDParam)); rawID != "" {
+	if rawID := strings.TrimSpace(r.URL.Query().Get(playback.DownloadedSubtitleIDParamV3)); rawID != "" {
 		downloadedID, parseErr := strconv.Atoi(rawID)
 		if parseErr != nil || downloadedID <= 0 {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid downloaded subtitle identity")
@@ -261,7 +267,6 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
 		return
 	}
-
 	externalCount := len(file.ExternalSubtitles)
 	if trackIndex < externalCount {
 		sub := file.ExternalSubtitles[trackIndex]

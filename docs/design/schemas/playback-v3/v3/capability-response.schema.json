@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/capability-response.schema.json",
+  "title": "Silo Playback Protocol v3 Capability Response",
+  "description": "Response body of GET /api/v1/playback/capabilities, mirroring CapabilityResponseV3 in internal/playback/protocol_v3.go. A client reads this before its first start request so it negotiates against what the server actually advertises instead of a compiled-in assumption. When the protocol is disabled the server still answers with the same shape — enabled false, empty lists, and a reason — so a client can tell a disabled server apart from an unreachable one.",
+  "type": "object",
+  "required": [
+    "enabled",
+    "protocol_versions",
+    "features",
+    "deliveries",
+    "transformations"
+  ],
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "protocol_versions": {
+      "type": "array",
+      "description": "Protocol versions this server speaks. A client picks the highest it supports rather than assuming a single value, which is what keeps a future v4 from breaking v3 clients.",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "features": {
+      "type": "array",
+      "description": "Server feature flags. The list grows additively within v3, so an unrecognized entry is expected and must be ignored, not treated as an error.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deliveries": {
+      "type": "array",
+      "description": "Serving routes the planner may return. Empty when the protocol is disabled.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "original_http",
+          "server_remux_progressive",
+          "server_remux_hls",
+          "server_transcode_hls"
+        ]
+      }
+    },
+    "transformations": {
+      "type": "array",
+      "description": "Server-executed transformations available to the planner. Client-executed transformations are declared by the client in its start request, not listed here.",
+      "items": {
+        "$ref": "#/$defs/transformation"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the protocol is unavailable. Present only when enabled is false."
+    }
+  },
+  "$defs": {
+    "transformation": {
+      "type": "object",
+      "required": [
+        "name",
+        "executor",
+        "recipe_version",
+        "validated_claims"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "executor": {
+          "type": "string",
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "recipe_version": {
+          "type": "string",
+          "description": "Identity of the recipe, not a semantic version to compare. A client matches it exactly or declines the transformation.",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "validated_claims": {
+          "type": "array",
+          "description": "Neutral statements about the bytes the transformation produces, so a client reasons about the output without knowing the server's toolchain.",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -24,9 +24,6 @@
       "index": 0
     }
   },
-  "failure": {
-    "classification": "network_degraded"
-  },
   "client_capabilities": {
     "video_evidence": "exact",
     "audio_evidence": "exact",

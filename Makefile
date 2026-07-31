@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -144,6 +144,25 @@ verify-settings-bindings-web:
 	@echo "web settings binding is current"
 
 verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-web
+
+# Regenerate the protocol-v3 golden wire fixtures from the live contract types.
+#
+# The server owns the playback contract and the clients prove conformance
+# against these bodies, so they are only trustworthy while the code that emits
+# them is the code that serves traffic. Editing one by hand instead of running
+# this would let the contract and the implementation drift apart in silence.
+playback-fixtures:
+	go run ./cmd/playbackfixtures -out internal/playback/testdata/protocol_v3
+
+# Fail when the committed fixtures disagree with the contract types. A change
+# that does not regenerate leaves every client testing against a body the server
+# no longer produces, which is exactly the drift the fixtures exist to catch.
+verify-playback-fixtures:
+	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
+	go run ./cmd/playbackfixtures -out "$$CHECK_DIR" && \
+	diff -ur internal/playback/testdata/protocol_v3 "$$CHECK_DIR" \
+		|| { echo "::error::internal/playback/testdata/protocol_v3 is stale; run make playback-fixtures"; exit 1; }
+	@echo "playback fixtures are current"
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

@@ -577,6 +577,11 @@ type SubtitleDecisionV3 struct {
 	Mode     SubtitleModeV3      `json:"mode"`
 	TrackID  string              `json:"track_id,omitempty"`
 	Artifact *SubtitleArtifactV3 `json:"artifact,omitempty"`
+	// Inventory is the complete, gap-free combined-ordinal subtitle track list
+	// for the effective source. It is authoritative: a client selects a track
+	// by echoing an entry's track_id or combined_index and never derives an
+	// ordinal by counting, summing track arrays, or taking max(index)+1.
+	Inventory []SubtitleInventoryItemV3 `json:"inventory"`
 }
 
 type TransformationV3 struct {

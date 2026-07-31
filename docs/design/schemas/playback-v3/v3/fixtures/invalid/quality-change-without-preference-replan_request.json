@@ -3,7 +3,7 @@
   "client_features": [
     "playback_plan_v3"
   ],
-  "operation": "failure_recovery",
+  "operation": "quality_change",
   "playback_attempt_id": "attempt-golden-0001",
   "replan_request_id": "replan-golden-0001",
   "failed_plan_id": "plan:golden-0001",
@@ -13,7 +13,7 @@
     "v3:0000000000000001"
   ],
   "attempt_count": 1,
-  "quality_preference": "auto",
+  "quality_preference": "",
   "position_seconds": 42.5,
   "metered": true,
   "bandwidth_estimate_kbps": 3500,
@@ -23,9 +23,6 @@
       "id": "file:42:audio:0",
       "index": 0
     }
-  },
-  "failure": {
-    "classification": "network_degraded"
   },
   "client_capabilities": {
     "video_evidence": "exact",

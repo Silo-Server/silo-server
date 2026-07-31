@@ -8,7 +8,7 @@
   "replan_request_id": "replan-golden-0001",
   "failed_plan_id": "plan:golden-0001",
   "plan_attempt_id": "plan-attempt-golden-0001",
-  "plan_attempt_key": "v3:0000000000000001",
+  "plan_attempt_key": "0000000000000001",
   "attempted_plan_keys": [
     "v3:0000000000000001"
   ],

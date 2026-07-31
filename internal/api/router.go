@@ -1037,7 +1037,22 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.MarkerUpserter = deps.FileRepo
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
-		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub)
+		// A resolver lets subtitle realtime events carry the combined ordinal
+		// the new track will hold in the next plan. Without a file repository
+		// the notifier still fires; its events just omit the track block.
+		var subtitleInventoryResolver playback.SubtitleInventoryResolver
+		if deps.FileRepo != nil {
+			// subtitleRepo is a concrete pointer: pass it only when non-nil so
+			// the resolver holds a nil interface rather than a typed nil.
+			var subtitleReader subtitles.Repository
+			if subtitleRepo != nil {
+				subtitleReader = subtitleRepo
+			}
+			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader); resolver != nil {
+				subtitleInventoryResolver = resolver
+			}
+		}
+		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub, subtitleInventoryResolver)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {

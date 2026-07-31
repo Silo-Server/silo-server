@@ -12,7 +12,7 @@
   "attempted_plan_keys": [
     "v3:0000000000000001"
   ],
-  "attempt_count": 1,
+  "attempt_count": 9,
   "quality_preference": "auto",
   "position_seconds": 42.5,
   "metered": true,

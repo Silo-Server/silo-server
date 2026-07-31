@@ -879,58 +879,85 @@ func transportGenerationV3(sessionID, planID string) string {
 	return sessionID + "-" + planSuffix + "-" + uuid.NewString()[:8]
 }
 
+// attachSubtitleArtifactV3 republishes the plan's subtitle inventory with
+// session-scoped URLs, then resolves the plan's selected ordinal against it and
+// stamps that entry's URL onto the artifact. Publishing and resolution share one
+// ordering implementation, so an artifact URL can never point at a different
+// track than the inventory entry the client selected.
+//
+// The inventory is scoped unconditionally, not only when a track is selected:
+// spec §8 makes it the authoritative track list and says a sidecar entry carries
+// a `url` "once a session exists to scope it to" — which is true here for every
+// entry, whatever the current selection is. Gating it on the selection published
+// a URL-less menu whenever playback started with subtitles off, so a client
+// building its picker from the inventory had nothing fetchable to offer.
 func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionID string, file *models.MediaFile, plan *playback.PlanV3, selectedIndex int, recipe *playback.ExecutableRecipeV3) error {
-	if plan == nil || file == nil || selectedIndex < 0 || (plan.Subtitle.Mode != playback.SubtitleRenderV3 && plan.Subtitle.Mode != playback.SubtitleConvertV3) {
+	if plan == nil || file == nil {
 		return nil
 	}
+	var frozenDownloaded *subtitles.DownloadedSubtitle
 	if recipe != nil && recipe.SubtitleSource == playback.SubtitleSourceDownloadedV3 {
 		if h == nil || h.SubtitleRepo == nil || recipe.DownloadedSubtitleID <= 0 {
 			return errors.New("the frozen downloaded subtitle is unavailable")
 		}
-		downloaded, err := h.SubtitleRepo.GetDownloadedSubtitle(ctx, recipe.DownloadedSubtitleID)
+		selected, err := h.SubtitleRepo.GetDownloadedSubtitle(ctx, recipe.DownloadedSubtitleID)
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
-		if downloaded == nil || downloaded.MediaFileID != file.ID {
+		if selected == nil || selected.MediaFileID != file.ID {
 			return errors.New("the frozen downloaded subtitle is unavailable for the selected media file")
 		}
-		url := downloadedSubtitleStreamURL(sessionID, selectedIndex, string(downloaded.Format), file.ID, downloaded.ID)
-		format := strings.ToLower(string(downloaded.Format))
-		mime := subtitleMIMEV3(format)
-		if plan.Subtitle.Mode == playback.SubtitleConvertV3 {
-			format = subtitleFormatVTTV3
-			mime = subtitleMIMEVTTV3
-			url = forceSubtitleExtensionV3(url, ".vtt")
-		}
-		plan.Subtitle.Artifact = &playback.SubtitleArtifactV3{URL: url, MIMEType: mime, Format: format, TimingOriginSeconds: plan.Timeline.StreamOriginSeconds}
-		return nil
+		frozenDownloaded = selected
 	}
-	var downloaded []subtitles.DownloadedSubtitle
-	if h.SubtitleRepo != nil {
-		var err error
-		downloaded, err = h.SubtitleRepo.ListDownloadedSubtitles(ctx, file.ID)
+	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory)
+	if playback.SubtitleInventoryNeedsDownloadedIdentityV3(plan.Subtitle.Inventory) {
+		if h == nil || h.SubtitleRepo == nil {
+			return errors.New("the downloaded subtitle inventory is unavailable")
+		}
+		downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(ctx, file.ID)
 		if err != nil {
 			return wrapSubtitleStoreErrorV3(err)
 		}
+		inventory = playback.SubtitleInventoryV3(sessionID, file, downloadedSubtitleEntriesV3(file, downloaded))
 	}
-	for _, value := range buildSubtitleURLs(sessionID, file, downloaded, true) {
-		if value.Index != selectedIndex {
-			continue
-		}
-		format := strings.ToLower(value.Codec)
-		mime := subtitleMIMEV3(format)
-		url := value.URL
-		if plan.Subtitle.Mode == playback.SubtitleConvertV3 {
-			format = subtitleFormatVTTV3
-			mime = subtitleMIMEVTTV3
-			url = forceSubtitleExtensionV3(value.URL, ".vtt")
-		}
-		plan.Subtitle.Artifact = &playback.SubtitleArtifactV3{URL: url, MIMEType: mime, Format: format, TimingOriginSeconds: plan.Timeline.StreamOriginSeconds}
+	plan.Subtitle.Inventory = inventory
+	if selectedIndex < 0 || (plan.Subtitle.Mode != playback.SubtitleRenderV3 && plan.Subtitle.Mode != playback.SubtitleConvertV3) {
 		return nil
 	}
-	return errors.New("selected subtitle artifact is absent from the frozen inventory")
+	item, ok := playback.SubtitleInventoryItemAtV3(inventory, selectedIndex)
+	if !ok && frozenDownloaded == nil {
+		return errors.New("selected subtitle artifact is absent from the frozen inventory")
+	}
+	if frozenDownloaded == nil && item.URL == "" {
+		return fmt.Errorf("subtitle track %d is %s and has no fetchable artifact", selectedIndex, item.Delivery)
+	}
+	format := strings.ToLower(item.Codec)
+	mime := subtitleMIMEV3(format)
+	url := item.URL
+	if frozenDownloaded != nil {
+		format = strings.ToLower(string(frozenDownloaded.Format))
+		mime = subtitleMIMEV3(format)
+		url = playback.DownloadedSubtitleStreamURLV3(sessionID, selectedIndex, string(frozenDownloaded.Format), file.ID, frozenDownloaded.ID)
+		for index := range plan.Subtitle.Inventory {
+			if plan.Subtitle.Inventory[index].CombinedIndex == selectedIndex {
+				plan.Subtitle.Inventory[index].URL = url
+				plan.Subtitle.Inventory[index].Codec = string(frozenDownloaded.Format)
+				break
+			}
+		}
+	}
+	if plan.Subtitle.Mode == playback.SubtitleConvertV3 {
+		format = playback.SubtitleFormatVTTV3
+		mime = playback.SubtitleMIMEVTTV3
+		url = forceSubtitleExtensionV3(url, playback.SubtitleExtVTTV3)
+	}
+	plan.Subtitle.Artifact = &playback.SubtitleArtifactV3{URL: url, MIMEType: mime, Format: format, TimingOriginSeconds: plan.Timeline.StreamOriginSeconds}
+	return nil
 }
 
+// downloadedSubtitleInventoryV3 lists the downloaded and AI-generated tracks
+// that follow the file's own tracks in the combined-ordinal space. The
+// repository orders by created_at, so the ordinals it produces are stable.
 func (h *PlaybackHandler) downloadedSubtitleInventoryV3(ctx context.Context, file *models.MediaFile) []playback.SubtitleInventoryEntryV3 {
 	if h == nil || h.SubtitleRepo == nil || file == nil {
 		return nil
@@ -939,12 +966,36 @@ func (h *PlaybackHandler) downloadedSubtitleInventoryV3(ctx context.Context, fil
 	if err != nil {
 		return nil
 	}
+	return downloadedSubtitleEntriesV3(file, downloaded)
+}
+
+// downloadedSubtitleEntriesV3 converts downloaded rows into inventory entries
+// at the ordinals that follow the file's external and embedded tracks.
+func downloadedSubtitleEntriesV3(file *models.MediaFile, downloaded []subtitles.DownloadedSubtitle) []playback.SubtitleInventoryEntryV3 {
+	if file == nil {
+		return nil
+	}
 	base := len(file.ExternalSubtitles) + len(file.SubtitleTracks)
 	result := make([]playback.SubtitleInventoryEntryV3, 0, len(downloaded))
 	for index, value := range downloaded {
-		result = append(result, playback.SubtitleInventoryEntryV3{CombinedIndex: base + index, Codec: string(value.Format), Source: "downloaded", DownloadedSubtitleID: value.ID})
+		result = append(result, playback.SubtitleInventoryEntryV3{
+			CombinedIndex:        base + index,
+			Codec:                string(value.Format),
+			Source:               playback.SubtitleSourceDownloadedV3,
+			Language:             value.Language,
+			Label:                downloadedSubtitleLabelV3(value),
+			HearingImpaired:      value.HearingImpaired,
+			DownloadedSubtitleID: value.ID,
+		})
 	}
 	return result
+}
+
+func downloadedSubtitleLabelV3(value subtitles.DownloadedSubtitle) string {
+	if value.ReleaseName == "" && value.Provider == "" {
+		return ""
+	}
+	return value.ReleaseName + " (" + value.Provider + ")"
 }
 
 // HandleReplanPlaybackV3 provides persistent idempotency and preserves the old

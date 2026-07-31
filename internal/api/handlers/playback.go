@@ -2063,15 +2063,19 @@ func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 // client-side rendering (JASSUB); PGS tracks get ".sup" for native clients
 // capable of rendering bitmap sidecars; all other text formats get ".vtt".
 func subtitleURLExt(codec string) string {
-	switch {
-	case playback.IsASS(codec):
-		return ".ass"
-	case playback.IsPGS(codec):
-		return ".sup"
-	}
-	return ".vtt"
+	return playback.SubtitleURLExtV3(codec)
 }
 
+// buildSubtitleURLs projects the combined-ordinal inventory onto the legacy
+// `subtitle_urls` wire shape. Ordinal assignment lives in
+// playback.BuildSubtitleInventoryV3 and is not duplicated here.
+//
+// Every track keeps its ordinal even when it is filtered out of this list:
+// includeBurnInOnly=false hides DVD/DVB bitmap tracks that older clients would
+// otherwise fetch as text ffmpeg cannot serve, and doing so leaves gaps in the
+// published index sequence. A client must therefore read each entry's own
+// Index and never infer one by counting entries or by max(index)+1. Protocol
+// v3 clients read plan.subtitle.inventory instead, which is always gap-free.
 func buildSubtitleURLs(
 	sessionID string,
 	file *models.MediaFile,
@@ -2081,82 +2085,34 @@ func buildSubtitleURLs(
 	if file == nil {
 		return nil
 	}
-
-	urls := make([]subtitleURL, 0, len(file.ExternalSubtitles)+len(file.SubtitleTracks)+len(downloaded))
-
-	for i, sub := range file.ExternalSubtitles {
-		urls = append(urls, subtitleURL{
-			Index:           i,
-			MediaFileID:     file.ID,
-			Language:        sub.Language,
-			Codec:           sub.Format,
-			Label:           firstNonEmptyString(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
-			Source:          "external",
-			Forced:          sub.Forced,
-			HearingImpaired: sub.HearingImpaired,
-			URL:             subtitleStreamURL(sessionID, i, sub.Format, file.ID),
-		})
-	}
-
-	embeddedOffset := len(file.ExternalSubtitles)
-	for i, track := range file.SubtitleTracks {
-		// PGS remains universally deliverable as a .sup sidecar. DVD/DVB
-		// bitmap tracks have no usable sidecar representation, so advertise
-		// them only to clients that explicitly declare server-side burn-in
-		// support. Older Apple/Android clients otherwise expose a text URL
-		// that ffmpeg cannot serve.
-		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) && !includeBurnInOnly {
+	inventory := playback.SubtitleInventoryV3(sessionID, file, downloadedSubtitleEntriesV3(file, downloaded))
+	urls := make([]subtitleURL, 0, len(inventory))
+	for _, item := range inventory {
+		if item.Delivery == playback.SubtitleDeliveryBurnInOnlyV3 && !includeBurnInOnly {
 			continue
 		}
+		url := item.URL
+		if url == "" {
+			// A burn-in-only track has no sidecar the stream handler can
+			// serve, but the legacy shape has no way to say so. Emit the URL
+			// the old builder would have: clients that requested burn-in
+			// support address the track by index and never fetch it.
+			url = playback.SubtitleStreamURLV3(sessionID, item.CombinedIndex, item.Codec, file.ID)
+		}
 		urls = append(urls, subtitleURL{
-			Index:           embeddedOffset + i,
+			Index:           item.CombinedIndex,
 			MediaFileID:     file.ID,
-			Language:        track.Language,
-			Codec:           track.Codec,
-			Label:           firstNonEmptyString(track.Title, track.EmbeddedTitle, track.Language),
-			Source:          "embedded",
-			Forced:          track.Forced,
-			HearingImpaired: track.HearingImpaired,
-			URL:             subtitleStreamURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
-			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
+			Language:        item.Language,
+			Codec:           item.Codec,
+			Label:           item.Label,
+			Source:          item.Source,
+			Forced:          item.Forced,
+			HearingImpaired: item.HearingImpaired,
+			URL:             url,
+			FontBundleURL:   item.FontBundleURL,
 		})
 	}
-
-	downloadedOffset := embeddedOffset + len(file.SubtitleTracks)
-	for i, dl := range downloaded {
-		urls = append(urls, subtitleURL{
-			Index:           downloadedOffset + i,
-			MediaFileID:     file.ID,
-			Language:        dl.Language,
-			Codec:           string(dl.Format),
-			Label:           dl.ReleaseName + " (" + dl.Provider + ")",
-			Source:          "downloaded",
-			HearingImpaired: dl.HearingImpaired,
-			URL:             downloadedSubtitleStreamURL(sessionID, downloadedOffset+i, string(dl.Format), file.ID, dl.ID),
-		})
-	}
-
 	return urls
-}
-
-const downloadedSubtitleIDParam = "downloaded_subtitle_id"
-
-func subtitleStreamURL(sessionID string, trackIndex int, codec string, fileID int) string {
-	return fmt.Sprintf("/stream/%s/subtitles/%d%s?file_id=%d", sessionID, trackIndex, subtitleURLExt(codec), fileID)
-}
-
-// downloadedSubtitleStreamURL binds a downloaded subtitle URL to its stable
-// database identity while preserving the combined track index for clients.
-func downloadedSubtitleStreamURL(sessionID string, trackIndex int, codec string, fileID, downloadedID int) string {
-	return subtitleStreamURL(sessionID, trackIndex, codec, fileID) +
-		"&" + downloadedSubtitleIDParam + "=" + strconv.Itoa(downloadedID)
-}
-
-func subtitleFontBundleURL(sessionID string, trackIndex int, codec string, fileID int) string {
-	if !playback.IsASS(codec) {
-		return ""
-	}
-	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts?file_id=%d", sessionID, trackIndex, fileID)
 }
 
 func firstNonEmptyString(values ...string) string {

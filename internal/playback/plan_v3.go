@@ -209,6 +209,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(input.Request.StartPosition), PlayerStartSeconds: floatOrZeroV3(input.Request.StartPosition), CanSeekAnywhere: true, SeekRestoration: "player_position"},
 	}
 	base.AvailableQualities = availableQualitiesV3(input, source)
+	base.Subtitle.Inventory = BuildSubtitleInventoryV3(file, input.AdditionalSubtitles)
 	base.Claims.Audio.Passthrough = passthrough
 	if source.DynamicRange == "hdr_unknown" && rangeOK {
 		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
@@ -516,12 +517,14 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing audio metadata required for a validated playback route.", true)
 	}
 	base := PlanV3{
-		ProtocolVersion:        ProtocolV3,
-		ExpiresAt:              NewPlanExpiryV3(input.Now),
-		SelectedTracks:         selectedTracksForPlanV3(file, input.AudioTrackIndex, SubtitlePolicyResultV3{SelectedIndex: -1, TransportIndex: -1}),
-		EffectiveRecipe:        recipeFromSourceV3(source),
-		Claims:                 ValidationClaimsV3{Audio: audioClaims},
-		Subtitle:               SubtitleDecisionV3{Mode: SubtitleOffV3},
+		ProtocolVersion: ProtocolV3,
+		ExpiresAt:       NewPlanExpiryV3(input.Now),
+		SelectedTracks:  selectedTracksForPlanV3(file, input.AudioTrackIndex, SubtitlePolicyResultV3{SelectedIndex: -1, TransportIndex: -1}),
+		EffectiveRecipe: recipeFromSourceV3(source),
+		Claims:          ValidationClaimsV3{Audio: audioClaims},
+		// Audio-only routes bypass every subtitle gate, so the inventory is
+		// empty rather than a list of tracks no route on this plan can deliver.
+		Subtitle:               SubtitleDecisionV3{Mode: SubtitleOffV3, Inventory: []SubtitleInventoryItemV3{}},
 		Transformations:        []TransformationV3{},
 		AppliedQuirks:          []AppliedQuirkV3{},
 		RuntimeCorrections:     []string{},

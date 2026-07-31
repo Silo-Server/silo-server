@@ -13,11 +13,24 @@
     "dynamic_range": "hdr10",
     "subtitle_mode": "burn_in",
     "transformations": [
-      {"name": "hdr_to_sdr_tonemap", "executor": "server", "recipe_version": "1"},
-      {"name": "audio_to_aac", "executor": "server", "recipe_version": "1"}
+      {
+        "name": "hdr_to_sdr_tonemap",
+        "executor": "server",
+        "recipe_version": "1",
+        "validated_claims": []
+      },
+      {
+        "name": "audio_to_aac",
+        "executor": "server",
+        "recipe_version": "1",
+        "validated_claims": []
+      }
     ],
     "output_context_id": "7",
-    "local_mutations": ["transport_reopen", "pcm:truehd:8"],
+    "local_mutations": [
+      "transport_reopen",
+      "pcm:truehd:8"
+    ],
     "expected": "v3:a90828494166fe72"
   },
   {
@@ -34,7 +47,12 @@
     "dynamic_range": "dolby_vision",
     "subtitle_mode": "off",
     "transformations": [
-      {"name": "client_dv7_to_dv81", "executor": "client", "recipe_version": "1"}
+      {
+        "name": "client_dv7_to_dv81",
+        "executor": "client",
+        "recipe_version": "1",
+        "validated_claims": []
+      }
     ],
     "output_context_id": "9",
     "local_mutations": [],
@@ -61,7 +79,9 @@
         "action": "client_runtime_correction"
       }
     ],
-    "runtime_corrections": ["client_dv8_hdr10plus_sanitizer_v1"],
+    "runtime_corrections": [
+      "client_dv8_hdr10plus_sanitizer_v1"
+    ],
     "output_context_id": "9",
     "local_mutations": [],
     "expected": "v3:32a3a37d71bc4f43"

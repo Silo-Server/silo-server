@@ -755,6 +755,63 @@ func TestPlanPlaybackV3DownloadedSubtitleCarriesStableIdentity(t *testing.T) {
 	}
 }
 
+// The plan carries the whole ordinal space, so a client never has to rebuild it
+// from the track arrays it happens to be able to render.
+func TestPlanPlaybackV3PublishesTheCompleteSubtitleInventory(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.en.srt", Language: "en", Format: "srt"}}
+	file.SubtitleTracks = []models.SubtitleTrack{
+		{Index: 0, Language: "ja", Codec: "hdmv_pgs_subtitle"},
+		{Index: 1, Language: "de", Codec: "dvd_subtitle"},
+	}
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	additional := []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es"}}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, AdditionalSubtitles: additional})
+	if result.Plan == nil {
+		t.Fatalf("result = %#v, want a plan", result)
+	}
+
+	inventory := result.Plan.Subtitle.Inventory
+	if len(inventory) != 4 {
+		t.Fatalf("inventory = %+v, want 4 entries (1 external + 2 embedded + 1 downloaded)", inventory)
+	}
+	for i, item := range inventory {
+		if item.CombinedIndex != i {
+			t.Errorf("entry %d has combined_index %d; the published space must be dense", i, item.CombinedIndex)
+		}
+	}
+	// The burn-in-only track is present with no URL rather than dropped.
+	if inventory[2].Delivery != SubtitleDeliveryBurnInOnlyV3 || inventory[2].URL != "" {
+		t.Errorf("the DVD track should be published as burn-in only with no URL, got %+v", inventory[2])
+	}
+	if inventory[3].Source != SubtitleSourceDownloadedV3 {
+		t.Errorf("the downloaded track should hold the last ordinal, got %+v", inventory[3])
+	}
+}
+
+// Adding the inventory to the plan must not perturb plan identity: replans
+// would otherwise miss the cache and clients would see spurious new attempts.
+func TestPlanAttemptKeyV3IgnoresTheSubtitleInventory(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}})
+	if result.Plan == nil {
+		t.Fatalf("result = %#v, want a plan", result)
+	}
+
+	before := PlanAttemptKeyV3(*result.Plan, "output-1", nil)
+	withInventory := *result.Plan
+	withInventory.Subtitle.Inventory = []SubtitleInventoryItemV3{{TrackID: "file:42:subtitle:0", CombinedIndex: 0, Source: SubtitleSourceEmbeddedV3, Codec: "subrip", Delivery: SubtitleDeliverySidecarV3}}
+	if after := PlanAttemptKeyV3(withInventory, "output-1", nil); after != before {
+		t.Errorf("attempt key changed with the inventory attached: %q -> %q", before, after)
+	}
+}
+
 func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.ExternalSubtitles = []models.ExternalSubtitle{{Format: "ass"}}

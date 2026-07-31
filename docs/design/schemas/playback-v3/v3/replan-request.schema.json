@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/replan-request.schema.json",
+  "title": "Silo Playback Protocol v3 Replan Request",
+  "description": "Body of POST /api/v1/playback/{session_id}/replan. Bounds mirror ReplanRequestV3.Validate and validateCapabilitiesV3 in internal/playback/protocol_v3.go. STRING LENGTHS: every `maxLength` here is a character count, while the server enforces the same limit as a UTF-8 byte length (Go `len(string)`), so a value near a cap that contains multi-byte characters can satisfy this schema yet be rejected at ingest. JSON Schema cannot express byte length, so the divergence is documented rather than encoded.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "playback_attempt_id",
+    "replan_request_id",
+    "failed_plan_id",
+    "plan_attempt_id",
+    "plan_attempt_key",
+    "attempt_count",
+    "client_capabilities",
+    "client_playback_context"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "client_features": {
+      "$ref": "#/$defs/feature_list"
+    },
+    "operation": {
+      "type": "string",
+      "description": "Omitted means failure_recovery, which keeps callers that predate the field on the ordinary recovery path. Seek operations are opt-in because both pin the current media version and user intent.",
+      "enum": [
+        "failure_recovery",
+        "seek_reanchor",
+        "seek_failure_recovery",
+        "track_change",
+        "quality_change"
+      ],
+      "maxLength": 32
+    },
+    "playback_attempt_id": {
+      "$ref": "#/$defs/bounded_identifier"
+    },
+    "replan_request_id": {
+      "$ref": "#/$defs/bounded_identifier"
+    },
+    "failed_plan_id": {
+      "$ref": "#/$defs/opaque_plan_token"
+    },
+    "plan_attempt_id": {
+      "$ref": "#/$defs/opaque_plan_token"
+    },
+    "plan_attempt_key": {
+      "$ref": "#/$defs/plan_attempt_key"
+    },
+    "attempted_plan_keys": {
+      "type": "array",
+      "description": "Keys of the plans this attempt has already tried, echoed back verbatim so the server can refuse to hand out a plan that already failed on this output route.",
+      "maxItems": 16,
+      "items": {
+        "$ref": "#/$defs/plan_attempt_key"
+      }
+    },
+    "local_mutations": {
+      "type": "array",
+      "description": "Client-applied local plan mutations, so the server can fold them into the attempt key it computes for the failed plan. Clients never hash anything themselves.",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "attempt_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8
+    },
+    "quality_preference": {
+      "type": "string",
+      "description": "Free-form and deliberately unbounded, normalized the same way as on a start request. A quality_change operation must name a non-blank rung: an empty preference would silently mean \"auto\", which is a different user intent than the menu selection that operation models."
+    },
+    "position_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 31536000
+    },
+    "metered": {
+      "type": "boolean"
+    },
+    "bandwidth_estimate_kbps": {
+      "$ref": "#/$defs/bandwidth_kbps"
+    },
+    "bandwidth_cap_kbps": {
+      "$ref": "#/$defs/bandwidth_kbps"
+    },
+    "selected_tracks": {
+      "$ref": "#/$defs/selected_tracks"
+    },
+    "failure": {
+      "$ref": "#/$defs/failure"
+    },
+    "client_capabilities": {
+      "$ref": "#/$defs/client_capabilities"
+    },
+    "client_playback_context": {
+      "$ref": "#/$defs/client_playback_context"
+    }
+  },
+  "$defs": {
+    "bounded_identifier": {
+      "type": "string",
+      "description": "Opaque client-minted identifier. The server matches ^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$, so the value is 8 to 128 characters and starts alphanumeric.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "opaque_plan_token": {
+      "type": "string",
+      "description": "Server-minted plan identity echoed back verbatim. Clients store and return these tokens and never parse or recompute them.",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "plan_attempt_key": {
+      "type": "string",
+      "description": "Server-computed opaque loop-prevention token. Always carries the `v3:` prefix; the server compares keys byte-for-byte, so case and whitespace are significant.",
+      "pattern": "^v3:",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "track_identity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "index": {
+          "$ref": "#/$defs/track_index"
+        }
+      },
+      "additionalProperties": true
+    },
+    "selected_tracks": {
+      "type": "object",
+      "properties": {
+        "audio": {
+          "$ref": "#/$defs/track_identity"
+        },
+        "subtitle": {
+          "$ref": "#/$defs/track_identity"
+        }
+      },
+      "additionalProperties": true
+    },
+    "failure": {
+      "type": "object",
+      "description": "Required for failure_recovery and seek_failure_recovery: both need a non-empty classification. A track_change or quality_change carries no failure.",
+      "properties": {
+        "classification": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "decoder_name": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": true
+    },
+    "track_index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "bandwidth_kbps": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 1000000
+    },
+    "feature_list": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 128
+      }
+    },
+    "capability_value_list": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 128
+      }
+    },
+    "delivery_value_list": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "maxLength": 64
+      }
+    },
+    "capability_evidence": {
+      "type": "string",
+      "description": "How the capability facts were produced. `exact` is a real platform probe with per-codec profiles/levels/bounds, `platform_attested` a decoder attestation without profile enumeration, `declared` a boolean support statement. Planner strictness follows the tier.",
+      "enum": [
+        "exact",
+        "platform_attested",
+        "declared"
+      ],
+      "maxLength": 32
+    },
+    "hdr_capabilities": {
+      "type": "object",
+      "properties": {
+        "hdr10": {
+          "type": "boolean"
+        },
+        "hdr10_plus": {
+          "type": "boolean"
+        },
+        "hlg": {
+          "type": "boolean"
+        },
+        "dolby_vision_profiles": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "integer"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "audio_passthrough": {
+      "type": "object",
+      "properties": {
+        "passthrough_codecs": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "spatializer_enabled": {
+          "type": "boolean"
+        },
+        "max_channels": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "properties": {
+              "codec": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "channel_counts": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "layouts": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "video_decode_capability": {
+      "type": "object",
+      "required": [
+        "codec"
+      ],
+      "properties": {
+        "codec": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decoder_name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "profiles": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "levels": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "bit_depths": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "max_width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_frame_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_bitrate_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hardware": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "client_capabilities": {
+      "type": "object",
+      "required": [
+        "video_evidence",
+        "audio_evidence"
+      ],
+      "properties": {
+        "video_evidence": {
+          "$ref": "#/$defs/capability_evidence"
+        },
+        "audio_evidence": {
+          "$ref": "#/$defs/capability_evidence"
+        },
+        "codecs_video": {
+          "$ref": "#/$defs/capability_value_list"
+        },
+        "codecs_video_hardware": {
+          "$ref": "#/$defs/capability_value_list"
+        },
+        "codecs_audio": {
+          "$ref": "#/$defs/capability_value_list"
+        },
+        "containers": {
+          "$ref": "#/$defs/capability_value_list"
+        },
+        "max_resolution": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "hdr": {
+          "type": "boolean"
+        },
+        "hdr_details": {
+          "$ref": "#/$defs/hdr_capabilities"
+        },
+        "audio_passthrough": {
+          "$ref": "#/$defs/audio_passthrough"
+        },
+        "video_decode": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/video_decode_capability"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "transformation_capability": {
+      "type": "object",
+      "required": [
+        "name",
+        "executor",
+        "recipe_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "executor": {
+          "type": "string",
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "recipe_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "validated_claims": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "delivery_capability": {
+      "type": "object",
+      "description": "One negotiated delivery class the client can execute. A `client` executor transformation is only accepted on a delivery that is enabled and supported_on_device, and only when client_features advertises client_video_transformations_v1; (executor, name, recipe_version) must be unique within the delivery.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "supported_on_device": {
+          "type": "boolean"
+        },
+        "failure_reason": {
+          "type": "string"
+        },
+        "containers": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "video_codecs": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "audio_decode_codecs": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "audio_passthrough_codecs": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "max_channels": {
+          "type": "integer"
+        },
+        "hdr_details": {
+          "$ref": "#/$defs/hdr_capabilities"
+        },
+        "subtitles": {
+          "type": "object",
+          "properties": {
+            "embedded_text": {
+              "type": "boolean"
+            },
+            "sidecar_text": {
+              "type": "boolean"
+            },
+            "ass_styling": {
+              "type": "boolean"
+            },
+            "embedded_bitmap": {
+              "type": "boolean"
+            },
+            "sidecar_bitmap": {
+              "type": "boolean"
+            },
+            "font_attachments": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        "features": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "auth_header_refresh": {
+          "type": "boolean"
+        },
+        "validated_claims": {
+          "$ref": "#/$defs/delivery_value_list"
+        },
+        "transformations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/transformation_capability"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "client_playback_context": {
+      "type": "object",
+      "required": [
+        "protocol_version"
+      ],
+      "properties": {
+        "protocol_version": {
+          "type": "integer",
+          "const": 3
+        },
+        "form_factor": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "app_version": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "device": {
+          "type": "object",
+          "description": "Manufacturer and model stay first-class because the device-quirk registry matches on them. Everything platform-specific travels in platform_details as opaque bounded strings.",
+          "properties": {
+            "platform": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "os_version": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "manufacturer": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "model": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "platform_details": {
+              "type": "object",
+              "maxProperties": 16,
+              "propertyNames": {
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 128
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "hdr_details": {
+              "$ref": "#/$defs/hdr_capabilities"
+            },
+            "audio_passthrough": {
+              "$ref": "#/$defs/audio_passthrough"
+            },
+            "current_sink": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "sink_type": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "output_context_id": {
+              "type": "string",
+              "description": "Opaque token identifying the current output route. The server only ever compares it for equality, so any stable platform-native identity works and omitting it is valid.",
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": true
+        },
+        "deliveries": {
+          "type": "object",
+          "description": "Keyed by delivery class: original_http, progressive, hls. A class the client omits is a class the planner will not route to.",
+          "maxProperties": 16,
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/delivery_capability"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "failure_recovery (the default when operation is omitted) and seek_failure_recovery require a non-empty failure classification; mirrors ReplanRequestV3.Validate in internal/playback/protocol_v3.go.",
+      "if": {
+        "anyOf": [
+          {
+            "not": {
+              "required": [
+                "operation"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "failure_recovery",
+                  "seek_failure_recovery"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "required": [
+          "failure"
+        ],
+        "properties": {
+          "failure": {
+            "required": [
+              "classification"
+            ],
+            "properties": {
+              "classification": {
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "quality_change must name the wanted rung; an empty preference would mean auto, a different user intent than the menu selection.",
+      "if": {
+        "properties": {
+          "operation": {
+            "const": "quality_change"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "required": [
+          "quality_preference"
+        ],
+        "properties": {
+          "quality_preference": {
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

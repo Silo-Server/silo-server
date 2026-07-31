@@ -144,6 +144,11 @@ type SubtitleReadyPayload struct {
 	SubtitleID int    `json:"subtitle_id"`
 	Language   string `json:"language"`
 	Label      string `json:"label,omitempty"`
+	// Track carries the new track's frozen combined ordinal, identity, and
+	// stream URL so the client can select it directly. Clients must not derive
+	// the ordinal themselves. Absent only when the server could not resolve the
+	// file's track inventory, in which case the client refetches the plan.
+	Track *SubtitleInventoryItemV3 `json:"track,omitempty"`
 }
 
 // StreamCue is one translated subtitle cue pushed to the player during a live
@@ -191,6 +196,10 @@ type SubtitleTranslationCompletedPayload struct {
 	SubtitleID int    `json:"subtitle_id"`
 	Language   string `json:"language"`
 	Label      string `json:"label,omitempty"`
+	// Track carries the persisted track's frozen combined ordinal, identity,
+	// and stream URL, replacing the placeholder the client created at
+	// translation start. See SubtitleReadyPayload.Track.
+	Track *SubtitleInventoryItemV3 `json:"track,omitempty"`
 }
 
 // SubtitleTranslationFailedPayload signals a live translation failed, so the
@@ -271,6 +280,7 @@ func NewSubtitleReadyEvent(
 	subtitleID int,
 	language string,
 	label string,
+	track *SubtitleInventoryItemV3,
 ) (EventEnvelope, error) {
 	payload, err := json.Marshal(SubtitleReadyPayload{
 		SessionID:  sessionID,
@@ -278,6 +288,7 @@ func NewSubtitleReadyEvent(
 		SubtitleID: subtitleID,
 		Language:   language,
 		Label:      label,
+		Track:      track,
 	})
 	if err != nil {
 		return EventEnvelope{}, err
@@ -310,10 +321,10 @@ func NewSubtitleTranslationCuesEvent(sessionID string, fileID int, jobID int64, 
 }
 
 // NewSubtitleTranslationCompletedEvent creates a validated translation-completed event.
-func NewSubtitleTranslationCompletedEvent(sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) (EventEnvelope, error) {
+func NewSubtitleTranslationCompletedEvent(sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string, track *SubtitleInventoryItemV3) (EventEnvelope, error) {
 	payload, err := json.Marshal(SubtitleTranslationCompletedPayload{
 		SessionID: sessionID, FileID: fileID, JobID: jobID,
-		TrackKey: trackKey, SubtitleID: subtitleID, Language: language, Label: label,
+		TrackKey: trackKey, SubtitleID: subtitleID, Language: language, Label: label, Track: track,
 	})
 	if err != nil {
 		return EventEnvelope{}, err
