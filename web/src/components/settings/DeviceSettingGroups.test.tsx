@@ -17,6 +17,11 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
     ResizeObserverStub;
 }
+// Radix Select opens through pointer capture, which jsdom also lacks.
+if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
 
 function renderGroups(
   settings: Partial<Record<SettingKey, EffectiveSetting>>,
@@ -121,6 +126,45 @@ describe("DeviceSettingGroups", () => {
     expect(screen.getByText("Household limit")).toBeInTheDocument();
     expect(screen.getByText(/limit this to 1080p/)).toBeInTheDocument();
     expect(screen.getByText(/your choice of 2160p isn't available/)).toBeInTheDocument();
+  });
+
+  // The bandwidth cap is declared as an integer range with a select control
+  // and no members, so the generic path rendered a dropdown with one blank
+  // entry — unusable, and silent about the value it was already storing.
+  it("offers real bandwidth choices for a numeric range with no members", async () => {
+    const { onChange } = renderGroups({
+      "playback.max_bitrate_kbps": effective({
+        key: "playback.max_bitrate_kbps",
+        value: 2000,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByText("2 Mbps")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("combobox", { name: /Maximum bitrate/i }));
+    const option = await screen.findByRole("option", { name: "8 Mbps" });
+    await userEvent.click(option);
+
+    // Indexed rather than .at(-1): the app tsconfig targets ES2020.
+    const calls = onChange.mock.calls;
+    const call = calls[calls.length - 1];
+    expect(call?.[0]).toBe("playback.max_bitrate_kbps");
+    expect(call?.[1]).toBe(8000);
+  });
+
+  it("keeps a stored bandwidth value selectable even when it is not a preset", () => {
+    renderGroups({
+      "playback.max_bitrate_kbps": effective({
+        key: "playback.max_bitrate_kbps",
+        value: 3500,
+        source: "profile_device",
+        scope: "profile_device",
+      }),
+    });
+
+    expect(screen.getByText("3.5 Mbps")).toBeInTheDocument();
   });
 
   it("states who set a locked value rather than disabling it silently", () => {

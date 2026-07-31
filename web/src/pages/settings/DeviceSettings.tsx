@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Info, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ChevronLeft, Info, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import type { UserDevice } from "@/api/types";
@@ -42,6 +42,16 @@ export default function DeviceSettings() {
   const [search, setSearch] = useState("");
   const [profileFilter, setProfileFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * On a phone the list and the settings are two screens, not two panes.
+   *
+   * Stacking them vertically put a device list over a thousand pixels tall
+   * above the first setting, so reaching "turn HDR off" meant scrolling past
+   * every other device first. Below xl the list hands off to the detail view
+   * and a back control returns; from xl up both are visible and this is
+   * ignored.
+   */
+  const [showDetailOnMobile, setShowDetailOnMobile] = useState(false);
   // One clock for the whole screen, taken once per mount: relative labels only
   // need to be right to the minute, and reading the clock during render is not
   // something a pure component may do.
@@ -75,7 +85,9 @@ export default function DeviceSettings() {
 
   return (
     <div className="space-y-5">
-      <header className="space-y-2">
+      {/* Hidden below xl while the detail view is open: on a phone that screen
+          is about one device, and its own header says which. */}
+      <header className={cn("space-y-2", showDetailOnMobile && "hidden xl:block")}>
         <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your devices</h2>
         <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed">
           Every phone, tablet, TV and browser you watch on. Pick one to see what&apos;s set
@@ -84,43 +96,65 @@ export default function DeviceSettings() {
       </header>
 
       {canSeeHousehold ? (
-        <HouseholdSwitch
-          household={household}
-          onChange={(next) => {
-            setHousehold(next);
-            if (!next) setProfileFilter(null);
-          }}
-          count={devices.length}
-        />
+        <div className={cn(showDetailOnMobile && "hidden xl:block")}>
+          <HouseholdSwitch
+            household={household}
+            onChange={(next) => {
+              setHousehold(next);
+              if (!next) setProfileFilter(null);
+            }}
+            count={devices.length}
+          />
+        </div>
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(230px,270px)_minmax(0,1fr)] xl:items-start">
         {isLoading ? (
-          <Skeleton className="h-64 rounded-[1.5rem]" />
-        ) : (
-          <DeviceList
-            devices={devices}
-            selectedDeviceId={selected?.device_id ?? null}
-            onSelect={(device) => setSelectedId(device.device_id)}
-            search={search}
-            onSearchChange={setSearch}
-            groupByProfile={household && canSeeHousehold}
-            profileFilter={profileFilter}
-            onProfileFilterChange={setProfileFilter}
-            ownProfileId={profile?.id}
-            now={now}
+          <Skeleton
+            className={cn("h-64 rounded-[1.5rem]", showDetailOnMobile && "hidden xl:block")}
           />
+        ) : (
+          <div className={cn(showDetailOnMobile && "hidden xl:block")}>
+            <DeviceList
+              devices={devices}
+              selectedDeviceId={selected?.device_id ?? null}
+              onSelect={(device) => {
+                setSelectedId(device.device_id);
+                setShowDetailOnMobile(true);
+                // Swapping the panes leaves the scroll position where the list
+                // was, which on a phone lands mid-settings with no context.
+                if (window.matchMedia("(max-width: 1279px)").matches) {
+                  window.scrollTo({ top: 0, behavior: "instant" });
+                }
+              }}
+              search={search}
+              onSearchChange={setSearch}
+              groupByProfile={household && canSeeHousehold}
+              profileFilter={profileFilter}
+              onProfileFilterChange={setProfileFilter}
+              ownProfileId={profile?.id}
+              now={now}
+            />
+          </div>
         )}
 
         {isLoading ? (
-          <Skeleton className="h-96 rounded-[1.5rem]" />
-        ) : selected ? (
-          <DeviceDetail
-            key={`${selected.profile_id}:${selected.device_id}`}
-            device={selected}
-            actingProfileId={profile?.id ?? ""}
-            now={now}
+          <Skeleton
+            className={cn("h-96 rounded-[1.5rem]", !showDetailOnMobile && "hidden xl:block")}
           />
+        ) : selected ? (
+          <div className={cn(!showDetailOnMobile && "hidden xl:block")}>
+            <DeviceDetail
+              key={`${selected.profile_id}:${selected.device_id}`}
+              device={selected}
+              actingProfileId={profile?.id ?? ""}
+              now={now}
+              onBack={() => {
+                setShowDetailOnMobile(false);
+                window.scrollTo({ top: 0, behavior: "instant" });
+              }}
+            />
+          </div>
         ) : (
           <p className="text-muted-foreground text-sm">
             No devices yet. They appear here as you sign in on them.
@@ -172,7 +206,7 @@ function SwitchButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+        "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors sm:min-h-9 sm:px-3 sm:text-[13px]",
         active
           ? "bg-surface-raised text-foreground"
           : "text-muted-foreground hover:text-foreground",
@@ -187,10 +221,13 @@ function DeviceDetail({
   device,
   actingProfileId,
   now,
+  onBack,
 }: {
   device: UserDevice;
   actingProfileId: string;
   now: number;
+  /** Returns to the list below xl, where the two are separate screens. */
+  onBack: () => void;
 }) {
   // Acting for someone else changes the copy throughout: the banner, the reset
   // labels, and every mutation's identity.
@@ -220,16 +257,27 @@ function DeviceDetail({
 
   return (
     <div className="space-y-4">
-      <section className="surface-panel rounded-[1.5rem] border-0 px-5 py-4 shadow-none">
-        <div className="flex flex-wrap items-start gap-3">
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-muted-foreground hover:text-foreground -ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        All devices
+      </button>
+
+      <section className="surface-panel rounded-[1.5rem] border-0 px-4 py-4 shadow-none sm:px-5">
+        <div className="flex items-start gap-3">
           <span className="bg-surface-raised flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
             <PlatformIcon kind={kind} className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-lg font-semibold tracking-tight">
+            {/* Wraps rather than truncating: on a phone the name is the whole
+                subject of the screen, and "Living Room Apple…" is not it. */}
+            <h3 className="text-lg leading-tight font-semibold tracking-tight">
               {device.device_name || "Unknown device"}
             </h3>
-            <p className="text-muted-foreground text-[13px]">
+            <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
               {[
                 platformKindLabel(kind),
                 device.is_current_device ? "using now" : lastSeenLabel(device.last_seen_at, now),
@@ -240,11 +288,11 @@ function DeviceDetail({
             </p>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {changedCount > 0 ? (
             <Button
               variant="outline"
-              size="sm"
+              className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
               disabled={clearDevice.isPending}
               onClick={() => {
                 if (
@@ -270,7 +318,7 @@ function DeviceDetail({
           {!device.is_current_device ? (
             <Button
               variant="ghost"
-              size="sm"
+              className="text-muted-foreground hover:text-destructive min-h-11 self-start px-0 text-[13px] sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm"
               disabled={forgetDevice.isPending}
               onClick={() => {
                 if (
@@ -306,16 +354,24 @@ function DeviceDetail({
         </Callout>
       ) : null}
 
+      {/* The scope sentence is required copy and must not be paraphrased away,
+          but five lines of prose is a wall on a phone. The mandated clause
+          leads; the elaboration is there for anyone who wants it. */}
       <Callout tone="info" icon={<Info className="h-4 w-4" />}>
-        These apply to{" "}
-        <strong className="text-foreground font-semibold">
-          this device, for {forSomeoneElse ? `${device.profile_name}'s` : "your"} profile only
-        </strong>
-        . {forSomeoneElse ? `${device.profile_name}'s` : "Your"} other devices, and anyone else who
-        uses this one, are unaffected.
-        {!device.is_current_device
-          ? " This device picks up your changes the next time it's used."
-          : ""}
+        <span className="block">
+          These apply to{" "}
+          <strong className="text-foreground font-semibold">
+            this device, for {forSomeoneElse ? `${device.profile_name}'s` : "your"} profile only
+          </strong>
+          .
+        </span>
+        <span className="text-muted-foreground/90 mt-1 block text-[12.5px]">
+          {forSomeoneElse ? `${device.profile_name}'s` : "Your"} other devices, and anyone else who
+          uses this one, are unaffected.
+          {!device.is_current_device
+            ? " This device picks up your changes the next time it's used."
+            : ""}
+        </span>
       </Callout>
 
       {isLoading ? (

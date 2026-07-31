@@ -93,9 +93,18 @@ function DeviceSettingRow({
   const locked = effective?.constraint_kind === "locked";
   const constrained = Boolean(effective?.constrained);
   const value = effective?.value ?? definition.defaultValue;
+  const inlineControl = controlKindFor(definition) === "switch";
 
   return (
-    <div className="border-border/50 grid gap-3 border-t pt-4 first:border-t-0 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <div
+      className={cn(
+        "border-border/50 grid gap-3 border-t pt-4 first:border-t-0 first:pt-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center",
+        // A switch fits beside its label even at 360px, and keeping it there
+        // saves a whole row on each of the ~18 toggles this screen renders.
+        // Wider controls still drop below, where they have room.
+        inlineControl && "grid-cols-[minmax(0,1fr)_auto] items-center",
+      )}
+    >
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">{definition.label}</span>
@@ -121,15 +130,25 @@ function DeviceSettingRow({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:justify-end">
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap sm:justify-end",
+          inlineControl && "justify-end",
+        )}
+      >
         {changedHere && !locked ? (
           <button
             type="button"
             onClick={() => onReset(settingKey)}
             disabled={disabled}
-            className="text-muted-foreground hover:text-foreground inline-flex shrink-0 items-center gap-1 text-xs transition-colors disabled:opacity-50"
+            className={cn(
+              "text-muted-foreground hover:text-foreground order-2 inline-flex min-h-11 shrink-0 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:order-none sm:min-h-0 sm:text-xs",
+              // Inline rows have no room beside the switch; the reset sits
+              // under the description instead.
+              inlineControl && "col-start-1 row-start-2 -mt-1 sm:col-auto sm:row-auto sm:mt-0",
+            )}
           >
-            <RotateCcw className="h-3 w-3" />
+            <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
             Use {ownerLabel} setting
           </button>
         ) : null}
@@ -192,9 +211,9 @@ function DeviceSettingControl({
     return (
       <Button
         variant="outline"
-        size="sm"
         disabled={disabled}
         onClick={() => onOpenPanel?.(settingKey)}
+        className="order-1 min-h-11 w-full sm:order-none sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
       >
         Change how they look
       </Button>
@@ -203,18 +222,20 @@ function DeviceSettingControl({
 
   if (control === "switch") {
     return (
-      <Switch
-        checked={value === true}
-        disabled={disabled}
-        onCheckedChange={(checked) => onChange(settingKey, checked)}
-      />
+      <span className="order-1 flex min-h-11 items-center sm:order-none sm:min-h-0">
+        <Switch
+          checked={value === true}
+          disabled={disabled}
+          onCheckedChange={(checked) => onChange(settingKey, checked)}
+        />
+      </span>
     );
   }
 
   if (control === "slider" || control === "stepper") {
     const numeric = typeof value === "number" ? value : Number(definition.defaultValue ?? 0);
     return (
-      <div className="flex w-full max-w-[260px] items-center gap-3">
+      <div className="order-1 flex w-full items-center gap-3 sm:order-none sm:max-w-[260px]">
         <Slider
           value={[numeric]}
           min={definition.minimum}
@@ -234,6 +255,43 @@ function DeviceSettingControl({
   const options = permittedOptions(settingKey, effective);
   const asString = value === null || value === undefined ? "" : String(value);
 
+  // A numeric "select" the manifest gives no members — the bandwidth cap is
+  // declared as a range, not a list — would render as a one-entry dropdown
+  // showing nothing at all. Present the range as bandwidth choices people
+  // recognise instead, and keep the stored value visible if it is not one of
+  // them.
+  const numericChoices = numericSelectChoices(settingKey, definition, options, asString);
+  if (numericChoices) {
+    return (
+      <Select
+        value={asString === "" ? EMPTY_SELECT_VALUE : asString}
+        disabled={disabled}
+        onValueChange={(next) =>
+          onChange(settingKey, next === EMPTY_SELECT_VALUE ? null : Number(next))
+        }
+      >
+        <SelectTrigger
+          aria-label={definition.label}
+          className={cn(
+            "order-1 h-11 w-full text-base sm:order-none sm:h-9 sm:w-[220px] sm:min-w-[180px] sm:text-sm",
+          )}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {numericChoices.map((choice) => (
+            <SelectItem
+              key={choice.value || EMPTY_SELECT_VALUE}
+              value={choice.value === "" ? EMPTY_SELECT_VALUE : choice.value}
+            >
+              {choice.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
   return (
     <Select
       value={asString === "" ? EMPTY_SELECT_VALUE : asString}
@@ -245,7 +303,12 @@ function DeviceSettingControl({
         )
       }
     >
-      <SelectTrigger className={cn("w-full min-w-[180px] sm:w-[220px]")}>
+      <SelectTrigger
+        aria-label={definition.label}
+        className={cn(
+          "order-1 h-11 w-full text-base sm:order-none sm:h-9 sm:w-[220px] sm:min-w-[180px] sm:text-sm",
+        )}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -275,6 +338,50 @@ function permittedOptions(settingKey: SettingKey, effective: EffectiveSetting | 
   const allowed = new Set(permitted.map((entry) => String(entry)));
   const narrowed = all.filter((option) => option.value === "" || allowed.has(option.value));
   return narrowed.length > 0 ? narrowed : all;
+}
+
+/**
+ * Bandwidth caps people recognise, bounded by the definition's own range.
+ *
+ * Returns null for any select the manifest actually gives members, which is
+ * every other one — this exists only for a numeric range declared with a
+ * select control.
+ */
+const BITRATE_CHOICES_KBPS = [1000, 2000, 4000, 8000, 15000, 25000, 40000];
+
+function numericSelectChoices(
+  settingKey: SettingKey,
+  definition: (typeof SETTING_DEFINITIONS)[SettingKey],
+  options: { value: string; label: string }[],
+  currentValue: string,
+): { value: string; label: string }[] | null {
+  const isNumeric = definition.type === "integer" || definition.type === "number";
+  const hasMembers = options.some((option) => option.value !== "");
+  if (!isNumeric || hasMembers) return null;
+
+  const min = definition.minimum ?? 0;
+  const max = definition.maximum ?? Number.MAX_SAFE_INTEGER;
+  const choices = BITRATE_CHOICES_KBPS.filter((kbps) => kbps >= min && kbps <= max).map((kbps) => ({
+    value: String(kbps),
+    label: formatBitrate(kbps),
+  }));
+
+  // A value set elsewhere (an API call, another client) must stay selectable
+  // rather than silently reading as "No limit".
+  if (currentValue !== "" && !choices.some((choice) => choice.value === currentValue)) {
+    const parsed = Number(currentValue);
+    if (Number.isFinite(parsed)) {
+      choices.push({ value: currentValue, label: formatBitrate(parsed) });
+      choices.sort((a, b) => Number(a.value) - Number(b.value));
+    }
+  }
+
+  const unsetLabel = settingKey === "playback.max_bitrate_kbps" ? "No limit" : "Unset";
+  return [{ value: "", label: unsetLabel }, ...choices];
+}
+
+function formatBitrate(kbps: number): string {
+  return kbps >= 1000 ? `${Number((kbps / 1000).toFixed(1))} Mbps` : `${kbps} kbps`;
 }
 
 /** Selects edit strings; integers travel back as numbers. */

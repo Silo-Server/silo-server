@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Search } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 
 import type { UserDevice } from "@/api/types";
 import { Input } from "@/components/ui/input";
@@ -115,13 +115,19 @@ export function DeviceList({
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={`Search ${devices.length} ${devices.length === 1 ? "device" : "devices"}`}
           aria-label="Search devices"
-          className="h-9 pl-8 text-[13px]"
+          // text-base on mobile: iOS Safari zooms the viewport when a focused
+          // input's font is under 16px, and the zoom does not undo itself.
+          className="h-11 pl-8 text-base xl:h-9 xl:text-[13px]"
         />
       </div>
 
       {groupByProfile && profiles.length > 1 && onProfileFilterChange ? (
+        // A wrapping row cost three lines and pushed the list off a phone
+        // screen at eight profiles. Scrolling horizontally keeps it to one
+        // line at any household size — the same trade the settings shell's own
+        // mobile tab bar makes — and unwraps into a normal row from xl up.
         <div
-          className="flex flex-wrap gap-1 px-0.5 pt-2 pb-1"
+          className="flex gap-1.5 overflow-x-auto px-0.5 pt-2 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] xl:flex-wrap xl:gap-1 xl:overflow-visible [&::-webkit-scrollbar]:hidden"
           role="group"
           aria-label="Filter by profile"
         >
@@ -229,7 +235,7 @@ function ProfileChip({
       // a screen reader announces them run together as "Everyone3".
       aria-label={`${label}, ${count} ${count === 1 ? "device" : "devices"}`}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition-colors",
+        "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[12px]",
         active
           ? "border-foreground/25 bg-surface-raised text-foreground"
           : "border-border/60 text-muted-foreground hover:bg-surface-hover hover:text-foreground",
@@ -263,18 +269,21 @@ function DeviceRow({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(device)}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors",
-        selected ? "bg-surface-raised" : "hover:bg-surface-hover",
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-left transition-colors",
+        // Rows are a tap target on a phone and a selection on a desktop, so
+        // they carry a comfortable minimum height only where that matters.
+        "min-h-14 xl:min-h-0",
+        selected ? "bg-surface-raised" : "hover:bg-surface-hover active:bg-surface-hover",
       )}
     >
-      <span className="bg-secondary text-muted-foreground flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
-        <PlatformIcon kind={kind} className="h-3.5 w-3.5" />
+      <span className="bg-secondary text-muted-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-lg xl:h-7 xl:w-7">
+        <PlatformIcon kind={kind} className="h-4 w-4 xl:h-3.5 xl:w-3.5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium">
+        <span className="block truncate text-sm font-medium xl:text-[13px]">
           {device.device_name || "Unknown device"}
         </span>
-        <span className="text-muted-foreground block truncate text-[11.5px]">
+        <span className="text-muted-foreground block truncate text-[12.5px] xl:text-[11.5px]">
           {device.is_current_device
             ? "This is the device you're on"
             : lastSeenLabel(device.last_seen_at, now)}
@@ -287,6 +296,8 @@ function DeviceRow({
         />
       ) : null}
       <ChangedCount count={device.changed_count} />
+      {/* Below xl a row navigates to another screen; say so. */}
+      <ChevronRight className="text-muted-foreground/50 h-4 w-4 shrink-0 xl:hidden" />
     </button>
   );
 }
