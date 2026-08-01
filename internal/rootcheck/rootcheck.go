@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,8 +48,16 @@ type Result struct {
 	ErrorMessage string // empty when Reachable
 }
 
+// virtualRootPrefix is the scheme used by library roots that hold only virtual
+// media populated by plugins. These roots have no filesystem presence and
+// should never be probed as directories.
+const virtualRootPrefix = "virtual://"
+
 // Probe checks that path exists, is a directory, and can be listed.
 func Probe(path string) Result {
+	if strings.HasPrefix(path, virtualRootPrefix) {
+		return Result{Reachable: true, Empty: true}
+	}
 	res := Result{Reachable: true}
 	info, err := os.Stat(path)
 	switch {
