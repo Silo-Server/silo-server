@@ -8,6 +8,17 @@ import type { PluginConfigSchema } from "@/api/types";
 
 import { PluginConfigForm } from "./PluginConfigForm";
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+function renderWithClient(ui: React.ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return {
+    ...render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>),
+    queryClient: client,
+  };
+}
 const schema: PluginConfigSchema = {
   key: "account",
   title: "Account",
@@ -38,7 +49,7 @@ const schema: PluginConfigSchema = {
 describe("PluginConfigForm secrets", () => {
   it("shows redacted saved state and only clears through an explicit action", async () => {
     const onSave = vi.fn();
-    render(
+    renderWithClient(
       <PluginConfigForm
         schema={schema}
         value={{ region: "us-east" }}
@@ -79,7 +90,7 @@ describe("PluginConfigForm secrets", () => {
         ),
       },
     };
-    render(
+    renderWithClient(
       <PluginConfigForm
         schema={requiredSchema}
         value={{ region: "us-east" }}
@@ -93,7 +104,7 @@ describe("PluginConfigForm secrets", () => {
   });
 
   it("keeps the submitted snapshot immutable while a save is pending", () => {
-    render(
+    renderWithClient(
       <PluginConfigForm
         schema={schema}
         value={{ region: "us-east" }}
@@ -113,7 +124,7 @@ describe("PluginConfigForm secrets", () => {
       success: false,
       message: "API key is required",
     });
-    render(
+    renderWithClient(
       <PluginConfigForm
         schema={schema}
         value={{ region: "us-east" }}
@@ -160,7 +171,7 @@ describe("PluginConfigForm quality profiles", () => {
         ],
       },
     };
-    render(
+    renderWithClient(
       <PluginConfigForm
         schema={qualitySchema}
         value={{
