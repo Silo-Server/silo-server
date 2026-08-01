@@ -8,7 +8,7 @@
  * is a manifest change plus a regeneration, never a hand-written key.
  */
 
-export const SETTINGS_REVISION = 3;
+export const SETTINGS_REVISION = 4;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -934,7 +934,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Poster badges",
     description: "Which badges appear on poster cards, and where.",
     category: "appearance",
-    platforms: ["web"],
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.custom_css": {
     key: "ui.custom_css",
