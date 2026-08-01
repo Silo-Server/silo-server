@@ -276,6 +276,10 @@ export interface SettingDefinition {
   category: string;
   control?: string;
   unit?: string;
+  /** Advisory: platforms this setting is expected to matter on. Absent
+   * means everywhere. A client hides settings for platforms it is not,
+   * rather than disabling them without explanation. */
+  platforms?: readonly string[];
   suggestedOptions?: SettingOptionSetId;
   unsetLabel?: string;
   values?: readonly { value: unknown; label: string; introducedIn: number }[];
@@ -343,6 +347,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Quality preset used for new downloads.",
     category: "downloads",
     control: "select",
+    platforms: ["ios", "android"],
     values: [
       { value: "1mbps", label: "1 Mbps", introducedIn: 1 },
       { value: "2mbps", label: "2 Mbps", introducedIn: 1 },
@@ -367,6 +372,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Do not suggest reclaiming space from downloads you have finished.",
     category: "downloads",
     control: "switch",
+    platforms: ["ios", "android"],
   },
   "downloads.wifi_only": {
     key: "downloads.wifi_only",
@@ -382,6 +388,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Only download while connected to Wi-Fi.",
     category: "downloads",
     control: "switch",
+    platforms: ["ios", "android"],
   },
   "nav.show_audiobooks": {
     key: "nav.show_audiobooks",
@@ -397,6 +404,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Show the Audiobooks section in navigation.",
     category: "nav",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "playback.audio_language": {
     key: "playback.audio_language",
@@ -644,6 +652,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "milliseconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: -5000,
     maximum: 5000,
   },
@@ -661,6 +670,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Allow Dolby Vision output on this device.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.dv_profile7_hdr10_fallback": {
     key: "player.dv_profile7_hdr10_fallback",
@@ -676,6 +686,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Play Profile 7 sources as HDR10 when this device cannot decode them natively.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.hdr_enabled": {
     key: "player.hdr_enabled",
@@ -706,6 +717,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Switch the display refresh rate to match what is playing.",
     category: "player",
     control: "switch",
+    platforms: ["android", "android_tv", "tvos"],
   },
   "player.orientation_mode": {
     key: "player.orientation_mode",
@@ -721,6 +733,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Whether the player rotates with the device.",
     category: "player",
     control: "select",
+    platforms: ["ios", "android"],
     values: [
       { value: "landscapeLocked", label: "Landscape", introducedIn: 1 },
       { value: "rotateFreely", label: "Rotate freely", introducedIn: 1 },
@@ -742,6 +755,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "stepper",
     unit: "episodes",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
     minimum: 0,
     maximum: 20,
   },
@@ -759,6 +773,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Keep playing in a floating window when you leave the player.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "macos", "android"],
   },
   "player.playback_speed": {
     key: "player.playback_speed",
@@ -795,6 +810,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "stepper",
     unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
     minimum: 0,
     maximum: 30,
   },
@@ -903,6 +919,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Use the operating system's caption style instead of Silo's.",
     category: "playback",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.card_overlays": {
     key: "ui.card_overlays",
@@ -917,6 +934,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Poster badges",
     description: "Which badges appear on poster cards, and where.",
     category: "appearance",
+    platforms: ["web"],
   },
   "ui.custom_css": {
     key: "ui.custom_css",
@@ -932,6 +950,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Raw CSS applied on top of the selected theme.",
     category: "appearance",
     control: "text",
+    platforms: ["web"],
   },
   "ui.custom_theme_vars": {
     key: "ui.custom_theme_vars",
@@ -947,6 +966,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Per-token overrides applied on top of the selected theme.",
     category: "appearance",
     control: "panel",
+    platforms: ["web"],
   },
   "ui.date_format": {
     key: "ui.date_format",
@@ -997,6 +1017,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Increase contrast across the interface.",
     category: "appearance",
     control: "switch",
+    platforms: ["web"],
   },
   "ui.library_order": {
     key: "ui.library_order",
@@ -1025,6 +1046,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Remembered library view",
     description: "Saved browse state for each library.",
     category: "navigation",
+    platforms: ["web"],
   },
   "ui.next_up_mode": {
     key: "ui.next_up_mode",
@@ -1059,6 +1081,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Return to where you left off when reopening a library.",
     category: "navigation",
     control: "switch",
+    platforms: ["web"],
   },
   "ui.sidebar_pins": {
     key: "ui.sidebar_pins",
@@ -1073,6 +1096,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Pinned sidebar items",
     description: "Sections and collections pinned into the sidebar.",
     category: "navigation",
+    platforms: ["web"],
   },
   "ui.text_scale": {
     key: "ui.text_scale",
@@ -1088,6 +1112,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Overall interface text size.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "default", label: "Default", introducedIn: 1 },
       { value: "large", label: "Large", introducedIn: 1 },
@@ -1109,6 +1134,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Use heavier interface text for readability.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "default", label: "Default", introducedIn: 1 },
       { value: "strong", label: "Bolder", introducedIn: 1 },
@@ -1128,6 +1154,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Colour theme for the Silo interface.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "midnight-cinema", label: "Midnight Cinema", introducedIn: 1 },
       { value: "cinema-light", label: "Cinema Light", introducedIn: 1 },

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { UserLibrary } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ import {
   NONE_VALUE,
   SUBTITLE_MODE_OPTIONS,
 } from "./libraryPlaybackPreferences";
-import { namedLanguageOptionsFor } from "@/lib/languageOptions";
+import { namedLanguageOptionsFor, type SettingOption } from "@/lib/languageOptions";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, RotateCcw } from "lucide-react";
 import {
@@ -169,6 +170,46 @@ function PlaybackField({
         </SelectTrigger>
         <SelectContent>{children}</SelectContent>
       </Select>
+      {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
+    </div>
+  );
+}
+
+/** PlaybackField for open language values, with the shared "Other…" entry. */
+function LanguageField({
+  label,
+  value,
+  options,
+  disabled,
+  hint,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  options: readonly SettingOption[];
+  disabled?: boolean;
+  hint?: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  const controlId = useId();
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={controlId} className="text-muted-foreground text-xs font-medium">
+        {label}
+      </Label>
+      <LanguageSelect
+        id={controlId}
+        value={value}
+        options={options}
+        disabled={disabled}
+        className="w-full"
+        onValueChange={onChange}
+      >
+        {children}
+      </LanguageSelect>
       {hint && <p className="text-muted-foreground/70 text-[11px] leading-tight">{hint}</p>}
     </div>
   );
@@ -371,9 +412,10 @@ function LibraryCard({
             automatically.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
-            <PlaybackField
+            <LanguageField
               label="Spoken language"
               value={editorState.audioLanguage}
+              options={audioLanguageOptions}
               disabled={playbackPending}
               hint={getProfileDefaultLanguageHint(profileDefaults.audioLanguage)}
               onChange={(value) => handlePlaybackChange("audioLanguage", value)}
@@ -381,16 +423,12 @@ function LibraryCard({
               <SelectItem value={INHERIT_VALUE}>
                 {buildInheritedLanguageLabel(profileDefaults.audioLanguage ?? "")}
               </SelectItem>
-              {audioLanguageOptions.map((language) => (
-                <SelectItem key={language.value} value={language.value}>
-                  {language.label}
-                </SelectItem>
-              ))}
-            </PlaybackField>
+            </LanguageField>
 
-            <PlaybackField
+            <LanguageField
               label="Subtitle language"
               value={editorState.subtitleLanguage}
+              options={subtitleLanguageOptions}
               disabled={playbackPending}
               hint={getProfileDefaultSubtitleLanguageHint(profileDefaults.subtitleLanguage)}
               onChange={(value) => handlePlaybackChange("subtitleLanguage", value)}
@@ -399,12 +437,7 @@ function LibraryCard({
                 {buildInheritedSubtitleLanguageLabel(profileDefaults.subtitleLanguage ?? "")}
               </SelectItem>
               <SelectItem value={NONE_VALUE}>None</SelectItem>
-              {subtitleLanguageOptions.map((language) => (
-                <SelectItem key={language.value} value={language.value}>
-                  {language.label}
-                </SelectItem>
-              ))}
-            </PlaybackField>
+            </LanguageField>
 
             <PlaybackField
               label="Subtitle behavior"

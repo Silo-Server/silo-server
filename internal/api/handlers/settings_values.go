@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -52,12 +53,24 @@ type SettingValuesHandler struct {
 	// EventsHub, when set, receives a user_settings.changed event after every
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
+
+	// UserRepo and ProfileTokens enable household management: a primary profile
+	// naming another profile on its own account. Both nil means the widening is
+	// simply unavailable — never that it is unguarded.
+	UserRepo      userLookup
+	ProfileTokens *access.ProfileTokenService
 }
 
+// languageSuggestionSource supplies the distinct original_language values the
+// accessible catalog actually contains. It decorates catalog.metadata_language
+// suggestions only: original_language is a plain indexed scalar column, so the
+// listing is a cheap DISTINCT scan. The audio and subtitle pickers deliberately
+// do NOT get observed values — their track-derived listings walk every media
+// file (tens of seconds on large catalogs), and since those settings are open
+// language_tag values, clients offer free entry beyond the contract floor
+// instead.
 type languageSuggestionSource interface {
 	ListOriginalLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
-	ListAudioLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
-	ListSubtitleLanguages(context.Context, catalog.BrowseFilters) ([]string, error)
 }
 
 // SetLibraryLookup wires the catalog lookup used to reject profile_library
@@ -67,9 +80,10 @@ func (h *SettingValuesHandler) SetLibraryLookup(lookup libraryLookup) {
 	h.libraryLookup = lookup
 }
 
-// SetLanguageSuggestionSource wires deployment-observed media languages into
-// effective setting responses. The contract option set remains the stable
-// floor; a missing source or failed catalog lookup simply returns that floor.
+// SetLanguageSuggestionSource wires deployment-observed original languages
+// into effective metadata-language responses. The contract option set remains
+// the stable floor; a missing source or failed catalog lookup simply returns
+// that floor.
 func (h *SettingValuesHandler) SetLanguageSuggestionSource(source languageSuggestionSource) {
 	h.languageSource = source
 }
@@ -439,15 +453,33 @@ func (h *SettingValuesHandler) setValueAt(
 		// updated_at included — rather than a reconstruction of the input.
 		h.recordMutation(r, store, mutationID, requestHash, response)
 	}
+	acting := actingProfileID(r.Context())
 	if identity.Scope == settingscontract.ScopeProfileDevice {
 		// A device that only ever writes canonically must still appear in
 		// ListDevices and the device-management surfaces, or it can never be
 		// discovered and forgotten. The legacy device route registers on every
 		// touch; the canonical route matches it on device writes.
-		h.registerWritingDevice(r, store, identity.ProfileID)
+		//
+		// Only when the caller is writing its own device for its own profile,
+		// though. Registration asserts "this device is in use by this profile",
+		// which a write aimed at another device — or made on another profile's
+		// behalf — is not. Registering here would invent a device nobody holds:
+		// the parent's browser filed under the child's profile.
+		if identity.DeviceID == deviceMetadataFromRequest(r).DeviceID && identity.ProfileID == acting {
+			h.registerWritingDevice(r, store, identity.ProfileID)
+		}
 	}
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
+	auditSettingsForOther(r.Context(), settingsAuditRecord{
+		Action:          "set",
+		ActorProfileID:  acting,
+		TargetProfileID: identity.ProfileID,
+		TargetUserID:    eventUserID,
+		DeviceID:        identity.DeviceID,
+		Key:             identity.Key,
+		Scope:           string(identity.Scope),
+	})
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -520,6 +552,15 @@ func (h *SettingValuesHandler) deleteValueAt(
 		writeError(w, http.StatusNotFound, "not_found", "No value is set at this scope")
 		return
 	}
+	auditSettingsForOther(r.Context(), settingsAuditRecord{
+		Action:          "clear",
+		ActorProfileID:  actingProfileID(r.Context()),
+		TargetProfileID: identity.ProfileID,
+		TargetUserID:    eventUserID,
+		DeviceID:        identity.DeviceID,
+		Key:             identity.Key,
+		Scope:           string(identity.Scope),
+	})
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
 	w.WriteHeader(http.StatusNoContent)
@@ -566,6 +607,23 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		DeviceID:   deviceMetadataFromRequest(r).DeviceID,
 		LibraryIDs: parseIntCSV(r.URL.Query().Get("library_ids")),
 		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
+	}
+
+	// A device-settings screen resolves what some *other* device sees, so this
+	// read accepts the same explicit identity the write path does, under the
+	// same guards: the device must belong to the profile, and naming another
+	// profile requires the household parent.
+	if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" && named != rc.ProfileID {
+		if !h.mayActForProfile(w, r, named) {
+			return
+		}
+		rc.ProfileID = named
+	}
+	if named := strings.TrimSpace(r.URL.Query().Get("device_id")); named != "" {
+		if !h.deviceBelongsToProfile(w, r, rc.ProfileID, named) {
+			return
+		}
+		rc.DeviceID = named
 	}
 
 	// The SQLite backend expands these into IN lists, whose host-parameter
@@ -871,8 +929,9 @@ func (h *SettingValuesHandler) identityForSessionKey(
 
 	identity := userstore.SettingIdentity{Key: key, Scope: scope}
 
-	// Profile and device come from the session headers rather than the query,
-	// so one profile cannot write another's settings by naming it.
+	// The profile defaults to the session header, so an ordinary caller cannot
+	// write another's settings by naming it. A household parent may name a
+	// different profile on their own account — authorized below.
 	if scope != settingscontract.ScopeAccount {
 		identity.ProfileID = strings.TrimSpace(apimw.GetProfileID(r.Context()))
 		if identity.ProfileID == "" {
@@ -880,17 +939,106 @@ func (h *SettingValuesHandler) identityForSessionKey(
 				"X-Profile-Id header is required for this scope")
 			return userstore.SettingIdentity{}, false
 		}
+		if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" &&
+			named != identity.ProfileID {
+			if !h.mayActForProfile(w, r, named) {
+				return userstore.SettingIdentity{}, false
+			}
+			identity.ProfileID = named
+		}
 	}
 	if scope == settingscontract.ScopeProfileDevice {
-		identity.DeviceID = deviceMetadataFromRequest(r).DeviceID
+		// A device may be named explicitly so one device can manage another's
+		// settings — the screen that lists your devices edits them in place.
+		// Unlike the profile above, that is safe to accept from the query only
+		// because the device is then checked against this profile's registry.
+		named := strings.TrimSpace(r.URL.Query().Get("device_id"))
+		identity.DeviceID = named
+		if identity.DeviceID == "" {
+			identity.DeviceID = deviceMetadataFromRequest(r).DeviceID
+		}
 		if identity.DeviceID == "" {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"X-Silo-Device-Id header is required for a device override")
 			return userstore.SettingIdentity{}, false
 		}
+		if named != "" && !h.deviceBelongsToProfile(w, r, identity.ProfileID, named) {
+			return userstore.SettingIdentity{}, false
+		}
 	}
 
 	return h.completeIdentity(w, r.Context(), r.URL.Query(), identity)
+}
+
+// mayActForProfile authorizes acting for a profile other than the caller's own.
+//
+// Two checks, in this order and for different reasons. First the household
+// guard: only the primary profile (or a server admin) manages the household, so
+// an ordinary member naming a sibling is 403 — the profile plainly exists, and
+// pretending otherwise would be a lie the caller can already disprove through
+// GET /profiles. Then existence, resolved through the caller's *own* user
+// store, which is what confines this to one account: a profile id from another
+// account is simply absent there, so it is 404 and the caller learns nothing.
+func (h *SettingValuesHandler) mayActForProfile(
+	w http.ResponseWriter, r *http.Request, profileID string,
+) bool {
+	store, ok := h.storeFor(w, r)
+	if !ok {
+		return false
+	}
+
+	allowed, err := canManageHousehold(r, store, h.UserRepo, h.ProfileTokens)
+	if err != nil {
+		writeProfileManagementPermissionError(w, err)
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "forbidden",
+			"Managing another profile's settings requires the primary profile or admin access")
+		return false
+	}
+
+	profile, err := store.GetProfile(r.Context(), profileID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load profile")
+		return false
+	}
+	if profile == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
+		return false
+	}
+	return true
+}
+
+// deviceBelongsToProfile authorizes a device id that came from the query rather
+// than from this request's own header. It answers 404 rather than 403 for an
+// unknown device: a 403 would confirm the id exists somewhere.
+//
+// The caller's own header device is deliberately not checked. Registration is
+// lazy — a device's first write is what registers it — so requiring a row there
+// would reject every new device's first setting.
+func (h *SettingValuesHandler) deviceBelongsToProfile(
+	w http.ResponseWriter, r *http.Request, profileID, deviceID string,
+) bool {
+	store, ok := h.storeFor(w, r)
+	if !ok {
+		return false
+	}
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "Device not found")
+		return false
+	}
+	exists, err := registry.DeviceExists(r.Context(), profileID, deviceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to look up device")
+		return false
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "not_found", "Device not found")
+		return false
+	}
+	return true
 }
 
 // keyedScopeFromRequest parses the parts every scoped request names: a key
@@ -1073,19 +1221,9 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 	if h.languageSource == nil {
 		return result
 	}
-
-	wantsMetadata, wantsAudio, wantsSubtitles := false, false, false
-	for _, eff := range resolved {
-		switch eff.Key {
-		case settingskeys.CatalogMetadataLanguage:
-			wantsMetadata = true
-		case settingskeys.PlaybackAudioLanguage:
-			wantsAudio = true
-		case settingskeys.PlaybackSubtitleLanguage:
-			wantsSubtitles = true
-		}
-	}
-	if !wantsMetadata && !wantsAudio && !wantsSubtitles {
+	if !slices.ContainsFunc(resolved, func(eff settingsresolve.Effective) bool {
+		return eff.Key == settingskeys.CatalogMetadataLanguage
+	}) {
 		return result
 	}
 
@@ -1095,33 +1233,13 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		filters.MaxContentRating = scope.MaxContentRating
 	}
-	if wantsMetadata {
-		values, err := h.languageSource.ListOriginalLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing metadata language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.CatalogMetadataLanguage] = values
-		}
+	values, err := h.languageSource.ListOriginalLanguages(r.Context(), filters)
+	if err != nil {
+		slog.WarnContext(r.Context(), "settings: listing metadata language suggestions",
+			"component", "settings", "error", err)
+		return result
 	}
-	if wantsAudio {
-		values, err := h.languageSource.ListAudioLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing audio language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.PlaybackAudioLanguage] = values
-		}
-	}
-	if wantsSubtitles {
-		values, err := h.languageSource.ListSubtitleLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing subtitle language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.PlaybackSubtitleLanguage] = values
-		}
-	}
+	result[settingskeys.CatalogMetadataLanguage] = values
 	return result
 }
 

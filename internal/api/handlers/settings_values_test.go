@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -831,6 +832,537 @@ func TestCapabilitiesReportTheContractRevision(t *testing.T) {
 	}
 }
 
+// storedDeviceIDFor reports the device a profile_device row was written for, or
+// "" when the key has no device-scoped row at all. The device-widening tests
+// assert on stored rows rather than status codes: before the query parameter is
+// honored a named device is silently ignored and the write lands on the header
+// device, which is a 200 either way.
+func storedDeviceIDFor(t *testing.T, store userstore.UserStore, key string) string {
+	t.Helper()
+	values, err := store.ListAllSettingValues(context.Background())
+	if err != nil {
+		t.Fatalf("listing stored values: %v", err)
+	}
+	for _, value := range values {
+		if value.Key == key && value.Scope == settingscontract.ScopeProfileDevice {
+			return value.DeviceID
+		}
+	}
+	return ""
+}
+
+func TestSetValue_RejectsDeviceNotOwnedByCaller(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatal("store does not implement DeviceRegistry")
+	}
+	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "device-1", DeviceName: "Laptop",
+	}); err != nil {
+		t.Fatalf("registering caller device: %v", err)
+	}
+
+	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&device_id=device-someone-else", []byte(`{"value":false}`))
+
+	// 404 rather than 403: a 403 would confirm the device id exists.
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("PUT naming an unknown device = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
+		t.Fatalf("wrote a row for device %q; want no write", got)
+	}
+}
+
+func TestSetValue_WritesNamedDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry := store.(userstore.DeviceRegistry)
+	for _, id := range []string{"device-1", "device-b"} {
+		if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+			ProfileID: "profile-1", DeviceID: id,
+		}); err != nil {
+			t.Fatalf("registering %s: %v", id, err)
+		}
+	}
+
+	// The request's own header is device-1; the query names device-b.
+	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&device_id=device-b", []byte(`{"value":false}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-b" {
+		t.Errorf("stored on device %q, want device-b", got)
+	}
+}
+
+func TestGetValue_ReadsNamedDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry := store.(userstore.DeviceRegistry)
+	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "device-b",
+	}); err != nil {
+		t.Fatalf("registering device-b: %v", err)
+	}
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       "player.hdr_enabled",
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "device-b",
+	}, json.RawMessage(`false`)); err != nil {
+		t.Fatalf("seeding device-b value: %v", err)
+	}
+
+	rec := routeValues(t, handler, http.MethodGet, "player.hdr_enabled",
+		"scope=profile_device&device_id=device-b", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET named device = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got settingValueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if got.DeviceID != "device-b" || string(got.Value) != "false" {
+		t.Errorf("read %s on %q, want false on device-b", got.Value, got.DeviceID)
+	}
+
+	// The caller's own device has no row, so it must still 404.
+	if rec := routeValues(t, handler, http.MethodGet, "player.hdr_enabled",
+		"scope=profile_device", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("GET own device = %d, want 404", rec.Code)
+	}
+}
+
+// The regression guard for every existing client: with no device_id in the
+// query the header device is used, exactly as before this parameter existed.
+func TestSetValue_FallsBackToHeaderDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device", []byte(`{"value":false}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-1" {
+		t.Errorf("stored on device %q, want the header device device-1", got)
+	}
+}
+
+func TestDeleteValue_RejectsDeviceNotOwnedByCaller(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	rec := routeValues(t, handler, http.MethodDelete, "player.hdr_enabled",
+		"scope=profile_device&device_id=device-someone-else", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("DELETE naming an unknown device = %d, want 404", rec.Code)
+	}
+}
+
+// --- Household widening: a primary profile addressing a sibling profile ---
+
+// newHouseholdValuesHandler builds a handler with two profiles on one account:
+// "profile-1" is the household parent, "profile-2" is another member.
+func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler, userstore.UserStore) {
+	t.Helper()
+	handler, store := newValuesTestHandler(t)
+
+	// profile-1 is already the household parent: is_primary is assigned to the
+	// first profile an account creates and is not settable afterwards.
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Robin"}); err != nil {
+		t.Fatalf("create sibling: %v", err)
+	}
+	primary, err := store.GetProfile(ctx, "profile-1")
+	if err != nil || primary == nil || !primary.IsPrimary {
+		t.Fatalf("profile-1 is not the primary profile (%+v, %v)", primary, err)
+	}
+	if pin != "" {
+		if err := store.UpdateProfile(ctx, "profile-1", userstore.UpdateProfileInput{
+			PIN: &pin,
+		}); err != nil {
+			t.Fatalf("set pin: %v", err)
+		}
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
+		ProfileID: "profile-2", DeviceID: "robin-ipad", DeviceName: "Robin's iPad",
+	}); err != nil {
+		t.Fatalf("registering sibling device: %v", err)
+	}
+
+	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
+	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
+	return handler, store
+}
+
+// routeValuesAs is routeValues with an explicit acting profile, so a test can
+// call as a non-primary member of the same household.
+func routeValuesAs(
+	t *testing.T, h *SettingValuesHandler, actingProfileID, method, key, query string, body []byte,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	target := "/settings/values/" + key
+	if query != "" {
+		target += "?" + query
+	}
+	req := valuesRequest(method, target, body)
+	req = req.WithContext(apimw.SetProfileID(req.Context(), actingProfileID))
+
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("key", key)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	switch method {
+	case http.MethodGet:
+		h.HandleGetValue(rec, req)
+	case http.MethodPut:
+		h.HandleSetValue(rec, req)
+	case http.MethodDelete:
+		h.HandleDeleteValue(rec, req)
+	}
+	return rec
+}
+
+func TestSetValue_NonPrimaryCannotNameSiblingProfile(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	rec := routeValuesAs(t, handler, "profile-2", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=profile-1&device_id=device-1", []byte(`{"value":false}`))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-primary naming a sibling = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
+		t.Errorf("wrote a row on device %q; want no write", got)
+	}
+}
+
+func TestSetValue_PrimaryWithUnverifiedPINCannotNameSibling(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "1234")
+
+	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":false}`))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("primary with unverified PIN = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "pin") {
+		t.Errorf("error does not mention the PIN: %s", rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
+		t.Errorf("wrote a row on device %q; want no write", got)
+	}
+}
+
+// A profile id that is not on this account resolves out of the caller's own
+// store, so it is simply absent — 404, and the caller learns nothing about
+// whether it exists elsewhere.
+func TestSetValue_ProfileFromAnotherAccountIsNotFound(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=someone-elses-profile&device_id=device-1",
+		[]byte(`{"value":false}`))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign profile = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "" {
+		t.Errorf("wrote a row on device %q; want no write", got)
+	}
+}
+
+func TestSetValue_PrimaryWritesSiblingProfileDeviceSetting(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
+		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":"always"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("primary writing a sibling = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	values, err := store.ListAllSettingValues(context.Background())
+	if err != nil {
+		t.Fatalf("listing: %v", err)
+	}
+	var found bool
+	for _, value := range values {
+		if value.Key != "playback.subtitle_mode" {
+			continue
+		}
+		found = true
+		if value.ProfileID != "profile-2" || value.DeviceID != "robin-ipad" {
+			t.Errorf("stored on (%s, %s), want (profile-2, robin-ipad)",
+				value.ProfileID, value.DeviceID)
+		}
+	}
+	if !found {
+		t.Error("no row stored for the sibling profile")
+	}
+}
+
+// A device belonging to a different profile than the one being addressed is
+// still rejected: the household widening changes who you may act for, not
+// which devices belong to whom.
+func TestSetValue_PrimaryCannotMixSiblingProfileWithForeignDevice(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+
+	rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=profile-2&device_id=not-robins-device",
+		[]byte(`{"value":false}`))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("sibling profile with a foreign device = %d, want 404: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// Naming your own profile explicitly is not a household action and must work
+// for anyone — it is what a client does when it sends the identity it read back.
+func TestSetValue_NamingOwnProfileIsAllowedForAnyone(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	rec := routeValuesAs(t, handler, "profile-2", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad", []byte(`{"value":false}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("naming own profile = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
+		t.Errorf("stored on device %q, want robin-ipad", got)
+	}
+}
+
+// Registration means "this device is in use by this profile". A write aimed at
+// some *other* device, or made on another profile's behalf, is not that — and
+// registering the actor's browser under the target profile would invent a
+// device nobody is holding.
+func TestSetValue_DoesNotRegisterWhenActingOnAnotherDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry := store.(userstore.DeviceRegistry)
+	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "apple-tv", DeviceName: "Apple TV",
+	}); err != nil {
+		t.Fatalf("registering apple-tv: %v", err)
+	}
+
+	// Header device is device-1; the write targets apple-tv.
+	if rec := routeValues(t, handler, http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&device_id=apple-tv", []byte(`{"value":false}`)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-1")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if exists {
+		t.Error("registered the acting device while writing to a different device")
+	}
+}
+
+func TestSetValue_DoesNotRegisterActorsDeviceUnderAnotherProfile(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "player.hdr_enabled",
+		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad",
+		[]byte(`{"value":false}`)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-1")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if exists {
+		t.Error("registered the parent's browser under the child's profile")
+	}
+}
+
+// captureAuditLogs swaps the default slog handler for the duration of a test.
+// The returned function parses whatever has been emitted so far and keeps only
+// the settings-audit records.
+func captureAuditLogs(t *testing.T) func() []map[string]any {
+	t.Helper()
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	return func() []map[string]any {
+		var records []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+			if line == "" {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal([]byte(line), &record); err != nil {
+				continue
+			}
+			if record["msg"] == settingsAuditMsg {
+				records = append(records, record)
+			}
+		}
+		return records
+	}
+}
+
+func TestSetValue_AuditsCrossProfileWrite(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+	audited := captureAuditLogs(t)
+
+	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
+		"scope=profile_device&profile_id=profile-2&device_id=robin-ipad",
+		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	records := audited()
+	if len(records) != 1 {
+		t.Fatalf("emitted %d audit records, want 1: %+v", len(records), records)
+	}
+	record := records[0]
+	if record["actor_profile_id"] != "profile-1" || record["target_profile_id"] != "profile-2" {
+		t.Errorf("actor/target = %v/%v, want profile-1/profile-2",
+			record["actor_profile_id"], record["target_profile_id"])
+	}
+	if record["setting_key"] != "playback.subtitle_mode" || record["device_id"] != "robin-ipad" {
+		t.Errorf("key/device = %v/%v", record["setting_key"], record["device_id"])
+	}
+	// Identity only: the value must never reach an operator's log.
+	for key, value := range record {
+		if text, ok := value.(string); ok && text == "always" {
+			t.Errorf("audit record leaked the value under %q", key)
+		}
+	}
+}
+
+// Ordinary self-service writes stay out of the trail. A record of everything
+// answers nothing, and the question this exists for is "who changed it for me".
+func TestSetValue_DoesNotAuditOwnWrite(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+	audited := captureAuditLogs(t)
+
+	if rec := routeValuesAs(t, handler, "profile-1", http.MethodPut, "playback.subtitle_mode",
+		"scope=profile", []byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if records := audited(); len(records) != 0 {
+		t.Errorf("audited an ordinary self-service write: %+v", records)
+	}
+}
+
+func TestGetEffective_ResolvesNamedDevice(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	registry := store.(userstore.DeviceRegistry)
+	if err := registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "apple-tv",
+	}); err != nil {
+		t.Fatalf("registering apple-tv: %v", err)
+	}
+	// The Apple TV overrides subtitle mode; this browser does not.
+	if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       "playback.subtitle_mode",
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "apple-tv",
+	}, json.RawMessage(`"always"`)); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	read := func(query string) map[string]any {
+		t.Helper()
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET effective?%s = %d: %s", query, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Settings []map[string]any `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("resolved %d settings, want 1", len(body.Settings))
+		}
+		return body.Settings[0]
+	}
+
+	named := read("keys=playback.subtitle_mode&device_id=apple-tv")
+	if named["value"] != "always" || named["source"] != "profile_device" {
+		t.Errorf("named device resolved %v from %v, want always from profile_device",
+			named["value"], named["source"])
+	}
+
+	// Without the parameter this browser still resolves its own answer.
+	own := read("keys=playback.subtitle_mode")
+	if own["source"] == "profile_device" {
+		t.Errorf("this browser resolved a device override it does not have: %v", own)
+	}
+}
+
+func TestGetEffective_RejectsDeviceNotOwnedByCaller(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values/effective?keys=playback.subtitle_mode&device_id=not-mine", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleGetEffective(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("effective read of a foreign device = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
+	handler, _ := newHouseholdValuesHandler(t, "")
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values/effective?keys=playback.subtitle_mode&profile_id=profile-1", nil)
+	req = req.WithContext(apimw.SetProfileID(req.Context(), "profile-2"))
+	rec := httptest.NewRecorder()
+	handler.HandleGetEffective(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-primary effective read of a sibling = %d, want 403: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// A server admin may act for any profile, including from a non-primary active
+// profile: apimw.IsAdmin short-circuits the household check by design. Pinned
+// because it is easy to mistake for the non-primary refusal above — the
+// difference is the account's role, not the profile's.
+func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
+	handler, store := newHouseholdValuesHandler(t, "")
+
+	target := "/settings/values/player.hdr_enabled" +
+		"?scope=profile_device&profile_id=profile-2&device_id=robin-ipad"
+	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
+	// Acting as the *non-primary* profile, but on an admin account.
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
+
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("key", "player.hdr_enabled")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	handler.HandleSetValue(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin naming a profile = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
+		t.Errorf("stored on device %q, want robin-ipad", got)
+	}
+}
+
 func TestMergeLanguageSuggestionsKeepsFloorObservedAndCurrent(t *testing.T) {
 	got := mergeLanguageSuggestions(
 		[]string{"en", "fr", "pt"},
@@ -858,25 +1390,15 @@ func TestMergeLanguageSuggestionsUsesExactCurrentAlias(t *testing.T) {
 type recordingLanguageSuggestionSource struct {
 	filters  catalog.BrowseFilters
 	original []string
+	calls    int
 }
 
 func (s *recordingLanguageSuggestionSource) ListOriginalLanguages(
 	_ context.Context, filters catalog.BrowseFilters,
 ) ([]string, error) {
 	s.filters = filters
+	s.calls++
 	return s.original, nil
-}
-
-func (*recordingLanguageSuggestionSource) ListAudioLanguages(
-	context.Context, catalog.BrowseFilters,
-) ([]string, error) {
-	return nil, nil
-}
-
-func (*recordingLanguageSuggestionSource) ListSubtitleLanguages(
-	context.Context, catalog.BrowseFilters,
-) ([]string, error) {
-	return nil, nil
 }
 
 func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testing.T) {
@@ -901,5 +1423,29 @@ func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testi
 		!slices.Equal(source.filters.DisabledLibraryIDs, []int{12}) ||
 		source.filters.MaxContentRating != "PG-13" {
 		t.Fatalf("catalog filters = %#v", source.filters)
+	}
+}
+
+// TestObservedLanguageSuggestionsSkipsPlaybackKeys pins the design decision
+// that only catalog.metadata_language gets deployment-observed suggestions.
+// The audio/subtitle track listings walk every media file — tens of seconds
+// on large catalogs — so those pickers ship the contract floor and clients
+// offer free entry for anything beyond it.
+func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
+	source := &recordingLanguageSuggestionSource{original: []string{"is"}}
+	handler, _ := newValuesTestHandler(t)
+	handler.SetLanguageSuggestionSource(source)
+
+	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
+	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{
+		{Key: settingskeys.PlaybackAudioLanguage},
+		{Key: settingskeys.PlaybackSubtitleLanguage},
+	})
+
+	if len(observed) != 0 {
+		t.Fatalf("observed suggestions for playback keys = %v, want none", observed)
+	}
+	if source.calls != 0 {
+		t.Fatalf("catalog scans = %d, want 0 for playback-only requests", source.calls)
 	}
 }

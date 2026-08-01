@@ -26,6 +26,10 @@ func TestPresentationMetadataIsGeneratedForEveryClientLanguage(t *testing.T) {
 				`catalog_metadata_languages`,
 				`suggestedOptions: "playback_subtitle_languages"`,
 				`unsetLabel: "None"`,
+				// Advisory platform tags reach the web UI so it can hide
+				// settings that do not apply to the device being edited.
+				`platforms: ["web"]`,
+				`platforms: ["ios", "android"]`,
 			},
 		},
 		{
