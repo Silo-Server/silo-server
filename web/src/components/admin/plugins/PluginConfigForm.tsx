@@ -193,10 +193,7 @@ export function PluginConfigForm({
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, SchemaOption[]>>({});
   const [optionsLoading, setOptionsLoading] = useState(false);
   const loadOptions = usePluginInstallationConfigOptions();
-  const hasDynamicFields = useMemo(
-    () => fields.some((f) => f.dynamic_options),
-    [fields],
-  );
+  const hasDynamicFields = useMemo(() => fields.some((f) => f.dynamic_options), [fields]);
   const loadOptionsRef = useRef(loadOptions);
   loadOptionsRef.current = loadOptions;
 

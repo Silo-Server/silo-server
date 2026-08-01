@@ -176,9 +176,14 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
           variant="outline"
           size="sm"
           onClick={() => {
-            const mediaKind = form.type === "show" ? "series" : form.type === "movie" ? "movies" : form.type || "media";
+            const mediaKind =
+              form.type === "show"
+                ? "series"
+                : form.type === "movie"
+                  ? "movies"
+                  : form.type || "media";
             const virtualPath = `virtual://${mediaKind}`;
-            if (form.paths.length === 1 && !(form.paths[0]?.trim())) {
+            if (form.paths.length === 1 && !form.paths[0]?.trim()) {
               form.updatePath(0, virtualPath);
             } else {
               form.addPath();
@@ -186,7 +191,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
             }
           }}
         >
-          <Plus className="mr-1 size-3.5 text-primary" /> Add Virtual
+          <Plus className="text-primary mr-1 size-3.5" /> Add Virtual
         </Button>
       </div>
       <FolderBrowser

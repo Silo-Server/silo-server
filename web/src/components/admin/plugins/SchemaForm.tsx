@@ -103,7 +103,7 @@ function FieldDescription({ text }: { text?: string }) {
           className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
         >
           {label}
-        </Link>
+        </Link>,
       );
     } else {
       parts.push(
@@ -115,7 +115,7 @@ function FieldDescription({ text }: { text?: string }) {
           className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
         >
           {label}
-        </a>
+        </a>,
       );
     }
     lastIndex = match.index + match[0].length;
