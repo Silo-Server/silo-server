@@ -2084,10 +2084,17 @@ func cleanScanRoots(paths []string) []string {
 	out := make([]string, 0, len(paths))
 	seen := make(map[string]bool, len(paths))
 	for _, rawPath := range paths {
-		if strings.TrimSpace(rawPath) == "" {
+		trimmed := strings.TrimSpace(rawPath)
+		if trimmed == "" {
 			continue
 		}
-		path := filepath.Clean(rawPath)
+		// Virtual roots have no filesystem presence — their media is
+		// populated by plugins via UpsertVirtualMedia.  Skip them so
+		// the scanner never tries to walk or probe a virtual:// path.
+		if strings.HasPrefix(trimmed, "virtual://") {
+			continue
+		}
+		path := filepath.Clean(trimmed)
 		if path == "" || path == "." || seen[path] {
 			continue
 		}
