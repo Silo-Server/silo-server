@@ -10,14 +10,26 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 const virtualPlaybackPrefix = "virtual://"
 
 const maxVirtualPlaybackStreams = 50
 
+const (
+	maxVirtualFailoverAttempts = 5
+	virtualStartupBudget       = 45 * time.Second
+)
+
 type VirtualPlaybackResolver interface {
-	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string) (string, error)
+	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string, ownerInstallationID int) (string, error)
+}
+
+type VirtualPlaybackResolverFunc func(context.Context, string, int, string, int) (string, error)
+
+func (f VirtualPlaybackResolverFunc) ResolveVirtualPlayback(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) (string, error) {
+	return f(ctx, path, userID, profileID, ownerInstallationID)
 }
 
 // VirtualPlaybackStream is the provider-neutral candidate shape used by the
@@ -40,18 +52,204 @@ type VirtualPlaybackStream struct {
 }
 
 type VirtualPlaybackStreamLister interface {
-	ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error)
+	ListVirtualPlaybackStreams(ctx context.Context, virtualPath string, userID int, profileID string, ownerInstallationID int) ([]VirtualPlaybackStream, error)
 }
 
-type VirtualPlaybackStreamListerFunc func(context.Context, string) ([]VirtualPlaybackStream, error)
+type VirtualPlaybackStreamListerFunc func(context.Context, string, int, string, int) ([]VirtualPlaybackStream, error)
 
-func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.Context, path string) ([]VirtualPlaybackStream, error) {
-	return f(ctx, path)
+func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) ([]VirtualPlaybackStream, error) {
+	return f(ctx, path, userID, profileID, ownerInstallationID)
 }
 
 // VirtualPlaybackStreamSink persists JIT candidates as selectable virtual
 // files.
 type VirtualPlaybackStreamSink func(context.Context, *models.MediaFile, []VirtualPlaybackStream) error
+
+type resolvedVirtualPlaybackSource struct {
+	URL            string
+	URI            string
+	OwnerID        int
+	File           *models.MediaFile
+	ProbeSucceeded bool
+}
+
+// resolveVirtualPlaybackSource chooses a ranked provider-neutral result,
+// resolves it, and probes it before planning. A result URI is bound to the
+// session so later Range, seek, subtitle, and transcode requests cannot silently
+// switch to a technically different candidate under the original plan.
+func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *models.MediaFile, profileID string) (resolvedVirtualPlaybackSource, error) {
+	if !isVirtualPlaybackFile(file) {
+		return resolvedVirtualPlaybackSource{File: file}, nil
+	}
+	if h.VirtualPlaybackResolver == nil {
+		return resolvedVirtualPlaybackSource{}, errors.New("virtual playback resolver is not configured")
+	}
+	userID := apimw.GetUserID(r.Context())
+	candidates := []VirtualPlaybackStream{{
+		URI: file.FilePath, OwnerInstallationID: file.VirtualOwnerInstallationID,
+	}}
+	parsed, _ := url.Parse(file.FilePath)
+	if parsed != nil && strings.TrimSpace(parsed.Query().Get("result")) == "" && h.VirtualPlaybackStreamLister != nil {
+		listCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+		streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(
+			listCtx, file.FilePath, userID, profileID, file.VirtualOwnerInstallationID,
+		)
+		if err == nil && len(streams) > 0 {
+			if len(streams) > maxVirtualPlaybackStreams {
+				streams = streams[:maxVirtualPlaybackStreams]
+			}
+			if h.VirtualPlaybackStreamSink != nil {
+				_ = h.VirtualPlaybackStreamSink(listCtx, file, streams)
+			}
+			if filtered := filterVirtualPlaybackStreams(file, streams); len(filtered) > 0 {
+				candidates = filtered
+			}
+		}
+		cancel()
+	}
+	if len(candidates) > maxVirtualFailoverAttempts {
+		candidates = candidates[:maxVirtualFailoverAttempts]
+	}
+	attemptCtx, cancel := context.WithTimeout(r.Context(), virtualStartupBudget)
+	defer cancel()
+	var firstResolved *resolvedVirtualPlaybackSource
+	var attemptErr error
+	for _, candidate := range candidates {
+		ownerID := candidate.OwnerInstallationID
+		if ownerID <= 0 {
+			ownerID = file.VirtualOwnerInstallationID
+		}
+		streamURL, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
+			attemptCtx, candidate.URI, userID, profileID, ownerID,
+		)
+		if err != nil {
+			attemptErr = errors.Join(attemptErr, err)
+			continue
+		}
+		transient := *file
+		transient.FilePath = candidate.URI
+		transient.VirtualOwnerInstallationID = ownerID
+		resolved := resolvedVirtualPlaybackSource{
+			URL: streamURL, URI: candidate.URI, OwnerID: ownerID, File: &transient,
+		}
+		if firstResolved == nil {
+			copy := resolved
+			firstResolved = &copy
+		}
+		if h.VirtualPlaybackSourceProber == nil {
+			return resolved, nil
+		}
+		probeCtx, probeCancel := context.WithTimeout(attemptCtx, 10*time.Second)
+		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
+		probeCancel()
+		if probeErr != nil || probed == nil {
+			if probeErr == nil {
+				probeErr = errors.New("virtual stream probe returned no metadata")
+			}
+			attemptErr = errors.Join(attemptErr, probeErr)
+			continue
+		}
+		resolved.File = probed
+		resolved.ProbeSucceeded = true
+		return resolved, nil
+	}
+	if firstResolved != nil {
+		// Unknown technical metadata routes through the conservative H264/AAC
+		// planner fallback; retaining the first resolved URI is safer than
+		// guessing direct-play compatibility.
+		return *firstResolved, nil
+	}
+	if attemptErr == nil {
+		attemptErr = errors.New("virtual playback provider returned no usable stream")
+	}
+	return resolvedVirtualPlaybackSource{}, attemptErr
+}
+
+func (h *PlaybackHandler) probeVirtualSessionFile(ctx context.Context, file *models.MediaFile, session *playback.Session) (*models.MediaFile, string, error) {
+	file = virtualPlaybackSessionFile(file, session)
+	if !isVirtualPlaybackFile(file) {
+		return file, "", nil
+	}
+	if h.VirtualMediaResolver == nil || h.VirtualPlaybackSourceProber == nil {
+		return file, "", errors.New("virtual playback probing is not configured")
+	}
+	resolved, err := resolveVirtualMediaPath(
+		ctx, h.VirtualMediaResolver, file.FilePath, file.VirtualOwnerInstallationID,
+		session.UserID, session.ProfileID,
+	)
+	if err != nil {
+		return file, "", err
+	}
+	probed, err := h.VirtualPlaybackSourceProber(ctx, resolved, file)
+	if err != nil {
+		return file, "", err
+	}
+	return probed, resolved, nil
+}
+
+func virtualPlaybackAlternatives(
+	ctx context.Context,
+	lister VirtualPlaybackStreamLister,
+	file *models.MediaFile,
+	userID int,
+	profileID string,
+) []VirtualPlaybackStream {
+	if lister == nil || file == nil {
+		return nil
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	streams, err := lister.ListVirtualPlaybackStreams(
+		listCtx, file.FilePath, userID, profileID, file.VirtualOwnerInstallationID,
+	)
+	if err != nil {
+		return nil
+	}
+	if len(streams) > maxVirtualPlaybackStreams {
+		streams = streams[:maxVirtualPlaybackStreams]
+	}
+	return filterVirtualPlaybackStreams(file, streams)
+}
+
+func filterVirtualPlaybackStreams(file *models.MediaFile, streams []VirtualPlaybackStream) []VirtualPlaybackStream {
+	if file == nil {
+		return nil
+	}
+	base, err := url.Parse(file.FilePath)
+	if err != nil {
+		return nil
+	}
+	baseProfile := strings.TrimSpace(base.Query().Get("profile"))
+	seen := map[string]struct{}{file.FilePath: {}}
+	alternatives := make([]VirtualPlaybackStream, 0, len(streams))
+	for _, stream := range streams {
+		if len(alternatives) >= maxVirtualPlaybackStreams-1 {
+			break
+		}
+		stream.URI = strings.TrimSpace(stream.URI)
+		if !strings.HasPrefix(strings.ToLower(stream.URI), virtualPlaybackPrefix) {
+			continue
+		}
+		candidate, parseErr := url.Parse(stream.URI)
+		if parseErr != nil ||
+			!strings.EqualFold(candidate.Scheme, base.Scheme) ||
+			!strings.EqualFold(candidate.Host, base.Host) ||
+			candidate.EscapedPath() != base.EscapedPath() {
+			continue
+		}
+		if baseProfile != "" && !strings.EqualFold(
+			strings.TrimSpace(candidate.Query().Get("profile")), baseProfile,
+		) {
+			continue
+		}
+		if _, duplicate := seen[stream.URI]; duplicate {
+			continue
+		}
+		seen[stream.URI] = struct{}{}
+		alternatives = append(alternatives, stream)
+	}
+	return alternatives
+}
 
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
@@ -72,37 +270,5 @@ func (h *PlaybackHandler) resolveVirtualPlayback(r *http.Request, file *models.M
 	if h.VirtualPlaybackResolver == nil {
 		return "", errors.New("virtual playback resolver is not configured")
 	}
-	return h.VirtualPlaybackResolver.ResolveVirtualPlayback(r.Context(), file.FilePath, apimw.GetUserID(r.Context()), profileID)
-}
-
-func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, file *models.MediaFile) {
-	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
-		return
-	}
-	// A result URI is already an explicit selection and its sibling results were
-	// populated when the parent profile/base URI was played. Profile URIs still
-	// need listing: the resolver has already fetched the provider response, and
-	// the plugin returns that cached response without another provider request.
-	if parsed, err := url.Parse(file.FilePath); err == nil {
-		query := parsed.Query()
-		if strings.TrimSpace(query.Get("result")) != "" {
-			return
-		}
-	}
-	if ctx.Err() != nil {
-		return
-	}
-	// ResolveVirtualPlayback has already performed the provider request. Keep
-	// this bounded and synchronous so the response contains the extra versions
-	// immediately; the plugin-side cache makes this listing a host-local call.
-	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(listCtx, file.FilePath)
-	if err != nil || len(streams) == 0 {
-		return
-	}
-	if len(streams) > maxVirtualPlaybackStreams {
-		streams = streams[:maxVirtualPlaybackStreams]
-	}
-	_ = h.VirtualPlaybackStreamSink(listCtx, file, streams)
+	return h.VirtualPlaybackResolver.ResolveVirtualPlayback(r.Context(), file.FilePath, apimw.GetUserID(r.Context()), profileID, file.VirtualOwnerInstallationID)
 }

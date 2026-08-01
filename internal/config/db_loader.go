@@ -335,6 +335,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.TranscodeEnabled = transcodeEnabled
+	virtualProviderFailover, err := boolOr(m, "playback.virtual_provider_failover", true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.VirtualProviderFailover = virtualProviderFailover
 
 	// Redis
 	cfg.Redis.URL = stringOr(m, "redis.url", "")

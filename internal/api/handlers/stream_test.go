@@ -332,6 +332,67 @@ func TestSubtitleSourceFileIDPinsURLAcrossEffectiveFileSwitch(t *testing.T) {
 	}
 }
 
+func TestProbeVirtualStreamFileReturnsResolvedProviderURL(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                         42,
+		FilePath:                   "virtual://movie/tt0133093",
+		VirtualOwnerInstallationID: 7,
+	}
+	session := &playback.Session{UserID: 11, ProfileID: "profile-1"}
+	handler := &StreamHandler{
+		VirtualMediaResolver: VirtualMediaResolverFunc(func(_ context.Context, virtualURI string, ownerID, userID int, profileID string) (string, error) {
+			if virtualURI != file.FilePath || ownerID != 7 || userID != 11 || profileID != "profile-1" {
+				t.Fatalf("unexpected resolver arguments: %q %d %d %q", virtualURI, ownerID, userID, profileID)
+			}
+			return "https://stream.example/movie.mkv?token=secret", nil
+		}),
+		VirtualSourceProber: func(_ context.Context, sourceURL string, source *models.MediaFile) (*models.MediaFile, error) {
+			if sourceURL != "https://stream.example/movie.mkv?token=secret" {
+				t.Fatalf("source URL = %q", sourceURL)
+			}
+			probed := *source
+			probed.Container = "matroska"
+			return &probed, nil
+		},
+	}
+
+	probed, sourceURL, err := handler.probeVirtualStreamFile(context.Background(), file, session)
+	if err != nil {
+		t.Fatalf("probeVirtualStreamFile: %v", err)
+	}
+	if sourceURL != "https://stream.example/movie.mkv?token=secret" {
+		t.Fatalf("source URL = %q", sourceURL)
+	}
+	if probed == nil || probed.Container != "matroska" || probed.FilePath != file.FilePath {
+		t.Fatalf("probed file = %#v", probed)
+	}
+}
+
+func TestProbeVirtualStreamFileResolvesWithoutOptionalProber(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                         42,
+		FilePath:                   "virtual://movie/tt0133093",
+		VirtualOwnerInstallationID: 7,
+	}
+	session := &playback.Session{UserID: 11, ProfileID: "profile-1"}
+	handler := &StreamHandler{
+		VirtualMediaResolver: VirtualMediaResolverFunc(func(_ context.Context, virtualURI string, ownerID, userID int, profileID string) (string, error) {
+			if virtualURI != file.FilePath || ownerID != 7 || userID != 11 || profileID != "profile-1" {
+				t.Fatalf("unexpected resolver arguments: %q %d %d %q", virtualURI, ownerID, userID, profileID)
+			}
+			return "https://stream.example/movie.mkv?token=secret", nil
+		}),
+	}
+
+	resolvedFile, sourceURL, err := handler.probeVirtualStreamFile(context.Background(), file, session)
+	if err != nil {
+		t.Fatalf("probeVirtualStreamFile: %v", err)
+	}
+	if resolvedFile != file || sourceURL != "https://stream.example/movie.mkv?token=secret" {
+		t.Fatalf("resolved = %#v, %q", resolvedFile, sourceURL)
+	}
+}
+
 func TestHandleTransportStartFailure_KeepsSessionForNonMissingError(t *testing.T) {
 	filePath := writePlaybackTestMediaFile(t, "movie.mkv")
 	file := &models.MediaFile{

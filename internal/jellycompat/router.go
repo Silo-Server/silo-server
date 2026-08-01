@@ -122,6 +122,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
+	playbackHandler.VirtualMediaResolver = deps.VirtualMediaResolver
+	playbackHandler.VirtualMediaRefreshResolver = deps.VirtualMediaRefreshResolver
+	playbackHandler.VirtualPlaybackStreamLister = deps.VirtualPlaybackStreamLister
+	playbackHandler.VirtualSourceProber = deps.VirtualSourceProber
+	playbackHandler.RemoteStreamRelay = deps.RemoteStreamRelay
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.S3Client = deps.S3Client

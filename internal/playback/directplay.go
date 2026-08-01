@@ -50,31 +50,31 @@ func MimeFromExtension(name string) string {
 	}
 }
 
+// MimeFromContainer maps probed container names when a source identity has no
+// filename extension (for example a provider-neutral virtual URI).
+func MimeFromContainer(container string) string {
+	normalized := strings.ToLower(strings.TrimSpace(strings.Split(container, ",")[0]))
+	switch normalized {
+	case "mp4", "mov", "m4v", "m4a":
+		return "video/mp4"
+	case "matroska", "mkv":
+		return "video/x-matroska"
+	case "webm":
+		return "video/webm"
+	case "mpegts", "mpeg-ts", "ts":
+		return "video/mp2t"
+	case "avi":
+		return "video/x-msvideo"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 // ServeDirectPlay serves a media file with HTTP byte-range support.
 // Uses http.ServeContent for proper range handling, which supports
 // Range requests, conditional requests (If-Modified-Since, If-None-Match),
 // and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
-	lower := strings.ToLower(filePath)
-	if strings.HasPrefix(lower, "aiostreams://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "virtual://") {
-		http.Redirect(w, r, filePath, http.StatusTemporaryRedirect)
-		return nil
-	}
-
-	if strings.HasSuffix(lower, ".strm") {
-		content, err := os.ReadFile(filePath)
-		if err != nil {
-			http.Error(w, "failed to read stream shortcut", http.StatusInternalServerError)
-			return err
-		}
-		streamURL := strings.TrimSpace(string(content))
-		if streamURL == "" {
-			http.Error(w, "stream shortcut is empty", http.StatusBadRequest)
-			return nil
-		}
-		http.Redirect(w, r, streamURL, http.StatusTemporaryRedirect)
-		return nil
-	}
 	// Media bodies routinely take longer than the server's absolute
 	// WriteTimeout; roll the write deadline with progress instead.
 	streamWriter := httpstream.NewRollingDeadlineWriter(w)

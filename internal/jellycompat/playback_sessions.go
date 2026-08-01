@@ -75,6 +75,10 @@ type PlaybackMediaSource struct {
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
 	ETag                        string
+	// VirtualSourceURI pins the provider-neutral candidate selected and probed
+	// during PlaybackInfo. The temporary provider URL is resolved just in time.
+	VirtualSourceURI                 string
+	VirtualSourceOwnerInstallationID int
 }
 
 // CompatPlaybackStore persists compat playback negotiation sessions (the

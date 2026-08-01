@@ -107,6 +107,15 @@ type Dependencies struct {
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
+	// Virtual playback dependencies are optional. When configured, Jellyfin
+	// clients negotiate and transport virtual files through the same provider
+	// resolution and transient probing pipeline as native clients.
+	VirtualMediaResolver        VirtualMediaResolver
+	VirtualMediaRefreshResolver VirtualMediaRefreshResolver
+	VirtualPlaybackStreamLister VirtualPlaybackStreamLister
+	VirtualSourceProber         VirtualSourceProber
+	RemoteStreamRelay           RemoteStreamRelay
+
 	// Subtitle support (optional)
 	SubtitleRepo subtitles.Repository // optional; downloaded subtitle support
 	S3Client     subtitles.S3Client   // optional

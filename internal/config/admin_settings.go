@@ -53,6 +53,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.hw_accel":                        "auto",
 	"playback.transcode_enabled":               "true",
 	"playback.local_transcode_fallback":        "true",
+	"playback.virtual_provider_failover":       "true",
 	"playback.chapter_thumbnail_workers":       "1",
 	"playback.chapter_thumbnail_execution":     "local",
 	"playback.chapter_thumbnail_node_capacity": "1",
@@ -266,7 +267,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", "playback.local_transcode_fallback",
+	case "metadata.cache_images", "playback.transcode_enabled", "playback.local_transcode_fallback", "playback.virtual_provider_failover",
 		"allow_4k_transcode", "enable_transcode_throttle", "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",

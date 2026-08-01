@@ -3,10 +3,13 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -94,6 +97,8 @@ type RemuxSession struct {
 	cmd        *exec.Cmd
 	cancel     context.CancelFunc
 	outputPipe io.ReadCloser
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
@@ -299,10 +304,13 @@ func (s *RemuxSession) Read(p []byte) (int, error) {
 // Close stops the ffmpeg process and cleans up all resources.
 // It is safe to call Close multiple times.
 func (s *RemuxSession) Close() error {
-	s.cancel()
-	// Drain the pipe so cmd.Wait does not block.
-	_, _ = io.Copy(io.Discard, s.outputPipe)
-	return s.cmd.Wait()
+	s.closeOnce.Do(func() {
+		s.cancel()
+		// Drain the pipe so cmd.Wait does not block.
+		_, _ = io.Copy(io.Discard, s.outputPipe)
+		s.closeErr = s.cmd.Wait()
+	})
+	return s.closeErr
 }
 
 // containerMIME maps output format names to MIME types for HTTP responses.
@@ -336,16 +344,18 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
-	// Check file exists before starting ffmpeg to return a proper 404.
-	// Headers must be written before streaming begins, so we can't detect
-	// ffmpeg errors after WriteHeader(200) has been sent.
-	if _, err := os.Stat(filePath); err != nil {
-		if os.IsNotExist(err) {
-			http.Error(w, "file not found", http.StatusNotFound)
+	// Local files get the usual preflight. The only URL accepted here is the
+	// private loopback relay created by the API handler; arbitrary remote URLs
+	// remain unsupported.
+	if !isLoopbackRelayInput(filePath) {
+		if _, err := os.Stat(filePath); err != nil {
+			if os.IsNotExist(err) {
+				http.Error(w, "file not found", http.StatusNotFound)
+				return err
+			}
+			http.Error(w, "failed to access file", http.StatusInternalServerError)
 			return err
 		}
-		http.Error(w, "failed to access file", http.StatusInternalServerError)
-		return err
 	}
 
 	session, err := StartRemuxWithDVMode(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath)
@@ -353,14 +363,38 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
+
+	buf := make([]byte, 32*1024) // 32 KB buffer
+	// Do not commit 200 until FFmpeg produces media bytes. A relay/provider
+	// failure is therefore still safe for the handler to retry.
+	var first []byte
+	for len(first) == 0 {
+		n, readErr := session.Read(buf)
+		if n > 0 {
+			first = buf[:n]
+		}
+		if readErr != nil {
+			if len(first) == 0 {
+				_ = session.Close()
+				http.Error(w, "failed to start remux", http.StatusBadGateway)
+				return errors.New("remux produced no output")
+			}
+			break
+		}
+	}
 
 	w.Header().Set("Content-Type", containerMIME(outputFormat))
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.WriteHeader(http.StatusOK)
+	if _, writeErr := w.Write(first); writeErr != nil {
+		return nil
+	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 
-	// Stream ffmpeg output to the HTTP response.
-	buf := make([]byte, 32*1024) // 32 KB buffer
+	// Stream subsequent ffmpeg output to the HTTP response.
 	for {
 		n, readErr := session.Read(buf)
 		if n > 0 {
@@ -375,4 +409,13 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 			return nil // EOF or error — done streaming.
 		}
 	}
+}
+
+func isLoopbackRelayInput(filePath string) bool {
+	parsed, err := url.Parse(filePath)
+	if err != nil || parsed.Scheme != "http" || parsed.User != nil {
+		return false
+	}
+	address := net.ParseIP(parsed.Hostname())
+	return address != nil && address.IsLoopback()
 }

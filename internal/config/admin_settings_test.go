@@ -23,6 +23,9 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
 	if got := effective["playback.transcode_enabled"]; got != "true" {
 		t.Fatalf("playback.transcode_enabled = %q, want true", got)
 	}
+	if got := effective["playback.virtual_provider_failover"]; got != "true" {
+		t.Fatalf("playback.virtual_provider_failover = %q, want true", got)
+	}
 	if got := effective["theme.catalog_url"]; got != DefaultThemeCatalogURL {
 		t.Fatalf("theme.catalog_url = %q, want %q", got, DefaultThemeCatalogURL)
 	}

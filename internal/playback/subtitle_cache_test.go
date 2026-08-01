@@ -519,6 +519,35 @@ func TestServeSUPExtractWindowedMissWarmsOnce(t *testing.T) {
 	}
 }
 
+func TestServeSUPExtractWindowedRemoteInputSkipsDetachedWarm(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := windowedSupOpts(source, 0, 100, 3600)
+	opts.CacheIdentity = "virtual://movie/tt123?profile=1080p"
+	opts.DisableBackgroundWarm = true
+
+	var warmCalls, windowCalls int
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1", nil)
+	err := c.ServeSUPExtract(recorder, request, opts, func(_ context.Context, extractOpts StreamExtractOpts) error {
+		if extractOpts.AllowWindow {
+			windowCalls++
+			_, writeErr := extractOpts.Writer.Write([]byte("WINDOW"))
+			return writeErr
+		}
+		warmCalls++
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if windowCalls != 1 || warmCalls != 0 {
+		t.Fatalf("extract calls: window=%d warm=%d, want window=1 warm=0", windowCalls, warmCalls)
+	}
+	if recorder.Body.String() != "WINDOW" {
+		t.Fatalf("windowed body = %q", recorder.Body.String())
+	}
+}
+
 // Warms beyond the server-wide slot budget are dropped, not queued, and a
 // dropped warm must not leave an in-flight reservation behind.
 func TestWarmInBackgroundSemaphoreDrop(t *testing.T) {

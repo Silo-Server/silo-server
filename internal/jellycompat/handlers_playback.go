@@ -102,6 +102,10 @@ type sessionStarterContext interface {
 	StartSessionWithContext(ctx context.Context, userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 }
 
+type virtualSourceSetter interface {
+	SetVirtualSource(sessionID, virtualURI string, ownerInstallationID int) error
+}
+
 // transcodeStreamDetailsSetter is implemented by the native SessionManager.
 // Optional (like sessionStarterContext) so lightweight test fakes don't have
 // to; without it the session keeps transport-level defaults only.
@@ -189,15 +193,20 @@ type PlaybackHandler struct {
 	// and node-affinity rule for free. The reconstruction recipe is carried in the
 	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
 	// round-trip a native stream token.
-	tm                     *playback.TranscodeManager
-	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
-	S3Client               subtitles.S3Client    // optional; for serving S3 subtitles
-	S3Bucket               string                // bucket for subtitle storage
-	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
-	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
-	WatchScrobbler         PlaybackWatchScrobbler
-	StableIdentityResolver watchsync.ScrobbleIdentityResolver
-	terminalFallbackDelay  time.Duration
+	tm                          *playback.TranscodeManager
+	SubtitleRepo                subtitles.Repository  // optional; enables downloaded subtitles
+	S3Client                    subtitles.S3Client    // optional; for serving S3 subtitles
+	S3Bucket                    string                // bucket for subtitle storage
+	SettingsRepo                SettingsReader        // optional; reads watched threshold setting
+	SessionSyncer               PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	WatchScrobbler              PlaybackWatchScrobbler
+	StableIdentityResolver      watchsync.ScrobbleIdentityResolver
+	terminalFallbackDelay       time.Duration
+	VirtualMediaResolver        VirtualMediaResolver
+	VirtualMediaRefreshResolver VirtualMediaRefreshResolver
+	VirtualPlaybackStreamLister VirtualPlaybackStreamLister
+	VirtualSourceProber         VirtualSourceProber
+	RemoteStreamRelay           RemoteStreamRelay
 	// RecipeNodeStore hands a remote transcode's reconstruction recipe to the
 	// control-plane recipe store (Redis) so a dedicated transcode node that
 	// restarts can rebuild ffmpeg from it. The node-hop token is server-minted and
@@ -299,6 +308,19 @@ func NewPlaybackHandler(
 			FFmpegPath:   h.FFmpegPath,
 			HWAccel:      h.HWAccel,
 		}
+	}
+	h.tm.ResolveInput = func(ctx context.Context, mediaFileID, ownerInstallationID, userID int, profileID, canonicalPath string) (string, func(), error) {
+		if !isCompatVirtualPath(canonicalPath) {
+			return "", nil, nil
+		}
+		if h.VirtualMediaResolver == nil || h.RemoteStreamRelay == nil {
+			return "", nil, errors.New("virtual playback reconstruction is not configured")
+		}
+		resolved, err := h.VirtualMediaResolver.ResolveVirtualMedia(ctx, canonicalPath, ownerInstallationID, userID, profileID)
+		if err != nil {
+			return "", nil, err
+		}
+		return h.RemoteStreamRelay.Register(ctx, resolved)
 	}
 	if reg, ok := sessionMgr.(interface {
 		GetSession(string) (*playback.Session, error)
@@ -647,11 +669,18 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 
 	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
 	for _, version := range detail.Versions {
-		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
-		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
+		if req.MediaSourceID != "" && !mediaSourceIDsEqual(h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID)), req.MediaSourceID) {
 			continue
 		}
-
+		version, virtualSourceURI, virtualOwnerID, prepareErr := h.prepareVirtualPlaybackVersion(r.Context(), session, version)
+		if prepareErr != nil {
+			slog.WarnContext(r.Context(), "jellycompat virtual playback preparation failed", "component", "jellycompat",
+				"file_id", version.FileID, "error", prepareErr)
+			continue
+		}
+		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
+		source.VirtualSourceURI = virtualSourceURI
+		source.VirtualSourceOwnerInstallationID = virtualOwnerID
 		// Resolve the client's subtitle selection against both the
 		// embedded/external tracks and any downloaded subtitles before
 		// advertising the streams, so the chosen subtitle is marked default and
@@ -714,7 +743,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 
 	if len(sourceDTOs) == 0 {
-		writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
+		writeError(w, http.StatusBadGateway, "PlaybackUnavailable", "No usable media source is available")
 		return
 	}
 

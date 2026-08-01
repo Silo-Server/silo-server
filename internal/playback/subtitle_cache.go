@@ -115,7 +115,7 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 		return c.serveWindowedSUP(w, r, opts, extract)
 	}
 
-	if cached, modTime, ok := c.Lookup(opts.InputPath, opts.TrackIndex); ok {
+	if cached, modTime, ok := c.lookup(opts.InputPath, opts.CacheIdentity, opts.TrackIndex); ok {
 		defer func() { _ = cached.Close() }()
 		slog.DebugContext(r.Context(), "subtitle stream served from cache",
 			"input", opts.InputPath, "track", opts.TrackIndex)
@@ -132,7 +132,7 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	// BeginFill returns nil when another fill for this track is already in
 	// flight (or the cache dir is unusable); this request then streams its
 	// own uncached extract.
-	fill := c.BeginFill(opts.InputPath, opts.TrackIndex)
+	fill := c.beginFill(opts.InputPath, opts.CacheIdentity, opts.TrackIndex)
 	var writer io.Writer = w
 	if fill != nil {
 		writer = fill.Tee(w)
@@ -159,12 +159,12 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 // started so later windows — the client re-fetches on every seek — hit the
 // fast path.
 func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
+	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.CacheIdentity, opts.TrackIndex); ok {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
 		opts.InputIsExtractedSup = true
-	} else {
+	} else if !opts.DisableBackgroundWarm {
 		c.WarmInBackground(opts, extract)
 	}
 
@@ -196,7 +196,7 @@ func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SUPExtr
 			"input", opts.InputPath, "track", opts.TrackIndex)
 		return
 	}
-	fill := c.BeginFill(opts.InputPath, opts.TrackIndex)
+	fill := c.beginFill(opts.InputPath, opts.CacheIdentity, opts.TrackIndex)
 	if fill == nil {
 		// Another fill (client-driven or a previous warm) is already in
 		// flight, or the cache is unusable — either way, nothing to do.
@@ -270,7 +270,11 @@ func subtitleCacheKey(inputPath string, trackIndex int, mtime time.Time, size in
 // is bumped to record recency for LRU eviction. The caller owns closing the
 // returned file.
 func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, modTime time.Time, ok bool) {
-	path, modTime, ok := c.cachedEntryPath(inputPath, trackIndex)
+	return c.lookup(inputPath, "", trackIndex)
+}
+
+func (c *SubtitleCache) lookup(inputPath, cacheIdentity string, trackIndex int) (f *os.File, modTime time.Time, ok bool) {
+	path, modTime, ok := c.cachedEntryPath(inputPath, cacheIdentity, trackIndex)
 	if !ok {
 		return nil, time.Time{}, false
 	}
@@ -287,16 +291,16 @@ func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, mo
 // miss) and bumps the entry's mtime to record recency for LRU eviction.
 // Callers that hand the path to an external reader (ffmpeg) rather than
 // opening it themselves use this instead of Lookup.
-func (c *SubtitleCache) cachedEntryPath(inputPath string, trackIndex int) (path string, srcModTime time.Time, ok bool) {
+func (c *SubtitleCache) cachedEntryPath(inputPath, cacheIdentity string, trackIndex int) (path string, srcModTime time.Time, ok bool) {
 	dir := c.dir()
 	if dir == "" {
 		return "", time.Time{}, false
 	}
-	src, err := os.Stat(inputPath)
-	if err != nil {
+	identity, modTime, size, ok := subtitleCacheSource(inputPath, cacheIdentity, time.Now())
+	if !ok {
 		return "", time.Time{}, false
 	}
-	path = filepath.Join(dir, subtitleCacheKey(inputPath, trackIndex, src.ModTime(), src.Size()))
+	path = filepath.Join(dir, subtitleCacheKey(identity, trackIndex, modTime, size))
 	if _, err := os.Stat(path); err != nil {
 		return "", time.Time{}, false
 	}
@@ -306,7 +310,7 @@ func (c *SubtitleCache) cachedEntryPath(inputPath string, trackIndex int) (path 
 	if err := os.Chtimes(path, now, now); err != nil {
 		slog.Debug("subtitle cache recency bump failed", "path", path, "error", err)
 	}
-	return path, src.ModTime(), true
+	return path, modTime, true
 }
 
 // SubtitleCacheFill is an in-progress cache population for one track. Bytes
@@ -332,19 +336,23 @@ type SubtitleCacheFill struct {
 // cache directory can't be created, or another fill for the same track is
 // already in flight.
 func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCacheFill {
+	return c.beginFill(inputPath, "", trackIndex)
+}
+
+func (c *SubtitleCache) beginFill(inputPath, cacheIdentity string, trackIndex int) *SubtitleCacheFill {
 	dir := c.dir()
 	if dir == "" {
 		return nil
 	}
-	src, err := os.Stat(inputPath)
-	if err != nil {
+	identity, modTime, size, ok := subtitleCacheSource(inputPath, cacheIdentity, time.Now())
+	if !ok {
 		return nil
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Warn("subtitle cache dir create failed", "dir", dir, "error", err)
 		return nil
 	}
-	key := subtitleCacheKey(inputPath, trackIndex, src.ModTime(), src.Size())
+	key := subtitleCacheKey(identity, trackIndex, modTime, size)
 
 	c.mu.Lock()
 	if _, busy := c.inflight[key]; busy {
@@ -363,12 +371,25 @@ func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCac
 	return &SubtitleCacheFill{
 		c:          c,
 		key:        key,
-		inputPath:  inputPath,
+		inputPath:  identity,
 		trackIndex: trackIndex,
-		srcMtime:   src.ModTime(),
-		srcSize:    src.Size(),
+		srcMtime:   modTime,
+		srcSize:    size,
 		tmp:        tmp,
 	}
+}
+
+func subtitleCacheSource(inputPath, cacheIdentity string, now time.Time) (string, time.Time, int64, bool) {
+	if identity := strings.TrimSpace(cacheIdentity); identity != "" {
+		const generation = 10 * time.Minute
+		bucket := now.Unix() / int64(generation/time.Second)
+		return identity, time.Unix(bucket*int64(generation/time.Second), 0), 0, true
+	}
+	src, err := os.Stat(inputPath)
+	if err != nil {
+		return "", time.Time{}, 0, false
+	}
+	return inputPath, src.ModTime(), src.Size(), true
 }
 
 func (c *SubtitleCache) release(key string) {

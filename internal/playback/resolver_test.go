@@ -170,7 +170,7 @@ func TestResolver_Transcode_UnsupportedVideoCodec(t *testing.T) {
 
 func TestResolver_VirtualSourceWithoutProbeMetadataTranscodes(t *testing.T) {
 	file := &models.MediaFile{
-		FilePath:  "aiostreams://series/tt2403776/2/1",
+		FilePath:  "virtual://series/tt2403776/2/1",
 		Container: "virtual",
 	}
 

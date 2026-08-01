@@ -28,8 +28,23 @@ func init() {
 
 // TranscodeOpts holds configuration for an HLS transcode session.
 type TranscodeOpts struct {
+	// InputPath is the concrete source opened by FFmpeg for this process.
 	InputPath string
-	OutputDir string // e.g., /tmp/silo-transcode/{session_id}/
+	// MediaFileID identifies the catalog row behind InputPath. It is runtime
+	// routing context and is deliberately not needed in FFmpeg arguments.
+	MediaFileID                      int
+	VirtualSourceOwnerInstallationID int
+	// CanonicalInputPath is the durable source identity used by reconstruction
+	// cards. Virtual playback sets this to virtual://... while InputPath points
+	// at a short-lived, server-local relay. It is never passed to FFmpeg.
+	CanonicalInputPath string
+	// InputCleanup releases any transient relay registered for InputPath.
+	// Runtime-only: recipe cards deliberately do not serialize callbacks.
+	InputCleanup func()
+	// RefreshInput obtains a fresh concrete source before an FFmpeg restart.
+	// Virtual providers may rotate signed URLs while a long session is active.
+	RefreshInput func(context.Context) (resolvedPath string, cleanup func(), err error)
+	OutputDir    string // e.g., /tmp/silo-transcode/{session_id}/
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
 	OutputSubdir         string
@@ -101,6 +116,7 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
+	inputCleanupOnce     sync.Once
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -1475,6 +1491,11 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	defer s.mu.Unlock()
 
 	s.running = false
+	s.inputCleanupOnce.Do(func() {
+		if s.opts.InputCleanup != nil {
+			s.opts.InputCleanup()
+		}
+	})
 
 	// Clean up temporary directory.
 	if removeOutput && s.outputDir != "" {
@@ -1590,10 +1611,24 @@ func (s *TranscodeSession) restart(
 		return nil
 	}
 	s.restarting = true
+	refreshInput := s.opts.RefreshInput
 	cancelCurrent := s.cancel
 	done := s.done
 	s.mu.Unlock()
 	s.StopThrottler()
+
+	var refreshedPath string
+	var refreshedCleanup func()
+	if refreshInput != nil {
+		var err error
+		refreshedPath, refreshedCleanup, err = refreshInput(ctx)
+		if err != nil {
+			s.mu.Lock()
+			s.restarting = false
+			s.mu.Unlock()
+			return fmt.Errorf("refresh transcode input: %w", err)
+		}
+	}
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -1611,6 +1646,15 @@ func (s *TranscodeSession) restart(
 	}
 	s.restartCount++
 	opts := s.opts
+	if refreshedPath != "" {
+		if opts.InputCleanup != nil {
+			opts.InputCleanup()
+		}
+		opts.InputPath = refreshedPath
+		opts.InputCleanup = refreshedCleanup
+		s.opts.InputPath = refreshedPath
+		s.opts.InputCleanup = refreshedCleanup
+	}
 	s.mu.Unlock()
 
 	// Copy-mode restarts must clean stale segments so ffmpeg writes fresh

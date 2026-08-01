@@ -88,6 +88,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/remotestream"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -1939,7 +1940,7 @@ func main() {
 				}
 				out := make([]catalog.VirtualPlaybackVariant, 0, len(got))
 				for _, v := range got {
-					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR})
+					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR, OwnerInstallationID: v.OwnerInstallationID})
 				}
 				return out, nil
 			}
@@ -2078,6 +2079,9 @@ func main() {
 		}
 		if refreshWorker != nil && metadataService != nil {
 			taskMgr.Register(tasks.NewRefreshMetadataTask(refreshWorker, metadataService))
+		}
+		if itemRepo != nil {
+			taskMgr.Register(tasks.NewReconcileVirtualEpisodesTask(itemRepo))
 		}
 		if metadataImageCacheProcessor != nil {
 			taskMgr.Register(tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor))
@@ -2511,6 +2515,54 @@ func main() {
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
 			SessionSyncer:   deps.SessionSyncer,
+		}
+		if pluginService != nil {
+			virtualRelay := remotestream.NewRelay()
+			compatDeps.RemoteStreamRelay = virtualRelay
+			go func() {
+				<-appCtx.Done()
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := virtualRelay.Close(closeCtx); err != nil {
+					slog.Warn("close jellycompat virtual stream relay", "error", err)
+				}
+			}()
+
+			virtualProviderFailover := func() bool {
+				current := configWatcher.Config()
+				return current == nil || current.Playback.VirtualProviderFailover
+			}
+			compatDeps.VirtualMediaResolver = jellycompat.VirtualMediaResolverFunc(func(ctx context.Context, path string, ownerInstallationID, userID int, profileID string) (string, error) {
+				return pluginService.ResolveVirtualPlaybackForInstallation(ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover())
+			})
+			compatDeps.VirtualMediaRefreshResolver = jellycompat.VirtualMediaRefreshResolverFunc(func(ctx context.Context, path string, ownerInstallationID, userID int, profileID string) (string, error) {
+				return pluginService.RefreshVirtualPlaybackForInstallation(ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover())
+			})
+			compatDeps.VirtualPlaybackStreamLister = jellycompat.VirtualPlaybackStreamListerFunc(func(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) ([]jellycompat.VirtualPlaybackStream, error) {
+				streams, err := pluginService.ListVirtualPlaybackStreamsForInstallation(ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover())
+				if err != nil {
+					return nil, err
+				}
+				out := make([]jellycompat.VirtualPlaybackStream, 0, len(streams))
+				for _, stream := range streams {
+					out = append(out, jellycompat.VirtualPlaybackStream{URI: stream.URI, Label: stream.Label, OwnerInstallationID: stream.OwnerInstallationID})
+				}
+				return out, nil
+			})
+			ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
+			virtualProbeCache := scanner.NewVirtualProbeCache(10*time.Minute, 256)
+			compatDeps.VirtualSourceProber = func(ctx context.Context, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
+				return virtualProbeCache.Probe(ctx, sourceURL, file, func(probeCtx context.Context, probeURL string, probeFile *models.MediaFile) (*models.MediaFile, error) {
+					relayURL, cleanup, err := virtualRelay.Register(probeCtx, probeURL)
+					if err != nil {
+						return probeFile, err
+					}
+					defer cleanup()
+					return scanner.ProbeVirtualSource(probeCtx, ffprobePath, cfg.Playback.FFmpegPath, relayURL, probeFile, func(dvCtx context.Context, input string) bool {
+						return playback.DVRPUStrippable(dvCtx, cfg.Playback.FFmpegPath, input)
+					})
+				})
+			}
 		}
 
 		// Wire direct dependencies when DB is available.

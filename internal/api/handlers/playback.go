@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/remotestream"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -129,7 +130,23 @@ type PlaybackChapterThumbnailQueuer interface {
 }
 
 type VirtualMediaResolver interface {
-	ResolveVirtualMedia(ctx context.Context, virtualURI string) (string, error)
+	ResolveVirtualMedia(ctx context.Context, virtualURI string, ownerInstallationID int, userID int, profileID string) (string, error)
+}
+
+type VirtualMediaResolverFunc func(context.Context, string, int, int, string) (string, error)
+
+func (f VirtualMediaResolverFunc) ResolveVirtualMedia(ctx context.Context, virtualURI string, ownerInstallationID int, userID int, profileID string) (string, error) {
+	return f(ctx, virtualURI, ownerInstallationID, userID, profileID)
+}
+
+type VirtualMediaRefreshResolver interface {
+	RefreshVirtualMedia(ctx context.Context, virtualURI string, ownerInstallationID int, userID int, profileID string) (string, error)
+}
+
+type VirtualMediaRefreshResolverFunc func(context.Context, string, int, int, string) (string, error)
+
+func (f VirtualMediaRefreshResolverFunc) RefreshVirtualMedia(ctx context.Context, virtualURI string, ownerInstallationID int, userID int, profileID string) (string, error) {
+	return f(ctx, virtualURI, ownerInstallationID, userID, profileID)
 }
 
 type VirtualPlaybackSourceProber func(context.Context, string, *models.MediaFile) (*models.MediaFile, error)
@@ -175,6 +192,8 @@ type PlaybackHandler struct {
 	ProbeEnsurer                PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	ChapterThumbnailQueuer      PlaybackChapterThumbnailQueuer
 	VirtualMediaResolver        VirtualMediaResolver
+	VirtualMediaRefreshResolver VirtualMediaRefreshResolver
+	RemoteStreamRelay           *remotestream.Relay
 	VirtualPlaybackSourceProber VirtualPlaybackSourceProber
 	IntroAnalyzer               IntroEpisodeAnalyzer
 	IntroRepository             PlaybackIntroEligibilityChecker
@@ -720,12 +739,16 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 // the bytes are served by HTTP Range / a re-spawned remux pipe at the
 // client-supplied position.
 func identityRecipeCard(s *playback.Session) playback.RecipeCard {
+	var card playback.RecipeCard
 	switch s.PlayMethod {
 	case playback.PlayRemux:
-		return playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
+		card = playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
 	default:
-		return playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
+		card = playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}
+	card.InputPath = s.VirtualSourceURI
+	card.VirtualSourceOwnerInstallationID = s.VirtualSourceOwnerInstallationID
+	return card
 }
 
 func fileBitrateKbps(file *models.MediaFile) int {
@@ -862,7 +885,7 @@ func (h *PlaybackHandler) commitLegacyRemoteReplacement(
 		// A crash monitor can remove the predecessor while the remote successor is
 		// preparing. A false result is harmless: the new route is already complete,
 		// and CloseTranscodeSessionIf never touches a different local successor.
-		h.tm.CloseTranscodeSessionIf(sessionID, previousLocal, "")
+		h.tm.CloseTranscodeSessionIfLocked(sessionID, previousLocal, "")
 	}
 	unlock()
 
@@ -894,7 +917,7 @@ func (h *PlaybackHandler) commitLegacyRemoteLastWriter(
 		return err
 	}
 	if previousLocal != nil {
-		h.tm.CloseTranscodeSessionIf(sessionID, previousLocal, "")
+		h.tm.CloseTranscodeSessionIfLocked(sessionID, previousLocal, "")
 	}
 	unlock()
 
@@ -1703,35 +1726,23 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		return
 	}
 	canonicalFile := file
-	virtualStreamURL, err := h.resolveVirtualPlayback(r, canonicalFile, profileID)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "virtual_playback_failed", "Failed to resolve virtual playback")
-		return
-	}
-	virtualSource := virtualStreamURL != ""
+	virtualSource := isVirtualPlaybackFile(canonicalFile)
+	virtualStreamURL := ""
 	virtualProbeSucceeded := false
 	// A resolved virtual URI is the effective source for capability planning.
 	// Keep the catalog row canonical, but give the legacy planner the provider
-	// URL (and transient probe metadata when available) so browsers do not
-	// accidentally receive an incompatible audio codec as direct play.
+	// URL only to probe. The planner receives transient technical metadata while
+	// the file path remains canonical so plans, logs, tokens, and restart
+	// recipes never retain a signed provider URL.
 	if virtualSource {
-		transient := *file
-		transient.FilePath = virtualStreamURL
-		file = &transient
-		if h.VirtualPlaybackSourceProber != nil {
-			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-			probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, virtualStreamURL, file)
-			cancel()
-			if probeErr != nil {
-				slog.WarnContext(r.Context(), "legacy virtual playback source probe failed; using safe transcode fallback", "component", "playback", "file_id", req.FileID, "error", probeErr)
-			} else if probed != nil {
-				file = probed
-				virtualProbeSucceeded = true
-			}
+		resolved, resolveErr := h.resolveVirtualPlaybackSource(r, canonicalFile, profileID)
+		if resolveErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_playback_failed", "Failed to resolve virtual playback")
+			return
 		}
-	}
-	if virtualStreamURL != "" {
-		h.loadVirtualPlaybackCandidates(r.Context(), canonicalFile)
+		virtualStreamURL = resolved.URL
+		file = resolved.File
+		virtualProbeSucceeded = resolved.ProbeSucceeded
 	}
 	if virtualStreamURL == "" {
 		file = h.ensurePlaybackProbe(r.Context(), file)
@@ -1848,6 +1859,14 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		audioTrackIndex,
 		preserveDirectAudioSelection,
 	)
+	// Silo's progressive stream endpoint cannot safely expose an upstream HLS
+	// manifest unchanged because relative playlist and segment references
+	// would resolve against the Silo API. Normalize provider HLS through the
+	// same server remux path used for an incompatible local container.
+	if virtualSource && method == playback.PlayDirect &&
+		(isHLSVirtualStreamURL(virtualStreamURL) || strings.EqualFold(strings.TrimSpace(effectiveFile.Container), "hls")) {
+		method = playback.PlayRemux
+	}
 	if requestedFile != nil && effectiveFile != nil && requestedFile.ID != effectiveFile.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
 			slog.WarnContext(r.Context(), "requested playback file preflight failed; continuing with alternate file", "component", "api",
@@ -1929,17 +1948,28 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	if effectiveFile != nil {
 		streamBitrateKbps = effectiveFile.Bitrate
 	}
+	virtualSourceURI := ""
+	virtualSourceOwnerID := 0
+	virtualSourceSet := false
+	if virtualSource && effectiveFile != nil {
+		virtualSourceURI = effectiveFile.FilePath
+		virtualSourceOwnerID = effectiveFile.VirtualOwnerInstallationID
+		virtualSourceSet = true
+	}
 	if err := h.sessionMgr.UpdateStreamState(session.ID, playback.SessionStreamState{
-		PlayMethod:        session.PlayMethod,
-		BasePlayMethod:    session.BasePlayMethod,
-		AudioTrackIndex:   audioTrackIndex,
-		TranscodeAudio:    session.TranscodeAudio,
-		ClientIP:          clientip.FromContext(r.Context()),
-		ClientName:        clientInfo.Name,
-		ClientVersion:     clientInfo.Version,
-		ClientUserAgent:   clientInfo.UserAgent,
-		StreamBitrateKbps: streamBitrateKbps,
-		TargetAudioCodec:  targetAudioCodec,
+		PlayMethod:                       session.PlayMethod,
+		BasePlayMethod:                   session.BasePlayMethod,
+		AudioTrackIndex:                  audioTrackIndex,
+		TranscodeAudio:                   session.TranscodeAudio,
+		ClientIP:                         clientip.FromContext(r.Context()),
+		ClientName:                       clientInfo.Name,
+		ClientVersion:                    clientInfo.Version,
+		ClientUserAgent:                  clientInfo.UserAgent,
+		StreamBitrateKbps:                streamBitrateKbps,
+		TargetAudioCodec:                 targetAudioCodec,
+		VirtualSourceURI:                 virtualSourceURI,
+		VirtualSourceOwnerInstallationID: virtualSourceOwnerID,
+		VirtualSourceSet:                 virtualSourceSet,
 	}); err != nil {
 		slog.ErrorContext(r.Context(), "failed to set stream state", "component", "api", "session", session.ID, "error", err)
 	}
@@ -1947,6 +1977,10 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	session.ClientIP = clientip.FromContext(r.Context())
 	session.StreamBitrateKbps = streamBitrateKbps
 	session.TargetAudioCodec = targetAudioCodec
+	if virtualSourceSet {
+		session.VirtualSourceURI = virtualSourceURI
+		session.VirtualSourceOwnerInstallationID = virtualSourceOwnerID
+	}
 	h.persistSeriesPlaybackPreference(r.Context(), userID, profileID, effectiveFile)
 
 	if req.StartPosition != nil {
@@ -1968,7 +2002,7 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 			}
 		}
 	}
-	if h.ChapterThumbnailQueuer != nil && effectiveFile != nil {
+	if h.ChapterThumbnailQueuer != nil && effectiveFile != nil && !virtualSource {
 		slog.InfoContext(r.Context(),
 			"queueing chapter thumbnails", "component", "api",
 			"source",
@@ -1986,7 +2020,9 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 			session.Position,
 		)
 	}
-	h.maybeQueueLazyPlaybackMarkers(r.Context(), session, effectiveFile)
+	if !virtualSource {
+		h.maybeQueueLazyPlaybackMarkers(r.Context(), session, effectiveFile)
+	}
 
 	// Direct-play and remux sessions reconstruct from the identity stream token
 	// carried on their serve URL (see playbackStreamURL); there is no server-side
@@ -2066,12 +2102,6 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 				}
 			}
 		}
-	}
-
-	if virtualStreamURL != "" && session.PlayMethod == playback.PlayDirect {
-		resp.StreamURL = virtualStreamURL
-		resp.SubtitleURLs = nil
-		resp.PlaybackInfo = &playbackInfoResult{StreamType: "external_http"}
 	}
 
 	if h.protocolV3ShadowEnabled(r.Context()) {
@@ -2352,6 +2382,16 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
+	if isVirtualPlaybackFile(file) {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probed, _, probeErr := h.probeVirtualSessionFile(probeCtx, file, session)
+		cancel()
+		if probeErr != nil || probed == nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_probe_failed", "Failed to inspect virtual media audio tracks")
+			return
+		}
+		file = probed
+	}
 	if req.AudioTrackIndex < 0 || req.AudioTrackIndex >= len(file.AudioTracks) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Audio track index out of range")
 		return
@@ -2420,10 +2460,22 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	if legacyCopyRestart {
 		restartCopyAnchorResolved = true
 		if req.Position > 0 {
+			anchorInput := file.FilePath
+			var releaseAnchorInput func()
+			if isVirtualPlaybackFile(file) {
+				anchorInput, releaseAnchorInput, err = h.resolveVirtualInput(
+					r.Context(), file, session.UserID, session.ProfileID, false,
+				)
+				if err != nil {
+					writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media seek")
+					return
+				}
+				defer releaseAnchorInput()
+			}
 			anchor, anchorSegment, anchorErr := h.resolveLegacyCopySeekAnchor(
 				r.Context(),
 				h.playbackConfig().FFmpegPath,
-				file.FilePath,
+				anchorInput,
 				req.Position,
 				restartSegmentDuration,
 			)
@@ -3120,12 +3172,30 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
-	file = h.ensurePlaybackProbe(r.Context(), file)
+	if isVirtualPlaybackFile(file) {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probed, _, probeErr := h.probeVirtualSessionFile(probeCtx, file, session)
+		cancel()
+		if probeErr != nil || probed == nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_probe_failed", "Failed to inspect virtual media stream")
+			return
+		}
+		file = probed
+	} else {
+		file = h.ensurePlaybackProbe(r.Context(), file)
+	}
 	requestedFile := file
 	if originalFileID := requestedMediaFileID(session); originalFileID > 0 && originalFileID != file.ID {
 		originalFile, loadErr := h.loadFileByPreferredID(r.Context(), originalFileID, 0)
 		if loadErr != nil || originalFile == nil {
 			requestedFile = nil
+		} else if isVirtualPlaybackFile(originalFile) {
+			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			requestedFile, _, loadErr = h.probeVirtualSessionFile(probeCtx, originalFile, session)
+			cancel()
+			if loadErr != nil {
+				requestedFile = nil
+			}
 		} else {
 			requestedFile = h.ensurePlaybackProbe(r.Context(), originalFile)
 		}
@@ -3280,10 +3350,22 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	if videoCopy {
 		streamOriginSeconds = req.SeekSeconds
 		if req.SeekSeconds > 0 {
+			anchorInput := file.FilePath
+			var releaseAnchorInput func()
+			if isVirtualPlaybackFile(file) {
+				anchorInput, releaseAnchorInput, err = h.resolveVirtualInput(
+					r.Context(), file, session.UserID, session.ProfileID, false,
+				)
+				if err != nil {
+					writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media seek")
+					return
+				}
+				defer releaseAnchorInput()
+			}
 			anchor, anchorSegment, anchorErr := h.resolveLegacyCopySeekAnchor(
 				r.Context(),
 				playbackCfg.FFmpegPath,
-				file.FilePath,
+				anchorInput,
 				req.SeekSeconds,
 				req.SegmentDuration,
 			)
@@ -3309,7 +3391,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 
 	// Determine whether to run locally or forward to a remote transcode node.
 	var plan nodepool.Plan
-	if h.NodePlanner != nil {
+	if h.NodePlanner != nil && !isVirtualPlaybackFile(file) {
 		estKbps := req.TargetBitrateKbps
 		if estKbps <= 0 {
 			estKbps = fileBitrateKbps(file)
@@ -3449,7 +3531,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// Local transcode (integrated mode — no transcode nodes available).
 	// In distributed mode admins can disable this fallback so the API server
 	// never transcodes when no eligible node exists.
-	if h.NodePlanner != nil && !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
+	if h.NodePlanner != nil && !isVirtualPlaybackFile(file) && !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
 		writeError(w, http.StatusServiceUnavailable, "no_transcode_node",
 			"No transcode node is available and local transcode fallback is disabled")
 		return
@@ -3463,6 +3545,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 
 	localOpts := playback.TranscodeOpts{
 		InputPath:              file.FilePath,
+		MediaFileID:            file.ID,
 		OutputDir:              filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
 		SessionID:              req.SessionID,
 		SourceVideoCodec:       file.CodecVideo,
@@ -3541,7 +3624,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		}
 		currentRoute := sessionTranscodeRoute(currentSession)
 		currentProcessID := remoteTransportID(currentSession)
-		h.tm.CloseTranscodeSession(req.SessionID, "")
+		h.tm.CloseTranscodeSessionLocked(req.SessionID, "")
 		transcodeSession, err = h.startLocalPlaybackTransport(r.Context(), localOpts)
 		if err != nil {
 			unlock()
@@ -3551,7 +3634,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		h.tm.RegisterTranscodeSession(req.SessionID, transcodeSession)
 		startState.hwAccel = transcodeSession.Opts().HWAccel
 		if _, err := h.sessionMgr.ApplyReplacement(req.SessionID, transcodeStartReplacement(startState, localRoute)); err != nil {
-			h.tm.CloseTranscodeSessionIf(req.SessionID, transcodeSession, "")
+			h.tm.CloseTranscodeSessionIfLocked(req.SessionID, transcodeSession, "")
 			unlock()
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to publish transcode session")
 			return

@@ -218,6 +218,7 @@ func YAMLToSettingsMap(path string) (map[string]string, error) {
 		m["playback.chapter_thumbnail_node_capacity"] = strconv.Itoa(raw.Playback.ChapterThumbnailNodeCapacity)
 	}
 	m["playback.transcode_enabled"] = strconv.FormatBool(raw.Playback.TranscodeEnabled)
+	m["playback.virtual_provider_failover"] = strconv.FormatBool(raw.Playback.VirtualProviderFailover)
 
 	// Redis
 	m["redis.url"] = raw.Redis.URL

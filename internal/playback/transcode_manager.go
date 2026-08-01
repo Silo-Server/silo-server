@@ -66,6 +66,11 @@ type TranscodeManager struct {
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
+	// ResolveInput turns a durable canonical source into the concrete,
+	// short-lived input used by FFmpeg during reconstruction. The returned
+	// cleanup function lives with the transcode session. This keeps provider
+	// credentials out of recipe cards while still allowing restart/resume.
+	ResolveInput func(ctx context.Context, mediaFileID int, ownerInstallationID int, userID int, profileID string, canonicalPath string) (resolvedPath string, cleanup func(), err error)
 
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
@@ -434,6 +439,10 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		SubtitleBurnIn:     card.SubtitleBurnIn,
 		SegmentDuration:    card.SegmentDuration,
 	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(card.InputPath)), "virtual://") {
+		s.VirtualSourceURI = card.InputPath
+		s.VirtualSourceOwnerInstallationID = card.VirtualSourceOwnerInstallationID
+	}
 	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
 	// replayed token cannot reconstruct past the user's limit. Reconstructing the
 	// user's own surviving sessions still succeeds up to the cap; only the over-cap
@@ -573,6 +582,28 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	cfg := m.runtimeConfig()
 	outputDir := reconstructionOutputDir(cfg.TranscodeDir, sessionID, card.OutputSubdir)
 	opts := card.TranscodeOpts(outputDir, cfg.FFmpegPath, m.logSink())
+	if m.ResolveInput != nil {
+		resolved, cleanup, err := m.ResolveInput(ctx, card.MediaFileID, card.VirtualSourceOwnerInstallationID, card.UserID, card.ProfileID, opts.InputPath)
+		if err != nil {
+			slog.ErrorContext(ctx, "reconstruct transcode input resolution failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
+			return nil
+		}
+		if resolved != "" {
+			opts.CanonicalInputPath = opts.InputPath
+			opts.InputPath = resolved
+			opts.InputCleanup = cleanup
+			canonicalPath := opts.CanonicalInputPath
+			opts.RefreshInput = func(refreshCtx context.Context) (string, func(), error) {
+				return m.ResolveInput(refreshCtx, card.MediaFileID, card.VirtualSourceOwnerInstallationID, card.UserID, card.ProfileID, canonicalPath)
+			}
+		}
+	}
+	inputTransferred := false
+	defer func() {
+		if !inputTransferred && opts.InputCleanup != nil {
+			opts.InputCleanup()
+		}
+	}()
 	// Re-resolve environment-specific encode knobs from current config so an
 	// operator config change applies to reconstructed sessions too.
 	opts.HWAccel = cfg.HWAccel
@@ -618,6 +649,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil
 	}
+	inputTransferred = true
 
 	// Register under the map lock. The lifecycle lock guarantees no other path
 	// registered since the re-check above; the existing-check is kept as defensive
@@ -720,6 +752,15 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // deferred to a future PR; today a stopped session can be reconstructed by a
 // still-valid token until it expires.
 func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string) {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	m.CloseTranscodeSessionLocked(sessionID, transcodeNodeURL)
+}
+
+// CloseTranscodeSessionLocked is the teardown primitive for callers that
+// already hold LockSessionLifecycle. It prevents stop/restart from crossing
+// while avoiding recursive locking in atomic replacement commits.
+func (m *TranscodeManager) CloseTranscodeSessionLocked(sessionID, transcodeNodeURL string) {
 	// Clean up local session if one exists (defensive).
 	m.transcodeMu.Lock()
 	session := m.transcodes[sessionID]
@@ -749,6 +790,14 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 // further teardown (e.g. stopping the upstream playback session): when it is
 // false, a successor owns the id and must not be disturbed.
 func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *TranscodeSession, transcodeNodeURL string) bool {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	return m.CloseTranscodeSessionIfLocked(sessionID, expected, transcodeNodeURL)
+}
+
+// CloseTranscodeSessionIfLocked is CloseTranscodeSessionIf for callers that
+// already own the session lifecycle lock.
+func (m *TranscodeManager) CloseTranscodeSessionIfLocked(sessionID string, expected *TranscodeSession, transcodeNodeURL string) bool {
 	m.transcodeMu.Lock()
 	current := m.transcodes[sessionID]
 	if current != expected {

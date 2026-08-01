@@ -39,9 +39,10 @@ type Claims struct {
 
 	// Ownership / authorization lookup keys (re-resolved at reconstruct).
 	// Not trust assertions.
-	UserID      int    `json:"uid,omitempty"`
-	ProfileID   string `json:"pid,omitempty"`
-	MediaFileID int    `json:"mfid,omitempty"`
+	UserID                           int    `json:"uid,omitempty"`
+	ProfileID                        string `json:"pid,omitempty"`
+	MediaFileID                      int    `json:"mfid,omitempty"`
+	VirtualSourceOwnerInstallationID int    `json:"vowner,omitempty"`
 
 	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct

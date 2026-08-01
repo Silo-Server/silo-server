@@ -51,8 +51,6 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get item detail")
 		return
 	}
-	detail = h.items.refreshVirtualPlaybackDetail(r.Context(), detail, h.items.accessFilter(r))
-
 	h.enrichItemDetail(r, detail)
 	h.items.maybeRequestStaleDetailMetadataRefresh(r.Context(), detail)
 	writeJSON(w, http.StatusOK, detail)
@@ -78,8 +76,6 @@ func (h *CatalogResourceHandler) HandleGetItemVersions(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get item versions")
 		return
 	}
-	detail = h.items.refreshVirtualPlaybackDetail(r.Context(), detail, h.items.accessFilter(r))
-
 	if !h.items.requestCanViewFilePaths(r) {
 		for i := range detail.Versions {
 			detail.Versions[i].FilePath = ""

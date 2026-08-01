@@ -6,17 +6,21 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/remotestream"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -48,11 +52,15 @@ type StreamHandler struct {
 	// SubtitleCache stores full-track PGS (.sup) extracts under the transcode
 	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
 	// (tests / minimal setups) — extraction then always streams uncached.
-	SubtitleCache        *playback.SubtitleCache
-	SubtitleRepo         subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client             subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket             string               // bucket for subtitle storage
-	VirtualMediaResolver VirtualMediaResolver
+	SubtitleCache               *playback.SubtitleCache
+	SubtitleRepo                subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client                    subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket                    string               // bucket for subtitle storage
+	VirtualMediaResolver        VirtualMediaResolver
+	VirtualMediaRefreshResolver VirtualMediaRefreshResolver
+	VirtualStreamLister         VirtualPlaybackStreamLister
+	VirtualSourceProber         VirtualPlaybackSourceProber
+	RemoteStreamRelay           *remotestream.Relay
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -129,6 +137,19 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
+	file = virtualPlaybackSessionFile(file, session)
+	if isVirtualPlaybackFile(file) && session.PlayMethod == playback.PlayRemux && h.VirtualSourceProber != nil {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probed, _, probeErr := h.probeVirtualStreamFile(probeCtx, file, session)
+		cancel()
+		if probeErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_probe_failed", "Failed to inspect virtual media stream")
+			return
+		}
+		if probed != nil {
+			file = probed
+		}
+	}
 	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
 		if isPlaybackFileMissing(err) {
 			h.abortPlaybackSession(r.Context(), session)
@@ -139,7 +160,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	switch session.PlayMethod {
 	case playback.PlayDirect:
-		streamPath, err := resolveVirtualMediaPath(r.Context(), h.VirtualMediaResolver, file.FilePath)
+		streamPath, err := resolveVirtualMediaPath(
+			r.Context(), h.VirtualMediaResolver, file.FilePath,
+			file.VirtualOwnerInstallationID, session.UserID, session.ProfileID,
+		)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
 			return
@@ -149,12 +173,28 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				_ = h.sessionMgr.EndTransport(sessionID)
 			}()
 		}
+		if isVirtualPlaybackFile(file) {
+			if h.RemoteStreamRelay == nil {
+				writeError(w, http.StatusServiceUnavailable, "virtual_media_relay_unavailable", "Virtual media relay is unavailable")
+				return
+			}
+			if err := h.serveVirtualDirect(w, r, file, session, streamPath); err != nil {
+				h.handleTransportStartFailure(r.Context(), session, file, err)
+				if remotestream.RetryableBeforeResponse(err) {
+					writeError(w, http.StatusBadGateway, "virtual_media_stream_unavailable", "Virtual media stream is unavailable")
+				}
+			}
+			return
+		}
 		if err := playback.ServeDirectPlay(w, r, streamPath); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 
 	case playback.PlayRemux:
-		streamPath, err := resolveVirtualMediaPath(r.Context(), h.VirtualMediaResolver, file.FilePath)
+		streamPath, err := resolveVirtualMediaPath(
+			r.Context(), h.VirtualMediaResolver, file.FilePath,
+			file.VirtualOwnerInstallationID, session.UserID, session.ProfileID,
+		)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
 			return
@@ -170,6 +210,16 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
+		if isVirtualPlaybackFile(file) {
+			if h.RemoteStreamRelay == nil {
+				writeError(w, http.StatusServiceUnavailable, "virtual_media_relay_unavailable", "Virtual media relay is unavailable")
+				return
+			}
+			if err := h.serveVirtualRemux(w, r, file, session, streamPath, seekSeconds); err != nil {
+				h.handleTransportStartFailure(r.Context(), session, file, err)
+			}
+			return
+		}
 		if err := playback.ServeRemuxWithDVMode(w, r, streamPath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -183,6 +233,179 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			"Unknown play method")
 	}
 }
+
+func (h *StreamHandler) serveVirtualDirect(
+	w http.ResponseWriter,
+	r *http.Request,
+	file *models.MediaFile,
+	session *playback.Session,
+	primaryURL string,
+) error {
+	streamWriter := httpstream.NewRollingDeadlineWriter(w)
+	attemptCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	stopClientCancel := context.AfterFunc(r.Context(), cancel)
+	startupTimer := time.AfterFunc(virtualStartupBudget, cancel)
+	defer func() {
+		startupTimer.Stop()
+		stopClientCancel()
+		cancel()
+	}()
+	var lastErr error
+	for index := 0; index < 2; index++ {
+		resolved := primaryURL
+		if index > 0 {
+			if h.VirtualMediaRefreshResolver == nil {
+				break
+			}
+			var resolveErr error
+			resolved, resolveErr = h.VirtualMediaRefreshResolver.RefreshVirtualMedia(
+				attemptCtx, file.FilePath, file.VirtualOwnerInstallationID, session.UserID, session.ProfileID,
+			)
+			if resolveErr != nil {
+				lastErr = resolveErr
+				continue
+			}
+		}
+		deferred := newDeferredErrorResponseWriter(streamWriter, startupTimer.Stop)
+		proxyErr := h.RemoteStreamRelay.Proxy(deferred, r.Clone(attemptCtx), resolved)
+		if proxyErr == nil {
+			return nil
+		}
+		lastErr = proxyErr
+		if deferred.committed || !remotestream.RetryableBeforeResponse(proxyErr) || attemptCtx.Err() != nil {
+			break
+		}
+	}
+	return lastErr
+}
+
+func (h *StreamHandler) serveVirtualRemux(
+	w http.ResponseWriter,
+	r *http.Request,
+	file *models.MediaFile,
+	session *playback.Session,
+	primaryURL string,
+	seekSeconds float64,
+) error {
+	attempts := []VirtualPlaybackStream{{
+		URI:                 file.FilePath,
+		OwnerInstallationID: file.VirtualOwnerInstallationID,
+	}}
+	if h.VirtualMediaRefreshResolver != nil {
+		attempts = append(attempts, attempts[0])
+	}
+
+	// Bound the complete pre-response failover phase. Once media bytes commit,
+	// the timer is stopped and the successful stream can run for its full
+	// duration. Client cancellation is still propagated throughout.
+	attemptCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	stopClientCancel := context.AfterFunc(r.Context(), cancel)
+	startupTimer := time.AfterFunc(virtualStartupBudget, cancel)
+	defer func() {
+		startupTimer.Stop()
+		stopClientCancel()
+		cancel()
+	}()
+
+	var lastErr error
+	for index, attempt := range attempts {
+		resolved := primaryURL
+		if index > 0 {
+			var resolveErr error
+			resolved, resolveErr = h.VirtualMediaRefreshResolver.RefreshVirtualMedia(
+				attemptCtx, attempt.URI, attempt.OwnerInstallationID, session.UserID, session.ProfileID,
+			)
+			if resolveErr != nil {
+				lastErr = resolveErr
+				continue
+			}
+		}
+		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(attemptCtx, resolved)
+		if relayErr != nil {
+			lastErr = relayErr
+			continue
+		}
+		deferred := newDeferredErrorResponseWriter(w, startupTimer.Stop)
+		attemptRequest := r.Clone(attemptCtx)
+		remuxErr := playback.ServeRemuxWithDVMode(
+			deferred, attemptRequest, relayURL, "mp4", seekSeconds,
+			session.TranscodeAudio, session.AudioTrackIndex,
+			file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath(),
+		)
+		cleanup()
+		if remuxErr == nil {
+			return nil
+		}
+		lastErr = remuxErr
+		if deferred.committed {
+			return remuxErr
+		}
+		if attemptCtx.Err() != nil {
+			break
+		}
+	}
+	if lastErr == nil {
+		lastErr = errors.New("virtual remux provider returned no usable stream")
+	}
+	writeError(w, http.StatusBadGateway, "virtual_media_stream_unavailable", "Virtual media stream is unavailable")
+	return lastErr
+}
+
+type deferredErrorResponseWriter struct {
+	target    http.ResponseWriter
+	header    http.Header
+	committed bool
+	status    int
+	onCommit  func() bool
+}
+
+func newDeferredErrorResponseWriter(target http.ResponseWriter, onCommit func() bool) *deferredErrorResponseWriter {
+	return &deferredErrorResponseWriter{
+		target: target, header: make(http.Header), onCommit: onCommit,
+	}
+}
+
+func (w *deferredErrorResponseWriter) Header() http.Header { return w.header }
+
+func (w *deferredErrorResponseWriter) WriteHeader(status int) {
+	if w.committed || w.status != 0 {
+		return
+	}
+	w.status = status
+	if status >= http.StatusBadRequest {
+		return
+	}
+	for key, values := range w.header {
+		w.target.Header()[key] = append([]string(nil), values...)
+	}
+	w.committed = true
+	if w.onCommit != nil {
+		w.onCommit()
+	}
+	w.target.WriteHeader(status)
+}
+
+func (w *deferredErrorResponseWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if !w.committed {
+		// Error responses are deliberately discarded so another candidate can
+		// be attempted without leaking a partial response to the client.
+		return len(body), nil
+	}
+	return w.target.Write(body)
+}
+
+func (w *deferredErrorResponseWriter) Flush() {
+	if w.committed {
+		if flusher, ok := w.target.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
+}
+
+func (w *deferredErrorResponseWriter) Unwrap() http.ResponseWriter { return w.target }
 
 // HandleSubtitle extracts a subtitle track from the media file associated with
 // a playback session and serves it as WebVTT or raw ASS depending on the
@@ -228,6 +451,21 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	if err != nil || file == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
+	}
+	file = virtualPlaybackSessionFile(file, session)
+	virtualSourceURL := ""
+	if isVirtualPlaybackFile(file) {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probed, resolved, probeErr := h.probeVirtualStreamFile(probeCtx, file, session)
+		cancel()
+		if probeErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_probe_failed", "Failed to inspect virtual media subtitles")
+			return
+		}
+		if probed != nil {
+			file = probed
+		}
+		virtualSourceURL = resolved
 	}
 
 	externalCount := len(file.ExternalSubtitles)
@@ -275,7 +513,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		// demuxed, so the first byte lands within ~1s even on network
 		// storage. Works identically for direct-play, remux, and
 		// transcode because it doesn't depend on any other ffmpeg.
-		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, session, requestedFormat)
+		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, session, virtualSourceURL, requestedFormat)
 		return
 	}
 
@@ -391,9 +629,24 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
+	file = virtualPlaybackSessionFile(file, session)
 	if file == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
+	}
+	virtualSourceURL := ""
+	if isVirtualPlaybackFile(file) {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probed, resolved, probeErr := h.probeVirtualStreamFile(probeCtx, file, session)
+		cancel()
+		if probeErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_probe_failed", "Failed to inspect virtual media subtitle fonts")
+			return
+		}
+		if probed != nil {
+			file = probed
+		}
+		virtualSourceURL = resolved
 	}
 	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
 		if isPlaybackFileMissing(err) {
@@ -420,7 +673,22 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.ffmpegPath())
+	inputPath := file.FilePath
+	if isVirtualPlaybackFile(file) {
+		if virtualSourceURL == "" || h.RemoteStreamRelay == nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
+			return
+		}
+		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(r.Context(), virtualSourceURL)
+		if relayErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
+			return
+		}
+		defer cleanup()
+		inputPath = relayURL
+	}
+
+	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), inputPath, h.ffmpegPath())
 	if err != nil {
 		slog.WarnContext(r.Context(), "subtitle font extraction failed", "component", "api",
 			"file_id", file.ID,
@@ -499,7 +767,7 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 // track, seeked to the best-known playback position, and pipes its
 // stdout directly to w. Because this ffmpeg is independent of the video
 // pipeline, it works the same for direct play, remux, and transcode.
-func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session, requestedFormat ...string) {
+func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session, virtualSourceURL string, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
 	switch {
@@ -539,14 +807,48 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		"duration_seconds", duration,
 	)
 
+	inputPath := file.FilePath
+	if isVirtualPlaybackFile(file) {
+		resolved := virtualSourceURL
+		if resolved == "" {
+			var resolveErr error
+			resolved, resolveErr = resolveVirtualMediaPath(
+				r.Context(), h.VirtualMediaResolver, file.FilePath,
+				file.VirtualOwnerInstallationID, session.UserID, session.ProfileID,
+			)
+			if resolveErr != nil {
+				writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
+				return
+			}
+		}
+		if h.RemoteStreamRelay == nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
+			return
+		}
+		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(r.Context(), resolved)
+		if relayErr != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
+			return
+		}
+		defer cleanup()
+		inputPath = relayURL
+	}
 	opts := playback.StreamExtractOpts{
-		InputPath:       file.FilePath,
+		InputPath:       inputPath,
 		TrackIndex:      embeddedIndex,
 		SourceCodec:     track.Codec,
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
 		AllowWindow:     allowWindow,
 		FFmpegPath:      h.ffmpegPath(),
+	}
+	if isVirtualPlaybackFile(file) {
+		opts.CacheIdentity = file.FilePath
+		// A windowed PGS request may otherwise spawn a detached cache warm
+		// against this request-scoped relay URL. The relay registration is
+		// released when this handler returns; keep remote extraction synchronous
+		// instead of leaving the warmer with a stale loopback token.
+		opts.DisableBackgroundWarm = true
 	}
 	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {
 		// Only text sources can be converted to WebVTT. A bitmap track (PGS
@@ -592,6 +894,55 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		// the client see a truncated response.
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
 	}
+}
+
+func (h *StreamHandler) probeVirtualStreamFile(ctx context.Context, file *models.MediaFile, session *playback.Session) (*models.MediaFile, string, error) {
+	if file == nil || session == nil {
+		return file, "", nil
+	}
+	resolved, err := resolveVirtualMediaPath(
+		ctx, h.VirtualMediaResolver, file.FilePath,
+		file.VirtualOwnerInstallationID, session.UserID, session.ProfileID,
+	)
+	if err != nil {
+		return file, "", err
+	}
+	if h.VirtualSourceProber == nil {
+		return file, resolved, nil
+	}
+	probed, err := h.VirtualSourceProber(ctx, resolved, file)
+	return probed, resolved, err
+}
+
+func virtualPlaybackSessionFile(file *models.MediaFile, session *playback.Session) *models.MediaFile {
+	if file == nil || session == nil || !isVirtualPlaybackFile(file) ||
+		!strings.HasPrefix(strings.ToLower(strings.TrimSpace(session.VirtualSourceURI)), virtualPlaybackPrefix) ||
+		!sameVirtualMediaIdentity(file.FilePath, session.VirtualSourceURI) {
+		return file
+	}
+	copy := *file
+	copy.FilePath = session.VirtualSourceURI
+	if session.VirtualSourceOwnerInstallationID > 0 {
+		copy.VirtualOwnerInstallationID = session.VirtualSourceOwnerInstallationID
+	}
+	return &copy
+}
+
+func sameVirtualMediaIdentity(baseURI, selectedURI string) bool {
+	base, baseErr := url.Parse(baseURI)
+	selected, selectedErr := url.Parse(selectedURI)
+	if baseErr != nil || selectedErr != nil ||
+		!strings.EqualFold(base.Scheme, selected.Scheme) ||
+		!strings.EqualFold(base.Host, selected.Host) || base.EscapedPath() != selected.EscapedPath() {
+		return false
+	}
+	for _, key := range []string{"profile", "result"} {
+		value := strings.TrimSpace(base.Query().Get(key))
+		if value != "" && !strings.EqualFold(value, strings.TrimSpace(selected.Query().Get(key))) {
+			return false
+		}
+	}
+	return true
 }
 
 // subtitleSeekPosition picks the best-known starting position for a

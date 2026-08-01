@@ -408,6 +408,36 @@ func TestPlanPlaybackV3VirtualSourceDefersIncompleteProbe(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3VirtualHLSNeverUsesProgressiveDirectEndpoint(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.FilePath = "virtual://movie/tt0133093"
+	file.Container = "hls"
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	req := validStartRequestV3()
+	req.Capabilities.Containers = append(req.Capabilities.Containers, "hls")
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153},
+		BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160,
+		MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+	}}
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, VirtualSource: true,
+		AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil {
+		t.Fatalf("result = %s, want a playable server-mediated plan", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.Delivery == DeliveryOriginalHTTPV3 || result.PlayMethod == PlayDirect {
+		t.Fatalf("result = %s, provider HLS must not use the progressive direct endpoint", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.Resolution = "2160p"

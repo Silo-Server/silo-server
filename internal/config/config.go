@@ -165,6 +165,7 @@ type PlaybackConfig struct {
 	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
 	ChapterThumbnailNodeCapacity int    `yaml:"chapter_thumbnail_node_capacity"`
 	TranscodeEnabled             bool   `yaml:"transcode_enabled"`
+	VirtualProviderFailover      bool   `yaml:"virtual_provider_failover"`
 }
 
 // RedisConfig holds Redis connection settings.

@@ -137,6 +137,14 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		audioClaims.Reason = "no_audio_track"
 	}
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
+	// A provider HLS manifest cannot be returned unchanged from Silo's
+	// authenticated progressive /stream endpoint: its relative segment URLs
+	// would resolve against the Silo API instead of the provider. Route it
+	// through an ffmpeg-backed remux/transcode just like any other
+	// non-progressive local source.
+	if input.VirtualSource && strings.EqualFold(strings.TrimSpace(source.Container), "hls") {
+		containerOK = false
+	}
 	hlsEngineOK := engineAvailableV3(input.Request, EngineMedia3HLSV3)
 	// DV strip eligibility is split by executor pool: a progressive remux
 	// executes on this process's ffmpeg, while an HLS remux may run on a
@@ -251,7 +259,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			plan := base
 			plan.Delivery = DeliveryOriginalHTTPV3
 			plan.Engine = EngineMedia3DirectV3
-			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
+			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: sourceMIMETypeV3(file, source), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 			plan.DecisionReason = "client_dv7_to_dv81"
 			plan.EffectiveRecipe.DynamicRange = "dolby_vision"
 			plan.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "client_profile7_to_profile81"}
@@ -272,7 +280,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			plan := base
 			plan.Delivery = DeliveryOriginalHTTPV3
 			plan.Engine = EngineMedia3DirectV3
-			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
+			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: sourceMIMETypeV3(file, source), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 			plan.DecisionReason = "client_dv7_to_hdr10"
 			plan.EffectiveRecipe.DynamicRange = "hdr10"
 			plan.Claims.Video = VideoClaimsV3{HDR10: true}
@@ -295,7 +303,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		plan := base
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Engine = EngineMedia3DirectV3
-		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
+		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: sourceMIMETypeV3(file, source), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 		plan.DecisionReason = "validated_original_playback"
 		applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
@@ -436,13 +444,24 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
 }
 
+func sourceMIMETypeV3(file *models.MediaFile, source SourceDescriptorV3) string {
+	mimeType := "application/octet-stream"
+	if file != nil {
+		mimeType = MimeFromExtension(file.FilePath)
+	}
+	if mimeType == "application/octet-stream" {
+		mimeType = MimeFromContainer(source.Container)
+	}
+	return mimeType
+}
+
 func isVirtualPlaybackFileV3(file *models.MediaFile) bool {
 	if file == nil {
 		return false
 	}
 	path := strings.ToLower(strings.TrimSpace(file.FilePath))
 	return strings.EqualFold(strings.TrimSpace(file.Container), "virtual") ||
-		strings.HasPrefix(path, "aiostreams://") || strings.HasPrefix(path, "virtual://")
+		strings.HasPrefix(path, "virtual://")
 }
 
 // planVideoTranscodeV3 always executes on the HLS engine, so the caller must

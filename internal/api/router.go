@@ -59,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/remotestream"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -79,26 +80,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/Silo-Server/silo-server/internal/webhooksync"
 )
-
-func languageAudioTracks(languages []string) []models.AudioTrack {
-	tracks := make([]models.AudioTrack, 0, len(languages))
-	for _, language := range languages {
-		if language = strings.TrimSpace(language); language != "" {
-			tracks = append(tracks, models.AudioTrack{Language: language})
-		}
-	}
-	return tracks
-}
-
-func languageSubtitleTracks(languages []string) []models.SubtitleTrack {
-	tracks := make([]models.SubtitleTrack, 0, len(languages))
-	for _, language := range languages {
-		if language = strings.TrimSpace(language); language != "" {
-			tracks = append(tracks, models.SubtitleTrack{Index: len(tracks), Language: language})
-		}
-	}
-	return tracks
-}
 
 // Dependencies holds all shared dependencies that handlers need.
 type Dependencies struct {
@@ -665,51 +646,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			detailSvc,
 			providerIDRepo,
 		)
-		if deps.PluginService != nil && deps.FileRepo != nil {
-			itemsHandler.SetVirtualPlaybackDetailRefresher(func(ctx context.Context, contentID string, filter catalog.AccessFilter) (*catalog.ItemDetail, error) {
-				detail, err := detailSvc.GetItemDetail(ctx, contentID, filter)
-				if err != nil {
-					return nil, err
-				}
-				for _, version := range detail.Versions {
-					if !strings.Contains(version.FilePath, "results=all") || strings.Contains(version.FilePath, "result=") {
-						continue
-					}
-					source, sourceErr := deps.FileRepo.GetByID(ctx, version.FileID)
-					if sourceErr != nil || source == nil {
-						continue
-					}
-					streams, listErr := deps.PluginService.ListVirtualPlaybackStreams(ctx, version.FilePath)
-					if listErr != nil {
-						return detail, listErr
-					}
-					for _, stream := range streams {
-						if !strings.HasPrefix(stream.URI, "virtual://") || stream.URI == source.FilePath {
-							continue
-						}
-						fileSize := stream.FileSize
-						if fileSize < 0 {
-							fileSize = 0
-						}
-						now := time.Now()
-						if _, upsertErr := deps.FileRepo.Upsert(ctx, models.MediaFile{
-							ContentID: source.ContentID, MediaFolderID: source.MediaFolderID,
-							EpisodeID: source.EpisodeID, SeasonNumber: source.SeasonNumber,
-							EpisodeNumber: source.EpisodeNumber, FilePath: stream.URI,
-							FileSize: fileSize, Resolution: stream.Resolution,
-							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
-							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
-							ProbeUpdatedAt: &now, Bitrate: stream.Bitrate, VirtualOwnerInstallationID: stream.OwnerInstallationID,
-							AudioTracks: languageAudioTracks(stream.AudioLanguages), SubtitleTracks: languageSubtitleTracks(stream.SubtitleLanguages),
-						}); upsertErr != nil {
-							return detail, upsertErr
-						}
-					}
-					return detailSvc.GetItemDetail(ctx, contentID, filter)
-				}
-				return detail, nil
-			})
-		}
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
@@ -972,6 +908,21 @@ func NewRouter(deps Dependencies) chi.Router {
 	var playbackCommandDispatcher *playback.CommandDispatcher
 	var streamHandler *handlers.StreamHandler
 	if deps.SessionMgr != nil {
+		virtualProviderFailover := func() bool {
+			cfg := deps.CurrentConfig()
+			return cfg == nil || cfg.Playback.VirtualProviderFailover
+		}
+		remoteStreamRelay := remotestream.NewRelay()
+		if deps.AppContext != nil && deps.AppContext.Done() != nil {
+			go func() {
+				<-deps.AppContext.Done()
+				closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := remoteStreamRelay.Close(closeCtx); err != nil {
+					slog.Warn("close remote stream relay", "error", err)
+				}
+			}()
+		}
 		var playbackAdminStore handlers.PlaybackAdminStore
 		if deps.DB != nil {
 			playbackAdminStore = handlers.NewPGPlaybackAdminStore(deps.DB, deps.EventsHub)
@@ -979,9 +930,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.FileRepo != nil {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr, deps.FileRepo)
 			if deps.PluginService != nil {
-				playbackHandler.VirtualPlaybackResolver = deps.PluginService
-				playbackHandler.VirtualPlaybackStreamLister = handlers.VirtualPlaybackStreamListerFunc(func(ctx context.Context, path string) ([]handlers.VirtualPlaybackStream, error) {
-					streams, err := deps.PluginService.ListVirtualPlaybackStreams(ctx, path)
+				playbackHandler.VirtualPlaybackResolver = handlers.VirtualPlaybackResolverFunc(func(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) (string, error) {
+					return deps.PluginService.ResolveVirtualPlaybackForInstallation(
+						ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover(),
+					)
+				})
+				playbackHandler.VirtualPlaybackStreamLister = handlers.VirtualPlaybackStreamListerFunc(func(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) ([]handlers.VirtualPlaybackStream, error) {
+					streams, err := deps.PluginService.ListVirtualPlaybackStreamsForInstallation(
+						ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover(),
+					)
 					if err != nil {
 						return nil, err
 					}
@@ -992,48 +949,78 @@ func NewRouter(deps Dependencies) chi.Router {
 					return out, nil
 				})
 				playbackHandler.VirtualPlaybackStreamSink = func(ctx context.Context, source *models.MediaFile, streams []handlers.VirtualPlaybackStream) error {
+					candidates := make([]scanner.VirtualCandidate, 0, len(streams))
 					for _, stream := range streams {
 						if !strings.HasPrefix(stream.URI, "virtual://") || stream.URI == source.FilePath {
 							continue
 						}
-						now := time.Now()
-						fileSize := stream.FileSize
-						if fileSize < 0 {
-							fileSize = 0
-						}
-						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{
-							ContentID: source.ContentID, MediaFolderID: source.MediaFolderID,
-							EpisodeID: source.EpisodeID, SeasonNumber: source.SeasonNumber,
-							EpisodeNumber: source.EpisodeNumber, FilePath: stream.URI,
-							FileSize: fileSize, Resolution: stream.Resolution,
+						candidates = append(candidates, scanner.VirtualCandidate{
+							OwnerInstallationID: stream.OwnerInstallationID,
+							URI:                 stream.URI, Label: stream.Label, Resolution: stream.Resolution,
 							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
-							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
-							ProbeUpdatedAt: &now, Bitrate: stream.Bitrate, VirtualOwnerInstallationID: stream.OwnerInstallationID,
-							AudioTracks: languageAudioTracks(stream.AudioLanguages), SubtitleTracks: languageSubtitleTracks(stream.SubtitleLanguages),
+							HDR: stream.HDR, FileSize: stream.FileSize, Bitrate: stream.Bitrate,
+							AudioLanguages: stream.AudioLanguages, SubtitleLanguages: stream.SubtitleLanguages,
 						})
-						if err != nil {
-							return err
-						}
 					}
-					return nil
+					return deps.FileRepo.ReplaceVirtualCandidates(ctx, source, candidates)
 				}
 			}
 			streamHandler = handlers.NewStreamHandler(deps.SessionMgr, deps.FileRepo)
 		} else {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 			if deps.PluginService != nil {
-				playbackHandler.VirtualPlaybackResolver = deps.PluginService
+				playbackHandler.VirtualPlaybackResolver = handlers.VirtualPlaybackResolverFunc(func(ctx context.Context, path string, userID int, profileID string, ownerInstallationID int) (string, error) {
+					return deps.PluginService.ResolveVirtualPlaybackForInstallation(
+						ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover(),
+					)
+				})
 			}
 		}
-		playbackHandler.VirtualMediaResolver = deps.PluginHTTPProxy
+		if deps.PluginService != nil {
+			playbackHandler.VirtualMediaResolver = handlers.VirtualMediaResolverFunc(func(ctx context.Context, path string, ownerInstallationID int, userID int, profileID string) (string, error) {
+				return deps.PluginService.ResolveVirtualPlaybackForInstallation(
+					ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover(),
+				)
+			})
+			playbackHandler.VirtualMediaRefreshResolver = handlers.VirtualMediaRefreshResolverFunc(func(ctx context.Context, path string, ownerInstallationID int, userID int, profileID string) (string, error) {
+				return deps.PluginService.RefreshVirtualPlaybackForInstallation(
+					ctx, path, userID, profileID, ownerInstallationID, virtualProviderFailover(),
+				)
+			})
+		}
+		playbackHandler.RemoteStreamRelay = remoteStreamRelay
 		if deps.Config != nil {
 			ffprobePath := scanner.FFprobePathFromFFmpeg(deps.Config.Playback.FFmpegPath)
-			playbackHandler.VirtualPlaybackSourceProber = func(ctx context.Context, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
-				return scanner.ProbeVirtualSource(ctx, ffprobePath, sourceURL, file)
+			virtualProbeCache := scanner.NewVirtualProbeCache(10*time.Minute, 256)
+			virtualSourceProber := func(ctx context.Context, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
+				return virtualProbeCache.Probe(ctx, sourceURL, file, func(probeCtx context.Context, probeURL string, probeFile *models.MediaFile) (*models.MediaFile, error) {
+					relayURL, cleanup, err := remoteStreamRelay.Register(probeCtx, probeURL)
+					if err != nil {
+						return probeFile, err
+					}
+					defer cleanup()
+					return scanner.ProbeVirtualSource(
+						probeCtx,
+						ffprobePath,
+						deps.Config.Playback.FFmpegPath,
+						relayURL,
+						probeFile,
+						func(dvCtx context.Context, input string) bool {
+							return playback.DVRPUStrippable(dvCtx, deps.Config.Playback.FFmpegPath, input)
+						},
+					)
+				})
+			}
+			playbackHandler.VirtualPlaybackSourceProber = virtualSourceProber
+			if streamHandler != nil {
+				streamHandler.VirtualSourceProber = virtualSourceProber
 			}
 		}
 		if streamHandler != nil {
-			streamHandler.VirtualMediaResolver = deps.PluginHTTPProxy
+			streamHandler.VirtualMediaResolver = playbackHandler.VirtualMediaResolver
+			streamHandler.VirtualMediaRefreshResolver = playbackHandler.VirtualMediaRefreshResolver
+			streamHandler.VirtualStreamLister = playbackHandler.VirtualPlaybackStreamLister
+			streamHandler.RemoteStreamRelay = remoteStreamRelay
 		}
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
@@ -1072,6 +1059,34 @@ func NewRouter(deps Dependencies) chi.Router {
 			streamHandler.SessionSyncer = deps.SessionSyncer
 			if deps.FileRepo != nil {
 				streamHandler.MissingMarker = deps.FileRepo
+			}
+		}
+		if deps.FileRepo != nil && playbackHandler.VirtualMediaResolver != nil {
+			playbackHandler.TranscodeManager().ResolveInput = func(ctx context.Context, mediaFileID int, ownerInstallationID int, userID int, profileID string, canonicalPath string) (string, func(), error) {
+				if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(canonicalPath)), "virtual://") {
+					return canonicalPath, nil, nil
+				}
+				file, err := deps.FileRepo.GetByID(ctx, mediaFileID)
+				if err != nil || file == nil {
+					return "", nil, errors.New("virtual media file is unavailable")
+				}
+				if ownerInstallationID <= 0 {
+					ownerInstallationID = file.VirtualOwnerInstallationID
+				}
+				var resolved string
+				if playbackHandler.VirtualMediaRefreshResolver != nil {
+					resolved, err = playbackHandler.VirtualMediaRefreshResolver.RefreshVirtualMedia(
+						ctx, canonicalPath, ownerInstallationID, userID, profileID,
+					)
+				} else {
+					resolved, err = playbackHandler.VirtualMediaResolver.ResolveVirtualMedia(
+						ctx, canonicalPath, ownerInstallationID, userID, profileID,
+					)
+				}
+				if err != nil {
+					return "", nil, err
+				}
+				return remoteStreamRelay.Register(ctx, resolved)
 			}
 		}
 
@@ -1579,7 +1594,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 				out := make([]catalog.VirtualPlaybackVariant, 0, len(got))
 				for _, v := range got {
-					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR})
+					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR, OwnerInstallationID: v.OwnerInstallationID})
 				}
 				return out, nil
 			}

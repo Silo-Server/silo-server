@@ -411,28 +411,14 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	virtualSource := isVirtualPlaybackFile(requestedFile)
-	virtualStreamURL := ""
 	effectiveFile := requestedFile
 	if virtualSource {
-		streamURL, resolveErr := h.resolveVirtualPlayback(r, requestedFile, profileID)
+		resolved, resolveErr := h.resolveVirtualPlaybackSource(r, requestedFile, profileID)
 		if resolveErr != nil {
 			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("virtual_playback_failed", "Failed to resolve virtual playback.", true))
 			return
 		}
-		virtualStreamURL = streamURL
-		transient := *requestedFile
-		transient.FilePath = streamURL
-		effectiveFile = &transient
-		if h.VirtualPlaybackSourceProber != nil {
-			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-			probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, effectiveFile)
-			cancel()
-			if probeErr != nil {
-				slog.WarnContext(r.Context(), "virtual playback source probe failed; planner will use deferred metadata fallback", "component", "playback", "file_id", requestedFile.ID, "error", probeErr)
-			} else if probed != nil {
-				effectiveFile = probed
-			}
-		}
+		effectiveFile = resolved.File
 	}
 	// Physical files may need the persisted probe repair path. Virtual files
 	// are probed transiently above after their provider URL is resolved; never
@@ -440,7 +426,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	if !virtualSource {
 		requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
 	}
-	audioIndex, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
+	audioIndex, err := resolveV3AudioIndex(effectiveFile, req.AudioTrackID, req.AudioTrackIndex)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -460,9 +446,9 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if virtualSource && result.Plan != nil && result.Plan.Delivery == playback.DeliveryOriginalHTTPV3 {
-		result.Plan.Stream.URL = virtualStreamURL
-	}
+	// The resolved provider URL is intentionally probe-only. All delivery
+	// plans keep the canonical virtual source and route through Silo so signed
+	// provider credentials never enter durable plans or client responses.
 	if !virtualSource && result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
@@ -608,7 +594,7 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 	if result.Plan.Delivery != playback.DeliveryTranscodeHLSV3 && result.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
 		return h.prepareIdentityTransportV3(session, result), nil
 	}
-	if h.NodePlanner != nil {
+	if h.NodePlanner != nil && !isVirtualPlaybackFile(file) {
 		plan := h.planNodeSessionV3(r.Context(), session, result)
 		if plan.TranscodeNode != nil {
 			transformations, err := h.remoteTransformationsV3(r.Context(), plan.TranscodeNode.URL)
@@ -693,7 +679,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, 
 				return
 			}
 			committed = true
-			h.tm.CloseTranscodeSession(session.ID, "")
+			h.tm.CloseTranscodeSessionLocked(session.ID, "")
 			if previousNodeURL != "" {
 				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 			}
@@ -748,7 +734,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	}
 	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, float64(file.Duration))
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	ts, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: file.CodecVideo, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: float64(file.Duration), FastStart: true, NodeType: "integrated", ExecutionMode: "integrated", FFmpegLogSink: h.FFmpegLogSink})
+	ts, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{InputPath: file.FilePath, MediaFileID: file.ID, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: file.CodecVideo, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: float64(file.Duration), FastStart: true, NodeType: "integrated", ExecutionMode: "integrated", FFmpegLogSink: h.FFmpegLogSink})
 	if err != nil {
 		unlock()
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
@@ -829,7 +815,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 			return
 		}
 		committed = true
-		h.tm.CloseTranscodeSession(session.ID, "")
+		h.tm.CloseTranscodeSessionLocked(session.ID, "")
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 		}
@@ -852,6 +838,11 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) playback.SessionStreamState {
 	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
+	if isVirtualPlaybackFile(file) {
+		state.VirtualSourceURI = file.FilePath
+		state.VirtualSourceOwnerInstallationID = file.VirtualOwnerInstallationID
+		state.VirtualSourceSet = true
+	}
 	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
 		state.SegmentDuration = 2
 	}
@@ -1166,6 +1157,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		requestedFallbackID = 0
 		effectiveFallbackID = 0
 	}
+	session, err := h.sessionMgr.GetSession(record.SessionID)
+	if err != nil {
+		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "session_expired", message: "The playback session has expired.", retryable: true}
+	}
 	requestedFile, err := h.loadFileByPreferredID(r.Context(), record.RequestedMediaFileID, requestedFallbackID)
 	requestedEditionResolved := err == nil && requestedFile != nil && requestedFile.ID == record.RequestedMediaFileID
 	if err != nil || requestedFile == nil {
@@ -1187,6 +1182,37 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	currentEffectiveFile, err := h.loadFileByPreferredID(r.Context(), record.EffectiveMediaFileID, effectiveFallbackID)
 	if err != nil || currentEffectiveFile == nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "source_unavailable", message: "The effective media source is unavailable."}
+	}
+	// Resolve and probe virtual bytes before remapping track selections. The
+	// catalog placeholder deliberately has no authoritative track inventory;
+	// validating a track change against it rejects valid audio/subtitle choices.
+	if isVirtualPlaybackFile(currentEffectiveFile) {
+		bound := virtualPlaybackSessionFile(currentEffectiveFile, session)
+		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		if bound.FilePath != currentEffectiveFile.FilePath {
+			currentEffectiveFile, _, err = h.probeVirtualSessionFile(probeCtx, bound, session)
+		} else {
+			var resolved resolvedVirtualPlaybackSource
+			resolved, err = h.resolveVirtualPlaybackSource(r, currentEffectiveFile, session.ProfileID)
+			currentEffectiveFile = resolved.File
+		}
+		cancel()
+		if err != nil || currentEffectiveFile == nil {
+			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "virtual_playback_failed", message: "Failed to inspect the active virtual stream.", retryable: true, cause: err}
+		}
+	}
+	if requestedEditionResolved {
+		if requestedFile.ID == currentEffectiveFile.ID {
+			requestedFile = currentEffectiveFile
+		} else if intentChange && isVirtualPlaybackFile(requestedFile) {
+			resolved, resolveErr := h.resolveVirtualPlaybackSource(r, requestedFile, session.ProfileID)
+			if resolveErr == nil && resolved.File != nil {
+				requestedFile = resolved.File
+			} else {
+				requestedEditionResolved = false
+			}
+		}
+		plannerRequestedFile = requestedFile
 	}
 	effectiveFile := currentEffectiveFile
 	if intentChange {
@@ -1212,6 +1238,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
+	virtualSource := isVirtualPlaybackFile(effectiveFile)
 	start.FileID = effectiveFile.ID
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
@@ -1250,8 +1277,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
+	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, VirtualSource: virtualSource, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+	if !virtualSource && result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
@@ -1267,10 +1294,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	if result.Terminal != nil {
 		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
-	}
-	session, err := h.sessionMgr.GetSession(record.SessionID)
-	if err != nil {
-		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "session_expired", message: "The playback session has expired.", retryable: true}
 	}
 	replacementManager, ok := h.sessionMgr.(replacementStateManagerV3)
 	if !ok {
@@ -1711,10 +1734,14 @@ func (h *PlaybackHandler) enqueueRouteEventV3(event playback.RouteEventRecordV3)
 	}
 	h.v3EventOnce.Do(func() {
 		h.v3EventQueue = make(chan playback.RouteEventRecordV3, 512)
+		// The worker owns the store selected when it starts. Capturing the
+		// interface avoids racing a later handler reconfiguration with an
+		// asynchronous event write.
+		planStore := h.PlanStoreV3
 		go func() {
 			for value := range h.v3EventQueue {
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				if err := h.PlanStoreV3.RecordRouteEvent(ctx, value); err != nil {
+				if err := planStore.RecordRouteEvent(ctx, value); err != nil {
 					slog.Warn("playback route event write failed", "error", err, "event", value.Event)
 				}
 				cancel()
@@ -2045,6 +2072,10 @@ func (h *PlaybackHandler) lazyDVRPUStrippableV3(ctx context.Context, file *model
 	strippable := true
 	return func() bool {
 		once.Do(func() {
+			if len(file.VideoTracks) > 0 && file.VideoTracks[0].DVRPUStrippable != nil {
+				strippable = *file.VideoTracks[0].DVRPUStrippable
+				return
+			}
 			strippable = playback.DVRPUStrippable(ctx, h.playbackConfig().FFmpegPath, file.FilePath)
 		})
 		return strippable

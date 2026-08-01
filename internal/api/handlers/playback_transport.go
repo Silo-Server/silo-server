@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -20,12 +22,114 @@ import (
 // locking and decide whether registration is immediate or transactionally
 // staged.
 func (h *PlaybackHandler) startLocalPlaybackTransport(ctx context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
-	inputPath, err := resolveVirtualMediaPath(ctx, h.VirtualMediaResolver, opts.InputPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve transcode input: %w", err)
+	if !strings.HasPrefix(strings.ToLower(opts.InputPath), virtualPlaybackPrefix) {
+		return playback.StartTranscode(context.WithoutCancel(ctx), opts)
 	}
-	opts.InputPath = inputPath
-	return playback.StartTranscode(context.WithoutCancel(ctx), opts)
+	if opts.MediaFileID <= 0 || h.fileResolver == nil {
+		return nil, errors.New("virtual transcode input is missing its media file identity")
+	}
+	file, err := h.fileResolver.GetByID(ctx, opts.MediaFileID)
+	if err != nil || file == nil {
+		return nil, fmt.Errorf("load virtual transcode input: %w", err)
+	}
+	userID, profileID := 0, ""
+	ownerInstallationID := file.VirtualOwnerInstallationID
+	if session, sessionErr := h.sessionMgr.GetSession(opts.SessionID); sessionErr == nil && session != nil {
+		userID, profileID = session.UserID, session.ProfileID
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(session.VirtualSourceURI)), virtualPlaybackPrefix) {
+			copy := *file
+			copy.FilePath = session.VirtualSourceURI
+			if session.VirtualSourceOwnerInstallationID > 0 {
+				copy.VirtualOwnerInstallationID = session.VirtualSourceOwnerInstallationID
+			}
+			file = &copy
+			ownerInstallationID = file.VirtualOwnerInstallationID
+			opts.InputPath = file.FilePath
+		}
+	}
+	canonicalPath := opts.InputPath
+	opts.CanonicalInputPath = canonicalPath
+	opts.VirtualSourceOwnerInstallationID = ownerInstallationID
+	opts.RefreshInput = func(refreshCtx context.Context) (string, func(), error) {
+		return h.resolveVirtualInputURI(
+			refreshCtx, canonicalPath, ownerInstallationID,
+			userID, profileID, true,
+		)
+	}
+	var lastErr error
+	startupCtx, startupCancel := context.WithTimeout(ctx, virtualStartupBudget)
+	defer startupCancel()
+	for attempt := 0; attempt < 2; attempt++ {
+		relayURL, cleanup, resolveErr := h.resolveVirtualInputURI(
+			startupCtx, canonicalPath, ownerInstallationID, userID, profileID, attempt > 0,
+		)
+		if resolveErr != nil {
+			lastErr = resolveErr
+			continue
+		}
+		attemptOpts := opts
+		attemptOpts.InputPath = relayURL
+		attemptOpts.InputCleanup = cleanup
+		session, startErr := playback.StartTranscode(context.WithoutCancel(startupCtx), attemptOpts)
+		if startErr == nil {
+			if _, readyErr := session.WaitForManifest(20 * time.Second); readyErr == nil {
+				return session, nil
+			} else {
+				startErr = readyErr
+			}
+			_ = session.Close()
+		} else {
+			cleanup()
+		}
+		lastErr = startErr
+	}
+	if lastErr == nil {
+		lastErr = errors.New("virtual transcode provider returned no usable stream")
+	}
+	return nil, lastErr
+}
+
+func (h *PlaybackHandler) resolveVirtualInput(ctx context.Context, file *models.MediaFile, userID int, profileID string, forceRefresh bool) (string, func(), error) {
+	if file == nil || !isVirtualPlaybackFile(file) {
+		return "", nil, errors.New("virtual media file is required")
+	}
+	return h.resolveVirtualInputURI(
+		ctx, file.FilePath, file.VirtualOwnerInstallationID,
+		userID, profileID, forceRefresh,
+	)
+}
+
+func (h *PlaybackHandler) resolveVirtualInputURI(
+	ctx context.Context,
+	virtualURI string,
+	ownerInstallationID int,
+	userID int,
+	profileID string,
+	forceRefresh bool,
+) (string, func(), error) {
+	var inputPath string
+	var err error
+	if forceRefresh && h.VirtualMediaRefreshResolver != nil {
+		inputPath, err = h.VirtualMediaRefreshResolver.RefreshVirtualMedia(
+			ctx, virtualURI, ownerInstallationID, userID, profileID,
+		)
+	} else {
+		inputPath, err = resolveVirtualMediaPath(
+			ctx, h.VirtualMediaResolver, virtualURI,
+			ownerInstallationID, userID, profileID,
+		)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve virtual input: %w", err)
+	}
+	if h.RemoteStreamRelay == nil {
+		return "", nil, errors.New("remote stream relay is not configured")
+	}
+	relayURL, cleanup, err := h.RemoteStreamRelay.Register(ctx, inputPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("register virtual input relay: %w", err)
+	}
+	return relayURL, cleanup, nil
 }
 
 // startRemotePlaybackTransport is the shared remote-node launch primitive.
@@ -33,11 +137,9 @@ func (h *PlaybackHandler) startLocalPlaybackTransport(ctx context.Context, opts 
 // their existing public error envelopes while executing identical transport
 // startup and response parsing.
 func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, nodeURL string, request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, error) {
-	inputPath, err := resolveVirtualMediaPath(ctx, h.VirtualMediaResolver, request.InputPath)
-	if err != nil {
-		return transcodenode.TranscodeStartResponse{}, 0, fmt.Errorf("resolve transcode input: %w", err)
+	if strings.HasPrefix(strings.ToLower(request.InputPath), virtualPlaybackPrefix) {
+		return transcodenode.TranscodeStartResponse{}, 0, errors.New("virtual sources require an integrated transcode transport")
 	}
-	request.InputPath = inputPath
 	body, err := json.Marshal(request)
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err

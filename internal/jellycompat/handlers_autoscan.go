@@ -282,7 +282,8 @@ func parentFallbackAutoscanUpdateError(err error) bool {
 	switch reqErr.Message {
 	case "Path does not exist",
 		"Path must be a file or directory",
-		"Unsupported media file extension":
+		"Unsupported media file extension",
+		"Unsupported media file extension for library type":
 		return true
 	default:
 		return false
@@ -298,7 +299,8 @@ func softAutoscanUpdateError(err error) bool {
 	case "No library matches the given path",
 		"Path does not exist",
 		"Path must be a file or directory",
-		"Unsupported media file extension":
+		"Unsupported media file extension",
+		"Unsupported media file extension for library type":
 		return true
 	default:
 		return false
