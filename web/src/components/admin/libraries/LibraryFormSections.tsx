@@ -164,12 +164,29 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
         ))}
       </div>
       {form.errors.paths ? <p className="text-destructive text-xs">{form.errors.paths}</p> : null}
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
         <Button type="button" variant="outline" size="sm" onClick={() => setBrowserOpen(true)}>
           <FolderSearch className="mr-1 size-3.5" /> Browse
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={form.addPath}>
           <Plus className="mr-1 size-3.5" /> Add Path
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const mediaKind = form.type === "show" ? "series" : form.type === "movie" ? "movies" : form.type || "media";
+            const virtualPath = `virtual://${mediaKind}`;
+            if (form.paths.length === 1 && !(form.paths[0]?.trim())) {
+              form.updatePath(0, virtualPath);
+            } else {
+              form.addPath();
+              form.updatePath(form.paths.length, virtualPath);
+            }
+          }}
+        >
+          <Plus className="mr-1 size-3.5 text-primary" /> Add Virtual
         </Button>
       </div>
       <FolderBrowser

@@ -402,3 +402,16 @@ func TestCopyModeReconstruct_SkipsFastSeek(t *testing.T) {
 		t.Fatalf("encoded card must apply the seg×dur fast seek")
 	}
 }
+
+func TestPlaybackHWAccel(t *testing.T) {
+	for _, value := range []string{"qsv", "vaapi", "nvenc", " QSV "} {
+		if !playbackHWAccel(value) {
+			t.Errorf("playbackHWAccel(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "none", "software", "auto"} {
+		if playbackHWAccel(value) {
+			t.Errorf("playbackHWAccel(%q) = true, want false", value)
+		}
+	}
+}

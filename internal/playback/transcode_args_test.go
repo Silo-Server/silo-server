@@ -529,6 +529,19 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 	}
 }
 
+func TestIsHardwareTranscode(t *testing.T) {
+	for _, value := range []string{"qsv", "vaapi", "nvenc", "cuda", "videotoolbox", "amf", "auto", " QSV "} {
+		if !isHardwareTranscode(value) {
+			t.Errorf("isHardwareTranscode(%q) = false, want true", value)
+		}
+	}
+	for _, value := range []string{"", "none", "software", "unknown"} {
+		if isHardwareTranscode(value) {
+			t.Errorf("isHardwareTranscode(%q) = true, want false", value)
+		}
+	}
+}
+
 func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:         "/media/movie.mkv",

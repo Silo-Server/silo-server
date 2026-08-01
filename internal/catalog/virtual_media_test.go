@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -270,4 +271,48 @@ func TestNormalizeVirtualReconcileIDsUsesConcreteEmptyArrays(t *testing.T) {
 	if got := normalizeVirtualKeepIDs(keep); len(got) != 1 || got[0] != keep[0] {
 		t.Fatalf("normalizeVirtualKeepIDs changed non-empty input: %#v", got)
 	}
+}
+
+func TestNormalizeSeriesVirtualMediaCreatesEpisodeSources(t *testing.T) {
+	reg := &VirtualMediaRegistrar{}
+	t.Run("top-level series URI attaches to episode", func(t *testing.T) {
+		input := VirtualMedia{
+			LibraryID: "2", MediaType: "series", Title: "Series", TVDBID: "42",
+			VirtualURI: "virtual://series/tvdb/42?profile=1080p",
+		}
+		norm := reg.normalizeSeriesVirtualMedia(context.Background(), input)
+		if err := validateVirtualMedia(norm); err != nil {
+			t.Fatalf("normalized series failed validation: %v", err)
+		}
+		if len(norm.Episodes) != 1 {
+			t.Fatalf("len(Episodes) = %d, want 1", len(norm.Episodes))
+		}
+		if norm.Episodes[0].VirtualURI != "virtual://series/tvdb/42/1/1?profile=1080p" {
+			t.Fatalf("Episode VirtualURI = %q, want virtual://series/tvdb/42/1/1?profile=1080p", norm.Episodes[0].VirtualURI)
+		}
+		if norm.VirtualURI != "" {
+			t.Fatalf("top-level VirtualURI was not cleared: %q", norm.VirtualURI)
+		}
+	})
+
+	t.Run("top-level series variants attach to episodes", func(t *testing.T) {
+		input := VirtualMedia{
+			LibraryID: "2", MediaType: "series", Title: "Series", TVDBID: "42",
+			Variants: []VirtualMediaVariant{{VirtualURI: "virtual://series/tvdb/42?profile=1080p", Label: "1080p"}},
+			Episodes: []VirtualEpisode{{SeasonNumber: 1, EpisodeNumber: 2, Title: "Episode 2"}},
+		}
+		norm := reg.normalizeSeriesVirtualMedia(context.Background(), input)
+		if err := validateVirtualMedia(norm); err != nil {
+			t.Fatalf("normalized series failed validation: %v", err)
+		}
+		if len(norm.Episodes[0].Variants) != 1 {
+			t.Fatalf("len(Episodes[0].Variants) = %d, want 1", len(norm.Episodes[0].Variants))
+		}
+		if norm.Episodes[0].Variants[0].VirtualURI != "virtual://series/tvdb/42/1/2?profile=1080p" {
+			t.Fatalf("Episode Variant VirtualURI = %q, want virtual://series/tvdb/42/1/2?profile=1080p", norm.Episodes[0].Variants[0].VirtualURI)
+		}
+		if norm.Variants != nil || norm.VirtualURI != "" {
+			t.Fatalf("series-level sources were not cleared: VirtualURI=%q, Variants=%#v", norm.VirtualURI, norm.Variants)
+		}
+	})
 }

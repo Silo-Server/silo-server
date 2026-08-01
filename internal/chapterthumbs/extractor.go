@@ -173,7 +173,7 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 			return nil, fmt.Errorf("qsv requires a render device")
 		}
 		args = append(args,
-			"-init_hw_device", fmt.Sprintf("vaapi=va:%s,driver=iHD,kernel_driver=i915,vendor_id=0x8086", hwDevice),
+			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", hwDevice),
 			"-init_hw_device", "qsv=qs@va",
 			"-filter_hw_device", "va",
 			"-hwaccel", "vaapi",

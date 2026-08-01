@@ -544,6 +544,7 @@ function ConfigureDialog({
                     <PluginConfigForm
                       key={schema.key}
                       schema={schema}
+                      installationId={installation.id}
                       value={globalConfigs.find((entry) => entry.key === schema.key)?.value}
                       configuredSecrets={
                         globalConfigs.find((entry) => entry.key === schema.key)?.configured_secrets

@@ -381,6 +381,9 @@ func (s *Service) resolveVirtualStreamResult(
 		return nil, 0, err
 	}
 	var providerErr error
+	var firstCandidateResult *pluginv1.VirtualStreamResult
+	var firstCandidateInstallationID int
+
 	for _, provider := range providers {
 		result, err := s.resolveVirtualStreamProvider(ctx, provider.installationID, provider.capabilityID, request)
 		if err != nil {
@@ -391,17 +394,23 @@ func (s *Service) resolveVirtualStreamResult(
 			providerErr = errors.Join(providerErr, errors.New("virtual stream provider returned no candidates"))
 			continue
 		}
-		if selectVirtualCandidate(result.GetCandidates(), selection) == nil {
-			providerErr = errors.Join(providerErr, errors.New("virtual stream provider returned no matching candidate"))
-			// Result IDs name exact provider bytes. Trying that opaque ID on a
-			// different installation cannot preserve the active session identity.
-			if selection.resultID != "" {
-				break
-			}
-			continue
+		if firstCandidateResult == nil {
+			firstCandidateResult = result
+			firstCandidateInstallationID = provider.installationID
 		}
-		return result, provider.installationID, nil
+		if selectVirtualCandidate(result.GetCandidates(), selection) != nil {
+			return result, provider.installationID, nil
+		}
+		providerErr = errors.Join(providerErr, errors.New("virtual stream provider returned no matching candidate"))
+		if selection.resultID != "" {
+			break
+		}
 	}
+
+	if firstCandidateResult != nil && selection.resultID == "" {
+		return firstCandidateResult, firstCandidateInstallationID, nil
+	}
+
 	if providerErr != nil {
 		return nil, 0, fmt.Errorf("resolve virtual playback: %w", providerErr)
 	}
@@ -835,6 +844,13 @@ func selectVirtualCandidate(candidates []*pluginv1.VirtualStreamCandidate, selec
 	if selection.profile != "" {
 		for _, candidate := range candidates {
 			if strings.EqualFold(candidate.GetResolution().GetLabel(), selection.profile) {
+				return candidate
+			}
+		}
+		for _, candidate := range candidates {
+			lbl := strings.ToLower(candidate.GetResolution().GetLabel())
+			prof := strings.ToLower(selection.profile)
+			if lbl != "" && (strings.Contains(lbl, prof) || strings.Contains(prof, lbl)) {
 				return candidate
 			}
 		}

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
 
+import { Link } from "react-router";
+
 import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,7 +82,53 @@ function SelectSkeleton() {
 // label — shared so the markup can't drift between the field/switch/section
 // renderers.
 function FieldDescription({ text }: { text?: string }) {
-  return text ? <p className="text-muted-foreground text-xs leading-relaxed">{text}</p> : null;
+  if (!text) return null;
+
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    const label = match[1] ?? "";
+    const url = match[2] ?? "";
+    if (url.startsWith("/")) {
+      parts.push(
+        <Link
+          key={match.index}
+          to={url}
+          className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
+        >
+          {label}
+        </Link>
+      );
+    } else {
+      parts.push(
+        <a
+          key={match.index}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary font-medium underline underline-offset-2 hover:opacity-80"
+        >
+          {label}
+        </a>
+      );
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return (
+    <p className="text-muted-foreground text-xs leading-relaxed">
+      {parts.length > 0 ? parts : text}
+    </p>
+  );
 }
 
 // Loading placeholder for a dynamic MULTI_SELECT (tags): a few shimmer chips.

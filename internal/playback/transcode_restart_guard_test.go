@@ -2,10 +2,38 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
 )
+
+func TestTrySoftwareFallbackDisabled(t *testing.T) {
+	session := &TranscodeSession{
+		outputDir: t.TempDir(),
+		waitErr:   errors.New("qsv encoder error"),
+		opts: TranscodeOpts{
+			HWAccel:          "qsv",
+			TargetCodecVideo: "h264",
+		},
+	}
+	if session.TrySoftwareFallback(context.Background()) {
+		t.Fatal("TrySoftwareFallback() = true, want false (automatic software fallback disabled)")
+	}
+}
+
+func TestIsHardwareTranscodeRecognizesAutoAndQSV(t *testing.T) {
+	for _, hw := range []string{"qsv", "vaapi", "nvenc", "auto", "QSV", "Auto"} {
+		if !IsHardwareTranscode(hw) {
+			t.Errorf("IsHardwareTranscode(%q) = false, want true", hw)
+		}
+	}
+	for _, hw := range []string{"none", "", "cpu", "soft"} {
+		if IsHardwareTranscode(hw) {
+			t.Errorf("IsHardwareTranscode(%q) = true, want false", hw)
+		}
+	}
+}
 
 // TestSegmentRecoveryDecisionWaitsWhileRestarting covers half of issue #243's
 // seek-freeze: while a restart is already in flight, a concurrent segment

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ConnectionCheckResponse,
@@ -9,9 +9,11 @@ import type {
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { usePluginInstallationConfigOptions } from "@/hooks/queries/admin/plugins";
 
 import { SchemaForm } from "./SchemaForm";
 import { buildSchemaValues, parseFieldTypes } from "./schemaFormUtils";
+import type { SchemaOption } from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
 
@@ -19,6 +21,8 @@ type Props = {
   schema: PluginConfigSchema;
   value?: PluginConfigValue;
   configuredSecrets?: string[];
+  /** Installation ID used to load dynamic SELECT options from the plugin. */
+  installationId?: number;
   onSave: (key: string, value: PluginConfigValue, clearSecrets: string[]) => void;
   onTest?: (
     key: string,
@@ -146,6 +150,7 @@ export function PluginConfigForm({
   schema,
   value,
   configuredSecrets = [],
+  installationId,
   onSave,
   onTest,
   isSaving = false,
@@ -182,6 +187,34 @@ export function PluginConfigForm({
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
   const [profilePreview, setProfilePreview] = useState<string | null>(null);
   const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
+
+  // Dynamic SELECT options: loaded once on mount (and when installationId changes)
+  // from the plugin's request_router.v1 ListConfigOptions gRPC method.
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, SchemaOption[]>>({});
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const loadOptions = usePluginInstallationConfigOptions();
+  const hasDynamicFields = useMemo(
+    () => fields.some((f) => f.dynamic_options),
+    [fields],
+  );
+  const loadOptionsRef = useRef(loadOptions);
+  loadOptionsRef.current = loadOptions;
+
+  useEffect(() => {
+    if (!installationId || !hasDynamicFields) return;
+    setOptionsLoading(true);
+    loadOptionsRef.current
+      .mutateAsync({ installationId })
+      .then((loaded) => {
+        setDynamicOptions(loaded ?? {});
+      })
+      .catch(() => {
+        // Silently swallow — fields degrade to empty dropdowns.
+      })
+      .finally(() => setOptionsLoading(false));
+    // Re-run only when the installation changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [installationId, hasDynamicFields]);
 
   useEffect(() => {
     setValues(Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])));
@@ -250,6 +283,8 @@ export function PluginConfigForm({
         values={values}
         onChange={handleChange}
         idPrefix={schema.key}
+        dynamicOptions={dynamicOptions}
+        optionsLoading={optionsLoading}
       />
 
       {fields.some((field) => field.key === "quality_profiles") ? (

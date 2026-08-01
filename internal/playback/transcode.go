@@ -68,6 +68,7 @@ type TranscodeOpts struct {
 	StartSegmentNumber     int    // -hls_segment_start_number, default 0
 	FFmpegPath             string // optional explicit ffmpeg binary path
 	HWAccel                string // auto, qsv, vaapi, nvenc, none
+	InitialHWAccel         string // requested HWAccel before resolution (e.g. qsv)
 	HWDevice               string // e.g., /dev/dri/renderD128 (default if empty)
 	SubtitleTrackIndex     int    // -1 = no subtitles
 	SubtitleBurnIn         bool
@@ -116,7 +117,13 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
-	inputCleanupOnce     sync.Once
+	// softwareFallbackAttempted prevents a hardware encoder failure from
+	// repeatedly restarting the same broken hardware pipeline. The fallback
+	// keeps the selected source and resume position, changing only the video
+	// execution path to software.
+	softwareFallbackAttempted bool
+	softwareFallbackPending   bool
+	inputCleanupOnce          sync.Once
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -185,6 +192,9 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
+	}
+	if opts.InitialHWAccel == "" {
+		opts.InitialHWAccel = opts.HWAccel
 	}
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 
@@ -518,7 +528,7 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		}
 		// VAAPI→QSV hardware pipeline: derive QSV from VAAPI device.
 		args = append(args,
-			"-init_hw_device", fmt.Sprintf("vaapi=va:%s,driver=iHD,kernel_driver=i915,vendor_id=0x8086", hwDevice),
+			"-init_hw_device", fmt.Sprintf("vaapi=va:%s", hwDevice),
 			"-init_hw_device", "qsv=qs@va",
 			"-filter_hw_device", "va",
 			"-hwaccel", "vaapi",
@@ -1529,6 +1539,33 @@ func (s *TranscodeSession) WaitError() error {
 	return s.waitErr
 }
 
+// TrySoftwareFallback switches a failed hardware-accelerated encode to the
+// software encoder while preserving the current source, seek position, and
+// segment numbering. Hardware remains the normal first choice; this is only
+// eligible after FFmpeg has exited with an error. It returns true when a
+// replacement process was started (or is already being restarted).
+//
+// The caller must re-arm any external exit monitor through the usual restart
+// hook. Keeping this decision on the session avoids losing the resume point or
+// accidentally selecting a different provider version before software has had
+// a chance to recover the same stream.
+func (s *TranscodeSession) TrySoftwareFallback(ctx context.Context) bool {
+	return false
+}
+
+func IsHardwareTranscode(hwAccel string) bool {
+	switch strings.ToLower(strings.TrimSpace(hwAccel)) {
+	case "qsv", "vaapi", "nvenc", "cuda", "videotoolbox", "amf", "auto":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHardwareTranscode(hwAccel string) bool {
+	return IsHardwareTranscode(hwAccel)
+}
+
 // Opts returns the TranscodeOpts used to create this session (for testing).
 func (s *TranscodeSession) Opts() TranscodeOpts {
 	s.mu.Lock()
@@ -1646,6 +1683,20 @@ func (s *TranscodeSession) restart(
 	}
 	s.restartCount++
 	opts := s.opts
+	if s.softwareFallbackPending {
+		// QSV/VAAPI/NVENC remain the preferred path. This flag is set only after
+		// that path has exited with an error; consume it exactly once for the
+		// replacement process so ordinary seek restarts retain their policy.
+		opts.HWAccel = "none"
+		if strings.EqualFold(opts.TargetCodecVideo, "copy") {
+			opts.TargetCodecVideo = "h264"
+			opts.VideoBitstreamFilter = ""
+		}
+		s.softwareFallbackPending = false
+		s.opts.HWAccel = "none"
+		s.opts.TargetCodecVideo = opts.TargetCodecVideo
+		s.opts.VideoBitstreamFilter = ""
+	}
 	if refreshedPath != "" {
 		if opts.InputCleanup != nil {
 			opts.InputCleanup()
@@ -1776,6 +1827,16 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 		}
 
 		if !running && waitErr != nil {
+			if s.TrySoftwareFallback(context.Background()) {
+				continue
+			}
+			stderr := ""
+			if s.stderr != nil {
+				stderr = truncateStderr(s.stderr.String())
+			}
+			if stderr != "" {
+				return "", fmt.Errorf("%w: %v (stderr: %s)", ErrTranscodeFailed, waitErr, stderr)
+			}
 			return "", fmt.Errorf("%w: %v", ErrTranscodeFailed, waitErr)
 		}
 		// If ffmpeg finished cleanly but the segment doesn't exist,

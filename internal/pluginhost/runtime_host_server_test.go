@@ -168,11 +168,35 @@ type fakeConfigSetter struct {
 	value          map[string]any
 }
 
-type fakeVirtualCatalog struct{ installationID int }
+type fakeVirtualCatalog struct {
+	installationID int
+	request        catalog.VirtualMedia
+}
 
 func (f *fakeVirtualCatalog) UpsertVirtualMedia(_ context.Context, installationID int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
 	f.installationID = installationID
+	f.request = req
 	return &catalog.VirtualMediaResult{MediaID: "movie-tmdb-42", LibraryID: req.LibraryID}, nil
+}
+
+func TestRuntimeHostServerUpsertVirtualMediaMapsEpisodeSources(t *testing.T) {
+	registrar := &fakeVirtualCatalog{}
+	srv := pluginhost.NewRuntimeHostServerWithServices(&fakeHub{}, &fakeLibLister{}, nil, nil, nil, registrar, "virtual.plugin", 77)
+	_, err := srv.UpsertVirtualMedia(context.Background(), &pluginv1.UpsertVirtualMediaRequest{
+		LibraryId: "2", MediaType: "series", Title: "Example", TvdbId: "42",
+		Episodes: []*pluginv1.VirtualEpisode{{
+			SeasonNumber: 1, EpisodeNumber: 1, VirtualUri: "virtual://series/tvdb/42/1/1",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registrar.request.VirtualURI != "" {
+		t.Fatalf("series-level URI = %q, want empty", registrar.request.VirtualURI)
+	}
+	if len(registrar.request.Episodes) != 1 || registrar.request.Episodes[0].VirtualURI == "" {
+		t.Fatalf("episode sources were not mapped: %+v", registrar.request.Episodes)
+	}
 }
 
 func TestRuntimeHostServerUpsertVirtualMediaUsesBoundInstallation(t *testing.T) {

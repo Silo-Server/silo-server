@@ -19,6 +19,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -29,6 +30,11 @@ const (
 	maxPluginUploadChunkSize = 1 << 20
 	defaultPluginChunkSize   = 512 << 10
 )
+
+// libraryLister lists all media libraries; used for dynamic SELECT options.
+type libraryLister interface {
+	List(ctx context.Context) ([]*models.MediaFolder, error)
+}
 
 type PluginHandler struct {
 	repositories  *plugins.RepositoryStore
@@ -41,6 +47,7 @@ type PluginHandler struct {
 	imageResolver *metadata.PluginImageResolver
 	uploads       *uploads.Manager
 	restartStatus *ServerRestartStatusTracker
+	folderRepo    libraryLister
 }
 
 func NewPluginHandler(
@@ -1059,6 +1066,86 @@ func (h *PluginHandler) HandleTestInstallationConfig(w http.ResponseWriter, r *h
 		Success: true,
 		Message: "Connection successful.",
 	})
+}
+
+// HandleListInstallationConfigOptions probes the plugin's request_router.v1
+// ListConfigOptions gRPC call and returns a map of field key → option list.
+// This powers dynamic SELECT dropdowns on the plugin settings page for plugins
+// that are self-contained (no external base_url / API key required).
+func (h *PluginHandler) HandleListInstallationConfigOptions(w http.ResponseWriter, r *http.Request) {
+	id, err := parseNamedIDParam(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid installation ID")
+		return
+	}
+	if h.service == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Plugin service not configured")
+		return
+	}
+
+	installation, err := h.installations.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, plugins.ErrInstallationNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "loading plugin installation for config options", "component", "api", "installation_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin installation")
+		return
+	}
+
+	// Find the first request_router.v1 capability on this installation.
+	caps, err := h.installations.ListCapabilities(r.Context(), installation.ID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "listing plugin capabilities for config options", "component", "api", "installation_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin capabilities")
+		return
+	}
+
+	const routerCapability = "request_router.v1"
+	var capabilityID string
+	for _, cap := range caps {
+		if cap.Type == routerCapability {
+			capabilityID = cap.ID
+			break
+		}
+	}
+	if capabilityID == "" {
+		// Plugin does not expose a request_router capability; return empty options gracefully.
+		writeJSON(w, http.StatusOK, map[string]any{})
+		return
+	}
+
+	client, err := h.service.RequestRouterClient(r.Context(), id, capabilityID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "getting request router client for config options", "component", "api", "installation_id", id, "error", err)
+		writeError(w, http.StatusServiceUnavailable, "plugin_unavailable", "Plugin is not running")
+		return
+	}
+
+	resp, err := client.ListConfigOptions(r.Context(), &pluginv1.ListConfigOptionsRequest{
+		CapabilityId: capabilityID,
+	})
+	if err != nil {
+		slog.ErrorContext(r.Context(), "calling ListConfigOptions on plugin", "component", "api", "installation_id", id, "error", err)
+		writeError(w, http.StatusBadGateway, "plugin_error", "Plugin returned an error")
+		return
+	}
+
+	// Translate proto option lists into {value, label} JSON arrays.
+	type optionJSON struct {
+		Value string `json:"value"`
+		Label string `json:"label"`
+	}
+	out := map[string][]optionJSON{}
+	for field, list := range resp.GetOptionsByField() {
+		opts := make([]optionJSON, 0, len(list.GetOptions()))
+		for _, o := range list.GetOptions() {
+			opts = append(opts, optionJSON{Value: o.GetValue(), Label: o.GetLabel()})
+		}
+		out[field] = opts
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *PluginHandler) HandlePutAuthBinding(w http.ResponseWriter, r *http.Request) {

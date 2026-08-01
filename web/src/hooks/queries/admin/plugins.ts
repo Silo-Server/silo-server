@@ -400,3 +400,16 @@ export function useSavePluginTaskBinding() {
     },
   });
 }
+
+// usePluginInstallationConfigOptions loads dynamic SELECT options from a plugin's
+// request_router.v1 ListConfigOptions gRPC method. Used by PluginConfigForm to
+// populate dropdown fields for self-contained plugins (no external base_url required).
+export function usePluginInstallationConfigOptions() {
+  return useMutation({
+    mutationFn: ({ installationId }: { installationId: number }) =>
+      api<Record<string, Array<{ value: string; label: string }>>>(
+        `/admin/plugins/installations/${installationId}/config-options`,
+        { method: "POST" },
+      ),
+  });
+}

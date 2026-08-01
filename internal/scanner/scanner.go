@@ -1078,6 +1078,9 @@ func (s *Scanner) scanFolderByRoots(
 	unreachableRoots := make([]string, 0)
 	suspectRoots := make([]string, 0)
 	for i, root := range configuredRoots {
+		if isVirtualRootPath(root) {
+			continue
+		}
 		probe := configuredProbes[i]
 		if !probe.Reachable {
 			logUnreachableRoot(ctx, folder.ID, root, probe)
@@ -1453,12 +1456,20 @@ func probeUnreachableRoots(ctx context.Context, folderID int, roots []string) []
 	var unreachable []string
 	probes := rootcheck.ProbeManyWithTimeout(ctx, roots, rootcheck.DefaultProbeTimeout)
 	for i, root := range roots {
+		if isVirtualRootPath(root) {
+			continue
+		}
 		if probe := probes[i]; !probe.Reachable {
 			logUnreachableRoot(ctx, folderID, root, probe)
 			unreachable = append(unreachable, root)
 		}
 	}
 	return unreachable
+}
+
+func isVirtualRootPath(root string) bool {
+	raw := strings.TrimSpace(strings.ToLower(root))
+	return raw == "virtual" || strings.HasPrefix(raw, "virtual://")
 }
 
 func logUnreachableRoot(ctx context.Context, folderID int, root string, probe rootcheck.Result) {

@@ -22,8 +22,38 @@ import (
 // locking and decide whether registration is immediate or transactionally
 // staged.
 func (h *PlaybackHandler) startLocalPlaybackTransport(ctx context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
+	session, err := h.startLocalPlaybackTransportOnce(ctx, opts)
+	if err == nil {
+		return session, nil
+	}
+	if playback.IsHardwareTranscode(opts.HWAccel) {
+		slog.WarnContext(ctx, "hardware transcode transport failed; falling back to software",
+			"component", "api",
+			"hw_accel", opts.HWAccel,
+			"session_id", opts.SessionID,
+			"error", err,
+		)
+		swOpts := opts
+		swOpts.HWAccel = "none"
+		swSession, swErr := h.startLocalPlaybackTransportOnce(ctx, swOpts)
+		if swErr == nil {
+			return swSession, nil
+		}
+	}
+	return nil, err
+}
+
+func (h *PlaybackHandler) startLocalPlaybackTransportOnce(ctx context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
 	if !strings.HasPrefix(strings.ToLower(opts.InputPath), virtualPlaybackPrefix) {
-		return playback.StartTranscode(context.WithoutCancel(ctx), opts)
+		session, startErr := playback.StartTranscode(context.WithoutCancel(ctx), opts)
+		if startErr != nil {
+			return nil, startErr
+		}
+		if _, readyErr := session.WaitForManifest(8 * time.Second); readyErr != nil {
+			_ = session.Close()
+			return nil, readyErr
+		}
+		return session, nil
 	}
 	if opts.MediaFileID <= 0 || h.fileResolver == nil {
 		return nil, errors.New("virtual transcode input is missing its media file identity")

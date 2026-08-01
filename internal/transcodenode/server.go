@@ -57,6 +57,15 @@ type TranscodeStartResponse struct {
 	HWAccel   string `json:"hw_accel,omitempty"`
 }
 
+func playbackHWAccel(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "qsv", "vaapi", "nvenc", "cuda", "videotoolbox", "amf":
+		return true
+	default:
+		return false
+	}
+}
+
 // HealthResponse is the JSON response for GET /api/v1/health.
 type HealthResponse struct {
 	Status     string `json:"status"`
@@ -538,6 +547,13 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := playback.StartTranscode(context.WithoutCancel(r.Context()), opts)
+	if err != nil && playbackHWAccel(opts.HWAccel) {
+		slog.WarnContext(r.Context(), "hardware transcode start failed; falling back to software",
+			"component", "transcodenode", "hw_accel", opts.HWAccel, "error", err)
+		swOpts := opts
+		swOpts.HWAccel = "none"
+		session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), swOpts)
+	}
 	if err != nil {
 		unlock()
 		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
@@ -547,10 +563,28 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if req.RequireReady {
 		if _, err := session.WaitForManifest(8 * time.Second); err != nil {
 			_ = session.Close()
-			unlock()
-			slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-			http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-			return
+			// Keep hardware acceleration as the first attempt, but retry the
+			// identical source/seek request in software when QSV/VAAPI/NVENC
+			// exits before producing a usable manifest.
+			if playbackHWAccel(session.Opts().HWAccel) || playbackHWAccel(opts.HWAccel) {
+				slog.WarnContext(r.Context(), "hardware transcode readiness check failed; falling back to software",
+					"component", "transcodenode", "error", err)
+				swOpts := opts
+				swOpts.HWAccel = "none"
+				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), swOpts)
+				if err == nil {
+					_, err = session.WaitForManifest(8 * time.Second)
+				}
+			}
+			if err != nil {
+				if session != nil {
+					_ = session.Close()
+				}
+				unlock()
+				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 

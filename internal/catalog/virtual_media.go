@@ -111,6 +111,9 @@ func (r *VirtualMediaRegistrar) UpsertVirtualMedia(ctx context.Context, installa
 	if r == nil || r.pool == nil {
 		return nil, errors.New("virtual catalog is unavailable")
 	}
+	if in.MediaType == "series" {
+		in = r.normalizeSeriesVirtualMedia(ctx, in)
+	}
 	if err := validateVirtualMedia(in); err != nil {
 		return nil, err
 	}
@@ -1046,4 +1049,118 @@ func nullTime(t time.Time) any {
 		return nil
 	}
 	return t
+}
+
+func (r *VirtualMediaRegistrar) normalizeSeriesVirtualMedia(ctx context.Context, in VirtualMedia) VirtualMedia {
+	if in.MediaType != "series" {
+		return in
+	}
+	hasTopLevelURI := in.VirtualURI != ""
+	hasTopLevelVariants := len(in.Variants) > 0
+
+	if !hasTopLevelURI && !hasTopLevelVariants && len(in.Episodes) > 0 {
+		return in
+	}
+
+	contentID := virtualContentID(in)
+
+	if len(in.Episodes) == 0 && r != nil && r.pool != nil {
+		rows, err := r.pool.Query(ctx, `
+			SELECT season_number, episode_number, title, COALESCE(overview,''), air_date, COALESCE(still_path,'')
+			FROM episodes
+			WHERE series_id=$1 AND season_number > 0 AND episode_number > 0
+			ORDER BY season_number, episode_number`, contentID)
+		if err == nil {
+			for rows.Next() {
+				var ep VirtualEpisode
+				var airDate *time.Time
+				if err := rows.Scan(&ep.SeasonNumber, &ep.EpisodeNumber, &ep.Title, &ep.Overview, &airDate, &ep.StillPath); err == nil {
+					if airDate != nil {
+						ep.AirDate = *airDate
+					}
+					in.Episodes = append(in.Episodes, ep)
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	if len(in.Episodes) == 0 {
+		in.Episodes = []VirtualEpisode{{
+			SeasonNumber:  1,
+			EpisodeNumber: 1,
+			Title:         in.Title,
+		}}
+	}
+
+	baseURI := in.VirtualURI
+	if baseURI == "" && hasTopLevelVariants {
+		baseURI = in.Variants[0].VirtualURI
+	}
+	if baseURI == "" {
+		baseURI = virtualPlaybackItemURIFromIDs("series", in.IMDbID, in.TMDBID, in.TVDBID)
+	}
+
+	for i := range in.Episodes {
+		ep := &in.Episodes[i]
+		if len(ep.Variants) == 0 {
+			if hasTopLevelVariants {
+				epVariants := make([]VirtualMediaVariant, 0, len(in.Variants))
+				for _, v := range in.Variants {
+					epV := v
+					epV.VirtualURI = buildEpisodeURI(v.VirtualURI, ep.SeasonNumber, ep.EpisodeNumber)
+					epVariants = append(epVariants, epV)
+				}
+				ep.Variants = epVariants
+				ep.VirtualURI = ""
+			} else if ep.VirtualURI == "" && baseURI != "" {
+				ep.VirtualURI = buildEpisodeURI(baseURI, ep.SeasonNumber, ep.EpisodeNumber)
+			}
+		}
+	}
+
+	in.VirtualURI = ""
+	in.Variants = nil
+
+	return in
+}
+
+func virtualPlaybackItemURIFromIDs(mediaType, imdbID, tmdbID, tvdbID string) string {
+	if imdbID != "" && imdbIDPattern.MatchString(imdbID) {
+		return "virtual://" + mediaType + "/" + imdbID
+	}
+	if tvdbID != "" && numericProviderIDPattern.MatchString(tvdbID) {
+		return "virtual://" + mediaType + "/tvdb/" + tvdbID
+	}
+	if tmdbID != "" && numericProviderIDPattern.MatchString(tmdbID) {
+		return "virtual://" + mediaType + "/tmdb/" + tmdbID
+	}
+	return ""
+}
+
+func buildEpisodeURI(seriesURI string, season, episode int) string {
+	parsed, err := url.Parse(seriesURI)
+	if err != nil || parsed.Scheme != "virtual" || parsed.Host != "series" {
+		return seriesURI
+	}
+	segments := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
+	if len(segments) == 0 || (len(segments) == 1 && segments[0] == "") {
+		return seriesURI
+	}
+	idOffset := 0
+	if segments[0] == "imdb" || segments[0] == "tmdb" || segments[0] == "tvdb" {
+		idOffset = 1
+	}
+	if len(segments) >= 3+idOffset {
+		return seriesURI
+	}
+	basePath := strings.TrimPrefix(parsed.Path, "/")
+	episodePath := fmt.Sprintf("/%s/%d/%d", basePath, season, episode)
+	epURL := &url.URL{
+		Scheme:   "virtual",
+		Host:     "series",
+		Path:     episodePath,
+		RawQuery: parsed.RawQuery,
+	}
+	return epURL.String()
 }

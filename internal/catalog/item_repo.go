@@ -1209,9 +1209,16 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 		         array_position($1::int[], id)
 		LIMIT 1`, libraryIDs, wantedFolderType).Scan(&folderID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("virtual playback item has no compatible %s library among selected targets", mediaType)
+			if fbErr := tx.QueryRow(ctx, `
+				SELECT id FROM media_folders
+				WHERE enabled IS NOT FALSE AND type IN ($1, 'mixed')
+				ORDER BY sort_order, id
+				LIMIT 1`, wantedFolderType).Scan(&folderID); fbErr != nil {
+				return false, fmt.Errorf("virtual playback item has no compatible %s library among selected targets", mediaType)
+			}
+		} else {
+			return false, fmt.Errorf("selecting virtual playback library: %w", err)
 		}
-		return false, fmt.Errorf("selecting virtual playback library: %w", err)
 	}
 	created := false
 	var existingType string
@@ -1542,7 +1549,7 @@ func (r *ItemRepository) ReconcileReleasedCollectionVirtualEpisodes(ctx context.
 			FROM media_files
 			WHERE episode_id IS NULL
 			  AND container='virtual'
-			  AND probe_source='virtual_collection'
+			  AND probe_source IN ('virtual_collection', 'virtual')
 			  AND file_path LIKE 'virtual://series/%'
 			  AND virtual_owner_installation_id IS NOT NULL
 			GROUP BY content_id
@@ -1552,7 +1559,7 @@ func (r *ItemRepository) ReconcileReleasedCollectionVirtualEpisodes(ctx context.
 			JOIN bases ON bases.content_id=mf.content_id
 			WHERE mf.episode_id IS NOT NULL
 			  AND mf.container='virtual'
-			  AND mf.probe_source='virtual_collection'
+			  AND mf.probe_source IN ('virtual_collection', 'virtual')
 			GROUP BY mf.content_id,mf.episode_id
 		), needs_reconciliation AS (
 			SELECT bases.content_id
@@ -1597,26 +1604,28 @@ func (r *ItemRepository) ReconcileReleasedCollectionVirtualEpisodes(ctx context.
 }
 
 type collectionVirtualSeriesBase struct {
-	folderID   int
-	ownerID    int
-	filePath   string
-	resolution string
-	codecVideo string
-	codecAudio string
-	hdr        bool
-	editionRaw string
+	folderID    int
+	ownerID     int
+	filePath    string
+	resolution  string
+	codecVideo  string
+	codecAudio  string
+	hdr         bool
+	editionRaw  string
+	probeSource string
 }
 
 func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, seriesID string) error {
 	rows, err := tx.Query(ctx, `
 		SELECT media_folder_id, virtual_owner_installation_id, file_path,
 		       COALESCE(resolution,''), COALESCE(codec_video,''),
-		       COALESCE(codec_audio,''), COALESCE(hdr,false), COALESCE(edition_raw,'')
+		       COALESCE(codec_audio,''), COALESCE(hdr,false), COALESCE(edition_raw,''),
+		       COALESCE(probe_source,'virtual_collection')
 		FROM media_files
 		WHERE content_id=$1
 		  AND episode_id IS NULL
 		  AND container='virtual'
-		  AND probe_source='virtual_collection'
+		  AND probe_source IN ('virtual_collection', 'virtual')
 		  AND file_path LIKE 'virtual://series/%'
 		  AND virtual_owner_installation_id IS NOT NULL
 		ORDER BY id`, seriesID)
@@ -1628,7 +1637,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 		var base collectionVirtualSeriesBase
 		if err := rows.Scan(
 			&base.folderID, &base.ownerID, &base.filePath, &base.resolution,
-			&base.codecVideo, &base.codecAudio, &base.hdr, &base.editionRaw,
+			&base.codecVideo, &base.codecAudio, &base.hdr, &base.editionRaw, &base.probeSource,
 		); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan virtual series profile: %w", err)
@@ -1655,8 +1664,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 		WHERE series_id=$1
 		  AND season_number > 0
 		  AND episode_number > 0
-		  AND air_date IS NOT NULL
-		  AND air_date <= CURRENT_DATE
+		  AND (air_date IS NULL OR air_date <= CURRENT_DATE)
 		ORDER BY season_number, episode_number`, seriesID)
 	if err != nil {
 		return fmt.Errorf("list released virtual episodes: %w", err)
@@ -1681,6 +1689,28 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 	}
 	episodeRows.Close()
 
+	if len(episodes) == 0 {
+		seasonID := fmt.Sprintf("%s-1", strings.Replace(seriesID, "series-", "season-", 1))
+		episodeID := fmt.Sprintf("%s-1-1", strings.Replace(seriesID, "series-", "episode-", 1))
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO seasons(content_id,series_id,season_number,title,metadata_source)
+			VALUES($1,$2,1,'Season 1','provider') ON CONFLICT DO NOTHING`, seasonID, seriesID); err != nil {
+			return fmt.Errorf("create default virtual season: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO episodes(content_id,series_id,season_id,season_number,episode_number,title,metadata_source)
+			VALUES($1,$2,$3,1,1,'Episode 1','provider') ON CONFLICT DO NOTHING`, episodeID, seriesID, seasonID); err != nil {
+			return fmt.Errorf("create default virtual episode: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO episode_libraries(episode_id,media_folder_id)
+			SELECT $1, media_folder_id FROM media_files WHERE content_id=$2 AND episode_id IS NULL
+			ON CONFLICT DO NOTHING`, episodeID, seriesID); err != nil {
+			return fmt.Errorf("link default virtual episode: %w", err)
+		}
+		episodes = append(episodes, episodeCoordinate{id: episodeID, season: 1, episode: 1})
+	}
+
 	expectedPaths := make([]string, 0, len(bases)*len(episodes))
 	expectedOwners := make([]int64, 0, len(bases)*len(episodes))
 	for _, base := range bases {
@@ -1696,6 +1726,10 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 			path := episodeURI.String()
 			expectedPaths = append(expectedPaths, path)
 			expectedOwners = append(expectedOwners, int64(base.ownerID))
+			ps := base.probeSource
+			if ps == "" {
+				ps = "virtual_collection"
+			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO media_files(
 					content_id,episode_id,media_folder_id,file_path,file_size,
@@ -1704,7 +1738,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 					virtual_owner_installation_id
 				) VALUES(
 					$1,$2,$3,$4,0,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),
-					$8,'virtual',$9,$10,$11,'virtual_collection',$12
+					$8,'virtual',$9,$10,$11,$12,$13
 				)
 				ON CONFLICT(file_path,virtual_owner_installation_id,media_folder_id)
 					WHERE virtual_owner_installation_id IS NOT NULL
@@ -1719,12 +1753,12 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 					edition_raw=EXCLUDED.edition_raw,
 					season_number=EXCLUDED.season_number,
 					episode_number=EXCLUDED.episode_number,
-					probe_source='virtual_collection',
+					probe_source=EXCLUDED.probe_source,
 					missing_since=NULL,
 					updated_at=NOW()`,
 				seriesID, episode.id, base.folderID, path, base.resolution,
 				base.codecVideo, base.codecAudio, base.hdr, base.editionRaw,
-				episode.season, episode.episode, base.ownerID,
+				episode.season, episode.episode, ps, base.ownerID,
 			); err != nil {
 				return fmt.Errorf("upsert released virtual episode: %w", err)
 			}
@@ -1739,7 +1773,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 				  AND claim.content_id=$1
 				  AND claim.media_folder_id=$2
 				  AND claim.file_path=$5
-				  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')
+				  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:' OR claim.source_key='request' OR left(claim.source_key,8)='request:' OR claim.source_key='virtual' OR left(claim.source_key,8)='virtual:')
 				ON CONFLICT(plugin_installation_id,source_key,content_id,media_folder_id,file_path)
 				DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,updated_at=NOW()`,
 				seriesID, base.folderID, path, base.ownerID, base.filePath,
@@ -1763,7 +1797,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 			JOIN episodes ep ON ep.content_id=mf.episode_id
 			WHERE ep.series_id=$1
 			  AND mf.container='virtual'
-			  AND mf.probe_source='virtual_collection'
+			  AND mf.probe_source IN ('virtual_collection', 'virtual')
 			  AND mf.virtual_owner_installation_id IS NOT NULL
 			  AND NOT EXISTS (
 			      SELECT 1 FROM expected
@@ -1777,7 +1811,7 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 		  AND claim.content_id=stale.content_id
 		  AND claim.media_folder_id=stale.media_folder_id
 		  AND claim.file_path=stale.file_path
-		  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')`, seriesID, expectedOwners, expectedPaths); err != nil {
+		  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:' OR claim.source_key='request' OR left(claim.source_key,8)='request:' OR claim.source_key='virtual' OR left(claim.source_key,8)='virtual:')`, seriesID, expectedOwners, expectedPaths); err != nil {
 		return fmt.Errorf("remove stale virtual episode claims: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1789,20 +1823,20 @@ func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, series
 		WHERE mf.episode_id=ep.content_id
 		  AND ep.series_id=$1
 		  AND mf.container='virtual'
-		  AND mf.probe_source='virtual_collection'
+		  AND mf.probe_source IN ('virtual_collection', 'virtual')
 		  AND mf.virtual_owner_installation_id IS NOT NULL
 		  AND NOT EXISTS (
-		      SELECT 1 FROM expected
-		      WHERE expected.owner_id=mf.virtual_owner_installation_id
-		        AND expected.file_path=mf.file_path
-		  )
+			      SELECT 1 FROM expected
+			      WHERE expected.owner_id=mf.virtual_owner_installation_id
+			        AND expected.file_path=mf.file_path
+			  )
 		  AND NOT EXISTS (
-		      SELECT 1 FROM virtual_media_file_source_claims claim
-		      WHERE claim.plugin_installation_id=mf.virtual_owner_installation_id
-		        AND claim.content_id=mf.content_id
-		        AND claim.media_folder_id=mf.media_folder_id
-		        AND claim.file_path=mf.file_path
-		  )`, seriesID, expectedOwners, expectedPaths); err != nil {
+			      SELECT 1 FROM virtual_media_file_source_claims claim
+			      WHERE claim.plugin_installation_id=mf.virtual_owner_installation_id
+			        AND claim.content_id=mf.content_id
+			        AND claim.media_folder_id=mf.media_folder_id
+			        AND claim.file_path=mf.file_path
+			  )`, seriesID, expectedOwners, expectedPaths); err != nil {
 		return fmt.Errorf("remove stale virtual episodes: %w", err)
 	}
 	return nil
