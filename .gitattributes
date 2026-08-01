@@ -1,0 +1,3 @@
+# Keep the fork docker.yml on upstream merges — upstream uses GITHUB_TOKEN
+# but the fork needs GHCR_PAT for ghcr.io package writes.
+.github/workflows/docker.yml merge=ours
