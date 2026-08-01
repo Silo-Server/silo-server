@@ -10,11 +10,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { groupDeviceSettings } from "@/lib/deviceSettingGroups";
 import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 import { formatQualityBitrate } from "@/player/hooks/useTranscodeQuality";
+import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { controlKindFor, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
 
@@ -255,6 +257,34 @@ function DeviceSettingControl({
 
   const options = permittedOptions(settingKey, effective);
   const asString = value === null || value === undefined ? "" : String(value);
+
+  // Open language values get the shared picker with "Other…" free entry —
+  // the contract floor is a short authored list, and any tag beyond it is
+  // typed rather than fetched from the catalog. A permitted_values constraint
+  // pins the list closed, so the free entry disappears with it.
+  if (definition.type === "language_tag") {
+    const permitted = (effective as { permitted_values?: unknown[] } | undefined)?.permitted_values;
+    const languageOptions = namedLanguageOptionsFor(settingKey, asString || undefined).filter(
+      (option) => !permitted?.length || permitted.some((entry) => String(entry) === option.value),
+    );
+    return (
+      <div className="order-1 w-full sm:order-none sm:w-[220px] sm:min-w-[180px]">
+        <LanguageSelect
+          aria-label={definition.label}
+          value={asString === "" ? EMPTY_SELECT_VALUE : asString}
+          options={languageOptions}
+          disabled={disabled}
+          allowOther={!permitted?.length}
+          className="h-11 w-full text-base sm:h-9 sm:text-sm"
+          onValueChange={(next) => onChange(settingKey, next === EMPTY_SELECT_VALUE ? null : next)}
+        >
+          {definition.nullable && (
+            <SelectItem value={EMPTY_SELECT_VALUE}>{definition.unsetLabel ?? "Unset"}</SelectItem>
+          )}
+        </LanguageSelect>
+      </div>
+    );
+  }
 
   // A numeric "select" the manifest gives no members — the bandwidth cap is
   // declared as a range, not a list — would render as a one-entry dropdown

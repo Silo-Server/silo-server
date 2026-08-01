@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -1389,7 +1388,6 @@ func TestMergeLanguageSuggestionsUsesExactCurrentAlias(t *testing.T) {
 }
 
 type recordingLanguageSuggestionSource struct {
-	mu       sync.Mutex
 	filters  catalog.BrowseFilters
 	original []string
 	calls    int
@@ -1398,23 +1396,9 @@ type recordingLanguageSuggestionSource struct {
 func (s *recordingLanguageSuggestionSource) ListOriginalLanguages(
 	_ context.Context, filters catalog.BrowseFilters,
 ) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.filters = filters
 	s.calls++
 	return s.original, nil
-}
-
-func (*recordingLanguageSuggestionSource) ListAudioLanguages(
-	context.Context, catalog.BrowseFilters,
-) ([]string, error) {
-	return nil, nil
-}
-
-func (*recordingLanguageSuggestionSource) ListSubtitleLanguages(
-	context.Context, catalog.BrowseFilters,
-) ([]string, error) {
-	return nil, nil
 }
 
 func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testing.T) {
@@ -1442,55 +1426,26 @@ func TestObservedLanguageSuggestionsIncludesAccessibleOriginalLanguages(t *testi
 	}
 }
 
-func TestObservedLanguageSuggestionsCachesPerScope(t *testing.T) {
-	source := &recordingLanguageSuggestionSource{original: []string{"is", "no"}}
+// TestObservedLanguageSuggestionsSkipsPlaybackKeys pins the design decision
+// that only catalog.metadata_language gets deployment-observed suggestions.
+// The audio/subtitle track listings walk every media file — tens of seconds
+// on large catalogs — so those pickers ship the contract floor and clients
+// offer free entry for anything beyond it.
+func TestObservedLanguageSuggestionsSkipsPlaybackKeys(t *testing.T) {
+	source := &recordingLanguageSuggestionSource{original: []string{"is"}}
 	handler, _ := newValuesTestHandler(t)
 	handler.SetLanguageSuggestionSource(source)
 
-	resolved := []settingsresolve.Effective{{Key: settingskeys.CatalogMetadataLanguage}}
-	requestInScope := func(scope access.Scope) map[string][]string {
-		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-		req = req.WithContext(access.SetScope(req.Context(), scope))
-		return handler.observedLanguageSuggestions(req, resolved)
-	}
+	req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
+	observed := handler.observedLanguageSuggestions(req, []settingsresolve.Effective{
+		{Key: settingskeys.PlaybackAudioLanguage},
+		{Key: settingskeys.PlaybackSubtitleLanguage},
+	})
 
-	scope := access.Scope{AllowedLibraryIDs: []int{4, 9}}
-	first := requestInScope(scope)
-	second := requestInScope(scope)
-	if !slices.Equal(second[settingskeys.CatalogMetadataLanguage], []string{"is", "no"}) {
-		t.Fatalf("cached suggestions = %v, want %v",
-			second[settingskeys.CatalogMetadataLanguage], first[settingskeys.CatalogMetadataLanguage])
+	if len(observed) != 0 {
+		t.Fatalf("observed suggestions for playback keys = %v, want none", observed)
 	}
-	if source.calls != 1 {
-		t.Fatalf("catalog scans for one scope = %d, want 1 (cached)", source.calls)
-	}
-
-	// Same libraries in a different order share the cache entry; a genuinely
-	// different scope must not.
-	requestInScope(access.Scope{AllowedLibraryIDs: []int{9, 4}})
-	if source.calls != 1 {
-		t.Fatalf("catalog scans after reordered scope = %d, want 1", source.calls)
-	}
-	requestInScope(access.Scope{AllowedLibraryIDs: []int{4}})
-	if source.calls != 2 {
-		t.Fatalf("catalog scans after narrower scope = %d, want 2", source.calls)
-	}
-}
-
-func TestObservedLanguageSuggestionsSurvivesEmptyList(t *testing.T) {
-	source := &recordingLanguageSuggestionSource{original: nil}
-	handler, _ := newValuesTestHandler(t)
-	handler.SetLanguageSuggestionSource(source)
-
-	resolved := []settingsresolve.Effective{{Key: settingskeys.CatalogMetadataLanguage}}
-	for range 2 {
-		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
-		observed := handler.observedLanguageSuggestions(req, resolved)
-		if got := observed[settingskeys.CatalogMetadataLanguage]; len(got) != 0 {
-			t.Fatalf("suggestions for empty catalog = %v, want none", got)
-		}
-	}
-	if source.calls != 1 {
-		t.Fatalf("catalog scans = %d, want 1 (empty result still cached)", source.calls)
+	if source.calls != 0 {
+		t.Fatalf("catalog scans = %d, want 0 for playback-only requests", source.calls)
 	}
 }

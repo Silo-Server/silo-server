@@ -1,5 +1,6 @@
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { MetadataLanguageSetting } from "@/components/settings/MetadataLanguageSetting";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -236,27 +237,22 @@ export default function PlaybackSettings() {
           label="Spoken language"
           description="Prefer a spoken language for this profile when multiple tracks are available."
           control={(id) => (
-            <div className="w-full">
-              <Select
+            <div className="w-full sm:w-[220px]">
+              <LanguageSelect
+                id={id}
                 value={audioLanguage ?? "none"}
+                options={audioLanguageOptions}
+                disabled={pending}
+                placeholder="No preference"
+                className="w-full"
                 onValueChange={(value) =>
                   // The contract spells "no preference" as null, where the
                   // legacy profile column spelled it as the empty string.
                   saveValue(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, value === "none" ? null : value)
                 }
               >
-                <SelectTrigger id={id} className="w-full sm:w-[220px]" disabled={pending}>
-                  <SelectValue placeholder="No preference" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No preference</SelectItem>
-                  {audioLanguageOptions.map((language) => (
-                    <SelectItem key={language.value} value={language.value}>
-                      {language.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <SelectItem value="none">No preference</SelectItem>
+              </LanguageSelect>
             </div>
           )}
         />
