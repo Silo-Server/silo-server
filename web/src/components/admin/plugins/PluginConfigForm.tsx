@@ -46,16 +46,6 @@ function humanizeKey(value: string) {
     .join(" ");
 }
 
-function validateProviderRegex(pattern: string): void {
-  // Provider profiles use Go/RE2 syntax. JavaScript does not support inline
-  // flags such as (?i), so translate the leading flag group for the browser
-  // preview while leaving the original pattern untouched for the plugin.
-  const inlineFlags = pattern.match(/^\(\?([imsu]+)\)/i);
-  const source = inlineFlags ? pattern.slice(inlineFlags[0].length) : pattern;
-  const flags = inlineFlags?.[1]?.toLowerCase() ?? "";
-  new RegExp(source, flags);
-}
-
 function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
   try {
     const parsed = JSON.parse(schema.json_schema) as {
@@ -293,17 +283,12 @@ export function PluginConfigForm({
                     if (regex !== undefined && typeof regex !== "string") {
                       throw new Error(`${regexKey} in profile ${label} must be a string.`);
                     }
-                    if (typeof regex === "string" && regex.trim() !== "") {
-                      try {
-                        validateProviderRegex(regex);
-                      } catch {
-                        throw new Error(`Invalid ${regexKey} in profile ${label}.`);
-                      }
-                    }
                   }
                   return label;
                 });
-                setProfilePreview(`Valid configuration: ${labels.join(", ")}`);
+                setProfilePreview(
+                  `Valid JSON structure: ${labels.join(", ")}. Save or test the connection to validate Go/RE2 expressions.`,
+                );
               } catch (error) {
                 setProfilePreview(
                   error instanceof Error ? error.message : "Invalid profiles JSON.",

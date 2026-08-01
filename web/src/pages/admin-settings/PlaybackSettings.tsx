@@ -11,6 +11,7 @@ const KEYS = [
   "playback.hw_accel",
   "playback.transcode_enabled",
   "playback.local_transcode_fallback",
+  "playback.virtual_provider_failover",
   "allow_4k_transcode",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
@@ -91,6 +92,13 @@ export default function PlaybackSettings() {
             hint="When no eligible transcode node is available, transcode on this server instead. Disable to keep all transcoding on dedicated nodes — playback that requires transcoding fails while no node is eligible."
             value={form.getValue("playback.local_transcode_fallback") || "true"}
             onChange={(v) => form.setValue("playback.local_transcode_fallback", v)}
+          />
+          <SettingField
+            label="Virtual Provider Failover"
+            type="toggle"
+            hint="When the provider that created a virtual item is unavailable or returns no playable streams, try another enabled virtual-stream provider. Disable to keep each item strictly bound to its owner."
+            value={form.getValue("playback.virtual_provider_failover") || "true"}
+            onChange={(v) => form.setValue("playback.virtual_provider_failover", v)}
           />
           <SettingField
             label="Allow 4K Transcoding"

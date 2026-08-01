@@ -20,7 +20,54 @@ env:
   GONOSUMDB: github.com/Silo-Server/*
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify frontend
+        working-directory: web
+        run: |
+          pnpm run lint
+          pnpm run format:check
+          pnpm run test
+          pnpm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify backend
+        run: |
+          go test ./...
+          go vet ./...
+          make verify-local-paths
+          make migrate-validate
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +146,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -162,7 +209,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -172,6 +219,8 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
+            type=raw,value=feat-virtual-playback,enable=${{ github.ref == 'refs/heads/feat/virtual-playback-greenfield' || github.ref == 'refs/heads/main' }}
+            type=raw,value=feat-virtual-playback-{{date 'YYYYMMDD-HHmmss'}},enable=${{ github.ref == 'refs/heads/feat/virtual-playback-greenfield' || github.ref == 'refs/heads/main' }}
             type=sha,prefix=,format=short
 
       - name: Create and push manifest list

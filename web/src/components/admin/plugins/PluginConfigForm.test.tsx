@@ -131,3 +131,49 @@ describe("PluginConfigForm secrets", () => {
     ]);
   });
 });
+
+describe("PluginConfigForm quality profiles", () => {
+  it("accepts Go/RE2 inline flags without applying JavaScript regex rules", async () => {
+    const qualitySchema: PluginConfigSchema = {
+      key: "streaming",
+      title: "Streaming",
+      json_schema: JSON.stringify({
+        type: "object",
+        properties: {
+          quality_profiles: {
+            type: "array",
+            items: { type: "object" },
+          },
+        },
+      }),
+      required: true,
+      admin_form: {
+        fields: [
+          {
+            key: "quality_profiles",
+            label: "Quality Profiles",
+            control: "TEXTAREA",
+            required: false,
+            secret: false,
+            multiline: true,
+          },
+        ],
+      },
+    };
+    render(
+      <PluginConfigForm
+        schema={qualitySchema}
+        value={{
+          quality_profiles:
+            '[{"label":"4K HDR","include_regex":"(?i)(2160p|4k)","exclude_regex":"(?i)(cam|ts)"}]',
+        }}
+        onSave={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Validate profiles" }));
+
+    expect(screen.getByText(/Valid JSON structure: 4K HDR/)).toBeInTheDocument();
+    expect(screen.queryByText(/Invalid include_regex/)).not.toBeInTheDocument();
+  });
+});
