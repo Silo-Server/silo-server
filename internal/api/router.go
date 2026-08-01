@@ -3078,7 +3078,7 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Put("/installations/{id}", pluginHandler.HandleUpdateInstallation)
 									r.Post("/installations/{id}/update", pluginHandler.HandleApplyUpdate)
 									r.Post("/installations/{id}/config/test", pluginHandler.HandleTestInstallationConfig)
-								r.Post("/installations/{id}/config-options", pluginHandler.HandleListInstallationConfigOptions)
+									r.Post("/installations/{id}/config-options", pluginHandler.HandleListInstallationConfigOptions)
 									r.Put("/installations/{id}/config", pluginHandler.HandlePutInstallationConfig)
 									r.Put("/installations/{id}/auth-binding", pluginHandler.HandlePutAuthBinding)
 									r.Put("/installations/{id}/task-bindings/{capability_id}", pluginHandler.HandlePutTaskBinding)
