@@ -79,6 +79,11 @@ type HTTPRoutesClient struct {
 	timeout time.Duration
 }
 
+type VirtualStreamProviderClient struct {
+	client  pluginv1.VirtualStreamProviderClient
+	timeout time.Duration
+}
+
 func newClient(installationID int, rpc *sdkruntime.Client, manifest *pluginv1.PluginManifest) *Client {
 	capabilities := make(map[string]*pluginv1.CapabilityDescriptor, len(manifest.GetCapabilities()))
 	for _, capability := range manifest.GetCapabilities() {
@@ -208,11 +213,28 @@ func (c *Client) HTTPRoutes(capabilityID string) (*HTTPRoutesClient, error) {
 	}, nil
 }
 
+func (c *Client) VirtualStreamProvider(capabilityID string) (*VirtualStreamProviderClient, error) {
+	if err := c.requireCapability("virtual_stream_provider.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &VirtualStreamProviderClient{
+		client:  c.rpc.VirtualStreamProvider(),
+		timeout: DefaultVirtualStreamTimeout,
+	}, nil
+}
+
 func NewHTTPRoutesClientForTest(client pluginv1.HttpRoutesClient, timeout time.Duration) *HTTPRoutesClient {
 	if timeout <= 0 {
 		timeout = DefaultRouteTimeout
 	}
 	return &HTTPRoutesClient{client: client, timeout: timeout}
+}
+
+func NewVirtualStreamProviderClientForTest(client pluginv1.VirtualStreamProviderClient, timeout time.Duration) *VirtualStreamProviderClient {
+	if timeout <= 0 {
+		timeout = DefaultVirtualStreamTimeout
+	}
+	return &VirtualStreamProviderClient{client: client, timeout: timeout}
 }
 
 func (c *Client) markUnhealthy() {
@@ -390,6 +412,18 @@ func (c *HTTPRoutesClient) Handle(ctx context.Context, req *pluginv1.HandleHTTPR
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.Handle(callCtx, req)
+}
+
+func (c *VirtualStreamProviderClient) ResolveVirtualStream(ctx context.Context, req *pluginv1.ResolveVirtualStreamRequest) (*pluginv1.ResolveVirtualStreamResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ResolveVirtualStream(callCtx, req)
+}
+
+func (c *VirtualStreamProviderClient) ListVirtualStreamProfiles(ctx context.Context, req *pluginv1.ListVirtualStreamProfilesRequest) (*pluginv1.ListVirtualStreamProfilesResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ListVirtualStreamProfiles(callCtx, req)
 }
 
 func ensureDeadline(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

@@ -2,7 +2,7 @@ module github.com/Silo-Server/silo-server
 
 // Greenfield virtual playback consumes the additive SDK contract published on
 // the companion integration branch until it lands upstream.
-replace github.com/Silo-Server/silo-plugin-sdk => github.com/drondeseries/silo-plugin-sdk v0.10.1-0.20260728224823-9bf6c6dbf009
+replace github.com/Silo-Server/silo-plugin-sdk => github.com/drondeseries/silo-plugin-sdk v0.10.1-0.20260801060038-d4c2c31ec749
 
 go 1.26.4
 

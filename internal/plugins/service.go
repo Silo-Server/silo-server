@@ -37,6 +37,7 @@ type pluginClient interface {
 	EventConsumer(capabilityID string) (*pluginhost.EventConsumerClient, error)
 	AuthProvider(capabilityID string) (*pluginhost.AuthProviderClient, error)
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
+	VirtualStreamProvider(capabilityID string) (*pluginhost.VirtualStreamProviderClient, error)
 }
 
 type Host interface {
@@ -97,6 +98,10 @@ type Service struct {
 	installationCacheGen uint64
 	virtualStreamsMu     sync.Mutex
 	virtualStreamsCache  map[string]virtualStreamsCacheEntry
+	virtualProfilesMu    sync.Mutex
+	virtualProfilesCache map[string]virtualProfilesCacheEntry
+	virtualVariantsMu    sync.Mutex
+	virtualVariantsCache map[string]virtualVariantsCacheEntry
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -686,6 +691,18 @@ func (s *Service) HTTPRoutesClient(
 	return client.HTTPRoutes(capabilityID)
 }
 
+func (s *Service) VirtualStreamProviderClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.VirtualStreamProviderClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.VirtualStreamProvider(capabilityID)
+}
+
 func (s *Service) RouteDescriptors(ctx context.Context, installationID int) ([]*pluginv1.HttpRouteDescriptor, error) {
 	manifest, err := s.manifestForInstallation(ctx, installationID, true)
 	if err != nil {
@@ -883,6 +900,12 @@ func (s *Service) invalidateInstallationCache() {
 	s.virtualStreamsMu.Lock()
 	s.virtualStreamsCache = nil
 	s.virtualStreamsMu.Unlock()
+	s.virtualProfilesMu.Lock()
+	s.virtualProfilesCache = nil
+	s.virtualProfilesMu.Unlock()
+	s.virtualVariantsMu.Lock()
+	s.virtualVariantsCache = nil
+	s.virtualVariantsMu.Unlock()
 }
 
 // IsInstallationEnabled reports whether the given plugin installation is

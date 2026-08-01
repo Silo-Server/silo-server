@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,63 +16,6 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
-
-// ResolveVirtualMedia asks the first enabled plugin exposing /resolve/* to
-// turn a virtual media URI into a concrete HTTP(S) stream URL.
-func (p *HTTPProxy) ResolveVirtualMedia(ctx context.Context, virtualURI string) (string, error) {
-	if p == nil || p.installations == nil {
-		return "", errors.New("plugin virtual media resolver is unavailable")
-	}
-	installations, err := p.installations.ListEnabled(ctx)
-	if err != nil {
-		return "", fmt.Errorf("list virtual media resolvers: %w", err)
-	}
-	routePath := "/resolve/" + virtualURI
-	for _, installation := range installations {
-		descriptors, descriptorErr := p.service.RouteDescriptors(ctx, installation.ID)
-		if descriptorErr != nil {
-			slog.WarnContext(ctx, "virtual media resolver route discovery failed", "component", "plugins", "installation_id", installation.ID, "error", descriptorErr)
-			continue
-		}
-		if matchRouteDescriptor(descriptors, http.MethodGet, routePath) == nil {
-			continue
-		}
-		capabilityID, capabilityErr := p.resolveHTTPRoutesCapability(ctx, installation.ID)
-		if capabilityErr != nil {
-			slog.WarnContext(ctx, "virtual media resolver capability lookup failed", "component", "plugins", "installation_id", installation.ID, "error", capabilityErr)
-			continue
-		}
-		client, clientErr := p.service.HTTPRoutesClient(ctx, installation.ID, capabilityID)
-		if clientErr != nil {
-			slog.WarnContext(ctx, "virtual media resolver client startup failed", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "error", clientErr)
-			continue
-		}
-		response, handleErr := client.Handle(ctx, &pluginv1.HandleHTTPRequest{Method: http.MethodGet, Path: routePath})
-		if handleErr != nil {
-			slog.WarnContext(ctx, "virtual media resolver request failed", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "error", handleErr)
-			continue
-		}
-		if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
-			slog.WarnContext(ctx, "virtual media resolver returned an error", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "status", response.GetStatusCode(), "body", strings.TrimSpace(string(response.GetBody())))
-			continue
-		}
-		if len(response.GetBody()) > maxVirtualPlaybackResponseLen {
-			slog.WarnContext(ctx, "virtual media resolver response exceeded size limit", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID)
-			continue
-		}
-		var payload struct {
-			StreamURL string `json:"stream_url"`
-		}
-		if unmarshalErr := json.Unmarshal(response.GetBody(), &payload); unmarshalErr != nil {
-			slog.WarnContext(ctx, "virtual media resolver returned invalid JSON", "component", "plugins", "installation_id", installation.ID, "capability_id", capabilityID, "error", unmarshalErr)
-			continue
-		}
-		if resolved, validateErr := validateProviderStreamURL(ctx, payload.StreamURL); validateErr == nil {
-			return resolved, nil
-		}
-	}
-	return "", fmt.Errorf("no installed plugin resolved virtual media URI %q", virtualURI)
-}
 
 type httpRouteClient interface {
 	Handle(ctx context.Context, req *pluginv1.HandleHTTPRequest) (*pluginv1.HandleHTTPResponse, error)

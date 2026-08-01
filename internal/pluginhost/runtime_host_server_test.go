@@ -8,8 +8,8 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
-	"github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -178,7 +178,7 @@ func (f *fakeVirtualCatalog) UpsertVirtualMedia(_ context.Context, installationI
 func TestRuntimeHostServerUpsertVirtualMediaUsesBoundInstallation(t *testing.T) {
 	registrar := &fakeVirtualCatalog{}
 	srv := pluginhost.NewRuntimeHostServerWithServices(&fakeHub{}, &fakeLibLister{}, nil, nil, nil, registrar, "virtual.plugin", 77)
-	resp, err := srv.UpsertVirtualMedia(context.Background(), &pluginv1.UpsertVirtualMediaRequest{LibraryId: "1", MediaType: "movie", Title: "Example", VirtualUri: "aiostreams://movie/tt1"})
+	resp, err := srv.UpsertVirtualMedia(context.Background(), &pluginv1.UpsertVirtualMediaRequest{LibraryId: "1", MediaType: "movie", Title: "Example", VirtualUri: "virtual://movie/tt1"})
 	if err != nil {
 		t.Fatal(err)
 	}

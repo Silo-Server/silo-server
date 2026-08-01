@@ -192,6 +192,7 @@ type fakePluginClient struct {
 	metadataProviderCalls int
 	httpRoutesClient      *pluginhost.HTTPRoutesClient
 	httpRoutesErr         error
+	virtualStreamClient   *pluginhost.VirtualStreamProviderClient
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -237,6 +238,10 @@ func (f *fakePluginClient) AuthProvider(string) (*pluginhost.AuthProviderClient,
 
 func (f *fakePluginClient) HTTPRoutes(string) (*pluginhost.HTTPRoutesClient, error) {
 	return f.httpRoutesClient, f.httpRoutesErr
+}
+
+func (f *fakePluginClient) VirtualStreamProvider(string) (*pluginhost.VirtualStreamProviderClient, error) {
+	return f.virtualStreamClient, nil
 }
 
 type fakeServiceInstallationStore struct {
