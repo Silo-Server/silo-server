@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"net/url"
 	"path"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -24,6 +26,17 @@ type AssetStore interface {
 	GetObject(ctx context.Context, bucket, key string) ([]byte, error)
 	Bucket() string
 }
+
+// PublicAssetURLProvider is an optional AssetStore capability for deriving
+// configured storage URLs. Byte-only stores remain valid AssetStore
+// implementations and fail closed when Complex-facing metadata is requested.
+type PublicAssetURLProvider interface {
+	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
+}
+
+var _ PublicAssetURLProvider = (*s3client.Client)(nil)
+
+const maxPublicAssetURLLength = 2048
 
 // Service is the single source of truth for branding. It assembles a Snapshot
 // from settings, processes/stores uploaded assets, and streams them back.
@@ -68,6 +81,52 @@ func (s *Service) Load(ctx context.Context) Snapshot {
 		}
 	}
 	return snap
+}
+
+// PublicAssetURL returns the stable public URL and content ref for the
+// preferred Complex-facing logo (mark, then wordmark). The storage client is
+// the sole URL source: request hosts and other browser-controlled origins are
+// never consulted.
+//
+// Public URL mode returns an unsigned query-free URL regardless of the expiry
+// argument. Presigned and finite-lived token modes return query parameters and
+// are rejected here, as are malformed or non-HTTPS URLs.
+func (s *Service) PublicAssetURL(ctx context.Context) (assetURL, etag string) {
+	if s == nil || !s.HasStorage() {
+		return "", ""
+	}
+	urlProvider, ok := s.store.(PublicAssetURLProvider)
+	if !ok {
+		return "", ""
+	}
+
+	for _, kind := range []AssetKind{KindMark, KindWordmark} {
+		spec := assetSpecs[kind]
+		ref, _ := s.settings.Get(ctx, spec.settingKey)
+		if ref == "" {
+			continue
+		}
+
+		key := spec.s3Prefix + "/" + ref
+		candidate, err := urlProvider.PresignGetURL(ctx, s.store.Bucket(), key, time.Hour)
+		if err != nil || !isSafePublicAssetURL(candidate) {
+			return "", ""
+		}
+		return candidate, ref
+	}
+
+	return "", ""
+}
+
+func isSafePublicAssetURL(candidate string) bool {
+	if candidate == "" || len(candidate) > maxPublicAssetURLLength {
+		return false
+	}
+	parsed, err := url.Parse(candidate)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.Hostname() == "" {
+		return false
+	}
+	return parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == ""
 }
 
 // UploadAsset validates, processes, and stores an uploaded branding image,

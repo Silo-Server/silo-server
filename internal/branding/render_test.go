@@ -1,12 +1,179 @@
 package branding
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/s3client"
 )
+
+type publicAssetURLSettings struct {
+	values map[string]string
+}
+
+func (s publicAssetURLSettings) Get(_ context.Context, key string) (string, error) {
+	return s.values[key], nil
+}
+
+func (s publicAssetURLSettings) Set(context.Context, string, string) error { return nil }
+
+type publicAssetURLStore struct {
+	url string
+	err error
+}
+
+type byteOnlyAssetStore struct{}
+
+func (*byteOnlyAssetStore) PutObject(context.Context, string, string, []byte) error { return nil }
+func (*byteOnlyAssetStore) GetObject(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+func (*byteOnlyAssetStore) Bucket() string { return "public-assets" }
+
+var _ AssetStore = (*byteOnlyAssetStore)(nil)
+
+func (*publicAssetURLStore) PutObject(context.Context, string, string, []byte) error { return nil }
+func (*publicAssetURLStore) GetObject(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+func (*publicAssetURLStore) Bucket() string { return "public-assets" }
+func (s *publicAssetURLStore) PresignGetURL(context.Context, string, string, time.Duration) (string, error) {
+	return s.url, s.err
+}
+
+var _ PublicAssetURLProvider = (*publicAssetURLStore)(nil)
+
+func TestPublicAssetURLPrefersMarkThenWordmark(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  map[string]string
+		wantURL string
+		wantTag string
+	}{
+		{
+			name: "mark",
+			values: map[string]string{
+				"branding.mark_ref":     "mark.webp",
+				"branding.wordmark_ref": "wordmark.webp",
+			},
+			wantURL: "https://garage.example.test/branding/mark/mark.webp",
+			wantTag: "mark.webp",
+		},
+		{
+			name: "wordmark fallback",
+			values: map[string]string{
+				"branding.wordmark_ref": "wordmark.webp",
+			},
+			wantURL: "https://garage.example.test/branding/wordmark/wordmark.webp",
+			wantTag: "wordmark.webp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(publicAssetURLSettings{values: tt.values}, &publicAssetURLStore{url: tt.wantURL})
+			gotURL, gotTag := svc.PublicAssetURL(context.Background())
+			if gotURL != tt.wantURL || gotTag != tt.wantTag {
+				t.Fatalf("PublicAssetURL() = (%q, %q), want (%q, %q)", gotURL, gotTag, tt.wantURL, tt.wantTag)
+			}
+		})
+	}
+}
+
+func TestPublicAssetURLRejectsUnstableOrUnsafeURLs(t *testing.T) {
+	overlong := "https://garage.example.test/" + strings.Repeat("a", 4096)
+	tests := []struct {
+		name string
+		url  string
+		err  error
+	}{
+		{name: "http", url: "http://garage.example.test/branding/mark/mark.webp"},
+		{name: "relative", url: "/branding/mark/mark.webp"},
+		{name: "userinfo", url: "https://user:pass@garage.example.test/branding/mark/mark.webp"},
+		{name: "fragment", url: "https://garage.example.test/branding/mark/mark.webp#asset"},
+		{name: "generic query", url: "https://garage.example.test/branding/mark/mark.webp?download=1"},
+		{name: "aws presigned", url: "https://garage.example.test/branding/mark/mark.webp?X-Amz-Expires=900&X-Amz-Signature=secret"},
+		{name: "finite token", url: "https://garage.example.test/branding/mark/mark.webp?token=1234-signature"},
+		{name: "overlong", url: overlong},
+		{name: "storage error", err: errors.New("storage unavailable")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := NewService(
+				publicAssetURLSettings{values: map[string]string{"branding.mark_ref": "mark.webp"}},
+				&publicAssetURLStore{url: tt.url, err: tt.err},
+			)
+			gotURL, gotTag := svc.PublicAssetURL(context.Background())
+			if gotURL != "" || gotTag != "" {
+				t.Fatalf("PublicAssetURL() = (%q, %q), want empty metadata", gotURL, gotTag)
+			}
+		})
+	}
+}
+
+func TestPublicAssetURLReturnsEmptyWithoutConfiguredBrandingOrStorage(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings publicAssetURLSettings
+		store    AssetStore
+	}{
+		{name: "no branding", settings: publicAssetURLSettings{values: map[string]string{}}, store: &publicAssetURLStore{}},
+		{name: "no storage", settings: publicAssetURLSettings{values: map[string]string{"branding.mark_ref": "mark.webp"}}},
+		{
+			name:     "byte storage without URL capability",
+			settings: publicAssetURLSettings{values: map[string]string{"branding.mark_ref": "mark.webp"}},
+			store:    &byteOnlyAssetStore{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotURL, gotTag := NewService(tt.settings, tt.store).PublicAssetURL(context.Background())
+			if gotURL != "" || gotTag != "" {
+				t.Fatalf("PublicAssetURL() = (%q, %q), want empty metadata", gotURL, gotTag)
+			}
+		})
+	}
+}
+
+func TestPublicAssetURLUsesOnlyConfiguredPublicS3Origin(t *testing.T) {
+	settings := publicAssetURLSettings{values: map[string]string{"branding.mark_ref": "mark.webp"}}
+	newStore := func(urlAuth string) *s3client.Client {
+		return s3client.NewClient(s3client.BucketConfig{
+			Endpoint:       "https://garage-api.example.test",
+			PublicEndpoint: "https://assets.example.test/tenant",
+			Region:         "us-east-1",
+			Bucket:         "public-assets",
+			KeyPrefix:      "silo/site-1",
+			AccessKey:      "test",
+			SecretKey:      "test",
+			PathStyle:      true,
+			URLAuth:        urlAuth,
+		})
+	}
+
+	t.Run("public", func(t *testing.T) {
+		gotURL, gotTag := NewService(settings, newStore(s3client.URLAuthPublic)).PublicAssetURL(context.Background())
+		wantURL := "https://assets.example.test/tenant/silo/site-1/branding/mark/mark.webp"
+		if gotURL != wantURL || gotTag != "mark.webp" {
+			t.Fatalf("PublicAssetURL() = (%q, %q), want (%q, %q)", gotURL, gotTag, wantURL, "mark.webp")
+		}
+	})
+
+	t.Run("presigned", func(t *testing.T) {
+		gotURL, gotTag := NewService(settings, newStore(s3client.URLAuthPresigned)).PublicAssetURL(context.Background())
+		if gotURL != "" || gotTag != "" {
+			t.Fatalf("PublicAssetURL() = (%q, %q), want empty metadata", gotURL, gotTag)
+		}
+	})
+}
 
 func newSnapshot(name string) Snapshot {
 	return Snapshot{ServerName: name, assets: map[AssetKind]string{}}

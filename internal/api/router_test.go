@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/branding"
@@ -25,23 +26,24 @@ func (routerContractSettings) Set(context.Context, string, string) error   { ret
 
 func TestRouterSystemCapabilitiesRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/system/capabilities")
-	assertSiloComplexStubAccess(t, http.HandlerFunc(handleSiloComplexCapabilitiesStub),
-		`{"api_version":"2.2","capabilities":[]}`+"\n")
+	assertSiloComplexAccess(t, http.HandlerFunc(handlers.NewSystemCapabilitiesHandler().HandleGet),
+		`{"api_version":"2.2","capabilities":["branding.v1"]}`+"\n")
 }
 
 func TestRouterAdminBrandingRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/admin/branding")
-	assertSiloComplexStubAccess(t, http.HandlerFunc(handleSiloComplexBrandingStub),
-		`{"server_name":"Sullyflix","logo_url":null,"logo_etag":null}`+"\n")
+	handler := handlers.NewBrandingHandler(branding.NewService(routerContractSettings{}, nil))
+	assertSiloComplexAccess(t, http.HandlerFunc(handler.HandleAdminBranding),
+		`{"server_name":"Silo","logo_url":null,"logo_etag":null}`+"\n")
 }
 
 func TestRouterSessionsSnapshotRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/admin/sessions/snapshot")
-	assertSiloComplexStubAccess(t, http.HandlerFunc(handleSiloComplexSessionsSnapshotStub),
+	assertSiloComplexAccess(t, http.HandlerFunc(handleSiloComplexSessionsSnapshotStub),
 		`{"snapshot_id":"00000000-0000-0000-0000-000000000000","generated_at":"1970-01-01T00:00:00Z","complete":false,"incomplete_reason":"not_implemented","sessions":[]}`+"\n")
 }
 
-func assertSiloComplexStubAccess(t *testing.T, handler http.Handler, expectedBody string) {
+func assertSiloComplexAccess(t *testing.T, handler http.Handler, expectedBody string) {
 	t.Helper()
 	protected := apimw.RequireActingAdmin(nil)(handler)
 

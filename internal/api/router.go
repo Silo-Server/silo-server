@@ -212,29 +212,6 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 	return d.Config
 }
 
-// The Silo Complex 2.2 handlers are intentionally static contract stubs. The
-// capability, branding, and complete-snapshot implementations replace them in
-// the follow-up tasks without changing these routes or response shapes.
-func handleSiloComplexCapabilitiesStub(w http.ResponseWriter, _ *http.Request) {
-	writeSiloComplexContractStub(w, struct {
-		APIVersion   string   `json:"api_version"`
-		Capabilities []string `json:"capabilities"`
-	}{
-		APIVersion:   "2.2",
-		Capabilities: []string{},
-	})
-}
-
-func handleSiloComplexBrandingStub(w http.ResponseWriter, _ *http.Request) {
-	writeSiloComplexContractStub(w, struct {
-		ServerName string  `json:"server_name"`
-		LogoURL    *string `json:"logo_url"`
-		LogoETag   *string `json:"logo_etag"`
-	}{
-		ServerName: "Sullyflix",
-	})
-}
-
 func handleSiloComplexSessionsSnapshotStub(w http.ResponseWriter, _ *http.Request) {
 	writeSiloComplexContractStub(w, struct {
 		SnapshotID  string `json:"snapshot_id"`
@@ -1760,6 +1737,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.BrandingService != nil {
 			brandingHandler = handlers.NewBrandingHandler(deps.BrandingService)
 		}
+		systemCapabilitiesHandler := handlers.NewSystemCapabilitiesHandler()
 
 		if webhookSyncHandler != nil {
 			r.Post("/plex-sync/webhooks/{secret}", webhookSyncHandler.HandleWebhook)
@@ -2044,7 +2022,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Silo Complex server-to-server discovery uses the same bearer
 				// API-key authentication and acting-admin authorization as the
 				// existing admin API.
-				r.With(requireActingAdmin).Get("/system/capabilities", handleSiloComplexCapabilitiesStub)
+				r.With(requireActingAdmin).Get("/system/capabilities", systemCapabilitiesHandler.HandleGet)
 
 				// User-facing library route (all authenticated users).
 				if libraryHandler != nil {
@@ -2777,7 +2755,9 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Group(func(r chi.Router) {
 							r.Use(requireActingAdmin)
 
-							r.Get("/branding", handleSiloComplexBrandingStub)
+							if brandingHandler != nil {
+								r.Get("/branding", brandingHandler.HandleAdminBranding)
+							}
 							r.Get("/sessions/snapshot", handleSiloComplexSessionsSnapshotStub)
 
 							r.Get("/users", adminHandler.HandleListUsers)

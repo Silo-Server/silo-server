@@ -38,6 +38,12 @@ type brandingResponse struct {
 	StorageAvailable bool   `json:"storage_available"`
 }
 
+type adminBrandingResponse struct {
+	ServerName string  `json:"server_name"`
+	LogoURL    *string `json:"logo_url"`
+	LogoETag   *string `json:"logo_etag"`
+}
+
 // HandleGetBranding returns the server branding configuration. Public endpoint —
 // no authentication required so branding applies before login (white-label).
 func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +60,21 @@ func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Reque
 		LoginBgURL:       snap.AssetURL(branding.KindLoginBg),
 		StorageAvailable: h.svc.HasStorage(),
 	})
+}
+
+// HandleAdminBranding returns the trusted branding metadata used by Silo
+// Complex. Logo metadata is omitted as JSON null unless the configured public
+// asset store can provide a stable absolute HTTPS URL.
+func (h *BrandingHandler) HandleAdminBranding(w http.ResponseWriter, r *http.Request) {
+	snap := h.svc.Load(r.Context())
+	logoURL, logoETag := h.svc.PublicAssetURL(r.Context())
+
+	response := adminBrandingResponse{ServerName: snap.ServerName}
+	if logoURL != "" && logoETag != "" {
+		response.LogoURL = &logoURL
+		response.LogoETag = &logoETag
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // HandleServeAsset streams a custom branding asset. Public endpoint — assets are
