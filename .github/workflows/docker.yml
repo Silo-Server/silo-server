@@ -59,6 +59,13 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
+      # github.com/h2non/bimg binds libvips through cgo and pkg-config, so the
+      # backend verification job needs the same headers as the CI Go job.
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvips-dev
+
       - name: Verify backend
         run: |
           go test ./...
