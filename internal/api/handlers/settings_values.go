@@ -11,11 +11,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -48,6 +51,14 @@ type SettingValuesHandler struct {
 	// deviceSeenThrottle window per (profile, device) — the same shape the
 	// legacy SettingsHandler uses.
 	deviceSeen *cache.TTLCache[struct{}]
+
+	// langSuggestions caches deployment-observed language lists per
+	// (list kind, access scope). The backing catalog scans walk every media
+	// file, which takes tens of seconds on large deployments, so they must
+	// not run once per effective-values request. Values are cached joined by
+	// newline because TTLCache requires a comparable value type.
+	langSuggestions     *cache.TTLCache[string]
+	langSuggestionGroup singleflight.Group
 
 	// EventsHub, when set, receives a user_settings.changed event after every
 	// successful write or delete. Nil (as in tests) simply skips publishing.
@@ -86,10 +97,11 @@ func NewSettingValuesHandler(
 	contract *settingscontract.Manifest,
 ) *SettingValuesHandler {
 	return &SettingValuesHandler{
-		storeProvider: provider,
-		contract:      contract,
-		resolver:      settingsresolve.New(contract),
-		deviceSeen:    cache.NewTTLCache[struct{}](),
+		storeProvider:   provider,
+		contract:        contract,
+		resolver:        settingsresolve.New(contract),
+		deviceSeen:      cache.NewTTLCache[struct{}](),
+		langSuggestions: cache.NewTTLCache[string](),
 	}
 }
 
@@ -1205,6 +1217,18 @@ func (h *SettingValuesHandler) effectiveResponsesWithObserved(
 	return out
 }
 
+// langSuggestionTTL bounds how stale the deployment-observed language lists
+// may get. The lists are advisory picker content derived from full catalog
+// scans, so a scan finishing mid-window shows up within this TTL rather than
+// on the next request.
+const langSuggestionTTL = 15 * time.Minute
+
+// langSuggestionColdWait caps how long an effective-values response waits for
+// an uncached catalog scan. On very large deployments the subtitle scan takes
+// several seconds; past this point the response ships with just the contract
+// floor while the scan keeps running to fill the cache for the next request.
+const langSuggestionColdWait = 2 * time.Second
+
 func (h *SettingValuesHandler) observedLanguageSuggestions(
 	r *http.Request,
 	resolved []settingsresolve.Effective,
@@ -1235,34 +1259,127 @@ func (h *SettingValuesHandler) observedLanguageSuggestions(
 		filters.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		filters.MaxContentRating = scope.MaxContentRating
 	}
+
+	type lookup struct {
+		key  string
+		kind string
+		list func(context.Context, catalog.BrowseFilters) ([]string, error)
+	}
+	lookups := make([]lookup, 0, 3)
 	if wantsMetadata {
-		values, err := h.languageSource.ListOriginalLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing metadata language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.CatalogMetadataLanguage] = values
-		}
+		lookups = append(lookups, lookup{
+			settingskeys.CatalogMetadataLanguage, "metadata", h.languageSource.ListOriginalLanguages,
+		})
 	}
 	if wantsAudio {
-		values, err := h.languageSource.ListAudioLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing audio language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.PlaybackAudioLanguage] = values
-		}
+		lookups = append(lookups, lookup{
+			settingskeys.PlaybackAudioLanguage, "audio", h.languageSource.ListAudioLanguages,
+		})
 	}
 	if wantsSubtitles {
-		values, err := h.languageSource.ListSubtitleLanguages(r.Context(), filters)
-		if err != nil {
-			slog.WarnContext(r.Context(), "settings: listing subtitle language suggestions",
-				"component", "settings", "error", err)
-		} else {
-			result[settingskeys.PlaybackSubtitleLanguage] = values
+		lookups = append(lookups, lookup{
+			settingskeys.PlaybackSubtitleLanguage, "subtitle", h.languageSource.ListSubtitleLanguages,
+		})
+	}
+
+	// The three catalog scans are independent, so run them concurrently:
+	// sequential execution stacks their latencies onto one response.
+	values := make([][]string, len(lookups))
+	errs := make([]error, len(lookups))
+	var wg sync.WaitGroup
+	for i, l := range lookups {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			values[i], errs[i] = h.cachedLanguageList(r.Context(), l.kind, filters, l.list)
+		}()
+	}
+	wg.Wait()
+
+	for i, l := range lookups {
+		if errs[i] != nil {
+			slog.WarnContext(r.Context(), "settings: listing "+l.kind+" language suggestions",
+				"component", "settings", "error", errs[i])
+			continue
 		}
+		result[l.key] = values[i]
 	}
 	return result
+}
+
+// cachedLanguageList serves one observed-language list through an in-process
+// TTL cache keyed by list kind and access scope, collapsing concurrent misses
+// with singleflight. The underlying catalog scans walk every media file —
+// tens of seconds on large deployments — so at most one scan per key runs at
+// a time and its result is reused across requests for langSuggestionTTL.
+func (h *SettingValuesHandler) cachedLanguageList(
+	ctx context.Context,
+	kind string,
+	filters catalog.BrowseFilters,
+	list func(context.Context, catalog.BrowseFilters) ([]string, error),
+) ([]string, error) {
+	key := languageSuggestionCacheKey(kind, filters)
+	if cached, ok := h.langSuggestions.Get(key); ok {
+		return splitCachedLanguages(cached), nil
+	}
+
+	ch := h.langSuggestionGroup.DoChan(key, func() (any, error) {
+		// Detach from the requesting context: an impatient client
+		// navigating away must not abort a scan that several other
+		// requests are waiting on, and letting it finish populates the
+		// cache for everyone who asks next.
+		values, err := list(context.WithoutCancel(ctx), filters)
+		if err != nil {
+			return nil, err
+		}
+		h.langSuggestions.Set(key, strings.Join(values, "\n"), langSuggestionTTL)
+		return values, nil
+	})
+	timeout := time.NewTimer(langSuggestionColdWait)
+	defer timeout.Stop()
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		values, _ := res.Val.([]string)
+		return values, nil
+	case <-timeout.C:
+		// Cold cache and a slow scan: ship the contract floor now. The
+		// scan keeps running and fills the cache for the next request.
+		return nil, nil
+	case <-ctx.Done():
+		// The scan keeps running and will fill the cache; this request
+		// just stops waiting for it.
+		return nil, ctx.Err()
+	}
+}
+
+func languageSuggestionCacheKey(kind string, filters catalog.BrowseFilters) string {
+	writeSorted := func(b *strings.Builder, ids []int) {
+		sorted := slices.Clone(ids)
+		slices.Sort(sorted)
+		for _, id := range sorted {
+			b.WriteString(strconv.Itoa(id))
+			b.WriteByte(',')
+		}
+	}
+	var b strings.Builder
+	b.WriteString(kind)
+	b.WriteString("|libs:")
+	writeSorted(&b, filters.LibraryIDs)
+	b.WriteString("|disabled:")
+	writeSorted(&b, filters.DisabledLibraryIDs)
+	b.WriteString("|rating:")
+	b.WriteString(filters.MaxContentRating)
+	return b.String()
+}
+
+func splitCachedLanguages(cached string) []string {
+	if cached == "" {
+		return nil
+	}
+	return strings.Split(cached, "\n")
 }
 
 // mergeLanguageSuggestions keeps the contract's stable authored order, then
