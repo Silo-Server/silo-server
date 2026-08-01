@@ -27,10 +27,18 @@ type eventsCapabilityResponse struct {
 	// a connection is exempt from the subscribe grace period, and that its
 	// hello frame carries required_action:"none".
 	DeclaredChannels bool `json:"declared_channels"`
-	// SubscribeGracePeriodSeconds is how long a connection that declared no
-	// channels may stay silent before it is closed. 0 would mean no deadline.
+	// SubscribeGracePeriodSeconds is how long a connection holding no
+	// subscription may stay silent before it is closed. 0 would mean no
+	// deadline.
 	SubscribeGracePeriodSeconds int `json:"subscribe_grace_period_seconds"`
-	// Channels is every channel this server knows, independent of role. What
+	// MaxRequestedChannels is the most channels one selection may name, on the
+	// URL or in a subscribe frame. Names past it are answered with a single
+	// too_many_channels rejection rather than one per name.
+	MaxRequestedChannels int `json:"max_requested_channels"`
+	// Channels is every channel a client may ask for on this server,
+	// independent of role — not every channel the server has: the plugins
+	// channel is host-to-plugin runtime dispatch and is granted to no role, so
+	// naming it here would advertise a request that can only be refused. What
 	// the caller may actually subscribe to arrives as available_channels in the
 	// hello frame, which is role-filtered.
 	Channels []evt.EventChannel `json:"channels"`
@@ -52,6 +60,7 @@ func (h *EventsHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		SubscribeFrame:              true,
 		DeclaredChannels:            true,
 		SubscribeGracePeriodSeconds: int(subscribeGracePeriod.Seconds()),
-		Channels:                    evt.AllChannels,
+		MaxRequestedChannels:        maxRequestedChannels,
+		Channels:                    evt.ClientChannels,
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,18 +33,40 @@ type taskInfoLister interface {
 
 const maxRealtimeScanSnapshotRuns = 500
 
-// subscribeGracePeriod bounds how long a connection that did not declare its
-// channels on the URL may stay silent before it is closed. It exists to
-// distinguish a client mid-handshake from one that connected and stalled;
-// connections that arrived with ?channels= are never put on this clock.
+// subscribeGracePeriod bounds how long a connection that is not subscribed to
+// anything may stay silent before it is closed. It exists to distinguish a
+// client mid-handshake from one that connected and stalled; a connection that
+// arrived with a usable ?channels= selection is never put on this clock.
 const subscribeGracePeriod = 5 * time.Second
 
+// maxRequestedChannels bounds how many distinct channels one selection may
+// name. Every refusal is echoed back with its channel name, so without a cap a
+// selection of many unknown names is an amplifier: the request is bounded by
+// the header/frame limit, the answer was not. Any real client names a subset of
+// the ten client channels; the slack is only so a caller learns it overshot
+// rather than silently losing channels.
+const maxRequestedChannels = 32
+
+// maxChannelNameLength bounds the channel name echoed in a rejection. A name
+// longer than any real channel is garbage by definition, and quoting it back in
+// full is the second half of the same amplification.
+const maxChannelNameLength = 64
+
+// maxEventsFrameBytes bounds an inbound frame on this socket. The only message
+// it accepts is a subscribe frame naming at most maxRequestedChannels channels,
+// which is orders of magnitude smaller; the limit exists so a client cannot
+// make the server buffer an arbitrarily large frame before it is rejected.
+const maxEventsFrameBytes = 64 * 1024
+
 // required_action values in the hello frame: whether the client still owes a
-// subscribe frame, or already declared its channels on the URL.
+// subscribe frame, or already holds a subscription it declared on the URL.
 const (
 	requiredActionSubscribe = "subscribe"
 	requiredActionNone      = "none"
 )
+
+// frameTypeSubscribed is the acknowledgement both selection paths answer with.
+const frameTypeSubscribed = "subscribed"
 
 type activeScanLister interface {
 	ListActiveSnapshot(ctx context.Context, limit int) ([]evt.ScanRun, error)
@@ -142,6 +165,7 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	}
 	defer conn.Close()
 	configureWebSocket(conn)
+	conn.SetReadLimit(maxEventsFrameBytes)
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -161,8 +185,24 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 	// half of the socket entirely.
 	declaredChannels, declared := parseDeclaredChannels(r.URL.Query())
 
-	requiredAction := requiredActionSubscribe
+	// Resolved before the hello frame so required_action can report what the
+	// connection actually owes. Resolution is pure — no query, no I/O — so
+	// nothing here can stall ahead of the reader that starts below; only the
+	// snapshots the accepted channels produce can, and those still run after
+	// it.
+	declaredSubs := make(map[evt.EventChannel]struct{})
+	var declaredAccepted []evt.EventChannel
+	var declaredRejected []evt.EventsRejectedChannel
 	if declared {
+		declaredSubs, declaredAccepted, declaredRejected =
+			resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
+	}
+
+	// A declaration that yielded no subscription discharges nothing: the client
+	// still owes a subscribe frame, and saying "none" would send it to wait
+	// silently for events on a connection due to be closed in five seconds.
+	requiredAction := requiredActionSubscribe
+	if len(declaredSubs) > 0 {
 		requiredAction = requiredActionNone
 	}
 	connectionID := ulid.Make().String()
@@ -200,33 +240,36 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 		}
 	}()
 
-	subscriptions := make(map[evt.EventChannel]struct{})
+	subscriptions := declaredSubs
 	if declared {
-		subs, accepted, rejected := resolveChannelSelection(declaredChannels, allowedChannels, boundProfileID)
-		subscriptions = subs
 		// The same subscribed frame the handshake produces, so a client sees
 		// one acknowledgement shape however it selected its channels — and
 		// still learns which of its requests were refused, and why.
 		if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
-			Type:     "subscribed",
-			Channels: accepted,
-			Rejected: rejected,
+			Type:     frameTypeSubscribed,
+			Channels: declaredAccepted,
+			Rejected: declaredRejected,
 		}); err != nil {
 			return
 		}
-		for _, channel := range accepted {
+		for _, channel := range declaredAccepted {
 			if err := h.writeSnapshotFrame(conn, r, claims, boundProfileID, channel); err != nil {
 				return
 			}
 		}
 	}
 
-	// A connection that declared its channels on the URL is already subscribed
-	// and has nothing left to say, so it is never put on the grace-period
-	// clock. Only a connection still owing a subscribe frame is. A nil channel
-	// blocks forever, which is exactly the disarmed case.
+	// The clock is disarmed by holding a subscription, not by having declared
+	// one. A declaration that resolved to nothing — ?channels= with no names,
+	// or a selection every entry of which was refused — leaves the connection
+	// in exactly the state the grace period exists to reap: subscribed to
+	// nothing, with no reason to expect it to ever receive a frame, while still
+	// holding a hub subscriber, two goroutines, and an envelope channel that
+	// every published event fans into. Such a client still owes a subscribe
+	// frame, and its rejected list told it why. A nil channel blocks forever,
+	// which is exactly the disarmed case.
 	var deadlineC <-chan time.Time
-	if !declared {
+	if len(subscriptions) == 0 {
 		deadline := time.NewTimer(subscribeGracePeriod)
 		defer deadline.Stop()
 		deadlineC = deadline.C
@@ -320,7 +363,7 @@ func (h *EventsHandler) handleEventsClientMessage(
 	nextSubs, accepted, rejected := resolveChannelSelection(message.Channels, allowed, boundProfileID)
 
 	if err := writeWebSocketJSON(conn, evt.EventsSubscribedMessage{
-		Type:      "subscribed",
+		Type:      frameTypeSubscribed,
 		RequestID: message.RequestID,
 		Channels:  accepted,
 		Rejected:  rejected,
@@ -346,6 +389,11 @@ func (h *EventsHandler) handleEventsClientMessage(
 // Closing the connection instead would take down every other channel it holds
 // over one bad name, and a client cannot always know which channels its role
 // allows before it asks.
+//
+// Because refusals are answered instead of closing the connection, the answer
+// has to be bounded independently of the request: at most maxRequestedChannels
+// distinct names are considered, and an overrun is reported once rather than
+// per excess name.
 func resolveChannelSelection(
 	requested []evt.EventChannel,
 	allowed []evt.EventChannel,
@@ -355,20 +403,25 @@ func resolveChannelSelection(
 	for _, channel := range allowed {
 		allowedSet[channel] = struct{}{}
 	}
-	validSet := make(map[evt.EventChannel]struct{}, len(evt.AllChannels))
-	for _, channel := range evt.AllChannels {
+	validSet := make(map[evt.EventChannel]struct{}, len(evt.ClientChannels))
+	for _, channel := range evt.ClientChannels {
 		validSet[channel] = struct{}{}
 	}
 
-	subs := make(map[evt.EventChannel]struct{}, len(requested))
-	accepted := make([]evt.EventChannel, 0, len(requested))
-	rejected := make([]evt.EventsRejectedChannel, 0)
+	capacity := min(len(requested), maxRequestedChannels)
+	subs := make(map[evt.EventChannel]struct{}, capacity)
+	accepted := make([]evt.EventChannel, 0, capacity)
+	rejected := make([]evt.EventsRejectedChannel, 0, capacity)
 	// A repeated channel is answered once whether it was accepted or refused.
 	// Only the accepted side deduplicated before this change, so asking twice
 	// for one forbidden channel produced two identical rejections.
-	seen := make(map[evt.EventChannel]struct{}, len(requested))
+	seen := make(map[evt.EventChannel]struct{}, capacity)
 
 	reject := func(channel evt.EventChannel, code, message string) {
+		// A garbage name is echoed back only far enough to be recognizable.
+		if len(channel) > maxChannelNameLength {
+			channel = channel[:maxChannelNameLength]
+		}
 		rejected = append(rejected, evt.EventsRejectedChannel{
 			Channel: channel,
 			Code:    code,
@@ -380,13 +433,24 @@ func resolveChannelSelection(
 		if _, dup := seen[channel]; dup {
 			continue
 		}
+		if len(seen) >= maxRequestedChannels {
+			// One entry for the whole overrun, not one per name: the point of
+			// the cap is that the response cannot grow with the request.
+			reject("", "too_many_channels",
+				"At most "+strconv.Itoa(maxRequestedChannels)+" channels may be requested at once")
+			break
+		}
 		seen[channel] = struct{}{}
 
 		switch {
 		case !contains(validSet, channel):
 			reject(channel, "unknown_channel", "Unknown channel")
 		case !contains(allowedSet, channel):
-			reject(channel, "forbidden", "Admin access required")
+			// Deliberately not "admin access required": the caller's role is
+			// the usual reason a channel is refused but not the only one, and a
+			// remedy that does not exist reads as a bug in the client's own
+			// permissions rather than a channel it was never going to get.
+			reject(channel, "forbidden", "This channel is not available to this connection")
 		// The notifications channel is profile-scoped: it requires a
 		// connection bound to a profile via a websocket ticket.
 		case channel == evt.ChannelNotifications && boundProfileID == "":
@@ -410,18 +474,27 @@ func contains(set map[evt.EventChannel]struct{}, channel evt.EventChannel) bool 
 // handshake entirely. An absent parameter returns ok=false, which keeps the
 // handshake (and its grace period) in force; an empty or all-blank value is a
 // deliberate declaration of nothing, so it returns ok=true and no channels.
+//
+// Every occurrence of the parameter is read, not just the first. Repeating a
+// query parameter is as natural a spelling as a comma-separated list, and
+// honoring one and silently discarding the rest loses channels with no
+// diagnostic — the connection would come up subscribed to less than it asked
+// for and report nothing rejected.
 func parseDeclaredChannels(query url.Values) ([]evt.EventChannel, bool) {
-	if !query.Has("channels") {
+	values, ok := query["channels"]
+	if !ok {
 		return nil, false
 	}
 
 	channels := make([]evt.EventChannel, 0, 4)
-	for _, raw := range strings.Split(query.Get("channels"), ",") {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
+	for _, value := range values {
+		for _, raw := range strings.Split(value, ",") {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			channels = append(channels, evt.EventChannel(name))
 		}
-		channels = append(channels, evt.EventChannel(name))
 	}
 	return channels, true
 }
