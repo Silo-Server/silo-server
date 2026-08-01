@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -209,6 +210,52 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 		}
 	}
 	return d.Config
+}
+
+// The Silo Complex 2.2 handlers are intentionally static contract stubs. The
+// capability, branding, and complete-snapshot implementations replace them in
+// the follow-up tasks without changing these routes or response shapes.
+func handleSiloComplexCapabilitiesStub(w http.ResponseWriter, _ *http.Request) {
+	writeSiloComplexContractStub(w, struct {
+		APIVersion   string   `json:"api_version"`
+		Capabilities []string `json:"capabilities"`
+	}{
+		APIVersion:   "2.2",
+		Capabilities: []string{},
+	})
+}
+
+func handleSiloComplexBrandingStub(w http.ResponseWriter, _ *http.Request) {
+	writeSiloComplexContractStub(w, struct {
+		ServerName string  `json:"server_name"`
+		LogoURL    *string `json:"logo_url"`
+		LogoETag   *string `json:"logo_etag"`
+	}{
+		ServerName: "Sullyflix",
+	})
+}
+
+func handleSiloComplexSessionsSnapshotStub(w http.ResponseWriter, _ *http.Request) {
+	writeSiloComplexContractStub(w, struct {
+		SnapshotID  string `json:"snapshot_id"`
+		GeneratedAt string `json:"generated_at"`
+		Complete    bool   `json:"complete"`
+		Reason      string `json:"incomplete_reason"`
+		Sessions    []any  `json:"sessions"`
+	}{
+		SnapshotID:  "00000000-0000-0000-0000-000000000000",
+		GeneratedAt: "1970-01-01T00:00:00Z",
+		Complete:    false,
+		Reason:      "not_implemented",
+		Sessions:    []any{},
+	})
+}
+
+func writeSiloComplexContractStub(w http.ResponseWriter, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		slog.Error("failed to encode Silo Complex contract stub", "error", err)
+	}
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted
@@ -1994,6 +2041,11 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Use(viewerAccessMiddleware.RequireViewerAccess)
 				}
 
+				// Silo Complex server-to-server discovery uses the same bearer
+				// API-key authentication and acting-admin authorization as the
+				// existing admin API.
+				r.With(requireActingAdmin).Get("/system/capabilities", handleSiloComplexCapabilitiesStub)
+
 				// User-facing library route (all authenticated users).
 				if libraryHandler != nil {
 					r.Get("/user/libraries", libraryHandler.HandleListUserLibraries)
@@ -2724,6 +2776,9 @@ func NewRouter(deps Dependencies) chi.Router {
 
 						r.Group(func(r chi.Router) {
 							r.Use(requireActingAdmin)
+
+							r.Get("/branding", handleSiloComplexBrandingStub)
+							r.Get("/sessions/snapshot", handleSiloComplexSessionsSnapshotStub)
 
 							r.Get("/users", adminHandler.HandleListUsers)
 							r.Post("/users", adminHandler.HandleCreateUser)
