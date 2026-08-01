@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -35,6 +36,10 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// EventsHub, when set, receives a user_settings.changed event for every
+	// canonical setting row a profile mutation syncs (see
+	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
+	EventsHub *evt.Hub
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -275,11 +280,8 @@ func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Reque
 	}
 
 	resp := profileListResponse{
-		Profiles:            make([]profileResponse, 0, len(profiles)),
+		Profiles:            h.toProfileResponses(r.Context(), store, profiles),
 		AvatarUploadEnabled: h.AvatarStore != nil,
-	}
-	for _, p := range profiles {
-		resp.Profiles = append(resp.Profiles, h.toProfileResponse(r.Context(), p))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -312,6 +314,14 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 	maxPlaybackQuality, ok := access.ParsePlaybackQualityPreset(req.MaxPlaybackQuality)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
+		return
+	}
+
+	// Planned before anything is written: a preference value the canonical
+	// store would refuse must fail the request while it is still a no-op.
+	settingsSync, err := planCreateProfileSettingsSync(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
@@ -412,8 +422,10 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := store.CreateProfile(r.Context(), profile); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create profile")
+	if err := h.createProfileWithSettingsSync(r.Context(), store, userID, profile, settingsSync); err != nil {
+		slog.ErrorContext(r.Context(), "profile create failed to sync canonical settings",
+			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 		return
 	}
 
@@ -456,7 +468,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		created = *p
 	}
 
-	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), created))
+	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), store, created))
 }
 
 // HandleUpdateProfile handles PUT /profiles/{id}.
@@ -566,6 +578,14 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Planned before the transaction so an invalid preference fails while the
+	// request is still a no-op.
+	settingsSync, err := planUpdateProfileSettingsSync(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
@@ -587,8 +607,15 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		MaxPlaybackQuality:         maxPlaybackQuality,
 	}
 
-	if err := store.UpdateProfile(r.Context(), profileID, input); err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
+	// The profile columns and their canonical projections commit together. A
+	// failure cannot leave a 500 response whose legacy values look saved while
+	// canonical readers continue serving the previous preference.
+	if err := h.applyProfileUpdateSettingsSync(
+		r.Context(), store, userID, profileID, input, settingsSync,
+	); err != nil {
+		slog.ErrorContext(r.Context(), "profile update failed to sync canonical settings",
+			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 		return
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
@@ -604,7 +631,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), *profile))
+	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *profile))
 }
 
 // HandleDeleteProfile handles DELETE /profiles/{id}.
@@ -747,7 +774,43 @@ func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request)
 
 // --- Helpers ---
 
-func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Profile) profileResponse {
+// toProfileResponse serializes one profile, resolving its preference block on
+// its own. Callers serializing several profiles must use toProfileResponses
+// instead so the whole list costs one store read.
+func (h *ProfileHandler) toProfileResponse(
+	ctx context.Context, store userstore.UserStore, p userstore.Profile,
+) profileResponse {
+	prefs := resolveProfilePreferences(ctx, store, []string{p.ID})
+	return h.profileResponseWith(ctx, p, prefs[p.ID])
+}
+
+// toProfileResponses serializes a whole household, resolving every profile's
+// preference block in one store read rather than one per profile.
+func (h *ProfileHandler) toProfileResponses(
+	ctx context.Context, store userstore.UserStore, profiles []userstore.Profile,
+) []profileResponse {
+	ids := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		ids = append(ids, p.ID)
+	}
+	prefs := resolveProfilePreferences(ctx, store, ids)
+
+	out := make([]profileResponse, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, h.profileResponseWith(ctx, p, prefs[p.ID]))
+	}
+	return out
+}
+
+// profileResponseWith builds the DTO from a profile row and its already
+// resolved preferences.
+//
+// The preference fields come from prefs rather than from p: those five are
+// canonical now, and the legacy columns behind them are written but no longer
+// read (see profiles_settings_sync.go). Everything else is still column-backed.
+func (h *ProfileHandler) profileResponseWith(
+	ctx context.Context, p userstore.Profile, prefs profilePreferences,
+) profileResponse {
 	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar)
 	return profileResponse{
 		ID:                         p.ID,
@@ -760,15 +823,15 @@ func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Prof
 		IsPrimary:                  p.IsPrimary,
 		MaxContentRating:           p.MaxContentRating,
 		QualityPreference:          p.QualityPreference,
-		Language:                   p.Language,
-		PreferredMetadataLanguage:  p.PreferredMetadataLanguage,
-		SubtitleLanguage:           p.SubtitleLanguage,
-		SubtitleMode:               p.SubtitleMode,
+		Language:                   prefs.AudioLanguage,
+		PreferredMetadataLanguage:  prefs.MetadataLanguage,
+		SubtitleLanguage:           prefs.SubtitleLanguage,
+		SubtitleMode:               prefs.SubtitleMode,
 		AutoSkipIntro:              p.AutoSkipIntro,
 		AutoSkipCredits:            p.AutoSkipCredits,
 		AutoSkipRecap:              p.AutoSkipRecap,
 		AutoPlayNextPreview:        p.AutoPlayNextPreview,
-		ShowForcedSubtitles:        p.ShowForcedSubtitles,
+		ShowForcedSubtitles:        prefs.ShowForcedSubtitles,
 		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
 		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),
 		MaxPlaybackQuality:         access.NormalizePlaybackQuality(p.MaxPlaybackQuality),

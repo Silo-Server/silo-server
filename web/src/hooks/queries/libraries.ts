@@ -1,51 +1,46 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { UserLibrary } from "@/api/types";
 import { useAuth } from "@/hooks/useAuth";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { libraryKeys } from "./keys";
-import { useSettings } from "./settings";
+import { useEffectiveSettings } from "./settingValues";
 
-export const DISABLED_LIBRARY_IDS_SETTING_KEY = "disabled_library_ids";
-export const LIBRARY_ORDER_SETTING_KEY = "library_order";
+const LIBRARY_PREF_KEYS = [
+  SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+  SETTING_KEYS.UI_LIBRARY_ORDER,
+] as const;
 
-function normalizeLibraryIDs(ids: number[]) {
+/**
+ * Drops non-integers, duplicates, and anything below 1 — the same
+ * normalization library-id-list.json enforces server-side, applied before a
+ * write so a value the client sends always validates.
+ */
+export function normalizeLibraryIDs(ids: number[]) {
   return [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
 }
 
-export function parseDisabledLibraryIDs(value: string | null | undefined) {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return normalizeLibraryIDs(
-      parsed.map((entry) => (typeof entry === "number" ? entry : Number.NaN)),
-    );
-  } catch {
-    return [];
+/**
+ * Accepts the canonical array value, the legacy JSON-string encoding, or
+ * null/undefined (the contract default), and always lands on a normalized id
+ * list. Backs both ui.disabled_library_ids and ui.library_order.
+ */
+export function parseLibraryIDList(value: unknown): number[] {
+  if (value == null) return [];
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    if (!value) return [];
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return [];
+    }
   }
-}
-
-export function serializeDisabledLibraryIDs(ids: number[]) {
-  return JSON.stringify(normalizeLibraryIDs(ids));
-}
-
-export function parseLibraryOrder(value: string | null | undefined): number[] {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return normalizeLibraryIDs(
-      parsed.map((entry) => (typeof entry === "number" ? entry : Number.NaN)),
-    );
-  } catch {
-    return [];
-  }
-}
-
-export function serializeLibraryOrder(ids: number[]) {
-  return JSON.stringify(normalizeLibraryIDs(ids));
+  if (!Array.isArray(parsed)) return [];
+  return normalizeLibraryIDs(
+    parsed.map((entry) => (typeof entry === "number" ? entry : Number.NaN)),
+  );
 }
 
 export function applyLibraryOrder(libraries: UserLibrary[], orderIDs: number[]): UserLibrary[] {
@@ -80,29 +75,44 @@ export function useAvailableUserLibraries() {
   });
 }
 
+/**
+ * The profile's own hide/order preferences, resolved through the canonical
+ * settings API in one batched read. Exported for the settings screen that
+ * edits them; most callers want useUserLibraries, which applies them.
+ */
+export function useLibraryDisplayPreferences() {
+  const { profile } = useAuth();
+  const query = useEffectiveSettings({ keys: LIBRARY_PREF_KEYS, enabled: Boolean(profile) });
+  const disabledValue = query.data?.[SETTING_KEYS.UI_DISABLED_LIBRARY_IDS]?.value;
+  const orderValue = query.data?.[SETTING_KEYS.UI_LIBRARY_ORDER]?.value;
+  // Memoized so effects keyed on these lists fire on saved-value changes, not
+  // on every render.
+  const disabledLibraryIDs = useMemo(() => parseLibraryIDList(disabledValue), [disabledValue]);
+  const libraryOrder = useMemo(() => parseLibraryIDList(orderValue), [orderValue]);
+  return {
+    ...query,
+    disabledLibraryIDs,
+    libraryOrder,
+    // A profile-less session has no preferences to wait for.
+    isLoading: Boolean(profile) && query.isLoading,
+  };
+}
+
 export function useUserLibraries() {
   const librariesQuery = useAvailableUserLibraries();
-  const settingsQuery = useSettings();
-  const disabledLibraryIDs = settingsQuery.isLoading
-    ? null
-    : parseDisabledLibraryIDs(settingsQuery.data?.[DISABLED_LIBRARY_IDS_SETTING_KEY]);
-  const libraryOrder = settingsQuery.isLoading
-    ? null
-    : parseLibraryOrder(settingsQuery.data?.[LIBRARY_ORDER_SETTING_KEY]);
+  const prefs = useLibraryDisplayPreferences();
 
   let data = librariesQuery.data;
-  if (data != null && disabledLibraryIDs != null) {
-    data = filterVisibleLibraries(data, disabledLibraryIDs);
-  }
-  if (data != null && libraryOrder != null) {
-    data = applyLibraryOrder(data, libraryOrder);
+  if (data != null && !prefs.isLoading) {
+    data = filterVisibleLibraries(data, prefs.disabledLibraryIDs);
+    data = applyLibraryOrder(data, prefs.libraryOrder);
   }
 
   return {
     ...librariesQuery,
     data,
-    isLoading: librariesQuery.isLoading || settingsQuery.isLoading,
-    isFetching: librariesQuery.isFetching || settingsQuery.isFetching,
-    error: librariesQuery.error ?? settingsQuery.error,
+    isLoading: librariesQuery.isLoading || prefs.isLoading,
+    isFetching: librariesQuery.isFetching || prefs.isFetching,
+    error: librariesQuery.error ?? prefs.error,
   };
 }

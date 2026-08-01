@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/theme-var-overrides.json",
+  "title": "Theme variable overrides",
+  "description": "Sparse map of theme token to CSS value. Token names mirror web/src/lib/themeTokens.ts; values are bounded to keep this from becoming an untyped blob. The per-value bound is sized to what the web importer already accepts and stores: computed multi-stop gradients routinely pass 128 characters, so a tighter bound would invalidate themes users already imported.",
+  "type": "object",
+  "propertyNames": {
+    "type": "string",
+    "pattern": "^[a-z][a-z0-9-]*$",
+    "maxLength": 64
+  },
+  "additionalProperties": {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 1024
+  },
+  "maxProperties": 256
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -344,7 +345,8 @@ func (h *AuthHandler) HandlePluginLaunch(w http.ResponseWriter, r *http.Request)
 	}
 
 	const ttl = 5 * time.Minute
-	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, ttl)
+	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
+	token, err := h.jwt.GeneratePluginAccessToken(claims.UserID, claims.Role, claims.SessionID, profileID, ttl)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare plugin access")
 		return

@@ -173,15 +173,31 @@ func (s *PostgresUserStore) DeleteDeviceSetting(ctx context.Context, profileID, 
 	return nil
 }
 
+// DeleteAllDeviceSettings clears everything one device holds for one profile.
+// It is the forget-device path, so it drops the canonical profile_device values
+// alongside the legacy string overrides: device identity columns are not foreign
+// keys in either backend, so nothing else would.
 func (s *PostgresUserStore) DeleteAllDeviceSettings(ctx context.Context, profileID, deviceID string) error {
-	_, err := s.pool.Exec(ctx,
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning transaction to forget device %q: %w", deviceID, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx,
 		"DELETE FROM user_device_settings WHERE user_id = $1 AND profile_id = $2 AND device_id = $3",
 		s.userID, profileID, deviceID,
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("deleting all device settings for device %q: %w", deviceID, err)
 	}
-	return nil
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_setting_values
+		WHERE user_id = $1 AND scope = 'profile_device' AND profile_id = $2 AND device_id = $3`,
+		s.userID, profileID, deviceID,
+	); err != nil {
+		return fmt.Errorf("deleting setting values for device %q: %w", deviceID, err)
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *PostgresUserStore) DeleteDeviceSettingsByKey(ctx context.Context, key string) error {

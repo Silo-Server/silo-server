@@ -51,7 +51,7 @@ func TestNoEpisodeDeletePath_ProtectsLastAirDateDenorm(t *testing.T) {
 	// breaking the invariant — e.g., schema migrations that drop and
 	// recreate the table, or tests asserting the absence itself.
 	knownEpisodeDeleteSites := map[string]bool{
-		"item_repo.go":                       true,
+		"item_repo.go":                      true,
 		"virtual_media_integration_test.go": true,
 	}
 

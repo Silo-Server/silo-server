@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -147,21 +148,22 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
 	})
 
-	insertItem := func(contentID, mediaType, title, overview, rating string) {
+	insertItem := func(contentID, mediaType, title, overview, rating, originalLanguage string) {
 		batchEquivExec(t, pool, `
-			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, default_metadata_language)
-			VALUES ($1, $2, $3, '{}'::text[], $4, $5, 'en')
-		`, contentID, mediaType, title, overview, rating)
+			INSERT INTO media_items (content_id, type, title, genres, overview, content_rating, default_metadata_language, original_language)
+			VALUES ($1, $2, $3, '{}'::text[], $4, $5, 'en', $6)
+		`, contentID, mediaType, title, overview, rating, originalLanguage)
 	}
 	// movieA: localized into fr, credited, has files. content_rating PG -> visible.
-	insertItem(movieA, "movie", "Movie A", "Movie A overview (en)", "PG")
-	// movieB: overview present, default lang en, NO fr localization row -> the
-	// pending-translation-language path must fire and match between paths.
-	insertItem(movieB, "movie", "Movie B", "Movie B overview (en)", "PG")
+	insertItem(movieA, "movie", "Movie A", "Movie A overview (en)", "PG", "en")
+	// movieB: Norwegian original, default metadata language en, and no no
+	// localization row. The per-source original-language exception must produce
+	// a Norwegian pending-translation target in both batch and per-item paths.
+	insertItem(movieB, "movie", "Movie B", "Movie B overview (en)", "PG", "no")
 	// series: has a work summary, no playable files (series skip the file path).
-	insertItem(series, "series", "Series One", "Series overview (en)", "PG")
+	insertItem(series, "series", "Series One", "Series overview (en)", "PG", "en")
 	// movieR: R-rated -> filtered out by MaxContentRating=PG-13 on BOTH paths.
-	insertItem(movieR, "movie", "Movie R", "Movie R overview (en)", "R")
+	insertItem(movieR, "movie", "Movie R", "Movie R overview (en)", "R", "en")
 
 	// fr localization for movieA only.
 	batchEquivExec(t, pool, `
@@ -251,13 +253,17 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	}
 
 	// Single shared access filter for BOTH paths: PG-13 ceiling (so PG items are
-	// visible, the R item is not) and an explicit fr presentation language (so
-	// the localization path actually runs rather than short-circuiting).
+	// visible, the R item is not), a French profile fallback, and Norwegian
+	// original-language metadata for Norwegian titles. This forces the batch
+	// path to group one page into two localization targets.
 	filter := AccessFilter{
-		PresentationLanguage: "fr",
-		MaxContentRating:     "PG-13",
-		UserID:               1,
-		ProfileID:            "profile-1",
+		ProfilePreferredLanguage: "fr",
+		MetadataLanguageOverrides: map[string]string{
+			"no": access.OriginalMetadataLanguage,
+		},
+		MaxContentRating: "PG-13",
+		UserID:           1,
+		ProfileID:        "profile-1",
 	}
 
 	visibleIDs := []string{movieA, movieB, series}
@@ -306,8 +312,8 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	if got := batch[movieA]; len(got.Versions) != 2 {
 		t.Fatalf("movieA versions = %d, want 2 (file prefetch not applied)", len(got.Versions))
 	}
-	if got := batch[movieB]; got.PendingTranslationLanguage != "fr" {
-		t.Fatalf("movieB pending translation language = %q, want fr", got.PendingTranslationLanguage)
+	if got := batch[movieB]; got.PendingTranslationLanguage != "no" {
+		t.Fatalf("movieB pending translation language = %q, want no", got.PendingTranslationLanguage)
 	}
 	if got := batch[series]; got.WorkID != "work-series-1" {
 		t.Fatalf("series work summary not applied: WorkID=%q", got.WorkID)

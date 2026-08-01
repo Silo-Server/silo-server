@@ -2670,6 +2670,10 @@ export type EventChannel =
   | "scans"
   | "history_import"
   | "user_state"
+  // Per-account settings changed somewhere (another device, or an admin
+  // editing this account). Identity only, never a value — see
+  // useSettingValuesRealtime.
+  | "user_settings"
   | "settings"
   | "notifications";
 
@@ -3740,16 +3744,6 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
-}
-
-export interface LibraryPlaybackPreference {
-  profile_id: string;
-  library_id: number;
-  audio_language?: string;
-  subtitle_language?: string;
-  subtitle_mode?: string;
-  show_forced_subtitles?: boolean;
-  updated_at?: string;
 }
 
 // Progress entry from GET /progress

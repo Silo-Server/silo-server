@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
@@ -234,7 +236,7 @@ func TestRemoveJellyfinCompatWebDisablesWebSetting(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{
 		"jellyfin_compat.enabled":         "true",
 		"jellyfin_compat.web_enabled":     "true",
-		"jellyfin_compat.web_install_dir": t.TempDir(),
+		"jellyfin_compat.web_install_dir": asyncWebInstallRoot(t),
 	}}
 	published := map[string]string{}
 	handler := &AdminHandler{
@@ -335,5 +337,50 @@ func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
 	}
 	if got := settings.values["jellyfin_compat.web_source_url"]; got != jellycompat.DefaultWebSourceURL {
 		t.Fatalf("jellyfin_compat.web_source_url = %q", got)
+	}
+}
+
+// asyncWebInstallRoot returns a temp dir for a handler that removes or installs
+// Jellyfin Web assets in a background goroutine.
+//
+// t.TempDir is wrong here: the endpoint returns 202 and its goroutine keeps
+// writing into the root after the test body returns, so t.TempDir's cleanup
+// trips "directory not empty" on an otherwise passing test.
+//
+// Removing the directory out from under a running goroutine only moves the
+// race, though: a write landing mid-traversal recreates a path RemoveAll has
+// already walked past, and the leftovers survive the run. The operation
+// records its own terminal state, so cleanup waits for that instead.
+func asyncWebInstallRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "jellyfin-web-root-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() {
+		waitForWebOperation(t, dir)
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("removing %s: %v", dir, err)
+		}
+	})
+	return dir
+}
+
+// waitForWebOperation blocks until the background install/remove goroutine for
+// root has reached a terminal state, or gives up after a bound generous enough
+// that only a genuinely stuck operation reaches it.
+func waitForWebOperation(t *testing.T, root string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		op := jellycompat.CurrentWebOperation(root)
+		if op == nil || op.State != jellycompat.WebComponentOperationRunning {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("background %s operation on %s did not finish", op.Kind, root)
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

@@ -14,6 +14,7 @@ import {
 import {
   type AdminDeviceSetting,
   useAdminDeviceDetail,
+  useAdminDeviceOverrides,
   useAdminDevices,
   useDeleteAdminUserDeviceSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
@@ -36,7 +37,8 @@ import {
   type DeviceProfileTabEntry,
   type PlatformKind,
 } from "@/components/admin/deviceOverrides";
-import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsManifest";
+import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
 
@@ -1386,7 +1388,16 @@ function DeviceDetailPanel({
   defaultShowAllSettings: boolean;
 }) {
   const isAnomaly = anomaly !== null;
+  // The detail endpoint supplies registration metadata — device name, owner,
+  // which profiles have ever used it — which is not a setting and has no
+  // canonical equivalent. The overrides themselves come from the canonical
+  // values API, because the detail endpoint's `settings` array still reports
+  // the legacy device-settings table that nothing writes to any more.
   const { data, isLoading } = useAdminDeviceDetail(userId, deviceId);
+  const { data: overrides, isLoading: overridesLoading } = useAdminDeviceOverrides(
+    userId,
+    deviceId,
+  );
   const updateSetting = useUpdateAdminUserDeviceSetting();
   const deleteSetting = useDeleteAdminUserDeviceSetting();
   const deleteProfileOverrides = useDeleteAllAdminUserDeviceSettingsForDevice();
@@ -1419,6 +1430,8 @@ function DeviceDetailPanel({
   const profileTabs = useMemo<DeviceProfileTabEntry[]>(() => {
     if (!data) return [];
     const grouped = new Map<string, DeviceProfileTabEntry>();
+    // Registered profiles come first so a profile that has used the device but
+    // overridden nothing still gets a (possibly empty) tab.
     for (const profile of data.profiles ?? []) {
       const profileId = profile.profile_id || UNKNOWN_PROFILE_ID;
       grouped.set(profileId, {
@@ -1427,7 +1440,7 @@ function DeviceDetailPanel({
         settings: [],
       });
     }
-    for (const setting of data.settings) {
+    for (const setting of overrides) {
       const profileId = setting.profile_id || UNKNOWN_PROFILE_ID;
       const existing = grouped.get(profileId);
       if (existing) {
@@ -1441,9 +1454,9 @@ function DeviceDetailPanel({
       }
     }
     return Array.from(grouped.values());
-  }, [data]);
+  }, [data, overrides]);
 
-  if (isLoading) {
+  if (isLoading || overridesLoading) {
     return (
       <div className="space-y-4 p-5">
         <Skeleton className="h-16 w-full rounded-md" />
@@ -1465,11 +1478,14 @@ function DeviceDetailPanel({
   }
 
   const kind = classifyPlatform(data.device_platform);
-  const totalOverrides = data.override_count ?? data.settings.length;
+  // Counted from the canonical rows rather than the endpoint's override_count,
+  // which is computed over the legacy table and would disagree with the rows
+  // rendered below.
+  const totalOverrides = overrides.length;
   const forceAllSettings = totalOverrides === 0;
   const effectiveShowAllSettings = forceAllSettings || showAllSettings;
-  const lastUpdate = data.settings
-    .map((s) => s.updated_at)
+  const lastUpdate = overrides
+    .map((setting) => setting.updated_at)
     .filter(Boolean)
     .sort()
     .pop();
@@ -1513,6 +1529,13 @@ function DeviceDetailPanel({
               userId: data.user_id,
               profileId: profileToReset.id,
               deviceId: data.device_id,
+              // There is no bulk canonical reset route; the mutation issues one
+              // delete per key, so it needs the keys that actually exist.
+              keys: overrides
+                .filter(
+                  (setting) => (setting.profile_id || UNKNOWN_PROFILE_ID) === profileToReset.id,
+                )
+                .map((setting) => setting.key),
             });
           }
           setProfileToReset(null);
@@ -1527,7 +1550,9 @@ function DeviceDetailPanel({
       */}
       <AdminSubtitleAppearanceDialog
         setting={
-          jsonEditor && jsonEditor.setting.key === "subtitle_appearance" ? jsonEditor.setting : null
+          jsonEditor && jsonEditor.setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+            ? jsonEditor.setting
+            : null
         }
         isOverride={jsonEditor?.isOverride ?? false}
         onClose={closeJsonEditor}
@@ -1552,7 +1577,10 @@ function DeviceDetailPanel({
       />
 
       <Dialog
-        open={jsonEditor !== null && jsonEditor.setting.key !== "subtitle_appearance"}
+        open={
+          jsonEditor !== null &&
+          jsonEditor.setting.key !== SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+        }
         onOpenChange={(open) => {
           if (!open) closeJsonEditor();
         }}

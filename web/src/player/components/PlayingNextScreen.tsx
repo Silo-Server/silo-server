@@ -3,10 +3,9 @@ import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
 import type { EpisodeRef } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
-import { useEffectiveSettings, useSetDeviceSetting } from "@/hooks/queries/settings";
+import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
-import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { preferredDateLocale } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 
@@ -22,7 +21,6 @@ interface PlayingNextScreenProps {
 }
 
 const COUNTDOWN_SECONDS = 10;
-const AUTOPLAY_SETTING_KEY = "playback.auto_play_next";
 
 export function PlayingNextScreen({
   seriesId,
@@ -36,15 +34,13 @@ export function PlayingNextScreen({
 }: PlayingNextScreenProps) {
   useDateTimeFormat();
   // -- Auto-play setting --
-  const { profile } = useCurrentProfile();
-  const { data: effectiveSettings } = useEffectiveSettings(profile?.id, [AUTOPLAY_SETTING_KEY]);
-  const setDeviceSetting = useSetDeviceSetting();
-  const autoplay = effectiveSettings?.[AUTOPLAY_SETTING_KEY]?.effective_value !== "false";
+  // Shared with Settings → Playback: both surfaces edit the same profile row,
+  // so a choice made here is the one that screen shows and vice versa.
+  const { enabled: autoplay, setEnabled: setAutoplay } = useAutoPlayNextSetting();
 
   const toggleAutoplay = useCallback(() => {
-    const newValue = autoplay ? "false" : "true";
-    setDeviceSetting.mutate({ key: AUTOPLAY_SETTING_KEY, value: newValue });
-  }, [autoplay, setDeviceSetting]);
+    void setAutoplay(!autoplay);
+  }, [autoplay, setAutoplay]);
 
   // -- Countdown (only starts after video has ended) --
   const [secondsRemaining, setSecondsRemaining] = useState(COUNTDOWN_SECONDS);

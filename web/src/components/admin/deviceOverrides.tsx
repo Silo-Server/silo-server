@@ -14,9 +14,13 @@ import { Button } from "@/components/ui/button";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
 import {
   ALL_DEVICE_SETTING_KEYS,
+  controlKindFor,
+  defaultValueToString,
   formatSettingValue,
   getSettingDefinition,
-} from "@/lib/settingsManifest";
+  isStructuredSetting,
+} from "@/lib/settingsDisplay";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
 import { formatDate } from "@/lib/datetime";
@@ -250,14 +254,15 @@ export function getSettingAnomaly(
   // the [min,max] range so each slider's threshold scales with its own
   // sensitivity rather than picking arbitrary unit thresholds per key.
   if (
-    definition?.control === "slider" &&
-    definition.min !== undefined &&
-    definition.max !== undefined
+    definition &&
+    controlKindFor(definition) === "slider" &&
+    definition.minimum !== undefined &&
+    definition.maximum !== undefined
   ) {
     const v = Number(setting.value);
     const def = Number(definition.defaultValue ?? 0);
     if (Number.isFinite(v) && Number.isFinite(def)) {
-      const range = Math.abs(definition.max - definition.min);
+      const range = Math.abs(definition.maximum - definition.minimum);
       const distance = Math.abs(v - def);
       if (range > 0 && distance / range >= 0.4) {
         const unit = definition.unit ? ` ${definition.unit}` : "";
@@ -315,7 +320,9 @@ export function DeviceOverrideRow({
   onReset,
 }: DeviceOverrideRowProps) {
   const definition = getSettingDefinition(setting.key);
-  const isJsonOnly = !definition || definition.control === "json";
+  // Object-valued settings have no inline widget: they open a bespoke panel
+  // (subtitle appearance) or the raw JSON editor.
+  const isJsonOnly = isStructuredSetting(definition);
 
   const anomalyBadgeLabel: Record<SettingAnomalyKind, string> = {
     extreme: "extreme",
@@ -374,10 +381,10 @@ export function DeviceOverrideRow({
           <span className="text-foreground/80">
             {formatSettingValue(setting.key, setting.value)}
           </span>
-          {!isJsonOnly && definition?.defaultValue !== undefined && (
+          {!isJsonOnly && definition && (
             <span className="text-muted-foreground/60">
               {" "}
-              · default {formatSettingValue(setting.key, definition.defaultValue)}
+              · default {formatSettingValue(setting.key, defaultValueToString(definition))}
             </span>
           )}
         </div>
@@ -390,9 +397,9 @@ export function DeviceOverrideRow({
       </div>
 
       <div className="flex flex-col items-stretch gap-2 md:min-w-[220px] md:items-end">
-        {isJsonOnly ? (
+        {isJsonOnly || !definition ? (
           <Button variant="outline" size="sm" onClick={() => onEditJson(setting, isOverride)}>
-            {setting.key === "subtitle_appearance" ? "Customize" : "Edit JSON"}
+            {setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE ? "Customize" : "Edit JSON"}
           </Button>
         ) : (
           <RegistrySettingControl
@@ -500,8 +507,8 @@ function buildRenderedRows(
           device_id: device.deviceId,
           device_name: device.deviceName,
           device_platform: device.devicePlatform,
-          key,
-          value: definition?.defaultValue ?? "",
+          key: key as string,
+          value: definition ? defaultValueToString(definition) : "",
           updated_at: "",
         },
       };
@@ -511,7 +518,7 @@ function buildRenderedRows(
   // Render in canonical manifest order so the layout is stable as overrides
   // are added or removed (rather than "overrides bubble to top, defaults
   // sink").  Stable order > recency for an admin browsing fields.
-  const order = new Map(ALL_DEVICE_SETTING_KEYS.map((key, idx) => [key, idx]));
+  const order = new Map<string, number>(ALL_DEVICE_SETTING_KEYS.map((key, idx) => [key, idx]));
   const all = [...overridden, ...synthetics];
   all.sort(
     (a, b) =>
@@ -675,7 +682,9 @@ export function DeviceProfileTabs({
         </div>
         <button
           type="button"
-          onClick={() => onResetProfile(active.settings[0]?.profile_id ?? "", active.profileName)}
+          // The tab's own id, not the first row's: a profile registered on the
+          // device with no override yet has no row to read it from.
+          onClick={() => onResetProfile(active.profileId, active.profileName)}
           disabled={resetPending || overrideCount === 0}
           className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground inline-flex items-center gap-1 text-[11.5px] transition-colors disabled:opacity-40"
         >

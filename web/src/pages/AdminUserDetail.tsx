@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
+  type AdminSettingIdentity,
+  type AdminUserSettingEntry,
   useAdminUser,
   useUpdateUser,
   useDeleteUser,
@@ -20,13 +22,7 @@ import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPlaybackHistory } from "@/hooks/queries/admin/history";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useUserIPs } from "@/hooks/queries/admin/ips";
-import type {
-  AdminSettingEntry,
-  AdminUser,
-  AdminUserProfile,
-  UpdateUserRequest,
-  UserIPEntry,
-} from "@/api/types";
+import type { AdminUser, AdminUserProfile, UpdateUserRequest, UserIPEntry } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
@@ -75,7 +71,11 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
-import { formatSettingValue, getSettingDefinition } from "@/lib/settingsManifest";
+import {
+  formatSettingValue,
+  getSettingDefinition,
+  isStructuredSetting,
+} from "@/lib/settingsDisplay";
 import {
   DeviceProfileTabs,
   PlatformTile,
@@ -531,6 +531,18 @@ function UserSettingsTab({ userId }: { userId: number }) {
   const { data: settings = [], isLoading } = useAdminUserSettings(userId);
   const updateSetting = useUpdateAdminUserSetting();
   const deleteSetting = useDeleteAdminUserSetting();
+  // Object-valued settings (pinned sidebar items, per-library overlays, the
+  // custom theme) have no inline widget, so they open the raw JSON editor —
+  // the same treatment the device tab gives them.
+  const [jsonEditor, setJsonEditor] = useState<{
+    entry: AdminUserSettingEntry;
+    identity: AdminSettingIdentity;
+  } | null>(null);
+  const [jsonValue, setJsonValue] = useState("");
+  const closeJsonEditor = () => {
+    setJsonEditor(null);
+    setJsonValue("");
+  };
 
   if (isLoading) {
     return (
@@ -538,30 +550,60 @@ function UserSettingsTab({ userId }: { userId: number }) {
     );
   }
 
-  const renderSettingRow = (entry: AdminSettingEntry) => {
+  const renderSettingRow = (entry: AdminUserSettingEntry) => {
     const definition = getSettingDefinition(entry.key);
     const label = definition?.label ?? entry.key;
-    const description = definition?.description ?? "Stored account preference.";
+    const description = definition?.description ?? "Stored preference.";
+    // A definition this build does not know, an object-valued one, or one the
+    // manifest marks as panel-edited has no inline control that could render
+    // its value truthfully. Without this the select branch would render a
+    // structured value as a one-entry "Unset" dropdown whose only option
+    // destroys it.
+    const isJsonOnly = isStructuredSetting(definition);
+    // A key can be stored at several scopes (or for several profiles,
+    // libraries or series) at once, so a row is identified by its full
+    // identity, and every mutation addresses exactly that row.
+    const identity = {
+      scope: entry.scope,
+      profileId: entry.profile_id,
+      libraryId: entry.library_id,
+      seriesId: entry.series_id,
+    };
+    const rowKey = [
+      entry.key,
+      entry.scope,
+      entry.profile_id ?? "",
+      entry.library_id ?? "",
+      entry.series_id ?? "",
+    ].join(":");
+    const scopeDetail = [
+      entry.profile_id ? `profile ${entry.profile_id}` : null,
+      entry.library_id ? `library ${entry.library_id}` : null,
+      entry.series_id ? `series ${entry.series_id}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
     return (
       <div
-        key={entry.key}
+        key={rowKey}
         className="border-border/50 grid gap-3 border-t py-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_auto]"
       >
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-sm font-medium">{label}</div>
             <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-200">
-              Explicit
+              {entry.scope}
             </span>
           </div>
           <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
           <p className="text-muted-foreground text-xs">
             Current: {formatSettingValue(entry.key, entry.value)}
+            {scopeDetail ? ` · ${scopeDetail}` : ""}
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 md:items-end">
-          {definition ? (
+          {definition && !isJsonOnly ? (
             <RegistrySettingControl
               definition={definition}
               value={entry.value}
@@ -570,31 +612,29 @@ function UserSettingsTab({ userId }: { userId: number }) {
                 updateSetting.mutate({
                   userId,
                   key: entry.key,
+                  identity,
                   value,
                 })
               }
             />
           ) : (
-            <Input
-              key={`${entry.key}:${entry.value}`}
-              defaultValue={entry.value}
+            <Button
+              variant="outline"
+              size="sm"
               disabled={updateSetting.isPending || deleteSetting.isPending}
-              className="w-full min-w-[180px] sm:w-[220px]"
-              onBlur={(event) => {
-                if (event.currentTarget.value === entry.value) return;
-                updateSetting.mutate({
-                  userId,
-                  key: entry.key,
-                  value: event.currentTarget.value,
-                });
+              onClick={() => {
+                setJsonEditor({ entry, identity });
+                setJsonValue(entry.value);
               }}
-            />
+            >
+              Edit JSON
+            </Button>
           )}
           <Button
             variant="ghost"
             size="sm"
             className="h-7 rounded-full px-2 text-xs"
-            onClick={() => deleteSetting.mutate({ userId, key: entry.key })}
+            onClick={() => deleteSetting.mutate({ userId, key: entry.key, identity })}
             disabled={updateSetting.isPending || deleteSetting.isPending}
           >
             <RotateCcw className="mr-1 h-3 w-3" />
@@ -607,15 +647,65 @@ function UserSettingsTab({ userId }: { userId: number }) {
 
   return (
     <div className="space-y-4">
+      <Dialog
+        open={jsonEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) closeJsonEditor();
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">
+              {jsonEditor?.entry.key ?? "JSON"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-[12.5px]">
+              Edit the raw value. This setting has no inline control, so saving replaces the stored
+              value wholesale — clearing it entirely is what the Reset button does.
+            </p>
+            <textarea
+              spellCheck={false}
+              aria-label="Raw value"
+              className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none"
+              value={jsonValue}
+              onChange={(event) => setJsonValue(event.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={closeJsonEditor}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!jsonEditor) return;
+                  updateSetting.mutate(
+                    {
+                      userId,
+                      key: jsonEditor.entry.key,
+                      identity: jsonEditor.identity,
+                      value: jsonValue,
+                    },
+                    { onSuccess: () => closeJsonEditor() },
+                  );
+                }}
+              >
+                Save value
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="surface-panel overflow-hidden rounded-[1.8rem] border-0">
         <div className="border-border/60 flex items-center gap-3 border-b px-5 py-4">
           <div className="rounded-full border border-emerald-500/25 bg-emerald-500/10 p-2">
             <Settings2 className="h-4 w-4 text-emerald-100" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold">User Playback Settings</h3>
+            <h3 className="text-sm font-semibold">User Settings</h3>
             <p className="text-muted-foreground text-sm">
-              Account-wide playback preferences that follow this user across devices.
+              Explicit values this user has stored, across account, profile, library and series
+              scopes. Device overrides live in the next tab.
             </p>
           </div>
         </div>
@@ -642,6 +732,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
     deviceId: string;
     profileId: string;
     profileName?: string;
+    keys: string[];
   } | null>(null);
   const [settingToReset, setSettingToReset] = useState<AdminDeviceSetting | null>(null);
   const [jsonEditor, setJsonEditor] = useState<AdminDeviceSetting | null>(null);
@@ -701,6 +792,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
               userId,
               profileId: deviceToReset.profileId,
               deviceId: deviceToReset.deviceId,
+              keys: deviceToReset.keys,
             });
           }
           setDeviceToReset(null);
@@ -890,7 +982,15 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
                     }),
                   )}
                   onResetProfile={(profileId, profileName) =>
-                    setDeviceToReset({ deviceId, profileId, profileName })
+                    setDeviceToReset({
+                      deviceId,
+                      profileId,
+                      profileName,
+                      keys:
+                        profiles
+                          .find((profile) => profile.profileId === profileId)
+                          ?.entries.map((entry) => entry.key) ?? [],
+                    })
                   }
                   onEditJson={(setting) => {
                     setJsonEditor(setting);

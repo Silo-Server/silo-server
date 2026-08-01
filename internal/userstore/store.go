@@ -2,11 +2,48 @@ package userstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
 
 var ErrCollectionGroupNotFound = errors.New("collection group not found")
+
+// PreferenceSettingsWriter is the subset of the user store that participates
+// in legacy-preference/canonical-setting synchronization. Implementations pass
+// a transaction-scoped writer to WithPreferenceSettingsTransaction so callers
+// can commit the legacy row and every canonical row as one unit.
+type PreferenceSettingsWriter interface {
+	CreateProfile(ctx context.Context, profile Profile) error
+	ListSettings(ctx context.Context) ([]SettingEntry, error)
+	// ListProfileIDs reads the current household membership inside the same
+	// transaction as a legacy account-setting mutation. This closes the
+	// create/write window where a newly committed profile could miss fan-out.
+	ListProfileIDs(ctx context.Context) ([]string, error)
+	// UpdateProfile writes the legacy profile preference columns that shipped
+	// clients still mutate during the canonical-settings cutover.
+	UpdateProfile(ctx context.Context, id string, u UpdateProfileInput) error
+	SetSubtitlePreference(ctx context.Context, pref SubtitlePreference) error
+	DeleteSubtitlePreference(ctx context.Context, profileID, seriesID string) error
+	SetAudioPreference(ctx context.Context, pref AudioPreference) error
+	DeleteAudioPreference(ctx context.Context, profileID, seriesID string) error
+	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
+	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
+	SetSetting(ctx context.Context, key, value string) error
+	DeleteSetting(ctx context.Context, key string) error
+	SetDeviceSetting(ctx context.Context, entry DeviceSettingEntry) error
+	DeleteDeviceSetting(ctx context.Context, profileID, deviceID, key string) error
+	// UpsertSettingValue writes one explicit value and increments its revision.
+	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	// DeleteSettingValue removes one explicit value and reports whether it existed.
+	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+}
+
+// PreferenceSettingsTransactioner is implemented by stores that can atomically
+// synchronize a shipped legacy preference row with its canonical values.
+type PreferenceSettingsTransactioner interface {
+	WithPreferenceSettingsTransaction(ctx context.Context, fn func(PreferenceSettingsWriter) error) error
+}
 
 // UserStore defines the interface for per-user data storage.
 // Both SQLite and Postgres backends implement this interface.
@@ -134,6 +171,62 @@ type UserStore interface {
 	// Onboarding
 	GetOnboardingState(ctx context.Context, profileID, tourID string) (*OnboardingState, error)
 	UpsertOnboardingState(ctx context.Context, state OnboardingState) error
+
+	// Jellyfin DisplayPreferences blobs, keyed by (prefs id, client) per user.
+	// They are the jellycompat subsystem's storage rather than user settings —
+	// the contract neither validates nor resolves them — so they live in the
+	// dedicated jellycompat_displayprefs table and hold opaque Jellyfin client
+	// JSON verbatim. Get returns "" when nothing is stored.
+	GetJellycompatDisplayPrefs(ctx context.Context, prefsID, client string) (string, error)
+	SetJellycompatDisplayPrefs(ctx context.Context, prefsID, client, value string) error
+
+	// Canonical typed setting values (contracts/settings/v1).
+	//
+	// These back the settings contract's storage layer. The manifest remains
+	// the schema; the store holds validated JSON keyed by scope identity, and
+	// knows nothing about definitions, defaults or resolution order.
+
+	// GetSettingValue returns the explicit value at exactly one scope, or nil
+	// when that identity is unset. It does not resolve fallbacks.
+	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
+	// ListSettingValuesForResolution returns every candidate row for one
+	// resolution request in a single query, unranked. The resolver applies each
+	// definition's resolution order in Go; issuing one lookup per scope is a
+	// rejected implementation.
+	ListSettingValuesForResolution(ctx context.Context, query SettingResolutionQuery) ([]SettingValue, error)
+	// ListAllSettingValues returns every explicit value this user has stored,
+	// across all scopes, in a stable (key, scope, identity) order. It serves
+	// the admin inspection surface; resolution reads keep going through
+	// ListSettingValuesForResolution.
+	ListAllSettingValues(ctx context.Context) ([]SettingValue, error)
+	// UpsertSettingValue writes the explicit value at one scope and increments
+	// that row's revision. Concurrent writes to one identity are
+	// last-write-wins in server receipt order; there is no compare-and-set
+	// precondition in v1.
+	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	// DeleteSettingValue removes the explicit value at one scope — the `unset`
+	// operation — and reports whether a row existed.
+	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+
+	// The scoped deletes below are application-enforced cleanup for identities
+	// this table cannot reference: the per-user SQLite store declares no foreign
+	// keys, and libraries, series and devices are not FK targets in Postgres
+	// either. Each removes only the rows scoped to the named entity.
+	DeleteSettingValuesForProfile(ctx context.Context, profileID string) (int64, error)
+	DeleteSettingValuesForDevice(ctx context.Context, profileID, deviceID string) (int64, error)
+	DeleteSettingValuesForLibrary(ctx context.Context, libraryID int) (int64, error)
+	DeleteSettingValuesForSeries(ctx context.Context, seriesID string) (int64, error)
+
+	// GetSettingMutation returns a recorded idempotency receipt, or nil.
+	GetSettingMutation(ctx context.Context, mutationID string) (*SettingMutationRecord, error)
+	// PutSettingMutation records a receipt without ever overwriting one. When
+	// the id is already recorded it returns the stored record with
+	// inserted=false, so the caller compares request hashes and answers
+	// already_applied or mutation_id_conflict.
+	PutSettingMutation(ctx context.Context, record SettingMutationRecord) (SettingMutationRecord, bool, error)
+	// DeleteExpiredSettingMutations removes receipts that expired before the
+	// given instant and reports how many. expires_at is not self-enforcing.
+	DeleteExpiredSettingMutations(ctx context.Context, before time.Time) (int64, error)
 }
 
 // DeviceRegistry is implemented by stores that track observed devices even

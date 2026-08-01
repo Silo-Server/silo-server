@@ -13,9 +13,7 @@ function renderWithQueryClient(ui: ReactNode) {
       mutations: { retry: false },
     },
   });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-  );
+  return renderToStaticMarkup(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
 const mocks = vi.hoisted(() => {

@@ -11,6 +11,15 @@ import (
 )
 
 func (s *PostgresUserStore) SetAudioPreference(ctx context.Context, pref userstore.AudioPreference) error {
+	return setAudioPreference(ctx, s.pool, s.userID, pref)
+}
+
+func setAudioPreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	pref userstore.AudioPreference,
+) error {
 	if pref.UpdatedAt == "" {
 		pref.UpdatedAt = nowUTC()
 	}
@@ -19,7 +28,7 @@ func (s *PostgresUserStore) SetAudioPreference(ctx context.Context, pref usersto
 		return fmt.Errorf("marshaling audio track signature for profile %q series %q: %w",
 			pref.ProfileID, pref.SeriesID, err)
 	}
-	_, err = s.pool.Exec(ctx, `
+	_, err = exec.Exec(ctx, `
 		INSERT INTO user_audio_preferences (
 			user_id, profile_id, series_id, audio_track_index,
 			audio_language, audio_track_signature, updated_at
@@ -29,7 +38,7 @@ func (s *PostgresUserStore) SetAudioPreference(ctx context.Context, pref usersto
 			audio_language = excluded.audio_language,
 			audio_track_signature = excluded.audio_track_signature,
 			updated_at = excluded.updated_at`,
-		s.userID,
+		userID,
 		pref.ProfileID,
 		pref.SeriesID,
 		pref.AudioTrackIndex,
@@ -79,9 +88,18 @@ func (s *PostgresUserStore) GetAudioPreference(ctx context.Context, profileID, s
 }
 
 func (s *PostgresUserStore) DeleteAudioPreference(ctx context.Context, profileID, seriesID string) error {
-	_, err := s.pool.Exec(ctx,
+	return deleteAudioPreference(ctx, s.pool, s.userID, profileID, seriesID)
+}
+
+func deleteAudioPreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	profileID, seriesID string,
+) error {
+	_, err := exec.Exec(ctx,
 		"DELETE FROM user_audio_preferences WHERE user_id = $1 AND profile_id = $2 AND series_id = $3",
-		s.userID, profileID, seriesID,
+		userID, profileID, seriesID,
 	)
 	if err != nil {
 		return fmt.Errorf("deleting audio preference for profile %q series %q: %w",

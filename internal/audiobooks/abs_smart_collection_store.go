@@ -22,8 +22,10 @@ import (
 // collection_type = 'smart'.
 //
 // abs.SmartCollection.IsPublic maps to user_personal_collections.is_shared.
-// profile_id is a text column (NOT NULL DEFAULT '') in the canonical
-// schema, so the empty string stands in for "primary profile".
+// profile_id is a text column in the canonical schema, NOT NULL and
+// defaulting to the empty string, which stands in for "primary profile".
+// (Spelling that default as a pair of SQL quotes here would not survive
+// gofmt, which folds them into a typographic quote in a doc comment.)
 //
 // abs.SmartCollection.Color and abs.SmartCollection.IsPinned have no
 // canonical columns (deferred per spec §6); reads always return the zero

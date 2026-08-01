@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/library-id-list.json",
+  "title": "Library id list",
+  "description": "An ordered, duplicate-free list of library ids. Backs both ui.disabled_library_ids and ui.library_order; the web client normalizes with normalizeLibraryIDs in web/src/hooks/queries/libraries.ts, which drops non-integers and anything below 1.",
+  "type": "array",
+  "maxItems": 512,
+  "uniqueItems": true,
+  "items": {
+    "type": "integer",
+    "minimum": 1
+  }
+}

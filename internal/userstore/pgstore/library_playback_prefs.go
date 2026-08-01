@@ -12,11 +12,20 @@ import (
 )
 
 func (s *PostgresUserStore) UpsertLibraryPlaybackPreference(ctx context.Context, pref userstore.LibraryPlaybackPreference) error {
+	return upsertLibraryPlaybackPreference(ctx, s.pool, s.userID, pref)
+}
+
+func upsertLibraryPlaybackPreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	pref userstore.LibraryPlaybackPreference,
+) error {
 	if pref.UpdatedAt == "" {
 		pref.UpdatedAt = nowUTC()
 	}
 	normalizeLibraryPlaybackPreference(&pref)
-	_, err := s.pool.Exec(ctx, `
+	_, err := exec.Exec(ctx, `
 		INSERT INTO user_library_playback_preferences (
 			user_id, profile_id, library_id, audio_language, subtitle_language,
 			subtitle_mode, show_forced_subtitles, updated_at
@@ -27,7 +36,7 @@ func (s *PostgresUserStore) UpsertLibraryPlaybackPreference(ctx context.Context,
 			subtitle_mode = excluded.subtitle_mode,
 			show_forced_subtitles = excluded.show_forced_subtitles,
 			updated_at = excluded.updated_at`,
-		s.userID,
+		userID,
 		pref.ProfileID,
 		pref.LibraryID,
 		libraryPlaybackDBValue(pref.AudioLanguage, pref.HasAudioLanguage),
@@ -123,9 +132,19 @@ func (s *PostgresUserStore) ListLibraryPlaybackPreferences(ctx context.Context, 
 }
 
 func (s *PostgresUserStore) DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error {
-	_, err := s.pool.Exec(ctx,
+	return deleteLibraryPlaybackPreference(ctx, s.pool, s.userID, profileID, libraryID)
+}
+
+func deleteLibraryPlaybackPreference(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	profileID string,
+	libraryID int,
+) error {
+	_, err := exec.Exec(ctx,
 		"DELETE FROM user_library_playback_preferences WHERE user_id = $1 AND profile_id = $2 AND library_id = $3",
-		s.userID, profileID, libraryID,
+		userID, profileID, libraryID,
 	)
 	if err != nil {
 		return fmt.Errorf("deleting library playback preference for profile %q library %d: %w",

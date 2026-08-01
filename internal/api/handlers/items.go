@@ -1478,7 +1478,18 @@ func (h *ItemsHandler) toSeasonResponseFromEpisodes(
 			s = localized
 		}
 	}
+	return h.seasonResponseFromEpisodes(r, s, episodes, userData)
+}
 
+// seasonResponseFromEpisodes maps a season that has already been localized.
+// List endpoints use this after LocalizeSeasonModels so they do not repeat the
+// localization query for every row.
+func (h *ItemsHandler) seasonResponseFromEpisodes(
+	r *http.Request,
+	s *models.Season,
+	episodes []*models.Episode,
+	userData *catalog.SeasonUserData,
+) seasonResponse {
 	resp := seasonResponse{
 		ContentID:       s.ContentID,
 		SeasonNumber:    s.SeasonNumber,
@@ -1814,15 +1825,16 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 
 	if scope, ok := access.GetScope(r.Context()); ok {
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:        scope.AllowedLibraryIDs,
-			DisabledLibraryIDs:       scope.DisabledLibraryIDs,
-			MaxContentRating:         scope.MaxContentRating,
-			MaxPlaybackQuality:       scope.MaxPlaybackQuality,
-			PresentationLibraryID:    presentationLibraryID,
-			ProfilePreferredLanguage: scope.PreferredMetadataLanguage,
-			SelectedFileID:           selectedFileID,
-			UserID:                   apimw.GetUserID(r.Context()),
-			ProfileID:                apimw.GetProfileID(r.Context()),
+			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
+			MaxContentRating:          scope.MaxContentRating,
+			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
+			PresentationLibraryID:     presentationLibraryID,
+			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
+			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
+			SelectedFileID:            selectedFileID,
+			UserID:                    apimw.GetUserID(r.Context()),
+			ProfileID:                 apimw.GetProfileID(r.Context()),
 		}
 	}
 

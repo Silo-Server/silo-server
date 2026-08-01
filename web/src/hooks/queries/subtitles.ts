@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { api } from "@/api/client";
+import { api, ApiClientError } from "@/api/client";
+import {
+  SERIES_SUBTITLE_SETTING_KEYS,
+  seriesSubtitleSettingPath,
+} from "@/lib/seriesSubtitleSettings";
 import type { PrePlaySubtitleSelection } from "@/player/types";
 import { derivePersistedSubtitleMode } from "@/player/utils/subtitleMode";
 import type {
@@ -13,7 +17,7 @@ import type {
   SubtitleUploadRequest,
 } from "@/api/types";
 
-import { itemKeys, subtitleKeys } from "./keys";
+import { itemKeys, settingsKeys, subtitleKeys } from "./keys";
 
 interface DownloadSubtitleResponse {
   subtitle: DownloadedSubtitle;
@@ -124,13 +128,37 @@ function invalidateItemDetails(queryClient: ReturnType<typeof useQueryClient>): 
  * Clears the persisted subtitle override (saved when a track is manually
  * selected during playback) so profile-level auto selection applies again.
  * Keyed by the movie's content ID or the episode's series ID.
+ *
+ * A manual selection writes two stores: the specialized per-series row holding
+ * the concrete track, and the canonical language/mode settings at
+ * profile_series. Resetting has to clear both. profile_series is the first
+ * scope in the manifest's resolution order for those keys, so leaving the
+ * canonical rows behind would keep resolving the abandoned language for every
+ * episode of the series with nothing in the UI able to remove it.
  */
 export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (prefId: string) => api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" }),
-    onSuccess: () => invalidateItemDetails(queryClient),
+    mutationFn: async (prefId: string) => {
+      await api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" });
+      await Promise.all(
+        SERIES_SUBTITLE_SETTING_KEYS.map((key) =>
+          api<void>(seriesSubtitleSettingPath(key, prefId), { method: "DELETE" }).catch((error) => {
+            // Nothing stored at this scope is the state a reset asks for.
+            if (error instanceof ApiClientError && error.status === 404) return;
+            throw error;
+          }),
+        ),
+      );
+    },
+    onSuccess: () =>
+      Promise.all([
+        invalidateItemDetails(queryClient),
+        // The player and the settings screens read these keys through the
+        // effective endpoint, so the cleared rows have to leave that cache too.
+        queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+      ]),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to reset subtitle preference");
     },

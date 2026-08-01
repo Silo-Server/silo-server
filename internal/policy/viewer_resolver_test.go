@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -22,11 +25,13 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 		user             *models.User
 		profile          *userstore.Profile
 		settings         map[string]string
+		settingValues    []userstore.SettingValue
 		input            access.ResolveInput
 		tokens           access.ProfileTokenValidator
 		wantNilAllowed   bool
 		wantEmptyAllowed bool
 		wantDisabled     []int
+		wantMetadataLang string
 	}{
 		{
 			name: "no profile unrestricted",
@@ -167,13 +172,39 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 			wantNilAllowed: true,
 		},
+		{
+			// The canonical catalog.metadata_language row feeds the policy input
+			// and comes back out on the scope; the legacy profile column carries
+			// a decoy value that must no longer be read.
+			name: "metadata language resolves canonically",
+			user: &models.User{
+				ID:                   1,
+				AccessPolicyRevision: 5,
+			},
+			profile: &userstore.Profile{
+				ID:                        "prof-1",
+				PreferredMetadataLanguage: "fr",
+			},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.CatalogMetadataLanguage,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`"de"`),
+			}},
+			input:            access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
+			wantNilAllowed:   true,
+			wantMetadataLang: "de",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := viewerResolverTestStore{
-				profile:  tt.profile,
-				settings: tt.settings,
+				profile:       tt.profile,
+				settings:      tt.settings,
+				settingValues: tt.settingValues,
 			}
 			users := viewerResolverUserRepo{user: tt.user}
 			stores := viewerResolverStoreProvider{store: store}
@@ -199,8 +230,14 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 			if tt.wantDisabled != nil && !reflect.DeepEqual(policyScope.DisabledLibraryIDs, tt.wantDisabled) {
 				t.Fatalf("DisabledLibraryIDs = %#v, want %#v", policyScope.DisabledLibraryIDs, tt.wantDisabled)
 			}
+			// Always asserted: cases with only the legacy profile column expect
+			// "" — the canonical resolution's contract default — proving the
+			// column is no longer read.
+			if policyScope.PreferredMetadataLanguage != tt.wantMetadataLang {
+				t.Fatalf("PreferredMetadataLanguage = %q, want %q", policyScope.PreferredMetadataLanguage, tt.wantMetadataLang)
+			}
 
-			decisionInput := viewerResolverExpectedInput(tt.user, tt.profile, tt.input, policyScope.ProfileVerified, access.DisabledLibraryIDs(ctx, store))
+			decisionInput := viewerResolverExpectedInput(tt.user, tt.profile, tt.input, policyScope.ProfileVerified, access.DisabledLibraryIDs(ctx, store, tt.input.ProfileID), access.PreferredMetadataLanguage(ctx, store, tt.input.ProfileID))
 			decision, _, err := pdp.ResolveViewerScope(ctx, decisionInput)
 			if err != nil {
 				t.Fatalf("ResolveViewerScope() error: %v", err)
@@ -451,6 +488,70 @@ type viewerResolverTestStore struct {
 	profile  *userstore.Profile
 	err      error
 	settings map[string]string
+	// settingValues are the canonical setting rows the resolver may read
+	// through ListSettingValuesForResolution. Scope matching is the
+	// resolver's job, so the store returns them unfiltered.
+	settingValues []userstore.SettingValue
+}
+
+type countingViewerResolverStore struct {
+	viewerResolverTestStore
+	resolutionReads int
+}
+
+func (s *countingViewerResolverStore) ListSettingValuesForResolution(
+	ctx context.Context, query userstore.SettingResolutionQuery,
+) ([]userstore.SettingValue, error) {
+	s.resolutionReads++
+	return s.viewerResolverTestStore.ListSettingValuesForResolution(ctx, query)
+}
+
+func TestViewerResolverBatchesViewerPreferenceRead(t *testing.T) {
+	ctx := context.Background()
+	store := &countingViewerResolverStore{viewerResolverTestStore: viewerResolverTestStore{
+		profile: &userstore.Profile{ID: "prof-1"},
+		settingValues: []userstore.SettingValue{
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.UiDisabledLibraryIds, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`[3,5]`),
+			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.CatalogMetadataLanguage, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`"de"`),
+			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.CatalogMetadataLanguageOverrides, Scope: settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`{"no":"x-silo-original"}`),
+			},
+		},
+	}}
+	resolver := NewViewerResolver(
+		viewerResolverUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		viewerResolverStoreProvider{store: store}, nil, newViewerResolverTestPDP(t, ctx),
+	)
+
+	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if store.resolutionReads != 1 {
+		t.Fatalf("canonical preference reads = %d, want 1", store.resolutionReads)
+	}
+	if !reflect.DeepEqual(scope.DisabledLibraryIDs, []int{3, 5}) || scope.PreferredMetadataLanguage != "de" {
+		t.Errorf("resolved scope = %#v", scope)
+	}
+	if got := scope.MetadataLanguageOverrides["no"]; got != access.OriginalMetadataLanguage {
+		t.Errorf("metadata language override = %q, want %q", got, access.OriginalMetadataLanguage)
+	}
 }
 
 func (s viewerResolverTestStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
@@ -467,12 +568,17 @@ func (s viewerResolverTestStore) GetSetting(_ context.Context, key string) (stri
 	return s.settings[key], nil
 }
 
+func (s viewerResolverTestStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	return s.settingValues, nil
+}
+
 func viewerResolverExpectedInput(
 	user *models.User,
 	profile *userstore.Profile,
 	input access.ResolveInput,
 	profileVerified bool,
 	disabled []int,
+	metadataLang string,
 ) ScopeInput {
 	out := ScopeInput{
 		SchemaVersion:        1,
@@ -495,7 +601,9 @@ func viewerResolverExpectedInput(
 		out.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		out.ProfileLibraryIDs = cloneViewerResolverInts(profile.AllowedLibraryIDs)
 		out.ProfileHasPIN = profile.PINHash != ""
-		out.ProfileMetadataLang = profile.PreferredMetadataLanguage
+		// Canonically resolved, mirroring ViewerResolver — the legacy profile
+		// column is no longer a policy input.
+		out.ProfileMetadataLang = metadataLang
 	}
 	return out
 }

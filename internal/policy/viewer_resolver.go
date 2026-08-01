@@ -79,6 +79,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 			return access.Scope{}, err
 		}
 	}
+	preferences := access.ResolveViewerPreferences(ctx, store, input.ProfileID)
 
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
@@ -89,7 +90,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   access.DisabledLibraryIDs(ctx, store),
+		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that
@@ -103,7 +104,12 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		policyInput.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		policyInput.ProfileLibraryIDs = slices.Clone(profile.AllowedLibraryIDs)
 		policyInput.ProfileHasPIN = profile.PINHash != ""
-		policyInput.ProfileMetadataLang = profile.PreferredMetadataLanguage
+		// Resolved canonically (profile scope -> contract default), not read off
+		// the legacy profile column it migrated from. scope.rego relays this
+		// value unchanged as a preference; the manifest deliberately declares no
+		// constraint on it, since constraining a setting by a policy input fed
+		// from that same setting would be circular.
+		policyInput.ProfileMetadataLang = preferences.PreferredMetadataLanguage
 	}
 
 	if r.pdp == nil {
@@ -142,6 +148,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		MaxContentRating:          decision.MaxContentRating,
 		MaxPlaybackQuality:        decision.MaxPlaybackQuality,
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
+		MetadataLanguageOverrides: preferences.MetadataLanguageOverrides,
 		PolicyRevision:            user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
 		// custom override may revoke verification but never grant it. ANDing

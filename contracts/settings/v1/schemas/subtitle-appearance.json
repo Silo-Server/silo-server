@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/subtitle-appearance.json",
+  "title": "Subtitle appearance",
+  "description": "Rendering appearance for subtitle tracks. Shared by the web, Apple and Android players; where they disagree the wider vocabulary wins, because a value a shipped client can already produce must stay storable. A stored value is a sparse override: every property is optional, and a consumer merges what is present over this definition's default_value, which is complete. Requiring all nine would invalidate the partial objects the current API already stores and round-trips, so the migration would have to quarantine real user preferences. Resolution across scopes is unchanged and still first-wins — a device override replaces the profile's object rather than merging with it — because a device override means \"draw subtitles this way on this screen\", not \"amend the profile\".",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "fontSize": {
+      "type": "string",
+      "enum": ["small", "medium", "large", "xlarge", "xxlarge"]
+    },
+    "fontFamily": {
+      "description": "A font family name. Not an enum: the Apple clients offer every family CTFontManagerCopyAvailableFontFamilyNames reports and store the chosen name verbatim, so restricting this to the web's three generic families would invalidate the stored appearance of every user who picked a real font. Family names are not ASCII — ヒラギノ角ゴ ProN is a stock macOS family — so the pattern excludes rather than allowlists: no control characters, quotes, separators, parentheses or braces, which keeps a value safe to interpolate into CSS or a platform font lookup while accepting any real family name.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[^\\x00-\\x1f\"'(){};:,\\\\/ ][^\\x00-\\x1f\"'(){};:,\\\\/]*$"
+    },
+    "fontColor": { "$ref": "#/$defs/hexColor" },
+    "backgroundColor": { "$ref": "#/$defs/hexColor" },
+    "backgroundStyle": {
+      "type": "string",
+      "enum": ["box", "shadow", "outline", "none"]
+    },
+    "backgroundOpacity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "textOutline": { "type": "boolean" },
+    "textOutlineColor": { "$ref": "#/$defs/hexColor" },
+    "position": {
+      "type": "string",
+      "enum": ["bottom", "lower-third", "top"]
+    }
+  },
+  "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    }
+  }
+}

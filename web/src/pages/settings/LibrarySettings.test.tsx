@@ -3,22 +3,22 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LibraryPlaybackPreference, Profile, UserLibrary } from "@/api/types";
+import type { Profile, UserLibrary } from "@/api/types";
+import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import {
-  buildLibraryPlaybackSummary,
-  buildLibraryPlaybackRequest,
+  buildLibraryPlaybackMutations,
+  buildLibraryPlaybackSummaryFromState,
   createLibraryPlaybackEditorState,
 } from "./libraryPlaybackPreferences";
 
 const mocks = vi.hoisted(() => ({
   useAvailableUserLibraries: vi.fn(),
+  useLibraryDisplayPreferences: vi.fn(),
   useCurrentProfile: vi.fn(),
-  useLibraryPlaybackPreferences: vi.fn(),
-  useDeleteDeviceSetting: vi.fn(),
   useEffectiveSettings: vi.fn(),
-  useSetting: vi.fn(),
-  useSetDeviceSetting: vi.fn(),
-  useSetSetting: vi.fn(),
+  useSetSettingValue: vi.fn(),
+  useClearSettingValue: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/libraries", async () => {
@@ -29,36 +29,23 @@ vi.mock("@/hooks/queries/libraries", async () => {
   return {
     ...actual,
     useAvailableUserLibraries: (...args: unknown[]) => mocks.useAvailableUserLibraries(...args),
+    useLibraryDisplayPreferences: (...args: unknown[]) =>
+      mocks.useLibraryDisplayPreferences(...args),
   };
 });
 
-vi.mock("@/hooks/queries/settings", async () => {
-  const actual = await vi.importActual<typeof import("@/hooks/queries/settings")>(
-    "@/hooks/queries/settings",
+vi.mock("@/hooks/queries/settingValues", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/settingValues")>(
+    "@/hooks/queries/settingValues",
   );
 
   return {
     ...actual,
-    useDeleteDeviceSetting: (...args: unknown[]) => mocks.useDeleteDeviceSetting(...args),
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
-    useSetting: (...args: unknown[]) => mocks.useSetting(...args),
-    useSetDeviceSetting: (...args: unknown[]) => mocks.useSetDeviceSetting(...args),
-    useSetSetting: (...args: unknown[]) => mocks.useSetSetting(...args),
+    useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
+    useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
   };
 });
-
-vi.mock("@/hooks/queries/libraryPlaybackPreferences", () => ({
-  useLibraryPlaybackPreferences: (...args: unknown[]) =>
-    mocks.useLibraryPlaybackPreferences(...args),
-  useSetLibraryPlaybackPreference: () => ({
-    isPending: false,
-    mutate: vi.fn(),
-  }),
-  useDeleteLibraryPlaybackPreference: () => ({
-    isPending: false,
-    mutate: vi.fn(),
-  }),
-}));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: (...args: unknown[]) => mocks.useCurrentProfile(...args),
@@ -93,47 +80,24 @@ const libraries: UserLibrary[] = [
   { id: 9, name: "Movies", type: "movies", sort_order: 1 },
 ];
 
-function makePreference(
-  overrides: Partial<LibraryPlaybackPreference> = {},
-): LibraryPlaybackPreference {
-  return {
-    profile_id: "profile-1",
-    library_id: overrides.library_id ?? 7,
-    updated_at: overrides.updated_at ?? "2026-03-23T00:00:00Z",
-    ...overrides,
-  };
+/** One entry of a resolved effective-settings map. */
+function resolved(
+  key: SettingKey,
+  value: unknown,
+  source: EffectiveSetting["source"],
+  extra: Partial<EffectiveSetting> = {},
+): EffectiveSettingsMap {
+  return { [key]: { key, value, source, ...extra } };
 }
 
-describe("LibrarySettings helpers", () => {
-  it("summarizes inherited rows as using profile defaults", () => {
-    expect(buildLibraryPlaybackSummary(null)).toBe("Uses profile defaults");
-  });
-
-  it("summarizes only the overridden playback fields", () => {
+describe("library playback editor state", () => {
+  it("reads inherit for every key resolved above the library", () => {
     expect(
-      buildLibraryPlaybackSummary(
-        makePreference({
-          audio_language: "ja",
-          subtitle_language: "en",
-          subtitle_mode: "always",
-          show_forced_subtitles: false,
-        }),
-      ),
-    ).toBe("Audio: Japanese • Subtitles: English • Behavior: Always • Forced subtitles: Off");
-  });
-
-  it("summarizes original audio language overrides with the original language label", () => {
-    expect(
-      buildLibraryPlaybackSummary(
-        makePreference({
-          audio_language: "original",
-        }),
-      ),
-    ).toBe("Audio: Original Language");
-  });
-
-  it("initializes editor state with inherit values when a library has no override", () => {
-    expect(createLibraryPlaybackEditorState(null)).toEqual({
+      createLibraryPlaybackEditorState({
+        ...resolved(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "en", "profile"),
+        ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "auto", "default"),
+      }),
+    ).toEqual({
       audioLanguage: "inherit",
       subtitleLanguage: "inherit",
       subtitleMode: "inherit",
@@ -141,93 +105,130 @@ describe("LibrarySettings helpers", () => {
     });
   });
 
-  it("maps stored empty subtitle overrides back to the none option", () => {
+  it("reads an override only from a value the library itself holds", () => {
     expect(
-      createLibraryPlaybackEditorState(
-        makePreference({
-          subtitle_language: "",
+      createLibraryPlaybackEditorState({
+        // Same value as the profile default, but stored on the library: still
+        // an override, which is why source rather than value decides.
+        ...resolved(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "ja", "profile_library", {
+          library_id: 7,
         }),
-      ),
+        ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always", "profile_library", {
+          library_id: 7,
+        }),
+        ...resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile_library", {
+          library_id: 7,
+        }),
+      }),
     ).toEqual({
-      audioLanguage: "inherit",
-      subtitleLanguage: "none",
-      subtitleMode: "inherit",
-      showForcedSubtitles: "inherit",
+      audioLanguage: "ja",
+      subtitleLanguage: "inherit",
+      subtitleMode: "always",
+      showForcedSubtitles: "off",
     });
   });
 
-  it("keeps inherited fields out of the request payload and serializes none as an empty string", () => {
+  it("distinguishes a stored null from an absent subtitle language", () => {
+    // A library row holding null is an explicit "no subtitles here", which must
+    // not read as the inherit the absence of a row means.
     expect(
-      buildLibraryPlaybackRequest({
+      createLibraryPlaybackEditorState(
+        resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, null, "profile_library", {
+          library_id: 7,
+        }),
+      ).subtitleLanguage,
+    ).toBe("none");
+    expect(createLibraryPlaybackEditorState({}).subtitleLanguage).toBe("inherit");
+  });
+
+  it("summarizes an untouched library as using profile defaults", () => {
+    expect(buildLibraryPlaybackSummaryFromState(createLibraryPlaybackEditorState({}))).toBe(
+      "Uses profile defaults",
+    );
+  });
+
+  it("summarizes only the overridden playback fields", () => {
+    expect(
+      buildLibraryPlaybackSummaryFromState({
+        audioLanguage: "ja",
+        subtitleLanguage: "en",
+        subtitleMode: "always",
+        showForcedSubtitles: "off",
+      }),
+    ).toBe("Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off");
+  });
+});
+
+describe("library playback mutations", () => {
+  it("plans a clear for every inherited field and a typed value for the rest", () => {
+    expect(
+      buildLibraryPlaybackMutations({
         audioLanguage: "inherit",
         subtitleLanguage: "none",
         subtitleMode: "inherit",
         showForcedSubtitles: "off",
       }),
-    ).toEqual({
-      subtitle_language: "",
-      show_forced_subtitles: false,
-    });
+    ).toEqual([
+      // No value means "delete the row at this scope so it inherits again".
+      { key: SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE },
+      { key: SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, value: null },
+      { key: SETTING_KEYS.PLAYBACK_SUBTITLE_MODE },
+      { key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, value: false },
+    ]);
   });
 
-  it("treats an omitted subtitle field as inherited instead of none", () => {
+  it("sends a language tag rather than the legacy empty string for a chosen language", () => {
     expect(
-      createLibraryPlaybackEditorState(
-        makePreference({
-          subtitle_language: undefined,
-        }),
-      ),
-    ).toEqual({
-      audioLanguage: "inherit",
-      subtitleLanguage: "inherit",
-      subtitleMode: "inherit",
-      showForcedSubtitles: "inherit",
-    });
+      buildLibraryPlaybackMutations({
+        audioLanguage: "ja",
+        subtitleLanguage: "inherit",
+        subtitleMode: "always",
+        showForcedSubtitles: "inherit",
+      }),
+    ).toEqual([
+      { key: SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, value: "ja" },
+      { key: SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE },
+      { key: SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, value: "always" },
+      { key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES },
+    ]);
   });
 });
 
 describe("LibrarySettings", () => {
   beforeEach(() => {
     mocks.useAvailableUserLibraries.mockReset();
+    mocks.useLibraryDisplayPreferences.mockReset();
     mocks.useCurrentProfile.mockReset();
-    mocks.useLibraryPlaybackPreferences.mockReset();
-    mocks.useDeleteDeviceSetting.mockReset();
     mocks.useEffectiveSettings.mockReset();
-    mocks.useSetting.mockReset();
-    mocks.useSetDeviceSetting.mockReset();
-    mocks.useSetSetting.mockReset();
+    mocks.useSetSettingValue.mockReset();
+    mocks.useClearSettingValue.mockReset();
 
     mocks.useAvailableUserLibraries.mockReturnValue({
       data: libraries,
+      isLoading: false,
+    });
+    mocks.useLibraryDisplayPreferences.mockReturnValue({
+      disabledLibraryIDs: [],
+      libraryOrder: [],
       isLoading: false,
     });
     mocks.useCurrentProfile.mockReturnValue({
       profile,
       isLoading: false,
     });
-    mocks.useLibraryPlaybackPreferences.mockReturnValue({
-      data: [],
-      isLoading: false,
-    });
-    mocks.useDeleteDeviceSetting.mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    });
     mocks.useEffectiveSettings.mockReturnValue({
       data: {},
       isLoading: false,
     });
-    mocks.useSetting.mockReturnValue({
-      data: null,
-      isLoading: false,
-    });
-    mocks.useSetDeviceSetting.mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    });
-    mocks.useSetSetting.mockReturnValue({
+    mocks.useSetSettingValue.mockReturnValue({
       isPending: false,
       mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    });
+    mocks.useClearSettingValue.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
     });
   });
 
@@ -239,24 +240,48 @@ describe("LibrarySettings", () => {
     expect(markup).toContain("Edit playback overrides");
   });
 
-  it("renders the playback override summary for libraries with saved defaults", () => {
-    mocks.useLibraryPlaybackPreferences.mockReturnValue({
-      data: [
-        makePreference({
-          library_id: 7,
-          audio_language: "ja",
-          subtitle_language: "en",
-          subtitle_mode: "always",
-          show_forced_subtitles: false,
-        }),
-      ],
-      isLoading: false,
-    });
+  it("renders the playback override summary from the values resolved for that library", () => {
+    mocks.useEffectiveSettings.mockImplementation(
+      (options?: { libraryIds?: readonly number[] }) => {
+        if (!options?.libraryIds?.length) {
+          return { data: {}, isLoading: false };
+        }
+        return {
+          isLoading: false,
+          data: {
+            ...resolved(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, "ja", "profile_library", {
+              library_id: options.libraryIds[0],
+            }),
+            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, "en", "profile_library", {
+              library_id: options.libraryIds[0],
+            }),
+            ...resolved(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, "always", "profile_library", {
+              library_id: options.libraryIds[0],
+            }),
+            ...resolved(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, false, "profile_library", {
+              library_id: options.libraryIds[0],
+            }),
+          },
+        };
+      },
+    );
 
     const markup = renderToStaticMarkup(<LibrarySettings />);
 
     expect(markup).toContain(
-      "Audio: Japanese • Subtitles: English • Behavior: Always • Forced subtitles: Off",
+      "Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off",
     );
+  });
+
+  it("resolves each library's overrides with that library in context", () => {
+    renderToStaticMarkup(<LibrarySettings />);
+
+    // Every card must resolve for its own library, or one library's override
+    // would be reported for another.
+    for (const library of libraries) {
+      expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ libraryIds: [library.id] }),
+      );
+    }
   });
 });

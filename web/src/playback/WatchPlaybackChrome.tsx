@@ -19,7 +19,8 @@ import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
-import { useEffectiveSettings } from "@/hooks/queries/settings";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
@@ -50,18 +51,6 @@ import {
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
-
-const AUTO_SKIP_INTRO_KEY = "playback.auto_skip_intro";
-
-function resolveDeviceOverrideBool(
-  setting: { effective_value: string; has_device_override: boolean } | undefined,
-  profileDefault: boolean,
-) {
-  if (setting?.has_device_override) {
-    return setting.effective_value === "true";
-  }
-  return profileDefault;
-}
 
 function normalizeWatchPlaybackRequest(
   input: WatchPlaybackStartInput | WatchRouteRequest,
@@ -400,9 +389,25 @@ export function WatchPlaybackHost() {
   const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
-  const { data: effectivePlaybackSettings = {} } = useEffectiveSettings(currentProfile?.id, [
-    AUTO_SKIP_INTRO_KEY,
-  ]);
+  // Resolved through the contract, so a device override winning over the
+  // profile's own choice is the manifest's resolution order rather than a
+  // precedence rule spelled out here.
+  //
+  // All three skip preferences are read, not just intros. The manifest declares
+  // every one of them at profile_device, but only the intro override was ever
+  // consulted, so a recap or preview override an admin (or the user) set on a
+  // device silently did nothing. One batched read costs no more than the single
+  // key did and makes all three behave as the contract says they do.
+  const { data: effectivePlaybackSettings } = useEffectiveSettings({
+    keys: [
+      SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+      SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+      SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+      // The resolution cap, which the quality picker writes canonically and
+      // no longer mirrors into the profile column playback used to read.
+      SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
+    ],
+  });
   const request = state.request;
   const isForegroundMode = request != null && state.mode === "foreground";
   const { data: item, error } = useWatchDetail(
@@ -843,15 +848,39 @@ export function WatchPlaybackHost() {
     );
   }
 
+  const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
+    ?.value as string | undefined;
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
     currentProfile,
     seriesEpisodes,
+    // "original" means no cap, which every consumer already spells "auto".
+    // Undefined until the read resolves, which leaves the profile-column
+    // fallback in place rather than blocking playback on a settings fetch.
+    qualityPreference:
+      canonicalQuality === undefined
+        ? undefined
+        : canonicalQuality === "original"
+          ? "auto"
+          : canonicalQuality,
   });
-  const autoSkipIntro = resolveDeviceOverrideBool(
-    effectivePlaybackSettings[AUTO_SKIP_INTRO_KEY],
-    watchPageProps.autoSkipIntro ?? false,
+  // The resolved answer already folds in the profile layer, so the props built
+  // from the profile record are only the pre-resolution fallback.
+  const resolvedBool = (key: SettingKey, fallback: boolean | undefined) =>
+    (effectivePlaybackSettings?.[key]?.value as boolean | undefined) ?? fallback ?? false;
+
+  const autoSkipIntro = resolvedBool(
+    SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+    watchPageProps.autoSkipIntro,
+  );
+  const autoSkipRecap = resolvedBool(
+    SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+    watchPageProps.autoSkipRecap,
+  );
+  const autoPlayNextPreview = resolvedBool(
+    SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+    watchPageProps.autoPlayNextPreview,
   );
 
   const playerDisplayMode =
@@ -863,6 +892,8 @@ export function WatchPlaybackHost() {
       <WatchPage
         {...watchPageProps}
         autoSkipIntro={autoSkipIntro}
+        autoSkipRecap={autoSkipRecap}
+        autoPlayNextPreview={autoPlayNextPreview}
         canEditMarkers={canEditMarkers}
         playbackRequestKey={requestKeyValue}
         onNavigateEpisode={handleNavigateEpisode}

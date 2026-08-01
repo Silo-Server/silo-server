@@ -34,6 +34,15 @@ func scanProfile(scanner interface {
 }
 
 func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profile) error {
+	return createProfile(ctx, s.pool, s.userID, p)
+}
+
+func createProfile(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	p userstore.Profile,
+) error {
 	if p.ID == "" {
 		p.ID = generateUUID()
 	}
@@ -52,10 +61,10 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 	// rights to manage the household's other profiles without requiring a
 	// server-wide admin role.
 	var hasExisting bool
-	if err := s.pool.QueryRow(ctx,
-		"SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1)", s.userID,
+	if err := exec.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1)", userID,
 	).Scan(&hasExisting); err != nil {
-		return fmt.Errorf("checking existing profiles for user %d: %w", s.userID, err)
+		return fmt.Errorf("checking existing profiles for user %d: %w", userID, err)
 	}
 	if !hasExisting {
 		p.IsPrimary = true
@@ -63,7 +72,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 		p.IsPrimary = false
 	}
 
-	_, err := s.pool.Exec(ctx, `
+	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (
 			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
@@ -71,7 +80,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
-		p.ID, s.userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
+		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating,
 		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
@@ -80,7 +89,7 @@ func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profi
 	if err != nil {
 		return fmt.Errorf("inserting profile %s: %w", p.ID, err)
 	}
-	if err := replaceProfileAllowedLibraries(ctx, s.pool, s.userID, p.ID, p.AllowedLibraryIDs); err != nil {
+	if err := replaceProfileAllowedLibraries(ctx, exec, userID, p.ID, p.AllowedLibraryIDs); err != nil {
 		return err
 	}
 	return nil
@@ -138,6 +147,16 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 }
 
 func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u userstore.UpdateProfileInput) error {
+	return updateProfile(ctx, s.pool, s.userID, id, u)
+}
+
+func updateProfile(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id string,
+	u userstore.UpdateProfileInput,
+) error {
 	var setClauses []string
 	var args []any
 	argIdx := 1
@@ -220,7 +239,7 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 	}
 
 	var exists bool
-	if err := s.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", s.userID, id).Scan(&exists); err != nil {
+	if err := exec.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1 AND id = $2)", userID, id).Scan(&exists); err != nil {
 		return fmt.Errorf("checking profile %s existence: %w", id, err)
 	}
 	if !exists {
@@ -231,10 +250,10 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 		addArg("updated_at", nowUTC())
 
 		whereClause := fmt.Sprintf("WHERE user_id = $%d AND id = $%d", argIdx, argIdx+1)
-		args = append(args, s.userID, id)
+		args = append(args, userID, id)
 
 		query := fmt.Sprintf("UPDATE user_profiles SET %s %s", strings.Join(setClauses, ", "), whereClause)
-		result, err := s.pool.Exec(ctx, query, args...)
+		result, err := exec.Exec(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("updating profile %s: %w", id, err)
 		}
@@ -244,13 +263,13 @@ func (s *PostgresUserStore) UpdateProfile(ctx context.Context, id string, u user
 	}
 
 	if u.AllowedLibraryIDs != nil {
-		if err := replaceProfileAllowedLibraries(ctx, s.pool, s.userID, id, *u.AllowedLibraryIDs); err != nil {
+		if err := replaceProfileAllowedLibraries(ctx, exec, userID, id, *u.AllowedLibraryIDs); err != nil {
 			return err
 		}
 	}
 	if accessPolicyChanged {
-		if _, err := s.pool.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", s.userID); err != nil {
-			return fmt.Errorf("bumping access policy revision for user %d: %w", s.userID, err)
+		if _, err := exec.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", userID); err != nil {
+			return fmt.Errorf("bumping access policy revision for user %d: %w", userID, err)
 		}
 	}
 	return nil
@@ -272,6 +291,10 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
+	// user_setting_values is listed rather than left to its composite profile
+	// FK so both backends delete identically: the per-user SQLite store has no
+	// foreign keys at all. Account-scope rows carry a NULL profile_id and are
+	// untouched, which is what removing one household member has to mean.
 	cascadeTables := []string{
 		"user_favorites",
 		"user_watchlist",
@@ -279,6 +302,7 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		"user_personal_collections",
 		"user_series_playback_preferences",
 		"user_library_playback_preferences",
+		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {

@@ -1,63 +1,69 @@
 import { useCallback, useMemo } from "react";
-import {
-  useDeviceSetting,
-  useEffectiveSettings,
-  useSetDeviceSetting,
-} from "@/hooks/queries/settings";
+import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
+import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
 
-export const LIBRARY_PAGE_STATE_SETTING_KEY = "ui.library_page_state";
-export const REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY = "ui.remember_library_page_state";
+/** Both keys are profile+device scoped in the contract. */
+const DEVICE_SCOPE: SettingIdentity = { scope: "profile_device" };
+
+const PAGE_STATE_KEYS = [
+  SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+  SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE,
+] as const;
 
 export interface LibraryPageStatePreference {
   version: 1;
   libraries: Record<string, { search: string }>;
 }
 
-export function parseLibraryPageStatePreference(
-  raw: string | null | undefined,
-): LibraryPageStatePreference {
-  if (!raw) {
+/**
+ * Accepts the canonical object value, the legacy JSON-string encoding, or
+ * null/undefined (the contract default), and always lands on a usable
+ * preference.
+ */
+export function parseLibraryPageStatePreference(raw: unknown): LibraryPageStatePreference {
+  if (raw == null) {
     return createEmptyLibraryPageStatePreference();
   }
-  try {
-    const value = JSON.parse(raw) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    if (!raw) {
       return createEmptyLibraryPageStatePreference();
     }
-    const maybePreference = value as {
-      version?: unknown;
-      libraries?: unknown;
-    };
-    if (maybePreference.version !== 1 || !maybePreference.libraries) {
+    try {
+      value = JSON.parse(raw);
+    } catch {
       return createEmptyLibraryPageStatePreference();
     }
-    if (typeof maybePreference.libraries !== "object" || Array.isArray(maybePreference.libraries)) {
-      return createEmptyLibraryPageStatePreference();
-    }
-
-    const libraries: LibraryPageStatePreference["libraries"] = {};
-    Object.entries(maybePreference.libraries).forEach(([libraryId, entry]) => {
-      if (!/^\d+$/.test(libraryId) || !entry || typeof entry !== "object" || Array.isArray(entry)) {
-        return;
-      }
-      const search = (entry as { search?: unknown }).search;
-      if (typeof search !== "string") {
-        return;
-      }
-      libraries[libraryId] = { search };
-    });
-
-    return { version: 1, libraries };
-  } catch {
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return createEmptyLibraryPageStatePreference();
   }
-}
+  const maybePreference = value as {
+    version?: unknown;
+    libraries?: unknown;
+  };
+  if (maybePreference.version !== 1 || !maybePreference.libraries) {
+    return createEmptyLibraryPageStatePreference();
+  }
+  if (typeof maybePreference.libraries !== "object" || Array.isArray(maybePreference.libraries)) {
+    return createEmptyLibraryPageStatePreference();
+  }
 
-export function serializeLibraryPageStatePreference(
-  preference: LibraryPageStatePreference,
-): string {
-  return JSON.stringify(preference);
+  const libraries: LibraryPageStatePreference["libraries"] = {};
+  Object.entries(maybePreference.libraries).forEach(([libraryId, entry]) => {
+    if (!/^\d+$/.test(libraryId) || !entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return;
+    }
+    const search = (entry as { search?: unknown }).search;
+    if (typeof search !== "string") {
+      return;
+    }
+    libraries[libraryId] = { search };
+  });
+
+  return { version: 1, libraries };
 }
 
 export function updateLibraryPageStatePreference(
@@ -79,29 +85,32 @@ function createEmptyLibraryPageStatePreference(): LibraryPageStatePreference {
 }
 
 export function useLibraryPageStatePreference() {
-  const profileId = storage.get(storage.KEYS.PROFILE_ID);
-  const setting = useDeviceSetting(profileId, LIBRARY_PAGE_STATE_SETTING_KEY);
-  const rememberSetting = useEffectiveSettings(profileId, [
-    REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
-  ]);
-  const mutation = useSetDeviceSetting();
+  // The effective endpoint requires a profile header; before one is chosen
+  // there is no saved state to restore and nowhere to save it.
+  const enabled = Boolean(storage.get(storage.KEYS.PROFILE_ID));
+  const { data, isLoading } = useEffectiveSettings({ keys: PAGE_STATE_KEYS, enabled });
+  const mutation = useSetSettingValue();
   const { mutate } = mutation;
-  const preference = useMemo(() => parseLibraryPageStatePreference(setting.data), [setting.data]);
-  const rememberEnabled =
-    rememberSetting.data?.[REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY]?.effective_value !== "false";
+
+  const stateValue = data?.[SETTING_KEYS.UI_LIBRARY_PAGE_STATE]?.value;
+  const preference = useMemo(() => parseLibraryPageStatePreference(stateValue), [stateValue]);
+  // The contract default is true; anything but an explicit false keeps the
+  // feature on, matching the legacy `!== "false"` reading.
+  const rememberEnabled = data?.[SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE]?.value !== false;
   const saveLibrarySearch = useCallback(
     (libraryId: number, search: string) => {
       const nextPreference = updateLibraryPageStatePreference(preference, libraryId, search);
       mutate({
-        key: LIBRARY_PAGE_STATE_SETTING_KEY,
-        value: serializeLibraryPageStatePreference(nextPreference),
+        key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+        value: nextPreference,
+        identity: DEVICE_SCOPE,
       });
     },
     [mutate, preference],
   );
 
   return {
-    isLoading: setting.isLoading || rememberSetting.isLoading,
+    isLoading: enabled && isLoading,
     preference,
     rememberEnabled,
     saveLibrarySearch,

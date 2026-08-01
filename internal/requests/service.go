@@ -103,7 +103,7 @@ func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
 func (s *Service) SetCatalogChangeNotifier(notify func()) { s.catalogChanged = notify }
 
 // SetVirtualMediaCleanup installs the host catalog cleanup hook used when a
-// pending request is cancelled. The hook must preserve physical files.
+// pending request is canceled. The hook must preserve physical files.
 func (s *Service) SetVirtualMediaCleanup(cleanup func(context.Context, Request) error) {
 	s.cleanupVirtual = cleanup
 }
@@ -962,16 +962,16 @@ func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) 
 		strings.TrimSpace(req.IntegrationKind) != "" {
 		return nil, ErrInvalidState
 	}
-	cancelled, err := s.store.SetOutcome(ctx, req.ID, OutcomeCancelled, viewer, reason)
+	canceled, err := s.store.SetOutcome(ctx, req.ID, OutcomeCancelled, viewer, reason)
 	if err != nil {
 		return nil, err
 	}
 	if s.cleanupVirtual != nil {
-		if err := s.cleanupVirtual(ctx, *cancelled); err != nil {
-			slog.WarnContext(ctx, "requests: cancelled virtual media cleanup failed", "component", "requests", "request_id", req.ID, "error", err)
+		if err := s.cleanupVirtual(ctx, *canceled); err != nil {
+			slog.WarnContext(ctx, "requests: canceled virtual media cleanup failed", "component", "requests", "request_id", req.ID, "error", err)
 		}
 	}
-	return cancelled, nil
+	return canceled, nil
 }
 
 func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request, error) {

@@ -21,6 +21,18 @@ type UpdateProfileInput = userstore.UpdateProfileInput
 // a new UUID is generated. CreatedAt and UpdatedAt are set to the current
 // UTC time if not already populated.
 func CreateProfile(db *sql.DB, p Profile) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction for profile insert %s: %w", p.ID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := createProfile(tx, p); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createProfile(exec preferenceSettingsExecutor, p Profile) error {
 	if p.ID == "" {
 		p.ID = generateUUID()
 	}
@@ -35,15 +47,9 @@ func CreateProfile(db *sql.DB, p Profile) error {
 		p.ShowForcedSubtitles = true
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction for profile insert %s: %w", p.ID, err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	// The first profile in this per-user database is the primary.
 	var hasExisting bool
-	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles)").Scan(&hasExisting); err != nil {
+	if err := exec.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles)").Scan(&hasExisting); err != nil {
 		return fmt.Errorf("checking existing profiles for %s: %w", p.ID, err)
 	}
 	if !hasExisting {
@@ -52,7 +58,7 @@ func CreateProfile(db *sql.DB, p Profile) error {
 		p.IsPrimary = false
 	}
 
-	_, err = tx.Exec(`
+	_, err := exec.Exec(`
 		INSERT INTO profiles (
 			id, name, avatar, pin_hash, is_child, is_primary, max_content_rating,
 			quality_preference, language, subtitle_language, subtitle_mode,
@@ -69,10 +75,10 @@ func CreateProfile(db *sql.DB, p Profile) error {
 	if err != nil {
 		return fmt.Errorf("inserting profile %s: %w", p.ID, err)
 	}
-	if err := replaceProfileAllowedLibrariesTx(tx, p.ID, p.AllowedLibraryIDs); err != nil {
+	if err := replaceProfileAllowedLibrariesTx(exec, p.ID, p.AllowedLibraryIDs); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // GetProfile retrieves a single profile by ID. Returns nil and no error if
@@ -143,6 +149,19 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 // in the UpdateProfileInput are changed. If PIN is provided, it is bcrypt-hashed
 // before storage.
 func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := updateProfile(tx, id, u); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateProfile(exec preferenceSettingsExecutor, id string, u UpdateProfileInput) error {
 	var setClauses []string
 	var args []any
 
@@ -225,14 +244,8 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 		return nil // nothing to update
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning transaction for profile update %s: %w", id, err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
 	var exists bool
-	if err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles WHERE id = ?)", id).Scan(&exists); err != nil {
+	if err := exec.QueryRow("SELECT EXISTS(SELECT 1 FROM profiles WHERE id = ?)", id).Scan(&exists); err != nil {
 		return fmt.Errorf("checking profile %s existence: %w", id, err)
 	}
 	if !exists {
@@ -248,7 +261,7 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 		args = append(args, id)
 
 		query := fmt.Sprintf("UPDATE profiles SET %s WHERE id = ?", strings.Join(setClauses, ", "))
-		result, err := tx.Exec(query, args...)
+		result, err := exec.Exec(query, args...)
 		if err != nil {
 			return fmt.Errorf("updating profile %s: %w", id, err)
 		}
@@ -262,12 +275,12 @@ func UpdateProfile(db *sql.DB, id string, u UpdateProfileInput) error {
 	}
 
 	if u.AllowedLibraryIDs != nil {
-		if err := replaceProfileAllowedLibrariesTx(tx, id, *u.AllowedLibraryIDs); err != nil {
+		if err := replaceProfileAllowedLibrariesTx(exec, id, *u.AllowedLibraryIDs); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // DeleteProfile removes a profile and cascades deletion to favorites,
@@ -292,7 +305,9 @@ func DeleteProfile(db *sql.DB, id string) error {
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
-	// Cascade-delete related tables.
+	// Cascade-delete related tables. This database declares no foreign keys, so
+	// user_setting_values is listed here; account-scope rows carry a NULL
+	// profile_id and are untouched, matching the Postgres backend.
 	cascadeTables := []string{
 		"favorites",
 		"watchlist",
@@ -301,6 +316,7 @@ func DeleteProfile(db *sql.DB, id string) error {
 		"profile_allowed_libraries",
 		"series_playback_preferences",
 		"library_playback_preferences",
+		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
 		column := "profile_id"

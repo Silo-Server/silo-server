@@ -120,7 +120,7 @@ func (r *VirtualMediaRegistrar) UpsertVirtualMedia(ctx context.Context, installa
 	if err != nil {
 		return nil, fmt.Errorf("begin virtual media transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := lockVirtualMediaSource(ctx, tx, installationID, source); err != nil {
 		return nil, err
 	}
@@ -1002,10 +1002,7 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, v.VirtualURI); err != nil {
 		return err
 	}
-	isHDR := false
-	if v.HDR != "" {
-		isHDR = true
-	}
+	isHDR := v.HDR != ""
 	fileSize := v.FileSize
 	if fileSize < 0 {
 		fileSize = 0

@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"slices"
@@ -468,7 +469,13 @@ func (s *progressCountingStore) GetSetting(context.Context, string) (string, err
 	panic("unused")
 }
 func (s *progressCountingStore) SetSetting(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) DeleteSetting(context.Context, string) error      { panic("unused") }
+func (s *progressCountingStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) SetJellycompatDisplayPrefs(context.Context, string, string, string) error {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSetting(context.Context, string) error { panic("unused") }
 func (s *progressCountingStore) ListSettings(context.Context) ([]userstore.SettingEntry, error) {
 	panic("unused")
 }
@@ -530,6 +537,42 @@ func (s *progressCountingStore) UpsertLibraryPlaybackPreference(context.Context,
 	panic("unused")
 }
 func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context, string, int) error {
+	panic("unused")
+}
+func (s *progressCountingStore) GetSettingValue(context.Context, userstore.SettingIdentity) (*userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSettingValue(context.Context, userstore.SettingIdentity) (bool, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSettingValuesForProfile(context.Context, string) (int64, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSettingValuesForDevice(context.Context, string, string) (int64, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSettingValuesForLibrary(context.Context, int) (int64, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSettingValuesForSeries(context.Context, string) (int64, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) GetSettingMutation(context.Context, string) (*userstore.SettingMutationRecord, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) PutSettingMutation(context.Context, userstore.SettingMutationRecord) (userstore.SettingMutationRecord, bool, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteExpiredSettingMutations(context.Context, time.Time) (int64, error) {
 	panic("unused")
 }
 

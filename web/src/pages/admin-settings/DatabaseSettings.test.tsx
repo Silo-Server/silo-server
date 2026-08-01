@@ -24,9 +24,7 @@ function renderWithQueryClient(ui: ReactNode) {
       mutations: { retry: false },
     },
   });
-  return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
-  );
+  return renderToStaticMarkup(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
 }
 
 function makeForm(redisUrl: string, managedByEnv = false) {

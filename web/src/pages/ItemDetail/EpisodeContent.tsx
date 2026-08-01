@@ -46,6 +46,7 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
+import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -56,6 +57,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
   const { profile: currentProfile } = useCurrentProfile();
+  // The resolution cap comes from the settings contract, where the quality
+  // picker writes; the profile column it falls back to is only the pre-cutover
+  // choice, since that picker no longer mirrors into it.
+  const qualityPreference = useQualityPreference(currentProfile?.quality_preference);
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const [editOpen, setEditOpen] = useState(false);
@@ -78,11 +83,11 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         sortedVersions,
         item.playback_variants,
         userData,
-        currentProfile?.quality_preference,
+        qualityPreference,
         item.effective_version_edition_key,
       ),
     [
-      currentProfile?.quality_preference,
+      qualityPreference,
       item.effective_version_edition_key,
       item.playback_variants,
       sortedVersions,
@@ -381,7 +386,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             onSearchSubtitles={
               (item.versions?.length ?? 0) > 0 ? () => setSubtitleSearchOpen(true) : undefined
             }
-            qualityPreference={currentProfile?.quality_preference}
+            qualityPreference={qualityPreference}
             audioSelectionMode={audioSelectionMode}
             explicitAudioTrackIndex={explicitAudioTrackIndex}
             onSelectAudioTrack={handleSelectAudioTrack}

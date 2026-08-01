@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/card-overlays.json",
+  "title": "Card overlay preferences",
+  "description": "Badges painted on poster cards. Mirrors CardOverlayPrefs in web/src/lib/overlays/types.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "preset", "order", "items"],
+  "properties": {
+    "version": { "const": 2 },
+    "preset": {
+      "type": "string",
+      "enum": ["minimal", "classic", "vibrant", "pill", "square"]
+    },
+    "order": {
+      "description": "Explicit render order. Empty means use the registry's own order.",
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/overlayId" }
+    },
+    "items": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/overlayId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled", "position"],
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "position": {
+            "type": "string",
+            "enum": ["top-left", "top-right", "bottom-left", "bottom-right"]
+          },
+          "accentColor": {
+            "description": "Hex colour. Absent means the overlay's own default accent.",
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
+          },
+          "showIcon": {
+            "description": "Absent means inherit from the preset.",
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "overlayId": {
+      "type": "string",
+      "enum": [
+        "resolution",
+        "hdr",
+        "resolution_hdr",
+        "audio",
+        "audio_channels",
+        "video_codec",
+        "container",
+        "aspect_ratio",
+        "release_type",
+        "edition",
+        "multi_audio",
+        "multi_sub",
+        "rating_imdb",
+        "rating_tmdb",
+        "rating_rt",
+        "rating_rt_audience",
+        "content_rating",
+        "year",
+        "runtime",
+        "original_language",
+        "studio",
+        "network",
+        "show_status",
+        "imdb_top_250",
+        "rt_certified_fresh"
+      ]
+    }
+  }
+}

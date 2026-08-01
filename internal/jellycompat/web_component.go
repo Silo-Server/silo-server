@@ -1159,6 +1159,15 @@ func finishWebOperation(root, id string, err error) *WebComponentOperationStatus
 	return copied
 }
 
+// CurrentWebOperation reports the install or remove operation in progress for
+// an install root, or nil when none is. Exported so a caller that has to
+// outlive an asynchronous operation — a test cleaning up the root it handed to
+// StartWebComponentRemove, for one — can wait for a terminal state rather than
+// deleting the directory out from under the goroutine still writing to it.
+func CurrentWebOperation(root string) *WebComponentOperationStatus {
+	return currentWebOperation(root)
+}
+
 func currentWebOperation(root string) *WebComponentOperationStatus {
 	webOperationsMu.Lock()
 	op := copyWebOperation(webOperations[root])

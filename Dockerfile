@@ -32,6 +32,10 @@ COPY --from=frontend_dist / web/dist
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY migrations/ migrations/
+# The settings contract is a Go package (contracts/settings/v1) that embeds the
+# manifest, so the binary carries the exact bytes it was built from. It lives
+# outside internal/ because clients vendor these files.
+COPY contracts/ contracts/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 RUN --mount=type=cache,target=/root/.cache/go-build \

@@ -262,13 +262,3 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 	}
 	return strings.Contains(strings.ToLower(u.Path), ".m3u8") || strings.Contains(strings.ToLower(u.RawQuery), ".m3u8")
 }
-
-func (h *PlaybackHandler) resolveVirtualPlayback(r *http.Request, file *models.MediaFile, profileID string) (string, error) {
-	if !isVirtualPlaybackFile(file) {
-		return "", nil
-	}
-	if h.VirtualPlaybackResolver == nil {
-		return "", errors.New("virtual playback resolver is not configured")
-	}
-	return h.VirtualPlaybackResolver.ResolveVirtualPlayback(r.Context(), file.FilePath, apimw.GetUserID(r.Context()), profileID, file.VirtualOwnerInstallationID)
-}

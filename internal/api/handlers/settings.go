@@ -15,6 +15,9 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -55,6 +58,7 @@ type SettingsHandler struct {
 	storeProvider  userstore.UserStoreProvider
 	serverSettings ServerSettingReader
 	deviceSeen     *cache.TTLCache[struct{}]
+	EventsHub      *evt.Hub
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
@@ -157,12 +161,7 @@ var settingsRegistry = map[string]settingSpec{
 	"playback.audio_language": {
 		Scope:        scopeDevice,
 		DefaultValue: "",
-		Validate: func(value string) error {
-			if len(strings.TrimSpace(value)) > 32 {
-				return fmt.Errorf("playback.audio_language must be 32 characters or fewer")
-			}
-			return nil
-		},
+		Validate:     validateLanguageTagSetting("playback.audio_language"),
 	},
 	"playback.auto_skip_intro": {
 		Scope:        scopeDevice,
@@ -253,7 +252,12 @@ var settingsRegistry = map[string]settingSpec{
 	"player.playback_speed": {
 		Scope:        scopeDevice,
 		DefaultValue: "1",
-		Validate:     validateFloatRange("player.playback_speed", 0.25, 3.0),
+		// Range only, no step: this endpoint accepted any in-range speed
+		// before the contract landed, and v1 rules forbid turning an existing
+		// 204 into a 400 before the coordinated cutover. The typed mutation
+		// endpoint enforces the manifest's 0.05 step, and the migration snaps
+		// historical off-step values onto the grid rather than dropping them.
+		Validate: validateFloatRange("player.playback_speed", 0.25, 3.0),
 	},
 	"player.audio_sync_ms": {
 		Scope:        scopeDevice,
@@ -378,7 +382,7 @@ func (h *SettingsHandler) HandleSetSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := store.SetSetting(r.Context(), key, req.Value); err != nil {
+	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, &req.Value); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set setting")
 		return
 	}
@@ -406,7 +410,7 @@ func (h *SettingsHandler) HandleDeleteSetting(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if err := store.DeleteSetting(r.Context(), key); err != nil {
+	if err := h.syncLegacyUserSetting(r.Context(), store, userID, key, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete setting")
 		return
 	}
@@ -502,25 +506,17 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := store.SetDeviceSetting(r.Context(), userstore.DeviceSettingEntry{
+	entry := userstore.DeviceSettingEntry{
 		ProfileID:      profileID,
 		DeviceID:       device.DeviceID,
 		DeviceName:     device.DeviceName,
 		DevicePlatform: device.DevicePlatform,
 		Key:            key,
 		Value:          req.Value,
-	}); err != nil {
+	}
+	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, &req.Value); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set device setting")
 		return
-	}
-	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
-		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
-			slog.WarnContext(r.Context(), "failed to clean up legacy device setting after canonical write",
-				"legacy_key", legacyKey,
-				"canonical_key", key,
-				"error", err,
-			)
-		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -557,18 +553,181 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 	}
 	h.registerRequestDevice(r.Context(), store, profileID, device)
 
-	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
-		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
-			return
-		}
-	}
-	if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, key); err != nil {
+	entry := userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: device.DeviceID, Key: key}
+	if err := h.syncLegacyDeviceSetting(r.Context(), store, userID, entry, nil); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func planLegacyRuntimeSettings(key string, value *string) ([]profileSettingSync, error) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return nil, fmt.Errorf("loading settings contract: %w", err)
+	}
+	planner := settingsmigrate.New(contract, settingscontract.ObjectSchemas())
+	if value == nil {
+		keys := planner.RuntimeKeys(key)
+		if len(keys) == 0 {
+			return nil, fmt.Errorf("%s has no canonical runtime target", key)
+		}
+		out := make([]profileSettingSync, 0, len(keys))
+		for _, canonicalKey := range keys {
+			out = append(out, profileSettingSync{key: canonicalKey})
+		}
+		return out, nil
+	}
+	planned, err := planner.PlanRuntimeValue(key, *value)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]profileSettingSync, 0, len(planned))
+	for _, mutation := range planned {
+		out = append(out, profileSettingSync{key: mutation.Key, value: mutation.Value})
+	}
+	return out, nil
+}
+
+// syncLegacyUserSetting commits the account-wide legacy row and its
+// profile-scoped canonical fan-out together. The old endpoint was shared by
+// every household profile, so mirroring only the active profile would change
+// its shipped semantics.
+func (h *SettingsHandler) syncLegacyUserSetting(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	key string,
+	value *string,
+) error {
+	writes, err := planLegacyRuntimeSettings(key, value)
+	if err != nil {
+		// The surviving v1 route historically accepted its registry validation.
+		// Some JSON entries are intentionally looser than the new typed schema;
+		// preserve their successful legacy write instead of changing 204 to 500.
+		slog.WarnContext(ctx, "legacy user setting has no canonical representation; preserving legacy write",
+			"component", "api", "key", key, "error", err)
+		writes = nil
+	}
+	transactioner, ok := store.(userstore.PreferenceSettingsTransactioner)
+	if !ok {
+		return fmt.Errorf("user store does not support atomic preference settings synchronization")
+	}
+	type changedProfile struct {
+		profileID string
+		keys      []string
+	}
+	var changed []changedProfile
+	err = transactioner.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		if value == nil {
+			if err := tx.DeleteSetting(ctx, key); err != nil {
+				return err
+			}
+		} else if err := tx.SetSetting(ctx, key, *value); err != nil {
+			return err
+		}
+		profileIDs, err := tx.ListProfileIDs(ctx)
+		if err != nil {
+			return fmt.Errorf("listing profiles for settings synchronization: %w", err)
+		}
+		changed = make([]changedProfile, 0, len(profileIDs))
+		for _, profileID := range profileIDs {
+			keys, err := writeCanonicalSettingsSync(ctx, tx, userstore.SettingIdentity{
+				Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+			}, writes)
+			if err != nil {
+				return err
+			}
+			changed = append(changed, changedProfile{profileID: profileID, keys: keys})
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, profile := range changed {
+		for _, changedKey := range profile.keys {
+			publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.profileID,
+				changedKey, string(settingscontract.ScopeProfile))
+		}
+	}
+	return nil
+}
+
+// syncLegacyDeviceSetting mirrors a shipped device-setting mutation to its
+// profile_device canonical rows. Alias cleanup participates in the same
+// transaction, so a failure cannot leave the two spellings disagreeing.
+func (h *SettingsHandler) syncLegacyDeviceSetting(
+	ctx context.Context,
+	store userstore.UserStore,
+	userID int,
+	entry userstore.DeviceSettingEntry,
+	value *string,
+) error {
+	writes, err := planLegacyRuntimeSettings(entry.Key, value)
+	if err != nil {
+		// Keep the established loose JSON endpoint compatible when a syntactically
+		// valid legacy document cannot satisfy the stricter canonical schema.
+		slog.WarnContext(ctx, "legacy device setting has no canonical representation; preserving legacy write",
+			"component", "api", "key", entry.Key, "error", err)
+		writes = nil
+	}
+	base := userstore.SettingIdentity{
+		Scope:     settingscontract.ScopeProfileDevice,
+		ProfileID: entry.ProfileID, DeviceID: entry.DeviceID,
+	}
+	return applyLegacyPreferenceSettingsSync(ctx, store, h.EventsHub, userID, base, writes,
+		func(tx userstore.PreferenceSettingsWriter) error {
+			if value == nil {
+				if legacyKey, ok := legacyDeviceSettingKey(entry.Key); ok {
+					if err := tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, legacyKey); err != nil {
+						return err
+					}
+				}
+				return tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, entry.Key)
+			}
+			entry.Value = *value
+			if err := tx.SetDeviceSetting(ctx, entry); err != nil {
+				return err
+			}
+			if legacyKey, ok := legacyDeviceSettingKey(entry.Key); ok {
+				return tx.DeleteDeviceSetting(ctx, entry.ProfileID, entry.DeviceID, legacyKey)
+			}
+			return nil
+		})
+}
+
+// planInheritedLegacyUserSettings captures the account-wide settings a newly
+// created profile must inherit while the old generic routes remain mounted.
+// Profile creation calls this inside the same preference transaction as the
+// insert; PostgreSQL's per-user advisory lock and SQLite's write transaction
+// serialize it with the account-setting fan-out path.
+func planInheritedLegacyUserSettings(
+	ctx context.Context,
+	store interface {
+		ListSettings(context.Context) ([]userstore.SettingEntry, error)
+	},
+) ([]profileSettingSync, error) {
+	entries, err := store.ListSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing legacy user settings: %w", err)
+	}
+	var out []profileSettingSync
+	for _, entry := range entries {
+		if !keyUsesUserScope(entry.Key) {
+			continue
+		}
+		value := entry.Value
+		planned, err := planLegacyRuntimeSettings(entry.Key, &value)
+		if err != nil {
+			slog.WarnContext(ctx, "legacy user setting cannot seed a new canonical profile",
+				"component", "api", "key", entry.Key, "error", err)
+			continue
+		}
+		out = append(out, planned...)
+	}
+	return out, nil
 }
 
 // HandleGetEffectiveSettings handles GET /settings/effective?keys=key1,key2
@@ -758,10 +917,25 @@ func validateRegisteredSetting(key, value string, expectedScope settingsScope) e
 	return spec.Validate(value)
 }
 
+// keyUsesUserScope reports whether a key is stored at account scope by the
+// legacy endpoints.
+//
+// This used to return true for any *unregistered* key, which is the extension
+// bag: a client could invent a production setting unilaterally and the server
+// stored it as an unvalidated string. That is how six ui.* settings and five
+// orphan keys reached production untyped, and closing it is the point of the
+// contract.
+//
+// An unknown key is now simply not a user setting, so the legacy write path
+// rejects it and the canonical API — which validates against the manifest — is
+// the only way to store anything new. That includes the jellycompat:* keys the
+// Jellyfin DisplayPreferences blobs once rode this table under: they live in
+// the dedicated jellycompat_displayprefs table now, and this API neither
+// accepts nor surfaces them.
 func keyUsesUserScope(key string) bool {
 	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
-	return !ok || spec.Scope == scopeUser
+	return ok && spec.Scope == scopeUser
 }
 
 func keyUsesDeviceScope(key string) bool {
@@ -862,6 +1036,18 @@ func validateIntRange(key string, min, max int) func(string) error {
 }
 
 func validateFloatRange(key string, min, max float64) func(string) error {
+	return validateFloatRangeStep(key, min, max, 0)
+}
+
+// validateFloatRangeStep enforces the range and, when step is positive, that
+// the value sits on the step grid anchored at min.
+//
+// The step check delegates to settingscontract.StepAligned so this endpoint
+// enforces exactly what contracts/settings/v1/manifest.json declares. Before
+// this, player.playback_speed advertised a 0.05 step that nothing enforced, so
+// the server happily stored 0.26 — a value no client's stepper can represent
+// and that every client would silently snap on the next write.
+func validateFloatRangeStep(key string, min, max, step float64) func(string) error {
 	return func(value string) error {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -869,6 +1055,33 @@ func validateFloatRange(key string, min, max float64) func(string) error {
 		}
 		if math.IsNaN(parsed) || parsed < min || parsed > max {
 			return fmt.Errorf("%s must be between %g and %g", key, min, max)
+		}
+		if !settingscontract.StepAligned(parsed, min, step) {
+			return fmt.Errorf("%s must be a multiple of %g starting from %g", key, step, min)
+		}
+		return nil
+	}
+}
+
+// validateLanguageTagSetting accepts a BCP 47 language tag, or the empty string.
+//
+// The empty string is the legacy wire form for "no preference": the string-only
+// settings API has no way to send null, and both the Android and web clients
+// send "" to clear the choice. The contract expresses the same state as null,
+// which is why every language definition there is nullable.
+//
+// Anything else must be a well-formed tag. The previous check was "32
+// characters or fewer", so the server accepted "!!!" for a field the manifest
+// declares as language_tag — and stored it where track matching would silently
+// never match.
+func validateLanguageTagSetting(key string) func(string) error {
+	return func(value string) error {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil
+		}
+		if _, ok := settingscontract.NormalizeLanguageTag(trimmed); !ok {
+			return fmt.Errorf("%s must be a BCP 47 language tag such as en or en-US", key)
 		}
 		return nil
 	}

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { mediaDurationSeconds, mediaElementDuration, toMediaTime, toPlayerTime } from "./mediaTimeline";
+import {
+  mediaDurationSeconds,
+  mediaElementDuration,
+  toMediaTime,
+  toPlayerTime,
+} from "./mediaTimeline";
 
 describe("media timeline", () => {
   it("round-trips a position through a stream origin", () => {

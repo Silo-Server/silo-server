@@ -24,12 +24,16 @@ func (s *stubScopeResolver) Resolve(_ context.Context, input access.ResolveInput
 func TestScopeAccessFilterMapsScope(t *testing.T) {
 	resolver := &stubScopeResolver{
 		scope: access.Scope{
-			UserID:              7,
-			ProfileID:           "profile-1",
-			AllowedLibraryIDs:   []int{2, 19},
-			LibrariesRestricted: true,
-			MaxContentRating:    "PG-13",
-			MaxPlaybackQuality:  "1080p",
+			UserID:                    7,
+			ProfileID:                 "profile-1",
+			AllowedLibraryIDs:         []int{2, 19},
+			LibrariesRestricted:       true,
+			MaxContentRating:          "PG-13",
+			MaxPlaybackQuality:        "1080p",
+			PreferredMetadataLanguage: "fr",
+			MetadataLanguageOverrides: map[string]string{
+				"no": access.OriginalMetadataLanguage,
+			},
 		},
 	}
 
@@ -49,6 +53,12 @@ func TestScopeAccessFilterMapsScope(t *testing.T) {
 	}
 	if filter.MaxPlaybackQuality != "1080p" {
 		t.Fatalf("MaxPlaybackQuality = %q, want 1080p", filter.MaxPlaybackQuality)
+	}
+	if filter.ProfilePreferredLanguage != "fr" {
+		t.Fatalf("ProfilePreferredLanguage = %q, want fr", filter.ProfilePreferredLanguage)
+	}
+	if got := filter.MetadataLanguageOverrides["no"]; got != access.OriginalMetadataLanguage {
+		t.Fatalf("MetadataLanguageOverrides[no] = %q, want %q", got, access.OriginalMetadataLanguage)
 	}
 	if filter.UserID != 7 || filter.ProfileID != "profile-1" {
 		t.Fatalf("identity not propagated: %+v", filter)

@@ -77,6 +77,12 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("HomeDismissals", func(t *testing.T) {
 		testHomeDismissals(t, newStore)
 	})
+	t.Run("SettingValues", func(t *testing.T) {
+		RunSettingValues(t, newStore)
+	})
+	t.Run("JellycompatDisplayPrefs", func(t *testing.T) {
+		RunJellycompatDisplayPrefs(t, newStore)
+	})
 }
 
 func testProfiles(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {

@@ -59,19 +59,24 @@ linters:
     misspell:
       locale: US
 
-issues:
-  exclude-dirs:
-    - web
-    - migrations
+  exclusions:
+    # Anchored regexes, not directory names: `paths` matches anywhere in the
+    # path, so a bare `web` also excluded internal/jellycompat/web_component.go,
+    # internal/webhooksync/, internal/notifications/webhook*.go and every other
+    # non-test file with "web" in its name — 14 files that were being linted
+    # before.
+    paths:
+      - ^web/
+      - ^migrations/
 
-  exclude-rules:
-    # Allow repeated strings in test files
-    - path: _test\.go
-      linters:
-        - goconst
+    rules:
+      # Allow repeated strings in test files
+      - path: _test\.go
+        linters:
+          - goconst
 
-    # Allow unchecked errors in test cleanup/defer
-    - path: _test\.go
-      text: "Error return value is not checked"
-      linters:
-        - errcheck
+      # Allow unchecked errors in test cleanup/defer
+      - path: _test\.go
+        text: "Error return value is not checked"
+        linters:
+          - errcheck

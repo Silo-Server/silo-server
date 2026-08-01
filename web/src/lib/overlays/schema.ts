@@ -84,15 +84,21 @@ function parseV2(parsed: Record<string, unknown>): CardOverlayPrefs {
   };
 }
 
-export function parseOverlayPrefs(raw: string | null): CardOverlayPrefs {
-  if (!raw) return buildDefaultPrefs();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return buildDefaultPrefs();
+// Accepts the canonical settings-contract value (an object or null), the
+// legacy JSON-string encoding, and anything malformed, always landing on a
+// complete prefs document.
+export function parseOverlayPrefs(raw: unknown): CardOverlayPrefs {
+  if (raw == null) return buildDefaultPrefs();
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    if (!raw) return buildDefaultPrefs();
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return buildDefaultPrefs();
+    }
   }
-  if (!parsed || typeof parsed !== "object") return buildDefaultPrefs();
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return buildDefaultPrefs();
   const obj = parsed as Record<string, unknown>;
   if (looksLikeV2(obj)) return parseV2(obj);
   return migrateFromV1(obj);

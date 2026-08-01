@@ -21,7 +21,9 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useOnboardingProgress } from "@/hooks/queries/onboarding";
 import { useUpdateProfile } from "@/hooks/queries/profiles";
-import { useSetSetting } from "@/hooks/queries/settings";
+import { settingValueFromString } from "@/hooks/queries/admin/users";
+import { useSetSettingValue, type SettingIdentity } from "@/hooks/queries/settingValues";
+import type { SettingKey } from "@/lib/settingsContract";
 import { cn } from "@/lib/utils";
 
 /**
@@ -265,7 +267,7 @@ function SettingControl({ step }: { step: OnboardingStep }) {
   const spec = step.setting!;
   const { profile, selectProfile } = useAuth();
   const updateProfile = useUpdateProfile();
-  const setSetting = useSetSetting();
+  const setSettingValue = useSetSettingValue();
 
   const currentValue =
     spec.target === "profile_field" && profile
@@ -285,9 +287,15 @@ function SettingControl({ step }: { step: OnboardingStep }) {
       );
       return;
     }
-    // "setting" and "device_setting" share the user-settings mutation shape;
-    // device scope only differs in endpoint, handled by the settings hook.
-    setSetting.mutate({ key: spec.key, value: next });
+    // "setting" and "device_setting" write the same canonical mutation; they
+    // differ only in the scope the value is stored at.
+    const identity: SettingIdentity =
+      spec.target === "device_setting" ? { scope: "profile_device" } : { scope: "profile" };
+    setSettingValue.mutate({
+      key: spec.key as SettingKey,
+      value: settingValueFromString(spec.key, next),
+      identity,
+    });
   }
 
   if (spec.control === "segmented") {

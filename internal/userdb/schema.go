@@ -265,6 +265,100 @@ CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
 
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);
+` + settingContractSchema + jellycompatDisplayPrefsSchema
+
+// jellycompatDisplayPrefsSchema is the dedicated home for Jellyfin
+// DisplayPreferences blobs, which used to ride user_settings under synthetic
+// jellycompat:* keys. It mirrors the PostgreSQL table in
+// migrations/sql (jellycompat_displayprefs) with user_id omitted: this
+// database is already scoped to one user. The value is opaque Jellyfin client
+// JSON stored verbatim, so it is TEXT with no json_valid CHECK — this table
+// stores what the client sent, it does not interpret it.
+const jellycompatDisplayPrefsSchema = `
+CREATE TABLE IF NOT EXISTS jellycompat_displayprefs (
+    prefs_id   TEXT NOT NULL,
+    client     TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (prefs_id, client)
+);
+`
+
+// settingContractSchema is the per-user half of the canonical settings contract
+// storage. It mirrors the PostgreSQL shape in
+// migrations/sql/20260727010621_user_setting_values.sql with user_id omitted:
+// this database is already scoped to one user. jsonb becomes TEXT plus a
+// json_valid CHECK, bigserial becomes INTEGER PRIMARY KEY AUTOINCREMENT, and
+// timestamptz becomes an RFC3339 TEXT column, matching the rest of this schema.
+//
+// This file declares no foreign keys, deliberately and consistently with every
+// other table here, so deleting a profile, library, series or device removes
+// these rows through the owning delete path rather than a cascade. The userstore
+// conformance suite holds both backends to identical behavior there.
+const settingContractSchema = `
+CREATE TABLE IF NOT EXISTS user_setting_values (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    key         TEXT NOT NULL,
+    scope       TEXT NOT NULL,
+    profile_id  TEXT,
+    device_id   TEXT,
+    library_id  INTEGER,
+    series_id   TEXT,
+    value       TEXT NOT NULL CHECK (json_valid(value)),
+    revision    INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    CHECK (scope IN ('account', 'profile', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (
+      (scope = 'account' AND profile_id IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_account_uq
+    ON user_setting_values (key) WHERE scope = 'account';
+CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_uq
+    ON user_setting_values (profile_id, key) WHERE scope = 'profile';
+CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_device_uq
+    ON user_setting_values (profile_id, device_id, key) WHERE scope = 'profile_device';
+CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_library_uq
+    ON user_setting_values (profile_id, library_id, key) WHERE scope = 'profile_library';
+CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_series_uq
+    ON user_setting_values (profile_id, series_id, key) WHERE scope = 'profile_series';
+
+CREATE INDEX IF NOT EXISTS user_setting_values_resolution_idx
+    ON user_setting_values (profile_id, key, scope);
+CREATE INDEX IF NOT EXISTS user_setting_values_series_idx
+    ON user_setting_values (profile_id, series_id);
+CREATE INDEX IF NOT EXISTS user_setting_values_library_idx
+    ON user_setting_values (profile_id, library_id);
+
+CREATE TABLE IF NOT EXISTS user_setting_mutations (
+    mutation_id  TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    result       TEXT NOT NULL CHECK (json_valid(result)),
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS user_setting_mutations_expiry_idx
+    ON user_setting_mutations (expires_at);
+
+CREATE TABLE IF NOT EXISTS user_setting_migration_rejects (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL,
+    source_key   TEXT NOT NULL,
+    identity     TEXT NOT NULL CHECK (json_valid(identity)),
+    value        TEXT,
+    reason       TEXT NOT NULL,
+    recorded_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS user_setting_migration_rejects_source_idx
+    ON user_setting_migration_rejects (source_table);
 `
 
 // InitSchema creates all tables in the given SQLite database.

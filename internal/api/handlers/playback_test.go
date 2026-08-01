@@ -28,6 +28,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -691,6 +693,86 @@ func TestHandleStartPlayback_DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *
 	if pref != nil {
 		t.Fatalf("expected no persisted preference on failure, got %+v", pref)
 	}
+}
+
+func TestHandleStartPlayback_AudioLanguageResolvesCanonically(t *testing.T) {
+	// The default audio track comes from the canonical playback.audio_language
+	// value resolved through the settings contract, not from the legacy
+	// user_profiles.language column. The column always carries the language of
+	// a different track than the canonical answer, so a regression to reading
+	// it flips the selected index.
+	newFile := func(t *testing.T) *models.MediaFile {
+		return &models.MediaFile{
+			ID:        42,
+			ContentID: "movie-1",
+			FilePath:  writePlaybackTestMediaFile(t, "movie.mkv"),
+			Duration:  3600,
+			AudioTracks: []models.AudioTrack{
+				{Language: "eng", Codec: "aac", Default: true},
+				{Language: "jpn", Codec: "aac"},
+			},
+		}
+	}
+
+	setLegacyLanguage := func(t *testing.T, store userstore.UserStore, language string) {
+		t.Helper()
+		if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
+			Language: &language,
+		}); err != nil {
+			t.Fatalf("seed legacy language column: %v", err)
+		}
+	}
+
+	startPlayback := func(t *testing.T, store userstore.UserStore, file *models.MediaFile) playbackSessionResponse {
+		t.Helper()
+		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+		handler.StoreProvider = testUserStoreProvider{store: store}
+		handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+		req := httptest.NewRequest("POST", "/api/v1/playback/start",
+			strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct"}`))
+		req = req.WithContext(newAuthorizedPlaybackContext())
+
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var resp playbackSessionResponse
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	t.Run("canonical value wins over legacy column", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setLegacyLanguage(t, store, "eng")
+		if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
+			Key:       settingskeys.PlaybackAudioLanguage,
+			Scope:     settingscontract.ScopeProfile,
+			ProfileID: "profile-1",
+		}, json.RawMessage(`"ja"`)); err != nil {
+			t.Fatalf("seed canonical audio language: %v", err)
+		}
+
+		resp := startPlayback(t, store, newFile(t))
+		if resp.AudioTrackIndex != 1 {
+			t.Fatalf("AudioTrackIndex = %d, want 1 (canonical \"ja\" track)", resp.AudioTrackIndex)
+		}
+	})
+
+	t.Run("legacy column alone no longer selects a track", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setLegacyLanguage(t, store, "jpn")
+
+		resp := startPlayback(t, store, newFile(t))
+		// No canonical value stored: the contract default is "no preference",
+		// so selection falls to the file's default track, not the column's.
+		if resp.AudioTrackIndex != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (file default track)", resp.AudioTrackIndex)
+		}
+	})
 }
 
 func TestHandleChangeAudioTrack_PersistsSeriesAudioPreferenceSignature(t *testing.T) {

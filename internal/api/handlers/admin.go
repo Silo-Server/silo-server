@@ -37,6 +37,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/policy"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -1355,10 +1357,6 @@ type adminSettingResponse struct {
 	RestartRequired bool `json:"restart_required,omitempty"`
 }
 
-type adminSettingsListResponse struct {
-	Settings []adminSettingResponse `json:"settings"`
-}
-
 type adminDeviceSettingResponse struct {
 	UserID         int    `json:"user_id"`
 	ProfileID      string `json:"profile_id"`
@@ -1413,345 +1411,6 @@ type adminDeviceDetailResponse struct {
 	Settings       []adminDeviceSettingResponse `json:"settings"`
 }
 
-// HandleListUserSettings handles GET /admin/users/{id}/settings.
-func (h *AdminHandler) HandleListUserSettings(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	entries, err := store.ListSettings(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list settings")
-		return
-	}
-	resp := adminSettingsListResponse{
-		Settings: make([]adminSettingResponse, 0, len(entries)),
-	}
-	for _, entry := range entries {
-		if !keyUsesUserScope(entry.Key) {
-			continue
-		}
-		resp.Settings = append(resp.Settings, adminSettingResponse{
-			Key:   entry.Key,
-			Value: entry.Value,
-		})
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleGetUserSetting handles GET /admin/users/{id}/settings/{key}.
-func (h *AdminHandler) HandleGetUserSetting(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	value, err := store.GetSetting(r.Context(), key)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load setting")
-		return
-	}
-	if value == "" {
-		entries, err := store.ListSettings(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load setting")
-			return
-		}
-		found := false
-		for _, entry := range entries {
-			if entry.Key == key {
-				found = true
-				break
-			}
-		}
-		if !found {
-			writeError(w, http.StatusNotFound, "not_found", "Setting not found")
-			return
-		}
-	}
-	writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, Value: value})
-}
-
-// HandleUpdateUserSetting handles PUT /admin/users/{id}/settings/{key}.
-func (h *AdminHandler) HandleUpdateUserSetting(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-	var req updateSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := validateRegisteredSetting(key, req.Value, scopeUser); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if err := store.SetSetting(r.Context(), key, req.Value); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update setting")
-		return
-	}
-	writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, Value: req.Value})
-}
-
-// HandleDeleteUserSetting handles DELETE /admin/users/{id}/settings/{key}.
-func (h *AdminHandler) HandleDeleteUserSetting(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if !keyUsesUserScope(key) {
-		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeUser))
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if err := store.DeleteSetting(r.Context(), key); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete setting")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleListUserDeviceSettings handles GET /admin/users/{id}/device-settings.
-func (h *AdminHandler) HandleListUserDeviceSettings(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	entries, err := store.ListAllDeviceSettings(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list device settings")
-		return
-	}
-	profileNames, err := listProfileNamesByID(r.Context(), store)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-		return
-	}
-	writeJSON(w, http.StatusOK, buildAdminDeviceSettingsResponse(userID, profileNames, entries))
-}
-
-// HandleListUserDeviceSettingsByKey handles GET /admin/users/{id}/device-settings/{key}.
-func (h *AdminHandler) HandleListUserDeviceSettingsByKey(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	entries, err := store.ListDeviceSettings(r.Context(), key)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list device settings")
-		return
-	}
-	profileNames, err := listProfileNamesByID(r.Context(), store)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
-		return
-	}
-	writeJSON(w, http.StatusOK, buildAdminDeviceSettingsResponse(userID, profileNames, entries))
-}
-
-// HandleUpdateUserDeviceSetting handles PUT /admin/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}.
-func (h *AdminHandler) HandleUpdateUserDeviceSetting(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	profileID := strings.TrimSpace(chi.URLParam(r, "profile_id"))
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	deviceID := strings.TrimSpace(chi.URLParam(r, "device_id"))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile id is required")
-		return
-	}
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
-		return
-	}
-	var req updateSettingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	if err := validateRegisteredSetting(key, req.Value, scopeDevice); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if !adminProfileExists(w, r, store, profileID) {
-		return
-	}
-	existing, err := store.GetDeviceSetting(r.Context(), profileID, deviceID, key)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device setting")
-		return
-	}
-	entry := userstore.DeviceSettingEntry{
-		ProfileID: profileID,
-		DeviceID:  deviceID,
-		Key:       key,
-		Value:     req.Value,
-	}
-	if existing != nil {
-		entry.DeviceName = existing.DeviceName
-		entry.DevicePlatform = existing.DevicePlatform
-	} else if registered, err := registeredDeviceForProfile(r.Context(), store, profileID, deviceID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
-		return
-	} else if registered != nil {
-		entry.DeviceName = registered.DeviceName
-		entry.DevicePlatform = registered.DevicePlatform
-	}
-	if err := store.SetDeviceSetting(r.Context(), entry); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update device setting")
-		return
-	}
-	writeJSON(w, http.StatusOK, adminSettingResponse{Key: key, Value: req.Value})
-}
-
-// HandleDeleteUserDeviceSetting handles DELETE /admin/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}.
-func (h *AdminHandler) HandleDeleteUserDeviceSetting(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	profileID := strings.TrimSpace(chi.URLParam(r, "profile_id"))
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	deviceID := strings.TrimSpace(chi.URLParam(r, "device_id"))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile id is required")
-		return
-	}
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if !adminProfileExists(w, r, store, profileID) {
-		return
-	}
-	if err := store.DeleteDeviceSetting(r.Context(), profileID, deviceID, key); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleDeleteAllUserDeviceSettings handles DELETE /admin/users/{id}/profiles/{profile_id}/devices/{device_id}/settings.
-func (h *AdminHandler) HandleDeleteAllUserDeviceSettings(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	profileID := strings.TrimSpace(chi.URLParam(r, "profile_id"))
-	deviceID := strings.TrimSpace(chi.URLParam(r, "device_id"))
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile id is required")
-		return
-	}
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Device id is required")
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if !adminProfileExists(w, r, store, profileID) {
-		return
-	}
-	if err := store.DeleteAllDeviceSettings(r.Context(), profileID, deviceID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device settings")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleDeleteUserDeviceSettingsByKey handles DELETE /admin/users/{id}/device-settings/{key}.
-func (h *AdminHandler) HandleDeleteUserDeviceSettingsByKey(w http.ResponseWriter, r *http.Request) {
-	userID, ok := parseAdminUserIDParam(w, r)
-	if !ok {
-		return
-	}
-	key := strings.TrimSpace(chi.URLParam(r, "key"))
-	if key == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
-		return
-	}
-	store, ok := h.adminUserStore(w, r, userID)
-	if !ok {
-		return
-	}
-	if err := store.DeleteDeviceSettingsByKey(r.Context(), key); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device settings")
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // HandleListDevices handles GET /admin/devices.
 func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request) {
 	if h.userRepo == nil || h.storeProv == nil {
@@ -1779,6 +1438,10 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 			if err != nil {
 				return fmt.Errorf("list device settings: %w", err)
 			}
+			canonicalValues, err := store.ListAllSettingValues(gctx)
+			if err != nil {
+				return fmt.Errorf("list canonical setting values: %w", err)
+			}
 			devices, err := listRegisteredDevices(gctx, store)
 			if err != nil {
 				return fmt.Errorf("list devices: %w", err)
@@ -1796,6 +1459,7 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 				user.Username,
 				user.Email,
 				entries,
+				canonicalValues,
 				devices,
 				profileNames,
 			)
@@ -1862,6 +1526,11 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
 		return
 	}
+	canonicalValues, err := store.ListAllSettingValues(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
+		return
+	}
 	registeredDevices, err := listRegisteredDevices(r.Context(), store)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load device")
@@ -1885,11 +1554,18 @@ func (h *AdminHandler) HandleGetDevice(w http.ResponseWriter, r *http.Request) {
 			deviceRegistrations = append(deviceRegistrations, entry)
 		}
 	}
+	deviceCanonicalValues := make([]userstore.SettingValue, 0)
+	for _, value := range canonicalValues {
+		if value.Scope == settingscontract.ScopeProfileDevice && value.DeviceID == deviceID {
+			deviceCanonicalValues = append(deviceCanonicalValues, value)
+		}
+	}
 	summaries := buildAdminDeviceSummaries(
 		user.ID,
 		user.Username,
 		user.Email,
 		deviceEntries,
+		deviceCanonicalValues,
 		deviceRegistrations,
 		profileNames,
 	)
@@ -1922,25 +1598,6 @@ func listRegisteredDevices(ctx context.Context, store userstore.UserStore) ([]us
 	return registry.ListDevices(ctx)
 }
 
-func registeredDeviceForProfile(
-	ctx context.Context,
-	store userstore.UserStore,
-	profileID string,
-	deviceID string,
-) (*userstore.DeviceEntry, error) {
-	devices, err := listRegisteredDevices(ctx, store)
-	if err != nil {
-		return nil, err
-	}
-	for _, device := range devices {
-		if device.ProfileID == profileID && device.DeviceID == deviceID {
-			matched := device
-			return &matched, nil
-		}
-	}
-	return nil, nil
-}
-
 func buildAdminDeviceSettingsResponse(userID int, profileNames map[string]string, entries []userstore.DeviceSettingEntry) adminDeviceSettingsListResponse {
 	resp := adminDeviceSettingsListResponse{
 		Settings: make([]adminDeviceSettingResponse, 0, len(entries)),
@@ -1966,6 +1623,7 @@ func buildAdminDeviceSummaries(
 	username string,
 	email string,
 	entries []userstore.DeviceSettingEntry,
+	canonicalValues []userstore.SettingValue,
 	registeredDevices []userstore.DeviceEntry,
 	profileNames map[string]string,
 ) []adminDeviceSummaryResponse {
@@ -2067,12 +1725,36 @@ func buildAdminDeviceSummaries(
 		if current == nil {
 			continue
 		}
-		if profileID != "" && entry.Key != "" {
-			current.keys[profileID+":"+entry.Key] = struct{}{}
+		key := canonicalAdminDeviceSettingKey(entry.Key)
+		if profileID != "" && key != "" {
+			current.keys[profileID+":"+key] = struct{}{}
 		}
 		profile := ensureProfile(current, profileID, entry.UpdatedAt)
-		if profile != nil && entry.Key != "" {
-			profile.keys[entry.Key] = struct{}{}
+		if profile != nil && key != "" {
+			profile.keys[key] = struct{}{}
+		}
+	}
+
+	// Canonical profile_device rows are the authoritative overrides after the
+	// settings cutover. Merge them by (profile,key) with the still-mounted
+	// legacy rows so a mirrored value counts once while a canonical-only write
+	// remains visible to fleet management.
+	for _, value := range canonicalValues {
+		if value.Scope != settingscontract.ScopeProfileDevice {
+			continue
+		}
+		deviceID := strings.TrimSpace(value.DeviceID)
+		profileID := strings.TrimSpace(value.ProfileID)
+		current := ensureDevice(deviceID, "", "", value.UpdatedAt)
+		if current == nil {
+			continue
+		}
+		if profileID != "" && value.Key != "" {
+			current.keys[profileID+":"+value.Key] = struct{}{}
+		}
+		profile := ensureProfile(current, profileID, value.UpdatedAt)
+		if profile != nil && value.Key != "" {
+			profile.keys[value.Key] = struct{}{}
 		}
 	}
 
@@ -2103,6 +1785,13 @@ func buildAdminDeviceSummaries(
 		devices = append(devices, current.device)
 	}
 	return devices
+}
+
+// canonicalAdminDeviceSettingKey uses the migration's rename table so fleet
+// counts describe logical overrides and every legacy/canonical pair counts
+// once, including pre-cutover appearance rows left in the legacy table.
+func canonicalAdminDeviceSettingKey(key string) string {
+	return settingsmigrate.CanonicalKey(strings.TrimSpace(key))
 }
 
 func listProfileNamesByID(ctx context.Context, store userstore.UserStore) (map[string]string, error) {

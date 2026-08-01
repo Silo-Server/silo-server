@@ -72,6 +72,30 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir stri
 	return nil
 }
 
+// MigrateDownTo rolls back every migration newer than version, newest first.
+//
+// It exists because several migrations are Go rather than SQL — the settings
+// backfill and the jellycompat DisplayPreferences move — and those are
+// registered on this provider, so the standalone goose CLI cannot see them.
+// Without this, their down functions are written but unreachable, and the only
+// rollback for a deploy that moved data out of a table the previous binary
+// reads is restoring a backup.
+//
+// version is the last migration to KEEP: passing the version before a release
+// undoes exactly that release.
+func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string, version int64) error {
+	provider, err := newMigrationProvider(pool, fsys, dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = provider.Close() }()
+
+	if _, err := provider.DownTo(ctx, version); err != nil {
+		return fmt.Errorf("rolling back goose migrations to %d: %w", version, err)
+	}
+	return nil
+}
+
 // MigrationStatus describes a migration source and whether Goose has applied it.
 type MigrationStatus struct {
 	Version   int64
@@ -132,6 +156,15 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
 		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
+		// These are Go rather than SQL because their conversion rules are
+		// shared with the per-user SQLite backend: the settings backfill
+		// validates every value against the contract and re-encodes it as
+		// typed JSON, and the displayprefs move parses the legacy jellycompat
+		// keys — neither expressible in SQL without duplicating those rules.
+		goose.WithGoMigrations(
+			settingsBackfillMigration(),
+			displayPrefsMoveMigration(),
+		),
 	)
 	if err != nil {
 		_ = sqlDB.Close()

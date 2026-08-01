@@ -33,9 +33,9 @@ describe("buildQualitySummary", () => {
   });
 
   it("labels the just-in-time virtual results action", () => {
-    expect(
-      buildQualitySummary(makeVersion({ file_path: "virtual://movie/tt1?results=all" })),
-    ).toBe("More results…");
+    expect(buildQualitySummary(makeVersion({ file_path: "virtual://movie/tt1?results=all" }))).toBe(
+      "More results…",
+    );
   });
 
   it("does not label returned result files as the action", () => {

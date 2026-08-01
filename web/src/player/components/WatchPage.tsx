@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { PlayerFileVersion, PlayerSubtitleTrackSignature, WatchPageProps } from "../types";
+import type { PlayerFileVersion, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerFetch } from "../player-fetch";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
-import { derivePersistedSubtitleMode } from "../utils/subtitleMode";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
+import { buildSubtitleChoiceRequests } from "../utils/subtitleChoicePersistence";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import { itemKeys } from "@/hooks/queries/keys";
@@ -167,39 +167,31 @@ export function WatchPage({
     [session],
   );
 
+  /**
+   * Persists an in-player subtitle choice for the whole series.
+   *
+   * buildSubtitleChoiceRequests decides what a pick is worth storing and
+   * where; this only issues the requests. They are independent on purpose: a
+   * failed settings write must not cost the user the track they picked, and a
+   * failed track write must not cost them the language, so each is best effort
+   * on its own rather than one composite request that half-applies.
+   */
   const handleSubtitleChanged = useCallback(
     (index: number | null) => {
-      const seriesId = seriesContext?.seriesId ?? contentId;
-      if (!seriesId) return;
-
-      const track = index !== null ? playableSubtitles.find((s) => s.index === index) : null;
-      // Never persist an index we can't resolve to a real track (e.g. the
-      // in-progress AI live track's sentinel index): it would store a
-      // nonexistent track with empty language and clobber the saved preference.
-      if (index !== null && !track) return;
-      const trackSignature: PlayerSubtitleTrackSignature | null = track
-        ? {
-            source: track.source,
-            language: track.language,
-            codec: track.codec,
-            label: track.label,
-            forced: track.forced,
-            hearing_impaired: track.hearing_impaired,
-          }
-        : null;
-
-      playerFetch(config, `/subtitle-prefs/${seriesId}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          subtitle_language: track?.language ?? "",
-          subtitle_track_index: index ?? -1,
-          subtitle_mode: derivePersistedSubtitleMode(index),
-          track_signature: trackSignature,
-          show_forced_subtitles: showForcedSubtitles,
-        }),
-      }).catch(() => {
-        // Best effort.
+      const requests = buildSubtitleChoiceRequests({
+        seriesId: seriesContext?.seriesId ?? contentId,
+        index,
+        tracks: playableSubtitles,
+        showForcedSubtitles,
       });
+      for (const request of requests) {
+        void playerFetch(config, request.path, {
+          method: "PUT",
+          body: JSON.stringify(request.body),
+        }).catch(() => {
+          // Best effort.
+        });
+      }
     },
     [config, seriesContext, contentId, playableSubtitles, showForcedSubtitles],
   );

@@ -36,8 +36,8 @@ describe("getLanguageName", () => {
     expect(getLanguageName("ENG")).toBe("English");
   });
 
-  it("falls back to capitalized code for unknown", () => {
-    expect(getLanguageName("xx")).toBe("Xx");
+  it("labels an unassigned code explicitly", () => {
+    expect(getLanguageName("xx")).toBe("Unknown language (xx)");
   });
 
   it("returns 'Unknown' for empty string", () => {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 14
+const schemaVersion = 17
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -142,7 +142,72 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 15 {
+		if err := migrateToV15(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 15"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 15: %w", err)
+		}
+	}
+
+	if version < 16 {
+		if err := migrateToV16(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 16"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 16: %w", err)
+		}
+	}
+
+	if version < 17 {
+		if err := migrateToV17(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 17"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 17: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV17 rehomes the Jellyfin DisplayPreferences blobs from
+// user_settings (jellycompat:* keys) into the dedicated
+// jellycompat_displayprefs table, removing the last non-settings tenant of the
+// legacy key/value table. The table itself comes from InitSchema on this open;
+// executing the DDL again here records it for the version gate, the same shape
+// migrateToV15 used for the settings contract tables.
+func migrateToV17(tx *sql.Tx) error {
+	if _, err := tx.Exec(jellycompatDisplayPrefsSchema); err != nil {
+		return fmt.Errorf("creating jellycompat_displayprefs: %w", err)
+	}
+	return moveJellycompatDisplayPrefs(tx)
+}
+
+// migrateToV16 backfills canonical setting values from the legacy tables.
+//
+// V15 created the tables; this fills them. It is the cutover's data half, and
+// it runs in the same transaction as every other step, so a database either
+// comes out fully migrated or untouched.
+func migrateToV16(tx *sql.Tx) error {
+	return migrateSettingsToCanonical(tx)
+}
+
+// migrateToV15 adds the canonical settings contract tables. InitSchema already
+// creates them with IF NOT EXISTS on every open, so this step is what records
+// that an existing database has them — the same shape migrateToV6 used for
+// series_playback_preferences.
+//
+// The settings-contract steps were numbered V14-V16 while this branch was in
+// review; main's profile_onboarding migration took V14 first, so they shifted
+// to V15-V17. Only unreleased dev databases carried the old numbers, and every
+// step is idempotent, so a re-run under the new numbering is harmless.
+func migrateToV15(tx *sql.Tx) error {
+	if _, err := tx.Exec(settingContractSchema); err != nil {
+		return fmt.Errorf("creating settings contract tables: %w", err)
+	}
+	return nil
 }
 
 // migrateToV14 adds the per-profile onboarding-tour state table. Keyed by

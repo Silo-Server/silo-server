@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/library-page-state.json",
+  "title": "Library page state",
+  "description": "Remembered per-library browse state. Mirrors web/src/hooks/queries/libraryPageState.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "libraries"],
+  "properties": {
+    "version": { "const": 1 },
+    "libraries": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["search"],
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "Serialized URLSearchParams from serializeLibraryPageSearchParams. An advanced view encodes each filter rule as three groups[i][rules][j][...] keys, so the length grows about 150 characters per rule: measured at 216 for one rule, 518 for three, 820 for five. The bound has to clear what the current unvalidated endpoint already stores, or these rows fail the migration.",
+            "maxLength": 4096
+          }
+        }
+      },
+      "maxProperties": 512
+    }
+  }
+}

@@ -334,6 +334,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 		evt.ChannelCatalog,
 		evt.ChannelHistoryImport,
 		evt.ChannelUserState,
+		evt.ChannelUserSettings,
 		evt.ChannelNotifications,
 	}
 	if role == "admin" {

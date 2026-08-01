@@ -161,18 +161,34 @@ type DerivedWatchPageProps = Omit<
   | "onPlaybackTransportReady"
 >;
 
+/**
+ * The pre-cutover cap, used when no canonical value was passed. The settings
+ * screen no longer writes this column, so it only carries a choice made before
+ * the contract landed.
+ */
+function currentProfileQualityFallback(profile?: Profile | null): string | null {
+  return profile?.quality_preference || null;
+}
+
 export function buildWatchPageProps({
   request,
   item,
   currentProfile,
   seriesEpisodes,
+  qualityPreference = currentProfileQualityFallback(currentProfile),
 }: {
   request: WatchRouteRequest;
   item: WatchDetail;
   currentProfile?: Profile | null;
   seriesEpisodes?: EpisodeRef[];
+  /**
+   * The resolution cap from the settings contract, via useQualityPreference.
+   * Passed in rather than read here because this is a pure builder: the
+   * canonical value is where the quality picker writes, and the profile column
+   * it falls back to is no longer updated by that picker.
+   */
+  qualityPreference?: string | null;
 }): DerivedWatchPageProps {
-  const qualityPreference = currentProfile?.quality_preference || null;
   const basePreferredSubtitleLanguage =
     item.effective_subtitle_language !== undefined
       ? item.effective_subtitle_language

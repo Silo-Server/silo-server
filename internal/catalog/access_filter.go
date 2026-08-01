@@ -19,11 +19,17 @@ type AccessFilter struct {
 	// language. Presentation language resolves: explicit PresentationLanguage
 	// → ProfilePreferredLanguage → the library's metadata_language.
 	ProfilePreferredLanguage string
-	MaxContentRating         string
-	MaxPlaybackQuality       string
-	SelectedFileID           int
-	UserID                   int
-	ProfileID                string
+	// MetadataLanguageOverrides maps an item's original language to a target
+	// language before ProfilePreferredLanguage is used as the fallback.
+	MetadataLanguageOverrides map[string]string
+	// PresentationOriginalLanguage supplies a parent series' original language
+	// while localizing season and episode rows, which do not duplicate it.
+	PresentationOriginalLanguage string
+	MaxContentRating             string
+	MaxPlaybackQuality           string
+	SelectedFileID               int
+	UserID                       int
+	ProfileID                    string
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so

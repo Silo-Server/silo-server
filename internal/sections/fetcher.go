@@ -458,12 +458,9 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 
 	nextUpMode := ""
 	if ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp {
-		nextUpMode, _ = store.GetSetting(ctx, "next_up_mode")
-		if nextUpMode == "" {
-			nextUpMode = "combined"
-		}
+		nextUpMode = NextUpMode(ctx, store, profileID)
 	}
-	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == "combined" {
+	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == NextUpModeCombined {
 		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
 		if nextUpErr != nil {
 			slog.ErrorContext(ctx, "fetching next-up items", "component", "sections", "error", nextUpErr)
@@ -473,11 +470,11 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}
 	}
 
-	if nextUpMode == "combined" && len(orderedItems) > 1 {
+	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		orderedItems = collapseContinueWatchingSeriesCandidates(orderedItems, itemMeta)
 	}
 
-	if nextUpMode == "combined" && len(orderedItems) > 1 {
+	if nextUpMode == NextUpModeCombined && len(orderedItems) > 1 {
 		sort.SliceStable(orderedItems, func(i, j int) bool {
 			left := itemMeta[orderedItems[i].ContentID].SortTimestamp
 			right := itemMeta[orderedItems[j].ContentID].SortTimestamp
@@ -723,9 +720,8 @@ func (f *Fetcher) fetchNextUpSection(ctx context.Context, resolved ResolvedSecti
 		return SectionWithItems{}, fmt.Errorf("getting user store: %w", err)
 	}
 
-	// Only resolve if user preference is "separate"
-	nextUpMode, _ := store.GetSetting(ctx, "next_up_mode")
-	if nextUpMode != "separate" {
+	// Only resolve if the profile's preference is "separate"
+	if NextUpMode(ctx, store, profileID) != NextUpModeSeparate {
 		return emptyResult, nil
 	}
 

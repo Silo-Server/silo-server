@@ -203,27 +203,16 @@ export const libraryKeys = {
   user: (profileId?: string | null) => ["libraries", "user", profileId ?? "none"] as const,
 };
 
-export const libraryPlaybackPreferenceKeys = {
-  all: ["libraryPlaybackPreferences"] as const,
-  list: (profileId?: string | null) =>
-    ["libraryPlaybackPreferences", "list", profileId ?? "none"] as const,
-  library: (profileId: string | null | undefined, libraryId: number) =>
-    ["libraryPlaybackPreferences", "library", profileId ?? "none", libraryId] as const,
-};
-
 export const progressKeys = {
   all: ["progress"] as const,
   list: (status?: string, libraryId?: number) => ["progress", "list", status, libraryId] as const,
 };
 
 export const settingsKeys = {
+  // The canonical value queries live under ["settings", "values", …] and build
+  // their own key (effectiveSettingsQueryKey), so one invalidation of that
+  // prefix covers every scope and batch.
   all: ["settings"] as const,
-  list: () => ["settings", "list"] as const,
-  detail: (key: string) => ["settings", key] as const,
-  deviceDetail: (profileId: string | null | undefined, key: string) =>
-    ["settings", "device", profileId ?? "none", key] as const,
-  effective: (profileId: string | null | undefined, keys: string[]) =>
-    ["settings", "effective", profileId ?? "none", [...keys].sort().join(",")] as const,
   plugins: () => ["settings", "plugins"] as const,
   pluginDetail: (installationId: number) => ["settings", "plugins", installationId] as const,
 };

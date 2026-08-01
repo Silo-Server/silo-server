@@ -24,6 +24,7 @@ import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession"
 import { Toaster } from "@/components/ui/sonner";
 import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
 import { useEventChannel } from "@/components/realtimeEventsContext";
+import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
 import AdminLayout from "@/components/AdminLayout";
 import Home from "@/pages/Home";
@@ -610,6 +611,9 @@ function RealtimeEventChannels() {
 
   useEventChannel("catalog");
   useEventChannel("user_state");
+  // Subscribes user_settings and invalidates the canonical value queries, so a
+  // setting changed on another device (or by an admin) reaches this tab.
+  useSettingValuesRealtime();
   // Profile-scoped; the server rejects the subscription until the connection
   // is bound to a profile via the websocket ticket, which is harmless.
   useEventChannel("notifications");

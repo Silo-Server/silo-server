@@ -45,8 +45,14 @@ describe("downloadDiagnosticReport", () => {
     const click = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
+    // A string body, not a Blob: `new Response(blob)` reads the body via
+    // `blob.stream()`, which jsdom's Blob does not implement on Node 22 — the
+    // version the Dockerfile builds with — so the Blob form passes locally on
+    // Node 24 and throws "object.stream is not a function" in CI. Nothing here
+    // asserts on the body's contents, only that the object URL and filename
+    // reach the anchor, so the string is equivalent and version-independent.
     mocks.apiResponse.mockResolvedValue(
-      new Response(new Blob(["bundle"]), { headers: { "Content-Type": "application/gzip" } }),
+      new Response("bundle", { headers: { "Content-Type": "application/gzip" } }),
     );
 
     await downloadDiagnosticReport(report);

@@ -40,13 +40,28 @@ type deleteLibraryExecutor interface {
 	Execute(ctx context.Context, req DeleteLibraryRequest, progress func(current, total int, message string)) (*DeleteLibraryResult, error)
 }
 
-type LibraryDeleteExecutor struct {
-	folderRepo  *catalog.FolderRepository
-	sectionRepo *sections.Repository
+// LibrarySettingsCleaner removes per-user canonical setting values scoped to a
+// deleted library. Satisfied by *userstore.SettingValuesCleaner.
+type LibrarySettingsCleaner interface {
+	DeleteForLibrary(ctx context.Context, libraryID int) int64
 }
 
-func NewLibraryDeleteExecutor(folderRepo *catalog.FolderRepository, sectionRepo *sections.Repository) *LibraryDeleteExecutor {
-	return &LibraryDeleteExecutor{folderRepo: folderRepo, sectionRepo: sectionRepo}
+type LibraryDeleteExecutor struct {
+	folderRepo      *catalog.FolderRepository
+	sectionRepo     *sections.Repository
+	settingsCleaner LibrarySettingsCleaner
+}
+
+func NewLibraryDeleteExecutor(
+	folderRepo *catalog.FolderRepository,
+	sectionRepo *sections.Repository,
+	settingsCleaner LibrarySettingsCleaner,
+) *LibraryDeleteExecutor {
+	return &LibraryDeleteExecutor{
+		folderRepo:      folderRepo,
+		sectionRepo:     sectionRepo,
+		settingsCleaner: settingsCleaner,
+	}
 }
 
 func (e *LibraryDeleteExecutor) Execute(
@@ -81,6 +96,13 @@ func (e *LibraryDeleteExecutor) Execute(
 		if err := e.sectionRepo.DeleteGeneratedHomeLibraryRecentSections(ctx, req.LibraryID); err != nil {
 			return nil, fmt.Errorf("deleting generated home sections: %w", err)
 		}
+	}
+	if e.settingsCleaner != nil {
+		// The canonical settings schema declares no FK on library_id, so the
+		// per-user profile_library values must go with the library or they
+		// orphan. Best-effort inside the cleaner: the library itself is
+		// already deleted at this point.
+		e.settingsCleaner.DeleteForLibrary(ctx, req.LibraryID)
 	}
 	if progress != nil {
 		progress(5, 5, "Library deletion completed")

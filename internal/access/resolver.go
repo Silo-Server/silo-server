@@ -10,8 +10,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// settingKeyDisabledLibraryIDs is the user-settings key that stores a JSON
-// array of library IDs the user has chosen to hide.
+// settingKeyDisabledLibraryIDs is the legacy account-wide user-settings key
+// that stored a JSON array of library IDs the user had chosen to hide. It is
+// read only as a fallback now: the setting moved to the profile-scoped
+// canonical key ui.disabled_library_ids, and the legacy write endpoint no
+// longer accepts this key.
 const settingKeyDisabledLibraryIDs = "disabled_library_ids"
 
 // UserRepository loads account-level access settings.
@@ -72,6 +75,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		return Scope{}, fmt.Errorf("opening user store for %d: %w", input.UserID, err)
 	}
 
+	preferences := ResolveViewerPreferences(ctx, store, input.ProfileID)
 	if input.ProfileID != "" {
 		profile, err := store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
@@ -83,7 +87,8 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
-		scope.PreferredMetadataLanguage = profile.PreferredMetadataLanguage
+		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
+		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
 		if err != nil {
@@ -92,8 +97,8 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.ProfileVerified = verified
 	}
 
-	// Apply user-level disabled library IDs setting.
-	disabled := DisabledLibraryIDs(ctx, store)
+	// Apply the profile's disabled library IDs setting.
+	disabled := preferences.DisabledLibraryIDs
 	if len(disabled) > 0 {
 		if scope.AllowedLibraryIDs != nil {
 			// Restricted user: subtract disabled IDs from the allowed set.
@@ -139,17 +144,29 @@ func VerifyProfileForRequest(
 	return profileVerified, nil
 }
 
-// DisabledLibraryIDs reads and parses the disabled_library_ids user setting.
-func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
-	raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
-	if err != nil || raw == "" {
-		return nil
-	}
+// DisabledLibraryIDs resolves the libraries the acting profile has hidden from
+// its own browsing: the canonical profile-scoped ui.disabled_library_ids row,
+// else the legacy account-wide disabled_library_ids setting.
+//
+// The canonical row is what the web writes since the settings cutover — the
+// legacy endpoint rejects the unregistered key, so an account-key read alone
+// would silently ignore every edit made after the cutover. The legacy fallback
+// stays because the one-time backfill only ran on stores that existed when it
+// shipped: a store restored from a pre-backfill snapshot still carries its
+// hidden libraries only in the account key, and dropping the fallback would
+// unhide them. A stored canonical row always wins, so the fallback can never
+// override a post-cutover edit.
+func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
+	return ResolveViewerPreferences(ctx, store, profileID).DisabledLibraryIDs
+}
+
+// parseLibraryIDList decodes a JSON library-id array, dropping anything that
+// is not a positive id. Malformed JSON reads as an empty list.
+func parseLibraryIDList(raw json.RawMessage) []int {
 	var ids []int
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+	if err := json.Unmarshal(raw, &ids); err != nil {
 		return nil
 	}
-	// Filter out invalid values.
 	n := 0
 	for _, id := range ids {
 		if id > 0 {

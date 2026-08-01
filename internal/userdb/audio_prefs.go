@@ -13,12 +13,16 @@ type AudioPreference = userstore.AudioPreference
 // SetAudioPreference creates or replaces an audio preference for a
 // given profile and series. Timestamps should be ISO 8601 UTC strings.
 func SetAudioPreference(db *sql.DB, pref AudioPreference) error {
+	return setAudioPreference(db, pref)
+}
+
+func setAudioPreference(exec preferenceSettingsExecutor, pref AudioPreference) error {
 	signatureJSON, err := userstore.MarshalAudioTrackSignature(pref.TrackSignature)
 	if err != nil {
 		return fmt.Errorf("marshaling audio track signature for profile %q series %q: %w",
 			pref.ProfileID, pref.SeriesID, err)
 	}
-	_, err = db.Exec(`
+	_, err = exec.Exec(`
 		INSERT INTO audio_preferences (
 			profile_id, series_id, audio_track_index,
 			audio_language, audio_track_signature, updated_at
@@ -79,7 +83,11 @@ func GetAudioPreference(db *sql.DB, profileID, seriesID string) (*AudioPreferenc
 // DeleteAudioPreference removes the audio preference for a profile
 // and series. It is not an error if the preference does not exist.
 func DeleteAudioPreference(db *sql.DB, profileID, seriesID string) error {
-	_, err := db.Exec(
+	return deleteAudioPreference(db, profileID, seriesID)
+}
+
+func deleteAudioPreference(exec preferenceSettingsExecutor, profileID, seriesID string) error {
+	_, err := exec.Exec(
 		"DELETE FROM audio_preferences WHERE profile_id = ? AND series_id = ?",
 		profileID, seriesID,
 	)

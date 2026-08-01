@@ -56,7 +56,12 @@ import type {
   SeriesContext,
   SubtitleMode,
 } from "../types";
-import { mediaDurationSeconds, mediaElementDuration, toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
+import {
+  mediaDurationSeconds,
+  mediaElementDuration,
+  toMediaTime,
+  toPlayerTime,
+} from "../utils/mediaTimeline";
 import {
   copyWatchTogetherInvite,
   endWatchTogetherRoom,

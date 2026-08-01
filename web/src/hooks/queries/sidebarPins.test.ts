@@ -9,8 +9,26 @@ import {
 describe("sidebar pin helpers", () => {
   it("parses invalid values as an empty pin map", () => {
     expect(parseSidebarPins(null)).toEqual({});
+    expect(parseSidebarPins(undefined)).toEqual({});
     expect(parseSidebarPins("not-json")).toEqual({});
     expect(parseSidebarPins("[]")).toEqual({});
+    expect(parseSidebarPins([])).toEqual({});
+    expect(parseSidebarPins(42)).toEqual({});
+  });
+
+  it("accepts the canonical object value directly", () => {
+    const pins = {
+      "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }],
+    };
+    expect(parseSidebarPins(pins)).toEqual(pins);
+  });
+
+  it("still accepts the legacy JSON-string encoding", () => {
+    expect(
+      parseSidebarPins('{"42":[{"type":"collection","id":"col-1","label":"Pinned Horror"}]}'),
+    ).toEqual({
+      "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }],
+    });
   });
 
   it("adds a new pin to the target library", () => {
@@ -40,9 +58,26 @@ describe("sidebar pin helpers", () => {
     });
   });
 
+  it("builds the optimistic value as a typed object, not a JSON string", () => {
+    const mutation = createSidebarPinsOptimisticMutation({
+      currentValue: { "42": [{ type: "section", id: "sec-1", label: "Recently Added" }] },
+      currentRevision: null,
+      libraryId: 42,
+      pin: { type: "collection", id: "col-1", label: "Pinned Horror" },
+      revision: 1,
+    });
+
+    expect(mutation.optimisticValue).toEqual({
+      "42": [
+        { type: "section", id: "sec-1", label: "Recently Added" },
+        { type: "collection", id: "col-1", label: "Pinned Horror" },
+      ],
+    });
+  });
+
   it("rolls back the latest optimistic mutation when its revision is still current", () => {
     const mutation = createSidebarPinsOptimisticMutation({
-      currentRaw: null,
+      currentValue: null,
       currentRevision: null,
       libraryId: 42,
       pin: { type: "collection", id: "col-1", label: "Pinned Horror" },
@@ -55,21 +90,21 @@ describe("sidebar pin helpers", () => {
         mutation,
       }),
     ).toEqual({
-      raw: null,
+      value: null,
       revision: null,
     });
   });
 
   it("does not roll back over a newer optimistic mutation revision", () => {
     const firstMutation = createSidebarPinsOptimisticMutation({
-      currentRaw: null,
+      currentValue: null,
       currentRevision: null,
       libraryId: 42,
       pin: { type: "collection", id: "col-1", label: "Pinned Horror" },
       revision: 1,
     });
     createSidebarPinsOptimisticMutation({
-      currentRaw: firstMutation.optimisticRaw,
+      currentValue: firstMutation.optimisticValue,
       currentRevision: 1,
       libraryId: 42,
       pin: { type: "section", id: "sec-1", label: "Recently Added" },
