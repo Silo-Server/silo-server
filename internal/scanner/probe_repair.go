@@ -92,7 +92,12 @@ type PlaybackProbeEnsurer struct {
 // URL or mutating the catalog row. The caller keeps the canonical virtual URI
 // in the database while using the returned technical metadata for playback
 // planning.
-func ProbeVirtualSource(ctx context.Context, ffprobePath, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
+func ProbeVirtualSource(
+	ctx context.Context,
+	ffprobePath, ffmpegPath, sourceURL string,
+	file *models.MediaFile,
+	dvStripProbe func(context.Context, string) bool,
+) (*models.MediaFile, error) {
 	if file == nil {
 		return nil, nil
 	}
@@ -101,9 +106,31 @@ func ProbeVirtualSource(ctx context.Context, ffprobePath, sourceURL string, file
 		return file, err
 	}
 	updated := *file
-	updated.FilePath = sourceURL
 	applyProbeData(&updated, probe, "virtual")
-	updated.FilePath = sourceURL
+	// Technical metadata belongs to this playback attempt, but the source
+	// identity must remain the canonical virtual URI. Persisting or carrying a
+	// provider's signed URL beyond the probe makes restart/resume depend on an
+	// expiring credential and can leak it through plans and recipe cards.
+	updated.FilePath = file.FilePath
+	if needsCopySafetyProbe(&updated) {
+		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		multi, scanErr := DetectMultiplePPSH264(scanCtx, ffmpegPath, sourceURL)
+		cancel()
+		if scanErr != nil {
+			updated = *fileWithCopySafety(&updated, nil, true)
+		} else {
+			updated = *fileWithMultiplePPS(&updated, multi)
+		}
+	}
+	if dvStripProbe != nil && len(updated.VideoTracks) > 0 {
+		track := updated.VideoTracks[0]
+		if track.DVProfile == 7 || track.DVProfile == 8 {
+			value := dvStripProbe(ctx, sourceURL)
+			tracks := append([]models.VideoTrack(nil), updated.VideoTracks...)
+			tracks[0].DVRPUStrippable = &value
+			updated.VideoTracks = tracks
+		}
+	}
 	return &updated, nil
 }
 

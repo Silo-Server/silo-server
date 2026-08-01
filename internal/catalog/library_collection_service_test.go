@@ -5,7 +5,189 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestMDBListEntryItemTypeSeries(t *testing.T) {
+	if got := mdbListEntryItemType(mdblistEntry{MediaType: "tv"}); got != "series" {
+		t.Fatalf("MDBList tv type = %q, want series", got)
+	}
+}
+
+func TestVirtualPlaybackItemURIPreferenceAndFallbacks(t *testing.T) {
+	tests := []struct {
+		name    string
+		item    *models.MediaItem
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "movie prefers imdb",
+			item: &models.MediaItem{Type: "movie", ImdbID: "TT0133093", TmdbID: "603"},
+			want: "virtual://movie/tt0133093",
+		},
+		{
+			name: "movie falls back to tmdb",
+			item: &models.MediaItem{Type: "movie", TmdbID: "603"},
+			want: "virtual://movie/tmdb/603",
+		},
+		{
+			name: "series prefers tvdb over tmdb",
+			item: &models.MediaItem{Type: "series", TvdbID: "393159", TmdbID: "111"},
+			want: "virtual://series/tvdb/393159",
+		},
+		{
+			name: "series falls back to tmdb",
+			item: &models.MediaItem{Type: "series", TmdbID: "111"},
+			want: "virtual://series/tmdb/111",
+		},
+		{
+			name:    "invalid identifiers",
+			item:    &models.MediaItem{Type: "movie", ImdbID: "not-imdb", TmdbID: "0"},
+			wantErr: true,
+		},
+		{
+			name:    "unsupported media type",
+			item:    &models.MediaItem{Type: "episode", ImdbID: "tt1"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := virtualPlaybackItemURI(tt.item)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("virtualPlaybackItemURI() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("virtualPlaybackItemURI(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("virtualPlaybackItemURI() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVirtualPlaybackContentIDUsesCanonicalProviderPriority(t *testing.T) {
+	tests := []struct {
+		name string
+		item *models.MediaItem
+		want string
+	}{
+		{
+			name: "movie tmdb before imdb",
+			item: &models.MediaItem{Type: "movie", TmdbID: "603", ImdbID: "tt0133093"},
+			want: "movie-tmdb-603",
+		},
+		{
+			name: "movie imdb fallback",
+			item: &models.MediaItem{Type: "movie", ImdbID: "TT0133093"},
+			want: "movie-imdb-tt0133093",
+		},
+		{
+			name: "series tvdb before tmdb and imdb",
+			item: &models.MediaItem{Type: "series", TvdbID: "393159", TmdbID: "111", ImdbID: "tt1"},
+			want: "series-tvdb-393159",
+		},
+		{
+			name: "series tmdb before imdb",
+			item: &models.MediaItem{Type: "series", TmdbID: "111", ImdbID: "tt1"},
+			want: "series-tmdb-111",
+		},
+		{
+			name: "series imdb fallback",
+			item: &models.MediaItem{Type: "series", ImdbID: "tt1"},
+			want: "series-imdb-tt1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := virtualPlaybackContentID(tt.item)
+			if err != nil {
+				t.Fatalf("virtualPlaybackContentID(): %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("virtualPlaybackContentID()=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVirtualPlaybackIdentityAvailableWithoutIMDb(t *testing.T) {
+	if !virtualPlaybackIdentityAvailable("movie", "", 603, 0) {
+		t.Fatal("TMDB-only movie identity was rejected")
+	}
+	if !virtualPlaybackIdentityAvailable("tv", "", 0, 393159) {
+		t.Fatal("TVDB-only series identity was rejected")
+	}
+	if !virtualPlaybackIdentityAvailable("show", "", 0, 393159) {
+		t.Fatal("MDBList show TVDB identity was rejected")
+	}
+	if virtualPlaybackIdentityAvailable("movie", "", 0, 393159) {
+		t.Fatal("movie unexpectedly accepted a TVDB-only identity")
+	}
+	if virtualPlaybackIdentityAvailable("tv", "invalid", 0, 0) {
+		t.Fatal("invalid series identity was accepted")
+	}
+}
+
+func TestQueueVirtualMetadataRefreshInvokesBoundedWorker(t *testing.T) {
+	refreshed := make(chan string, 1)
+	service := &LibraryCollectionService{
+		RefreshVirtualItem: func(_ context.Context, contentID string) error {
+			refreshed <- contentID
+			return nil
+		},
+	}
+	service.queueVirtualMetadataRefresh("content-1")
+	select {
+	case got := <-refreshed:
+		if got != "content-1" {
+			t.Fatalf("refreshed content ID = %q, want content-1", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for virtual metadata refresh")
+	}
+}
+
+func TestConfiguredVirtualVariantsCachesProfileDiscoveryPerMediaType(t *testing.T) {
+	calls := 0
+	service := &LibraryCollectionService{
+		VirtualVariants: func(_ context.Context, virtualURI, mediaType string) ([]VirtualPlaybackVariant, error) {
+			calls++
+			if mediaType != "movie" {
+				t.Fatalf("mediaType=%q, want movie", mediaType)
+			}
+			return []VirtualPlaybackVariant{{
+				VirtualURI: virtualURI + "?profile=1080p", Label: "1080p",
+				OwnerInstallationID: 11,
+			}}, nil
+		},
+	}
+	ctx := context.WithValue(context.Background(), collectionVirtualVariantCacheKey{}, &collectionVirtualVariantCache{
+		entries: make(map[string][]VirtualPlaybackVariant),
+	})
+	first, err := service.configuredVirtualVariants(ctx, "virtual://movie/tt100", "movie")
+	if err != nil {
+		t.Fatalf("first profiles: %v", err)
+	}
+	second, err := service.configuredVirtualVariants(ctx, "virtual://movie/tt200", "movie")
+	if err != nil {
+		t.Fatalf("second profiles: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("profile callback calls=%d, want 1", calls)
+	}
+	if first[0].VirtualURI != "virtual://movie/tt100?profile=1080p" ||
+		second[0].VirtualURI != "virtual://movie/tt200?profile=1080p" {
+		t.Fatalf("rebased profiles first=%q second=%q", first[0].VirtualURI, second[0].VirtualURI)
+	}
+}
 
 // TestPickCandidatesByPriority_ReturnsAllInOrder pins the fallback semantic
 // that the legacy resolveMDBListEntry preserved: when external IDs resolve

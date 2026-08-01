@@ -271,6 +271,12 @@ func (s stubStore) UpsertLibraryPlaybackPreference(context.Context, userstore.Li
 func (s stubStore) DeleteLibraryPlaybackPreference(context.Context, string, int) error {
 	panic("unused")
 }
+func (s stubStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
+	panic("unused")
+}
+func (s stubStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
+	panic("unused")
+}
 
 func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 	resolver := NewResolver(

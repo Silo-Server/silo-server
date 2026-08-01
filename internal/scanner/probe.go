@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -15,6 +17,34 @@ import (
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+const (
+	maxFFprobeOutputBytes = 8 << 20
+	maxFFprobeStreams     = 256
+	maxFFprobeChapters    = 10000
+)
+
+var errFFprobeOutputTooLarge = fmt.Errorf("ffprobe output exceeds %d bytes", maxFFprobeOutputBytes)
+
+type boundedProbeBuffer struct {
+	buffer   bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func (b *boundedProbeBuffer) Write(p []byte) (int, error) {
+	if len(p) > b.limit-b.buffer.Len() {
+		b.overflow = true
+		remaining := b.limit - b.buffer.Len()
+		if remaining > 0 {
+			_, _ = b.buffer.Write(p[:remaining])
+		}
+		return len(p), errFFprobeOutputTooLarge
+	}
+	return b.buffer.Write(p)
+}
+
+func (b *boundedProbeBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 // ffprobeOutput represents the top-level JSON output from ffprobe.
 type ffprobeOutput struct {
@@ -129,14 +159,32 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 		filePath,
 	)
 
-	output, err := cmd.Output()
-	if err != nil {
+	output := &boundedProbeBuffer{limit: maxFFprobeOutputBytes}
+	cmd.Stdout = output
+	if err := cmd.Run(); err != nil {
+		// A producer may receive SIGPIPE after the bounded writer rejects its
+		// output, so the process error can mask the writer's sentinel.
+		if output.overflow || errors.Is(err, errFFprobeOutputTooLarge) {
+			return nil, errFFprobeOutputTooLarge
+		}
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
+	}
+	// os/exec may report a successful process exit after its stdout copy
+	// goroutine consumed the Writer error. Keep an explicit overflow bit so a
+	// provider-controlled response can never fall through to JSON parsing.
+	if output.overflow {
+		return nil, errFFprobeOutputTooLarge
 	}
 
 	var raw ffprobeOutput
-	if err := json.Unmarshal(output, &raw); err != nil {
+	if err := json.Unmarshal(output.Bytes(), &raw); err != nil {
 		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if len(raw.Streams) > maxFFprobeStreams {
+		return nil, fmt.Errorf("ffprobe returned %d streams (maximum %d)", len(raw.Streams), maxFFprobeStreams)
+	}
+	if len(raw.Chapters) > maxFFprobeChapters {
+		return nil, fmt.Errorf("ffprobe returned %d chapters (maximum %d)", len(raw.Chapters), maxFFprobeChapters)
 	}
 
 	probe := convertProbeData(&raw)

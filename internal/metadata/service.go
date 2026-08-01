@@ -4236,6 +4236,14 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		slog.WarnContext(ctx, "metadata: failed to ensure series episode links", "component", "metadata",
 			"series_id", seriesID, "error", err)
 	}
+	if materializer, ok := s.itemRepo.(interface {
+		MaterializeVirtualPlaybackEpisodes(context.Context, string) error
+	}); ok {
+		if err := materializer.MaterializeVirtualPlaybackEpisodes(ctx, seriesID); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to materialize released virtual episodes",
+				"component", "metadata", "series_id", seriesID, "error", err)
+		}
+	}
 	s.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now())
 }
 

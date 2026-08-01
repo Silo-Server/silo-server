@@ -8,7 +8,7 @@ SET virtual_owner_installation_id = COALESCE(mi.virtual_owner_installation_id, 0
 FROM public.media_items mi
 WHERE mi.content_id = mf.content_id
   AND mf.virtual_owner_installation_id IS NULL
-  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%');
+  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%');
 
 ALTER TABLE ONLY public.media_files
     DROP CONSTRAINT IF EXISTS media_files_file_path_key;

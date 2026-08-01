@@ -242,6 +242,10 @@ type VideoTrack struct {
 	// safety scan cannot establish that video stream-copy is safe. It is
 	// runtime-only so transient scan failures are retried on a later request.
 	VideoCopyUnsafe bool `json:"-"`
+	// DVRPUStrippable is the runtime verdict for removing Dolby Vision RPUs
+	// from this exact source. It is populated for resolved virtual streams,
+	// whose loopback relay cannot be os.Stat'ed by the local-file probe.
+	DVRPUStrippable *bool `json:"-"`
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.

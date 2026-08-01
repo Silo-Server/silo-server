@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
+	"github.com/Silo-Server/silo-server/internal/requestlock"
 )
 
 // Sentinel errors for item repository operations.
@@ -47,6 +49,9 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 		return 0, 0, errors.New("item repository is not configured")
 	}
 	collectionID = strings.TrimSpace(collectionID)
+	if collectionID == "" {
+		return 0, 0, errors.New("collection id is required")
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin collection virtual reconciliation: %w", err)
@@ -60,8 +65,16 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 		JOIN media_items mi ON mi.content_id = lci.media_item_id
 		JOIN library_collection_libraries lcl ON lcl.collection_id = lci.collection_id
 		JOIN media_folders mf ON mf.id = lcl.library_id AND mf.enabled IS NOT FALSE
-		WHERE ($1 = '' OR lci.collection_id = $1)
-		  AND mi.virtual_source = 'collection'
+		WHERE lci.collection_id = $1
+		  AND (
+		      mi.virtual_source='collection'
+		      OR left(mi.virtual_source,11)='collection:'
+		      OR EXISTS (
+		          SELECT 1 FROM virtual_media_source_claims claim
+		          WHERE claim.content_id=mi.content_id
+		            AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')
+		      )
+		  )
 		  AND ((mi.type = 'movie' AND mf.type IN ('movies','mixed'))
 		    OR (mi.type = 'series' AND mf.type IN ('series','mixed')))
 		ORDER BY lci.media_item_id,
@@ -69,27 +82,19 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 			mf.id`, collectionID); err != nil {
 		return 0, 0, fmt.Errorf("identify compatible collection libraries: %w", err)
 	}
-	// Older collection rows may no longer have a library_collection_items
-	// record (for example after a source refresh removed an entry). Keep those
-	// virtual items visible by assigning the enabled type-specific folder.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO reconcile_virtual_targets(content_id, media_folder_id)
-		SELECT mi.content_id, mf.id
-		FROM media_items mi
-		JOIN media_folders mf ON mf.enabled IS NOT FALSE
-		WHERE mi.virtual_source = 'collection'
-		  AND ((mi.type = 'movie' AND mf.type = 'movies')
-		    OR (mi.type = 'series' AND mf.type = 'series'))
-		  AND NOT EXISTS (
-			SELECT 1 FROM reconcile_virtual_targets t WHERE t.content_id = mi.content_id
-		  )`); err != nil {
-		return 0, 0, fmt.Errorf("assign fallback collection libraries: %w", err)
-	}
 	badLinks, err := tx.Exec(ctx, `
 		DELETE FROM media_item_libraries mil
 		USING media_items mi
 		WHERE mil.content_id = mi.content_id
-		  AND mi.virtual_source = 'collection'
+		  AND (
+		      mi.virtual_source='collection'
+		      OR left(mi.virtual_source,11)='collection:'
+		      OR EXISTS (
+		          SELECT 1 FROM virtual_media_source_claims claim
+		          WHERE claim.content_id=mi.content_id
+		            AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')
+		      )
+		  )
 		  AND mi.content_id IN (SELECT content_id FROM reconcile_virtual_targets)
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_folders mf
@@ -106,31 +111,73 @@ func (r *ItemRepository) ReconcileCollectionVirtualLibraryLinks(ctx context.Cont
 		ON CONFLICT DO NOTHING`); err != nil {
 		return 0, 0, fmt.Errorf("link compatible collection libraries: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE reconcile_virtual_file_targets ON COMMIT DROP AS
+		SELECT mf.id,t.media_folder_id,
+		       EXISTS (
+		           SELECT 1 FROM media_files target_file
+		           WHERE target_file.media_folder_id=t.media_folder_id
+		             AND target_file.file_path=mf.file_path
+		             AND target_file.virtual_owner_installation_id
+		                 IS NOT DISTINCT FROM mf.virtual_owner_installation_id
+		       ) AS target_exists,
+		       row_number() OVER (
+		           PARTITION BY t.media_folder_id,mf.file_path,mf.virtual_owner_installation_id
+		           ORDER BY mf.id
+		       ) AS target_rank
+		FROM media_files mf
+		JOIN reconcile_virtual_targets t ON t.content_id=mf.content_id
+		JOIN media_folders current_folder ON current_folder.id=mf.media_folder_id
+		JOIN media_items current_item ON current_item.content_id=mf.content_id
+		WHERE (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND mf.media_folder_id<>t.media_folder_id
+		  AND (
+		      current_folder.enabled IS FALSE
+		      OR (current_item.type='movie' AND current_folder.type NOT IN ('movies','mixed'))
+		      OR (current_item.type='series' AND current_folder.type NOT IN ('series','mixed'))
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims claim
+		      WHERE claim.content_id=mf.content_id
+		        AND claim.media_folder_id=mf.media_folder_id
+		        AND claim.file_path=mf.file_path
+		  )`); err != nil {
+		return 0, 0, fmt.Errorf("identify collection virtual files to move: %w", err)
+	}
+	duplicateFiles, err := tx.Exec(ctx, `
+		DELETE FROM media_files mf
+		USING reconcile_virtual_file_targets target
+		WHERE mf.id=target.id
+		  AND (target.target_exists OR target.target_rank>1)`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("remove duplicate collection virtual files: %w", err)
+	}
 	files, err := tx.Exec(ctx, `
 		UPDATE media_files mf
-		SET media_folder_id = t.media_folder_id, updated_at = NOW()
-		FROM reconcile_virtual_targets t
-		WHERE mf.content_id = t.content_id
-		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
-		  AND mf.media_folder_id <> t.media_folder_id`)
+		SET media_folder_id=target.media_folder_id,updated_at=NOW()
+		FROM reconcile_virtual_file_targets target
+		WHERE mf.id=target.id
+		  AND NOT target.target_exists
+		  AND target.target_rank=1`)
 	if err != nil {
 		return 0, 0, fmt.Errorf("move collection virtual files: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, fmt.Errorf("commit collection virtual reconciliation: %w", err)
 	}
-	return badLinks.RowsAffected(), files.RowsAffected(), nil
+	return badLinks.RowsAffected(), files.RowsAffected() + duplicateFiles.RowsAffected(), nil
 }
 
 // VirtualPlaybackVariant describes a provider-neutral profile variant. The
 // URI is resolved lazily by a virtual playback plugin when playback starts.
 type VirtualPlaybackVariant struct {
-	VirtualURI string
-	Label      string
-	Resolution string
-	CodecVideo string
-	CodecAudio string
-	HDR        string
+	VirtualURI          string
+	Label               string
+	Resolution          string
+	CodecVideo          string
+	CodecAudio          string
+	HDR                 string
+	OwnerInstallationID int
 }
 
 // PurgeVirtualPlaybackItems removes zero-storage virtual files and any
@@ -150,23 +197,122 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 		CREATE TEMP TABLE purge_virtual_items ON COMMIT DROP AS
 		SELECT DISTINCT mf.content_id FROM media_files mf
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
-		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%')
+		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
 		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))`, opts.LibraryID, opts.InstallationID); err != nil {
 		return 0, 0, fmt.Errorf("identify virtual media items: %w", err)
+	}
+	// Source claims are independent catalog ownership records, not foreign
+	// keys to media_files. Remove the exact claims for files selected by this
+	// purge first so retained local items do not keep ghost plugin ownership.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_file_source_claims claim
+		USING media_files mf, media_items mi
+		WHERE mf.content_id=mi.content_id
+		  AND claim.content_id=mf.content_id
+		  AND claim.media_folder_id=mf.media_folder_id
+		  AND claim.file_path=mf.file_path
+		  AND (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND mf.content_id IN (SELECT content_id FROM purge_virtual_items)
+		  AND ($1=0 OR mf.media_folder_id=$1)
+		  AND ($2=0 OR mf.virtual_owner_installation_id=$2
+		      OR (mf.virtual_owner_installation_id=0 AND mi.virtual_owner_installation_id=$2))
+		  AND ($2=0 OR claim.plugin_installation_id=$2)`,
+		opts.LibraryID, opts.InstallationID); err != nil {
+		return 0, 0, fmt.Errorf("delete virtual file source claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_source_claims claim
+		WHERE claim.content_id IN (SELECT content_id FROM purge_virtual_items)
+		  AND ($1=0 OR claim.media_folder_id=$1)
+		  AND ($2=0 OR claim.plugin_installation_id=$2)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims file_claim
+		      WHERE file_claim.plugin_installation_id=claim.plugin_installation_id
+		        AND file_claim.source_key=claim.source_key
+		        AND file_claim.content_id=claim.content_id
+		        AND file_claim.media_folder_id=claim.media_folder_id
+		  )`, opts.LibraryID, opts.InstallationID); err != nil {
+		return 0, 0, fmt.Errorf("delete empty virtual source claims: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
 		DELETE FROM media_files mf
 		USING media_items mi
 		WHERE mf.content_id = mi.content_id
-		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%')
+		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
 		  AND mf.content_id IN (SELECT content_id FROM purge_virtual_items)
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
-		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))`, opts.LibraryID, opts.InstallationID)
+		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))
+		  AND ($2=0 OR NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims remaining
+		      WHERE remaining.content_id=mf.content_id
+		        AND remaining.media_folder_id=mf.media_folder_id
+		        AND remaining.file_path=mf.file_path
+		  ))`, opts.LibraryID, opts.InstallationID)
 	if err != nil {
 		return 0, 0, fmt.Errorf("delete virtual files: %w", err)
 	}
 	filesDeleted = result.RowsAffected()
+
+	if _, err := tx.Exec(ctx, `
+		WITH chosen AS (
+			SELECT DISTINCT ON (claim.content_id)
+				claim.content_id,claim.plugin_installation_id,claim.source_key,
+				claim.media_folder_id
+			FROM virtual_media_source_claims claim
+			WHERE claim.content_id IN (SELECT content_id FROM purge_virtual_items)
+			  AND NOT EXISTS (
+			      SELECT 1 FROM media_files physical
+			      WHERE physical.content_id=claim.content_id
+			        AND physical.container<>'virtual'
+			        AND physical.file_path NOT LIKE 'virtual://%'
+			  )
+			ORDER BY claim.content_id,claim.owns_item_metadata DESC,
+			         claim.last_seen_at DESC,claim.plugin_installation_id,
+			         claim.source_key,claim.media_folder_id
+		)
+		UPDATE virtual_media_source_claims claim
+		SET owns_item_metadata=(
+			chosen.plugin_installation_id IS NOT NULL
+			AND claim.plugin_installation_id=chosen.plugin_installation_id
+			AND claim.source_key=chosen.source_key
+			AND claim.media_folder_id=chosen.media_folder_id
+		),updated_at=NOW()
+		FROM purge_virtual_items affected
+		LEFT JOIN chosen ON chosen.content_id=affected.content_id
+		WHERE claim.content_id=affected.content_id`); err != nil {
+		return 0, 0, fmt.Errorf("reconcile remaining virtual ownership: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items mi
+		SET virtual_owner_installation_id=claim.plugin_installation_id,
+		    virtual_source=claim.source_key,
+		    virtual_last_seen_at=claim.last_seen_at,
+		    updated_at=NOW()
+		FROM (
+		    SELECT DISTINCT ON (content_id)
+		        content_id,plugin_installation_id,source_key,last_seen_at
+		    FROM virtual_media_source_claims
+		    WHERE owns_item_metadata
+		    ORDER BY content_id,last_seen_at DESC,plugin_installation_id,source_key
+		) claim
+		WHERE mi.content_id=claim.content_id
+		  AND mi.content_id IN (SELECT content_id FROM purge_virtual_items)`); err != nil {
+		return 0, 0, fmt.Errorf("restore remaining virtual ownership: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items mi
+		SET virtual_owner_installation_id=NULL,
+		    virtual_source='',
+		    virtual_last_seen_at=NULL,
+		    updated_at=NOW()
+		WHERE mi.content_id IN (SELECT content_id FROM purge_virtual_items)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_source_claims claim
+		      WHERE claim.content_id=mi.content_id AND claim.owns_item_metadata
+		  )`); err != nil {
+		return 0, 0, fmt.Errorf("clear purged virtual ownership: %w", err)
+	}
 
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_items mi
@@ -199,51 +345,7 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 	return filesDeleted, itemsDeleted, nil
 }
 
-// ReconcileCollectionVirtualItems removes collection-owned virtual items that
-// are no longer referenced by any server collection. Physical files and
-// plugin-owned/request virtual items are left untouched.
-func (r *ItemRepository) ReconcileCollectionVirtualItems(ctx context.Context, libraryIDs []int) (int64, error) {
-	if r == nil || r.pool == nil {
-		return 0, errors.New("item repository is not configured")
-	}
-	if len(libraryIDs) == 0 {
-		return 0, nil
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin collection virtual reconciliation: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	rows, err := tx.Query(ctx, `
-		DELETE FROM media_items mi
-		WHERE mi.virtual_source = 'collection'
-		  AND EXISTS (
-			SELECT 1 FROM media_item_libraries mil
-			WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($1)
-		  )
-		  AND NOT EXISTS (SELECT 1 FROM library_collection_items lci WHERE lci.media_item_id = mi.content_id)
-		  AND NOT EXISTS (
-			SELECT 1 FROM media_files mf
-			WHERE mf.content_id = mi.content_id AND mf.container <> 'virtual' AND mf.file_path NOT LIKE 'virtual://%'
-		  )
-		RETURNING mi.content_id`, libraryIDs)
-	if err != nil {
-		return 0, fmt.Errorf("reconcile collection virtual items: %w", err)
-	}
-	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return 0, fmt.Errorf("collect reconciled virtual media IDs: %w", err)
-	}
-	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
-		return 0, fmt.Errorf("enqueue reconciled virtual media search deletes: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("commit collection virtual reconciliation: %w", err)
-	}
-	return int64(len(deletedIDs)), nil
-}
-
-// CleanupRequestVirtualMedia removes only virtual sources for a cancelled
+// CleanupRequestVirtualMedia removes only virtual sources for a canceled
 // request. Physical files and collection membership are never removed.
 func (r *ItemRepository) CleanupRequestVirtualMedia(ctx context.Context, mediaType string, tmdbID int, tvdbID, imdbID string) error {
 	if r == nil || r.pool == nil {
@@ -254,26 +356,156 @@ func (r *ItemRepository) CleanupRequestVirtualMedia(ctx context.Context, mediaTy
 		return fmt.Errorf("begin request virtual cleanup: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Match the request repository's per-title lock so a replacement request
+	// cannot race cancellation cleanup.
+	if lockKey, ok := requestlock.MediaKey(mediaType, tmdbID, tvdbID, imdbID); ok {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+			return fmt.Errorf("lock request virtual media: %w", err)
+		}
+	}
+	var activeReplacement bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_requests
+			WHERE media_type=$1
+			  AND outcome='active'
+			  AND status<>'completed'
+			  AND (($2>0 AND tmdb_id=$2)
+			    OR ($3<>'' AND tvdb_id::text=$3)
+			    OR ($4<>'' AND imdb_id=$4))
+		)`,
+		mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID),
+	).Scan(&activeReplacement); err != nil {
+		return fmt.Errorf("check replacement request before virtual cleanup: %w", err)
+	}
+	if activeReplacement {
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit skipped request virtual cleanup: %w", err)
+		}
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE request_virtual_items ON COMMIT DROP AS
+		SELECT mi.content_id
+		FROM media_items mi
+		WHERE mi.type=$1
+		  AND (($2>0 AND mi.tmdb_id=$2::text)
+		    OR ($3<>'' AND mi.tvdb_id=$3)
+		    OR ($4<>'' AND mi.imdb_id=$4))`,
+		mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID)); err != nil {
+		return fmt.Errorf("identify request virtual media: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE request_virtual_files ON COMMIT DROP AS
+		SELECT plugin_installation_id,source_key,content_id,media_folder_id,file_path
+		FROM virtual_media_file_source_claims
+		WHERE (source_key='request' OR left(source_key,8)='request:')
+		  AND content_id IN (SELECT content_id FROM request_virtual_items)`); err != nil {
+		return fmt.Errorf("identify request virtual file claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_file_source_claims claim
+		USING request_virtual_files target
+		WHERE claim.plugin_installation_id=target.plugin_installation_id
+		  AND claim.source_key=target.source_key
+		  AND claim.content_id=target.content_id
+		  AND claim.media_folder_id=target.media_folder_id
+		  AND claim.file_path=target.file_path`); err != nil {
+		return fmt.Errorf("delete request virtual file claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_files mf
+		USING request_virtual_files target
+		WHERE mf.content_id=target.content_id
+		  AND mf.media_folder_id=target.media_folder_id
+		  AND mf.file_path=target.file_path
+		  AND mf.virtual_owner_installation_id=target.plugin_installation_id
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims remaining
+		      WHERE remaining.plugin_installation_id=target.plugin_installation_id
+		        AND remaining.content_id=target.content_id
+		        AND remaining.media_folder_id=target.media_folder_id
+		        AND remaining.file_path=target.file_path
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM library_collection_items membership
+		      WHERE membership.media_item_id=target.content_id
+		  )`); err != nil {
+		return fmt.Errorf("delete unshared request virtual files: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_source_claims claim
+		WHERE (claim.source_key='request' OR left(claim.source_key,8)='request:')
+		  AND claim.content_id IN (SELECT content_id FROM request_virtual_items)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims file_claim
+		      WHERE file_claim.plugin_installation_id=claim.plugin_installation_id
+		        AND file_claim.source_key=claim.source_key
+		        AND file_claim.content_id=claim.content_id
+		        AND file_claim.media_folder_id=claim.media_folder_id
+		  )`); err != nil {
+		return fmt.Errorf("delete request virtual source claims: %w", err)
+	}
+	// New registrations are claim-scoped above. Retain a narrow scalar fallback
+	// for request rows created before source claims, while preserving anything
+	// still referenced by a collection.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM media_files mf
 		USING media_items mi
-		WHERE mf.content_id = mi.content_id
-		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
-		  AND mi.type = $1
-		  AND (($2 > 0 AND mi.tmdb_id = $2::text)
-		    OR ($3 <> '' AND mi.tvdb_id = $3)
-		    OR ($4 <> '' AND mi.imdb_id = $4))`, mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID)); err != nil {
-		return fmt.Errorf("delete request virtual files: %w", err)
+		WHERE mf.content_id=mi.content_id
+		  AND mi.content_id IN (SELECT content_id FROM request_virtual_items)
+		  AND mi.virtual_source='request'
+		  AND (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims claim
+		      WHERE claim.content_id=mf.content_id
+		        AND claim.media_folder_id=mf.media_folder_id
+		        AND claim.file_path=mf.file_path
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM library_collection_items lci
+		      WHERE lci.media_item_id=mi.content_id
+		  )`); err != nil {
+		return fmt.Errorf("delete legacy request virtual files: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items mi
+		SET virtual_owner_installation_id=claim.plugin_installation_id,
+		    virtual_source=claim.source_key,
+		    virtual_last_seen_at=claim.last_seen_at,
+		    updated_at=NOW()
+		FROM (
+		    SELECT DISTINCT ON (content_id)
+		        content_id,plugin_installation_id,source_key,last_seen_at
+		    FROM virtual_media_source_claims
+		    WHERE owns_item_metadata
+		    ORDER BY content_id,last_seen_at DESC,plugin_installation_id,source_key
+		) claim
+		WHERE mi.content_id=claim.content_id
+		  AND mi.content_id IN (SELECT content_id FROM request_virtual_items)`); err != nil {
+		return fmt.Errorf("restore request media ownership: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items mi
+		SET virtual_owner_installation_id=NULL,
+		    virtual_source='',
+		    virtual_last_seen_at=NULL,
+		    updated_at=NOW()
+		WHERE mi.content_id IN (SELECT content_id FROM request_virtual_items)
+		  AND mi.virtual_source='request'
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_source_claims claim
+		      WHERE claim.content_id=mi.content_id AND claim.owns_item_metadata
+		  )`); err != nil {
+		return fmt.Errorf("clear removed request media ownership: %w", err)
 	}
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_items mi
-		WHERE mi.type = $1
+		WHERE mi.content_id IN (SELECT content_id FROM request_virtual_items)
 		  AND NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = mi.content_id)
 		  AND NOT EXISTS (SELECT 1 FROM library_collection_items lci WHERE lci.media_item_id = mi.content_id)
-		  AND (($2 > 0 AND mi.tmdb_id = $2::text)
-		    OR ($3 <> '' AND mi.tvdb_id = $3)
-		    OR ($4 <> '' AND mi.imdb_id = $4))
-		RETURNING mi.content_id`, mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID))
+		  AND NOT EXISTS (SELECT 1 FROM virtual_media_source_claims claim WHERE claim.content_id=mi.content_id)
+		RETURNING mi.content_id`)
 	if err != nil {
 		return fmt.Errorf("delete request virtual media items: %w", err)
 	}
@@ -872,21 +1104,83 @@ func nonNilStringSlice(values []string) []string {
 	return values
 }
 
-// MaterializeVirtualPlaybackItem atomically creates a catalog item, links it to
-// the selected libraries, and adds a zero-storage playback source. Existing
-// local files always suppress creation of the virtual source.
-func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, item *models.MediaItem, libraryIDs []int) error {
-	return r.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, nil)
+// virtualPlaybackItemURI returns the stable provider-neutral handle used for
+// collection-created virtual files. IMDb remains the preferred streaming
+// identity, while TVDB (series only) and TMDB keep otherwise valid catalog
+// entries materializable until metadata enrichment supplies an IMDb ID.
+func virtualPlaybackItemURI(item *models.MediaItem) (string, error) {
+	if item == nil {
+		return "", errors.New("virtual playback item is required")
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(item.Type))
+	if mediaType == "" {
+		mediaType = "movie"
+	}
+	if mediaType != "movie" && mediaType != "series" {
+		return "", fmt.Errorf("virtual playback item has unsupported media type %q", mediaType)
+	}
+	if imdbID := strings.ToLower(strings.TrimSpace(item.ImdbID)); imdbIDPattern.MatchString(imdbID) {
+		return "virtual://" + mediaType + "/" + imdbID, nil
+	}
+	if mediaType == "series" {
+		if tvdbID := strings.TrimSpace(item.TvdbID); numericProviderIDPattern.MatchString(tvdbID) {
+			return "virtual://series/tvdb/" + tvdbID, nil
+		}
+	}
+	if tmdbID := strings.TrimSpace(item.TmdbID); numericProviderIDPattern.MatchString(tmdbID) {
+		return "virtual://" + mediaType + "/tmdb/" + tmdbID, nil
+	}
+	return "", errors.New("virtual playback item requires a valid IMDb, TVDB, or TMDB ID")
+}
+
+func virtualPlaybackContentID(item *models.MediaItem) (string, error) {
+	if item == nil {
+		return "", errors.New("virtual playback item is required")
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(item.Type))
+	if mediaType != "movie" && mediaType != "series" {
+		return "", fmt.Errorf("virtual playback item has unsupported media type %q", mediaType)
+	}
+	imdbID := strings.ToLower(strings.TrimSpace(item.ImdbID))
+	if imdbID != "" && !imdbIDPattern.MatchString(imdbID) {
+		imdbID = ""
+	}
+	tmdbID := strings.TrimSpace(item.TmdbID)
+	if tmdbID != "" && !numericProviderIDPattern.MatchString(tmdbID) {
+		tmdbID = ""
+	}
+	tvdbID := strings.TrimSpace(item.TvdbID)
+	if tvdbID != "" && !numericProviderIDPattern.MatchString(tvdbID) {
+		tvdbID = ""
+	}
+	in := VirtualMedia{
+		MediaType: mediaType,
+		IMDbID:    imdbID,
+		TMDBID:    tmdbID,
+		TVDBID:    tvdbID,
+	}
+	if mediaType == "movie" {
+		in.TVDBID = ""
+	}
+	contentID := virtualContentID(in)
+	if strings.HasSuffix(contentID, "-imdb-") {
+		return "", errors.New("virtual playback item requires a valid canonical external ID")
+	}
+	return contentID, nil
 }
 
 // MaterializeVirtualPlaybackItemWithVariants creates the base virtual source
 // and any configured profile variants without contacting a streaming provider.
-func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.Context, item *models.MediaItem, libraryIDs []int, variants []VirtualPlaybackVariant) error {
-	if item == nil || item.ContentID == "" || strings.TrimSpace(item.ImdbID) == "" {
-		return fmt.Errorf("virtual playback item requires content and IMDb IDs")
+func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.Context, item *models.MediaItem, libraryIDs []int, variants []VirtualPlaybackVariant) (bool, error) {
+	if item == nil || strings.TrimSpace(item.ContentID) == "" {
+		return false, errors.New("virtual playback item requires a content ID")
+	}
+	virtualPath, err := virtualPlaybackItemURI(item)
+	if err != nil {
+		return false, err
 	}
 	if len(libraryIDs) == 0 {
-		return fmt.Errorf("virtual playback item requires at least one library")
+		return false, fmt.Errorf("virtual playback item requires at least one library")
 	}
 	mediaType := strings.TrimSpace(item.Type)
 	if mediaType == "" {
@@ -894,9 +1188,12 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin virtual item transaction: %w", err)
+		return false, fmt.Errorf("begin virtual item transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, item.ContentID); err != nil {
+		return false, fmt.Errorf("lock canonical virtual item: %w", err)
+	}
 	// Mixed collections can target both libraries. A virtual file still has a
 	// single owning folder, so select it from the item's type instead of using
 	// the first collection target.
@@ -912,47 +1209,191 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 		         array_position($1::int[], id)
 		LIMIT 1`, libraryIDs, wantedFolderType).Scan(&folderID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("virtual playback item has no compatible %s library among selected targets", mediaType)
+			return false, fmt.Errorf("virtual playback item has no compatible %s library among selected targets", mediaType)
 		}
-		return fmt.Errorf("selecting virtual playback library: %w", err)
+		return false, fmt.Errorf("selecting virtual playback library: %w", err)
 	}
-	if err := r.UpsertTx(ctx, tx, item); err != nil {
-		return err
+	created := false
+	var existingType string
+	err = tx.QueryRow(ctx, `
+		SELECT type FROM media_items WHERE content_id=$1 FOR UPDATE`,
+		item.ContentID,
+	).Scan(&existingType)
+	switch {
+	case err == nil:
+		if existingType != mediaType {
+			return false, fmt.Errorf("canonical virtual content ID belongs to media type %q", existingType)
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		if err := r.UpsertTx(ctx, tx, item); err != nil {
+			return false, err
+		}
+		created = true
+	default:
+		return false, fmt.Errorf("checking canonical virtual item: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 		VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`, item.ContentID, folderID); err != nil {
-		return fmt.Errorf("linking virtual item to library: %w", err)
+		return false, fmt.Errorf("linking virtual item to library: %w", err)
 	}
-	virtualPath := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, container)
-		SELECT $1, $2, $3, 0, 'virtual'
-		WHERE NOT EXISTS (
-			SELECT 1 FROM media_files
-			WHERE content_id = $1 AND left(file_path, 10) <> $4
-		)
-		ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`, item.ContentID, folderID, virtualPath, "virtual://"); err != nil {
-		return fmt.Errorf("creating virtual playback file: %w", err)
+	ownerInstallationID := 0
+	ownerIDs := make([]int64, 0, len(variants))
+	seenOwners := make(map[int]struct{}, len(variants))
+	for _, variant := range variants {
+		if variant.OwnerInstallationID > 0 {
+			if ownerInstallationID == 0 {
+				ownerInstallationID = variant.OwnerInstallationID
+			}
+			if _, exists := seenOwners[variant.OwnerInstallationID]; !exists {
+				seenOwners[variant.OwnerInstallationID] = struct{}{}
+				ownerIDs = append(ownerIDs, int64(variant.OwnerInstallationID))
+			}
+		}
+	}
+	if ownerInstallationID <= 0 {
+		return false, errors.New("virtual playback item requires an owning provider installation")
+	}
+	desiredPaths := make([]string, 0, len(variants)+len(ownerIDs))
+	desiredOwners := make([]int64, 0, len(variants)+len(ownerIDs))
+	for _, ownerID := range ownerIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_files (
+				content_id, media_folder_id, file_path, file_size, container,
+				probe_source, virtual_owner_installation_id
+			)
+			VALUES ($1, $2, $3, 0, 'virtual', 'virtual_collection', $4)
+			ON CONFLICT (file_path, virtual_owner_installation_id, media_folder_id)
+				WHERE virtual_owner_installation_id IS NOT NULL
+			DO UPDATE SET
+				content_id=EXCLUDED.content_id,
+				probe_source='virtual_collection',
+				missing_since=NULL,
+				updated_at=NOW()`,
+			item.ContentID, folderID, virtualPath, ownerID); err != nil {
+			return false, fmt.Errorf("creating virtual playback file: %w", err)
+		}
+		desiredPaths = append(desiredPaths, virtualPath)
+		desiredOwners = append(desiredOwners, ownerID)
 	}
 	for _, variant := range variants {
 		path := strings.TrimSpace(variant.VirtualURI)
 		if path == "" || path == virtualPath || !strings.HasPrefix(path, "virtual://") {
 			continue
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, resolution, codec_video, codec_audio, hdr, container)
-			SELECT $1, $2, $3, 0, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), CASE WHEN NULLIF($7,'') IS NULL THEN false ELSE true END, 'virtual'
-			WHERE NOT EXISTS (SELECT 1 FROM media_files WHERE content_id = $1 AND left(file_path, 10) <> 'virtual://')
-			ON CONFLICT (file_path) WHERE virtual_owner_installation_id IS NULL DO NOTHING`, item.ContentID, folderID, path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
-			return fmt.Errorf("creating virtual playback variant: %w", err)
+		variantOwnerID := variant.OwnerInstallationID
+		if variantOwnerID <= 0 {
+			variantOwnerID = ownerInstallationID
 		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_files (
+				content_id, media_folder_id, file_path, file_size, resolution,
+				codec_video, codec_audio, hdr, container, probe_source,
+				virtual_owner_installation_id
+			) VALUES (
+				$1, $2, $3, 0, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''),
+				CASE WHEN NULLIF($7,'') IS NULL THEN false ELSE true END,
+				'virtual', 'virtual_collection', $8
+			)
+			ON CONFLICT (file_path, virtual_owner_installation_id, media_folder_id)
+				WHERE virtual_owner_installation_id IS NOT NULL
+			DO UPDATE SET
+				content_id=EXCLUDED.content_id,
+				media_folder_id=EXCLUDED.media_folder_id,
+				resolution=EXCLUDED.resolution,
+				codec_video=EXCLUDED.codec_video,
+				codec_audio=EXCLUDED.codec_audio,
+				hdr=EXCLUDED.hdr,
+				probe_source='virtual_collection',
+				missing_since=NULL,
+				updated_at=NOW()`,
+			item.ContentID, folderID, path, variant.Resolution, variant.CodecVideo,
+			variant.CodecAudio, variant.HDR, variantOwnerID); err != nil {
+			return false, fmt.Errorf("creating virtual playback variant: %w", err)
+		}
+		desiredPaths = append(desiredPaths, path)
+		desiredOwners = append(desiredOwners, int64(variantOwnerID))
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH desired(owner_id,file_path) AS (
+			SELECT * FROM unnest($3::bigint[],$4::text[])
+		), stale AS (
+			SELECT mf.content_id,mf.media_folder_id,mf.file_path,mf.virtual_owner_installation_id
+			FROM media_files mf
+			WHERE mf.content_id=$1
+			  AND mf.media_folder_id=$2
+			  AND mf.container='virtual'
+			  AND mf.probe_source='virtual_collection'
+			  AND mf.virtual_owner_installation_id IS NOT NULL
+			  AND NOT EXISTS (
+			      SELECT 1 FROM desired
+			      WHERE desired.owner_id=mf.virtual_owner_installation_id
+			        AND desired.file_path=mf.file_path
+			  )
+		)
+		DELETE FROM virtual_media_file_source_claims claim
+		USING stale
+		WHERE claim.content_id=stale.content_id
+		  AND claim.media_folder_id=stale.media_folder_id
+		  AND claim.file_path=stale.file_path
+		  AND claim.plugin_installation_id=stale.virtual_owner_installation_id
+		  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')`,
+		item.ContentID, folderID, desiredOwners, desiredPaths); err != nil {
+		return false, fmt.Errorf("releasing stale collection virtual file claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH desired(owner_id,file_path) AS (
+			SELECT * FROM unnest($3::bigint[],$4::text[])
+		)
+		DELETE FROM media_files mf
+		WHERE mf.content_id=$1
+		  AND mf.media_folder_id=$2
+		  AND mf.container='virtual'
+		  AND mf.probe_source='virtual_collection'
+		  AND mf.virtual_owner_installation_id IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM desired
+		      WHERE desired.owner_id=mf.virtual_owner_installation_id
+		        AND desired.file_path=mf.file_path
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims claim
+		      WHERE claim.content_id=mf.content_id
+		        AND claim.media_folder_id=mf.media_folder_id
+		        AND claim.file_path=mf.file_path
+		        AND claim.plugin_installation_id=mf.virtual_owner_installation_id
+		  )`, item.ContentID, folderID, desiredOwners, desiredPaths); err != nil {
+		return false, fmt.Errorf("removing stale collection virtual files: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_source_claims claim
+		WHERE claim.content_id=$1
+		  AND claim.media_folder_id=$2
+		  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims file_claim
+		      WHERE file_claim.plugin_installation_id=claim.plugin_installation_id
+		        AND file_claim.source_key=claim.source_key
+		        AND file_claim.content_id=claim.content_id
+		        AND file_claim.media_folder_id=claim.media_folder_id
+		  )`, item.ContentID, folderID); err != nil {
+		return false, fmt.Errorf("removing empty collection virtual source claims: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_items
 		SET virtual_source = 'collection', virtual_last_seen_at = NOW(), updated_at = NOW()
-		WHERE content_id = $1`, item.ContentID); err != nil {
-		return fmt.Errorf("marking collection virtual item ownership: %w", err)
+		WHERE content_id = $1
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_files mf
+		      WHERE mf.content_id=media_items.content_id
+		        AND mf.container<>'virtual'
+		        AND mf.file_path NOT LIKE 'virtual://%'
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_source_claims claim
+		      WHERE claim.content_id=media_items.content_id
+		  )`, item.ContentID); err != nil {
+		return false, fmt.Errorf("marking collection virtual item ownership: %w", err)
 	}
 	// Virtual items are database-only and therefore never pass through the
 	// scanner's normal metadata-refresh enqueue path.  Queue core metadata
@@ -967,10 +1408,402 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 			reason_mask = metadata_refresh_debt.reason_mask | EXCLUDED.reason_mask,
 			next_refresh_at = LEAST(metadata_refresh_debt.next_refresh_at, EXCLUDED.next_refresh_at),
 			updated_at = NOW()`, item.ContentID); err != nil {
-		return fmt.Errorf("queueing virtual item metadata refresh: %w", err)
+		return false, fmt.Errorf("queueing virtual item metadata refresh: %w", err)
+	}
+	if mediaType == "series" {
+		if err := materializeVirtualPlaybackEpisodesTx(ctx, tx, item.ContentID); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit virtual item transaction: %w", err)
+		return false, fmt.Errorf("commit virtual item transaction: %w", err)
+	}
+	return created, nil
+}
+
+func (r *ItemRepository) CleanupUnreferencedCollectionVirtualItems(ctx context.Context, candidateIDs []string) (int64, error) {
+	if r == nil || r.pool == nil || len(candidateIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin failed collection cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE failed_collection_virtual_folders ON COMMIT DROP AS
+		WITH removed AS (
+			DELETE FROM media_files mf
+			WHERE mf.content_id=ANY($1::text[])
+			  AND mf.container='virtual'
+			  AND mf.probe_source='virtual_collection'
+			  AND NOT EXISTS (
+			      SELECT 1 FROM virtual_media_file_source_claims claim
+			      WHERE claim.plugin_installation_id=mf.virtual_owner_installation_id
+			        AND claim.content_id=mf.content_id
+			        AND claim.media_folder_id=mf.media_folder_id
+			        AND claim.file_path=mf.file_path
+			  )
+			RETURNING content_id,media_folder_id
+		)
+		SELECT DISTINCT content_id,media_folder_id FROM removed`, candidateIDs); err != nil {
+		return 0, fmt.Errorf("remove failed collection virtual files: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_libraries membership
+		USING failed_collection_virtual_folders removed
+		WHERE membership.content_id=removed.content_id
+		  AND membership.media_folder_id=removed.media_folder_id
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_files remaining
+		      WHERE remaining.content_id=membership.content_id
+		        AND remaining.media_folder_id=membership.media_folder_id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM library_collection_items collection_item
+		      JOIN library_collection_libraries collection_library
+		        ON collection_library.collection_id=collection_item.collection_id
+		      WHERE collection_item.media_item_id=membership.content_id
+		        AND collection_library.library_id=membership.media_folder_id
+		  )`); err != nil {
+		return 0, fmt.Errorf("remove failed collection library links: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.content_id=ANY($1::text[])
+		  AND (mi.virtual_source='collection' OR left(mi.virtual_source,11)='collection:')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM library_collection_items lci
+		      WHERE lci.media_item_id=mi.content_id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_files mf
+		      WHERE mf.content_id=mi.content_id
+		        AND mf.container<>'virtual'
+		        AND mf.file_path NOT LIKE 'virtual://%'
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_source_claims claim
+		      WHERE claim.content_id=mi.content_id
+		  )
+		RETURNING mi.content_id`, candidateIDs)
+	if err != nil {
+		return 0, fmt.Errorf("delete failed collection virtual items: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return 0, fmt.Errorf("collect failed collection virtual items: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return 0, fmt.Errorf("enqueue failed collection search deletes: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit failed collection cleanup: %w", err)
+	}
+	return int64(len(deletedIDs)), nil
+}
+
+// MaterializeVirtualPlaybackEpisodes attaches released episode rows to every
+// configured provider/profile placeholder for a collection-created series.
+// It performs no provider lookup; stream URLs remain strictly just-in-time.
+func (r *ItemRepository) MaterializeVirtualPlaybackEpisodes(ctx context.Context, seriesID string) error {
+	if r == nil || r.pool == nil {
+		return errors.New("item repository is not configured")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin virtual episode materialization: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := materializeVirtualPlaybackEpisodesTx(ctx, tx, seriesID); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit virtual episode materialization: %w", err)
+	}
+	return nil
+}
+
+// ReconcileReleasedCollectionVirtualEpisodes materializes newly released
+// episode placeholders for a bounded set of collection-created series. It
+// only reads catalog metadata and writes provider-neutral virtual handles; it
+// never resolves or prewarms a provider URL.
+func (r *ItemRepository) ReconcileReleasedCollectionVirtualEpisodes(ctx context.Context, limit int) (int, error) {
+	if r == nil || r.pool == nil {
+		return 0, errors.New("item repository is not configured")
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	rows, err := r.pool.Query(ctx, `
+		WITH bases AS (
+			SELECT content_id,count(*) AS base_count
+			FROM media_files
+			WHERE episode_id IS NULL
+			  AND container='virtual'
+			  AND probe_source='virtual_collection'
+			  AND file_path LIKE 'virtual://series/%'
+			  AND virtual_owner_installation_id IS NOT NULL
+			GROUP BY content_id
+		), episode_file_counts AS (
+			SELECT mf.content_id,mf.episode_id,count(*) AS file_count
+			FROM media_files mf
+			JOIN bases ON bases.content_id=mf.content_id
+			WHERE mf.episode_id IS NOT NULL
+			  AND mf.container='virtual'
+			  AND mf.probe_source='virtual_collection'
+			GROUP BY mf.content_id,mf.episode_id
+		), needs_reconciliation AS (
+			SELECT bases.content_id
+			FROM bases
+			JOIN episodes ep ON ep.series_id=bases.content_id
+			LEFT JOIN episode_file_counts files
+			  ON files.content_id=bases.content_id AND files.episode_id=ep.content_id
+			WHERE ep.season_number>0
+			  AND ep.episode_number>0
+			  AND ep.air_date IS NOT NULL
+			  AND ep.air_date<=CURRENT_DATE
+			  AND COALESCE(files.file_count,0)<bases.base_count
+			UNION
+			SELECT bases.content_id
+			FROM bases
+			JOIN episodes ep ON ep.series_id=bases.content_id
+			JOIN episode_file_counts files
+			  ON files.content_id=bases.content_id AND files.episode_id=ep.content_id
+			WHERE ep.air_date IS NULL OR ep.air_date>CURRENT_DATE
+		)
+		SELECT content_id
+		FROM needs_reconciliation
+		ORDER BY content_id
+		LIMIT $1`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("list collection series needing episode reconciliation: %w", err)
+	}
+	seriesIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return 0, fmt.Errorf("collect collection series needing episode reconciliation: %w", err)
+	}
+	reconciled := 0
+	var reconcileErr error
+	for _, seriesID := range seriesIDs {
+		if err := r.MaterializeVirtualPlaybackEpisodes(ctx, seriesID); err != nil {
+			reconcileErr = errors.Join(reconcileErr, fmt.Errorf("%s: %w", seriesID, err))
+			continue
+		}
+		reconciled++
+	}
+	return reconciled, reconcileErr
+}
+
+type collectionVirtualSeriesBase struct {
+	folderID   int
+	ownerID    int
+	filePath   string
+	resolution string
+	codecVideo string
+	codecAudio string
+	hdr        bool
+	editionRaw string
+}
+
+func materializeVirtualPlaybackEpisodesTx(ctx context.Context, tx pgx.Tx, seriesID string) error {
+	rows, err := tx.Query(ctx, `
+		SELECT media_folder_id, virtual_owner_installation_id, file_path,
+		       COALESCE(resolution,''), COALESCE(codec_video,''),
+		       COALESCE(codec_audio,''), COALESCE(hdr,false), COALESCE(edition_raw,'')
+		FROM media_files
+		WHERE content_id=$1
+		  AND episode_id IS NULL
+		  AND container='virtual'
+		  AND probe_source='virtual_collection'
+		  AND file_path LIKE 'virtual://series/%'
+		  AND virtual_owner_installation_id IS NOT NULL
+		ORDER BY id`, seriesID)
+	if err != nil {
+		return fmt.Errorf("list virtual series profiles: %w", err)
+	}
+	var bases []collectionVirtualSeriesBase
+	for rows.Next() {
+		var base collectionVirtualSeriesBase
+		if err := rows.Scan(
+			&base.folderID, &base.ownerID, &base.filePath, &base.resolution,
+			&base.codecVideo, &base.codecAudio, &base.hdr, &base.editionRaw,
+		); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan virtual series profile: %w", err)
+		}
+		parsed, parseErr := url.Parse(base.filePath)
+		if parseErr != nil || parsed.Scheme != "virtual" || parsed.Host != "series" ||
+			strings.TrimSpace(parsed.Query().Get("result")) != "" {
+			continue
+		}
+		bases = append(bases, base)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate virtual series profiles: %w", err)
+	}
+	rows.Close()
+	if len(bases) == 0 {
+		return nil
+	}
+
+	episodeRows, err := tx.Query(ctx, `
+		SELECT content_id, season_number, episode_number
+		FROM episodes
+		WHERE series_id=$1
+		  AND season_number > 0
+		  AND episode_number > 0
+		  AND air_date IS NOT NULL
+		  AND air_date <= CURRENT_DATE
+		ORDER BY season_number, episode_number`, seriesID)
+	if err != nil {
+		return fmt.Errorf("list released virtual episodes: %w", err)
+	}
+	type episodeCoordinate struct {
+		id      string
+		season  int
+		episode int
+	}
+	var episodes []episodeCoordinate
+	for episodeRows.Next() {
+		var episode episodeCoordinate
+		if err := episodeRows.Scan(&episode.id, &episode.season, &episode.episode); err != nil {
+			episodeRows.Close()
+			return fmt.Errorf("scan released virtual episode: %w", err)
+		}
+		episodes = append(episodes, episode)
+	}
+	if err := episodeRows.Err(); err != nil {
+		episodeRows.Close()
+		return fmt.Errorf("iterate released virtual episodes: %w", err)
+	}
+	episodeRows.Close()
+
+	expectedPaths := make([]string, 0, len(bases)*len(episodes))
+	expectedOwners := make([]int64, 0, len(bases)*len(episodes))
+	for _, base := range bases {
+		parsed, _ := url.Parse(base.filePath)
+		identifier := strings.TrimPrefix(parsed.EscapedPath(), "/")
+		for _, episode := range episodes {
+			episodeURI := &url.URL{
+				Scheme:   "virtual",
+				Host:     "series",
+				Path:     fmt.Sprintf("/%s/%d/%d", identifier, episode.season, episode.episode),
+				RawQuery: parsed.RawQuery,
+			}
+			path := episodeURI.String()
+			expectedPaths = append(expectedPaths, path)
+			expectedOwners = append(expectedOwners, int64(base.ownerID))
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO media_files(
+					content_id,episode_id,media_folder_id,file_path,file_size,
+					resolution,codec_video,codec_audio,hdr,container,edition_raw,
+					season_number,episode_number,probe_source,
+					virtual_owner_installation_id
+				) VALUES(
+					$1,$2,$3,$4,0,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),
+					$8,'virtual',$9,$10,$11,'virtual_collection',$12
+				)
+				ON CONFLICT(file_path,virtual_owner_installation_id,media_folder_id)
+					WHERE virtual_owner_installation_id IS NOT NULL
+				DO UPDATE SET
+					content_id=EXCLUDED.content_id,
+					episode_id=EXCLUDED.episode_id,
+					media_folder_id=EXCLUDED.media_folder_id,
+					resolution=EXCLUDED.resolution,
+					codec_video=EXCLUDED.codec_video,
+					codec_audio=EXCLUDED.codec_audio,
+					hdr=EXCLUDED.hdr,
+					edition_raw=EXCLUDED.edition_raw,
+					season_number=EXCLUDED.season_number,
+					episode_number=EXCLUDED.episode_number,
+					probe_source='virtual_collection',
+					missing_since=NULL,
+					updated_at=NOW()`,
+				seriesID, episode.id, base.folderID, path, base.resolution,
+				base.codecVideo, base.codecAudio, base.hdr, base.editionRaw,
+				episode.season, episode.episode, base.ownerID,
+			); err != nil {
+				return fmt.Errorf("upsert released virtual episode: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO virtual_media_file_source_claims(
+					plugin_installation_id,source_key,content_id,media_folder_id,
+					file_path,last_seen_at,updated_at
+				)
+				SELECT claim.plugin_installation_id,claim.source_key,$1,$2,$3,NOW(),NOW()
+				FROM virtual_media_file_source_claims claim
+				WHERE claim.plugin_installation_id=$4
+				  AND claim.content_id=$1
+				  AND claim.media_folder_id=$2
+				  AND claim.file_path=$5
+				  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')
+				ON CONFLICT(plugin_installation_id,source_key,content_id,media_folder_id,file_path)
+				DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,updated_at=NOW()`,
+				seriesID, base.folderID, path, base.ownerID, base.filePath,
+			); err != nil {
+				return fmt.Errorf("claim released virtual episode: %w", err)
+			}
+		}
+	}
+	if expectedPaths == nil {
+		expectedPaths = []string{}
+	}
+	if expectedOwners == nil {
+		expectedOwners = []int64{}
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH expected(owner_id,file_path) AS (
+			SELECT * FROM unnest($2::bigint[],$3::text[])
+		), stale AS (
+			SELECT mf.content_id,mf.media_folder_id,mf.file_path,mf.virtual_owner_installation_id
+			FROM media_files mf
+			JOIN episodes ep ON ep.content_id=mf.episode_id
+			WHERE ep.series_id=$1
+			  AND mf.container='virtual'
+			  AND mf.probe_source='virtual_collection'
+			  AND mf.virtual_owner_installation_id IS NOT NULL
+			  AND NOT EXISTS (
+			      SELECT 1 FROM expected
+			      WHERE expected.owner_id=mf.virtual_owner_installation_id
+			        AND expected.file_path=mf.file_path
+			  )
+		)
+		DELETE FROM virtual_media_file_source_claims claim
+		USING stale
+		WHERE claim.plugin_installation_id=stale.virtual_owner_installation_id
+		  AND claim.content_id=stale.content_id
+		  AND claim.media_folder_id=stale.media_folder_id
+		  AND claim.file_path=stale.file_path
+		  AND (claim.source_key='collection' OR left(claim.source_key,11)='collection:')`, seriesID, expectedOwners, expectedPaths); err != nil {
+		return fmt.Errorf("remove stale virtual episode claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH expected(owner_id,file_path) AS (
+			SELECT * FROM unnest($2::bigint[],$3::text[])
+		)
+		DELETE FROM media_files mf
+		USING episodes ep
+		WHERE mf.episode_id=ep.content_id
+		  AND ep.series_id=$1
+		  AND mf.container='virtual'
+		  AND mf.probe_source='virtual_collection'
+		  AND mf.virtual_owner_installation_id IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM expected
+		      WHERE expected.owner_id=mf.virtual_owner_installation_id
+		        AND expected.file_path=mf.file_path
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims claim
+		      WHERE claim.plugin_installation_id=mf.virtual_owner_installation_id
+		        AND claim.content_id=mf.content_id
+		        AND claim.media_folder_id=mf.media_folder_id
+		        AND claim.file_path=mf.file_path
+		  )`, seriesID, expectedOwners, expectedPaths); err != nil {
+		return fmt.Errorf("remove stale virtual episodes: %w", err)
 	}
 	return nil
 }

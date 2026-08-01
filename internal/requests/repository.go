@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/requestlock"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -226,6 +227,22 @@ func (r *Repository) CreateRequest(ctx context.Context, input CreateRequestRecor
 		return nil, fmt.Errorf("begin create request transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	// Serialize creation with cancellation cleanup for this title. Without a
+	// shared lock, a replacement request can be inserted after the canceled
+	// request commits but before its virtual-media cleanup runs, causing cleanup
+	// to remove the replacement request's provider-neutral claim.
+	requestTVDBID := ""
+	if input.Input.TVDBID != nil && *input.Input.TVDBID > 0 {
+		requestTVDBID = strconv.Itoa(*input.Input.TVDBID)
+	}
+	if lockKey, ok := requestlock.MediaKey(
+		string(input.Input.MediaType), input.Input.TMDBID, requestTVDBID, input.Input.IMDbID,
+	); ok {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+			return nil, fmt.Errorf("acquire request media lock: %w", err)
+		}
+	}
 
 	if input.Quota != nil {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1::int4, $2::int4)`,

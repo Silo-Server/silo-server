@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -1007,6 +1008,204 @@ func virtualOwnerInstallationValue(mf models.MediaFile) any {
 		return mf.VirtualOwnerInstallationID
 	}
 	return nil
+}
+
+// VirtualCandidate is provider-neutral technical metadata for one ephemeral
+// stream choice. URI must remain a canonical virtual:// handle; provider URLs
+// are resolved only when playback opens the selected file.
+type VirtualCandidate struct {
+	OwnerInstallationID int
+	URI                 string
+	Label               string
+	Resolution          string
+	CodecVideo          string
+	CodecAudio          string
+	HDR                 string
+	FileSize            int64
+	Bitrate             int
+	AudioLanguages      []string
+	SubtitleLanguages   []string
+}
+
+// ReplaceVirtualCandidates atomically replaces the just-in-time candidates
+// for one canonical source, episode, profile, and plugin owner. Provider result
+// IDs can change between requests; replacement prevents stale rows from
+// accumulating forever while retaining other profiles and installations.
+func (r *FileRepository) ReplaceVirtualCandidates(ctx context.Context, source *models.MediaFile, candidates []VirtualCandidate) error {
+	if r == nil || r.pool == nil {
+		return errors.New("file repository is not configured")
+	}
+	if source == nil || source.ContentID == "" || source.VirtualOwnerInstallationID <= 0 {
+		return errors.New("virtual candidate source and installation owner are required")
+	}
+	if len(candidates) > 50 {
+		candidates = candidates[:50]
+	}
+	group, ok := virtualCandidateGroup(source.FilePath)
+	if !ok {
+		return errors.New("virtual candidate source URI is invalid")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin virtual candidate replacement: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	keep := make(map[int]struct{}, len(candidates))
+	owners := map[int]struct{}{source.VirtualOwnerInstallationID: {}}
+	for _, candidate := range candidates {
+		ownerInstallationID := candidate.OwnerInstallationID
+		if ownerInstallationID <= 0 {
+			ownerInstallationID = source.VirtualOwnerInstallationID
+		}
+		owners[ownerInstallationID] = struct{}{}
+		candidateGroup, candidateOK := virtualCandidateGroup(candidate.URI)
+		if !candidateOK || candidateGroup != group || !virtualCandidateSelection(candidate.URI) {
+			return fmt.Errorf("virtual candidate URI is outside its source group")
+		}
+		fileSize := candidate.FileSize
+		if fileSize < 0 {
+			fileSize = 0
+		}
+		audioTracks, err := json.Marshal(languageAudioTracks(candidate.AudioLanguages))
+		if err != nil {
+			return fmt.Errorf("marshal virtual candidate audio tracks: %w", err)
+		}
+		subtitleTracks, err := json.Marshal(languageSubtitleTracks(candidate.SubtitleLanguages))
+		if err != nil {
+			return fmt.Errorf("marshal virtual candidate subtitle tracks: %w", err)
+		}
+		var id int
+		err = tx.QueryRow(ctx, `
+			INSERT INTO media_files (
+				content_id, episode_id, media_folder_id, file_path, file_size,
+				resolution, codec_video, codec_audio, hdr, container, bitrate,
+				edition_raw, audio_tracks, subtitle_tracks, probe_source,
+				probe_updated_at, virtual_owner_installation_id
+			) VALUES (
+				$1, NULLIF($2,''), $3, $4, $5,
+				NULLIF($6,''), NULLIF($7,''), NULLIF($8,''), $9, 'virtual',
+				NULLIF($10,0), $11, $12, $13, 'virtual', NOW(), $14
+			)
+			ON CONFLICT (file_path, virtual_owner_installation_id, media_folder_id)
+				WHERE virtual_owner_installation_id IS NOT NULL
+			DO UPDATE SET
+				content_id=EXCLUDED.content_id,
+				episode_id=EXCLUDED.episode_id,
+				media_folder_id=EXCLUDED.media_folder_id,
+				file_size=EXCLUDED.file_size,
+				resolution=EXCLUDED.resolution,
+				codec_video=EXCLUDED.codec_video,
+				codec_audio=EXCLUDED.codec_audio,
+				hdr=EXCLUDED.hdr,
+				container='virtual',
+				bitrate=EXCLUDED.bitrate,
+				edition_raw=EXCLUDED.edition_raw,
+				audio_tracks=EXCLUDED.audio_tracks,
+				subtitle_tracks=EXCLUDED.subtitle_tracks,
+				probe_source='virtual',
+				probe_updated_at=NOW(),
+				missing_since=NULL,
+				updated_at=NOW()
+			RETURNING id`,
+			source.ContentID, source.EpisodeID, source.MediaFolderID, candidate.URI,
+			fileSize, candidate.Resolution, candidate.CodecVideo,
+			candidate.CodecAudio, candidate.HDR != "", candidate.Bitrate,
+			candidate.Label, audioTracks, subtitleTracks,
+			ownerInstallationID,
+		).Scan(&id)
+		if err != nil {
+			return fmt.Errorf("upsert virtual candidate: %w", err)
+		}
+		keep[id] = struct{}{}
+	}
+
+	ownerIDs := make([]int64, 0, len(owners))
+	for ownerID := range owners {
+		ownerIDs = append(ownerIDs, int64(ownerID))
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id, file_path
+		FROM media_files
+		WHERE content_id=$1
+		  AND COALESCE(episode_id,'')=$2
+		  AND media_folder_id=$3
+		  AND virtual_owner_installation_id=ANY($4::bigint[])
+		  AND container='virtual'`,
+		source.ContentID, source.EpisodeID, source.MediaFolderID, ownerIDs)
+	if err != nil {
+		return fmt.Errorf("list existing virtual candidates: %w", err)
+	}
+	var stale []int
+	for rows.Next() {
+		var id int
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan existing virtual candidate: %w", err)
+		}
+		existingGroup, valid := virtualCandidateGroup(path)
+		if !valid || existingGroup != group || !virtualCandidateSelection(path) {
+			continue
+		}
+		if _, exists := keep[id]; !exists {
+			stale = append(stale, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate existing virtual candidates: %w", err)
+	}
+	rows.Close()
+	if len(stale) > 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM media_files WHERE id = ANY($1::bigint[])`, stale); err != nil {
+			return fmt.Errorf("delete stale virtual candidates: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit virtual candidate replacement: %w", err)
+	}
+	return nil
+}
+
+func virtualCandidateGroup(raw string) (string, bool) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "virtual" || parsed.Host == "" {
+		return "", false
+	}
+	query := parsed.Query()
+	query.Del("result")
+	parsed.RawQuery = query.Encode()
+	parsed.Fragment = ""
+	return parsed.String(), true
+}
+
+func virtualCandidateSelection(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(parsed.Query().Get("result")) != ""
+}
+
+func languageAudioTracks(languages []string) []models.AudioTrack {
+	result := make([]models.AudioTrack, 0, len(languages))
+	for _, language := range languages {
+		if language = strings.TrimSpace(language); language != "" {
+			result = append(result, models.AudioTrack{Language: language})
+		}
+	}
+	return result
+}
+
+func languageSubtitleTracks(languages []string) []models.SubtitleTrack {
+	result := make([]models.SubtitleTrack, 0, len(languages))
+	for _, language := range languages {
+		if language = strings.TrimSpace(language); language != "" {
+			result = append(result, models.SubtitleTrack{Language: language})
+		}
+	}
+	return result
 }
 
 // identityColumnDefaults normalizes the identity/grouping zero values the way
@@ -2665,7 +2864,7 @@ func claimRepresentativeWindow(limit int) int {
 // MarkMissing sets the missing_since timestamp for the given media file.
 func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Time) error {
 	tag, err := r.pool.Exec(ctx,
-		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND container <> 'virtual' AND file_path NOT LIKE 'aiostreams://%' AND file_path NOT LIKE 'virtual://%'",
+		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND container <> 'virtual' AND file_path NOT LIKE 'virtual://%'",
 		since, id,
 	)
 	if err != nil {
@@ -2694,7 +2893,7 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	// Virtual plugin-backed files are not present on the local filesystem by
 	// design. They must never be treated as missing physical files by scanner
 	// cleanup, otherwise a scan/restart disables playback for every virtual item.
-	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2 AND container <> 'virtual' AND file_path NOT LIKE 'aiostreams://%' AND file_path NOT LIKE 'virtual://%'"
+	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2 AND container <> 'virtual' AND file_path NOT LIKE 'virtual://%'"
 	args := []any{folderID, cutoff}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
@@ -2941,8 +3140,8 @@ func (r *FileRepository) ListByObservedRootPath(ctx context.Context, folderID in
 func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files
 		WHERE content_id = $1 AND missing_since IS NULL
-		ORDER BY (left(file_path, 13) = $2) ASC, id ASC`
-	rows, err := r.pool.Query(ctx, query, contentID, "aiostreams://")
+		ORDER BY (container = 'virtual') ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, contentID)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by content_id: %w", err)
 	}

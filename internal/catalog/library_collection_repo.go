@@ -213,7 +213,7 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 	if err != nil {
 		return nil, fmt.Errorf("beginning library collection create: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := `
 		INSERT INTO library_collections (
@@ -376,7 +376,6 @@ func (r *LibraryCollectionRepository) ListAll(ctx context.Context, libraryID *in
 		scopeJoin = fmt.Sprintf(`JOIN library_collection_libraries scope_lcl
 			ON scope_lcl.collection_id = lc.id AND scope_lcl.library_id = $%d`, argIdx)
 		args = append(args, *libraryID)
-		argIdx++
 	} else {
 		scopeJoin = libraryCollectionScopeFallbackJoin
 	}
@@ -711,24 +710,66 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 }
 
 func (r *LibraryCollectionRepository) Delete(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM library_collections WHERE id = $1", id)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
+		return fmt.Errorf("beginning library collection deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var lockedID string
+	if err := tx.QueryRow(ctx, `SELECT id FROM library_collections WHERE id=$1 FOR UPDATE`, id).Scan(&lockedID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLibraryCollectionNotFound
+		}
+		return fmt.Errorf("locking library collection for deletion: %w", err)
+	}
+	sourceKey := "collection:" + id
+	if err := captureCollectionVirtualItems(ctx, tx, sourceKey); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM virtual_media_source_claims WHERE source_key=$1`, sourceKey); err != nil {
+		return fmt.Errorf("clearing deleted collection virtual claims: %w", err)
+	}
+	if err := reconcileAffectedVirtualMetadataOwnership(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM library_collections WHERE id=$1`, id); err != nil {
 		return fmt.Errorf("deleting library collection: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrLibraryCollectionNotFound
+	if err := cleanupUnclaimedCollectionVirtualMedia(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing library collection deletion: %w", err)
 	}
 	return nil
 }
 
 func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collectionID string, items []LibraryCollectionItemInput) error {
+	collectionSourceKey := "collection:" + collectionID
+	if len([]byte(collectionSourceKey)) > 128 {
+		return fmt.Errorf("collection ID is too long for virtual source ownership")
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning collection item replacement: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, "DELETE FROM library_collection_items WHERE collection_id = $1", collectionID); err != nil {
+	// Serialize replacements for one collection and retain the previous
+	// membership inside this transaction. Cleanup must be based only on rows
+	// removed from this collection; a global "not desired" sweep can delete
+	// unrelated collection-owned virtual items.
+	var lockedCollectionID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM library_collections WHERE id=$1 FOR UPDATE`,
+		collectionID,
+	).Scan(&lockedCollectionID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLibraryCollectionNotFound
+		}
+		return fmt.Errorf("locking library collection: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM library_collection_items WHERE collection_id=$1`, collectionID); err != nil {
 		return fmt.Errorf("clearing collection items: %w", err)
 	}
 
@@ -757,12 +798,209 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 		position++
 	}
 
+	// A collection is an independent owner of the virtual files that it
+	// materialized. Rebuild its exact claims transactionally with membership so
+	// request cancellation and other provider reconciliation cannot remove a
+	// file that the collection still needs.
+	if err := captureCollectionVirtualItems(ctx, tx, collectionSourceKey); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO affected_collection_virtual_items(content_id)
+		SELECT media_item_id FROM library_collection_items WHERE collection_id=$1
+		ON CONFLICT DO NOTHING`, collectionID); err != nil {
+		return fmt.Errorf("capturing current collection virtual items: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM virtual_media_source_claims
+		WHERE source_key=$1`, collectionSourceKey); err != nil {
+		return fmt.Errorf("clearing previous collection virtual claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO virtual_media_source_claims(
+			plugin_installation_id,source_key,content_id,media_folder_id,
+			owns_item_metadata,last_seen_at,updated_at
+		)
+		SELECT DISTINCT
+			mf.virtual_owner_installation_id,$1,mf.content_id,mf.media_folder_id,
+			false,
+			NOW(),NOW()
+		FROM media_files mf
+		JOIN library_collection_items lci
+		  ON lci.collection_id=$2 AND lci.media_item_id=mf.content_id
+		JOIN library_collection_libraries lcl
+		  ON lcl.collection_id=$2 AND lcl.library_id=mf.media_folder_id
+		WHERE mf.virtual_owner_installation_id>0
+		  AND (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		ON CONFLICT(plugin_installation_id,source_key,content_id,media_folder_id)
+		DO UPDATE SET
+			owns_item_metadata=EXCLUDED.owns_item_metadata,
+			last_seen_at=EXCLUDED.last_seen_at,
+			updated_at=NOW()`, collectionSourceKey, collectionID); err != nil {
+		return fmt.Errorf("claiming collection virtual sources: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO virtual_media_file_source_claims(
+			plugin_installation_id,source_key,content_id,media_folder_id,
+			file_path,last_seen_at,updated_at
+		)
+		SELECT
+			mf.virtual_owner_installation_id,$1,mf.content_id,mf.media_folder_id,
+			mf.file_path,NOW(),NOW()
+		FROM media_files mf
+		JOIN library_collection_items lci
+		  ON lci.collection_id=$2 AND lci.media_item_id=mf.content_id
+		JOIN library_collection_libraries lcl
+		  ON lcl.collection_id=$2 AND lcl.library_id=mf.media_folder_id
+		WHERE mf.virtual_owner_installation_id>0
+		  AND (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		ON CONFLICT(plugin_installation_id,source_key,content_id,media_folder_id,file_path)
+		DO UPDATE SET last_seen_at=EXCLUDED.last_seen_at,updated_at=NOW()`,
+		collectionSourceKey, collectionID); err != nil {
+		return fmt.Errorf("claiming collection virtual files: %w", err)
+	}
+	if err := reconcileAffectedVirtualMetadataOwnership(ctx, tx); err != nil {
+		return err
+	}
+	if err := cleanupUnclaimedCollectionVirtualMedia(ctx, tx); err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {
 		return fmt.Errorf("touching library collection: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing collection item replacement: %w", err)
+	}
+	return nil
+}
+
+func captureCollectionVirtualItems(ctx context.Context, tx pgx.Tx, sourceKey string) error {
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE affected_collection_virtual_items(
+			content_id text PRIMARY KEY
+		) ON COMMIT DROP`); err != nil {
+		return fmt.Errorf("create affected collection virtual items: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO affected_collection_virtual_items(content_id)
+		SELECT DISTINCT content_id
+		FROM virtual_media_source_claims
+		WHERE source_key=$1`, sourceKey); err != nil {
+		return fmt.Errorf("capturing previous collection virtual items: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE previous_collection_virtual_files ON COMMIT DROP AS
+		SELECT plugin_installation_id,content_id,media_folder_id,file_path
+		FROM virtual_media_file_source_claims
+		WHERE source_key=$1`, sourceKey); err != nil {
+		return fmt.Errorf("capturing previous collection virtual files: %w", err)
+	}
+	return nil
+}
+
+// reconcileAffectedVirtualMetadataOwnership guarantees one compatibility
+// owner for each affected virtual-only item. Collection claims describe file
+// lifecycle, not competing metadata authorities, so an existing owner wins;
+// otherwise the newest remaining claim is promoted deterministically. Local
+// files always remain authoritative and clear the compatibility owner fields.
+func reconcileAffectedVirtualMetadataOwnership(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `
+		WITH chosen AS (
+			SELECT DISTINCT ON (claim.content_id)
+				claim.content_id,claim.plugin_installation_id,claim.source_key,
+				claim.media_folder_id,claim.last_seen_at
+			FROM virtual_media_source_claims claim
+			JOIN affected_collection_virtual_items affected
+			  ON affected.content_id=claim.content_id
+			WHERE NOT EXISTS (
+				SELECT 1 FROM media_files physical
+				WHERE physical.content_id=claim.content_id
+				  AND physical.container<>'virtual'
+				  AND physical.file_path NOT LIKE 'virtual://%'
+			)
+			ORDER BY claim.content_id,claim.owns_item_metadata DESC,
+			         claim.last_seen_at DESC,claim.plugin_installation_id,
+			         claim.source_key,claim.media_folder_id
+		)
+		UPDATE virtual_media_source_claims claim
+		SET owns_item_metadata=(
+			chosen.plugin_installation_id IS NOT NULL
+			AND claim.plugin_installation_id=chosen.plugin_installation_id
+			AND claim.source_key=chosen.source_key
+			AND claim.media_folder_id=chosen.media_folder_id
+		),updated_at=CASE
+			WHEN claim.owns_item_metadata IS DISTINCT FROM (
+				chosen.plugin_installation_id IS NOT NULL
+				AND claim.plugin_installation_id=chosen.plugin_installation_id
+				AND claim.source_key=chosen.source_key
+				AND claim.media_folder_id=chosen.media_folder_id
+			) THEN NOW() ELSE claim.updated_at END
+		FROM affected_collection_virtual_items affected
+		LEFT JOIN chosen ON chosen.content_id=affected.content_id
+		WHERE claim.content_id=affected.content_id`); err != nil {
+		return fmt.Errorf("reconciling collection virtual metadata claims: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		WITH chosen AS (
+			SELECT DISTINCT ON (claim.content_id)
+				claim.content_id,claim.plugin_installation_id,claim.source_key,
+				claim.last_seen_at
+			FROM virtual_media_source_claims claim
+			JOIN affected_collection_virtual_items affected
+			  ON affected.content_id=claim.content_id
+			WHERE claim.owns_item_metadata
+			ORDER BY claim.content_id,claim.last_seen_at DESC,
+			         claim.plugin_installation_id,claim.source_key
+		)
+		UPDATE media_items item
+		SET virtual_owner_installation_id=chosen.plugin_installation_id,
+			virtual_source=COALESCE(chosen.source_key,''),
+			virtual_last_seen_at=chosen.last_seen_at,
+			updated_at=NOW()
+		FROM affected_collection_virtual_items affected
+		LEFT JOIN chosen ON chosen.content_id=affected.content_id
+		WHERE item.content_id=affected.content_id`); err != nil {
+		return fmt.Errorf("reconciling collection virtual metadata owner: %w", err)
+	}
+	return nil
+}
+
+func cleanupUnclaimedCollectionVirtualMedia(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_files mf
+		USING previous_collection_virtual_files previous
+		WHERE mf.virtual_owner_installation_id=previous.plugin_installation_id
+		  AND mf.content_id=previous.content_id
+		  AND mf.media_folder_id=previous.media_folder_id
+		  AND mf.file_path=previous.file_path
+		  AND (mf.container='virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND NOT EXISTS (
+		      SELECT 1 FROM virtual_media_file_source_claims claim
+		      WHERE claim.plugin_installation_id=mf.virtual_owner_installation_id
+		        AND claim.content_id=mf.content_id
+		        AND claim.media_folder_id=mf.media_folder_id
+		        AND claim.file_path=mf.file_path
+		  )`); err != nil {
+		return fmt.Errorf("deleting unclaimed collection virtual files: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.content_id IN (SELECT content_id FROM affected_collection_virtual_items)
+		  AND NOT EXISTS (SELECT 1 FROM library_collection_items membership WHERE membership.media_item_id=mi.content_id)
+		  AND NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id=mi.content_id)
+		  AND NOT EXISTS (SELECT 1 FROM virtual_media_source_claims claim WHERE claim.content_id=mi.content_id)
+		RETURNING mi.content_id`)
+	if err != nil {
+		return fmt.Errorf("cleaning removed collection virtual items: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("collecting removed collection virtual items: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return fmt.Errorf("enqueueing removed collection search deletes: %w", err)
 	}
 	return nil
 }

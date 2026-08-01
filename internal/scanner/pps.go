@@ -14,6 +14,7 @@ import (
 // generous window catches slower rotations while staying a stream-copy, so the
 // scan finishes in well under a second regardless of runtime.
 const copySafetyScanSeconds = 15
+const maxCopySafetyOutput = 1 << 20
 
 // DetectMultiplePPSH264 reports whether an H.264 stream redefines the same
 // pic_parameter_set_id in-band with more than one distinct content within the
@@ -41,8 +42,9 @@ func DetectMultiplePPSH264(ctx context.Context, ffmpegPath, filePath string) (bo
 		"-f", "h264",
 		"-",
 	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	stdout := &boundedProbeBuffer{limit: maxCopySafetyOutput}
+	var stderr bytes.Buffer
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return false, fmt.Errorf("pps scan: %w (%s)", err, strings.TrimSpace(stderr.String()))

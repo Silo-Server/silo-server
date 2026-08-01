@@ -9,12 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
-	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -104,6 +105,12 @@ type CollageGenerator interface {
 
 var ErrLibraryCollectionSyncUnsupported = errors.New("smart collections cannot be synchronized")
 
+const (
+	virtualMetadataRefreshWorkers = 4
+	virtualMetadataRefreshQueue   = 256
+	virtualMetadataRefreshTimeout = 2 * time.Minute
+)
+
 type LibraryCollectionService struct {
 	collections  *LibraryCollectionRepository
 	items        *ItemRepository
@@ -136,6 +143,80 @@ type LibraryCollectionService struct {
 	// so metadata is enriched immediately instead of waiting for the six-hour
 	// refresh-debt task.
 	RefreshVirtualItem func(context.Context, string) error
+
+	virtualRefreshOnce  sync.Once
+	virtualRefreshQueue chan string
+}
+
+type collectionVirtualCreationTracker struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+type collectionVirtualCreationTrackerKey struct{}
+type collectionVirtualVariantCacheKey struct{}
+
+type collectionVirtualVariantCache struct {
+	mu      sync.Mutex
+	entries map[string][]VirtualPlaybackVariant
+}
+
+func trackCollectionVirtualCreation(ctx context.Context, contentID string) {
+	tracker, _ := ctx.Value(collectionVirtualCreationTrackerKey{}).(*collectionVirtualCreationTracker)
+	if tracker == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	tracker.mu.Lock()
+	tracker.ids = append(tracker.ids, contentID)
+	tracker.mu.Unlock()
+}
+
+func (t *collectionVirtualCreationTracker) snapshot() []string {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]string(nil), t.ids...)
+}
+
+func (s *LibraryCollectionService) configuredVirtualVariants(ctx context.Context, virtualURI, mediaType string) ([]VirtualPlaybackVariant, error) {
+	if s == nil || s.VirtualVariants == nil {
+		return nil, nil
+	}
+	cache, _ := ctx.Value(collectionVirtualVariantCacheKey{}).(*collectionVirtualVariantCache)
+	if cache == nil {
+		return s.VirtualVariants(ctx, virtualURI, mediaType)
+	}
+	cache.mu.Lock()
+	template, ok := cache.entries[mediaType]
+	cache.mu.Unlock()
+	if !ok {
+		variants, err := s.VirtualVariants(ctx, virtualURI, mediaType)
+		if err != nil {
+			return nil, err
+		}
+		cache.mu.Lock()
+		cache.entries[mediaType] = append([]VirtualPlaybackVariant(nil), variants...)
+		cache.mu.Unlock()
+		return variants, nil
+	}
+	target, err := url.Parse(virtualURI)
+	if err != nil || target.Scheme != "virtual" {
+		return nil, fmt.Errorf("invalid virtual playback URI %q", virtualURI)
+	}
+	variants := make([]VirtualPlaybackVariant, 0, len(template))
+	for _, variant := range template {
+		parsed, parseErr := url.Parse(variant.VirtualURI)
+		if parseErr != nil || parsed.Scheme != "virtual" {
+			return nil, fmt.Errorf("invalid cached virtual profile URI %q", variant.VirtualURI)
+		}
+		rebased := *target
+		rebased.RawQuery = parsed.RawQuery
+		variant.VirtualURI = rebased.String()
+		variants = append(variants, variant)
+	}
+	return variants, nil
 }
 
 func NewLibraryCollectionService(
@@ -224,6 +305,55 @@ func sourceEnablesVirtualPlayback(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &cfg) == nil && cfg.VirtualPlayback
 }
 
+func virtualPlaybackIdentityAvailable(mediaType, imdbID string, tmdbID, tvdbID int) bool {
+	itemType := "movie"
+	if mediaType == "show" || mediaType == "tv" || mediaType == "series" {
+		itemType = "series"
+	}
+	item := &models.MediaItem{
+		Type:   itemType,
+		ImdbID: strings.TrimSpace(imdbID),
+	}
+	if tmdbID > 0 {
+		item.TmdbID = strconv.Itoa(tmdbID)
+	}
+	if tvdbID > 0 {
+		item.TvdbID = strconv.Itoa(tvdbID)
+	}
+	_, err := virtualPlaybackItemURI(item)
+	return err == nil
+}
+
+func (s *LibraryCollectionService) queueVirtualMetadataRefresh(contentID string) {
+	contentID = strings.TrimSpace(contentID)
+	if s == nil || s.RefreshVirtualItem == nil || contentID == "" {
+		return
+	}
+	s.virtualRefreshOnce.Do(func() {
+		s.virtualRefreshQueue = make(chan string, virtualMetadataRefreshQueue)
+		for range virtualMetadataRefreshWorkers {
+			go func() {
+				for queuedID := range s.virtualRefreshQueue {
+					ctx, cancel := context.WithTimeout(context.Background(), virtualMetadataRefreshTimeout)
+					if err := s.RefreshVirtualItem(ctx, queuedID); err != nil {
+						slog.WarnContext(ctx, "collection virtual metadata refresh failed",
+							"component", "catalog", "content_id", queuedID, "error", err)
+					}
+					cancel()
+				}
+			}()
+		}
+	})
+	select {
+	case s.virtualRefreshQueue <- contentID:
+	default:
+		// Materialization inserted durable metadata_refresh_debt in the same
+		// transaction, so saturation delays enrichment without losing it.
+		slog.Warn("collection virtual metadata refresh queue is full",
+			"component", "catalog", "content_id", contentID)
+	}
+}
+
 func (s *LibraryCollectionService) materializeVirtualPlayback(ctx context.Context, item *models.MediaItem, libraryIDs []int) error {
 	var variants []VirtualPlaybackVariant
 	if s.VirtualVariants != nil {
@@ -231,29 +361,22 @@ func (s *LibraryCollectionService) materializeVirtualPlayback(ctx context.Contex
 		if mediaType == "" {
 			mediaType = "movie"
 		}
-		uri := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
-		var err error
-		variants, err = s.VirtualVariants(ctx, uri, mediaType)
+		uri, err := virtualPlaybackItemURI(item)
+		if err != nil {
+			return err
+		}
+		variants, err = s.configuredVirtualVariants(ctx, uri, mediaType)
 		if err != nil {
 			return fmt.Errorf("getting virtual profile variants: %w", err)
 		}
 	}
-	if err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, variants); err != nil {
+	_, err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, variants)
+	if err != nil {
 		return err
 	}
-	s.refreshVirtualItemMetadata(ctx, item.ContentID)
+	trackCollectionVirtualCreation(ctx, item.ContentID)
+	s.queueVirtualMetadataRefresh(item.ContentID)
 	return nil
-}
-
-func (s *LibraryCollectionService) refreshVirtualItemMetadata(ctx context.Context, contentID string) {
-	if s.RefreshVirtualItem == nil || strings.TrimSpace(contentID) == "" {
-		return
-	}
-	go func() {
-		if err := s.RefreshVirtualItem(context.WithoutCancel(ctx), contentID); err != nil {
-			slog.Warn("collection virtual metadata refresh failed", "content_id", contentID, "error", err)
-		}
-	}()
 }
 
 func (s *LibraryCollectionService) SyncCollection(ctx context.Context, collectionID string) (*models.LibraryCollectionSyncRun, error) {
@@ -266,7 +389,7 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 		return nil, err
 	}
 	if s.items != nil {
-		if movedLinks, movedFiles, reconcileErr := s.items.ReconcileCollectionVirtualLibraryLinks(ctx, ""); reconcileErr != nil {
+		if movedLinks, movedFiles, reconcileErr := s.items.ReconcileCollectionVirtualLibraryLinks(ctx, collection.ID); reconcileErr != nil {
 			slog.WarnContext(ctx, "collection virtual library reconciliation failed", "error", reconcileErr)
 		} else if movedLinks > 0 || movedFiles > 0 {
 			slog.InfoContext(ctx, "collection virtual library links reconciled", "links_removed", movedLinks, "files_moved", movedFiles)
@@ -275,30 +398,45 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 	if IsLiveQueryType(collection.CollectionType) {
 		return nil, ErrLibraryCollectionSyncUnsupported
 	}
+	tracker := &collectionVirtualCreationTracker{}
+	ctx = context.WithValue(ctx, collectionVirtualCreationTrackerKey{}, tracker)
+	ctx = context.WithValue(ctx, collectionVirtualVariantCacheKey{}, &collectionVirtualVariantCache{
+		entries: make(map[string][]VirtualPlaybackVariant, 2),
+	})
 
 	var source libraryCollectionSourceConfig
 	if err := json.Unmarshal(collection.SourceConfig, &source); err != nil {
 		return nil, fmt.Errorf("parsing collection source config: %w", err)
 	}
 
+	var run *models.LibraryCollectionSyncRun
 	switch source.Mode {
 	case "smart":
 		return nil, ErrLibraryCollectionSyncUnsupported
 	case "mdblist_json":
-		return s.syncMDBListCollection(ctx, collection, collectionutil.MDBListURLCandidates(source.URL, collection.SourceURL), source.Limit, opts)
+		run, err = s.syncMDBListCollection(ctx, collection, collectionutil.MDBListURLCandidates(source.URL, collection.SourceURL), source.Limit, opts)
 	case "tmdb_preset":
-		return s.syncTMDBPresetCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBPresetCollection(ctx, collection, source, opts)
 	case "tmdb_collection":
-		return s.syncTMDBFranchiseCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBFranchiseCollection(ctx, collection, source, opts)
 	case "tmdb_discover":
-		return s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
+		run, err = s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
 	case "trakt_preset":
-		return s.syncTraktPresetCollection(ctx, collection, source, opts)
+		run, err = s.syncTraktPresetCollection(ctx, collection, source, opts)
 	case "trakt_list":
-		return s.syncTraktListCollection(ctx, collection, source, opts)
+		run, err = s.syncTraktListCollection(ctx, collection, source, opts)
 	default:
 		return nil, fmt.Errorf("unsupported collection sync mode: %s", source.Mode)
 	}
+	if err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if _, cleanupErr := s.items.CleanupUnreferencedCollectionVirtualItems(cleanupCtx, tracker.snapshot()); cleanupErr != nil {
+			slog.WarnContext(cleanupCtx, "failed collection sync left virtual cleanup debt",
+				"component", "catalog", "collection_id", collection.ID, "error", cleanupErr)
+		}
+	}
+	return run, err
 }
 
 func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, collection *models.LibraryCollection, listURLs []string, limit *int, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
@@ -358,31 +496,57 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	}
 
 	if sourceEnablesVirtualPlayback(collection.SourceConfig) {
-		for _, entry := range entries {
-			if mdbListEntryItemType(entry) != "movie" || strings.TrimSpace(entry.IMDbID) == "" {
+		// MDBList fetches beyond the configured item limit to compensate for
+		// duplicates and local misses. Do not materialize that entire lookahead
+		// set: rows beyond the final collection limit would be left as orphaned
+		// library items even though they can never become collection members.
+		materializeEntries := entries
+		if limit != nil && *limit > 0 && len(materializeEntries) > *limit {
+			materializeEntries = materializeEntries[:*limit]
+		}
+		for _, entry := range materializeEntries {
+			tvdbID := 0
+			if entry.TVDBID != nil {
+				tvdbID = *entry.TVDBID
+			}
+			if !virtualPlaybackIdentityAvailable(entry.MediaType, entry.IMDbID, entry.ID, tvdbID) {
 				continue
 			}
-			if len(pickCandidatesByPriority(movieLookup, entry, "movie")) > 0 {
-				continue
+			itemType := mdbListEntryItemType(entry)
+			lookup := movieLookup
+			if itemType == "series" {
+				lookup = seriesLookup
 			}
-			contentID, err := idgen.NextID()
-			if err != nil {
-				return nil, fmt.Errorf("generating virtual media id: %w", err)
+			if len(pickCandidatesByPriority(lookup, entry, itemType)) > 0 {
+				continue
 			}
 			item := &models.MediaItem{
-				ContentID: contentID, Type: "movie", Title: entry.Title,
+				Type: itemType, Title: entry.Title,
 				SortTitle: entry.Title, Year: entry.ReleaseYear, ImdbID: entry.IMDbID,
 				TmdbID: fmt.Sprintf("%d", entry.ID), Status: "matched",
 			}
 			if entry.ID <= 0 {
 				item.TmdbID = ""
 			}
+			if tvdbID > 0 {
+				item.TvdbID = strconv.Itoa(tvdbID)
+			}
+			contentID, err := virtualPlaybackContentID(item)
+			if err != nil {
+				return nil, fmt.Errorf("building canonical virtual media id: %w", err)
+			}
+			item.ContentID = contentID
 			if err := s.materializeVirtualPlayback(ctx, item, collection.LibraryIDs); err != nil {
 				return nil, fmt.Errorf("materializing virtual item %q: %w", entry.Title, err)
 			}
-			movieLookup.ByIMDb[entry.IMDbID] = contentID
+			if item.ImdbID != "" {
+				lookup.ByIMDb[item.ImdbID] = contentID
+			}
 			if item.TmdbID != "" {
-				movieLookup.ByTMDB[item.TmdbID] = contentID
+				lookup.ByTMDB[item.TmdbID] = contentID
+			}
+			if item.TvdbID != "" {
+				lookup.ByTVDB[item.TvdbID] = contentID
 			}
 		}
 	}
@@ -473,9 +637,6 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	}
 
 	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-	if _, err := s.items.ReconcileCollectionVirtualItems(ctx, collection.LibraryIDs); err != nil {
 		return nil, err
 	}
 
@@ -574,7 +735,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 			return nil, err
 		}
 		if item == nil {
-			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+			if cfg.VirtualPlayback && virtualPlaybackIdentityAvailable(entry.MediaType, entry.IMDbID, entry.ID, entry.TVDBID) {
 				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
 				if err != nil {
 					return nil, err
@@ -642,9 +803,6 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 	)
 
 	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-	if _, err := s.items.ReconcileCollectionVirtualItems(ctx, collection.LibraryIDs); err != nil {
 		return nil, err
 	}
 
@@ -749,7 +907,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 			return nil, err
 		}
 		if item == nil {
-			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+			if cfg.VirtualPlayback && virtualPlaybackIdentityAvailable(entry.MediaType, entry.IMDbID, entry.ID, entry.TVDBID) {
 				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
 				if err != nil {
 					return nil, err
@@ -808,9 +966,6 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 	)
 
 	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-	if _, err := s.items.ReconcileCollectionVirtualItems(ctx, collection.LibraryIDs); err != nil {
 		return nil, err
 	}
 
@@ -935,7 +1090,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 			return nil, err
 		}
 		if item == nil {
-			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+			if cfg.VirtualPlayback && virtualPlaybackIdentityAvailable(entry.MediaType, entry.IMDbID, entry.ID, entry.TVDBID) {
 				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
 				if err != nil {
 					return nil, err
@@ -990,9 +1145,6 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 	)
 
 	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-	if _, err := s.items.ReconcileCollectionVirtualItems(ctx, collection.LibraryIDs); err != nil {
 		return nil, err
 	}
 
@@ -1197,7 +1349,7 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 			return nil, err
 		}
 		if item == nil {
-			if virtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+			if virtualPlayback && virtualPlaybackIdentityAvailable(entry.MediaType, entry.IMDbID, entry.TMDBID, entry.TVDBID) {
 				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, entry.Year, entry.IMDbID, entry.TMDBID, entry.TVDBID)
 				if err != nil {
 					return nil, err
@@ -1237,9 +1389,6 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 	}
 
 	if err := s.collections.ReplaceItems(ctx, collection.ID, matchedItems); err != nil {
-		return nil, err
-	}
-	if _, err := s.items.ReconcileCollectionVirtualItems(ctx, collection.LibraryIDs); err != nil {
 		return nil, err
 	}
 
@@ -1298,37 +1447,39 @@ func (s *LibraryCollectionService) recordFailedCollectionSync(ctx context.Contex
 }
 
 func (s *LibraryCollectionService) createVirtualCollectionItem(ctx context.Context, collection *models.LibraryCollection, mediaType, title string, year int, imdbID string, tmdbID, tvdbID int) (*models.MediaItem, error) {
-	contentID, err := idgen.NextID()
-	if err != nil {
-		return nil, fmt.Errorf("generating virtual media id: %w", err)
-	}
 	itemType := "movie"
-	if mediaType == "tv" || mediaType == "series" {
+	if mediaType == "show" || mediaType == "tv" || mediaType == "series" {
 		itemType = "series"
 	}
-	item := &models.MediaItem{ContentID: contentID, Type: itemType, Title: title, SortTitle: title, Year: year, ImdbID: strings.TrimSpace(imdbID), Status: "matched"}
+	item := &models.MediaItem{Type: itemType, Title: title, SortTitle: title, Year: year, ImdbID: strings.TrimSpace(imdbID), Status: "matched"}
 	if tmdbID > 0 {
 		item.TmdbID = fmt.Sprintf("%d", tmdbID)
 	}
 	if tvdbID > 0 {
 		item.TvdbID = fmt.Sprintf("%d", tvdbID)
 	}
-	virtualType := "movie"
-	if itemType == "series" {
-		virtualType = "series"
+	contentID, err := virtualPlaybackContentID(item)
+	if err != nil {
+		return nil, fmt.Errorf("building canonical virtual media ID for %q: %w", title, err)
 	}
-	virtualURI := "virtual://" + virtualType + "/" + strings.TrimSpace(item.ImdbID)
+	item.ContentID = contentID
+	virtualURI, err := virtualPlaybackItemURI(item)
+	if err != nil {
+		return nil, fmt.Errorf("building virtual item URI for %q: %w", title, err)
+	}
 	var variants []VirtualPlaybackVariant
 	if s.VirtualVariants != nil {
-		variants, err = s.VirtualVariants(ctx, virtualURI, itemType)
+		variants, err = s.configuredVirtualVariants(ctx, virtualURI, itemType)
 		if err != nil {
 			return nil, fmt.Errorf("getting virtual profile variants: %w", err)
 		}
 	}
-	if err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, collection.LibraryIDs, variants); err != nil {
+	_, err = s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, collection.LibraryIDs, variants)
+	if err != nil {
 		return nil, fmt.Errorf("materializing virtual item %q: %w", title, err)
 	}
-	s.refreshVirtualItemMetadata(ctx, item.ContentID)
+	trackCollectionVirtualCreation(ctx, item.ContentID)
+	s.queueVirtualMetadataRefresh(item.ContentID)
 	return item, nil
 }
 
