@@ -162,7 +162,94 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	if attemptErr == nil {
 		attemptErr = errors.New("virtual playback provider returned no usable stream")
 	}
+	// When the primary resolution fails — commonly because a previously
+	// persisted "result=" candidate has rotated or expired at the provider —
+	// re-rank the current provider candidates provider-neutrally and retry
+	// before failing. This keeps one stale indexer/debrid result from turning
+	// a still-streamable item into a hard playback failure, without crossing
+	// the user's selected quality when a same-profile candidate exists.
+	if fb := h.fallbackResolveStaleVirtualSource(attemptCtx, file, userID, profileID); fb != nil {
+		return *fb, nil
+	}
 	return resolvedVirtualPlaybackSource{}, attemptErr
+}
+
+// fallbackResolveStaleVirtualSource re-lists the provider's current candidates
+// and resolves the first healthy provider-neutral stream. It returns nil when
+// the original URI carried no stale result= pick, or when no substitute
+// candidate can be resolved, so the caller preserves its original error.
+func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
+	ctx context.Context,
+	file *models.MediaFile,
+	userID int,
+	profileID string,
+) *resolvedVirtualPlaybackSource {
+	parsed, _ := url.Parse(file.FilePath)
+	if parsed != nil && strings.TrimSpace(parsed.Query().Get("result")) == "" {
+		return nil
+	}
+	if h.VirtualPlaybackStreamLister == nil {
+		return nil
+	}
+	neutralKey := virtualPlaybackNeutralKey(file.FilePath)
+	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	streams, listErr := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(
+		listCtx, neutralKey, userID, profileID, file.VirtualOwnerInstallationID,
+	)
+	cancel()
+	if listErr != nil || len(streams) == 0 {
+		return nil
+	}
+	if len(streams) > maxVirtualPlaybackStreams {
+		streams = streams[:maxVirtualPlaybackStreams]
+	}
+	for _, stream := range streams {
+		if stream.URI == "" || stream.URI == file.FilePath {
+			continue
+		}
+		resolved, err := h.resolveVirtualCandidateSource(ctx, file, stream, userID, profileID)
+		if err == nil {
+			return resolved
+		}
+	}
+	return nil
+}
+
+// resolveVirtualCandidateSource resolves and probes a single virtual stream
+// candidate, returning a fully-probed source on success.
+func (h *PlaybackHandler) resolveVirtualCandidateSource(
+	ctx context.Context,
+	file *models.MediaFile,
+	candidate VirtualPlaybackStream,
+	userID int,
+	profileID string,
+) (*resolvedVirtualPlaybackSource, error) {
+	ownerID := candidate.OwnerInstallationID
+	if ownerID <= 0 {
+		ownerID = file.VirtualOwnerInstallationID
+	}
+	streamURL, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
+		ctx, candidate.URI, userID, profileID, ownerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	transient := *file
+	transient.FilePath = candidate.URI
+	transient.VirtualOwnerInstallationID = ownerID
+	resolved := resolvedVirtualPlaybackSource{URL: streamURL, URI: candidate.URI, OwnerID: ownerID, File: &transient}
+	if h.VirtualPlaybackSourceProber == nil {
+		return &resolved, nil
+	}
+	probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)
+	probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
+	probeCancel()
+	if probeErr != nil || probed == nil {
+		return nil, errors.New("virtual stream probe failed during fallback")
+	}
+	resolved.File = probed
+	resolved.ProbeSucceeded = true
+	return &resolved, nil
 }
 
 func (h *PlaybackHandler) probeVirtualSessionFile(ctx context.Context, file *models.MediaFile, session *playback.Session) (*models.MediaFile, string, error) {
@@ -253,6 +340,24 @@ func filterVirtualPlaybackStreams(file *models.MediaFile, streams []VirtualPlayb
 
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
+}
+
+// virtualPlaybackNeutralKey returns the virtual URI with any concrete "result="
+// pick removed, preserving the scheme/host/path and the profile so a stale
+// provider candidate can be re-resolved provider-neutrally within the same
+// quality selection.
+func virtualPlaybackNeutralKey(virtualPath string) string {
+	parsed, err := url.Parse(virtualPath)
+	if err != nil {
+		return virtualPath
+	}
+	q := parsed.Query()
+	if strings.TrimSpace(q.Get("result")) == "" {
+		return virtualPath
+	}
+	q.Del("result")
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 func isHLSVirtualStreamURL(streamURL string) bool {
