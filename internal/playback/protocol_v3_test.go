@@ -3,6 +3,7 @@ package playback
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,15 +23,16 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	first := ServerFeaturesV3()
 	second := ServerFeaturesV3()
 	expected := map[string]struct{}{
-		FeaturePlaybackPlanV3:       {},
-		FeatureMedia3Only:           {},
-		FeatureDetailedDecodeV3:     {},
-		FeatureLayoutPassthrough:    {},
-		FeatureRouteDiagnostics:     {},
-		FeatureDeviceQuirksV3:       {},
-		FeatureSeekReanchorV3:       {},
-		FeatureDirectStreamResumeV3: {},
-		FeaturePlanSourceDurationV3: {},
+		FeaturePlaybackPlanV3:           {},
+		FeatureMedia3Only:               {},
+		FeatureDetailedDecodeV3:         {},
+		FeatureLayoutPassthrough:        {},
+		FeatureRouteDiagnostics:         {},
+		FeatureDeviceQuirksV3:           {},
+		FeatureSeekReanchorV3:           {},
+		FeatureDirectStreamResumeV3:     {},
+		FeaturePlanSourceDurationV3:     {},
+		FeatureExternalTextSidecarSetV3: {},
 	}
 	if len(first) != len(expected) {
 		t.Fatalf("server features = %v, want %d entries", first, len(expected))
@@ -54,6 +56,28 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	first[0] = "mutated"
 	if second[0] != FeaturePlaybackPlanV3 {
 		t.Fatalf("feature slices share backing storage: %v", second)
+	}
+}
+
+func TestSubtitleDecisionV3SidecarsRoundTrip(t *testing.T) {
+	want := SubtitleDecisionV3{Sidecars: []SubtitleSidecarV3{{
+		TrackID:             "file:42:subtitle:1",
+		Index:               1,
+		URL:                 "/stream/session/subtitles/1.srt?file_id=42",
+		MIMEType:            "application/x-subrip",
+		Format:              "srt",
+		TimingOriginSeconds: 12.5,
+	}}}
+	body, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got SubtitleDecisionV3
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 

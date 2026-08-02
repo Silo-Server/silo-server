@@ -11,25 +11,26 @@ import (
 )
 
 const (
-	ProtocolV3                    = 3
-	FeaturePlaybackPlanV3         = "playback_plan_v3"
-	FeatureMedia3Only             = "media3_only"
-	FeatureDetailedDecodeV3       = "detailed_decode_capabilities"
-	FeatureLayoutPassthrough      = "layout_aware_passthrough"
-	FeatureClientVideoTransforms  = "client_video_transformations_v1"
-	FeatureRouteDiagnostics       = "playback_route_diagnostics"
-	FeatureDeviceQuirksV3         = "device_quirks_v1"
-	FeatureSeekReanchorV3         = "seek_reanchor_v1"
-	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
-	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
-	PlanRecipeVersionV3           = "v3.2"
-	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
-	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
-	ClientDVTransformVersionV3    = "1"
-	ClientDV8HDR10PlusSanitizerV3 = "client_dv8_hdr10plus_sanitizer_v1"
-	ClientPostResumeRecoveryV3    = "client_post_resume_video_recovery_v1"
-	ClientSurfaceRecoveryV3       = "client_surface_recovery_v1"
-	DeviceQuirkRegistryRevisionV3 = "2026-07-13.1"
+	ProtocolV3                      = 3
+	FeaturePlaybackPlanV3           = "playback_plan_v3"
+	FeatureMedia3Only               = "media3_only"
+	FeatureDetailedDecodeV3         = "detailed_decode_capabilities"
+	FeatureLayoutPassthrough        = "layout_aware_passthrough"
+	FeatureClientVideoTransforms    = "client_video_transformations_v1"
+	FeatureRouteDiagnostics         = "playback_route_diagnostics"
+	FeatureDeviceQuirksV3           = "device_quirks_v1"
+	FeatureSeekReanchorV3           = "seek_reanchor_v1"
+	FeatureDirectStreamResumeV3     = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3     = "plan_source_duration_v1"
+	FeatureExternalTextSidecarSetV3 = "external_text_sidecar_set_v1"
+	PlanRecipeVersionV3             = "v3.2"
+	ClientDV7ToDV81V3               = "client_dv7_to_dv81"
+	ClientDV7ToHDR10V3              = "client_dv7_to_hdr10"
+	ClientDVTransformVersionV3      = "1"
+	ClientDV8HDR10PlusSanitizerV3   = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientPostResumeRecoveryV3      = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3         = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3   = "2026-07-13.1"
 )
 
 // ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
@@ -51,6 +52,7 @@ func ServerFeaturesV3() []string {
 		// absent field, and a client cannot decide whether its own catalog
 		// fallback is still required.
 		FeaturePlanSourceDurationV3,
+		FeatureExternalTextSidecarSetV3,
 	}
 }
 
@@ -502,10 +504,20 @@ type SubtitleArtifactV3 struct {
 	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
 }
 
+type SubtitleSidecarV3 struct {
+	TrackID             string  `json:"track_id"`
+	Index               int     `json:"index"`
+	URL                 string  `json:"url"`
+	MIMEType            string  `json:"mime_type"`
+	Format              string  `json:"format"`
+	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
+}
+
 type SubtitleDecisionV3 struct {
 	Mode     SubtitleModeV3      `json:"mode"`
 	TrackID  string              `json:"track_id,omitempty"`
 	Artifact *SubtitleArtifactV3 `json:"artifact,omitempty"`
+	Sidecars []SubtitleSidecarV3 `json:"sidecars,omitempty"`
 }
 
 type TransformationV3 struct {
