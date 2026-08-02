@@ -252,6 +252,8 @@ func (i *Installer) replaceBinary(
 		return nil, err
 	}
 
+	manifest.Checksum = checksum
+
 	manifestBytes, err := protojson.Marshal(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
@@ -412,6 +414,13 @@ func (i *Installer) replaceArchive(
 }
 
 func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checksum string, manifest *pluginv1.PluginManifest, repositoryID *int) (*InstallResult, error) {
+	// Use the checksum we computed from the downloaded binary data rather
+	// than the value the binary's self-reported manifest declares.  A
+	// plugin binary that was post-processed after compilation (strip, upx,
+	// signing) often reports a stale checksum that does not match the
+	// bytes Silo actually holds.
+	manifest.Checksum = checksum
+
 	manifestBytes, err := protojson.Marshal(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
