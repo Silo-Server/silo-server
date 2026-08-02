@@ -269,6 +269,71 @@ func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
 	}
 }
 
+func TestHandleSubtitleServesExternalTextInRequestedRawFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		format      string
+		extension   string
+		body        string
+		contentType string
+	}{
+		{
+			name:        "srt",
+			format:      "srt",
+			extension:   "srt",
+			body:        "1\n00:00:01,000 --> 00:00:02,000\nHello\n",
+			contentType: "application/x-subrip; charset=utf-8",
+		},
+		{
+			name:        "vtt",
+			format:      "vtt",
+			extension:   "vtt",
+			body:        "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n",
+			contentType: "text/vtt; charset=utf-8",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := dir + "/movie.en." + tt.extension
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file := &models.MediaFile{
+				ID: 42,
+				ExternalSubtitles: []models.ExternalSubtitle{{
+					Path: path, Format: tt.format, Language: "en",
+				}},
+			}
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: file})
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0."+tt.extension, nil)
+			req = req.WithContext(newAuthorizedPlaybackContext())
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("session_id", session.ID)
+			routeCtx.URLParams.Add("track", "0."+tt.extension)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+			rr := httptest.NewRecorder()
+			handler.HandleSubtitle(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			if got := rr.Header().Get("Content-Type"); got != tt.contentType {
+				t.Fatalf("Content-Type = %q, want %q", got, tt.contentType)
+			}
+			if got := rr.Body.String(); got != tt.body {
+				t.Fatalf("body = %q, want raw %q", got, tt.body)
+			}
+		})
+	}
+}
+
 // A .vtt request for a bitmap (PGS) embedded track must be rejected up front:
 // PGS passes the burn-in guard because it is deliverable as .sup, but it has
 // no text to convert, so forcing WebVTT would spawn an ffmpeg that always

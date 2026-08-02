@@ -222,6 +222,22 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	externalCount := len(file.ExternalSubtitles)
 	if trackIndex < externalCount {
 		sub := file.ExternalSubtitles[trackIndex]
+		format := strings.ToLower(sub.Format)
+
+		// Protocol V3 can advertise validated external text sidecars in their
+		// native format. Keep these requests byte-for-byte raw so Media3 can
+		// parse the small text resource without a conversion step.
+		if (requestedFormat == "srt" && (format == "srt" || format == "subrip")) ||
+			(requestedFormat == "vtt" && (format == "vtt" || format == "webvtt")) {
+			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error",
+					"Failed to load external subtitle")
+				return
+			}
+			playback.ServeSubtitle(w, data, requestedFormat)
+			return
+		}
 
 		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
