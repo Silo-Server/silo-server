@@ -1527,11 +1527,10 @@ func TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings(t *testing.T) {
 // TestObjectSchemasAcceptTheShapesClientsStore exercises every schema_ref
 // against a real value.
 //
-// Nothing else does. Each of these definitions is nullable with a null default,
-// so TestDefaultsValidateAgainstTheirOwnSchema returns at the null branch
-// without ever compiling the reference — a schema_ref naming a file that does
-// not exist, or a schema that rejects the shape its client actually stores,
-// would pass every other test in this file.
+// Defaults alone are insufficient: several definitions are nullable and stop
+// at the null branch, while an empty-object default does not exercise dynamic
+// properties. These real client shapes make every referenced schema prove its
+// actual value vocabulary.
 func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 	manifest, err := Load()
 	if err != nil {
@@ -1539,6 +1538,7 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 	}
 
 	valid := map[string]string{
+		"catalog.metadata_language_overrides": `{"ja":"en","no":"x-silo-original"}`,
 		"ui.card_overlays": `{"version":2,"preset":"minimal","order":["hdr","year"],` +
 			`"items":{"hdr":{"enabled":true,"position":"top-left","accentColor":"#f5c518"},` +
 			`"year":{"enabled":false,"position":"bottom-right","showIcon":true}}}`,
@@ -1569,10 +1569,11 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 
 	// Each schema must actually constrain something, or it is decoration.
 	invalid := map[string]string{
-		"ui.card_overlays":        `{"version":2,"preset":"nonesuch","order":[],"items":{}}`,
-		"ui.sidebar_pins":         `{"7":[{"type":"bogus","id":"x","label":"L"}]}`,
-		"ui.disabled_library_ids": `[0,-1]`,
-		"ui.library_order":        `[1,1]`,
+		"catalog.metadata_language_overrides": `{"Norwegian":"not a language tag"}`,
+		"ui.card_overlays":                    `{"version":2,"preset":"nonesuch","order":[],"items":{}}`,
+		"ui.sidebar_pins":                     `{"7":[{"type":"bogus","id":"x","label":"L"}]}`,
+		"ui.disabled_library_ids":             `[0,-1]`,
+		"ui.library_order":                    `[1,1]`,
 	}
 	for key, value := range invalid {
 		t.Run(key+" rejects", func(t *testing.T) {

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/metadata-language-overrides.json",
+  "title": "Metadata language exceptions",
+  "description": "Maps a media item's canonical original-language code to the metadata language a profile wants for that item. x-silo-original means use the source language itself.",
+  "type": "object",
+  "propertyNames": {
+    "description": "Canonical ISO 639 language code as stored in media_items.original_language.",
+    "type": "string",
+    "pattern": "^[a-z]{2,3}$"
+  },
+  "additionalProperties": {
+    "description": "A BCP 47 target language or the x-silo-original private-use sentinel.",
+    "type": "string",
+    "minLength": 2,
+    "maxLength": 255,
+    "pattern": "^([a-zA-Z]{2,3}(-[a-zA-Z]{3}){0,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?(-([0-9a-zA-Z]{5,8}|[0-9][0-9a-zA-Z]{3}))*(-[0-9a-wy-zA-WY-Z](-[0-9a-zA-Z]{2,8})+)*(-[xX](-[0-9a-zA-Z]{1,8})+)?|[xX](-[0-9a-zA-Z]{1,8})+)$"
+  },
+  "maxProperties": 256
+}

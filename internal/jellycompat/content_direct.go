@@ -835,14 +835,14 @@ func (s *directContentService) ListSeasons(ctx context.Context, session *Session
 	progressMap := s.batchProgressForEpisodes(ctx, session, allEpisodeIDs)
 
 	if len(seasons) > 0 {
+		if s.detailSvc != nil {
+			if localized, locErr := s.detailSvc.LocalizeSeasonModels(ctx, seasons, filter); locErr == nil && len(localized) == len(seasons) {
+				seasons = localized
+			}
+		}
 		result := make([]upstreamSeason, 0, len(seasons))
 		for _, season := range seasons {
 			eps := groupedEpisodes[season.SeasonNumber]
-			if s.detailSvc != nil {
-				if localized, locErr := s.detailSvc.LocalizeSeasonModel(ctx, season, filter); locErr == nil && localized != nil {
-					season = localized
-				}
-			}
 			us := modelSeasonToUpstream(season, len(eps))
 			applySeasonUserData(&us, eps, progressMap)
 			result = append(result, us)
@@ -922,14 +922,14 @@ func (s *directContentService) ListEpisodes(ctx context.Context, session *Sessio
 			progressMap = progressEntries
 		}
 	}
+	if s.detailSvc != nil {
+		if localized, locErr := s.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); locErr == nil && len(localized) == len(episodes) {
+			episodes = localized
+		}
+	}
 
 	result := make([]upstreamEpisode, 0, len(episodes))
 	for _, ep := range episodes {
-		if s.detailSvc != nil {
-			if localized, locErr := s.detailSvc.LocalizeEpisodeModel(ctx, ep, filter); locErr == nil && localized != nil {
-				ep = localized
-			}
-		}
 		ue := modelEpisodeToUpstream(ep, seriesID)
 		if progress, ok := progressMap[ep.ContentID]; ok {
 			progressCopy := progress

@@ -105,6 +105,8 @@ interface VideoPlayerProps {
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string) => void;
   qualityPreference?: string | null;
+  /** Bandwidth cap in kbps from playback.max_bitrate_kbps; null/undefined is uncapped. */
+  maxBitrateKbps?: number | null;
   onRefreshSubtitles?: () => void;
   audioTracks?: PlayerAudioTrack[];
   activeAudioIndex?: number;
@@ -195,6 +197,7 @@ export function VideoPlayer({
   seriesContext,
   onNavigateEpisode,
   qualityPreference,
+  maxBitrateKbps,
   onRefreshSubtitles,
   audioTracks = [],
   activeAudioIndex = 0,
@@ -340,6 +343,7 @@ export function VideoPlayer({
     playMethod,
     initialPosition,
     qualityPreference,
+    maxBitrateKbps,
     transportRestart,
   });
   const { cancelPendingTranscodeStart, startupGeneration } = transcodeQuality;

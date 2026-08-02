@@ -12,6 +12,9 @@ type Scope struct {
 	// PreferredMetadataLanguage is the profile's metadata (presentation)
 	// language; "" inherits the library's metadata language.
 	PreferredMetadataLanguage string
+	// MetadataLanguageOverrides maps a media item's canonical original-language
+	// code to the profile's target metadata language for that source.
+	MetadataLanguageOverrides map[string]string
 	PolicyRevision            int64
 	ProfileVerified           bool
 }

@@ -2895,7 +2895,14 @@ export interface EventsHelloMessage {
   schema_version: number;
   connection_id: string;
   available_channels: EventChannel[];
-  required_action: "subscribe";
+  /**
+   * "none" when the connection already holds at least one subscription,
+   * declared as ?channels= on the URL. "subscribe" when it still owes a
+   * subscribe frame — including when it declared channels but none of them
+   * resolved, since such a connection is subscribed to nothing and is closed
+   * after the grace period like any other silent one.
+   */
+  required_action: "subscribe" | "none";
 }
 
 export interface EventsSubscribeMessage {
@@ -2984,6 +2991,24 @@ export interface AdminDeviceProfileSummary {
   profile_name: string;
   override_count: number;
   last_updated: string;
+}
+
+/** One device the signed-in viewer watches on. */
+export interface UserDevice {
+  device_id: string;
+  device_name: string;
+  device_platform: string;
+  last_seen_at: string;
+  profile_id: string;
+  profile_name: string;
+  /** True for the device this browser is. */
+  is_current_device: boolean;
+  /** How many settings this (profile, device) pair overrides. */
+  changed_count: number;
+}
+
+export interface UserDeviceListResponse {
+  devices: UserDevice[];
 }
 
 export interface AdminDeviceSummary {

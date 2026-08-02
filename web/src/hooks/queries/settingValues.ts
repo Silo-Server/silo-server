@@ -4,7 +4,7 @@ import { api } from "@/api/client";
 import { storage } from "@/utils/storage";
 import { SETTING_DEFINITIONS, SETTINGS_REVISION, type SettingKey } from "@/lib/settingsContract";
 import { useEventChannel } from "@/components/realtimeEventsContext";
-import { settingsKeys } from "./keys";
+import { deviceKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -33,6 +33,16 @@ export interface SettingIdentity {
   libraryId?: number;
   /** Required for profile_series. */
   seriesId?: string;
+  /**
+   * A device other than the one this browser is. Omit to address the current
+   * device, which is what every screen except "your devices" wants.
+   */
+  deviceId?: string;
+  /**
+   * A profile other than the signed-in one. Only the household parent may set
+   * this; the server answers 403 for anyone else.
+   */
+  profileId?: string;
 }
 
 export interface EffectiveSetting<T = unknown> {
@@ -63,6 +73,8 @@ function identityQuery(identity: SettingIdentity): string {
   const params = new URLSearchParams({ scope: identity.scope });
   if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
   if (identity.seriesId !== undefined) params.set("series_id", identity.seriesId);
+  if (identity.deviceId !== undefined) params.set("device_id", identity.deviceId);
+  if (identity.profileId !== undefined) params.set("profile_id", identity.profileId);
   return params.toString();
 }
 
@@ -79,13 +91,20 @@ export function effectiveSettingsQueryKey(options?: {
   keys?: readonly SettingKey[];
   libraryIds?: readonly number[];
   seriesIds?: readonly string[];
+  deviceId?: string;
+  profileId?: string;
 }) {
-  const { keys, libraryIds, seriesIds } = options ?? {};
+  const { keys, libraryIds, seriesIds, deviceId, profileId } = options ?? {};
   return [
     ...settingsKeys.all,
     "values",
     "effective",
-    activeProfileId(),
+    // The device and profile a read resolved for are part of the identity of
+    // the answer, not just of the request. Without them a read of the Apple
+    // TV's values would land on the same cache entry as this browser's and
+    // serve one device's settings as another's.
+    profileId ?? activeProfileId(),
+    deviceId ?? "",
     keys ? [...keys].sort().join(",") : "*",
     libraryIds ? [...libraryIds].sort().join(",") : "",
     seriesIds ? [...seriesIds].sort().join(",") : "",
@@ -104,19 +123,27 @@ export function useEffectiveSettings(options?: {
   keys?: readonly SettingKey[];
   libraryIds?: readonly number[];
   seriesIds?: readonly string[];
+  /** Resolve for a device other than this browser. */
+  deviceId?: string;
+  /** Resolve for another profile on the account (household parent only). */
+  profileId?: string;
   enabled?: boolean;
 }) {
   const keys = options?.keys;
   const libraryIds = options?.libraryIds;
   const seriesIds = options?.seriesIds;
+  const deviceId = options?.deviceId;
+  const profileId = options?.profileId;
 
   return useQuery({
-    queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds }),
+    queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds, deviceId, profileId }),
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keys?.length) params.set("keys", keys.join(","));
       if (libraryIds?.length) params.set("library_ids", libraryIds.join(","));
       if (seriesIds?.length) params.set("series_ids", seriesIds.join(","));
+      if (deviceId) params.set("device_id", deviceId);
+      if (profileId) params.set("profile_id", profileId);
       const query = params.toString();
       const result = await api<EffectiveResponse>(
         `/settings/values/effective${query ? `?${query}` : ""}`,
@@ -181,8 +208,14 @@ export function useSetSettingValue() {
         },
         body: JSON.stringify({ value }),
       }),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    onSettled: (_data, _error, variables) => {
+      void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+      // A device-scoped write changes that device's "how many things differ"
+      // count, which the device list shows. Without this the badge stays stale
+      // until the list's own staleTime expires.
+      if (variables.identity.scope === "profile_device") {
+        void qc.invalidateQueries({ queryKey: deviceKeys.all });
+      }
     },
   });
 }
@@ -194,8 +227,11 @@ export function useClearSettingValue() {
   return useMutation({
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    onSettled: (_data, _error, variables) => {
+      void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+      if (variables.identity.scope === "profile_device") {
+        void qc.invalidateQueries({ queryKey: deviceKeys.all });
+      }
     },
   });
 }

@@ -213,6 +213,10 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  category: string;\n")
 	out.WriteString("  control?: string;\n")
 	out.WriteString("  unit?: string;\n")
+	out.WriteString("  /** Advisory: platforms this setting is expected to matter on. Absent\n")
+	out.WriteString("   * means everywhere. A client hides settings for platforms it is not,\n")
+	out.WriteString("   * rather than disabling them without explanation. */\n")
+	out.WriteString("  platforms?: readonly string[];\n")
 	out.WriteString("  suggestedOptions?: SettingOptionSetId;\n")
 	out.WriteString("  unsetLabel?: string;\n")
 	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number }[];\n")
@@ -253,6 +257,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		}
 		if def.Unit != "" {
 			fmt.Fprintf(&out, "    unit: %q,\n", def.Unit)
+		}
+		if len(def.Platforms) > 0 {
+			fmt.Fprintf(&out, "    platforms: [%s],\n", quotedStrings(def.Platforms))
 		}
 		if def.SuggestedOptions != "" {
 			fmt.Fprintf(&out, "    suggestedOptions: %q,\n", def.SuggestedOptions)
@@ -531,6 +538,14 @@ func sortedOptionSetNames(contract *settingscontract.Manifest) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func quotedStrings(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprintf("%q", value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func quotedScopes(def *settingscontract.Definition) string {

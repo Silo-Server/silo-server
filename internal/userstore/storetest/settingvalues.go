@@ -49,6 +49,54 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("MutationIdempotency", func(t *testing.T) {
 		testSettingMutationIdempotency(t, newStore)
 	})
+	t.Run("DeviceExists", func(t *testing.T) {
+		testDeviceExists(t, newStore)
+	})
+}
+
+// testDeviceExists pins the check that authorizes a device named in a request
+// rather than taken from its headers. It must be scoped to the profile, not
+// merely to the account: two profiles in one household register the same TV
+// separately, and a device is only "yours" for the profile that registered it.
+func testDeviceExists(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		t.Skip("store does not implement DeviceRegistry")
+	}
+
+	seedSettingProfiles(t, ctx, store, "p1", "p2")
+	if err := registry.RegisterDevice(ctx, userstore.DeviceEntry{
+		ProfileID: "p1", DeviceID: deviceApple, DeviceName: "Apple TV",
+	}); err != nil {
+		t.Fatalf("RegisterDevice: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		profileID string
+		deviceID  string
+		want      bool
+	}{
+		{"registered", "p1", deviceApple, true},
+		{"other profile same device", "p2", deviceApple, false},
+		{"unknown device", "p1", "no-such-device", false},
+		{"empty device", "p1", "", false},
+		{"empty profile", "", deviceApple, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := registry.DeviceExists(ctx, tc.profileID, tc.deviceID)
+			if err != nil {
+				t.Fatalf("DeviceExists(%q, %q): %v", tc.profileID, tc.deviceID, err)
+			}
+			if got != tc.want {
+				t.Errorf("DeviceExists(%q, %q) = %v, want %v",
+					tc.profileID, tc.deviceID, got, tc.want)
+			}
+		})
+	}
 }
 
 // testPreferenceSettingsTransactionRollback proves that a failure after both

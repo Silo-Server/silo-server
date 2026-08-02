@@ -228,6 +228,11 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 		}
 
 		if len(seasons) > 0 {
+			if h.items.detailSvc != nil {
+				if localized, locErr := h.items.detailSvc.LocalizeSeasonModels(r.Context(), seasons, filter); locErr == nil && len(localized) == len(seasons) {
+					seasons = localized
+				}
+			}
 			episodesBySeason, err := h.items.episodeRepo.ListBySeriesGroupedBySeason(r.Context(), id)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list seasons")
@@ -245,7 +250,7 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 				if hasProgressMap {
 					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
-				sr := h.items.toSeasonResponseFromEpisodes(r, id, s, episodes, userData)
+				sr := h.items.seasonResponseFromEpisodes(r, s, episodes, userData)
 				resp = append(resp, sr)
 			}
 

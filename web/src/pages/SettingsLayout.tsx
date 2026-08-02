@@ -16,6 +16,7 @@ import {
   Server,
   Sparkles,
   Bell,
+  MonitorSmartphone,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -49,6 +50,12 @@ interface NavSection {
 
 const settingIndex = (...labels: string[]) => labels.map((label) => ({ label }));
 
+/**
+ * Settings pages that manage their own multi-column layout, so the shell's
+ * reading-width cap would squeeze them instead of helping.
+ */
+const WIDE_SETTINGS_PAGES = new Set(["devices"]);
+
 const NAV_SECTIONS: NavSection[] = [
   {
     label: "Playback",
@@ -60,6 +67,8 @@ const NAV_SECTIONS: NavSection[] = [
         description: "Quality, language, and skipping",
         keywords: [
           "video quality",
+          "bitrate",
+          "bandwidth",
           "spoken language",
           "metadata language",
           "auto skip",
@@ -68,7 +77,8 @@ const NAV_SECTIONS: NavSection[] = [
           "preview",
         ],
         settings: settingIndex(
-          "Video quality",
+          "Preferred quality",
+          "Maximum bitrate",
           "Spoken language",
           "Metadata language",
           "Auto-skip intros",
@@ -285,6 +295,37 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Account",
     items: [
       {
+        path: "devices",
+        label: "Your Devices",
+        icon: MonitorSmartphone,
+        description: "Settings for each device you watch on",
+        keywords: [
+          "devices",
+          "tv",
+          "phone",
+          "tablet",
+          "browser",
+          "this device",
+          "forget device",
+          "hdr",
+          "dolby vision",
+          "sound delay",
+          "lip sync",
+        ],
+        settings: settingIndex(
+          "Preferred quality",
+          "Maximum bitrate",
+          "HDR",
+          "Dolby Vision",
+          "Play Dolby Vision films as HDR10",
+          "Match content frame rate",
+          "How video fills the screen",
+          "Audio sync offset",
+          "Subtitle sync offset",
+          "Forget this device",
+        ),
+      },
+      {
         path: "notifications",
         label: "Notifications",
         icon: Bell,
@@ -358,6 +399,9 @@ export default function SettingsLayout() {
   const segments = location.pathname.split("/");
   const activeSegment = segments[2] || "playback";
   const canManageProfiles = actingAdmin || profile?.is_primary === true;
+  // Most settings pages are a single column of rows and read best measured.
+  // A page that is itself two panes needs the room, so it opts out.
+  const wideSetting = WIDE_SETTINGS_PAGES.has(activeSegment);
 
   const visibleSections = useMemo(
     () =>
@@ -469,7 +513,7 @@ export default function SettingsLayout() {
           </aside>
 
           <div className="min-w-0 flex-1 pt-8 lg:pt-0">
-            <div className="mx-auto w-full max-w-3xl">
+            <div className={cn("mx-auto w-full", wideSetting ? "max-w-6xl" : "max-w-3xl")}>
               <Outlet />
             </div>
           </div>

@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import DatabaseSettings from "./DatabaseSettings";
+import { USER_DATABASE_BACKEND_OPTIONS } from "./databaseSettingOptions";
 
 const useSettingsFormMock = vi.fn();
 const useCheckAdminSettingsConnectionMock = vi.fn();
@@ -48,6 +49,14 @@ describe("DatabaseSettings", () => {
     expect(markup).toContain("Redis");
     expect(markup).toContain("Enable Redis");
     expect(markup).not.toContain("Connection URL");
+  });
+
+  it("marks the unimplemented SQLite backend as unavailable", () => {
+    expect(USER_DATABASE_BACKEND_OPTIONS).toContainEqual({
+      value: "sqlite",
+      label: "SQLite (TBD)",
+      disabled: true,
+    });
   });
 
   it("shows the Redis connection URL when Redis is enabled", () => {

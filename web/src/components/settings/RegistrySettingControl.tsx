@@ -1,4 +1,3 @@
-import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -7,6 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SettingSlider } from "@/components/settings/SettingSlider";
 import { controlKindFor, optionsFor, type SettingDisplay } from "@/lib/settingsDisplay";
 
 const EMPTY_SELECT_VALUE = "__empty__";
@@ -58,20 +58,17 @@ export function RegistrySettingControl({
     const parsed = Number(value);
     const numericValue = Number.isFinite(parsed) && value !== "" ? parsed : fallback;
     return (
-      <div className="flex w-full max-w-[260px] items-center gap-3">
-        <Slider
-          value={[numericValue]}
-          min={definition.minimum}
-          max={definition.maximum}
-          step={definition.step}
-          disabled={disabled}
-          onValueCommit={(values) => onChange(String(values[0] ?? numericValue))}
-        />
-        <span className="text-muted-foreground min-w-16 text-right text-xs font-medium">
-          {numericValue}
-          {definition.unit ? ` ${definition.unit}` : ""}
-        </span>
-      </div>
+      <SettingSlider
+        className="flex w-full max-w-[260px] items-center gap-3"
+        value={numericValue}
+        min={definition.minimum}
+        max={definition.maximum}
+        step={definition.step}
+        unit={definition.unit}
+        disabled={disabled}
+        aria-label={definition.label}
+        onCommit={(next) => onChange(String(next))}
+      />
     );
   }
 

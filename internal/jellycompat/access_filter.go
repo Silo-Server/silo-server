@@ -43,13 +43,14 @@ func NewScopeAccessFilter(resolver ScopeResolver) AccessFilterResolver {
 			}
 		}
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:        scope.AllowedLibraryIDs,
-			DisabledLibraryIDs:       scope.DisabledLibraryIDs,
-			MaxContentRating:         scope.MaxContentRating,
-			MaxPlaybackQuality:       scope.MaxPlaybackQuality,
-			ProfilePreferredLanguage: scope.PreferredMetadataLanguage,
-			UserID:                   userID,
-			ProfileID:                profileID,
+			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
+			MaxContentRating:          scope.MaxContentRating,
+			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
+			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
+			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
+			UserID:                    userID,
+			ProfileID:                 profileID,
 		}
 	}
 }

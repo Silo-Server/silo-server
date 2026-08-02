@@ -70,6 +70,7 @@ export function WatchPage({
   initialPosition,
   forceInitialPosition,
   qualityPreference,
+  maxBitrateKbps,
   explicitAudioTrackIndex,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
@@ -480,6 +481,7 @@ export function WatchPage({
       }
       duration={selectedDuration}
       qualityPreference={qualityPreference}
+      maxBitrateKbps={maxBitrateKbps}
       seriesContext={seriesContext}
       onNavigateEpisode={onNavigateEpisode}
       displayMode={displayMode}

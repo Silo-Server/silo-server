@@ -41,6 +41,7 @@ import PersonDetail from "@/pages/PersonDetail";
 import Collections from "@/pages/Collections";
 import CollectionEditor from "@/pages/CollectionEditor";
 import Notifications from "@/pages/Notifications";
+import DeviceSettings from "@/pages/settings/DeviceSettings";
 import NotificationsSettings from "@/pages/settings/NotificationsSettings";
 import Requests from "@/pages/Requests";
 import RequestBrowse from "@/pages/RequestBrowse";
@@ -489,6 +490,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
