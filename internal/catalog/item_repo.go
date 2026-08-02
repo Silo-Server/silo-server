@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1873,6 +1874,46 @@ func (r *ItemRepository) IncrementRefreshFailure(ctx context.Context, contentID 
 		return ErrItemNotFound
 	}
 	return nil
+}
+
+// TryClaimTrailersRefresh atomically consumes an item's trailer-refresh
+// cooldown slot. The UPDATE is the gate: it writes NOW() only when the stored
+// timestamp is NULL or older than the cooldown window, so concurrent callers
+// cannot both win. A caller that wins gets (true, nil, nil).
+//
+// Losing the gate means either the item is in cooldown or it no longer exists,
+// which the follow-up read distinguishes: it returns the stored timestamp (the
+// basis for the caller's next-allowed time) or ErrItemNotFound.
+func (r *ItemRepository) TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE media_items
+		SET trailers_refresh_requested_at = NOW()
+		WHERE content_id = $1
+		  AND (trailers_refresh_requested_at IS NULL
+		       OR trailers_refresh_requested_at < NOW() - $2::interval)`,
+		contentID, fmt.Sprintf("%d seconds", int64(cooldown.Seconds())),
+	)
+	if err != nil {
+		return false, nil, fmt.Errorf("claiming trailers refresh: %w", err)
+	}
+	if tag.RowsAffected() > 0 {
+		return true, nil, nil
+	}
+
+	var requestedAt *time.Time
+	err = r.pool.QueryRow(ctx, `
+		SELECT trailers_refresh_requested_at
+		FROM media_items
+		WHERE content_id = $1`,
+		contentID,
+	).Scan(&requestedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil, ErrItemNotFound
+		}
+		return false, nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+	}
+	return false, requestedAt, nil
 }
 
 // MediaTMDBRow is a single result row from LookupTMDBIDs, containing the

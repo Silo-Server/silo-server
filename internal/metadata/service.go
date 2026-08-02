@@ -80,6 +80,14 @@ type metadataItemDeleteRepo interface {
 	Delete(ctx context.Context, contentID string) ([]string, error)
 }
 
+// metadataTrailerRefreshRepo is the cooldown gate behind
+// RequestTrailersRefresh. It is a separate optional interface (asserted on
+// itemRepo) because only the viewer-facing trailer action needs it; the
+// concrete *catalog.ItemRepository satisfies it.
+type metadataTrailerRefreshRepo interface {
+	TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error)
+}
+
 type metadataProviderIDRepo interface {
 	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaItemProviderID, error)
 	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
@@ -2672,6 +2680,79 @@ func (s *MetadataService) RequestStaleMetadataRefresh(ctx context.Context, targe
 		s.startOnDemandMetadataRefresh(targetType, contentID)
 	}
 	return nil
+}
+
+// Trailer refresh outcome statuses returned by RequestTrailersRefresh.
+const (
+	// TrailerRefreshStatusQueued means the request won the cooldown gate and a
+	// detached refresh was started.
+	TrailerRefreshStatusQueued = "queued"
+	// TrailerRefreshStatusCooldown means the item was refreshed within the
+	// cooldown window; NextAllowedAt says when the next request may win.
+	TrailerRefreshStatusCooldown = "cooldown"
+	// TrailerRefreshStatusDisabled means every library containing the item has
+	// remote videos turned off, so a refresh could not produce trailers.
+	TrailerRefreshStatusDisabled = "disabled"
+)
+
+// TrailerRefreshCooldown is the per-item window between viewer-triggered
+// trailer refreshes. A full single-item refresh is not cheap, and provider
+// video sets change slowly, so the window is deliberately long.
+const TrailerRefreshCooldown = 7 * 24 * time.Hour
+
+// TrailerRefreshOutcome reports what a viewer's "find trailers" request did.
+// NextAllowedAt is set only for the cooldown status.
+type TrailerRefreshOutcome struct {
+	Status        string
+	NextAllowedAt *time.Time
+}
+
+// RequestTrailersRefresh is the viewer-facing trailer fetch: it starts a full
+// single-item metadata refresh at most once per TrailerRefreshCooldown.
+//
+// The refresh runs in scheduled mode (MergeFillEmpty), so this non-admin
+// trigger cannot overwrite unlocked admin edits, while found videos still
+// persist — mergeAndPersist writes item_videos whenever providers returned
+// any, and skips the write when they returned none, so a transient empty
+// result cannot wipe stored trailers.
+//
+// Ordering matters: the disabled check runs before the gate so an item whose
+// libraries have remote videos turned off never burns a cooldown slot.
+func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID string) (TrailerRefreshOutcome, error) {
+	if s == nil {
+		return TrailerRefreshOutcome{}, ErrMetadataNotFound
+	}
+	contentID = strings.TrimSpace(contentID)
+	if contentID == "" {
+		return TrailerRefreshOutcome{}, catalog.ErrItemNotFound
+	}
+
+	// A non-nil empty allow-list means every containing library disabled
+	// remote videos. A nil map means allow-all (unknown scope or a transient
+	// lookup failure) and must not short-circuit.
+	if allowed := s.resolveAllowedVideoKinds(ctx, contentID, 0); allowed != nil && len(allowed) == 0 {
+		return TrailerRefreshOutcome{Status: TrailerRefreshStatusDisabled}, nil
+	}
+
+	gate, ok := s.itemRepo.(metadataTrailerRefreshRepo)
+	if !ok || gate == nil {
+		return TrailerRefreshOutcome{}, ErrMetadataNotFound
+	}
+	claimed, requestedAt, err := gate.TryClaimTrailersRefresh(ctx, contentID, TrailerRefreshCooldown)
+	if err != nil {
+		return TrailerRefreshOutcome{}, err
+	}
+	if !claimed {
+		outcome := TrailerRefreshOutcome{Status: TrailerRefreshStatusCooldown}
+		if requestedAt != nil {
+			next := requestedAt.Add(TrailerRefreshCooldown).UTC()
+			outcome.NextAllowedAt = &next
+		}
+		return outcome, nil
+	}
+
+	s.startOnDemandMetadataRefresh(RefreshTargetItem, contentID)
+	return TrailerRefreshOutcome{Status: TrailerRefreshStatusQueued}, nil
 }
 
 func (s *MetadataService) refreshDebtTargetIsDue(ctx context.Context, targetType, contentID string, now time.Time) (bool, error) {

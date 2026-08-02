@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -47,6 +48,21 @@ type MetadataRefreshRequester interface {
 	RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error
 }
 
+// TrailerRefreshRequester starts a viewer-triggered trailer fetch for one item
+// and reports whether it was queued, in cooldown, or disabled by every
+// containing library. Implemented by *metadata.MetadataService.
+type TrailerRefreshRequester interface {
+	RequestTrailersRefresh(ctx context.Context, contentID string) (metadata.TrailerRefreshOutcome, error)
+}
+
+// trailerItemAccess resolves and authorizes the item behind the trailer
+// refresh route. The concrete *catalog.ItemRepository satisfies it; the
+// interface keeps the handler testable without a database.
+type trailerItemAccess interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+}
+
 type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
@@ -70,6 +86,9 @@ type ItemsHandler struct {
 	profileStaler            ProfileStaler
 	profileRefreshRequester  ProfileRefreshRequester
 	metadataRefreshRequester MetadataRefreshRequester
+	trailerRefreshRequester  TrailerRefreshRequester
+	trailerItemAccess        trailerItemAccess
+	trailerRefreshLimiter    ratelimit.RateLimiter
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
 	ebookReadStateStore      EbookReadStateStore
@@ -128,6 +147,22 @@ func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshReques
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {
 	h.metadataRefreshRequester = requester
+}
+
+// SetTrailerRefreshRequester wires the viewer-facing trailer fetch action.
+// Leaving it unset disables the route's behavior (503), so the router only
+// registers it when the metadata service is available.
+func (h *ItemsHandler) SetTrailerRefreshRequester(requester TrailerRefreshRequester) {
+	if h == nil {
+		return
+	}
+	h.trailerRefreshRequester = requester
+	if h.trailerRefreshLimiter == nil {
+		h.trailerRefreshLimiter = ratelimit.NewMemoryLimiter()
+	}
+	if h.trailerItemAccess == nil && h.itemRepo != nil {
+		h.trailerItemAccess = h.itemRepo
+	}
 }
 
 func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchProvider) {
@@ -426,6 +461,121 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// trailerRefreshRate bounds how often one user may trigger trailer fetches
+// across all items. The per-item cooldown enforced by the metadata service is
+// the real budget; this only keeps a misbehaving client from hammering the
+// endpoint (same shape as personRefreshRate).
+var trailerRefreshRate = ratelimit.Rate{
+	RequestsPerSecond: 10,
+	RequestsPerMinute: 10,
+	Burst:             10,
+}
+
+// trailerRefreshResponse is the body of the trailer refresh endpoint.
+// NextAllowedAt is present only for the cooldown status.
+type trailerRefreshResponse struct {
+	Status        string `json:"status"`
+	NextAllowedAt string `json:"next_allowed_at,omitempty"`
+}
+
+// HandleRequestTrailersRefresh handles POST /api/v1/items/{id}/trailers/refresh:
+// any authenticated viewer with access to a movie or series may ask the server
+// to fetch its remote trailers, at most once per item per cooldown window.
+//
+// "cooldown" and "disabled" are expected client-rendered states, not errors,
+// so they answer 200; 429 stays reserved for the per-user limiter. The access
+// check runs before the metadata service is called so a caller who cannot see
+// the item can never consume its cooldown slot.
+func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.trailerRefreshRequester == nil || h.trailerItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Trailer refresh is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+		return
+	}
+
+	userID := apimw.GetUserID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	if h.trailerRefreshLimiter != nil {
+		result := h.trailerRefreshLimiter.Allow(r.Context(), strconv.Itoa(userID), trailerRefreshRate)
+		if !result.Allowed {
+			if result.RetryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(result.RetryAfter.Seconds()))))
+			}
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many trailer refresh requests")
+			return
+		}
+	}
+
+	item, err := h.trailerItemAccess.GetByID(r.Context(), contentID)
+	if err != nil || item == nil {
+		if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
+			slog.ErrorContext(r.Context(), "trailers: failed to look up item", "component", "api",
+				"content_id", contentID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found", "Item not found")
+		return
+	}
+	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), contentID, h.accessFilter(r)); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "trailers: failed to authorize item", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+		return
+	}
+
+	// Only movie and series detail responses carry videos/extras, so any other
+	// type is a client bug rather than an empty result.
+	switch item.Type {
+	case "movie", "series":
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported_type", "Trailers are only available for movies and series")
+		return
+	}
+
+	outcome, err := h.trailerRefreshRequester.RequestTrailersRefresh(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "trailers: failed to request refresh", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request trailers")
+		return
+	}
+
+	switch outcome.Status {
+	case metadata.TrailerRefreshStatusQueued:
+		writeJSON(w, http.StatusAccepted, trailerRefreshResponse{Status: outcome.Status})
+	case metadata.TrailerRefreshStatusCooldown:
+		resp := trailerRefreshResponse{Status: outcome.Status}
+		if outcome.NextAllowedAt != nil {
+			resp.NextAllowedAt = outcome.NextAllowedAt.UTC().Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, resp)
+	case metadata.TrailerRefreshStatusDisabled:
+		writeJSON(w, http.StatusOK, trailerRefreshResponse{Status: outcome.Status})
+	default:
+		slog.ErrorContext(r.Context(), "trailers: unexpected refresh outcome", "component", "api",
+			"content_id", contentID, "status", outcome.Status)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request trailers")
+	}
 }
 
 // HandleMarkWatched handles POST /watched/{id}.

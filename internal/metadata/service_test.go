@@ -32,6 +32,12 @@ const (
 type fakeItemRepo struct {
 	mu    sync.Mutex
 	items map[string]*models.MediaItem
+
+	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
+	trailersRequestedAt map[string]time.Time
+	trailersClaims      int
+	trailersClaimErr    error
+	now                 func() time.Time
 }
 
 func newFakeItemRepo() *fakeItemRepo {
@@ -120,6 +126,41 @@ func (r *fakeItemRepo) ReplacePeople(_ context.Context, _ string, _ []models.Ite
 
 func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ int, _ string, _ int) ([]string, error) {
 	return nil, nil
+}
+
+// TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the
+// claim succeeds only when no timestamp is stored or the stored one predates
+// the cooldown window, and a losing caller reads back the stored timestamp.
+func (r *fakeItemRepo) TryClaimTrailersRefresh(_ context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok {
+		return false, nil, catalog.ErrItemNotFound
+	}
+	now := time.Now().UTC()
+	if r.now != nil {
+		now = r.now()
+	}
+	if r.trailersClaimErr != nil {
+		return false, nil, r.trailersClaimErr
+	}
+	stored, ok := r.trailersRequestedAt[contentID]
+	if !ok || stored.Before(now.Add(-cooldown)) {
+		if r.trailersRequestedAt == nil {
+			r.trailersRequestedAt = make(map[string]time.Time)
+		}
+		r.trailersRequestedAt[contentID] = now
+		r.trailersClaims++
+		return true, nil, nil
+	}
+	blocked := stored
+	return false, &blocked, nil
+}
+
+func (r *fakeItemRepo) trailersClaimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trailersClaims
 }
 
 type fakeRefreshDebtRepo struct {

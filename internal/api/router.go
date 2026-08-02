@@ -2508,6 +2508,18 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
 				}
 
+				// Viewer-facing trailer fetch. Registered beside the on-view
+				// translation trigger because it is the same shape: a
+				// non-admin, item-scoped metadata action guarded by item
+				// access plus a per-user limiter, with the real budget being
+				// the per-item cooldown the metadata service enforces.
+				if itemsHandler != nil && itemRepo != nil {
+					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
+						itemsHandler.SetTrailerRefreshRequester(requester)
+						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
+					}
+				}
+
 				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
