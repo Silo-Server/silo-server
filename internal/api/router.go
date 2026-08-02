@@ -2523,6 +2523,12 @@ func NewRouter(deps Dependencies) chi.Router {
 				// refresh:false.
 				if itemsHandler != nil && itemRepo != nil {
 					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
+						// Share the process's configured limiter so the
+						// per-user budget is one budget on Redis deployments
+						// rather than one per instance. Nil when rate limiting
+						// is disabled; the handler then keeps its private
+						// in-memory fallback.
+						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
 						itemsHandler.SetTrailerRefreshRequester(requester)
 						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
 					}

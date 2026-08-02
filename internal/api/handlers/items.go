@@ -163,6 +163,23 @@ func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequ
 	h.metadataRefreshRequester = requester
 }
 
+// SetTrailerRefreshLimiter wires the process's configured rate limiter into the
+// trailer fetch action, so the per-user budget is shared across instances when
+// the deployment runs the Redis backend. A private in-memory limiter would give
+// each instance its own allowance for the same user, and the per-item database
+// cooldown cannot make up the difference — it bounds one item, while this
+// budget bounds how many distinct items a user can start refreshes for.
+//
+// Call before SetTrailerRefreshRequester, which falls back to a private
+// in-memory limiter when none is set (single-instance deployments, and any
+// deployment with rate limiting turned off entirely).
+func (h *ItemsHandler) SetTrailerRefreshLimiter(limiter ratelimit.RateLimiter) {
+	if h == nil || limiter == nil {
+		return
+	}
+	h.trailerRefreshLimiter = limiter
+}
+
 // SetTrailerRefreshRequester wires the viewer-facing trailer fetch action.
 // Leaving it unset disables the route's behavior (503), so the router only
 // registers it when the metadata service is available.
@@ -495,6 +512,13 @@ var trailerRefreshRate = ratelimit.Rate{
 	Burst:             10,
 }
 
+// trailerRefreshLimiterKey namespaces this action's per-user counter. The
+// limiter behind it is normally the process-wide one shared with the rate-limit
+// middleware, whose keys are namespaced the same way ("ip:", "key:").
+func trailerRefreshLimiterKey(userID int) string {
+	return "trailers:" + strconv.Itoa(userID)
+}
+
 // trailerRefreshResponse is the body of the trailer refresh endpoint.
 // NextAllowedAt is present only for the cooldown status.
 type trailerRefreshResponse struct {
@@ -582,7 +606,10 @@ func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *ht
 	}
 
 	if h.trailerRefreshLimiter != nil {
-		result := h.trailerRefreshLimiter.Allow(r.Context(), strconv.Itoa(userID), trailerRefreshRate)
+		// The limiter may be the process-wide one the middleware uses, so the
+		// key is namespaced: an unprefixed user id would share a counter with
+		// whatever else keys on the same string.
+		result := h.trailerRefreshLimiter.Allow(r.Context(), trailerRefreshLimiterKey(userID), trailerRefreshRate)
 		if !result.Allowed {
 			if result.RetryAfter > 0 {
 				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(result.RetryAfter.Seconds()))))

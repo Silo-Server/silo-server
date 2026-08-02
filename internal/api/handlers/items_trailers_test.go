@@ -497,3 +497,75 @@ func TestTrailerRefreshCapability(t *testing.T) {
 		}
 	})
 }
+
+// recordingLimiter captures the keys an action limiter is called with.
+type recordingLimiter struct {
+	keys    []string
+	allowed bool
+}
+
+func (l *recordingLimiter) Allow(_ context.Context, key string, _ ratelimit.Rate) ratelimit.AllowResult {
+	l.keys = append(l.keys, key)
+	return ratelimit.AllowResult{Allowed: l.allowed, RetryAfter: time.Second}
+}
+
+func (l *recordingLimiter) Close() {}
+
+// The action's budget must be enforced by the process's configured limiter, or
+// a Redis deployment gives every instance an independent allowance for the same
+// user and multiplies the stated budget by the instance count. The per-item
+// database cooldown cannot compensate: it bounds one item, while this bounds
+// how many distinct items a user can start refreshes for.
+func TestTrailersRefreshUsesTheInjectedSharedLimiter(t *testing.T) {
+	itemAccess := &fakeTrailerItemAccess{
+		items:     map[string]*models.MediaItem{"movie-1": {ContentID: "movie-1", Type: "movie"}},
+		ensureErr: map[string]error{},
+	}
+	requester := &fakeTrailerRefreshRequester{
+		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued},
+	}
+	handler := newTrailerRefreshHandler(itemAccess, requester)
+	shared := &recordingLimiter{allowed: false}
+	handler.SetTrailerRefreshLimiter(shared)
+	// The requester wiring must not replace an injected limiter with a private
+	// in-memory one, which is the whole point of injecting it.
+	handler.SetTrailerRefreshRequester(requester)
+
+	rr := httptest.NewRecorder()
+	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("movie-1", 7))
+
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d — the injected limiter's verdict was ignored (%s)",
+			rr.Code, http.StatusTooManyRequests, rr.Body.String())
+	}
+	if len(shared.keys) != 1 {
+		t.Fatalf("shared limiter consulted %d times, want 1", len(shared.keys))
+	}
+	// The limiter may be the process-wide one, whose keyspace is shared with
+	// the rate-limit middleware ("ip:", "key:"), so this action's keys have to
+	// be namespaced too.
+	if shared.keys[0] != trailerRefreshLimiterKey(7) {
+		t.Fatalf("limiter key = %q, want the namespaced %q", shared.keys[0], trailerRefreshLimiterKey(7))
+	}
+	if shared.keys[0] == "7" {
+		t.Fatal("an unprefixed user id would collide with other keyspaces in a shared limiter")
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("a rate-limited request must not reach the service, got %v", requester.requests)
+	}
+}
+
+// Rate limiting can be disabled outright (or the database unavailable), in
+// which case there is no shared limiter to inject. The action keeps its own
+// in-memory guard rather than running unbounded.
+func TestTrailersRefreshFallsBackToAPrivateLimiter(t *testing.T) {
+	handler := &ItemsHandler{}
+	handler.SetTrailerRefreshLimiter(nil)
+	handler.SetTrailerRefreshRequester(&fakeTrailerRefreshRequester{
+		outcome: metadata.TrailerRefreshOutcome{Status: metadata.TrailerRefreshStatusQueued},
+	})
+
+	if handler.trailerRefreshLimiter == nil {
+		t.Fatal("the action must keep a limiter even when no shared one is configured")
+	}
+}

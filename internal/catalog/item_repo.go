@@ -1970,6 +1970,32 @@ func (r *ItemRepository) ReleaseTrailersRefreshClaim(ctx context.Context, conten
 	return nil
 }
 
+// TrailersRefreshRequestedAt reads the timestamp of the trailer-refresh
+// cooldown claim currently held for an item, or nil when the slot is free.
+//
+// The durable recovery path needs it: when the process that consumed a slot
+// dies mid-refresh, the refresh-debt queue re-runs the work in a worker that
+// never saw the claim and so has no timestamp to release it on. Reading the
+// claim before the refresh starts gives that worker the same exact key the
+// original request had, so ReleaseTrailersRefreshClaim's equality guard keeps
+// working: a slot re-claimed in the meantime is left alone.
+func (r *ItemRepository) TrailersRefreshRequestedAt(ctx context.Context, contentID string) (*time.Time, error) {
+	var requestedAt *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT trailers_refresh_requested_at
+		FROM media_items
+		WHERE content_id = $1`,
+		contentID,
+	).Scan(&requestedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrItemNotFound
+		}
+		return nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+	}
+	return requestedAt, nil
+}
+
 // MediaTMDBRow is a single result row from LookupTMDBIDs, containing the
 // fields needed by the pluginhost CatalogPresence adapter.
 type MediaTMDBRow struct {

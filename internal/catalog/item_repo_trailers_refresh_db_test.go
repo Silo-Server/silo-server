@@ -302,3 +302,77 @@ func TestTryClaimTrailersRefreshRetriesWhenSlotIsFreedMidClassification(t *testi
 		t.Fatal("a cooldown must be dateable")
 	}
 }
+
+// TestTrailersRefreshRequestedAt covers the read the durable recovery path uses
+// to inherit a claim: a worker recovering a request whose process died never
+// saw the claim, so it reads back the stored timestamp and releases on that
+// exact key, keeping ReleaseTrailersRefreshClaim's equality guard meaningful.
+func TestTrailersRefreshRequestedAt(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	repo := NewItemRepository(pool)
+	contentID := fmt.Sprintf("trailer-read-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres)
+		VALUES ($1, 'movie', 'Trailer Read', 'matched', '{}'::text[])
+	`, contentID); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+
+	const cooldown = 7 * 24 * time.Hour
+
+	// A free slot reads as nil rather than an error: the recovery path uses
+	// that to conclude it owes nobody a release.
+	requestedAt, err := repo.TrailersRefreshRequestedAt(ctx, contentID)
+	if err != nil {
+		t.Fatalf("read an unclaimed slot: %v", err)
+	}
+	if requestedAt != nil {
+		t.Fatalf("unclaimed slot read as %s, want nil", requestedAt)
+	}
+
+	claimed, claimedAt, err := repo.TryClaimTrailersRefresh(ctx, contentID, cooldown)
+	if err != nil || !claimed || claimedAt == nil {
+		t.Fatalf("claim = %v, at = %v, err = %v", claimed, claimedAt, err)
+	}
+
+	requestedAt, err = repo.TrailersRefreshRequestedAt(ctx, contentID)
+	if err != nil {
+		t.Fatalf("read a claimed slot: %v", err)
+	}
+	if requestedAt == nil {
+		t.Fatal("a claimed slot must read back its timestamp")
+	}
+	// The read must reproduce the claim exactly, or the equality-guarded
+	// release it feeds would silently match nothing.
+	if !requestedAt.Equal(*claimedAt) {
+		t.Fatalf("read %s, want the claimed timestamp %s", requestedAt, claimedAt)
+	}
+	if err := repo.ReleaseTrailersRefreshClaim(ctx, contentID, *requestedAt); err != nil {
+		t.Fatalf("release on the read timestamp: %v", err)
+	}
+	requestedAt, err = repo.TrailersRefreshRequestedAt(ctx, contentID)
+	if err != nil {
+		t.Fatalf("read after release: %v", err)
+	}
+	if requestedAt != nil {
+		t.Fatalf("released slot still holds %s", requestedAt)
+	}
+
+	// A missing item is distinguishable from a free slot.
+	if _, err := repo.TrailersRefreshRequestedAt(ctx, contentID+"-missing"); !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("read for a missing item = %v, want ErrItemNotFound", err)
+	}
+}

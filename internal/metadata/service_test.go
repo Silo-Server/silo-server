@@ -34,14 +34,15 @@ type fakeItemRepo struct {
 	items map[string]*models.MediaItem
 
 	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
-	trailersRequestedAt map[string]time.Time
-	trailersClaims      int
-	trailersClaimErr    error
-	trailersClaimResult *trailersClaimResult
-	trailersReleases    int
-	trailersReleased    chan struct{}
-	trailersReleaseGate chan struct{}
-	now                 func() time.Time
+	trailersRequestedAt    map[string]time.Time
+	trailersRequestedAtErr error
+	trailersClaims         int
+	trailersClaimErr       error
+	trailersClaimResult    *trailersClaimResult
+	trailersReleases       int
+	trailersReleased       chan struct{}
+	trailersReleaseGate    chan struct{}
+	now                    func() time.Time
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -201,6 +202,24 @@ func (r *fakeItemRepo) ReleaseTrailersRefreshClaim(_ context.Context, contentID 
 	return nil
 }
 
+// TrailersRefreshRequestedAt reads back the stored claim the way the durable
+// recovery path does, so a refresh that inherits a claim can release it on the
+// same key the original request wrote.
+func (r *fakeItemRepo) TrailersRefreshRequestedAt(_ context.Context, contentID string) (*time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok {
+		return nil, catalog.ErrItemNotFound
+	}
+	if r.trailersRequestedAtErr != nil {
+		return nil, r.trailersRequestedAtErr
+	}
+	if stored, ok := r.trailersRequestedAt[contentID]; ok {
+		return &stored, nil
+	}
+	return nil, nil
+}
+
 // expectTrailersRelease arms a channel closed by the next
 // ReleaseTrailersRefreshClaim, so a test can wait for the detached refresh's
 // failure path instead of polling.
@@ -292,8 +311,13 @@ func (r *fakeRefreshDebtRepo) UpsertTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
+// RequestDue mirrors the repository's merge semantics rather than overwriting:
+// the real statement ORs the reason mask, keeps the greater priority and the
+// earlier next_refresh_at. Callers reason about all three (a trailer request
+// adds its reason to whatever debt an item already has, and must not push
+// genuinely-due work out), so a fake that replaced the row would hide that.
 func (r *fakeRefreshDebtRepo) RequestDue(
-	ctx context.Context,
+	_ context.Context,
 	targetType string,
 	contentID string,
 	priority int,
@@ -301,7 +325,29 @@ func (r *fakeRefreshDebtRepo) RequestDue(
 	nextRefreshAt time.Time,
 	_ time.Duration,
 ) error {
-	return r.UpsertTargetDebt(ctx, targetType, contentID, priority, reasonMask, nextRefreshAt)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	targetType = NormalizeRefreshTargetType(targetType)
+	key := fakeRefreshDebtKey(targetType, contentID)
+	if key == "" || contentID == "" || reasonMask == 0 {
+		return nil
+	}
+	if existing, ok := r.debts[key]; ok {
+		existing.ReasonMask |= reasonMask
+		existing.Priority = max(existing.Priority, priority)
+		if nextRefreshAt.Before(existing.NextRefreshAt) {
+			existing.NextRefreshAt = nextRefreshAt
+		}
+		return nil
+	}
+	r.debts[key] = &models.MetadataRefreshDebt{
+		TargetType:    targetType,
+		ContentID:     contentID,
+		Priority:      priority,
+		ReasonMask:    reasonMask,
+		NextRefreshAt: nextRefreshAt,
+	}
+	return nil
 }
 
 func (r *fakeRefreshDebtRepo) MarkFailure(

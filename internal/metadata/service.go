@@ -87,6 +87,7 @@ type metadataItemDeleteRepo interface {
 type metadataTrailerRefreshRepo interface {
 	TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error)
 	ReleaseTrailersRefreshClaim(ctx context.Context, contentID string, claimedAt time.Time) error
+	TrailersRefreshRequestedAt(ctx context.Context, contentID string) (*time.Time, error)
 }
 
 type metadataProviderIDRepo interface {
@@ -2625,8 +2626,88 @@ func (s *MetadataService) RefreshScheduledItem(ctx context.Context, contentID st
 
 // RefreshScheduledTarget re-fetches metadata for a queued item, season, or
 // episode target using the background refresh merge policy.
+//
+// A queued item may be the durable recovery for a viewer's trailer request
+// whose process died mid-refresh (see RequestTrailersRefresh). That request
+// consumed a week-long cooldown slot and took its release hook down with the
+// process, so this path adopts both: it carries the same failure semantics, and
+// a recovery that fails hands the slot back instead of leaving the viewer
+// blocked for a week over trailers nobody ever stored.
 func (s *MetadataService) RefreshScheduledTarget(ctx context.Context, targetType, contentID string) error {
+	if NormalizeRefreshTargetType(targetType) == RefreshTargetItem {
+		if claim := s.adoptTrailersRefreshClaim(ctx, contentID); claim != nil {
+			return claim.run(ctx)
+		}
+	}
 	return s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false)
+}
+
+// trailersRefreshRecovery is an inherited trailer-refresh cooldown claim, held
+// across the scheduled refresh that is recovering the request which consumed
+// it.
+type trailersRefreshRecovery struct {
+	service   *MetadataService
+	gate      metadataTrailerRefreshRepo
+	contentID string
+	claimedAt time.Time
+}
+
+// adoptTrailersRefreshClaim reports the cooldown claim a queued item's refresh
+// is responsible for, or nil when the refresh owes nobody a release.
+//
+// The debt row's trailers-requested reason bit is what makes the claim
+// identifiable: RequestTrailersRefresh sets it exactly when it consumes a slot,
+// and the first refresh that resolves the row clears it. Reading the stored
+// timestamp gives the same key the original request held, so the release stays
+// equality-guarded — a slot re-claimed by a newer request in the meantime is
+// that request's to release, not this one's.
+func (s *MetadataService) adoptTrailersRefreshClaim(ctx context.Context, contentID string) *trailersRefreshRecovery {
+	if s == nil || strings.TrimSpace(contentID) == "" {
+		return nil
+	}
+	gate, ok := s.itemRepo.(metadataTrailerRefreshRepo)
+	if !ok || gate == nil {
+		return nil
+	}
+	reasonMask, err := s.currentRefreshDebtTargetReasonMask(ctx, RefreshTargetItem, contentID)
+	if err != nil || !hasRefreshDebtReason(reasonMask, RefreshDebtReasonTrailersRequested) {
+		return nil
+	}
+	claimedAt, err := gate.TrailersRefreshRequestedAt(ctx, contentID)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to read the trailers refresh claim a queued refresh inherits",
+			"component", "metadata", "content_id", contentID, "error", err)
+		return nil
+	}
+	if claimedAt == nil {
+		// The slot was already handed back (or the window lapsed), so this
+		// refresh owes nothing.
+		return nil
+	}
+	return &trailersRefreshRecovery{service: s, gate: gate, contentID: contentID, claimedAt: *claimedAt}
+}
+
+// run performs the recovery refresh under the inherited claim, releasing the
+// slot on the same failures the original request's hook covered — including a
+// videos write that failed and was only logged, which leaves the refresh
+// "successful" while storing none of the trailers the cooldown was charged for.
+func (r *trailersRefreshRecovery) run(ctx context.Context) error {
+	var videoPersistErr atomic.Pointer[error]
+	refreshCtx := withVideoPersistFailureObserver(ctx, func(persistErr error) {
+		videoPersistErr.CompareAndSwap(nil, &persistErr)
+	})
+
+	err := r.service.refreshTarget(refreshCtx, RefreshTargetItem, r.contentID, 0, ModeScheduledRefresh, false)
+	releaseErr := err
+	if releaseErr == nil {
+		if stored := videoPersistErr.Load(); stored != nil {
+			releaseErr = fmt.Errorf("persisting item videos: %w", *stored)
+		}
+	}
+	if releaseErr != nil {
+		r.service.releaseTrailersRefreshClaim(r.gate, r.contentID, r.claimedAt, releaseErr)
+	}
+	return err
 }
 
 // RefreshItemForLibrary re-fetches metadata for an item using a specific
@@ -2739,6 +2820,20 @@ const trailerRefreshReleaseTimeout = 15 * time.Second
 // a deadline of its own; it is a single indexed UPDATE, so this is generous.
 const trailerRefreshClaimTimeout = 15 * time.Second
 
+// trailerRefreshRecoveryDelay holds the durable recovery row back until after
+// the detached fast path can possibly still be running.
+//
+// The debt row exists only to survive a process that dies mid-refresh. Due
+// immediately, it is claimable by the refresh_metadata task the moment it is
+// written, and that task calls RefreshScheduledTarget without consulting the
+// in-process claim — so the worker and the goroutine would run the same full
+// provider refresh at once, burning provider quota and racing each other's
+// writes. Delaying past metadataOnDemandRefreshTimeout means the row can only
+// come due once the goroutine is guaranteed finished (or gone with its
+// process); on the normal path the refresh's own debt sync resolves the row
+// long before then.
+const trailerRefreshRecoveryDelay = 5 * time.Minute
+
 // videoPersistFailureContextKey scopes a videos-persistence observer to one
 // refresh. mergeAndPersist logs and continues when videoRepo.ReplaceByContentID
 // fails, because a video write failure must not fail a whole metadata refresh
@@ -2793,6 +2888,20 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 	contentID = strings.TrimSpace(contentID)
 	if contentID == "" {
 		return TrailerRefreshOutcome{}, catalog.ErrItemNotFound
+	}
+
+	// An admin lock on the videos field makes mergeAndPersist skip the
+	// item_videos write entirely (its isFieldLocked(locked, FieldVideos)
+	// guard), so a refresh started here would report success and consume the
+	// week having saved nothing. From the viewer's side that is the same
+	// answer as a library with
+	// remote videos turned off — trailers cannot be fetched for this item — so
+	// it reuses "disabled" rather than inventing a status clients do not know:
+	// the Apple coordinator treats an unrecognized status as "stop, nothing
+	// found", which would be a worse answer than the one disabled already
+	// gives.
+	if s.trailerVideosLocked(ctx, contentID) {
+		return TrailerRefreshOutcome{Status: TrailerRefreshStatusDisabled}, nil
 	}
 
 	// A non-nil empty allow-list means every containing library disabled
@@ -2854,11 +2963,12 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 	// is the fast path and normally finishes in seconds, but it does not
 	// survive a restart; the debt row does, so a process that dies mid-refresh
 	// leaves behind work the refresh worker will pick up instead of an item
-	// that waits out the window having fetched nothing. The queue is
-	// idempotent (RequestDue merges into any existing row and never pulls a
-	// leased or recently-attempted target forward), so this is additive: on the
-	// normal path the refresh completes first and syncRefreshDebtForItem
-	// resolves the row.
+	// that waits out the window having fetched nothing. The row is deliberately
+	// not due yet (trailerRefreshRecoveryDelay) so the worker cannot run the
+	// same refresh alongside the goroutine, and the goroutine clears it on
+	// success, so it fires only when the fast path really did not finish. The
+	// queue is idempotent (RequestDue merges into any existing row and never
+	// pulls a leased or recently-attempted target forward), so this is additive.
 	s.enqueueTrailersRefreshDebt(ctx, contentID)
 
 	// Hand the slot back if the refresh this request started fails, including
@@ -2883,6 +2993,11 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 				}
 			}
 			if refreshErr == nil {
+				// The fast path did the work, so the recovery row has nothing
+				// left to recover. Clearing it keeps the worker from re-running
+				// a refresh that already happened; the refresh's own debt sync
+				// usually gets there first, and this is idempotent either way.
+				s.settleTrailersRefreshDebt(contentID)
 				return
 			}
 			s.releaseTrailersRefreshClaim(gate, contentID, claimedAt, refreshErr)
@@ -2906,6 +3021,10 @@ func (s *MetadataService) enqueueTrailersRefreshDebt(ctx context.Context, conten
 	// ahead of real debt, nor be counted as a failure in the operator metrics.
 	// Nothing recomputes the bit, so the next successful refresh clears it.
 	reasonMask := RefreshDebtReasonTrailersRequested
+	// Not due until the fast path cannot still be running: RequestDue keeps the
+	// earlier of the two timestamps when a row already exists, so genuinely due
+	// debt for this item is never pushed out by the delay.
+	dueAt := time.Now().UTC().Add(trailerRefreshRecoveryDelay)
 	dueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), trailerRefreshClaimTimeout)
 	defer cancel()
 	if err := s.refreshDebtRepo.RequestDue(
@@ -2914,12 +3033,80 @@ func (s *MetadataService) enqueueTrailersRefreshDebt(ctx context.Context, conten
 		contentID,
 		refreshDebtPriority(reasonMask),
 		reasonMask,
-		time.Now().UTC(),
+		dueAt,
 		metadataRefreshNudgeCooldown,
 	); err != nil {
 		slog.WarnContext(dueCtx, "metadata: failed to record durable debt for a trailers refresh", "component", "metadata",
 			"content_id", contentID, "error", err)
 	}
+}
+
+// settleTrailersRefreshDebt resolves the recovery row after the fast path
+// finished the work it was insurance for.
+//
+// It runs on its own context in the detached goroutine, after the refresh's own
+// debt sync has normally already rewritten or deleted the row — so this is a
+// no-op in the common case and matters only when that sync did not clear the
+// trailers-requested bit. Clearing just that bit (rather than deleting the row)
+// keeps any real debt the item still carries: another reason left in the mask
+// means the item genuinely needs refreshing again, and the queue should keep
+// saying so.
+func (s *MetadataService) settleTrailersRefreshDebt(contentID string) {
+	if s == nil || s.refreshDebtRepo == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), trailerRefreshClaimTimeout)
+	defer cancel()
+
+	debt, err := s.refreshDebtRepo.GetTarget(ctx, RefreshTargetItem, contentID)
+	if err != nil {
+		if !errors.Is(err, ErrRefreshDebtNotFound) {
+			slog.WarnContext(ctx, "metadata: failed to read durable debt after a trailers refresh", "component", "metadata",
+				"content_id", contentID, "error", err)
+		}
+		return
+	}
+	if debt == nil || !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonTrailersRequested) {
+		return
+	}
+	remaining := debt.ReasonMask &^ RefreshDebtReasonTrailersRequested
+	if remaining == 0 {
+		if err := s.refreshDebtRepo.DeleteTargetDebt(ctx, RefreshTargetItem, contentID); err != nil {
+			slog.WarnContext(ctx, "metadata: failed to clear durable debt after a trailers refresh", "component", "metadata",
+				"content_id", contentID, "error", err)
+		}
+		return
+	}
+	if err := s.refreshDebtRepo.MarkTargetSuccess(
+		ctx,
+		RefreshTargetItem,
+		contentID,
+		effectiveRefreshDebtPriority(remaining, debt.AttemptCount),
+		remaining,
+		nextRefreshAtForDebt(remaining, debt.AttemptCount, time.Now().UTC()),
+	); err != nil {
+		slog.WarnContext(ctx, "metadata: failed to settle durable debt after a trailers refresh", "component", "metadata",
+			"content_id", contentID, "error", err)
+	}
+}
+
+// trailerVideosLocked reports that an admin has locked the item's videos field,
+// which makes mergeAndPersist skip the item_videos write no matter what the
+// providers return. A refresh started in that state would report success and
+// charge the viewer a week for trailers it could never save.
+//
+// A lookup failure answers false: the preflight exists to avoid a pointless
+// refresh, and refusing the action because the database blinked would be a
+// worse failure than performing one.
+func (s *MetadataService) trailerVideosLocked(ctx context.Context, contentID string) bool {
+	if s == nil || s.itemRepo == nil {
+		return false
+	}
+	item, err := s.itemRepo.GetByID(ctx, contentID)
+	if err != nil || item == nil {
+		return false
+	}
+	return isFieldLocked(intSliceToFields(item.LockedFields), FieldVideos)
 }
 
 // releaseTrailersRefreshClaim clears the cooldown slot this request consumed.
