@@ -2050,9 +2050,9 @@ func (h *ItemsHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	sections.InvalidateResolvedListCache()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"success": true,
-		"content_id": contentID,
+		"success":        true,
+		"content_id":     contentID,
 		"images_cleaned": len(images),
-		"message": "Media item deleted successfully",
+		"message":        "Media item deleted successfully",
 	})
 }
