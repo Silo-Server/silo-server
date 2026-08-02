@@ -295,6 +295,8 @@ export function useRetryMediaRequest() {
       toast.error(err instanceof Error ? err.message : "Failed to retry request");
     },
   });
+}
+
 export function useCancelMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -58,11 +58,12 @@ describe("buildMediaItemMenuModel", () => {
     });
     const actions = model.filter((item) => item.kind === "action");
 
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(5);
     expect(actions[0]?.label).toBe("Play from Beginning");
     expect(actions[1]?.label).toBe("Mark Unwatched");
     expect(actions[2]?.label).toBe("View Play History");
     expect(actions[3]?.label).toBe("Refresh Metadata");
+    expect(actions[4]?.label).toBe("Delete Item");
   });
 
   it("omits admin actions for non-admin users", () => {

@@ -12,7 +12,6 @@ import {
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { usePurgeVirtualPlaybackItems } from "@/hooks/queries/admin/collections";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";

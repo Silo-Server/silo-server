@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
     useDeleteRating: vi.fn(),
     setRatingMutate: vi.fn(),
     deleteRatingMutate: vi.fn(),
+    useDeleteMediaItem: vi.fn(),
   };
 });
 
@@ -58,6 +59,7 @@ vi.mock("@/hooks/queries/watchlist", () => ({
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
+  useDeleteMediaItem: mocks.useDeleteMediaItem,
 }));
 
 vi.mock("@/hooks/queries/episodes", () => ({
@@ -199,6 +201,7 @@ describe("SeriesContent", () => {
     mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
+    mocks.useDeleteMediaItem.mockReturnValue({ mutate: vi.fn(), isPending: false });
   });
 
   it("passes rating state and change handler to ActionBar", () => {

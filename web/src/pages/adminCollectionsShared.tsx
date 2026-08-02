@@ -1699,7 +1699,10 @@ export function CollectionEditForm({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Source Type</Label>
-              <Select value={tmdbSourceKind} onValueChange={(v) => setTmdbSourceKind(v as TMDBSourceKind)}>
+              <Select
+                value={tmdbSourceKind}
+                onValueChange={(v) => setTmdbSourceKind(v as TMDBSourceKind)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

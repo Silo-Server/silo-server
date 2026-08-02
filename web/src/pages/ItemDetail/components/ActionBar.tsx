@@ -463,14 +463,18 @@ export default function ActionBar({
                 )}
                 {isAdmin && contentId && (
                   <DropdownMenuItem
-                    className="text-red-500 focus:text-red-400 focus:bg-red-500/10"
+                    className="text-red-500 focus:bg-red-500/10 focus:text-red-400"
                     disabled={deleteMediaItem.isPending}
                     onSelect={() => {
-                      if (window.confirm("Delete this show/movie? Home and library will update immediately.")) {
+                      if (
+                        window.confirm(
+                          "Delete this show/movie? Home and library will update immediately.",
+                        )
+                      ) {
                         deleteMediaItem.mutate(contentId, {
                           onSuccess: () => {
                             navigate("/");
-                          }
+                          },
                         });
                       }
                     }}

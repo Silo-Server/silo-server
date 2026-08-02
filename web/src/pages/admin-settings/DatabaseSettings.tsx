@@ -26,7 +26,6 @@ export default function DatabaseSettings() {
   const checkConnection = useCheckAdminSettingsConnection();
   const purgeVirtual = usePurgeVirtualPlaybackItems();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
-  const [purgeDryRun, setPurgeDryRun] = useState(false);
   const [purgeLibraryID, setPurgeLibraryID] = useState("");
   const [purgeInstallationID, setPurgeInstallationID] = useState("");
   const redisUrl = form.getValue("redis.url");
