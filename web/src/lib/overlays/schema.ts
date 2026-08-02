@@ -19,7 +19,10 @@ export function buildDefaultPrefs(): CardOverlayPrefs {
 // the native clients' settings UIs can author them, and dropping them here
 // would erase another client's preference on the next web save. Their bases
 // mirror the native registries' defaults (ribbons: top-right, disabled).
-const PASSTHROUGH_IDS = ["imdb_top_250", "rt_certified_fresh"] as const satisfies readonly OverlayId[];
+const PASSTHROUGH_IDS = [
+  "imdb_top_250",
+  "rt_certified_fresh",
+] as const satisfies readonly OverlayId[];
 const PASSTHROUGH_BASE: OverlayItemConfig = { enabled: false, position: "top-right" };
 
 function isKnownOverlayId(v: unknown): v is OverlayId {

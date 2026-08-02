@@ -207,7 +207,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       : null;
   const watchedMutation = useWatchedStateMutation(item);
   const navigationState = location.state as EpisodeNavigationState | null;
-  const isPlayable = (item.versions?.length ?? 0) > 0 || (item.playback_variants?.length ?? 0) > 0 || Boolean(item.content_id);
+  const isPlayable =
+    (item.versions?.length ?? 0) > 0 ||
+    (item.playback_variants?.length ?? 0) > 0 ||
+    Boolean(item.content_id);
   const primaryAction = resolveLeafPrimaryAction(item, "Play Episode");
   const restartHref =
     primaryAction.label === "Resume" && isPlayable
