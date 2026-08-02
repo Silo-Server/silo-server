@@ -4,9 +4,9 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePurgeVirtualPlaybackItems } from "@/hooks/queries/admin/collections";
+import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
-import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "./SettingField";
 import { SaveBar } from "./SaveBar";
@@ -27,7 +27,7 @@ export default function DatabaseSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const checkConnection = useCheckAdminSettingsConnection();
   const purgeVirtual = usePurgeVirtualPlaybackItems();
-  const { data: librariesData } = useAvailableUserLibraries();
+  const { data: librariesData } = useAdminLibraries();
   const { data: pluginInstallations } = useAdminPluginInstallations();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
   const [purgeLibraryID, setPurgeLibraryID] = useState("");
