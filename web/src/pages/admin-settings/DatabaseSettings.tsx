@@ -30,8 +30,8 @@ export default function DatabaseSettings() {
   const { data: librariesData } = useAdminLibraries();
   const { data: pluginInstallations } = useAdminPluginInstallations();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
-  const [purgeLibraryID, setPurgeLibraryID] = useState("");
-  const [purgeInstallationID, setPurgeInstallationID] = useState("");
+  const [purgeLibraryID, setPurgeLibraryID] = useState("all");
+  const [purgeInstallationID, setPurgeInstallationID] = useState("all");
   const redisUrl = form.getValue("redis.url");
   const redisManagedByEnv = form.sensitiveManagedByEnv.includes("redis.url");
   const redisConfigured = redisUrl.trim() !== "" || form.sensitiveConfigured.includes("redis.url");
@@ -39,7 +39,7 @@ export default function DatabaseSettings() {
   const effectiveRedisEnabled = redisEnabledOverride ?? redisConfigured;
 
   const libraryOptions = useMemo(() => {
-    const opts = [{ value: "", label: "All Libraries" }];
+    const opts = [{ value: "all", label: "All Libraries" }];
     if (librariesData) {
       for (const lib of librariesData) {
         opts.push({ value: String(lib.id), label: `${lib.name} (ID: ${lib.id})` });
@@ -49,7 +49,7 @@ export default function DatabaseSettings() {
   }, [librariesData]);
 
   const pluginOptions = useMemo(() => {
-    const opts = [{ value: "", label: "All Plugins" }];
+    const opts = [{ value: "all", label: "All Plugins" }];
     if (pluginInstallations) {
       for (const plugin of pluginInstallations) {
         opts.push({
