@@ -178,6 +178,50 @@ func TestHandleStartPlaybackV3ReturnsExecutableDirectPlan(t *testing.T) {
 	}
 }
 
+func TestHandleStartPlaybackV3PersistsNegotiatedExternalTextSidecars(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.ExternalSubtitles = []models.ExternalSubtitle{{
+		Path: writePlaybackTestMediaFile(t, "movie.en.srt"), Format: "srt", Language: "en",
+	}}
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	request := v3HandlerStartRequest()
+	request.ClientFeatures = append(request.ClientFeatures, playback.FeatureExternalTextSidecarSetV3)
+	request.ClientPlaybackContext.Features = append(request.ClientPlaybackContext.Features, playback.FeatureExternalTextSidecarSetV3)
+	body := marshalV3StartRequest(t, request)
+
+	start := func() playback.DecisionResponseV3 {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(body)).WithContext(newAuthorizedPlaybackContext())
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+		var response playback.DecisionResponseV3
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+
+	first := start()
+	second := start()
+	for name, response := range map[string]playback.DecisionResponseV3{"first": first, "replay": second} {
+		if response.PlaybackPlan == nil || len(response.PlaybackPlan.Subtitle.Sidecars) != 1 {
+			t.Fatalf("%s sidecars = %#v", name, response.PlaybackPlan)
+		}
+		got := response.PlaybackPlan.Subtitle.Sidecars[0]
+		if got.TrackID != "file:42:subtitle:0" || got.Index != 0 || got.Format != "srt" || got.MIMEType != "application/x-subrip" {
+			t.Fatalf("%s sidecar = %#v", name, got)
+		}
+	}
+	if first.PlaybackPlan.Subtitle.Sidecars[0] != second.PlaybackPlan.Subtitle.Sidecars[0] {
+		t.Fatalf("replayed sidecar changed: first=%#v replay=%#v", first.PlaybackPlan.Subtitle.Sidecars, second.PlaybackPlan.Subtitle.Sidecars)
+	}
+}
+
 func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
@@ -226,11 +270,14 @@ func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
+	file.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "movie.en.srt"), Format: "srt", Language: "en"}}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
+	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureExternalTextSidecarSetV3)
+	startRequest.ClientPlaybackContext.Features = append(startRequest.ClientPlaybackContext.Features, playback.FeatureExternalTextSidecarSetV3)
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
 	handler.HandleStartPlayback(startRR, startReq)
@@ -272,6 +319,12 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	second := call()
 	if first.PlaybackPlan == nil || second.PlaybackPlan == nil || first.PlaybackPlan.PlanID != second.PlaybackPlan.PlanID {
 		t.Fatalf("first=%#v second=%#v", first, second)
+	}
+	if len(first.PlaybackPlan.Subtitle.Sidecars) != 1 || len(second.PlaybackPlan.Subtitle.Sidecars) != 1 {
+		t.Fatalf("replan sidecars first=%#v second=%#v", first.PlaybackPlan.Subtitle.Sidecars, second.PlaybackPlan.Subtitle.Sidecars)
+	}
+	if first.PlaybackPlan.Subtitle.Sidecars[0] != second.PlaybackPlan.Subtitle.Sidecars[0] {
+		t.Fatalf("idempotent replan changed sidecar: first=%#v second=%#v", first.PlaybackPlan.Subtitle.Sidecars, second.PlaybackPlan.Subtitle.Sidecars)
 	}
 	session, err := manager.GetSession(started.SessionID)
 	if err != nil {

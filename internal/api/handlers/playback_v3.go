@@ -536,6 +536,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "subtitle_artifact_unavailable", message: "Failed to prepare the selected subtitle artifact.", cause: err}
 	}
+	attachExternalTextSidecarsV3(req, session.ID, effectiveFile, result.Plan)
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, NormalizedRequest: req, RequestDigest: requestDigest, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport); err != nil {
@@ -870,6 +871,65 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		return nil
 	}
 	return errors.New("selected subtitle artifact is absent from the frozen inventory")
+}
+
+func supportsExternalTextSidecarSetV3(req playback.StartRequestV3) bool {
+	return playback.HasFeatureV3(req.ClientFeatures, playback.FeatureExternalTextSidecarSetV3) &&
+		playback.HasFeatureV3(req.ClientPlaybackContext.Features, playback.FeatureExternalTextSidecarSetV3)
+}
+
+func externalTextSidecarFormatV3(format string) (extension, mime, normalized string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "srt", "subrip":
+		return ".srt", "application/x-subrip", "srt", true
+	case "vtt", "webvtt":
+		return ".vtt", "text/vtt", "vtt", true
+	default:
+		return "", "", "", false
+	}
+}
+
+func attachExternalTextSidecarsV3(req playback.StartRequestV3, sessionID string, file *models.MediaFile, plan *playback.PlanV3) {
+	if plan == nil {
+		return
+	}
+	plan.Subtitle.Sidecars = nil
+	if file == nil || !supportsExternalTextSidecarSetV3(req) {
+		return
+	}
+	for index, subtitle := range file.ExternalSubtitles {
+		extension, mime, normalized, ok := externalTextSidecarFormatV3(subtitle.Format)
+		if !ok {
+			continue
+		}
+		data, err := playback.LoadExternalSubtitleRaw(subtitle.Path)
+		if err != nil {
+			slog.Warn("external text sidecar omitted",
+				"media_file_id", file.ID,
+				"subtitle_index", index,
+				"format", normalized,
+				"reason", "unreadable",
+			)
+			continue
+		}
+		if len(data) == 0 {
+			slog.Warn("external text sidecar omitted",
+				"media_file_id", file.ID,
+				"subtitle_index", index,
+				"format", normalized,
+				"reason", "empty",
+			)
+			continue
+		}
+		plan.Subtitle.Sidecars = append(plan.Subtitle.Sidecars, playback.SubtitleSidecarV3{
+			TrackID:             playback.TrackIDV3(file.ID, "subtitle", index),
+			Index:               index,
+			URL:                 fmt.Sprintf("/stream/%s/subtitles/%d%s?file_id=%d", sessionID, index, extension, file.ID),
+			MIMEType:            mime,
+			Format:              normalized,
+			TimingOriginSeconds: plan.Timeline.StreamOriginSeconds,
+		})
+	}
 }
 
 func (h *PlaybackHandler) downloadedSubtitleInventoryV3(ctx context.Context, file *models.MediaFile) []playback.SubtitleInventoryEntryV3 {
@@ -1261,6 +1321,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		transport.rollback()
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "subtitle_artifact_unavailable", message: "Failed to prepare the selected subtitle artifact.", cause: err}
 	}
+	attachExternalTextSidecarsV3(start, session.ID, effectiveFile, result.Plan)
 	if seekReanchor {
 		if err := validateSeekReanchorPlanV3(record, result.Plan); err != nil {
 			transport.rollback()
