@@ -6,13 +6,34 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/api/contracts/complexv22"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+func TestPlaybackControlRequestEmbedsSharedTerminateRequest(t *testing.T) {
+	typ := reflect.TypeOf(playbackControlRequest{})
+	field, ok := typ.FieldByName("TerminateRequest")
+	if !ok || !field.Anonymous || field.Type != reflect.TypeOf(complexv22.TerminateRequest{}) {
+		t.Fatalf("playback control request must anonymously embed shared TerminateRequest; field=%+v ok=%v", field, ok)
+	}
+
+	var request playbackControlRequest
+	if err := json.Unmarshal([]byte(`{"reason":"legacy admin reason","session_generation":"g1","snapshot_id":"s1","reason_code":"limit","idempotency_key":"k1"}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Reason != "legacy admin reason" || request.SessionGeneration != "g1" || request.SnapshotID != "s1" || request.ReasonCode != "limit" || request.IdempotencyKey != "k1" {
+		t.Fatalf("decoded request lost shared or legacy fields: %+v", request)
+	}
+	if !request.sessionGenerationPresent || !request.snapshotIDPresent || !request.idempotencyKeyPresent {
+		t.Fatalf("custom guard presence validation was not preserved: %+v", request)
+	}
+}
 
 type adminPlaybackControlTestConn struct {
 	mu       sync.Mutex

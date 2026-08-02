@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/api/contracts/complexv22"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/worker"
 )
+
+func TestLiveSnapshotUsesSharedConcreteSessionDTO(t *testing.T) {
+	got := reflect.TypeOf(sessionSnapshotResponse{}.Sessions).Elem()
+	want := reflect.TypeOf(complexv22.SnapshotSession{})
+	if got != want {
+		t.Fatalf("live snapshot session type = %v, want shared %v", got, want)
+	}
+}
 
 func TestSnapshotNormalizesLegacySentinelWithoutExposingIt(t *testing.T) {
 	row := playbackSessionRow{SessionGeneration: playback.LegacySessionGenerationSentinel}

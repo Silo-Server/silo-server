@@ -1,25 +1,26 @@
 package handlers
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/Silo-Server/silo-server/internal/api/contracts/complexv22"
+)
 
 // SystemCapabilitiesHandler reports the Silo Complex API features whose
 // production guarantees are implemented by this server.
 type SystemCapabilitiesHandler struct{}
+
+type systemCapabilitiesResponse = complexv22.SystemCapabilitiesResponse
 
 // NewSystemCapabilitiesHandler constructs a capability discovery handler.
 func NewSystemCapabilitiesHandler() *SystemCapabilitiesHandler {
 	return &SystemCapabilitiesHandler{}
 }
 
-type systemCapabilitiesResponse struct {
-	APIVersion   string   `json:"api_version"`
-	Capabilities []string `json:"capabilities"`
-}
-
 // HandleGet handles GET /api/v1/system/capabilities.
 func (*SystemCapabilitiesHandler) HandleGet(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, systemCapabilitiesResponse{
 		APIVersion:   "2.2",
-		Capabilities: []string{"branding.v1", "sessions.snapshot.v2", "sessions.terminate.v1", "users.identity.v1"},
+		Capabilities: complexv22.Capabilities,
 	})
 }

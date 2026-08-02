@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/api/contracts/complexv22"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -32,14 +33,12 @@ type AdminPlaybackControlHandler struct {
 }
 
 type playbackControlRequest struct {
-	Reason            string `json:"reason"`
-	ReasonCode        string `json:"reason_code,omitempty"`
-	Title             string `json:"title"`
-	Message           string `json:"message"`
-	DeadlineMS        int    `json:"deadline_ms"`
-	SessionGeneration string `json:"session_generation,omitempty"`
-	SnapshotID        string `json:"snapshot_id,omitempty"`
-	IdempotencyKey    string `json:"idempotency_key,omitempty"`
+	complexv22.TerminateRequest
+
+	Reason     string `json:"reason"`
+	Title      string `json:"title"`
+	Message    string `json:"message"`
+	DeadlineMS int    `json:"deadline_ms"`
 
 	sessionGenerationPresent bool
 	snapshotIDPresent        bool
@@ -63,10 +62,7 @@ func (p *playbackControlRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type playbackControlResponse struct {
-	CommandID string `json:"command_id"`
-	Status    string `json:"status"`
-}
+type playbackControlResponse = complexv22.TerminateResponse
 
 func requiresLivePlaybackControl(name playback.CommandName) bool {
 	switch name {
@@ -224,6 +220,7 @@ func (h *AdminPlaybackControlHandler) handleSessionCommand(w http.ResponseWriter
 		return
 	}
 	if name == playback.CommandTerminate {
+		guard := req.TerminateRequest
 		guardFields := 0
 		for _, present := range []bool{req.sessionGenerationPresent, req.snapshotIDPresent, req.idempotencyKeyPresent} {
 			if present {
@@ -231,7 +228,7 @@ func (h *AdminPlaybackControlHandler) handleSessionCommand(w http.ResponseWriter
 			}
 		}
 		if guardFields != 0 {
-			if guardFields != 3 || strings.TrimSpace(req.SessionGeneration) == "" || strings.TrimSpace(req.SnapshotID) == "" || strings.TrimSpace(req.IdempotencyKey) == "" {
+			if guardFields != 3 || strings.TrimSpace(guard.SessionGeneration) == "" || strings.TrimSpace(guard.SnapshotID) == "" || strings.TrimSpace(guard.IdempotencyKey) == "" {
 				writeError(w, http.StatusUnprocessableEntity, "invalid_termination_guard", "Session generation, snapshot ID, and idempotency key must be provided together and non-empty")
 				return
 			}

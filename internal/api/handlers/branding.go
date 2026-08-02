@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/api/contracts/complexv22"
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
 
@@ -38,11 +39,7 @@ type brandingResponse struct {
 	StorageAvailable bool   `json:"storage_available"`
 }
 
-type adminBrandingResponse struct {
-	ServerName string  `json:"server_name"`
-	LogoURL    *string `json:"logo_url"`
-	LogoETag   *string `json:"logo_etag"`
-}
+type adminBrandingResponse = complexv22.BrandingResponse
 
 // HandleGetBranding returns the server branding configuration. Public endpoint —
 // no authentication required so branding applies before login (white-label).
