@@ -182,7 +182,9 @@ export default function DatabaseSettings() {
                 });
               }}
             >
-              {purgeVirtual.isPending && purgeDryRun ? "Previewing..." : "Preview Purge"}
+              {purgeVirtual.isPending && purgeVirtual.variables?.dryRun
+                ? "Previewing..."
+                : "Preview Purge"}
             </Button>
             <Button
               type="button"
@@ -207,7 +209,9 @@ export default function DatabaseSettings() {
                 }
               }}
             >
-              {purgeVirtual.isPending && !purgeDryRun ? "Purging..." : "Purge Virtual Items"}
+              {purgeVirtual.isPending && !purgeVirtual.variables?.dryRun
+                ? "Purging..."
+                : "Purge Virtual Items"}
             </Button>
           </div>
         </div>

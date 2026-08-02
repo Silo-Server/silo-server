@@ -61,6 +61,13 @@ interface TMDBSourceConfig {
   limit: string;
 }
 
+interface TMDBPresetSourceConfig {
+  preset: TMDBPreset;
+  mediaType: TMDBMediaType;
+  timeWindow: TMDBTimeWindow;
+  limit: string;
+}
+
 interface TraktPresetSourceConfig {
   preset: TraktPreset;
   mediaType: TraktMediaType;
@@ -609,6 +616,8 @@ export function CollectionForm({
     </CollectionBuilder>
   );
 }
+
+export type CollectionSourceType = "manual" | "mdblist" | "tmdb" | "trakt";
 
 export type CollectionSourcePick = CollectionSourceType | "templates";
 
