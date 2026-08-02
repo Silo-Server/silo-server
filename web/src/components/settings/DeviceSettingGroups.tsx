@@ -15,7 +15,7 @@ import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { groupDeviceSettings } from "@/lib/deviceSettingGroups";
 import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
-import { formatQualityBitrate } from "@/player/hooks/useTranscodeQuality";
+import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
 import { controlKindFor, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
@@ -388,25 +388,9 @@ function permittedOptions(settingKey: SettingKey, effective: EffectiveSetting | 
  *
  * Returns null for any select the manifest actually gives members, which is
  * every other one — this exists only for a numeric range declared with a
- * select control.
+ * select control. The ladder itself lives in lib/bitrateOptions so the
+ * profile Defaults screen offers the same choices.
  */
-/**
- * The bandwidth ladder, in kbps.
- *
- * The low end matches the in-player quality switcher
- * (web/src/player/hooks/useTranscodeQuality.ts) so a cap chosen here lines up
- * with what the player offers mid-playback. Above that it keeps climbing to
- * the definition's own ceiling of 200 Mbps, which is what remuxed 4K HDR and
- * untouched Blu-ray rips actually need — a ladder that stopped short would cap
- * people below what their server can already send them.
- *
- * Entries outside a definition's declared range are filtered out, so this list
- * can cover more ground than any single setting allows.
- */
-const BITRATE_CHOICES_KBPS = [
-  1500, 2000, 4000, 6000, 10000, 15000, 20000, 30000, 40000, 60000, 80000, 100000, 150000, 200000,
-];
-
 function numericSelectChoices(
   settingKey: SettingKey,
   definition: (typeof SETTING_DEFINITIONS)[SettingKey],
@@ -417,29 +401,8 @@ function numericSelectChoices(
   const hasMembers = options.some((option) => option.value !== "");
   if (!isNumeric || hasMembers) return null;
 
-  const min = definition.minimum ?? 0;
-  const max = definition.maximum ?? Number.MAX_SAFE_INTEGER;
-  const choices = BITRATE_CHOICES_KBPS.filter((kbps) => kbps >= min && kbps <= max).map((kbps) => ({
-    value: String(kbps),
-    label: formatBitrate(kbps),
-  }));
-
-  // A value set elsewhere (an API call, another client) must stay selectable
-  // rather than silently reading as "No limit".
-  if (currentValue !== "" && !choices.some((choice) => choice.value === currentValue)) {
-    const parsed = Number(currentValue);
-    if (Number.isFinite(parsed)) {
-      choices.push({ value: currentValue, label: formatBitrate(parsed) });
-      choices.sort((a, b) => Number(a.value) - Number(b.value));
-    }
-  }
-
   const unsetLabel = settingKey === "playback.max_bitrate_kbps" ? "No limit" : "Unset";
-  return [{ value: "", label: unsetLabel }, ...choices];
-}
-
-function formatBitrate(kbps: number): string {
-  return formatQualityBitrate(kbps);
+  return bitrateSelectChoices(definition, currentValue, unsetLabel);
 }
 
 /** Selects edit strings; integers travel back as numbers. */

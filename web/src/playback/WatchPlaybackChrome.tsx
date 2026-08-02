@@ -406,6 +406,9 @@ export function WatchPlaybackHost() {
       // The resolution cap, which the quality picker writes canonically and
       // no longer mirrors into the profile column playback used to read.
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
+      // The bandwidth cap that pairs with it; the player keeps its startup
+      // tier under this so the setting does what its label says.
+      SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
     ],
   });
   const request = state.request;
@@ -850,6 +853,8 @@ export function WatchPlaybackHost() {
 
   const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
     ?.value as string | undefined;
+  const maxBitrateKbps = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]
+    ?.value as number | null | undefined;
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
@@ -891,6 +896,7 @@ export function WatchPlaybackHost() {
       {(isForeground || isPostRoll) && <WatchPlaybackTitle title={activeItem.title} />}
       <WatchPage
         {...watchPageProps}
+        maxBitrateKbps={maxBitrateKbps ?? null}
         autoSkipIntro={autoSkipIntro}
         autoSkipRecap={autoSkipRecap}
         autoPlayNextPreview={autoPlayNextPreview}

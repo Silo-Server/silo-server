@@ -265,4 +265,73 @@ describe("useTranscodeQuality", () => {
     expect(sentBodies()[2]!.subtitle_track_index).toBe(3);
     expect(sentBodies()[2]!.subtitle_burn_in).toBe(true);
   });
+
+  // playback.max_bitrate_kbps. The setting is a promise about bandwidth; the
+  // startup tier is where the web player keeps it.
+  it("starts below the bandwidth cap instead of at the file's own bitrate", async () => {
+    // A remux would auto-start "original" (codec copy at the file's 8 Mbps);
+    // a 4 Mbps cap must pull the startup down to a tier that fits.
+    renderHook(
+      () =>
+        useTranscodeQuality({
+          sessionId: "sess-1",
+          selectedVersion: version,
+          versions: [version],
+          playMethod: "remux",
+          initialPosition: 0,
+          maxBitrateKbps: 4000,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = sentBodies()[0]!;
+    expect(body.target_codec_video).toBe("h264");
+    expect(body.target_bitrate_kbps).toBeLessThanOrEqual(4000);
+    expect(body.target_bitrate_kbps).toBeGreaterThan(0);
+  });
+
+  it("leaves the startup tier alone when it already fits the cap", async () => {
+    renderHook(
+      () =>
+        useTranscodeQuality({
+          sessionId: "sess-1",
+          selectedVersion: version,
+          versions: [version],
+          playMethod: "remux",
+          initialPosition: 0,
+          maxBitrateKbps: 20000,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // The file's 8 Mbps fits under 20 Mbps, so the remux keeps codec copy.
+    const body = sentBodies()[0]!;
+    expect(body.target_codec_video).toBe("copy");
+    expect(body.target_bitrate_kbps).toBe(0);
+  });
+
+  it("combines a resolution preference with the bandwidth cap", async () => {
+    // 720p preference offers the 4 Mbps "720p High" tier first; a 2 Mbps cap
+    // must drop the start to plain 720p rather than honoring only one axis.
+    renderHook(
+      () =>
+        useTranscodeQuality({
+          sessionId: "sess-1",
+          selectedVersion: version,
+          versions: [version],
+          playMethod: "remux",
+          initialPosition: 0,
+          qualityPreference: "720p",
+          maxBitrateKbps: 2000,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const body = sentBodies()[0]!;
+    expect(body.target_resolution).toBe("720p");
+    expect(body.target_bitrate_kbps).toBe(2000);
+  });
 });
