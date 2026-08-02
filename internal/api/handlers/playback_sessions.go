@@ -9,10 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -22,6 +25,7 @@ import (
 // via video_decision and audio_decision.
 type playbackSessionRow struct {
 	SessionID                string    `json:"session_id"`
+	SessionGeneration        string    `json:"session_generation"`
 	UserID                   int       `json:"user_id"`
 	Username                 string    `json:"username"`
 	ProfileID                string    `json:"profile_id"`
@@ -44,6 +48,8 @@ type playbackSessionRow struct {
 	UpdatedAt                time.Time `json:"updated_at"`
 	PositionSeconds          float64   `json:"position_seconds"`
 	IsPaused                 bool      `json:"is_paused"`
+	State                    string    `json:"state"`
+	IsTranscoded             bool      `json:"is_transcoded"`
 	HasPlaybackControl       bool      `json:"has_playback_control"`
 	ClientIP                 string    `json:"client_ip,omitempty"`
 	ClientName               string    `json:"client_name,omitempty"`
@@ -107,6 +113,42 @@ type PlaybackSessionsQuery struct {
 	UserID int
 }
 
+type sessionSnapshotResponse struct {
+	SnapshotID       string               `json:"snapshot_id"`
+	GeneratedAt      time.Time            `json:"generated_at"`
+	Complete         bool                 `json:"complete"`
+	IncompleteReason string               `json:"incomplete_reason,omitempty"`
+	Sessions         []playbackSessionRow `json:"sessions"`
+}
+
+type snapshotReportingNode struct {
+	ID             string
+	BootGeneration string
+	UpdatedAt      time.Time
+}
+
+type snapshotWatermark struct {
+	ReportingNode  string
+	BootGeneration string
+	CompletedAt    time.Time
+	SessionCount   int
+}
+
+const (
+	snapshotCoverageFreshness            = 45 * time.Second
+	snapshotClockSkewTolerance           = 5 * time.Second
+	snapshotReasonNoReportingNodes       = "no_reporting_nodes"
+	snapshotReasonStaleHeartbeat         = "stale_reporting_node"
+	snapshotReasonMissingWatermark       = "missing_snapshot_watermark"
+	snapshotReasonStaleWatermark         = "stale_snapshot_watermark"
+	snapshotReasonBootGenerationMismatch = "boot_generation_mismatch"
+	snapshotReasonCountMismatch          = "session_count_mismatch"
+	snapshotReasonOrphanReportingNode    = "orphan_reporting_node"
+	snapshotReasonInvalidIdentity        = "invalid_session_identity"
+	snapshotReasonInvalidStartedAt       = "invalid_started_at"
+	snapshotReasonQueryFailed            = "snapshot_query_failed"
+)
+
 type playbackSessionsReader interface {
 	Load(ctx context.Context, r *http.Request, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
 }
@@ -153,10 +195,25 @@ func (l *PlaybackSessionsLoader) Load(
 	if l == nil || l.pool == nil {
 		return nil, errors.New("database not configured")
 	}
+	return l.loadRows(ctx, r, l.pool, query, true)
+}
+
+type playbackSessionsQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func (l *PlaybackSessionsLoader) loadRows(
+	ctx context.Context,
+	r *http.Request,
+	querier playbackSessionsQuerier,
+	query PlaybackSessionsQuery,
+	capped bool,
+) ([]playbackSessionRow, error) {
 
 	sql := `
 		SELECT
 			s.session_id,
+			s.session_generation::text,
 			s.user_id,
 			COALESCE(u.username, ''),
 			COALESCE(s.profile_id, ''),
@@ -211,14 +268,9 @@ func (l *PlaybackSessionsLoader) Load(
 		 LEFT JOIN media_items series_mi ON series_mi.content_id = e.series_id
 		 LEFT JOIN stream_nodes remote_node ON remote_node.url = s.transcode_node_url`
 
-	var args []any
-	if query.UserID > 0 {
-		sql += " WHERE s.user_id = $1"
-		args = append(args, query.UserID)
-	}
-	sql += " ORDER BY s.started_at DESC LIMIT 200"
+	sql, args := finishPlaybackSessionsSQL(sql, query, capped)
 
-	rows, err := l.pool.Query(ctx, sql, args...)
+	rows, err := querier.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying playback sessions: %w", err)
 	}
@@ -233,11 +285,13 @@ func (l *PlaybackSessionsLoader) Load(
 		var sourceBitrateKbps *int
 		var sourceAudioChannels *int
 		var audioTracksJSON []byte
+		var startedAt *time.Time
+		var updatedAt *time.Time
 		if err := rows.Scan(
-			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.ContentID,
+			&s.SessionID, &s.SessionGeneration, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.ContentID,
 			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
-			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.StartedAt, &s.UpdatedAt,
+			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &startedAt, &updatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
 			&s.ClientUserAgent, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
@@ -253,6 +307,13 @@ func (l *PlaybackSessionsLoader) Load(
 		s.SourceBitrateKbps = sourceBitrateKbps
 		s.SourceAudioChannels = sourceAudioChannels
 		s.ClientLabel = playbackClientDisplayName(s.ClientName, s.ClientVersion, s.ClientUserAgent)
+		normalizePlaybackSessionGeneration(&s)
+		if startedAt != nil {
+			s.StartedAt = startedAt.UTC()
+		}
+		if updatedAt != nil {
+			s.UpdatedAt = updatedAt.UTC()
+		}
 		enrichPlaybackSessionRow(&s, audioTracksJSON)
 		sessions = append(sessions, s)
 	}
@@ -262,6 +323,190 @@ func (l *PlaybackSessionsLoader) Load(
 	l.populateProfileNames(ctx, sessions)
 
 	return sessions, nil
+}
+
+func normalizePlaybackSessionGeneration(row *playbackSessionRow) {
+	if row != nil && row.SessionGeneration == playback.LegacySessionGenerationSentinel {
+		row.SessionGeneration = ""
+	}
+}
+
+func finishPlaybackSessionsSQL(sql string, query PlaybackSessionsQuery, capped bool) (string, []any) {
+	var args []any
+	if query.UserID > 0 {
+		sql += " WHERE s.user_id = $1"
+		args = append(args, query.UserID)
+	}
+	sql += " ORDER BY s.started_at DESC"
+	if capped {
+		sql += " LIMIT 200"
+	}
+	return sql, args
+}
+
+func (l *PlaybackSessionsLoader) loadSnapshot(
+	ctx context.Context,
+	r *http.Request,
+) ([]snapshotReportingNode, []snapshotWatermark, []playbackSessionRow, error) {
+	if l == nil || l.pool == nil {
+		return nil, nil, nil, errors.New("database not configured")
+	}
+	tx, err := l.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("beginning session snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	nodeRows, err := tx.Query(ctx, `SELECT node_id, boot_generation::text, updated_at FROM node_heartbeats ORDER BY node_id`)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("querying reporting nodes: %w", err)
+	}
+	nodes := make([]snapshotReportingNode, 0)
+	for nodeRows.Next() {
+		var node snapshotReportingNode
+		if err := nodeRows.Scan(&node.ID, &node.BootGeneration, &node.UpdatedAt); err != nil {
+			nodeRows.Close()
+			return nil, nil, nil, fmt.Errorf("scanning reporting node: %w", err)
+		}
+		node.UpdatedAt = node.UpdatedAt.UTC()
+		nodes = append(nodes, node)
+	}
+	if err := nodeRows.Err(); err != nil {
+		nodeRows.Close()
+		return nil, nil, nil, fmt.Errorf("iterating reporting nodes: %w", err)
+	}
+	nodeRows.Close()
+
+	watermarkRows, err := tx.Query(ctx, `
+		SELECT reporting_node, boot_generation::text, completed_at, session_count
+		FROM playback_session_snapshot_watermarks
+		ORDER BY reporting_node
+	`)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("querying snapshot watermarks: %w", err)
+	}
+	watermarks := make([]snapshotWatermark, 0)
+	for watermarkRows.Next() {
+		var watermark snapshotWatermark
+		if err := watermarkRows.Scan(&watermark.ReportingNode, &watermark.BootGeneration, &watermark.CompletedAt, &watermark.SessionCount); err != nil {
+			watermarkRows.Close()
+			return nil, nil, nil, fmt.Errorf("scanning snapshot watermark: %w", err)
+		}
+		watermark.CompletedAt = watermark.CompletedAt.UTC()
+		watermarks = append(watermarks, watermark)
+	}
+	if err := watermarkRows.Err(); err != nil {
+		watermarkRows.Close()
+		return nil, nil, nil, fmt.Errorf("iterating snapshot watermarks: %w", err)
+	}
+	watermarkRows.Close()
+
+	sessions, err := l.loadRows(ctx, r, tx, PlaybackSessionsQuery{}, false)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, nil, fmt.Errorf("committing session snapshot read: %w", err)
+	}
+	return nodes, watermarks, sessions, nil
+}
+
+func evaluateSnapshotCompleteness(
+	generatedAt time.Time,
+	nodes []snapshotReportingNode,
+	watermarks []snapshotWatermark,
+	sessions []playbackSessionRow,
+) string {
+	if len(nodes) == 0 {
+		return snapshotReasonNoReportingNodes
+	}
+	nodeSet := make(map[string]struct{}, len(nodes))
+	watermarkByNode := make(map[string]snapshotWatermark, len(watermarks))
+	for _, watermark := range watermarks {
+		watermarkByNode[watermark.ReportingNode] = watermark
+	}
+	for _, node := range nodes {
+		nodeID := node.ID
+		nodeSet[nodeID] = struct{}{}
+		if strings.TrimSpace(nodeID) == "" || node.UpdatedAt.IsZero() || node.UpdatedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(node.UpdatedAt) > snapshotCoverageFreshness {
+			return snapshotReasonStaleHeartbeat
+		}
+		watermark, ok := watermarkByNode[nodeID]
+		if !ok {
+			return snapshotReasonMissingWatermark
+		}
+		if watermark.CompletedAt.IsZero() || watermark.CompletedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(watermark.CompletedAt) > snapshotCoverageFreshness {
+			return snapshotReasonStaleWatermark
+		}
+		if node.BootGeneration != watermark.BootGeneration {
+			return snapshotReasonBootGenerationMismatch
+		}
+	}
+	for reportingNode := range watermarkByNode {
+		if _, ok := nodeSet[reportingNode]; !ok {
+			return snapshotReasonOrphanReportingNode
+		}
+	}
+
+	counts := make(map[string]int, len(nodes))
+	for _, session := range sessions {
+		reportingNode := session.ReportingNode
+		if strings.TrimSpace(reportingNode) == "" {
+			return snapshotReasonOrphanReportingNode
+		}
+		if _, ok := nodeSet[reportingNode]; !ok {
+			return snapshotReasonOrphanReportingNode
+		}
+		if strings.TrimSpace(session.SessionID) == "" || session.UserID <= 0 {
+			return snapshotReasonInvalidIdentity
+		}
+		generation, err := uuid.Parse(session.SessionGeneration)
+		if err != nil || generation == uuid.Nil {
+			return snapshotReasonInvalidIdentity
+		}
+		if session.StartedAt.IsZero() || session.StartedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) {
+			return snapshotReasonInvalidStartedAt
+		}
+		counts[reportingNode]++
+	}
+	for nodeID := range nodeSet {
+		if counts[nodeID] != watermarkByNode[nodeID].SessionCount {
+			return snapshotReasonCountMismatch
+		}
+	}
+	return ""
+}
+
+// HandleGetSessionsSnapshot returns one uncapped, generation-stable view of
+// every participating reporting node. Coverage failures are represented as a
+// safe HTTP 200 incomplete envelope so callers never enforce from partial data.
+func (h *AdminHandler) HandleGetSessionsSnapshot(w http.ResponseWriter, r *http.Request) {
+	response := sessionSnapshotResponse{
+		Sessions: make([]playbackSessionRow, 0),
+	}
+	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
+	if err != nil {
+		response.SnapshotID = uuid.NewString()
+		response.GeneratedAt = time.Now().UTC()
+		response.IncompleteReason = snapshotReasonQueryFailed
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	nodes, watermarks, sessions, err := loader.loadSnapshot(r.Context(), r)
+	if err != nil {
+		response.SnapshotID = uuid.NewString()
+		response.GeneratedAt = time.Now().UTC()
+		response.IncompleteReason = snapshotReasonQueryFailed
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+	generatedAt := time.Now().UTC()
+	response.SnapshotID = uuid.NewString()
+	response.GeneratedAt = generatedAt
+	response.Sessions = sessions
+	response.IncompleteReason = evaluateSnapshotCompleteness(generatedAt, nodes, watermarks, sessions)
+	response.Complete = response.IncompleteReason == ""
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, path string) string {
@@ -278,6 +523,12 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	if row.IsPaused {
+		row.State = "paused"
+	} else {
+		row.State = "playing"
+	}
+	row.IsTranscoded = row.VideoDecision == "transcode" || row.AudioDecision == "transcode"
 	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack

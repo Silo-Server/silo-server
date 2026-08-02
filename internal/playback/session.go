@@ -12,9 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// LegacySessionGenerationSentinel is reserved for persistence boundaries that
+// require a non-null UUID. It represents the public legacy empty generation and
+// must never be installed on or exposed from a live Session.
+const LegacySessionGenerationSentinel = "00000000-0000-0000-0000-000000000000"
+
 // Session represents an active playback session.
 type Session struct {
 	ID                   string
+	Generation           string
 	UserID               int
 	ProfileID            string
 	MediaFileID          int
@@ -131,7 +137,28 @@ type SessionReplacementRollback struct {
 // ErrSessionReplacementSuperseded means a replacement rollback would overwrite
 // a newer session mutation. Callers should terminate the session rather than
 // expose state that disagrees with the durable playback plan.
-var ErrSessionReplacementSuperseded = errors.New("session replacement was superseded")
+var (
+	ErrSessionReplacementSuperseded = errors.New("session replacement was superseded")
+	// ErrSessionGenerationTombstoneUnavailable means reconstruction or stop
+	// could not safely consult durable ended-generation state.
+	ErrSessionGenerationTombstoneUnavailable = errors.New("session generation tombstone unavailable")
+	ErrInvalidSessionGeneration              = errors.New("invalid session generation")
+)
+
+func validatePublicSessionGeneration(generation string) error {
+	parsed, err := uuid.Parse(generation)
+	if err == nil && parsed == uuid.Nil {
+		return fmt.Errorf("%w: reserved legacy sentinel", ErrInvalidSessionGeneration)
+	}
+	return nil
+}
+
+func persistedSessionGeneration(generation string) string {
+	if generation == "" {
+		return LegacySessionGenerationSentinel
+	}
+	return generation
+}
 
 type clientInfoContextKey struct{}
 
@@ -163,15 +190,25 @@ func ClientInfoFromContext(ctx context.Context) ClientInfo {
 
 // SessionManager tracks active playback sessions and enforces stream limits.
 type SessionManager struct {
-	sessions         map[string]*Session
-	mu               sync.RWMutex
-	maxStreams       int
-	maxTranscodes    int
-	limitProvider    SessionLimitProvider
-	admissionDecider AdmissionDecider
-	activeGrace      time.Duration
-	pausedGrace      time.Duration
-	expireHook       func(*Session)
+	sessions                 map[string]*Session
+	endedGenerations         map[sessionGenerationKey]time.Time
+	mu                       sync.RWMutex
+	generationTombstoneStore SessionGenerationTombstoneStore
+	sessionLifecycleMu       sync.Mutex
+	sessionLifecycleLocks    map[string]*sessionLifecycleLock
+	sessionLifecycleWaitHook func(string)
+	maxStreams               int
+	maxTranscodes            int
+	limitProvider            SessionLimitProvider
+	admissionDecider         AdmissionDecider
+	activeGrace              time.Duration
+	pausedGrace              time.Duration
+	expireHook               func(*Session)
+}
+
+type sessionGenerationKey struct {
+	sessionID  string
+	generation string
 }
 
 // SessionLimits stores per-user admission limits. Zero values mean unlimited.
@@ -233,6 +270,14 @@ const (
 	// pressing Play after a long pause freeze the client (issue #243).
 	// Keep in sync with pausedSessionGrace in internal/worker/cleanup.go.
 	DefaultPausedSessionGrace = 30 * time.Minute
+
+	sessionGenerationStoreIOTimeout = 5 * time.Second
+
+	// maxInMemorySessionGenerationTombstones bounds the standalone fallback to
+	// roughly 45 ended lifecycles per minute across the 24-hour token lifetime.
+	// Production also has the durable store, so eviction here never removes the
+	// authoritative replay record.
+	maxInMemorySessionGenerationTombstones = 65_536
 )
 
 // NewSessionManager creates a SessionManager with the given concurrency limits.
@@ -240,12 +285,23 @@ const (
 // maxTranscodes limits concurrent transcode streams per user.
 func NewSessionManager(maxStreams, maxTranscodes int) *SessionManager {
 	return &SessionManager{
-		sessions:      make(map[string]*Session),
-		maxStreams:    maxStreams,
-		maxTranscodes: maxTranscodes,
-		activeGrace:   DefaultActiveSessionGrace,
-		pausedGrace:   DefaultPausedSessionGrace,
+		sessions:              make(map[string]*Session),
+		endedGenerations:      make(map[sessionGenerationKey]time.Time),
+		sessionLifecycleLocks: make(map[string]*sessionLifecycleLock),
+		maxStreams:            maxStreams,
+		maxTranscodes:         maxTranscodes,
+		activeGrace:           DefaultActiveSessionGrace,
+		pausedGrace:           DefaultPausedSessionGrace,
 	}
+}
+
+// SetSessionGenerationTombstoneStore installs the durable ended-generation
+// store used by production reconstruction. A nil store retains the bounded
+// in-memory fallback used by standalone managers and tests.
+func (m *SessionManager) SetSessionGenerationTombstoneStore(store SessionGenerationTombstoneStore) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.generationTombstoneStore = store
 }
 
 // SetLimitProvider overrides the manager defaults with dynamic per-user
@@ -423,10 +479,11 @@ func newSession(
 	method PlayMethod,
 	transcodeAudio bool,
 ) *Session {
-	now := time.Now()
+	now := time.Now().UTC()
 	clientInfo := ClientInfoFromContext(ctx)
 	return &Session{
 		ID:                   uuid.New().String(),
+		Generation:           uuid.New().String(),
 		UserID:               userID,
 		ProfileID:            profileID,
 		MediaFileID:          effectiveFileID,
@@ -476,22 +533,43 @@ func admissionDenyError(reasonCode string) error {
 // authenticated request before calling this — RegisterReconstructed performs
 // no authorization itself.
 func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
+	registered, err := m.RegisterReconstructedChecked(context.Background(), s)
+	if err != nil {
+		return nil
+	}
+	return registered
+}
+
+// RegisterReconstructedChecked restores a session without applying admission
+// caps, but still performs the durable ended-generation check. It is used only
+// for the existing fail-open limit-provider path; tombstone read failures always
+// fail closed.
+func (m *SessionManager) RegisterReconstructedChecked(ctx context.Context, s *Session) (*Session, error) {
 	if s == nil || s.ID == "" {
-		return s
+		return s, nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if existing, ok := m.sessions[s.ID]; ok {
-		return existing
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	now := time.Now()
-	if s.StartedAt.IsZero() {
+	if err := validatePublicSessionGeneration(s.Generation); err != nil {
+		return nil, err
+	}
+	release := m.acquireSessionLifecycleLock(s.ID)
+	defer release()
+
+	if existing := m.liveSession(s.ID); existing != nil {
+		return existing, nil
+	}
+	now := time.Now().UTC()
+	ended, err := m.wasSessionGenerationEnded(ctx, s.ID, s.Generation, now)
+	if err != nil {
+		return nil, err
+	}
+	if ended {
+		s.Generation = uuid.New().String()
 		s.StartedAt = now
 	}
-	s.UpdatedAt = now
-	s.LastActivityAt = now
-	m.sessions[s.ID] = s
-	return s
+	return m.registerReconstructedLocked(s, now), nil
 }
 
 // RegisterReconstructedWithLimits is RegisterReconstructed plus the same per-user
@@ -515,6 +593,25 @@ func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := validatePublicSessionGeneration(s.Generation); err != nil {
+		return nil, err
+	}
+	release := m.acquireSessionLifecycleLock(s.ID)
+	defer release()
+
+	if existing := m.liveSession(s.ID); existing != nil {
+		return existing, nil
+	}
+	now := time.Now().UTC()
+	ended, err := m.wasSessionGenerationEnded(ctx, s.ID, s.Generation, now)
+	if err != nil {
+		return nil, err
+	}
+	if ended {
+		s.Generation = uuid.New().String()
+		s.StartedAt = now
+	}
+
 	limits, err := m.limitsForUser(ctx, s.UserID)
 	if err != nil {
 		return nil, err
@@ -522,7 +619,6 @@ func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s 
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
 	if existing, ok := m.sessions[s.ID]; ok {
 		return existing, nil
 	}
@@ -540,7 +636,6 @@ func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s 
 		return nil, ErrTooManyTranscodes
 	}
 
-	now := time.Now()
 	if s.StartedAt.IsZero() {
 		s.StartedAt = now
 	}
@@ -548,6 +643,97 @@ func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s 
 	s.LastActivityAt = now
 	m.sessions[s.ID] = s
 	return s, nil
+}
+
+func (m *SessionManager) liveSession(sessionID string) *Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if existing := m.sessions[sessionID]; existing != nil {
+		return existing
+	}
+	return nil
+}
+
+func (m *SessionManager) registerReconstructedLocked(s *Session, now time.Time) *Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.sessions[s.ID]; ok {
+		return existing
+	}
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return s
+}
+
+func (m *SessionManager) wasSessionGenerationEnded(ctx context.Context, sessionID, generation string, now time.Time) (bool, error) {
+	generation = persistedSessionGeneration(generation)
+	key := sessionGenerationKey{sessionID: sessionID, generation: generation}
+	m.mu.Lock()
+	m.pruneEndedGenerationsLocked(now)
+	expiresAt, found := m.endedGenerations[key]
+	store := m.generationTombstoneStore
+	m.mu.Unlock()
+	if found && expiresAt.After(now) {
+		return true, nil
+	}
+	if store == nil {
+		return false, nil
+	}
+	ended, err := store.WasSessionGenerationEnded(ctx, sessionID, generation, now)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrSessionGenerationTombstoneUnavailable, err)
+	}
+	if ended {
+		m.mu.Lock()
+		m.rememberEndedGenerationLocked(key, now.Add(MaxTokenTTL), now)
+		m.mu.Unlock()
+	}
+	return ended, nil
+}
+
+func (m *SessionManager) recordEndedSessionGeneration(ctx context.Context, sessionID, generation string, now time.Time) error {
+	generation = persistedSessionGeneration(generation)
+	m.mu.RLock()
+	store := m.generationTombstoneStore
+	m.mu.RUnlock()
+	expiresAt := now.Add(MaxTokenTTL)
+	if store != nil {
+		if err := store.RecordEndedSessionGeneration(ctx, sessionID, generation, expiresAt); err != nil {
+			return fmt.Errorf("%w: %v", ErrSessionGenerationTombstoneUnavailable, err)
+		}
+	}
+	m.mu.Lock()
+	m.rememberEndedGenerationLocked(sessionGenerationKey{sessionID: sessionID, generation: generation}, expiresAt, now)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *SessionManager) rememberEndedGenerationLocked(key sessionGenerationKey, expiresAt, now time.Time) {
+	m.pruneEndedGenerationsLocked(now)
+	if _, exists := m.endedGenerations[key]; !exists && len(m.endedGenerations) >= maxInMemorySessionGenerationTombstones {
+		var earliestKey sessionGenerationKey
+		var earliestExpiry time.Time
+		for candidate, candidateExpiry := range m.endedGenerations {
+			if earliestExpiry.IsZero() || candidateExpiry.Before(earliestExpiry) {
+				earliestKey = candidate
+				earliestExpiry = candidateExpiry
+			}
+		}
+		delete(m.endedGenerations, earliestKey)
+	}
+	m.endedGenerations[key] = expiresAt
+}
+
+func (m *SessionManager) pruneEndedGenerationsLocked(now time.Time) {
+	for key, expiresAt := range m.endedGenerations {
+		if !expiresAt.After(now) {
+			delete(m.endedGenerations, key)
+		}
+	}
 }
 
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
@@ -697,6 +883,23 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 	return nil
 }
 
+func (m *SessionManager) UpdateProgressGeneration(sessionID, generation string, position float64, isPaused bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
+	s.Position = position
+	s.IsPaused = isPaused
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // UpdateAudioTrack updates the audio track index and optionally the play
 // method for a session. Used when switching audio tracks mid-playback.
 func (m *SessionManager) UpdateAudioTrack(sessionID string, audioTrackIndex int, method PlayMethod) error {
@@ -708,6 +911,26 @@ func (m *SessionManager) UpdateAudioTrack(sessionID string, audioTrackIndex int,
 		return ErrSessionNotFound
 	}
 
+	s.AudioTrackIndex = audioTrackIndex
+	s.BasePlayMethod = method
+	if s.PlayMethod != PlayTranscode || method == PlayTranscode {
+		s.PlayMethod = method
+	}
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return nil
+}
+
+func (m *SessionManager) UpdateAudioTrackGeneration(sessionID, generation string, audioTrackIndex int, method PlayMethod) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
 	s.AudioTrackIndex = audioTrackIndex
 	s.BasePlayMethod = method
 	if s.PlayMethod != PlayTranscode || method == PlayTranscode {
@@ -951,6 +1174,26 @@ func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, 
 	return nil
 }
 
+// SetTranscodeStreamDetailsGeneration records encode decisions only when the
+// reusable public session ID still belongs to the expected generation.
+func (m *SessionManager) SetTranscodeStreamDetailsGeneration(sessionID, generation, targetVideoCodec, targetAudioCodec string, transcodeAudio bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
+	s.TargetVideoCodec = targetVideoCodec
+	s.TargetAudioCodec = targetAudioCodec
+	s.TranscodeAudio = transcodeAudio
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // SetTranscodeNodeURL assigns a transcode node URL to an existing session.
 func (m *SessionManager) SetTranscodeNodeURL(sessionID, url string) error {
 	m.mu.Lock()
@@ -961,6 +1204,25 @@ func (m *SessionManager) SetTranscodeNodeURL(sessionID, url string) error {
 		return ErrSessionNotFound
 	}
 
+	s.TranscodeNodeURL = url
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return nil
+}
+
+// SetTranscodeNodeURLGeneration assigns a node only when the reusable public
+// session ID still belongs to the expected generation.
+func (m *SessionManager) SetTranscodeNodeURLGeneration(sessionID, generation, url string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
 	s.TranscodeNodeURL = url
 	s.streamRevision++
 	m.touchSessionLocked(s)
@@ -1084,6 +1346,21 @@ func (m *SessionManager) BeginTransport(sessionID string) error {
 	return nil
 }
 
+func (m *SessionManager) BeginTransportGeneration(sessionID, generation string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
+	s.activeTransportCount++
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // EndTransport decrements the count of in-flight media transport requests for
 // the session and refreshes its activity timestamp.
 func (m *SessionManager) EndTransport(sessionID string) error {
@@ -1102,17 +1379,101 @@ func (m *SessionManager) EndTransport(sessionID string) error {
 	return nil
 }
 
-// StopSession removes a session from the manager.
-func (m *SessionManager) StopSession(sessionID string) error {
+func (m *SessionManager) EndTransportGeneration(sessionID, generation string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if _, ok := m.sessions[sessionID]; !ok {
+	s, ok := m.sessions[sessionID]
+	if !ok {
 		return ErrSessionNotFound
 	}
-
-	delete(m.sessions, sessionID)
+	if s.Generation != generation {
+		return ErrSessionSuperseded
+	}
+	if s.activeTransportCount > 0 {
+		s.activeTransportCount--
+	}
+	m.touchSessionLocked(s)
 	return nil
+}
+
+// TerminateSessionGeneration durably ends one exact public-session identity.
+// The per-ID lifecycle guard spans tombstone I/O, generation-matched live-state
+// deletion, and finalizer execution so reconstruction cannot install a
+// successor between those steps. The global session mutex is never held during
+// tombstone I/O or finalizer work. An absent or already-tombstoned generation is
+// a successful idempotent retry and still reruns the finalizer.
+func (m *SessionManager) TerminateSessionGeneration(
+	ctx context.Context,
+	sessionID string,
+	generation string,
+	finalizer func() error,
+) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return fmt.Errorf("%w: exact session identity is required", ErrSessionGenerationTombstoneUnavailable)
+	}
+	if err := validatePublicSessionGeneration(generation); err != nil {
+		return err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	release := m.acquireSessionLifecycleLock(sessionID)
+	defer release()
+	return m.terminateSessionGenerationLocked(ctx, sessionID, generation, finalizer)
+}
+
+// terminateSessionGenerationLocked requires the caller to own sessionID's
+// lifecycle guard.
+func (m *SessionManager) terminateSessionGenerationLocked(
+	ctx context.Context,
+	sessionID string,
+	generation string,
+	finalizer func() error,
+) error {
+	if generation == "" {
+		m.mu.RLock()
+		current := m.sessions[sessionID]
+		m.mu.RUnlock()
+		if current != nil && current.Generation != "" {
+			return ErrSessionSuperseded
+		}
+	}
+	ioCtx, cancel := context.WithTimeout(ctx, sessionGenerationStoreIOTimeout)
+	err := m.recordEndedSessionGeneration(ioCtx, sessionID, generation, time.Now().UTC())
+	cancel()
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	if current := m.sessions[sessionID]; current != nil && current.Generation == generation {
+		delete(m.sessions, sessionID)
+	}
+	m.mu.Unlock()
+
+	if finalizer != nil {
+		if err := finalizer(); err != nil {
+			return fmt.Errorf("finalizing playback session %s generation %s: %w", sessionID, generation, err)
+		}
+	}
+	return nil
+}
+
+// StopSession removes the currently live generation from the manager.
+func (m *SessionManager) StopSession(sessionID string) error {
+	release := m.acquireSessionLifecycleLock(sessionID)
+	defer release()
+
+	m.mu.RLock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.RUnlock()
+		return ErrSessionNotFound
+	}
+	generation := s.Generation
+	m.mu.RUnlock()
+
+	return m.terminateSessionGenerationLocked(context.Background(), sessionID, generation, nil)
 }
 
 // GetSession returns the session with the given ID, or ErrSessionNotFound.
@@ -1256,22 +1617,61 @@ func (m *SessionManager) CleanStale() []*Session {
 // provided grace period. Sessions with an active media transport request are
 // preserved even if they have not emitted a recent heartbeat yet.
 func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*Session {
-	m.mu.Lock()
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	m.mu.RUnlock()
 
-	now := time.Now()
 	var expired []*Session
-	for id, s := range m.sessions {
-		if s.activeTransportCount > 0 {
+	for _, id := range ids {
+		release := m.acquireSessionLifecycleLock(id)
+		now := time.Now().UTC()
+		m.mu.RLock()
+		s, ok := m.sessions[id]
+		if !ok {
+			m.mu.RUnlock()
+			release()
 			continue
 		}
-		if m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle) {
-			cp := *s
+		if s.activeTransportCount > 0 {
+			m.mu.RUnlock()
+			release()
+			continue
+		}
+		generation := s.Generation
+		inactive := m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle)
+		m.mu.RUnlock()
+		if !inactive {
+			release()
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), sessionGenerationStoreIOTimeout)
+		err := m.recordEndedSessionGeneration(ctx, id, generation, now)
+		cancel()
+		if err != nil {
+			slog.Warn("keeping inactive playback session live because its generation tombstone could not be recorded",
+				"session", id, "error", err)
+			release()
+			continue
+		}
+
+		m.mu.Lock()
+		current, ok := m.sessions[id]
+		if ok && current.Generation == generation && current.activeTransportCount == 0 &&
+			m.sessionIsInactiveLocked(current, time.Now().UTC(), activeIdle, pausedIdle) {
+			cp := *current
 			expired = append(expired, &cp)
 			delete(m.sessions, id)
 		}
+		m.mu.Unlock()
+		release()
 	}
+	m.mu.RLock()
 	hook := m.expireHook
-	m.mu.Unlock()
+	m.mu.RUnlock()
 
 	if hook != nil {
 		for _, s := range expired {

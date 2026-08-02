@@ -20,6 +20,6 @@ type systemCapabilitiesResponse struct {
 func (*SystemCapabilitiesHandler) HandleGet(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, systemCapabilitiesResponse{
 		APIVersion:   "2.2",
-		Capabilities: []string{"branding.v1"},
+		Capabilities: []string{"branding.v1", "sessions.snapshot.v2"},
 	})
 }

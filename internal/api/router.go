@@ -3,7 +3,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -210,29 +209,6 @@ func (d *Dependencies) CurrentConfig() *config.Config {
 		}
 	}
 	return d.Config
-}
-
-func handleSiloComplexSessionsSnapshotStub(w http.ResponseWriter, _ *http.Request) {
-	writeSiloComplexContractStub(w, struct {
-		SnapshotID  string `json:"snapshot_id"`
-		GeneratedAt string `json:"generated_at"`
-		Complete    bool   `json:"complete"`
-		Reason      string `json:"incomplete_reason"`
-		Sessions    []any  `json:"sessions"`
-	}{
-		SnapshotID:  "00000000-0000-0000-0000-000000000000",
-		GeneratedAt: "1970-01-01T00:00:00Z",
-		Complete:    false,
-		Reason:      "not_implemented",
-		Sessions:    []any{},
-	})
-}
-
-func writeSiloComplexContractStub(w http.ResponseWriter, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		slog.Error("failed to encode Silo Complex contract stub", "error", err)
-	}
 }
 
 // NewRouter creates a chi.Router with all middleware and routes mounted
@@ -2758,7 +2734,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							if brandingHandler != nil {
 								r.Get("/branding", brandingHandler.HandleAdminBranding)
 							}
-							r.Get("/sessions/snapshot", handleSiloComplexSessionsSnapshotStub)
+							r.Get("/sessions/snapshot", adminHandler.HandleGetSessionsSnapshot)
 
 							r.Get("/users", adminHandler.HandleListUsers)
 							r.Post("/users", adminHandler.HandleCreateUser)

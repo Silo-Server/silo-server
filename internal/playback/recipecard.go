@@ -16,12 +16,14 @@ import (
 // context, channels, log sink). Those are re-wired on reconstruct from the
 // live config and request.
 type RecipeCard struct {
-	SessionID            string `json:"session_id"`
-	UserID               int    `json:"user_id"`
-	ProfileID            string `json:"profile_id"`
-	MediaFileID          int    `json:"media_file_id"`
-	TranscodeNodeURL     string `json:"transcode_node_url,omitempty"`
-	TranscodeTransportID string `json:"transcode_transport_id,omitempty"`
+	SessionID            string    `json:"session_id"`
+	SessionGeneration    string    `json:"session_generation,omitempty"`
+	StartedAt            time.Time `json:"started_at,omitempty"`
+	UserID               int       `json:"user_id"`
+	ProfileID            string    `json:"profile_id"`
+	MediaFileID          int       `json:"media_file_id"`
+	TranscodeNodeURL     string    `json:"transcode_node_url,omitempty"`
+	TranscodeTransportID string    `json:"transcode_transport_id,omitempty"`
 
 	// PlayMethod discriminates which serve path reconstructs this session
 	// (direct / remux / transcode). Empty decodes as PlayTranscode for
@@ -66,6 +68,16 @@ type RecipeCard struct {
 	TargetBitrateKbps      int     `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration          float64 `json:"total_duration"`
 	FastStart              bool    `json:"fast_start,omitempty"`
+}
+
+// WithSessionIdentity binds a recipe to the lifetime of one live playback
+// session. The values survive token-carried restart reconstruction.
+func (c RecipeCard) WithSessionIdentity(generation string, startedAt time.Time) RecipeCard {
+	c.SessionGeneration = generation
+	if !startedAt.IsZero() {
+		c.StartedAt = startedAt.UTC()
+	}
+	return c
 }
 
 // NewRecipeCard builds a RecipeCard from the durable identity fields plus the
@@ -193,6 +205,8 @@ const MaxTokenTTL = 24 * time.Hour
 func (c RecipeCard) ToClaims() streamtoken.Claims {
 	return streamtoken.Claims{
 		SessionID:              c.SessionID,
+		SessionGeneration:      c.SessionGeneration,
+		StartedAt:              formatRecipeStartedAt(c.StartedAt),
 		MediaPath:              c.InputPath,
 		OutputSubdir:           c.OutputSubdir,
 		PlayMethod:             string(c.PlayMethod),
@@ -237,6 +251,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 	}
 	return RecipeCard{
 		SessionID:              c.SessionID,
+		SessionGeneration:      c.SessionGeneration,
+		StartedAt:              parseRecipeStartedAt(c.StartedAt),
 		UserID:                 c.UserID,
 		ProfileID:              c.ProfileID,
 		MediaFileID:            c.MediaFileID,
@@ -265,4 +281,19 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TotalDuration:          c.TotalDuration,
 		FastStart:              c.FastStart,
 	}
+}
+
+func formatRecipeStartedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func parseRecipeStartedAt(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
 }

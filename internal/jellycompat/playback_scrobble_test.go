@@ -139,6 +139,30 @@ type flakyTerminalPlaybackStore struct {
 	stageCalls int
 }
 
+func (s *flakyTerminalPlaybackStore) CompareAndSwapUpstream(
+	id string,
+	expected UpstreamSessionIdentity,
+	fn UpstreamSessionMutation,
+) (*PlaybackSession, bool, error) {
+	candidate, ok := s.PlaybackSessionStore.GetFinalizable(id, s.PlaybackSessionStore.compatTokenForID(id))
+	if !ok || candidate.UpstreamSessionID != expected.ID || candidate.UpstreamSessionGeneration != expected.Generation {
+		return s.PlaybackSessionStore.CompareAndSwapUpstream(id, expected, fn)
+	}
+	deleteSession, previewErr := fn(candidate)
+	if previewErr != nil || deleteSession || !candidate.Terminal || candidate.TerminalScrobbleEvent == nil {
+		return s.PlaybackSessionStore.CompareAndSwapUpstream(id, expected, fn)
+	}
+	s.mu.Lock()
+	s.stageCalls++
+	if s.failStages > 0 {
+		s.failStages--
+		s.mu.Unlock()
+		return nil, false, errors.New("terminal store unavailable")
+	}
+	s.mu.Unlock()
+	return s.PlaybackSessionStore.CompareAndSwapUpstream(id, expected, fn)
+}
+
 func (s *flakyTerminalPlaybackStore) StageTerminal(
 	id string,
 	compatToken string,

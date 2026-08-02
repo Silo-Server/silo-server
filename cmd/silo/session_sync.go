@@ -14,8 +14,13 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		return worker.SessionSync{ReportingNode: reportingNode}
 	}
 
+	generation := s.Generation
+	if generation == "" {
+		generation = playback.LegacySessionGenerationSentinel
+	}
 	return worker.SessionSync{
 		SessionID:            s.ID,
+		SessionGeneration:    generation,
 		UserID:               s.UserID,
 		ProfileID:            s.ProfileID,
 		MediaFileID:          s.MediaFileID,

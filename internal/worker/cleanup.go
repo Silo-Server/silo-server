@@ -102,6 +102,7 @@ func (c *SessionCleaner) Stop() {
 // 2. Remove stale heartbeat rows (> 5 minutes)
 // 3. Remove stale active sessions (last_sync_at > 45s)
 // 4. Remove stale paused sessions (last_sync_at > 2 minutes)
+// 5. Remove expired playback-session generation tombstones
 func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	var totalDeleted int64
 
@@ -120,10 +121,19 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 
 	// 2. Clean up stale heartbeat rows.
 	if _, err := c.pool.Exec(ctx, `
-		DELETE FROM node_heartbeats
-		WHERE updated_at < NOW() - make_interval(secs => $1::double precision)
+		WITH deleted_heartbeats AS (
+			DELETE FROM node_heartbeats
+			WHERE updated_at < NOW() - make_interval(secs => $1::double precision)
+			RETURNING node_id
+		)
+		DELETE FROM playback_session_snapshot_watermarks
+		WHERE reporting_node IN (SELECT node_id FROM deleted_heartbeats)
+		   OR NOT EXISTS (
+			SELECT 1 FROM node_heartbeats
+			WHERE node_id = playback_session_snapshot_watermarks.reporting_node
+		   )
 	`, nodeHeartbeatCleanup.Seconds()); err != nil {
-		return int(totalDeleted), fmt.Errorf("cleaning stale heartbeats: %w", err)
+		return int(totalDeleted), fmt.Errorf("cleaning stale heartbeats and snapshot watermarks: %w", err)
 	}
 
 	// 3. Active sessions: 45s grace on last_sync_at.
@@ -148,7 +158,16 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	}
 	totalDeleted += tag.RowsAffected()
 
-	// 5. Audiobook session cleanup (hourly): close abandoned open sessions.
+	// Ended generations only need to outlive the longest signed playback token.
+	// Expiry cleanup bounds both durable storage and the revocation lookup index.
+	if _, err := c.pool.Exec(ctx, `
+		DELETE FROM playback_session_generation_tombstones
+		WHERE expires_at <= NOW()
+	`); err != nil {
+		return int(totalDeleted), fmt.Errorf("cleaning expired playback session generation tombstones: %w", err)
+	}
+
+	// 6. Audiobook session cleanup (hourly): close abandoned open sessions.
 	// Closed rows are retained because the ABS stats endpoint currently has
 	// all-time semantics and aggregates directly from abs_playback_sessions.
 	// Kept off totalDeleted so it doesn't trigger the live-session

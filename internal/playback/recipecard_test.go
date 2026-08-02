@@ -3,6 +3,7 @@ package playback
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
@@ -66,6 +67,21 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
+	}
+}
+
+func TestRecipeCardSessionGenerationAndStartRoundTripClaims(t *testing.T) {
+	startedAt := time.Date(2026, 8, 1, 13, 14, 15, 123456000, time.UTC)
+	card := NewDirectRecipeCard("session-1", 7, "profile-1", 42).
+		WithSessionIdentity("e7fd1aef-c2cb-4b70-9a50-11f61d7d5318", startedAt)
+
+	claims := card.ToClaims()
+	got := RecipeCardFromClaims(&claims)
+	if got.SessionGeneration != card.SessionGeneration {
+		t.Fatalf("generation = %q, want %q", got.SessionGeneration, card.SessionGeneration)
+	}
+	if !got.StartedAt.Equal(startedAt) {
+		t.Fatalf("started_at = %s, want %s", got.StartedAt, startedAt)
 	}
 }
 
@@ -144,7 +160,10 @@ func TestReconstructSessionRestoresClientMetadata(t *testing.T) {
 	card.ClientVersion = "0.15"
 	card.ClientUserAgent = "Findroid/0.15 (Android)"
 
-	session := tm.ReconstructSession(t.Context(), "sess-jf", 42, card)
+	session, err := tm.ReconstructSessionChecked(t.Context(), "sess-jf", 42, card)
+	if err != nil {
+		t.Fatalf("reconstruct: %v", err)
+	}
 	if session == nil {
 		t.Fatal("reconstruct returned nil")
 	}

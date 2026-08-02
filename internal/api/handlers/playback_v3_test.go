@@ -1164,7 +1164,7 @@ func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
 		},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
-	transport, transportErr := handler.prepareTransportV3(request, &playback.Session{ID: "session-ready", UserID: 7, ProfileID: "profile-1"}, v3HandlerFixtureFile(t), playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac"})
+	transport, transportErr := handler.prepareTransportV3(request, &playback.Session{ID: "session-ready", Generation: "32a4e124-9df7-4cfa-be49-e8e503316714", UserID: 7, ProfileID: "profile-1"}, v3HandlerFixtureFile(t), playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac"})
 	if transportErr != nil {
 		t.Fatalf("prepare remote transport: %v", transportErr)
 	}

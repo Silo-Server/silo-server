@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -40,6 +42,10 @@ func (f *fakeSessionRegistry) RegisterReconstructed(s *Session) *Session {
 	}
 	f.sessions[s.ID] = s
 	return s
+}
+
+func (f *fakeSessionRegistry) RegisterReconstructedChecked(_ context.Context, s *Session) (*Session, error) {
+	return f.RegisterReconstructed(s), nil
 }
 
 // RegisterReconstructedWithLimits mirrors RegisterReconstructed for the tests.
@@ -95,7 +101,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 	t.Run("live session, matching owner -> loaded", func(t *testing.T) {
 		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
 		m := newMgr(reg)
-		got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, nil)
+		got, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 5, nil)
 		if status != SessionLoaded || got == nil || got.ID != "s" {
 			t.Fatalf("got status=%v session=%+v", status, got)
 		}
@@ -104,7 +110,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 	t.Run("live session, mismatched owner -> forbidden", func(t *testing.T) {
 		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
 		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 9, nil); status != SessionForbidden {
+		if _, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 9, nil); status != SessionForbidden {
 			t.Fatalf("status = %v, want forbidden", status)
 		}
 	})
@@ -112,7 +118,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 	t.Run("live session, zero caller -> loaded (UUID as bearer)", func(t *testing.T) {
 		reg := &fakeSessionRegistry{sessions: map[string]*Session{"s": {ID: "s", UserID: 5}}}
 		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 0, nil); status != SessionLoaded {
+		if _, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 0, nil); status != SessionLoaded {
 			t.Fatalf("status = %v, want loaded", status)
 		}
 	})
@@ -121,7 +127,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 		reg := &fakeSessionRegistry{}
 		m := newMgr(reg)
 		card := NewRemuxRecipeCard("s", 5, "p", 77, true, 2)
-		got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, cardPtr(card))
+		got, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 5, cardPtr(card))
 		if status != SessionLoaded || got == nil {
 			t.Fatalf("status=%v session=%+v", status, got)
 		}
@@ -137,7 +143,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 		reg := &fakeSessionRegistry{}
 		m := newMgr(reg)
 		card := NewDirectRecipeCard("s", 5, "p", 77)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 9, cardPtr(card)); status != SessionMissing {
+		if _, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 9, cardPtr(card)); status != SessionMissing {
 			t.Fatalf("status = %v, want missing", status)
 		}
 	})
@@ -146,7 +152,7 @@ func TestLoadOrReconstructSession(t *testing.T) {
 		reg := &fakeSessionRegistry{}
 		m := newMgr(reg)
 		card := NewDirectRecipeCard("other", 5, "p", 77)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, cardPtr(card)); status != SessionMissing {
+		if _, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 5, cardPtr(card)); status != SessionMissing {
 			t.Fatalf("status = %v, want missing (card session id mismatch)", status)
 		}
 	})
@@ -154,10 +160,93 @@ func TestLoadOrReconstructSession(t *testing.T) {
 	t.Run("miss + no token -> missing", func(t *testing.T) {
 		reg := &fakeSessionRegistry{}
 		m := newMgr(reg)
-		if _, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "nope", 5, nil); status != SessionMissing {
+		if _, status, _ := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "nope", 5, nil); status != SessionMissing {
 			t.Fatalf("status = %v, want missing", status)
 		}
 	})
+}
+
+func TestLoadOrReconstructSessionRejectsLiveRecipeGenerationMismatch(t *testing.T) {
+	reg := &fakeSessionRegistry{sessions: map[string]*Session{"shared": {
+		ID: "shared", Generation: "g2", UserID: 5, MediaFileID: 99,
+	}}}
+	mgr := NewTranscodeManager()
+	mgr.Sessions = reg
+	card := NewDirectRecipeCard("shared", 5, "p", 77).WithSessionIdentity("g1", time.Now().UTC())
+	got, status, err := mgr.LoadOrReconstructSessionChecked(t.Context(), reg.GetSession, "shared", 5, &card)
+	if !errors.Is(err, ErrSessionSuperseded) || status != SessionLoadFailed || got != nil {
+		t.Fatalf("stale recipe load: session=%+v status=%v err=%v", got, status, err)
+	}
+	if live := reg.sessions["shared"]; live.Generation != "g2" || live.MediaFileID != 99 {
+		t.Fatalf("stale recipe changed G2: %+v", live)
+	}
+}
+
+type successorWinningRegistry struct{ winner *Session }
+
+func (r *successorWinningRegistry) GetSession(string) (*Session, error) {
+	return nil, ErrSessionNotFound
+}
+func (r *successorWinningRegistry) RegisterReconstructed(*Session) *Session { return r.winner }
+func (r *successorWinningRegistry) RegisterReconstructedChecked(context.Context, *Session) (*Session, error) {
+	return r.winner, nil
+}
+func (r *successorWinningRegistry) RegisterReconstructedWithLimits(context.Context, *Session) (*Session, error) {
+	return r.winner, nil
+}
+
+func TestLoadOrReconstructSessionRejectsSuccessorWinningRegistration(t *testing.T) {
+	reg := &successorWinningRegistry{winner: &Session{ID: "shared", Generation: "g2", UserID: 5, MediaFileID: 99}}
+	mgr := NewTranscodeManager()
+	mgr.Sessions = reg
+	card := NewDirectRecipeCard("shared", 5, "p", 77).WithSessionIdentity("g1", time.Now().UTC())
+	got, status, err := mgr.LoadOrReconstructSessionChecked(t.Context(), reg.GetSession, "shared", 5, &card)
+	if !errors.Is(err, ErrSessionSuperseded) || status != SessionLoadFailed || got != nil {
+		t.Fatalf("registration winner load: session=%+v status=%v err=%v", got, status, err)
+	}
+	if reg.winner.Generation != "g2" || reg.winner.MediaFileID != 99 {
+		t.Fatalf("stale recipe changed winner: %+v", reg.winner)
+	}
+}
+
+func TestLoadOrReconstructSessionAcceptsItsOwnTombstoneRotation(t *testing.T) {
+	mgr := NewSessionManager(0, 0)
+	card := NewDirectRecipeCard("rotated", 5, "p", 77).WithSessionIdentity("g1", time.Now().UTC().Add(-time.Minute))
+	if got, err := mgr.RegisterReconstructedChecked(t.Context(), &Session{ID: "rotated", Generation: "g1", UserID: 5}); err != nil || got == nil {
+		t.Fatalf("register G1: session=%+v err=%v", got, err)
+	}
+	if err := mgr.TerminateSessionGeneration(t.Context(), "rotated", "g1", nil); err != nil {
+		t.Fatalf("terminate G1: %v", err)
+	}
+	tm := NewTranscodeManager()
+	tm.Sessions = mgr
+	got, status, err := tm.LoadOrReconstructSessionChecked(t.Context(), mgr.GetSession, "rotated", 5, &card)
+	if err != nil || status != SessionLoaded || got == nil || got.Generation == "g1" || got.Generation == "" {
+		t.Fatalf("own tombstone rotation: session=%+v status=%v err=%v", got, status, err)
+	}
+}
+
+func TestSessionGenerationAndStartedAtSurviveReconstruction(t *testing.T) {
+	startedAt := time.Date(2026, 8, 1, 10, 11, 12, 0, time.UTC)
+	card := NewDirectRecipeCard("session-identity", 5, "profile-1", 77).
+		WithSessionIdentity("283a2e08-cc3a-42e9-a9ba-0b24853a6a4d", startedAt)
+	reg := &fakeSessionRegistry{}
+	mgr := NewTranscodeManager()
+	mgr.Sessions = reg
+
+	got, err := mgr.ReconstructSessionChecked(context.Background(), card.SessionID, card.UserID, card)
+	if err != nil {
+		t.Fatalf("ReconstructSessionChecked: %v", err)
+	}
+	if got == nil {
+		t.Fatal("ReconstructSession returned nil")
+	}
+	if got.Generation != card.SessionGeneration {
+		t.Fatalf("generation = %q, want %q", got.Generation, card.SessionGeneration)
+	}
+	if !got.StartedAt.Equal(startedAt) {
+		t.Fatalf("started_at = %s, want %s", got.StartedAt, startedAt)
+	}
 }
 
 // CloseTranscodeSessionIf must leave a successor registered under the same id
@@ -230,6 +319,35 @@ func TestCloseTranscodeSessionIf_GateContract(t *testing.T) {
 	}
 }
 
+func TestMonitorLocalTranscodeExitFallsBackWithoutIdentityHandler(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fail-ffmpeg.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 17\n"), 0o755); err != nil {
+		t.Fatalf("write failing ffmpeg: %v", err)
+	}
+	dead, err := StartTranscode(t.Context(), TranscodeOpts{
+		SessionID: "legacy-handler", InputPath: "ignored", OutputDir: t.TempDir(), FFmpegPath: script,
+	})
+	if err != nil {
+		t.Fatalf("start failing ffmpeg: %v", err)
+	}
+	mgr := NewTranscodeManager()
+	mgr.RegisterTranscodeSession("legacy-handler", dead)
+	called := make(chan *TranscodeSession, 1)
+	mgr.OnFFmpegCrash = func(_ context.Context, _ string, crashed *TranscodeSession) {
+		called <- crashed
+	}
+	mgr.MonitorLocalTranscodeExitGeneration("legacy-handler", "g1", dead)
+
+	select {
+	case crashed := <-called:
+		if crashed != dead {
+			t.Fatalf("legacy handler received crash %p, want %p", crashed, dead)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("timed out waiting for legacy crash handler fallback")
+	}
+}
+
 // fastResumeSeek must apply the seg×dur fast resume only for encoded transcodes;
 // copy-mode cards have variable-duration segments so the fast seek is unsafe.
 func TestFastResumeSeek(t *testing.T) {
@@ -268,12 +386,12 @@ func TestReconstructSession_AdmissionCap(t *testing.T) {
 
 	// First reconstruct for the user admits.
 	card1 := NewDirectRecipeCard("a", 7, "p", 100)
-	if got := m.ReconstructSession(ctx, "a", 7, card1); got == nil {
+	if got, _ := m.ReconstructSessionChecked(ctx, "a", 7, card1); got == nil {
 		t.Fatal("first reconstruct within cap should succeed")
 	}
 	// Second distinct session for the same user is over cap -> refused.
 	card2 := NewDirectRecipeCard("b", 7, "p", 101)
-	if got := m.ReconstructSession(ctx, "b", 7, card2); got != nil {
+	if got, _ := m.ReconstructSessionChecked(ctx, "b", 7, card2); got != nil {
 		t.Fatal("over-cap reconstruct must be refused")
 	}
 }
@@ -291,7 +409,10 @@ func TestReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
 	m.Sessions = reg
 
 	card := NewDirectRecipeCard("a", 7, "p", 100)
-	got := m.ReconstructSession(ctx, "a", 7, card)
+	got, err := m.ReconstructSessionChecked(ctx, "a", 7, card)
+	if err != nil {
+		t.Fatalf("ReconstructSessionChecked: %v", err)
+	}
 	if got == nil {
 		t.Fatal("limit-provider error must fail open and admit the reconstructed session, not refuse")
 	}
@@ -302,6 +423,27 @@ func TestReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
 	// yields SessionLoaded, not SessionMissing.
 	if _, err := reg.GetSession("a"); err != nil {
 		t.Fatalf("failed-open session not registered: %v", err)
+	}
+}
+
+func TestReconstructSession_TombstoneReadErrorFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	reg := &fakeSessionRegistry{
+		limitsErr: errors.Join(ErrSessionGenerationTombstoneUnavailable, errors.New("db timeout")),
+	}
+	m := NewTranscodeManager()
+	m.Sessions = reg
+
+	card := NewDirectRecipeCard("a", 7, "p", 100)
+	got, err := m.ReconstructSessionChecked(ctx, "a", 7, card)
+	if !errors.Is(err, ErrSessionGenerationTombstoneUnavailable) {
+		t.Fatalf("reconstruction error = %v, want tombstone unavailable", err)
+	}
+	if got != nil {
+		t.Fatalf("tombstone read error reconstructed session: %+v", got)
+	}
+	if _, err := reg.GetSession("a"); err == nil {
+		t.Fatal("tombstone read error must not use the unchecked fail-open registration path")
 	}
 }
 
@@ -316,7 +458,10 @@ func TestLoadOrReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
 	m.Sessions = reg
 
 	card := NewDirectRecipeCard("s", 5, "p", 77)
-	got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, &card)
+	got, status, err := m.LoadOrReconstructSessionChecked(ctx, reg.GetSession, "s", 5, &card)
+	if err != nil {
+		t.Fatalf("LoadOrReconstructSessionChecked: %v", err)
+	}
 	if status != SessionLoaded || got == nil {
 		t.Fatalf("provider error must yield SessionLoaded, got status=%v session=%+v", status, got)
 	}
@@ -332,7 +477,7 @@ func TestReconstructSession_OverCapStillRefused(t *testing.T) {
 		m := NewTranscodeManager()
 		m.Sessions = reg
 		card := NewDirectRecipeCard("a", 7, "p", 100)
-		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
+		if got, _ := m.ReconstructSessionChecked(ctx, "a", 7, card); got != nil {
 			t.Fatal("ErrTooManyStreams over-cap must still be refused (nil)")
 		}
 		if _, err := reg.GetSession("a"); err == nil {
@@ -345,7 +490,7 @@ func TestReconstructSession_OverCapStillRefused(t *testing.T) {
 		m := NewTranscodeManager()
 		m.Sessions = reg
 		card := NewDirectRecipeCard("a", 7, "p", 100)
-		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
+		if got, _ := m.ReconstructSessionChecked(ctx, "a", 7, card); got != nil {
 			t.Fatal("ErrTooManyTranscodes over-cap must still be refused (nil)")
 		}
 	})
@@ -364,7 +509,10 @@ func TestReconstructSession_Ownership(t *testing.T) {
 		m.Sessions = reg
 
 		card := NewDirectRecipeCard("s", 5, "p", 77)
-		got := m.ReconstructSession(ctx, "s", 0, card)
+		got, err := m.ReconstructSessionChecked(ctx, "s", 0, card)
+		if err != nil {
+			t.Fatalf("ReconstructSessionChecked: %v", err)
+		}
 		if got == nil {
 			t.Fatal("zero caller (UUID-as-bearer route) must reconstruct")
 		}
@@ -382,7 +530,7 @@ func TestReconstructSession_Ownership(t *testing.T) {
 		m.Sessions = reg
 
 		card := NewDirectRecipeCard("s", 5, "p", 77)
-		if got := m.ReconstructSession(ctx, "s", 9, card); got != nil {
+		if got, _ := m.ReconstructSessionChecked(ctx, "s", 9, card); got != nil {
 			t.Fatal("non-zero caller mismatching the card owner must be refused")
 		}
 	})

@@ -23,7 +23,9 @@ type testCompatSessionManager struct {
 	progressCalls       int
 	progressUpdates     []compatProgressCall
 	stopCalls           []string
+	stopErr             error
 	startCalls          int
+	startHook           func(*playback.Session)
 	beginTransportCalls []string
 	endTransportCalls   []string
 }
@@ -55,6 +57,9 @@ func (m *testCompatSessionManager) StartSession(userID int, profileID string, fi
 		m.sessions = make(map[string]*playback.Session)
 	}
 	m.sessions[session.ID] = session
+	if m.startHook != nil {
+		m.startHook(session)
+	}
 	return session, nil
 }
 
@@ -114,6 +119,9 @@ func (m *testCompatSessionManager) UpdateAudioTrack(sessionID string, audioTrack
 
 func (m *testCompatSessionManager) StopSession(sessionID string) error {
 	m.stopCalls = append(m.stopCalls, sessionID)
+	if m.stopErr != nil {
+		return m.stopErr
+	}
 	delete(m.sessions, sessionID)
 	return nil
 }
@@ -130,6 +138,15 @@ func (m *testCompatSessionManager) SetTranscodeNodeURL(sessionID, url string) er
 		session.TranscodeNodeURL = url
 	}
 	return nil
+}
+
+func (m *testCompatSessionManager) SetTranscodeRoute(sessionID string, route playback.TranscodeRoute) error {
+	if session, ok := m.sessions[sessionID]; ok {
+		session.TranscodeNodeURL = route.NodeURL
+		session.TranscodeTransportID = route.TransportID
+		return nil
+	}
+	return playback.ErrSessionNotFound
 }
 
 type testCompatFileResolver struct {
@@ -288,8 +305,9 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 
 	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
 	playbackStore.Put(PlaybackSession{
-		ID:           "play-1",
-		MediaSources: []PlaybackMediaSource{source},
+		ID:                "play-1",
+		UpstreamSessionID: "upstream-1",
+		MediaSources:      []PlaybackMediaSource{source},
 	})
 
 	handler := &PlaybackHandler{
@@ -300,7 +318,7 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 		tm:            playback.NewTranscodeManager(),
 	}
 
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", "", source)
 	if err != nil {
 		t.Fatalf("ensureTranscodeSession: %v", err)
 	}
@@ -342,6 +360,7 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		context.Background(),
 		"play-1",
 		"upstream-1",
+		"",
 		source,
 		&models.MediaFile{ID: version.FileID, FilePath: filePath},
 		12,
@@ -352,5 +371,8 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 
 	if got := remoteReq.AudioTrackIndex; got != 1 {
 		t.Fatalf("remote AudioTrackIndex = %d, want 1", got)
+	}
+	if remoteReq.SessionID != "upstream-1" || remoteReq.PublicSessionID != "" || remoteReq.SessionGeneration != "" {
+		t.Fatalf("legacy remote identity = (%q,%q,%q)", remoteReq.SessionID, remoteReq.PublicSessionID, remoteReq.SessionGeneration)
 	}
 }

@@ -716,10 +716,10 @@ func main() {
 
 		var handler http.Handler
 		if mode == "proxy" {
-			srv := proxy.NewServer(watcher, tracker)
+			srv := proxy.NewServer(watcher, tracker, playback.NewPGSessionGenerationTombstoneStore(pool))
 			handler = srv.Handler()
 		} else {
-			srv := transcodenode.NewServer(watcher, tracker)
+			srv := transcodenode.NewServer(watcher, tracker, playback.NewPGSessionGenerationTombstoneStore(pool))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
 			// start, so this node can rebuild a Jellyfin transcode after its own
@@ -1677,6 +1677,9 @@ func main() {
 
 	// Step 6: Create playback session manager and wire into dependencies.
 	sessionMgr := playback.NewSessionManager(6, 2) // defaults from plan: max_streams=6, max_transcodes=2
+	if deps.DB != nil {
+		sessionMgr.SetSessionGenerationTombstoneStore(playback.NewPGSessionGenerationTombstoneStore(deps.DB))
+	}
 	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
@@ -1723,6 +1726,7 @@ func main() {
 	// Build the reconciler early enough that playback handlers can trigger
 	// immediate session syncs after start/stop events.
 	nodeIdentity := resolveNodeIdentity()
+	bootGeneration := uuid.New()
 
 	var reconciler *worker.Reconciler
 	var heartbeatWriter *worker.HeartbeatWriter
@@ -1735,7 +1739,7 @@ func main() {
 			}
 			return syncs
 		}
-		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider)
+		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider, bootGeneration)
 		reconciler.EventBus = deps.EventBus
 		reconciler.EventsHub = deps.EventsHub
 		reconciler.PreSync = func() {
@@ -1749,7 +1753,7 @@ func main() {
 		deps.SessionSyncer = reconciler
 
 		nodeURL := fmt.Sprintf("http://%s%s", nodeIdentity, cfg.Server.Listen)
-		heartbeatWriter = worker.NewHeartbeatWriter(deps.DB, nodeIdentity, mode, nodeURL)
+		heartbeatWriter = worker.NewHeartbeatWriter(deps.DB, nodeIdentity, mode, nodeURL, bootGeneration)
 	}
 
 	if deps.DB != nil {

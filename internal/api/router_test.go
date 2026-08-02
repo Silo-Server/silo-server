@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,7 +28,7 @@ func (routerContractSettings) Set(context.Context, string, string) error   { ret
 func TestRouterSystemCapabilitiesRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/system/capabilities")
 	assertSiloComplexAccess(t, http.HandlerFunc(handlers.NewSystemCapabilitiesHandler().HandleGet),
-		`{"api_version":"2.2","capabilities":["branding.v1"]}`+"\n")
+		`{"api_version":"2.2","capabilities":["branding.v1","sessions.snapshot.v2"]}`+"\n")
 }
 
 func TestRouterAdminBrandingRoute(t *testing.T) {
@@ -39,8 +40,23 @@ func TestRouterAdminBrandingRoute(t *testing.T) {
 
 func TestRouterSessionsSnapshotRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/admin/sessions/snapshot")
-	assertSiloComplexAccess(t, http.HandlerFunc(handleSiloComplexSessionsSnapshotStub),
-		`{"snapshot_id":"00000000-0000-0000-0000-000000000000","generated_at":"1970-01-01T00:00:00Z","complete":false,"incomplete_reason":"not_implemented","sessions":[]}`+"\n")
+	handler := handlers.NewAdminHandler(nil, nil, nil)
+	assertSiloComplexAccess(t, http.HandlerFunc(handler.HandleGetSessionsSnapshot), "")
+	protected := apimw.RequireActingAdmin(nil)(http.HandlerFunc(handler.HandleGetSessionsSnapshot))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request = request.WithContext(apimw.SetClaims(request.Context(), &auth.Claims{Role: "admin"}))
+	recorder := httptest.NewRecorder()
+	protected.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if body["snapshot_id"] == "" || body["generated_at"] == "" || body["complete"] != false || body["incomplete_reason"] != "snapshot_query_failed" {
+		t.Fatalf("unexpected fail-closed snapshot: %#v", body)
+	}
 }
 
 func assertSiloComplexAccess(t *testing.T, handler http.Handler, expectedBody string) {
@@ -73,7 +89,7 @@ func assertSiloComplexAccess(t *testing.T, handler http.Handler, expectedBody st
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 		}
-		if body := recorder.Body.String(); body != expectedBody {
+		if body := recorder.Body.String(); expectedBody != "" && body != expectedBody {
 			t.Fatalf("body = %q, want %q", body, expectedBody)
 		}
 	})

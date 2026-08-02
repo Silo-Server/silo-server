@@ -19,6 +19,8 @@ import (
 // never trusted on their own.
 type Claims struct {
 	SessionID            string `json:"sid"`
+	SessionGeneration    string `json:"sgen,omitempty"`
+	StartedAt            string `json:"sat,omitempty"`
 	MediaPath            string `json:"path"`
 	PlayMethod           string `json:"method"`
 	TranscodeAudio       bool   `json:"ta,omitempty"`

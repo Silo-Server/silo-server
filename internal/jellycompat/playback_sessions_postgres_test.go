@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -39,17 +40,20 @@ func TestDurableCompatPlaybackStore_SurvivesRestart(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ctx := context.Background()
 	id := fmt.Sprintf("compat-test-%d", time.Now().UnixNano())
+	upstreamStartedAt := time.Date(2026, time.August, 1, 15, 4, 5, 0, time.FixedZone("EDT", -4*60*60))
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
 
 	store1 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	store1.Put(PlaybackSession{
-		ID:                 id,
-		CompatToken:        "tok",
-		UserID:             "u1",
-		RouteItemID:        "route-1",
-		UpstreamSessionID:  "up-1",
-		InitialSeekSeconds: 12.5,
-		MediaSources:       []PlaybackMediaSource{{ID: "src-1", FileID: 7}},
+		ID:                        id,
+		CompatToken:               "tok",
+		UserID:                    "u1",
+		RouteItemID:               "route-1",
+		UpstreamSessionID:         "up-1",
+		UpstreamSessionGeneration: "generation-1",
+		UpstreamStartedAt:         upstreamStartedAt,
+		InitialSeekSeconds:        12.5,
+		MediaSources:              []PlaybackMediaSource{{ID: "src-1", FileID: 7}},
 	})
 
 	// Fresh instance => empty cache => must hit Postgres.
@@ -60,6 +64,12 @@ func TestDurableCompatPlaybackStore_SurvivesRestart(t *testing.T) {
 	}
 	if got.UpstreamSessionID != "up-1" || got.RouteItemID != "route-1" || got.InitialSeekSeconds != 12.5 {
 		t.Fatalf("reloaded session lost fields: %+v", got)
+	}
+	if got.UpstreamSessionGeneration != "generation-1" {
+		t.Fatalf("UpstreamSessionGeneration = %q, want generation-1", got.UpstreamSessionGeneration)
+	}
+	if !got.UpstreamStartedAt.Equal(upstreamStartedAt.UTC()) || got.UpstreamStartedAt.Location() != time.UTC {
+		t.Fatalf("UpstreamStartedAt = %v (%v), want %v (UTC)", got.UpstreamStartedAt, got.UpstreamStartedAt.Location(), upstreamStartedAt.UTC())
 	}
 
 	// FindByRoute on the fresh instance resolves via a DB-backed scan.
@@ -83,6 +93,85 @@ func TestDurableCompatPlaybackStore_SurvivesRestart(t *testing.T) {
 	store4 := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	if _, ok := store4.Get(id); ok {
 		t.Fatal("session still present after delete")
+	}
+}
+
+func TestDurableCompatPlaybackStoreCompareAndSwapUpstreamRejectsStaleGeneration(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("compat-cas-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	seed.Put(PlaybackSession{
+		ID:                        id,
+		CompatToken:               "owner",
+		UpstreamSessionID:         "upstream",
+		UpstreamSessionGeneration: "g2",
+		UpstreamPlayMethod:        "transcode",
+		Recipe:                    &playback.RecipeCard{SessionID: "upstream", MediaFileID: 42},
+	})
+
+	stale := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	_, matched, err := stale.CompareAndSwapUpstream(
+		id,
+		UpstreamSessionIdentity{ID: "upstream", Generation: "g1"},
+		func(session *PlaybackSession) (bool, error) {
+			session.UpstreamSessionGeneration = "g1-mutated"
+			session.UpstreamPlayMethod = "direct"
+			session.Recipe = nil
+			return true, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("stale compare-and-swap: %v", err)
+	}
+	if matched {
+		t.Fatal("stale generation matched durable row")
+	}
+
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	got, ok := fresh.Get(id)
+	if !ok || got.UpstreamSessionGeneration != "g2" || got.UpstreamPlayMethod != "transcode" || got.Recipe == nil || got.Recipe.MediaFileID != 42 {
+		t.Fatalf("stale generation changed durable replacement: ok=%v got=%+v", ok, got)
+	}
+}
+
+func TestDurableStoppedFirstRequestAfterRestartUsesPersistedIdentity(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("compat-stopped-restart-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	seed.Put(PlaybackSession{
+		ID:                        id,
+		CompatToken:               "owner",
+		UpstreamSessionID:         "upstream-restart",
+		UpstreamSessionGeneration: "generation-restart",
+		UpstreamStartedAt:         time.Now().UTC().Add(-time.Minute),
+		UpstreamPlayMethod:        "direct",
+	})
+
+	restarted := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	playSession, ok := restarted.Get(id)
+	if !ok {
+		t.Fatal("durable compat row missing after restart")
+	}
+	mgr := playback.NewSessionManager(0, 0)
+	h := newRestartIdentityHandler(restarted, mgr)
+	if err := h.teardownPlaySession(ctx, playSession, nil, nil); err != nil {
+		t.Fatalf("Stopped first request after restart: %v", err)
+	}
+
+	verify := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	if _, ok := verify.Get(id); ok {
+		t.Fatal("Stopped first request left durable compat row routable")
+	}
+	if got := mgr.RegisterReconstructed(&playback.Session{
+		ID: "upstream-restart", Generation: "generation-restart",
+	}); got == nil || got.Generation == "generation-restart" {
+		t.Fatalf("persisted ended generation reconstructed after restart stop: %+v", got)
 	}
 }
 

@@ -27,7 +27,7 @@ func TestSystemCapabilitiesAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 	}
 	want := systemCapabilitiesResponse{
 		APIVersion:   "2.2",
-		Capabilities: []string{"branding.v1"},
+		Capabilities: []string{"branding.v1", "sessions.snapshot.v2"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("response = %#v, want %#v", got, want)

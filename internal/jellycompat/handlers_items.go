@@ -3301,6 +3301,14 @@ func max(value, fallback int) int {
 }
 
 func writeCompatUpstreamError(w http.ResponseWriter, err error) {
+	if errors.Is(err, playback.ErrSessionSuperseded) {
+		writeError(w, http.StatusServiceUnavailable, "SessionSuperseded", "Playback session changed; retry the request")
+		return
+	}
+	if errors.Is(err, errCompatSessionStopUnavailable) || errors.Is(err, playback.ErrSessionGenerationTombstoneUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "SessionStopUnavailable", "Playback session stop could not be persisted; retry the request")
+		return
+	}
 	if errors.Is(err, errUpstreamReplaced) {
 		writeError(w, http.StatusConflict, "Conflict", "Playback session changed concurrently; retry the request")
 		return

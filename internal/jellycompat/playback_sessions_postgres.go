@@ -754,6 +754,115 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 	return nil
 }
 
+// CompareAndSwapUpstream applies one mutation to the DB-authoritative compat
+// row only when its complete native-session identity matches expected. Cache
+// state changes only after the transaction commits, so a stale or failed CAS
+// cannot erase a newer generation locally.
+func (d *DurableCompatPlaybackStore) CompareAndSwapUpstream(
+	id string,
+	expected UpstreamSessionIdentity,
+	fn UpstreamSessionMutation,
+) (*PlaybackSession, bool, error) {
+	if d.pool == nil {
+		return d.mem.CompareAndSwapUpstream(id, expected, fn)
+	}
+	unlockSession := d.lockSessionMutation(id)
+	defer unlockSession()
+	d.cacheMutationMu.RLock()
+	defer func() { d.finishCacheMutation(id, d.mem.compatTokenForID(id)) }()
+	if d.isUnpersisted(id) {
+		compatToken := d.mem.compatTokenForID(id)
+		cached, ok := d.mem.GetFinalizable(id, compatToken)
+		if !ok {
+			return nil, false, nil
+		}
+		if _, err := d.insertIfAbsent(cached); err != nil {
+			return nil, false, fmt.Errorf("repair unpersisted compat row before identity CAS %s: %w", id, err)
+		}
+		d.clearUnpersisted(id)
+	}
+
+	committed, matched, deleted, err := d.compareAndSwapUpstreamDB(id, expected, fn)
+	if err != nil {
+		return nil, false, fmt.Errorf("durably compare-and-swap compat upstream identity %s: %w", id, err)
+	}
+	if committed == nil {
+		return nil, false, nil
+	}
+	d.mem.Delete(id)
+	if !deleted {
+		d.mem.Put(*committed)
+		d.markIDValidated(id)
+	} else {
+		d.invalidateValidation(id, committed.CompatToken)
+		d.clearUnpersisted(id)
+		d.clearPendingUpdates(id)
+	}
+	return committed, matched, nil
+}
+
+func (d *DurableCompatPlaybackStore) compareAndSwapUpstreamDB(
+	id string,
+	expected UpstreamSessionIdentity,
+	fn UpstreamSessionMutation,
+) (*PlaybackSession, bool, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var raw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT data FROM jellycompat_playback_sessions WHERE id = $1 AND expires_at > $2 FOR UPDATE`,
+		id, d.now(),
+	).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, false, nil
+	}
+	if err != nil {
+		return nil, false, false, err
+	}
+	var session PlaybackSession
+	if err := json.Unmarshal(raw, &session); err != nil {
+		return nil, false, false, err
+	}
+	if session.UpstreamSessionID != expected.ID || session.UpstreamSessionGeneration != expected.Generation {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, false, false, err
+		}
+		return &session, false, false, nil
+	}
+
+	deleteSession, err := fn(&session)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if deleteSession {
+		if _, err := tx.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id); err != nil {
+			return nil, false, false, err
+		}
+	} else {
+		if !session.UpstreamStartedAt.IsZero() {
+			session.UpstreamStartedAt = session.UpstreamStartedAt.UTC()
+		}
+		session.UpdatedAt = d.now()
+		data, err := json.Marshal(session)
+		if err != nil {
+			return nil, false, false, err
+		}
+		if _, err := tx.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, session.ExpiresAt); err != nil {
+			return nil, false, false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, false, err
+	}
+	return &session, true, deleteSession, nil
+}
+
 // updateDB applies fn to the DB-authoritative row inside a transaction using
 // SELECT ... FOR UPDATE, then upserts and commits. It returns the committed
 // session when the round-trip succeeded. A nil pool or a genuinely

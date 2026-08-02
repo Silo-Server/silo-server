@@ -9,17 +9,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+const legacySessionGenerationUUID = playback.LegacySessionGenerationSentinel
 
 // SessionSync represents the data needed to sync a playback session to the
 // playback_sessions_sync table in PostgreSQL.
 type SessionSync struct {
 	SessionID            string
+	SessionGeneration    string
 	UserID               int
 	ProfileID            string
 	MediaFileID          int
@@ -70,6 +75,7 @@ type PreSyncHook func()
 type Reconciler struct {
 	pool            *pgxpool.Pool
 	nodeName        string
+	bootGeneration  uuid.UUID
 	sessionProvider SessionSyncProvider
 	interval        time.Duration
 	stop            chan struct{}
@@ -89,10 +95,11 @@ type Reconciler struct {
 // NewReconciler creates a new Reconciler with sensible defaults. The default
 // reconciliation interval is 30 seconds. The sessionProvider may be nil if
 // session sync is not needed (e.g. in tests).
-func NewReconciler(pool *pgxpool.Pool, nodeName string, sp SessionSyncProvider) *Reconciler {
+func NewReconciler(pool *pgxpool.Pool, nodeName string, sp SessionSyncProvider, bootGeneration uuid.UUID) *Reconciler {
 	return &Reconciler{
 		pool:            pool,
 		nodeName:        strings.TrimSpace(nodeName),
+		bootGeneration:  bootGeneration,
 		sessionProvider: sp,
 		interval:        15 * time.Second,
 		stop:            make(chan struct{}),
@@ -149,14 +156,15 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO playback_sessions_sync
-				(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method,
+				(session_id, session_generation, user_id, profile_id, media_file_id, requested_media_file_id, play_method,
 				 reporting_node, started_at, updated_at, last_sync_at, client_ip,
 				 client_name, client_version, client_user_agent,
 				 audio_track_index, transcode_audio, stream_bitrate_kbps, transcode_node_url,
 				 target_resolution, target_video_codec, target_audio_codec, target_bitrate_kbps,
 				 transcode_hw_accel, position_seconds, is_paused, has_websocket, compat_origin)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+			VALUES ($1, COALESCE(NULLIF($2, '')::uuid, $28::uuid), $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11::inet, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
 			ON CONFLICT (session_id) DO UPDATE SET
+				session_generation    = EXCLUDED.session_generation,
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
 				media_file_id       = EXCLUDED.media_file_id,
@@ -183,14 +191,14 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				has_websocket       = EXCLUDED.has_websocket,
 				compat_origin       = EXCLUDED.compat_origin,
 				last_sync_at        = NOW()
-		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
+		`, s.SessionID, s.SessionGeneration, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
 			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientUserAgent),
 			s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
 			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
 			nullableString(s.TargetAudioCodec), nullableInt(s.TargetBitrateKbps),
 			nullableString(s.TranscodeHWAccel), normalizePositionSeconds(s.PositionSeconds),
-			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat)
+			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, legacySessionGenerationUUID)
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -211,6 +219,19 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 		`, reportingNode, sessionIDs); err != nil {
 			return fmt.Errorf("deleting missing sessions for node %s: %w", reportingNode, err)
 		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO playback_session_snapshot_watermarks
+			(reporting_node, boot_generation, reconciliation_generation, completed_at, session_count)
+		VALUES ($1, $2, gen_random_uuid(), NOW(), $3)
+		ON CONFLICT (reporting_node) DO UPDATE SET
+			boot_generation = EXCLUDED.boot_generation,
+			reconciliation_generation = EXCLUDED.reconciliation_generation,
+			completed_at = EXCLUDED.completed_at,
+			session_count = EXCLUDED.session_count
+	`, reportingNode, r.bootGeneration, len(sessionIDs)); err != nil {
+		return fmt.Errorf("recording snapshot watermark for node %s: %w", reportingNode, err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -242,6 +263,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 	rows, err := tx.Query(ctx, `
 		SELECT
 			session_id,
+			session_generation::text,
 			user_id,
 			COALESCE(profile_id, ''),
 			media_file_id,
@@ -279,8 +301,11 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 	var sessions []SessionSync
 	for rows.Next() {
 		var s SessionSync
+		var startedAt *time.Time
+		var updatedAt *time.Time
 		if err := rows.Scan(
 			&s.SessionID,
+			&s.SessionGeneration,
 			&s.UserID,
 			&s.ProfileID,
 			&s.MediaFileID,
@@ -300,14 +325,23 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.TargetAudioCodec,
 			&s.TargetBitrateKbps,
 			&s.TranscodeHWAccel,
-			&s.StartedAt,
-			&s.UpdatedAt,
+			&startedAt,
+			&updatedAt,
 			&s.PositionSeconds,
 			&s.IsPaused,
 			&s.HasWebSocket,
 			&s.IsJellyfinCompat,
 		); err != nil {
 			return nil, err
+		}
+		if startedAt != nil {
+			s.StartedAt = startedAt.UTC()
+		}
+		if updatedAt != nil {
+			s.UpdatedAt = updatedAt.UTC()
+		}
+		if s.SessionGeneration == legacySessionGenerationUUID {
+			s.SessionGeneration = ""
 		}
 		sessions = append(sessions, s)
 	}
@@ -324,6 +358,9 @@ func normalizeSessionSyncs(reportingNode string, sessions []SessionSync) []Sessi
 		if strings.TrimSpace(cp.ReportingNode) == "" {
 			cp.ReportingNode = reportingNode
 		}
+		if cp.SessionGeneration == legacySessionGenerationUUID {
+			cp.SessionGeneration = ""
+		}
 		normalized[i] = cp
 	}
 	sort.Slice(normalized, func(i, j int) bool {
@@ -338,6 +375,7 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 	}
 	for i := range left {
 		if left[i].SessionID != right[i].SessionID ||
+			left[i].SessionGeneration != right[i].SessionGeneration ||
 			left[i].UserID != right[i].UserID ||
 			left[i].ProfileID != right[i].ProfileID ||
 			left[i].MediaFileID != right[i].MediaFileID ||

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -74,6 +76,198 @@ func TestSessionManager_StartStop(t *testing.T) {
 	if sm.ActiveCount(1) != 0 {
 		t.Errorf("ActiveCount after stop = %d, want 0", sm.ActiveCount(1))
 	}
+}
+
+func TestSessionGenerationIsOpaqueStableAndChangesWhenEndedIDIsReused(t *testing.T) {
+	mgr := playback.NewSessionManager(0, 0)
+	started, err := mgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if started.Generation == "" {
+		t.Fatal("new session generation is empty")
+	}
+	if _, err := uuid.Parse(started.Generation); err != nil {
+		t.Fatalf("generation %q is not opaque UUID identity: %v", started.Generation, err)
+	}
+
+	same := mgr.RegisterReconstructed(&playback.Session{ID: started.ID, Generation: uuid.NewString()})
+	if same.Generation != started.Generation {
+		t.Fatalf("same live session generation = %q, want %q", same.Generation, started.Generation)
+	}
+
+	if err := mgr.StopSession(started.ID); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	reused := mgr.RegisterReconstructed(&playback.Session{
+		ID:         started.ID,
+		Generation: started.Generation,
+		StartedAt:  started.StartedAt,
+	})
+	if reused.Generation == "" || reused.Generation == started.Generation {
+		t.Fatalf("reused ended ID generation = %q, want a new opaque generation", reused.Generation)
+	}
+}
+
+type memoryGenerationTombstoneStore struct {
+	ended    map[string]time.Time
+	readErr  error
+	writeErr error
+}
+
+func (s *memoryGenerationTombstoneStore) WasSessionGenerationEnded(_ context.Context, sessionID, generation string, now time.Time) (bool, error) {
+	if s.readErr != nil {
+		return false, s.readErr
+	}
+	expiresAt, ok := s.ended[sessionID+"\x00"+generation]
+	return ok && expiresAt.After(now), nil
+}
+
+func (s *memoryGenerationTombstoneStore) RecordEndedSessionGeneration(_ context.Context, sessionID, generation string, expiresAt time.Time) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	if s.ended == nil {
+		s.ended = make(map[string]time.Time)
+	}
+	s.ended[sessionID+"\x00"+generation] = expiresAt
+	return nil
+}
+
+func TestSessionGenerationRejectsRepeatedReplayAndSurvivesManagerRestart(t *testing.T) {
+	store := &memoryGenerationTombstoneStore{}
+	firstManager := playback.NewSessionManager(0, 0)
+	firstManager.SetSessionGenerationTombstoneStore(store)
+
+	const sessionID = "replayed-session"
+	firstGeneration := uuid.NewString()
+	first, err := firstManager.RegisterReconstructedChecked(t.Context(), &playback.Session{
+		ID: sessionID, Generation: firstGeneration, StartedAt: time.Now().Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("register first generation: %v", err)
+	}
+	stoppedAt := time.Now().UTC()
+	if err := firstManager.StopSession(first.ID); err != nil {
+		t.Fatalf("stop first generation: %v", err)
+	}
+	expiresAt := store.ended[sessionID+"\x00"+firstGeneration]
+	if expiresAt.Before(stoppedAt.Add(playback.MaxTokenTTL-time.Second)) || expiresAt.After(stoppedAt.Add(playback.MaxTokenTTL+time.Second)) {
+		t.Fatalf("tombstone expiry = %s, want stop time + MaxTokenTTL (%s)", expiresAt, playback.MaxTokenTTL)
+	}
+
+	secondManager := playback.NewSessionManager(0, 0)
+	secondManager.SetSessionGenerationTombstoneStore(store)
+	second, err := secondManager.RegisterReconstructedChecked(t.Context(), &playback.Session{
+		ID: sessionID, Generation: firstGeneration, StartedAt: first.StartedAt,
+	})
+	if err != nil {
+		t.Fatalf("replay first generation after restart: %v", err)
+	}
+	if second.Generation == firstGeneration {
+		t.Fatal("ended generation was reused after manager restart")
+	}
+	if err := secondManager.StopSession(second.ID); err != nil {
+		t.Fatalf("stop second generation: %v", err)
+	}
+
+	third, err := secondManager.RegisterReconstructedChecked(t.Context(), &playback.Session{
+		ID: sessionID, Generation: firstGeneration, StartedAt: first.StartedAt,
+	})
+	if err != nil {
+		t.Fatalf("replay older first generation: %v", err)
+	}
+	if third.Generation == firstGeneration || third.Generation == second.Generation {
+		t.Fatalf("older replay generation = %q, want a fresh generation distinct from %q and %q", third.Generation, firstGeneration, second.Generation)
+	}
+}
+
+func TestLegacyEmptyGenerationTerminationPersistsSentinelAndRotatesReplay(t *testing.T) {
+	store := &memoryGenerationTombstoneStore{}
+	mgr := playback.NewSessionManager(0, 0)
+	mgr.SetSessionGenerationTombstoneStore(store)
+	legacy, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{ID: "legacy-empty", Generation: ""})
+	if err != nil || legacy == nil || legacy.Generation != "" {
+		t.Fatalf("register legacy: session=%+v err=%v", legacy, err)
+	}
+	if err := mgr.TerminateSessionGeneration(t.Context(), "legacy-empty", "", nil); err != nil {
+		t.Fatalf("terminate legacy: %v", err)
+	}
+	if _, ok := store.ended["legacy-empty\x00"+playback.LegacySessionGenerationSentinel]; !ok {
+		t.Fatalf("legacy tombstone was not stored as sentinel: %+v", store.ended)
+	}
+	replayed, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{ID: "legacy-empty", Generation: ""})
+	if err != nil || replayed == nil || replayed.Generation == "" || replayed.Generation == playback.LegacySessionGenerationSentinel {
+		t.Fatalf("legacy replay did not rotate to public generation: session=%+v err=%v", replayed, err)
+	}
+	if parsed, parseErr := uuid.Parse(replayed.Generation); parseErr != nil || parsed == uuid.Nil || parsed.Version() != 4 {
+		t.Fatalf("rotated generation = %q, want non-nil UUID v4", replayed.Generation)
+	}
+}
+
+func TestAbsentLegacyEmptyTerminationIsIdempotentAcrossRestart(t *testing.T) {
+	store := &memoryGenerationTombstoneStore{}
+	first := playback.NewSessionManager(0, 0)
+	first.SetSessionGenerationTombstoneStore(store)
+	finalized := 0
+	for i := 0; i < 2; i++ {
+		if err := first.TerminateSessionGeneration(t.Context(), "absent-legacy", "", func() error {
+			finalized++
+			return nil
+		}); err != nil {
+			t.Fatalf("absent legacy termination %d: %v", i, err)
+		}
+	}
+	if finalized != 2 {
+		t.Fatalf("finalizer calls=%d, want 2", finalized)
+	}
+	restarted := playback.NewSessionManager(0, 0)
+	restarted.SetSessionGenerationTombstoneStore(store)
+	replayed, err := restarted.RegisterReconstructedChecked(t.Context(), &playback.Session{ID: "absent-legacy", Generation: ""})
+	if err != nil || replayed == nil || replayed.Generation == "" || replayed.Generation == playback.LegacySessionGenerationSentinel {
+		t.Fatalf("restart replay identity: session=%+v err=%v", replayed, err)
+	}
+}
+
+func TestReconstructRejectsReservedLegacyGenerationSentinel(t *testing.T) {
+	for _, generation := range []string{playback.LegacySessionGenerationSentinel, "{00000000-0000-0000-0000-000000000000}"} {
+		mgr := playback.NewSessionManager(0, 0)
+		got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+			ID: "public-sentinel", Generation: generation,
+		})
+		if !errors.Is(err, playback.ErrInvalidSessionGeneration) || got != nil {
+			t.Fatalf("reserved public generation %q: session=%+v err=%v", generation, got, err)
+		}
+	}
+}
+
+func TestSessionGenerationStoreFailuresFailClosed(t *testing.T) {
+	t.Run("stop write failure leaves session live", func(t *testing.T) {
+		mgr := playback.NewSessionManager(0, 0)
+		mgr.SetSessionGenerationTombstoneStore(&memoryGenerationTombstoneStore{writeErr: errors.New("write failed")})
+		session, err := mgr.StartSession(1, "profile", 1, playback.PlayDirect, false)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if err := mgr.StopSession(session.ID); !errors.Is(err, playback.ErrSessionGenerationTombstoneUnavailable) {
+			t.Fatalf("StopSession error = %v, want tombstone unavailable", err)
+		}
+		if _, err := mgr.GetSession(session.ID); err != nil {
+			t.Fatalf("session removed after failed tombstone write: %v", err)
+		}
+	})
+
+	t.Run("reconstruct read failure is denied", func(t *testing.T) {
+		mgr := playback.NewSessionManager(0, 0)
+		mgr.SetSessionGenerationTombstoneStore(&memoryGenerationTombstoneStore{readErr: errors.New("read failed")})
+		got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{ID: "session", Generation: uuid.NewString()})
+		if got != nil {
+			t.Fatalf("reconstruct returned session on tombstone read failure: %+v", got)
+		}
+		if !errors.Is(err, playback.ErrSessionGenerationTombstoneUnavailable) {
+			t.Fatalf("reconstruct error = %v, want tombstone unavailable", err)
+		}
+	})
 }
 
 func TestSessionManager_StopNonExistent(t *testing.T) {

@@ -99,14 +99,22 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	// ?seek= query for remux), so no runtime beyond the Session needs rebuilding.
 	// Without a token (or signing secret) reconstruct is off, collapsing to a
 	// plain GetSession + ownership check.
-	card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
-	session, status := h.TM.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, userID, card)
+	card, tokenErr := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	if tokenErr != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_token", "Invalid or expired stream token")
+		return
+	}
+	session, status, loadErr := h.TM.LoadOrReconstructSessionChecked(r.Context(), h.sessionMgr.GetSession, sessionID, userID, card)
 	switch status {
 	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
 		return
 	case playback.SessionLoadFailed:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		if errors.Is(loadErr, playback.ErrSessionGenerationTombstoneUnavailable) || errors.Is(loadErr, playback.ErrSessionSuperseded) {
+			writeError(w, http.StatusServiceUnavailable, "session_lifecycle_unavailable", "Playback session lifecycle state is temporarily unavailable")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		}
 		return
 	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")

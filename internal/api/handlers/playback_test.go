@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -271,6 +272,695 @@ func writePlaybackTestFFmpeg(t *testing.T) string {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return path
+}
+
+func TestNativeTranscodeServeRejectsStaleLiveGenerationToken(t *testing.T) {
+	var proxyRequests atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		proxyRequests.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("g2-content"))
+	}))
+	t.Cleanup(proxy.Close)
+	mgr := playback.NewSessionManager(0, 0)
+	if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+		ID: "shared-native", Generation: "g2", UserID: 1, MediaFileID: 99,
+		PlayMethod: playback.PlayTranscode, TranscodeNodeURL: proxy.URL,
+	}); err != nil || got == nil {
+		t.Fatalf("register G2: session=%+v err=%v", got, err)
+	}
+	h := NewPlaybackHandler(mgr)
+	h.JWTSecret = "native-token-secret"
+	g1 := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{SessionID: "shared-native"}).
+		WithSessionIdentity("g1", time.Now().UTC().Add(-time.Minute))
+	staleToken := h.signSessionToken(g1)
+
+	for _, tc := range []struct {
+		name   string
+		path   string
+		params map[string]string
+		handle func(http.ResponseWriter, *http.Request)
+	}{
+		{name: "manifest", path: "/playback/transcode/shared-native/master.m3u8", params: map[string]string{"session_id": "shared-native"}, handle: h.HandleGetTranscodeManifest},
+		{name: "segment", path: "/playback/transcode/shared-native/segment/seg_0.ts", params: map[string]string{"session_id": "shared-native", "name": "seg_0.ts"}, handle: h.HandleGetTranscodeSegment},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			tc.handle(recorder, playbackTestRequest(http.MethodGet, tc.path+"?st="+url.QueryEscape(staleToken), nil, tc.params))
+			if recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "g2-content") {
+				t.Fatalf("stale %s response status=%d body=%q", tc.name, recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+	if proxyRequests.Load() != 0 {
+		t.Fatalf("stale G1 token served G2 through %d proxy requests", proxyRequests.Load())
+	}
+	invalid := httptest.NewRecorder()
+	h.HandleGetTranscodeManifest(invalid, playbackTestRequest(http.MethodGet,
+		"/playback/transcode/shared-native/master.m3u8?st=invalid", nil,
+		map[string]string{"session_id": "shared-native"}))
+	if invalid.Code != http.StatusUnauthorized || proxyRequests.Load() != 0 {
+		t.Fatalf("invalid supplied token status=%d proxy_requests=%d body=%q", invalid.Code, proxyRequests.Load(), invalid.Body.String())
+	}
+	streamHandler := NewStreamHandler(mgr, nil)
+	streamHandler.JWTSecret = h.JWTSecret
+	invalidStream := httptest.NewRecorder()
+	streamHandler.HandleStream(invalidStream, playbackTestRequest(http.MethodGet,
+		"/stream/shared-native?st=invalid", nil,
+		map[string]string{"session_id": "shared-native"}))
+	if invalidStream.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid direct stream token status=%d body=%q", invalidStream.Code, invalidStream.Body.String())
+	}
+	matching := playback.NewRecipeCard(1, "profile-1", 99, "", playback.TranscodeOpts{SessionID: "shared-native"}).
+		WithSessionIdentity("g2", time.Now().UTC())
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{name: "matching token", token: h.signSessionToken(matching)},
+		{name: "absent legacy token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := "/playback/transcode/shared-native/master.m3u8"
+			if tc.token != "" {
+				target += "?st=" + url.QueryEscape(tc.token)
+			}
+			recorder := httptest.NewRecorder()
+			h.HandleGetTranscodeManifest(recorder, playbackTestRequest(http.MethodGet, target, nil, map[string]string{"session_id": "shared-native"}))
+			if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "g2-content") {
+				t.Fatalf("live control status=%d body=%q", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+	if proxyRequests.Load() != 2 {
+		t.Fatalf("valid live controls made %d proxy requests, want 2", proxyRequests.Load())
+	}
+	live, err := mgr.GetSession("shared-native")
+	if err != nil || live.Generation != "g2" || live.MediaFileID != 99 {
+		t.Fatalf("stale token changed G2: session=%+v err=%v", live, err)
+	}
+}
+
+func TestLoadNativeTranscodeLiveSessionTokenControls(t *testing.T) {
+	mgr := playback.NewSessionManager(0, 0)
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+		ID: "native-live", Generation: "g2", UserID: 1, MediaFileID: 99, StartedAt: startedAt,
+	}); err != nil || got == nil {
+		t.Fatalf("register live: session=%+v err=%v", got, err)
+	}
+	h := NewPlaybackHandler(mgr)
+	h.JWTSecret = "native-token-secret"
+	matching := playback.NewRecipeCard(1, "profile-1", 99, "", playback.TranscodeOpts{SessionID: "native-live"}).WithSessionIdentity("g2", startedAt)
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{name: "matching token", token: h.signSessionToken(matching)},
+		{name: "absent legacy token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := playbackTestRequest(http.MethodGet, "/playback/transcode/native-live/master.m3u8", nil, map[string]string{"session_id": "native-live"})
+			if tc.token != "" {
+				query := req.URL.Query()
+				query.Set(streamTokenParam, tc.token)
+				req.URL.RawQuery = query.Encode()
+			}
+			got, status, card, err := h.loadTranscodeServeSession(req, "native-live")
+			if err != nil || status != playback.SessionLoaded || got == nil || got.Generation != "g2" {
+				t.Fatalf("load live: session=%+v status=%v card=%+v err=%v", got, status, card, err)
+			}
+			if tc.token == "" && card != nil {
+				t.Fatalf("absent token unexpectedly decoded card %+v", card)
+			}
+		})
+	}
+}
+
+func TestNativeTranscodeServeHoldsGenerationThroughProcessSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		path   string
+		params map[string]string
+		handle func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{name: "manifest", path: "/playback/transcode/shared-barrier/master.m3u8", params: map[string]string{"session_id": "shared-barrier"}, handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeManifest(w, r) }},
+		{name: "segment", path: "/playback/transcode/shared-barrier/segment/seg_0.m4s", params: map[string]string{"session_id": "shared-barrier", "name": "seg_0.m4s"}, handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeSegment(w, r) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g1Proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("g1-content"))
+			}))
+			t.Cleanup(g1Proxy.Close)
+			mgr := playback.NewSessionManager(0, 0)
+			startedAt := time.Now().UTC().Add(-time.Minute)
+			if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+				ID: "shared-barrier", Generation: "g1", UserID: 1, MediaFileID: 42,
+				PlayMethod: playback.PlayTranscode, TranscodeNodeURL: g1Proxy.URL, StartedAt: startedAt,
+			}); err != nil || got == nil {
+				t.Fatalf("register G1: session=%+v err=%v", got, err)
+			}
+			h := NewPlaybackHandler(mgr)
+			h.JWTSecret = "barrier-secret"
+			g1Card := playback.NewRecipeCard(1, "profile-1", 42, g1Proxy.URL, playback.TranscodeOpts{SessionID: "shared-barrier"}).WithSessionIdentity("g1", startedAt)
+			token := h.signSessionToken(g1Card)
+
+			g2Script := filepath.Join(t.TempDir(), "g2-ffmpeg.sh")
+			if err := os.WriteFile(g2Script, []byte("#!/bin/sh\nlast=''\nfor arg in \"$@\"; do last=\"$arg\"; done\nout=$(dirname \"$last\")\nmkdir -p \"$out\"\nprintf '#EXTM3U\\n#G2-MANIFEST\\n' > \"$last\"\nprintf 'g2-segment' > \"$out/seg_0.m4s\"\nsleep 30\n"), 0o755); err != nil {
+				t.Fatalf("write G2 ffmpeg: %v", err)
+			}
+			g2Transcode, err := playback.StartTranscode(t.Context(), playback.TranscodeOpts{
+				SessionID: "shared-barrier", InputPath: "ignored", OutputDir: t.TempDir(), FFmpegPath: g2Script,
+				TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2,
+			})
+			if err != nil {
+				t.Fatalf("start G2 transcode: %v", err)
+			}
+			t.Cleanup(func() {
+				h.tm.CloseTranscodeSession("shared-barrier", "")
+				_ = g2Transcode.CloseProcess()
+			})
+
+			selectionEntered := make(chan struct{})
+			releaseSelection := make(chan struct{})
+			h.transcodeServeSelectionHook = func() {
+				close(selectionEntered)
+				<-releaseSelection
+			}
+			recorder := httptest.NewRecorder()
+			requestDone := make(chan struct{})
+			go func() {
+				defer close(requestDone)
+				tc.handle(h, recorder, playbackTestRequest(http.MethodGet, tc.path+"?st="+url.QueryEscape(token), nil, tc.params))
+			}()
+			select {
+			case <-selectionEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("serve request did not reach process-selection barrier")
+			}
+
+			replacementDone := make(chan error, 1)
+			go func() {
+				err := mgr.TerminateSessionGeneration(t.Context(), "shared-barrier", "g1", func() error {
+					h.tm.RegisterTranscodeSession("shared-barrier", g2Transcode)
+					return nil
+				})
+				if err == nil {
+					_, err = mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+						ID: "shared-barrier", Generation: "g2", UserID: 1, MediaFileID: 99, PlayMethod: playback.PlayTranscode,
+					})
+				}
+				replacementDone <- err
+			}()
+			select {
+			case err := <-replacementDone:
+				t.Fatalf("G2 replacement completed before G1 process capture: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseSelection)
+			select {
+			case <-requestDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("serve request did not complete")
+			}
+			if err := <-replacementDone; err != nil {
+				t.Fatalf("install G2: %v", err)
+			}
+			if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "g1-content") || strings.Contains(recorder.Body.String(), "g2") {
+				t.Fatalf("stale G1 serve status=%d body=%q", recorder.Code, recorder.Body.String())
+			}
+			if live, err := mgr.GetSession("shared-barrier"); err != nil || live.Generation != "g2" || live.MediaFileID != 99 {
+				t.Fatalf("G2 native state: session=%+v err=%v", live, err)
+			}
+			if h.tm.GetTranscodeSession("shared-barrier") != g2Transcode {
+				t.Fatal("G1 request changed G2 transcode")
+			}
+		})
+	}
+}
+
+func writeNativeTranscodeFiles(outputDir, label string) error {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return fmt.Errorf("create transcode fixture directory: %w", err)
+	}
+	manifest := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#" + label +
+		"-MANIFEST\n#EXTINF:2.0,\nseg_0.m4s\n#EXTINF:2.0,\nseg_1.m4s\n"
+	for name, body := range map[string]string{
+		"stream.m3u8": manifest,
+		"seg_0.m4s":   label + "-segment-bytes",
+		"seg_1.m4s":   label + "-lookahead",
+	} {
+		if err := os.WriteFile(filepath.Join(outputDir, name), []byte(body), 0o644); err != nil {
+			return fmt.Errorf("write %s transcode fixture: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func startNativeFileTranscode(t *testing.T, sessionID, outputDir string) *playback.TranscodeSession {
+	t.Helper()
+	session, err := playback.StartTranscode(t.Context(), playback.TranscodeOpts{
+		SessionID: sessionID, InputPath: "ignored", OutputDir: outputDir, FFmpegPath: "/bin/true",
+		TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2,
+	})
+	if err != nil {
+		t.Fatalf("start file-backed transcode fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = session.CloseProcess() })
+	return session
+}
+
+func TestNativeTranscodeServeCapturesResourceBeforeSameDirectoryReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		path        string
+		params      map[string]string
+		rangeHeader string
+		wantStatus  int
+		wantBody    string
+		handle      func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{name: "manifest", path: "/playback/transcode/shared-files/master.m3u8", params: map[string]string{"session_id": "shared-files"}, wantStatus: http.StatusOK, wantBody: "G1-MANIFEST", handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeManifest(w, r) }},
+		{name: "segment", path: "/playback/transcode/shared-files/segment/seg_0.m4s", params: map[string]string{"session_id": "shared-files", "name": "seg_0.m4s"}, wantStatus: http.StatusOK, wantBody: "G1-segment-bytes", handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeSegment(w, r) }},
+		{name: "segment_range", path: "/playback/transcode/shared-files/segment/seg_0.m4s", params: map[string]string{"session_id": "shared-files", "name": "seg_0.m4s"}, rangeHeader: "bytes=3-9", wantStatus: http.StatusPartialContent, wantBody: "segment", handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeSegment(w, r) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			startedAt := time.Now().UTC().Add(-time.Minute)
+			if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+				ID: "shared-files", Generation: "g1", UserID: 1, MediaFileID: 42,
+				PlayMethod: playback.PlayTranscode, StartedAt: startedAt,
+			}); err != nil || got == nil {
+				t.Fatalf("register G1: session=%+v err=%v", got, err)
+			}
+			h := NewPlaybackHandler(mgr)
+			h.JWTSecret = "filesystem-barrier-secret"
+			var servedSegment *trackingTranscodeSegmentFile
+			if tc.name != "manifest" {
+				h.transcodeSegmentOpen = func(path string) (transcodeSegmentFile, error) {
+					file, err := os.Open(path)
+					if err != nil {
+						return nil, err
+					}
+					servedSegment = &trackingTranscodeSegmentFile{File: file}
+					return servedSegment, nil
+				}
+			}
+			outputDir := filepath.Join(t.TempDir(), "transcode", "shared-files")
+			g1Transcode := startNativeFileTranscode(t, "shared-files", outputDir)
+			if err := writeNativeTranscodeFiles(outputDir, "G1"); err != nil {
+				t.Fatal(err)
+			}
+			h.tm.RegisterTranscodeSession("shared-files", g1Transcode)
+			t.Cleanup(func() { h.tm.CloseTranscodeSession("shared-files", "") })
+
+			g1Card := playback.NewRecipeCard(1, "profile-1", 42, "", g1Transcode.Opts()).WithSessionIdentity("g1", startedAt)
+			token := h.signSessionToken(g1Card)
+			captureEntered := make(chan struct{})
+			releaseCapture := make(chan struct{})
+			replacementFinished := make(chan struct{})
+			var replacementErr error
+			h.transcodeServeResourceCaptureHook = func() {
+				close(captureEntered)
+				<-releaseCapture
+			}
+			h.transcodeServeResourceCapturedHook = func() { <-replacementFinished }
+
+			recorder := httptest.NewRecorder()
+			requestDone := make(chan struct{})
+			go func() {
+				defer close(requestDone)
+				req := playbackTestRequest(http.MethodGet, tc.path+"?st="+url.QueryEscape(token), nil, tc.params)
+				if tc.rangeHeader != "" {
+					req.Header.Set("Range", tc.rangeHeader)
+				}
+				tc.handle(h, recorder, req)
+			}()
+			select {
+			case <-captureEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("serve request did not reach resource-capture barrier")
+			}
+
+			go func() {
+				defer close(replacementFinished)
+				replacementErr = mgr.TerminateSessionGeneration(t.Context(), "shared-files", "g1", func() error {
+					h.tm.CloseTranscodeSessionIf("shared-files", g1Transcode, "")
+					g2Transcode, startErr := playback.StartTranscode(t.Context(), playback.TranscodeOpts{
+						SessionID: "shared-files", InputPath: "ignored", OutputDir: outputDir, FFmpegPath: "/bin/true",
+						TargetCodecVideo: "copy", TargetCodecAudio: "copy", SegmentDuration: 2,
+					})
+					if startErr != nil {
+						return startErr
+					}
+					if fixtureErr := writeNativeTranscodeFiles(outputDir, "G2"); fixtureErr != nil {
+						_ = g2Transcode.CloseProcess()
+						return fixtureErr
+					}
+					h.tm.RegisterTranscodeSession("shared-files", g2Transcode)
+					return nil
+				})
+				if replacementErr == nil {
+					_, replacementErr = mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+						ID: "shared-files", Generation: "g2", UserID: 1, MediaFileID: 99, PlayMethod: playback.PlayTranscode,
+					})
+				}
+			}()
+			select {
+			case <-replacementFinished:
+				close(releaseCapture)
+				<-requestDone
+				t.Fatalf("G2 replacement completed before G1 resource capture: %v", replacementErr)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseCapture)
+			select {
+			case <-requestDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("serve request did not complete")
+			}
+			if replacementErr != nil {
+				t.Fatalf("install G2: %v", replacementErr)
+			}
+			bodyMatches := recorder.Body.String() == tc.wantBody
+			if tc.name == "manifest" {
+				bodyMatches = strings.Contains(recorder.Body.String(), tc.wantBody)
+			}
+			if recorder.Code != tc.wantStatus || !bodyMatches {
+				t.Fatalf("stale G1 serve status=%d body=%q, want status=%d body=%q", recorder.Code, recorder.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if strings.Contains(recorder.Body.String(), "G2") {
+				t.Fatalf("stale G1 serve leaked G2 bytes: %q", recorder.Body.String())
+			}
+			if servedSegment != nil && !servedSegment.closed.Load() {
+				t.Fatal("served segment handle remained open")
+			}
+			if tc.rangeHeader != "" && recorder.Header().Get("Content-Range") != "bytes 3-9/16" {
+				t.Fatalf("Content-Range = %q", recorder.Header().Get("Content-Range"))
+			}
+		})
+	}
+}
+
+func TestNativeRemoteTranscodeServeAcquiresResponseBeforeSameTransportReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		path       string
+		params     map[string]string
+		partial    bool
+		wantStatus int
+		wantBody   string
+		handle     func(*PlaybackHandler, http.ResponseWriter, *http.Request)
+	}{
+		{name: "manifest", path: "/playback/transcode/shared-remote/master.m3u8", params: map[string]string{"session_id": "shared-remote"}, wantStatus: http.StatusOK, wantBody: "G1-manifest", handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeManifest(w, r) }},
+		{name: "segment_partial_response", path: "/playback/transcode/shared-remote/segment/seg_0.m4s", params: map[string]string{"session_id": "shared-remote", "name": "seg_0.m4s"}, partial: true, wantStatus: http.StatusPartialContent, wantBody: "G1-range", handle: func(h *PlaybackHandler, w http.ResponseWriter, r *http.Request) { h.HandleGetTranscodeSegment(w, r) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstreamEntered := make(chan struct{})
+			releaseUpstream := make(chan struct{})
+			var nodeGeneration atomic.Value
+			nodeGeneration.Store("G1")
+			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				close(upstreamEntered)
+				<-releaseUpstream
+				generation := nodeGeneration.Load().(string)
+				w.Header().Set("X-Test-Generation", generation)
+				if tc.partial {
+					w.Header().Set("Content-Range", "bytes 3-9/16")
+					w.WriteHeader(http.StatusPartialContent)
+					_, _ = w.Write([]byte(generation + "-range"))
+					return
+				}
+				_, _ = w.Write([]byte(generation + "-manifest"))
+			}))
+			t.Cleanup(node.Close)
+
+			mgr := playback.NewSessionManager(0, 0)
+			startedAt := time.Now().UTC().Add(-time.Minute)
+			if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+				ID: "shared-remote", Generation: "g1", UserID: 1, MediaFileID: 42,
+				PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL,
+				TranscodeTransportID: "shared-transport", StartedAt: startedAt,
+			}); err != nil || got == nil {
+				t.Fatalf("register G1: session=%+v err=%v", got, err)
+			}
+			h := NewPlaybackHandler(mgr)
+			replacementFinished := make(chan struct{})
+			var replacementErr error
+			h.transcodeServeResourceCapturedHook = func() { <-replacementFinished }
+
+			recorder := httptest.NewRecorder()
+			requestDone := make(chan struct{})
+			go func() {
+				defer close(requestDone)
+				req := playbackTestRequest(http.MethodGet, tc.path, nil, tc.params)
+				tc.handle(h, recorder, req)
+			}()
+			select {
+			case <-upstreamEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("G1 proxy request did not reach upstream")
+			}
+
+			go func() {
+				defer close(replacementFinished)
+				replacementErr = mgr.TerminateSessionGeneration(t.Context(), "shared-remote", "g1", func() error {
+					nodeGeneration.Store("G2")
+					return nil
+				})
+				if replacementErr == nil {
+					_, replacementErr = mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+						ID: "shared-remote", Generation: "g2", UserID: 1, MediaFileID: 99,
+						PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL,
+						TranscodeTransportID: "shared-transport", StartedAt: time.Now().UTC(),
+					})
+				}
+			}()
+			select {
+			case <-replacementFinished:
+				close(releaseUpstream)
+				<-requestDone
+				t.Fatalf("G2 replacement completed before G1 upstream response acquisition: %v", replacementErr)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseUpstream)
+			select {
+			case <-requestDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("G1 proxy request did not complete")
+			}
+			if replacementErr != nil {
+				t.Fatalf("install G2: %v", replacementErr)
+			}
+			if recorder.Code != tc.wantStatus || recorder.Body.String() != tc.wantBody {
+				t.Fatalf("stale G1 proxy status=%d body=%q, want status=%d body=%q", recorder.Code, recorder.Body.String(), tc.wantStatus, tc.wantBody)
+			}
+			if recorder.Header().Get("X-Test-Generation") != "G1" || strings.Contains(recorder.Body.String(), "G2") {
+				t.Fatalf("stale G1 proxy leaked successor response: headers=%v body=%q", recorder.Header(), recorder.Body.String())
+			}
+			if tc.partial && recorder.Header().Get("Content-Range") != "bytes 3-9/16" {
+				t.Fatalf("Content-Range = %q", recorder.Header().Get("Content-Range"))
+			}
+		})
+	}
+}
+
+type playbackProxyRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f playbackProxyRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type trackingProxyBody struct {
+	reader  io.Reader
+	readErr error
+	closed  atomic.Bool
+}
+
+func (b *trackingProxyBody) Read(p []byte) (int, error) {
+	if b.readErr != nil {
+		return 0, b.readErr
+	}
+	return b.reader.Read(p)
+}
+
+func (b *trackingProxyBody) Close() error {
+	b.closed.Store(true)
+	return nil
+}
+
+func TestNativeRemoteTranscodeServeClosesCapturedResponseOnEveryPath(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		segment      bool
+		roundTripErr error
+		bodyErr      error
+		touchError   bool
+		badURL       bool
+		wantStatus   int
+	}{
+		{name: "request_build_error_preserves_mapping", badURL: true, wantStatus: http.StatusInternalServerError},
+		{name: "transport_error_releases_lease", roundTripErr: errors.New("injected upstream failure"), wantStatus: http.StatusBadGateway},
+		{name: "manifest_read_error_closes_body", bodyErr: errors.New("injected manifest read failure"), wantStatus: http.StatusBadGateway},
+		{name: "post_capture_error_closes_body", touchError: true, wantStatus: http.StatusInternalServerError},
+		{name: "client_cancel_read_closes_body", segment: true, bodyErr: context.Canceled, wantStatus: http.StatusOK},
+		{name: "success_closes_body", wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			startedAt := time.Now().UTC().Add(-time.Minute)
+			nodeURL := "http://node.invalid"
+			if tc.badURL {
+				nodeURL = "://invalid"
+			}
+			if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+				ID: "remote-close", Generation: "g1", UserID: 1, MediaFileID: 42,
+				PlayMethod: playback.PlayTranscode, TranscodeNodeURL: nodeURL,
+				TranscodeTransportID: "remote-close-transport", StartedAt: startedAt,
+			}); err != nil || got == nil {
+				t.Fatalf("register session: session=%+v err=%v", got, err)
+			}
+			var handlerSessionMgr SessionManagerInterface = mgr
+			if tc.touchError {
+				handlerSessionMgr = &touchErrorSessionManager{SessionManager: mgr}
+			}
+			h := NewPlaybackHandler(handlerSessionMgr)
+			h.JWTSecret = "remote-close-secret"
+			var body *trackingProxyBody
+			h.transcodeProxyClient = &http.Client{Transport: playbackProxyRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				if tc.roundTripErr != nil {
+					return nil, tc.roundTripErr
+				}
+				body = &trackingProxyBody{reader: strings.NewReader("#EXTM3U\nsegment.ts\n"), readErr: tc.bodyErr}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       body,
+				}, nil
+			})}
+
+			card := playback.NewRecipeCard(1, "profile-1", 42, nodeURL, playback.TranscodeOpts{SessionID: "remote-close"}).WithSessionIdentity("g1", startedAt)
+			target := "/playback/transcode/remote-close/master.m3u8?st=" + url.QueryEscape(h.signSessionToken(card))
+			params := map[string]string{"session_id": "remote-close"}
+			handle := h.HandleGetTranscodeManifest
+			if tc.segment {
+				target = "/playback/transcode/remote-close/segment/seg_0.ts"
+				params["name"] = "seg_0.ts"
+				handle = h.HandleGetTranscodeSegment
+			}
+			recorder := httptest.NewRecorder()
+			handle(recorder, playbackTestRequest(http.MethodGet, target, nil, params))
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status = %d body=%q, want %d", recorder.Code, recorder.Body.String(), tc.wantStatus)
+			}
+			if body != nil && !body.closed.Load() {
+				t.Fatal("captured upstream response body remained open")
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if err := mgr.TerminateSessionGeneration(ctx, "remote-close", "g1", nil); err != nil {
+				t.Fatalf("generation lease remained held after proxy completion: %v", err)
+			}
+		})
+	}
+}
+
+type trackingTranscodeSegmentFile struct {
+	*os.File
+	statErr error
+	closed  atomic.Bool
+}
+
+type touchErrorSessionManager struct {
+	*playback.SessionManager
+}
+
+func (m *touchErrorSessionManager) TouchActivity(string) error {
+	return errors.New("injected touch failure")
+}
+
+func (f *trackingTranscodeSegmentFile) Stat() (os.FileInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+	return f.File.Stat()
+}
+
+func (f *trackingTranscodeSegmentFile) Close() error {
+	f.closed.Store(true)
+	return f.File.Close()
+}
+
+func TestNativeTranscodeSegmentCaptureCleansUpEarlyErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		openErr    bool
+		statErr    bool
+		touchError bool
+	}{
+		{name: "open_error", openErr: true},
+		{name: "stat_error_closes_handle", statErr: true},
+		{name: "post_capture_error_closes_handle", touchError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := playback.NewSessionManager(0, 0)
+			if got, err := mgr.RegisterReconstructedChecked(t.Context(), &playback.Session{
+				ID: "capture-error", Generation: "g1", UserID: 1, MediaFileID: 42,
+				PlayMethod: playback.PlayTranscode, StartedAt: time.Now().UTC().Add(-time.Minute),
+			}); err != nil || got == nil {
+				t.Fatalf("register session: session=%+v err=%v", got, err)
+			}
+			var handlerSessionMgr SessionManagerInterface = mgr
+			if tc.touchError {
+				handlerSessionMgr = &touchErrorSessionManager{SessionManager: mgr}
+			}
+			h := NewPlaybackHandler(handlerSessionMgr)
+			outputDir := filepath.Join(t.TempDir(), "capture-error")
+			transcode := startNativeFileTranscode(t, "capture-error", outputDir)
+			if err := writeNativeTranscodeFiles(outputDir, "G1"); err != nil {
+				t.Fatal(err)
+			}
+			h.tm.RegisterTranscodeSession("capture-error", transcode)
+			t.Cleanup(func() { h.tm.CloseTranscodeSession("capture-error", "") })
+
+			var tracked *trackingTranscodeSegmentFile
+			if tc.openErr {
+				h.transcodeSegmentOpen = func(string) (transcodeSegmentFile, error) {
+					return nil, errors.New("injected open failure")
+				}
+			} else {
+				h.transcodeSegmentOpen = func(path string) (transcodeSegmentFile, error) {
+					file, err := os.Open(path)
+					if err != nil {
+						return nil, err
+					}
+					tracked = &trackingTranscodeSegmentFile{File: file}
+					if tc.statErr {
+						tracked.statErr = errors.New("injected stat failure")
+					}
+					return tracked, nil
+				}
+			}
+
+			recorder := httptest.NewRecorder()
+			h.HandleGetTranscodeSegment(recorder, playbackTestRequest(http.MethodGet,
+				"/playback/transcode/capture-error/segment/seg_0.m4s", nil,
+				map[string]string{"session_id": "capture-error", "name": "seg_0.m4s"}))
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d body=%q", recorder.Code, recorder.Body.String())
+			}
+			if tracked != nil && !tracked.closed.Load() {
+				t.Fatal("segment handle remained open after early failure")
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if err := mgr.TerminateSessionGeneration(ctx, "capture-error", "g1", nil); err != nil {
+				t.Fatalf("generation lease remained held after capture error: %v", err)
+			}
+		})
+	}
 }
 
 func writePlaybackTestFFmpegFailingAfterFirstStart(t *testing.T) string {
@@ -1687,14 +2377,14 @@ func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t 
 	if remoteStartReq.AudioTrackIndex != 1 {
 		t.Fatalf("remote AudioTrackIndex = %d, want 1", remoteStartReq.AudioTrackIndex)
 	}
-	if remoteStartReq.SessionID != sessionID {
-		t.Fatalf("remote SessionID = %q, want existing encoded transport %q", remoteStartReq.SessionID, sessionID)
+	if remoteStartReq.SessionID == sessionID {
+		t.Fatalf("remote SessionID = public ID %q, want generation-bound transport", sessionID)
 	}
 	if remoteStartReq.RequireReady {
 		t.Fatal("encoded audio switch unexpectedly changed to legacy copy replacement lifecycle")
 	}
-	if len(remoteDeletes) != 0 {
-		t.Fatalf("remote DELETEs = %v, want node-managed same-ID replacement", remoteDeletes)
+	if len(remoteDeletes) != 1 || remoteDeletes[0] != "/transcode/"+sessionID {
+		t.Fatalf("remote DELETEs = %v, want rollout cleanup of bare predecessor", remoteDeletes)
 	}
 	// Seek 121.5s with the node-default 2s segments => align to 120s / segment 60.
 	if remoteStartReq.StartSegmentNumber != 60 {
@@ -1764,7 +2454,21 @@ func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t 
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if updated.TranscodeNodeURL != remote.URL || updated.TranscodeTransportID != "" {
+	if claims.SessionGeneration != updated.Generation {
+		t.Fatalf("token generation = %q, want %q", claims.SessionGeneration, updated.Generation)
+	}
+	expectedTransportID, err := playback.GenerationBoundTranscodeTransportID(sessionID, updated.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remoteStartReq.SessionID != expectedTransportID || remoteStartReq.PublicSessionID != sessionID || remoteStartReq.SessionGeneration != updated.Generation {
+		t.Fatalf("remote generation identity = (%q,%q,%q), want (%q,%q,%q)", remoteStartReq.SessionID, remoteStartReq.PublicSessionID, remoteStartReq.SessionGeneration, expectedTransportID, sessionID, updated.Generation)
+	}
+	claimStartedAt, err := time.Parse(time.RFC3339Nano, claims.StartedAt)
+	if err != nil || !claimStartedAt.Equal(updated.StartedAt) {
+		t.Fatalf("token started_at = %q, want %s (parse error: %v)", claims.StartedAt, updated.StartedAt, err)
+	}
+	if updated.TranscodeNodeURL != remote.URL || updated.TranscodeTransportID != expectedTransportID {
 		t.Fatalf("published transcode route = %q/%q", updated.TranscodeNodeURL, updated.TranscodeTransportID)
 	}
 }
@@ -1867,11 +2571,12 @@ func TestHandleChangeAudioTrack_RemoteCopyRestartUsesFreshSeekAnchor(t *testing.
 		remoteStartReq.StartSegmentNumber != 48 {
 		t.Fatalf("remote copy restart recipe = %+v", remoteStartReq)
 	}
-	if !strings.HasPrefix(remoteStartReq.SessionID, session.ID+legacyTransportMarker) {
-		t.Fatalf("remote SessionID = %q, want legacy replacement for %q", remoteStartReq.SessionID, session.ID)
+	expectedTransportID, err := playback.GenerationBoundTranscodeTransportID(session.ID, session.Generation)
+	if err != nil || remoteStartReq.SessionID != expectedTransportID || remoteStartReq.PublicSessionID != session.ID || remoteStartReq.SessionGeneration != session.Generation {
+		t.Fatalf("remote identity = (%q,%q,%q), want generation-bound %q: %v", remoteStartReq.SessionID, remoteStartReq.PublicSessionID, remoteStartReq.SessionGeneration, expectedTransportID, err)
 	}
-	if !remoteStartReq.RequireReady {
-		t.Fatal("remote copy replacement did not require readiness before predecessor retirement")
+	if remoteStartReq.RequireReady {
+		t.Fatal("generation-bound same-transport restart unexpectedly required successor readiness")
 	}
 	if len(remoteDeletes) != 1 || remoteDeletes[0] != "/transcode/"+session.ID {
 		t.Fatalf("remote DELETEs = %v, want predecessor %q", remoteDeletes, session.ID)
@@ -1982,11 +2687,12 @@ func TestHandleChangeAudioTrack_RemoteCopyRejectionPreservesPredecessorState(t *
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d, body = %s", response.Code, http.StatusBadGateway, response.Body.String())
 	}
-	if !strings.HasPrefix(replacementID, session.ID+legacyTransportMarker) {
-		t.Fatalf("replacement ID = %q, want distinct legacy transport for %q", replacementID, session.ID)
+	expectedTransportID, err := playback.GenerationBoundTranscodeTransportID(session.ID, session.Generation)
+	if err != nil || replacementID != expectedTransportID {
+		t.Fatalf("replacement ID = %q, want generation-bound %q: %v", replacementID, expectedTransportID, err)
 	}
-	if len(deletedIDs) != 1 || deletedIDs[0] != replacementID {
-		t.Fatalf("deleted transports = %v, want only rejected replacement %q", deletedIDs, replacementID)
+	if len(deletedIDs) != 0 {
+		t.Fatalf("deleted transports = %v, want rejected same-transport restart untouched", deletedIDs)
 	}
 	persisted, err := sessionMgr.GetSession(session.ID)
 	if err != nil {
@@ -2235,6 +2941,13 @@ func TestHandleChangeAudioTrack_LocalCopyRestartUsesFreshSeekAnchor(t *testing.T
 		claims.StreamOriginSeconds != 96 || !claims.CopySeekAnchorResolved ||
 		claims.StartSegmentNumber != 48 || claims.AudioTrackIndex != 1 {
 		t.Fatalf("local copy reconstruction claims = %+v", claims)
+	}
+	if claims.SessionGeneration != session.Generation {
+		t.Fatalf("token generation = %q, want %q", claims.SessionGeneration, session.Generation)
+	}
+	claimStartedAt, err := time.Parse(time.RFC3339Nano, claims.StartedAt)
+	if err != nil || !claimStartedAt.Equal(session.StartedAt) {
+		t.Fatalf("token started_at = %q, want %s (parse error: %v)", claims.StartedAt, session.StartedAt, err)
 	}
 	if resp.PlayerStartSeconds == nil || *resp.PlayerStartSeconds != 4 ||
 		resp.StreamOriginSeconds == nil || *resp.StreamOriginSeconds != 96 ||
@@ -2524,11 +3237,12 @@ func TestHandleStartTranscode_SeekedCopyPreservedOnRemoteNode(t *testing.T) {
 	if remoteStartReq.TargetResolution != transcodeResolution2160p {
 		t.Fatalf("remote copy target resolution = %q, want unchanged 2160p", remoteStartReq.TargetResolution)
 	}
-	if !strings.HasPrefix(remoteStartReq.SessionID, session.ID+legacyTransportMarker) {
-		t.Fatalf("remote SessionID = %q, want legacy transport for %q", remoteStartReq.SessionID, session.ID)
+	expectedTransportID, err := playback.GenerationBoundTranscodeTransportID(session.ID, session.Generation)
+	if err != nil || remoteStartReq.SessionID != expectedTransportID || remoteStartReq.PublicSessionID != session.ID || remoteStartReq.SessionGeneration != session.Generation {
+		t.Fatalf("remote identity = (%q,%q,%q), want generation-bound %q: %v", remoteStartReq.SessionID, remoteStartReq.PublicSessionID, remoteStartReq.SessionGeneration, expectedTransportID, err)
 	}
-	if !remoteStartReq.RequireReady {
-		t.Fatal("remote copy start did not require readiness before route publication")
+	if remoteStartReq.RequireReady {
+		t.Fatal("generation-bound same-transport start unexpectedly required successor readiness")
 	}
 
 	var response transcodeStartResponse
@@ -2630,11 +3344,12 @@ func TestHandleStartTranscode_RemoteRejectionPreservesLegacyPredecessor(t *testi
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want %d, body = %s", response.Code, http.StatusBadGateway, response.Body.String())
 	}
-	if !strings.HasPrefix(replacementID, session.ID+legacyTransportMarker) {
-		t.Fatalf("replacement ID = %q, want distinct legacy transport for %q", replacementID, session.ID)
+	expectedTransportID, err := playback.GenerationBoundTranscodeTransportID(session.ID, session.Generation)
+	if err != nil || replacementID != expectedTransportID {
+		t.Fatalf("replacement ID = %q, want generation-bound %q: %v", replacementID, expectedTransportID, err)
 	}
-	if len(deletedIDs) != 1 || deletedIDs[0] != replacementID {
-		t.Fatalf("deleted transports = %v, want only rejected replacement %q", deletedIDs, replacementID)
+	if len(deletedIDs) != 0 {
+		t.Fatalf("deleted transports = %v, want rejected same-transport start untouched", deletedIDs)
 	}
 	persisted, err := sessionMgr.GetSession(session.ID)
 	if err != nil {
@@ -2730,13 +3445,18 @@ func TestHandleStartTranscode_ConcurrentRemoteReplacementsPublishOneWinner(t *te
 	go start()
 	go start()
 	<-prepared
-	<-prepared
+	select {
+	case <-prepared:
+		t.Fatal("same-generation remote starts were not serialized")
+	case <-time.After(50 * time.Millisecond):
+	}
 	close(release)
+	<-prepared
 
 	statuses := []int{<-responses, <-responses}
 	sort.Ints(statuses)
-	if statuses[0] != http.StatusAccepted || statuses[1] != http.StatusConflict {
-		t.Fatalf("replacement statuses = %v, want [%d %d]", statuses, http.StatusAccepted, http.StatusConflict)
+	if statuses[0] != http.StatusAccepted || statuses[1] != http.StatusAccepted {
+		t.Fatalf("replacement statuses = %v, want two serialized accepts", statuses)
 	}
 	persisted, err := sessionMgr.GetSession(session.ID)
 	if err != nil {
@@ -2746,22 +3466,16 @@ func TestHandleStartTranscode_ConcurrentRemoteReplacementsPublishOneWinner(t *te
 	preparedSnapshot := append([]string(nil), preparedIDs...)
 	deletedSnapshot := append([]string(nil), deletedIDs...)
 	remoteMu.Unlock()
-	if len(preparedSnapshot) != 2 || preparedSnapshot[0] == preparedSnapshot[1] {
-		t.Fatalf("prepared transport IDs = %v, want two distinct successors", preparedSnapshot)
+	if len(preparedSnapshot) != 2 || preparedSnapshot[0] != preparedSnapshot[1] {
+		t.Fatalf("prepared transport IDs = %v, want one stable generation transport", preparedSnapshot)
 	}
 	winner := persisted.TranscodeTransportID
 	if winner != preparedSnapshot[0] && winner != preparedSnapshot[1] {
 		t.Fatalf("published transport = %q, not one of %v", winner, preparedSnapshot)
 	}
-	loser := preparedSnapshot[0]
-	if loser == winner {
-		loser = preparedSnapshot[1]
-	}
 	sort.Strings(deletedSnapshot)
-	wantDeletes := []string{session.ID, loser}
-	sort.Strings(wantDeletes)
-	if len(deletedSnapshot) != 2 || deletedSnapshot[0] != wantDeletes[0] || deletedSnapshot[1] != wantDeletes[1] {
-		t.Fatalf("deleted transports = %v, want predecessor and loser %v", deletedSnapshot, wantDeletes)
+	if len(deletedSnapshot) != 1 || deletedSnapshot[0] != session.ID {
+		t.Fatalf("deleted transports = %v, want only bare rollout predecessor", deletedSnapshot)
 	}
 }
 
@@ -2791,6 +3505,7 @@ func TestHandleStartTranscode_RemoteSuccessorCannotBeOverwrittenByStaleFinalizat
 
 	var remoteMu sync.Mutex
 	preparedBitrates := make(map[string]int)
+	preparedCount := 0
 	var deletedIDs []string
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -2801,6 +3516,7 @@ func TestHandleStartTranscode_RemoteSuccessorCannotBeOverwrittenByStaleFinalizat
 			}
 			remoteMu.Lock()
 			preparedBitrates[startReq.SessionID] = startReq.TargetBitrateKbps
+			preparedCount++
 			remoteMu.Unlock()
 			w.WriteHeader(http.StatusAccepted)
 			_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{
@@ -2861,29 +3577,23 @@ func TestHandleStartTranscode_RemoteSuccessorCannotBeOverwrittenByStaleFinalizat
 	<-sessionMgr.entered
 	secondResult := start(2222)
 
-	// Give the second request time to prepare its successor and contend on the
-	// lifecycle commit while the first request's durable state publication is
-	// deliberately paused.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		remoteMu.Lock()
-		preparedCount := len(preparedBitrates)
-		remoteMu.Unlock()
-		if preparedCount == 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("second replacement was not prepared")
-		}
-		time.Sleep(time.Millisecond)
+	// The exact generation lifecycle guard serializes same-transport starts: the
+	// second request must not replace the node process before the first durable
+	// publication completes.
+	time.Sleep(50 * time.Millisecond)
+	remoteMu.Lock()
+	countBeforeRelease := preparedCount
+	remoteMu.Unlock()
+	if countBeforeRelease != 1 {
+		t.Fatalf("remote starts before release = %d, want 1", countBeforeRelease)
 	}
 	close(sessionMgr.release)
 
 	if status := <-firstResult; status != http.StatusAccepted {
 		t.Fatalf("first status = %d, want %d", status, http.StatusAccepted)
 	}
-	if status := <-secondResult; status != http.StatusConflict {
-		t.Fatalf("superseded second status = %d, want %d", status, http.StatusConflict)
+	if status := <-secondResult; status != http.StatusAccepted {
+		t.Fatalf("serialized second status = %d, want %d", status, http.StatusAccepted)
 	}
 	persisted, err := sessionMgr.GetSession(session.ID)
 	if err != nil {
@@ -2893,14 +3603,14 @@ func TestHandleStartTranscode_RemoteSuccessorCannotBeOverwrittenByStaleFinalizat
 	winnerBitrate := preparedBitrates[persisted.TranscodeTransportID]
 	deletedSnapshot := append([]string(nil), deletedIDs...)
 	remoteMu.Unlock()
-	if winnerBitrate != 1111 {
-		t.Fatalf("published transport bitrate = %d, want committed successor bitrate 1111", winnerBitrate)
+	if winnerBitrate != 2222 {
+		t.Fatalf("published transport bitrate = %d, want serialized last writer bitrate 2222", winnerBitrate)
 	}
 	if persisted.TargetBitrateKbps != winnerBitrate {
 		t.Fatalf("persisted bitrate = %d, want route winner bitrate %d", persisted.TargetBitrateKbps, winnerBitrate)
 	}
-	if len(deletedSnapshot) != 2 {
-		t.Fatalf("deleted transports = %v, want predecessor and first successor", deletedSnapshot)
+	if len(deletedSnapshot) != 1 || deletedSnapshot[0] != session.ID {
+		t.Fatalf("deleted transports = %v, want only bare rollout predecessor", deletedSnapshot)
 	}
 }
 

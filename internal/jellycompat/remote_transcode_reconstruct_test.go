@@ -6,13 +6,29 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/proxy"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
+
+type allowGenerationStore struct{}
+
+func (allowGenerationStore) WasSessionGenerationEnded(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+func (allowGenerationStore) RecordEndedSessionGeneration(context.Context, string, string, time.Time) error {
+	return nil
+}
 
 // stubRecipeNodeStore is an in-memory stand-in for the control-plane recipe
 // store (*noderecipe.Store) so the round-trip tests can assert what central
@@ -65,6 +81,10 @@ func (r *localSessionRegistry) RegisterReconstructed(s *playback.Session) *playb
 }
 
 func (r *localSessionRegistry) RegisterReconstructedWithLimits(_ context.Context, s *playback.Session) (*playback.Session, error) {
+	return r.RegisterReconstructed(s), nil
+}
+
+func (r *localSessionRegistry) RegisterReconstructedChecked(_ context.Context, s *playback.Session) (*playback.Session, error) {
 	return r.RegisterReconstructed(s), nil
 }
 
@@ -150,6 +170,7 @@ func TestStartRemoteTranscode_NodeRestartReconstruct(t *testing.T) {
 		context.Background(),
 		"play-1",
 		"upstream-1",
+		"",
 		source,
 		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"},
 		0,
@@ -184,6 +205,94 @@ func TestStartRemoteTranscode_NodeRestartReconstruct(t *testing.T) {
 	}
 }
 
+func TestModernRemoteTranscodeCarriesGenerationBoundTransportEndToEnd(t *testing.T) {
+	const generation = "32a4e124-9df7-4cfa-be49-e8e503316714"
+	var startReq transcodenode.TranscodeStartRequest
+	nodePath := make(chan string, 1)
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/transcode/start":
+			if err := json.NewDecoder(r.Body).Decode(&startReq); err != nil {
+				t.Errorf("decode start: %v", err)
+			}
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			nodePath <- r.URL.Path
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("manifest"))
+		}
+	}))
+	defer node.Close()
+
+	recipeStore := &stubRecipeNodeStore{}
+	handler, sessionMgr, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	startedAt := time.Now().UTC()
+	sessionMgr.sessions["upstream-1"].Generation = generation
+	sessionMgr.sessions["upstream-1"].StartedAt = startedAt
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", UpstreamSessionGeneration: generation, UpstreamStartedAt: startedAt, UpstreamPlayMethod: "transcode"})
+
+	source := testRemoteTranscodeSource()
+	if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", generation, source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	expected, _ := playback.GenerationBoundTranscodeTransportID("upstream-1", generation)
+	live, _ := sessionMgr.GetSession("upstream-1")
+	stored, _ := playbackStore.Get("play-1")
+	nodeRecipe, _ := recipeStore.Get("upstream-1")
+	if startReq.SessionID != expected || startReq.PublicSessionID != "upstream-1" || startReq.SessionGeneration != generation {
+		t.Fatalf("node request identity = (%q,%q,%q), want (%q,upstream-1,%s)", startReq.SessionID, startReq.PublicSessionID, startReq.SessionGeneration, expected, generation)
+	}
+	if live.TranscodeTransportID != expected || stored.Recipe == nil || stored.Recipe.TranscodeTransportID != expected || nodeRecipe.TranscodeTransportID != expected {
+		t.Fatalf("transport propagation live=%q compat=%v node=%q want=%q", live.TranscodeTransportID, stored.Recipe, nodeRecipe.TranscodeTransportID, expected)
+	}
+
+	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = handler.JWTSecret
+	cfg.Playback.TranscodeDir = t.TempDir()
+	watcher.SetConfigForTest(cfg)
+	proxyServer := proxy.NewServer(watcher, nodesessions.NewTracker(nil, "proxy", "proxy", "proxy"), allowGenerationStore{})
+	proxyHTTP := httptest.NewServer(proxyServer.Handler())
+	defer proxyHTTP.Close()
+	redirect, err := handler.buildProxyRedirectURL(stored, string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/movie.mkv"}, source, node.URL, 0, &nodepool.Node{URL: proxyHTTP.URL})
+	if err != nil {
+		t.Fatalf("buildProxyRedirectURL: %v", err)
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(redirect, proxyHTTP.URL+"/stream/transcode/"), "/master.m3u8")
+	claims, err := streamtoken.Verify(token, handler.JWTSecret)
+	if err != nil || claims.TranscodeTransportID != expected {
+		t.Fatalf("claims transport = %q, error=%v, want %q", claims.TranscodeTransportID, err, expected)
+	}
+	resp, err := http.Get(redirect)
+	if err != nil {
+		t.Fatalf("proxy GET: %v", err)
+	}
+	_ = resp.Body.Close()
+	select {
+	case got := <-nodePath:
+		if got != "/transcode/"+expected+"/master.m3u8" {
+			t.Fatalf("proxy node path = %q, want transport %q", got, expected)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("proxy did not reach transcode node")
+	}
+
+	reg := &localSessionRegistry{}
+	tm := playback.NewTranscodeManager()
+	tm.Sessions = reg
+	reconstructed, status, reconstructErr := tm.LoadOrReconstructSessionChecked(t.Context(), reg.GetSession, "upstream-1", stored.Recipe.UserID, stored.Recipe)
+	if reconstructErr != nil || status != playback.SessionLoaded || reconstructed == nil || reconstructed.TranscodeTransportID != expected {
+		t.Fatalf("restart reconstruction = session=%+v status=%v error=%v, want transport %q", reconstructed, status, reconstructErr, expected)
+	}
+
+	for _, inconsistent := range []string{"", "mismatch"} {
+		stored.Recipe.TranscodeTransportID = inconsistent
+		if _, err := handler.buildProxyRedirectURL(stored, string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/movie.mkv"}, source, node.URL, 0, &nodepool.Node{URL: proxyHTTP.URL}); err == nil {
+			t.Fatalf("inconsistent stored transport %q unexpectedly signed", inconsistent)
+		}
+	}
+}
+
 // TestStartRemoteTranscode_CentralRestartReconstruct covers the central-restart
 // leg: the recipe lives in the compat store (PlaybackSession.Recipe), the
 // in-memory native session is gone, and LoadOrReconstructSession rebuilds the
@@ -203,7 +312,7 @@ func TestStartRemoteTranscode_CentralRestartReconstruct(t *testing.T) {
 	})
 
 	source := testRemoteTranscodeSource()
-	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
+	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", "", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
 		t.Fatalf("startRemoteTranscode: %v", err)
 	}
 
@@ -227,13 +336,16 @@ func TestStartRemoteTranscode_CentralRestartReconstruct(t *testing.T) {
 	tm.Sessions = reg
 	tm.JWTSecretFn = func() string { return "test-secret" }
 
-	session, status := tm.LoadOrReconstructSession(
+	session, status, loadErr := tm.LoadOrReconstructSessionChecked(
 		context.Background(),
 		reg.GetSession,
 		"upstream-1",
 		stored.Recipe.UserID,
 		stored.Recipe,
 	)
+	if loadErr != nil {
+		t.Fatalf("LoadOrReconstructSessionChecked: %v", loadErr)
+	}
 	if status != playback.SessionLoaded || session == nil {
 		t.Fatalf("LoadOrReconstructSession status=%v session=%v, want reconstructed", status, session)
 	}
@@ -267,7 +379,7 @@ func TestStartRemoteTranscode_UpdateFailureRollsBackNode(t *testing.T) {
 	handler, _, _ := newRemoteTranscodeHandler(t, srv.URL, recipeStore)
 	// No play session put → Update("missing") fails, triggering rollback.
 	source := testRemoteTranscodeSource()
-	err := handler.startRemoteTranscode(context.Background(), "missing", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, srv.URL)
+	err := handler.startRemoteTranscode(context.Background(), "missing", "upstream-1", "", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, srv.URL)
 	if err == nil {
 		t.Fatal("expected error when compat Update fails")
 	}

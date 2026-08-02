@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,12 +28,13 @@ type Server struct {
 	egress     *egressMeter
 	// subCache stores full-track PGS (.sup) extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
-	subCache *playback.SubtitleCache
+	subCache        *playback.SubtitleCache
+	generationStore playback.SessionGenerationTombstoneStore
 }
 
 // NewServer creates a new proxy server backed by a config watcher and session
 // tracker.
-func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
+func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker, generationStore playback.SessionGenerationTombstoneStore) *Server {
 	return &Server{
 		watcher: watcher,
 		tracker: tracker,
@@ -43,6 +45,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
+		generationStore: generationStore,
 	}
 }
 
@@ -135,6 +138,17 @@ func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoke
 	claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil
+	}
+	if err := playback.AuthorizeSessionGeneration(r.Context(), s.generationStore, claims.SessionID, claims.SessionGeneration, time.Now()); err != nil {
+		switch {
+		case errors.Is(err, playback.ErrSessionGenerationTombstoneUnavailable):
+			http.Error(w, "generation authority unavailable", http.StatusServiceUnavailable)
+		case errors.Is(err, playback.ErrSessionGenerationEnded):
+			http.Error(w, "session generation ended", http.StatusGone)
+		default:
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}
 		return nil
 	}
 	return claims

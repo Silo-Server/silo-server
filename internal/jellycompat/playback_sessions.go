@@ -16,6 +16,18 @@ import (
 // another process owns its delivery lease (or already sent its fallback).
 var ErrTerminalClaimUnavailable = errors.New("compat terminal event claim unavailable")
 
+// UpstreamSessionIdentity identifies one exact native-session lifetime. Native
+// IDs can be reused after a tombstone, so the ID alone is not a safe mutation
+// guard.
+type UpstreamSessionIdentity struct {
+	ID         string
+	Generation string
+}
+
+// UpstreamSessionMutation atomically changes the compat row selected by an
+// exact upstream identity. Returning deleteSession removes the matched row.
+type UpstreamSessionMutation func(session *PlaybackSession) (deleteSession bool, err error)
+
 // PlaybackSession stores compat-owned playback negotiation state before the
 // native Silo playback session starts.
 type PlaybackSession struct {
@@ -37,6 +49,8 @@ type PlaybackSession struct {
 	InitialSeekSeconds         float64
 	MediaSources               []PlaybackMediaSource
 	UpstreamSessionID          string
+	UpstreamSessionGeneration  string
+	UpstreamStartedAt          time.Time
 	UpstreamPlayMethod         string
 	TranscodeStarted           bool
 	ProgressPersistenceKnown   bool
@@ -116,6 +130,10 @@ type CompatPlaybackStore interface {
 	GetFinalizable(id, compatToken string) (*PlaybackSession, bool)
 	// Update modifies a session in place under the store's lock.
 	Update(id string, fn func(*PlaybackSession) error) error
+	// CompareAndSwapUpstream applies fn only when both the persisted upstream ID
+	// and generation match expected. The durable implementation performs the
+	// comparison and mutation in one PostgreSQL transaction.
+	CompareAndSwapUpstream(id string, expected UpstreamSessionIdentity, fn UpstreamSessionMutation) (*PlaybackSession, bool, error)
 	// FindByRoute resolves a route item / media-source id to a session.
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
 	// FindByClientPlaySessionID resolves the client-generated PlaySessionId
@@ -221,6 +239,9 @@ func (s *PlaybackSessionStore) putNegotiatedNormalized(session PlaybackSession) 
 
 func (s *PlaybackSessionStore) normalizeSession(session PlaybackSession) PlaybackSession {
 	now := s.now()
+	if !session.UpstreamStartedAt.IsZero() {
+		session.UpstreamStartedAt = session.UpstreamStartedAt.UTC()
+	}
 	if session.CreatedAt.IsZero() {
 		session.CreatedAt = now
 	}
@@ -517,6 +538,44 @@ func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error
 	session.UpdatedAt = s.now()
 	s.sessions[id] = session
 	return nil
+}
+
+// CompareAndSwapUpstream atomically mutates the exact native-session lifetime
+// currently attached to a compat row.
+func (s *PlaybackSessionStore) CompareAndSwapUpstream(
+	id string,
+	expected UpstreamSessionIdentity,
+	fn UpstreamSessionMutation,
+) (*PlaybackSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.sessions[id]
+	if !ok || !session.ExpiresAt.After(s.now()) {
+		if ok {
+			delete(s.sessions, id)
+		}
+		return nil, false, nil
+	}
+	if session.UpstreamSessionID != expected.ID || session.UpstreamSessionGeneration != expected.Generation {
+		copy := session
+		return &copy, false, nil
+	}
+	deleteSession, err := fn(&session)
+	if err != nil {
+		return nil, false, err
+	}
+	if deleteSession {
+		delete(s.sessions, id)
+		return &session, true, nil
+	}
+	if !session.UpstreamStartedAt.IsZero() {
+		session.UpstreamStartedAt = session.UpstreamStartedAt.UTC()
+	}
+	session.UpdatedAt = s.now()
+	s.sessions[id] = session
+	copy := session
+	return &copy, true, nil
 }
 
 // FindByClientPlaySessionID resolves the client-generated PlaySessionId alias

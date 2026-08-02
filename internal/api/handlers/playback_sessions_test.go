@@ -4,8 +4,343 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/worker"
 )
+
+func TestSnapshotNormalizesLegacySentinelWithoutExposingIt(t *testing.T) {
+	row := playbackSessionRow{SessionGeneration: playback.LegacySessionGenerationSentinel}
+	normalizePlaybackSessionGeneration(&row)
+	if row.SessionGeneration != "" {
+		t.Fatalf("snapshot exposed sentinel generation %q", row.SessionGeneration)
+	}
+	now := time.Now().UTC()
+	bootGeneration := uuid.NewString()
+	reason := evaluateSnapshotCompleteness(now,
+		[]snapshotReportingNode{{ID: "api-1", BootGeneration: bootGeneration, UpdatedAt: now}},
+		[]snapshotWatermark{{ReportingNode: "api-1", BootGeneration: bootGeneration, CompletedAt: now, SessionCount: 1}},
+		[]playbackSessionRow{{SessionID: "legacy", SessionGeneration: row.SessionGeneration, UserID: 7, ReportingNode: "api-1", StartedAt: now.Add(-time.Second)}},
+	)
+	if reason != snapshotReasonInvalidIdentity {
+		t.Fatalf("legacy sentinel snapshot reason = %q, want invalid identity", reason)
+	}
+}
+
+func TestSnapshotLoaderDoesNotExposePersistedLegacySentinel(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SILO_TEST_DATABASE_URL to run snapshot database coverage test")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	sessionID := "snapshot-legacy-" + uuid.NewString()
+	startedAt := time.Now().UTC().Add(-time.Minute)
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO playback_sessions_sync
+			(session_id, session_generation, user_id, media_file_id, play_method, reporting_node, started_at, updated_at)
+		VALUES ($1, $2::uuid, 7, 0, 'direct', 'api-legacy', $3, $3)
+	`, sessionID, playback.LegacySessionGenerationSentinel, startedAt); err != nil {
+		t.Fatalf("seed legacy snapshot row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(t.Context(), `DELETE FROM playback_sessions_sync WHERE session_id=$1`, sessionID)
+	})
+	loader := NewPlaybackSessionsLoader(pool, nil, nil)
+	rows, err := loader.Load(t.Context(), httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions", nil), PlaybackSessionsQuery{})
+	if err != nil {
+		t.Fatalf("load snapshot rows: %v", err)
+	}
+	var got *playbackSessionRow
+	for i := range rows {
+		if rows[i].SessionID == sessionID {
+			got = &rows[i]
+			break
+		}
+	}
+	if got == nil || got.SessionGeneration != "" {
+		t.Fatalf("legacy snapshot row=%+v, want public empty generation", got)
+	}
+	now := time.Now().UTC()
+	boot := uuid.NewString()
+	if reason := evaluateSnapshotCompleteness(now,
+		[]snapshotReportingNode{{ID: "api-legacy", BootGeneration: boot, UpdatedAt: now}},
+		[]snapshotWatermark{{ReportingNode: "api-legacy", BootGeneration: boot, CompletedAt: now, SessionCount: 1}},
+		[]playbackSessionRow{*got},
+	); reason != snapshotReasonInvalidIdentity {
+		t.Fatalf("legacy persisted snapshot reason=%q, want invalid identity", reason)
+	}
+}
+
+func TestSnapshotCompletenessRequiresFreshReportingCoverage(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	freshNode := snapshotReportingNode{
+		ID:             "api-1",
+		BootGeneration: "47cf5dbe-65d4-4975-bdc8-039443ebe16d",
+		UpdatedAt:      now.Add(-time.Second),
+	}
+	freshWatermark := snapshotWatermark{
+		ReportingNode:  "api-1",
+		BootGeneration: freshNode.BootGeneration,
+		CompletedAt:    now.Add(-time.Second),
+		SessionCount:   0,
+	}
+	validSession := playbackSessionRow{
+		SessionID:         "session-1",
+		SessionGeneration: "52ebfda7-2025-49f8-8c1c-0d345043dc10",
+		UserID:            7,
+		ReportingNode:     "api-1",
+		StartedAt:         now.Add(-time.Minute),
+	}
+
+	tests := []struct {
+		name       string
+		nodes      []snapshotReportingNode
+		watermarks []snapshotWatermark
+		sessions   []playbackSessionRow
+		want       string
+	}{
+		{name: "zero nodes", want: snapshotReasonNoReportingNodes},
+		{name: "zero sessions with fresh completed watermark", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{freshWatermark}},
+		{name: "missing watermark", nodes: []snapshotReportingNode{freshNode}, want: snapshotReasonMissingWatermark},
+		{name: "watermark from previous process boot", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: "dbcd1710-cf21-4695-b35f-c0b0d5f33889", CompletedAt: now, SessionCount: 0}}, want: snapshotReasonBootGenerationMismatch},
+		{name: "orphan zero-session watermark", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{freshWatermark, {ReportingNode: "api-orphan", CompletedAt: now, SessionCount: 0}}, want: snapshotReasonOrphanReportingNode},
+		{name: "persisted whitespace mismatch", nodes: []snapshotReportingNode{{ID: " api-1 ", BootGeneration: freshNode.BootGeneration, UpdatedAt: freshNode.UpdatedAt}}, watermarks: []snapshotWatermark{freshWatermark}, want: snapshotReasonMissingWatermark},
+		{name: "blank heartbeat node", nodes: []snapshotReportingNode{{ID: "   ", UpdatedAt: freshNode.UpdatedAt}}, watermarks: []snapshotWatermark{{ReportingNode: "   ", CompletedAt: now}}, want: snapshotReasonStaleHeartbeat},
+		{name: "blank watermark node", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "   ", CompletedAt: now}}, want: snapshotReasonMissingWatermark},
+		{name: "stale watermark", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: freshNode.BootGeneration, CompletedAt: now.Add(-time.Minute)}}, want: snapshotReasonStaleWatermark},
+		{name: "stale heartbeat", nodes: []snapshotReportingNode{{ID: "api-1", UpdatedAt: now.Add(-time.Minute)}}, watermarks: []snapshotWatermark{freshWatermark}, want: snapshotReasonStaleHeartbeat},
+		{name: "count mismatch", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: freshNode.BootGeneration, CompletedAt: now, SessionCount: 2}}, sessions: []playbackSessionRow{validSession}, want: snapshotReasonCountMismatch},
+		{name: "orphan reporting node", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{freshWatermark}, sessions: []playbackSessionRow{{SessionID: "orphan", SessionGeneration: validSession.SessionGeneration, UserID: 7, ReportingNode: "api-2", StartedAt: validSession.StartedAt}}, want: snapshotReasonOrphanReportingNode},
+		{name: "invalid generation", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: freshNode.BootGeneration, CompletedAt: now, SessionCount: 1}}, sessions: []playbackSessionRow{{SessionID: "bad", UserID: 7, ReportingNode: "api-1", StartedAt: validSession.StartedAt}}, want: snapshotReasonInvalidIdentity},
+		{name: "invalid start", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: freshNode.BootGeneration, CompletedAt: now, SessionCount: 1}}, sessions: []playbackSessionRow{{SessionID: "bad", SessionGeneration: validSession.SessionGeneration, UserID: 7, ReportingNode: "api-1"}}, want: snapshotReasonInvalidStartedAt},
+		{name: "future start", nodes: []snapshotReportingNode{freshNode}, watermarks: []snapshotWatermark{{ReportingNode: "api-1", BootGeneration: freshNode.BootGeneration, CompletedAt: now, SessionCount: 1}}, sessions: []playbackSessionRow{{SessionID: "bad", SessionGeneration: validSession.SessionGeneration, UserID: 7, ReportingNode: "api-1", StartedAt: now.Add(time.Minute)}}, want: snapshotReasonInvalidStartedAt},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evaluateSnapshotCompleteness(now, tc.nodes, tc.watermarks, tc.sessions); got != tc.want {
+				t.Fatalf("reason = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSnapshotRowsExposeStateAndTranscodeFlag(t *testing.T) {
+	row := playbackSessionRow{PlayMethod: "remux", TranscodeAudio: true, IsPaused: true}
+	enrichPlaybackSessionRow(&row, nil)
+	if row.State != "paused" {
+		t.Fatalf("state = %q, want paused", row.State)
+	}
+	if !row.IsTranscoded {
+		t.Fatal("audio-transcoded remux must report is_transcoded=true")
+	}
+}
+
+func TestSnapshotQueryIsUncappedWhileLegacyListRemainsCapped(t *testing.T) {
+	snapshotSQL, _ := finishPlaybackSessionsSQL("SELECT * FROM playback_sessions_sync s", PlaybackSessionsQuery{}, false)
+	if strings.Contains(snapshotSQL, "LIMIT") {
+		t.Fatalf("snapshot SQL is capped: %s", snapshotSQL)
+	}
+	legacySQL, _ := finishPlaybackSessionsSQL("SELECT * FROM playback_sessions_sync s", PlaybackSessionsQuery{}, true)
+	if !strings.Contains(legacySQL, "LIMIT 200") {
+		t.Fatalf("legacy SQL lost its compatibility cap: %s", legacySQL)
+	}
+}
+
+func TestSnapshotCompleteForFreshZeroSessionNode(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SILO_TEST_DATABASE_URL to run snapshot database coverage test")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM playback_sessions_sync; DELETE FROM playback_session_snapshot_watermarks; DELETE FROM node_heartbeats`); err != nil {
+		t.Fatalf("clear snapshot tables: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO node_heartbeats (node_id, node_type, updated_at) VALUES ('api-test', 'api', NOW());
+		INSERT INTO playback_session_snapshot_watermarks
+			(reporting_node, boot_generation, reconciliation_generation, completed_at, session_count)
+		VALUES ('api-test', (SELECT boot_generation FROM node_heartbeats WHERE node_id='api-test'), gen_random_uuid(), NOW(), 0)
+	`); err != nil {
+		t.Fatalf("seed coverage: %v", err)
+	}
+	handler := NewAdminHandler(nil, pool, nil)
+	recorder := httptest.NewRecorder()
+	handler.HandleGetSessionsSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions/snapshot", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var response sessionSnapshotResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Complete || response.IncompleteReason != "" || len(response.Sessions) != 0 {
+		t.Fatalf("snapshot = %+v, want complete empty snapshot", response)
+	}
+}
+
+func TestSnapshotIncompleteAfterSameNodeRestartsBeforeReconciliation(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SILO_TEST_DATABASE_URL to run snapshot database coverage test")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	node := "snapshot-restart-" + uuid.NewString()
+	sessionID := "snapshot-restart-session-" + uuid.NewString()
+	oldBoot := uuid.New()
+	newBoot := uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(t.Context(), `DELETE FROM playback_sessions_sync WHERE session_id=$1`, sessionID)
+		_, _ = pool.Exec(t.Context(), `DELETE FROM playback_session_snapshot_watermarks WHERE reporting_node=$1`, node)
+		_, _ = pool.Exec(t.Context(), `DELETE FROM node_heartbeats WHERE node_id=$1`, node)
+	})
+
+	oldHeartbeat := worker.NewHeartbeatWriter(pool, node, "api", "", oldBoot)
+	oldReconciler := worker.NewReconciler(pool, node, nil, oldBoot)
+	oldSnapshot := []worker.SessionSync{{
+		SessionID:         sessionID,
+		SessionGeneration: uuid.NewString(),
+		UserID:            7,
+		MediaFileID:       42,
+		PlayMethod:        "direct",
+		ReportingNode:     node,
+		StartedAt:         time.Now().UTC().Add(-time.Minute),
+		UpdatedAt:         time.Now().UTC(),
+	}}
+	if err := oldHeartbeat.Beat(t.Context()); err != nil {
+		t.Fatalf("old process heartbeat: %v", err)
+	}
+	if err := oldReconciler.ReconcileNodeSessions(t.Context(), node, oldSnapshot); err != nil {
+		t.Fatalf("old process reconciliation: %v", err)
+	}
+
+	handler := NewAdminHandler(nil, pool, nil)
+	readSnapshot := func() sessionSnapshotResponse {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		handler.HandleGetSessionsSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions/snapshot", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+		var response sessionSnapshotResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return response
+	}
+	if response := readSnapshot(); !response.Complete {
+		t.Fatalf("old process snapshot = %+v, want complete", response)
+	}
+
+	newHeartbeat := worker.NewHeartbeatWriter(pool, node, "api", "", newBoot)
+	if err := newHeartbeat.Beat(t.Context()); err != nil {
+		t.Fatalf("new process heartbeat: %v", err)
+	}
+	if response := readSnapshot(); response.Complete || response.IncompleteReason != snapshotReasonBootGenerationMismatch {
+		t.Fatalf("pre-reconciliation restart snapshot = %+v, want boot-generation mismatch", response)
+	}
+
+	newReconciler := worker.NewReconciler(pool, node, nil, newBoot)
+	if err := newReconciler.ReconcileNodeSessions(t.Context(), node, oldSnapshot); err != nil {
+		t.Fatalf("new process reconciliation: %v", err)
+	}
+	if response := readSnapshot(); !response.Complete {
+		t.Fatalf("new process snapshot = %+v, want complete after matching reconciliation", response)
+	}
+}
+
+func TestSnapshotIncompleteForOrphanZeroSessionWatermark(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SILO_TEST_DATABASE_URL to run snapshot database coverage test")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM playback_sessions_sync; DELETE FROM playback_session_snapshot_watermarks; DELETE FROM node_heartbeats`); err != nil {
+		t.Fatalf("clear snapshot tables: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO node_heartbeats (node_id, node_type, updated_at) VALUES ('api-test', 'api', NOW());
+		INSERT INTO playback_session_snapshot_watermarks
+			(reporting_node, boot_generation, reconciliation_generation, completed_at, session_count)
+		VALUES ('api-test', (SELECT boot_generation FROM node_heartbeats WHERE node_id='api-test'), gen_random_uuid(), NOW(), 0),
+		       ('api-orphan', gen_random_uuid(), gen_random_uuid(), NOW(), 0)
+	`); err != nil {
+		t.Fatalf("seed orphan coverage: %v", err)
+	}
+	handler := NewAdminHandler(nil, pool, nil)
+	recorder := httptest.NewRecorder()
+	handler.HandleGetSessionsSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions/snapshot", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var response sessionSnapshotResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Complete || response.IncompleteReason != snapshotReasonOrphanReportingNode {
+		t.Fatalf("snapshot = %+v, want incomplete orphan reporting node", response)
+	}
+}
+
+func TestSnapshotIncompleteForPersistedWhitespaceNodeMismatch(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SILO_TEST_DATABASE_URL to run snapshot database coverage test")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if _, err := pool.Exec(t.Context(), `DELETE FROM playback_sessions_sync; DELETE FROM playback_session_snapshot_watermarks; DELETE FROM node_heartbeats`); err != nil {
+		t.Fatalf("clear snapshot tables: %v", err)
+	}
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO node_heartbeats (node_id, node_type, updated_at) VALUES (' api-legacy ', 'api', NOW());
+		INSERT INTO playback_session_snapshot_watermarks
+			(reporting_node, boot_generation, reconciliation_generation, completed_at, session_count)
+		VALUES ('api-legacy', gen_random_uuid(), gen_random_uuid(), NOW(), 0)
+	`); err != nil {
+		t.Fatalf("seed whitespace-mismatched coverage: %v", err)
+	}
+	handler := NewAdminHandler(nil, pool, nil)
+	recorder := httptest.NewRecorder()
+	handler.HandleGetSessionsSnapshot(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions/snapshot", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	var response sessionSnapshotResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Complete || response.IncompleteReason == "" {
+		t.Fatalf("snapshot = %+v, want incomplete whitespace-mismatched coverage", response)
+	}
+}
 
 func TestSessionComponentDecisionLabelsCopiedAudioDuringHLSAsRemux(t *testing.T) {
 	videoDecision, audioDecision := sessionComponentDecision("transcode", false, "copy")

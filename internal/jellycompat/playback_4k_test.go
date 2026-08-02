@@ -140,14 +140,14 @@ func TestEnsureTranscodeSession4KGuard(t *testing.T) {
 		FileID:  1,
 		Version: catalog.FileVersion{FileID: 1, Resolution: "2160p", CodecVideo: "hevc"},
 	}
-	if _, err := h.ensureTranscodeSession(context.Background(), "ps", "session", source); !errors.Is(err, errTranscode4KDisallowed) {
+	if _, err := h.ensureTranscodeSession(context.Background(), "ps", "session", "", source); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("ensureTranscodeSession() error = %v, want errTranscode4KDisallowed", err)
 	}
 
 	// Video-copy sessions pass the guard (and fail later on the missing file
 	// resolver, which is fine for this test).
 	source.TranscodeAudio = true
-	if _, err := h.ensureTranscodeSession(context.Background(), "ps", "session", source); errors.Is(err, errTranscode4KDisallowed) {
+	if _, err := h.ensureTranscodeSession(context.Background(), "ps", "session", "", source); errors.Is(err, errTranscode4KDisallowed) {
 		t.Error("ensureTranscodeSession() blocked a video-copy session")
 	}
 }
@@ -159,7 +159,7 @@ func TestStartRemoteTranscode4KGuard(t *testing.T) {
 		FileID:  1,
 		Version: catalog.FileVersion{FileID: 1, Resolution: "2160p", CodecVideo: "hevc"},
 	}
-	if err := h.startRemoteTranscode(context.Background(), "play", "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
+	if err := h.startRemoteTranscode(context.Background(), "play", "session", "", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("startRemoteTranscode() error = %v, want errTranscode4KDisallowed", err)
 	}
 }

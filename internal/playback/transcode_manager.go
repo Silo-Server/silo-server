@@ -32,7 +32,8 @@ type TranscodeRuntimeConfig struct {
 // caps so replaying a token cannot reconstruct past the concurrent stream /
 // transcode limits a fresh StartSession would reject.
 type sessionReconstructor interface {
-	RegisterReconstructed(s *Session) *Session
+	GetSession(sessionID string) (*Session, error)
+	RegisterReconstructedChecked(ctx context.Context, s *Session) (*Session, error)
 	RegisterReconstructedWithLimits(ctx context.Context, s *Session) (*Session, error)
 }
 
@@ -63,6 +64,10 @@ type TranscodeManager struct {
 	// reconstructed under the same id between the exit and teardown is not killed.
 	// No-op when nil.
 	OnFFmpegCrash func(ctx context.Context, sessionID string, dead *TranscodeSession)
+	// OnFFmpegCrashIdentity is the generation-bound form used by lifecycle-aware
+	// compatibility handlers. The generation is captured when the monitor is
+	// registered, never reloaded after the delayed crash callback fires.
+	OnFFmpegCrashIdentity func(ctx context.Context, sessionID, generation string, dead *TranscodeSession)
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
@@ -312,7 +317,7 @@ func (m *TranscodeManager) markReconstructing(sessionID string) func() {
 	}
 }
 
-// SessionLoadStatus is the outcome of LoadOrReconstructSession, letting each
+// SessionLoadStatus is the outcome of LoadOrReconstructSessionChecked, letting each
 // handler render its own error shape (native vs jellycompat) without the manager
 // touching the http response.
 type SessionLoadStatus int
@@ -328,7 +333,7 @@ const (
 	SessionForbidden
 )
 
-// LoadOrReconstructSession is the single front door every serve handler uses to
+// LoadOrReconstructSessionChecked is the single front door every serve handler uses to
 // obtain a playback Session: it looks the session up via getSession and, on a
 // not-found miss (e.g. after a restart), reconstructs it from the recipe card,
 // re-binding ownership to the live caller. The two-factor ownership rule is
@@ -342,49 +347,69 @@ const (
 // Under token-carried reconstruction it is the sole descriptor source — there is
 // no shared per-session store to fall back on — so a not-found session with a nil
 // card is a genuine miss.
-func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSession func(string) (*Session, error), sessionID string, requestUserID int, card *RecipeCard) (*Session, SessionLoadStatus) {
+// It preserves typed reconstruction dependency failures for HTTP callers that
+// must distinguish a retryable fail-closed result from a genuine missing session.
+func (m *TranscodeManager) LoadOrReconstructSessionChecked(ctx context.Context, getSession func(string) (*Session, error), sessionID string, requestUserID int, card *RecipeCard) (*Session, SessionLoadStatus, error) {
+	if card != nil {
+		if err := validatePublicSessionGeneration(card.SessionGeneration); err != nil {
+			return nil, SessionLoadFailed, err
+		}
+	}
 	session, err := getSession(sessionID)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
-			return nil, SessionLoadFailed
+			return nil, SessionLoadFailed, err
 		}
 		// A nil manager (documented optional on StreamHandler) cannot reconstruct,
 		// so a missing session is simply not-found rather than a panic.
 		if m == nil || card == nil {
-			return nil, SessionMissing
+			return nil, SessionMissing, nil
 		}
 		// Lost the in-memory session (e.g. restart): rebuild it from the token's
-		// recipe. ReconstructSession re-binds the session to the card owner and
+		// recipe. ReconstructSessionChecked re-binds the session to the card owner and
 		// refuses a non-zero caller that mismatches it (a zero caller is allowed for
 		// the authless bearer routes), so a nil result here is a genuine not-found.
-		session = m.ReconstructSession(ctx, sessionID, requestUserID, *card)
-		if session == nil {
-			return nil, SessionMissing
+		session, err = m.ReconstructSessionChecked(ctx, sessionID, requestUserID, *card)
+		if err != nil {
+			return nil, SessionLoadFailed, err
 		}
-		return session, SessionLoaded
+		if session == nil {
+			return nil, SessionMissing, nil
+		}
+		return session, SessionLoaded, nil
+	}
+	if card != nil && session.Generation != card.SessionGeneration {
+		return nil, SessionLoadFailed, ErrSessionSuperseded
 	}
 	// Live session: enforce the existing ownership check. A zero caller is
 	// allowed (these routes treat the session UUID as a bearer when auth is
 	// optional); a non-zero mismatch is refused.
 	if requestUserID != 0 && session.UserID != requestUserID {
-		return nil, SessionForbidden
+		return nil, SessionForbidden, nil
 	}
-	return session, SessionLoaded
+	return session, SessionLoaded, nil
 }
 
-// ReconstructSession rebuilds the in-memory playback Session from a persisted
+// ReconstructSessionChecked rebuilds the in-memory playback Session from a persisted
 // recipe card after the server lost its state (restart). It re-binds the session
 // to the live authenticated caller and refuses if ownership cannot be confirmed.
 // Returns the (re)registered session, or nil if reconstruct is not possible (no
 // card, ownership mismatch, or unsupported session manager).
-func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID string, requestUserID int, card RecipeCard) *Session {
+// It includes a typed failure channel for durable generation-tombstone reads.
+// Callers that might otherwise start a
+// replacement session must use this form so an unavailable ended-generation
+// decision remains fail-closed and retryable.
+func (m *TranscodeManager) ReconstructSessionChecked(ctx context.Context, sessionID string, requestUserID int, card RecipeCard) (*Session, error) {
 	if m == nil || m.Sessions == nil {
-		return nil
+		return nil, nil
 	}
 	if card.SessionID == "" || card.SessionID != sessionID {
 		// The token's recipe must be for the session id in the URL; a mismatch is
 		// a forged or stale request.
-		return nil
+		return nil, nil
+	}
+	if err := validatePublicSessionGeneration(card.SessionGeneration); err != nil {
+		return nil, err
 	}
 	// Re-bind ownership to the card owner. A zero caller is allowed (the authless
 	// transcode delivery routes — HLS master.m3u8 / segment — treat the session
@@ -395,7 +420,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		slog.WarnContext(ctx, "transcode reconstruct ownership rejected", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID,
 			"request_user", requestUserID, "card_user", card.UserID)
-		return nil
+		return nil, nil
 	}
 
 	// An empty PlayMethod is a card written before direct/remux were
@@ -407,6 +432,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 
 	s := &Session{
 		ID:                   card.SessionID,
+		Generation:           card.SessionGeneration,
 		UserID:               card.UserID,
 		ProfileID:            card.ProfileID,
 		MediaFileID:          card.MediaFileID,
@@ -428,6 +454,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		ClientVersion:    normalizeClientMetadataValue(card.ClientVersion, 64),
 		ClientUserAgent:  normalizeClientMetadataValue(card.ClientUserAgent, 512),
 		IsJellyfinCompat: card.IsJellyfinCompat,
+		StartedAt:        card.StartedAt,
 		// Preserve the byte-affecting recipe so an audio switch after a restart
 		// rebuilds the same stream (subtitles/cadence) instead of dropping them.
 		SubtitleTrackIndex: card.SubtitleTrackIndex,
@@ -442,11 +469,17 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 	if err != nil {
 		// Admission denials must still refuse: a replayed token cannot reconstruct
 		// past a current cap or after transcoding has been disabled for the user.
+		if errors.Is(err, ErrSessionGenerationTombstoneUnavailable) {
+			slog.WarnContext(ctx, "playback session reconstruct refused because ended-generation state is unavailable", "component", "playback",
+				"session", sessionID, "playback_session_id", sessionID,
+				"user", card.UserID, "method", method, "error", err)
+			return nil, err
+		}
 		if errors.Is(err, ErrTooManyStreams) || errors.Is(err, ErrTooManyTranscodes) || errors.Is(err, ErrTranscodingDisabled) || errors.Is(err, ErrAudioTranscodingDisabled) {
 			slog.WarnContext(ctx, "playback session reconstruct refused by admission policy", "component", "playback",
 				"session", sessionID, "playback_session_id", sessionID,
 				"user", card.UserID, "method", method, "error", err)
-			return nil
+			return nil, nil
 		}
 		// Otherwise the limit provider itself could not be evaluated (e.g. a
 		// transient Postgres error during a post-restart reconstruct wave). Fail
@@ -457,11 +490,20 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		slog.WarnContext(ctx, "playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID,
 			"user", card.UserID, "method", method, "error", err)
-		session = m.Sessions.RegisterReconstructed(s)
+		session, err = m.Sessions.RegisterReconstructedChecked(ctx, s)
+		if err != nil {
+			slog.WarnContext(ctx, "playback session reconstruct refused because ended-generation state is unavailable", "component", "playback",
+				"session", sessionID, "playback_session_id", sessionID,
+				"user", card.UserID, "method", method, "error", err)
+			return nil, err
+		}
+	}
+	if session != nil && session.Generation != s.Generation {
+		return nil, ErrSessionSuperseded
 	}
 	slog.InfoContext(ctx, "playback session reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID, "user", card.UserID, "method", method)
-	return session
+	return session, nil
 }
 
 // ReconstructTranscode rebuilds the in-memory TranscodeSession (and, if
@@ -635,17 +677,21 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// Mirror the handler's start path: re-arm the throttler and exit monitor
 	// after every Restart of this reconstructed session, so seek/audio-switch
 	// restarts keep the same wiring as a freshly started transcode.
+	// The caller captured this exact identity under the native session lifecycle
+	// lease. Never reload by reusable ID here or a delayed reconstruction could
+	// bind its monitor to a successor generation.
+	generation := card.SessionGeneration
 	transcodeSession.SetRestartHook(func(ctx context.Context) {
 		if m.StartThrottler != nil {
 			m.StartThrottler(ctx, transcodeSession)
 		}
-		m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
+		m.MonitorLocalTranscodeExitGeneration(sessionID, generation, transcodeSession)
 	})
 
 	if m.StartThrottler != nil {
 		m.StartThrottler(ctx, transcodeSession)
 	}
-	m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
+	m.MonitorLocalTranscodeExitGeneration(sessionID, generation, transcodeSession)
 	slog.InfoContext(ctx, "transcode process reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
@@ -664,9 +710,17 @@ func reconstructionOutputDir(root, sessionID, signedSubdir string) string {
 }
 
 // MonitorLocalTranscodeExit watches a local ffmpeg process and, on an error exit,
-// invokes OnFFmpegCrash so the embedding handler tears down the playback session.
+// invokes the configured crash handler so the embedding handler tears down the
+// playback session.
 // A clean exit (no error) leaves the segments servable until the client stops.
 func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *TranscodeSession) {
+	m.MonitorLocalTranscodeExitGeneration(sessionID, "", session)
+}
+
+// MonitorLocalTranscodeExitGeneration binds a delayed ffmpeg exit to the exact
+// playback generation that owned the process when monitoring began. Empty is a
+// valid legacy generation and is passed unchanged to the identity callback.
+func (m *TranscodeManager) MonitorLocalTranscodeExitGeneration(sessionID, generation string, session *TranscodeSession) {
 	if m == nil || sessionID == "" || session == nil {
 		return
 	}
@@ -702,7 +756,9 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		// reconstruct it on the next request. Pass the dead session so teardown is a
 		// compare-and-delete: a reconstruct that registered a successor under this id
 		// between the current!=session check above and teardown must not be killed.
-		if m.OnFFmpegCrash != nil {
+		if m.OnFFmpegCrashIdentity != nil {
+			m.OnFFmpegCrashIdentity(context.Background(), sessionID, generation, session)
+		} else if m.OnFFmpegCrash != nil {
 			m.OnFFmpegCrash(context.Background(), sessionID, session)
 		}
 	}()

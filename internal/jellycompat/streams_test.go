@@ -54,6 +54,37 @@ func TestAudioSelectionChanged(t *testing.T) {
 	}
 }
 
+func TestUpstreamRecipeCardWithoutLiveIdentityRemainsLegacyCompatible(t *testing.T) {
+	h := &PlaybackHandler{sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{}}}
+	card := h.upstreamRecipeCard(
+		&PlaybackSession{UpstreamSessionID: "legacy-upstream"},
+		&Session{StreamAppUserID: 7, ProfileID: "profile-1"},
+		PlaybackMediaSource{FileID: 42},
+		"direct",
+	)
+	if card.SessionID != "legacy-upstream" || card.SessionGeneration != "" || !card.StartedAt.IsZero() {
+		t.Fatalf("legacy card identity = (%q, %q, %s)", card.SessionID, card.SessionGeneration, card.StartedAt)
+	}
+}
+
+func TestUpstreamRecipeCardUsesPersistedIdentityWithoutLiveSession(t *testing.T) {
+	startedAt := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	h := &PlaybackHandler{sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{}}}
+	card := h.upstreamRecipeCard(
+		&PlaybackSession{
+			UpstreamSessionID:         "persisted-upstream",
+			UpstreamSessionGeneration: "persisted-generation",
+			UpstreamStartedAt:         startedAt,
+		},
+		&Session{StreamAppUserID: 7, ProfileID: "profile-1"},
+		PlaybackMediaSource{FileID: 42},
+		"direct",
+	)
+	if card.SessionID != "persisted-upstream" || card.SessionGeneration != "persisted-generation" || !card.StartedAt.Equal(startedAt) {
+		t.Fatalf("persisted card identity = (%q, %q, %s)", card.SessionID, card.SessionGeneration, card.StartedAt)
+	}
+}
+
 func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -397,7 +428,7 @@ func TestRestartCompatTranscodeForAudioSelection_LocalRePersistsRecipe(t *testin
 
 	// Start the live transcode on the main track and persist its initial recipe
 	// (AudioTrackIndex 0), mirroring a normal play start.
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", mainSource)
+	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", "", mainSource)
 	if err != nil {
 		t.Fatalf("ensureTranscodeSession: %v", err)
 	}

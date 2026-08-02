@@ -37,6 +37,12 @@ const compatSegmentDuration = 2
 // upstream session to the play session while this one was being created.
 var errUpstreamReplaced = errors.New("upstream session replaced concurrently")
 
+var errCompatSessionStopUnavailable = errors.New("compat session stop unavailable")
+
+func compatSessionStopError(sessionID string, err error) error {
+	return fmt.Errorf("%w: stopping playback session %s: %w", errCompatSessionStopUnavailable, sessionID, err)
+}
+
 type sessionReportRequest struct {
 	ItemID              string          `json:"ItemId"`
 	MediaSourceID       string          `json:"MediaSourceId"`
@@ -109,7 +115,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 	if h.NodePlanner != nil && h.JWTSecret != "" {
 		plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, "", false, source.Version.Bitrate)
-		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, method, file, *source, "", seekSeconds, plan.ProxyNode); redirectErr == nil {
+		if redirectURL, redirectErr := h.buildProxyRedirectURL(playSession, method, file, *source, "", seekSeconds, plan.ProxyNode); redirectErr == nil {
 			http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 			return
 		}
@@ -119,11 +125,8 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	// a long-lived direct-play range transfer emits no progress reports, and
 	// without the transport marker stale cleanup reaps the session mid-stream.
 	if h.sessionMgr != nil && playSession.UpstreamSessionID != "" {
-		if err := h.sessionMgr.BeginTransport(playSession.UpstreamSessionID); err == nil {
-			upstreamSessionID := playSession.UpstreamSessionID
-			defer func() {
-				_ = h.sessionMgr.EndTransport(upstreamSessionID)
-			}()
+		if endTransport, err := h.beginCompatTransport(playSession); err == nil {
+			defer endTransport()
 		}
 	}
 
@@ -223,31 +226,43 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 			writeCompatUpstreamError(w, err)
 			return
 		}
-		failRemoteStart := func() {
-			h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+		failRemoteStart := func() error {
+			return h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
 		}
 		upstreamSession, upstreamErr := h.sessionMgr.GetSession(playSession.UpstreamSessionID)
 		if upstreamErr == nil {
 			plan := h.NodePlanner.PlanSession(playSession.UpstreamSessionID, upstreamSession.TranscodeNodeURL, true, source.Version.Bitrate)
 			if tcNode := plan.TranscodeNode; tcNode != nil {
 				if h.fileResolver == nil {
-					failRemoteStart()
+					if cleanupErr := failRemoteStart(); cleanupErr != nil {
+						writeCompatUpstreamError(w, cleanupErr)
+						return
+					}
 					writeError(w, http.StatusInternalServerError, "ServerError", "File resolver not available")
 					return
 				}
 				file, fileErr := h.fileResolver.GetByID(r.Context(), source.FileID)
 				if fileErr != nil {
-					failRemoteStart()
+					if cleanupErr := failRemoteStart(); cleanupErr != nil {
+						writeCompatUpstreamError(w, cleanupErr)
+						return
+					}
 					writeError(w, http.StatusNotFound, "NotFound", "Media file not found")
 					return
 				}
-				if err := h.sessionMgr.SetTranscodeNodeURL(playSession.UpstreamSessionID, tcNode.URL); err != nil {
-					failRemoteStart()
+				if err := h.setCompatTranscodeNodeURL(playSession, tcNode.URL); err != nil {
+					if cleanupErr := failRemoteStart(); cleanupErr != nil {
+						writeCompatUpstreamError(w, cleanupErr)
+						return
+					}
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to bind transcode node")
 					return
 				}
-				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
-					failRemoteStart()
+				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
+					if cleanupErr := failRemoteStart(); cleanupErr != nil {
+						writeCompatUpstreamError(w, cleanupErr)
+						return
+					}
 					if errors.Is(err, errTranscode4KDisallowed) {
 						writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
 						return
@@ -255,9 +270,12 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusBadGateway, "TranscodeStartFailed", "Transcode node rejected the request")
 					return
 				}
-				redirectURL, redirectErr := h.buildProxyRedirectURL(playSession.ID, playSession.UpstreamSessionID, string(playback.PlayTranscode), file, *source, tcNode.URL, 0, plan.ProxyNode)
+				redirectURL, redirectErr := h.buildProxyRedirectURL(playSession, string(playback.PlayTranscode), file, *source, tcNode.URL, 0, plan.ProxyNode)
 				if redirectErr != nil {
-					failRemoteStart()
+					if cleanupErr := failRemoteStart(); cleanupErr != nil {
+						writeCompatUpstreamError(w, cleanupErr)
+						return
+					}
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to sign proxy stream URL")
 					return
 				}
@@ -271,7 +289,10 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	// server never transcodes when no eligible node exists.
 	if h.NodePlanner != nil && !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
 		if playSession.UpstreamSessionID != "" {
-			h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil)
+			if cleanupErr := h.teardownPlaySession(context.WithoutCancel(r.Context()), playSession, nil, nil); cleanupErr != nil {
+				writeCompatUpstreamError(w, cleanupErr)
+				return
+			}
 		}
 		writeError(w, http.StatusServiceUnavailable, "NoTranscodeNode",
 			"No transcode node is available and local transcode fallback is disabled")
@@ -379,17 +400,41 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	// recipe on a not-found miss (e.g. after a server restart). Ownership is
 	// re-bound to the Jellyfin caller's native user id (StreamAppUserID), matching
 	// the recipe owner.
-	upstreamSession, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID, session.StreamAppUserID, playSession.Recipe)
+	upstreamSession, status, loadErr := h.tm.LoadOrReconstructSessionChecked(r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID, session.StreamAppUserID, playSession.Recipe)
 	switch status {
 	case playback.SessionMissing:
 		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
 		return
 	case playback.SessionLoadFailed:
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load upstream session")
+		if errors.Is(loadErr, playback.ErrSessionGenerationTombstoneUnavailable) || errors.Is(loadErr, playback.ErrSessionSuperseded) {
+			writeCompatUpstreamError(w, loadErr)
+		} else {
+			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load upstream session")
+		}
 		return
 	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "Forbidden", "Session belongs to another user")
 		return
+	}
+	if upstreamSession.Generation != playSession.UpstreamSessionGeneration {
+		updated, matched, err := h.playbackStore.CompareAndSwapUpstream(
+			playSession.ID,
+			playSession.upstreamIdentity(),
+			func(current *PlaybackSession) (bool, error) {
+				current.UpstreamSessionGeneration = upstreamSession.Generation
+				current.UpstreamStartedAt = upstreamSession.StartedAt
+				if current.Recipe != nil {
+					card := current.Recipe.WithSessionIdentity(upstreamSession.Generation, upstreamSession.StartedAt)
+					current.Recipe = &card
+				}
+				return false, nil
+			},
+		)
+		if err != nil || !matched || updated == nil {
+			writeError(w, http.StatusServiceUnavailable, "Unavailable", "Playback session identity changed")
+			return
+		}
+		playSession = updated
 	}
 
 	transcodeSession := h.tm.GetTranscodeSession(playSession.UpstreamSessionID)
@@ -402,7 +447,12 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 			if segNum, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 				requestedSegment = segNum
 			}
-			transcodeSession = h.tm.ReconstructTranscode(r.Context(), playSession.UpstreamSessionID, requestedSegment, *playSession.Recipe)
+			var reconstructErr error
+			transcodeSession, reconstructErr = h.reconstructCompatTranscode(r.Context(), playSession, requestedSegment)
+			if reconstructErr != nil {
+				writeCompatUpstreamError(w, reconstructErr)
+				return
+			}
 		}
 		if transcodeSession == nil {
 			writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
@@ -504,9 +554,9 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
 
-					if restartErr := h.tm.RestartSessionLocked(
+					if restartErr := h.restartCompatTranscodeProcess(
 						context.WithoutCancel(r.Context()),
-						playSession.UpstreamSessionID,
+						playSession,
 						transcodeSession,
 						seekSeconds,
 						segNum,
@@ -802,22 +852,24 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 
 	fallback := compatScrobbleFallbackSession(session, playSession, nil, 0, false, false)
 	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallback)
+	if err := h.cleanupPlaySession(r.Context(), playSession, upstreamSession, transcodeNodeURL); err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
 	if event, ok := h.compatScrobbleEvent(
 		r.Context(), compatScrobbleStop, playSession, upstreamSession, nil, nil,
 	); ok {
-		h.stageCompatTerminal(r.Context(), playSession, upstreamSession, transcodeNodeURL, event, false, false, 0)
+		h.stageCompatTerminal(r.Context(), playSession, upstreamSession, transcodeNodeURL, event, false, true, 0)
 	} else if upstreamSession == nil {
 		// With no native session and no reported position, publishing a zero-value
 		// fallback could move provider progress backwards. Keep only the terminal
 		// authenticated mapping for a possible later Stopped report.
-		if err := h.playbackStore.HideFromRouting(playSession.ID, playSession.CompatToken); err != nil &&
+		if err := h.hideCompatPlayback(playSession); err != nil &&
 			!errors.Is(err, ErrSessionNotFound) {
-			h.scheduleCompatTerminalHide(playSession.ID, playSession.CompatToken, playSession.ExpiresAt, 1)
+			h.scheduleCompatTerminalHide(playSession, 1)
 		}
-		h.cleanupPlaySession(r.Context(), playSession, nil, transcodeNodeURL)
 	} else {
-		h.playbackStore.Delete(playSession.ID)
-		h.cleanupPlaySession(r.Context(), playSession, upstreamSession, transcodeNodeURL)
+		_, _ = h.deleteCompatPlayback(playSession)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -832,18 +884,24 @@ func (h *PlaybackHandler) teardownPlaySession(
 	playSession *PlaybackSession,
 	fallbackSession *playback.Session,
 	positionOverride *float64,
-) {
+) error {
 	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallbackSession)
+	cleanupDone := playSession.Terminal
+	if !cleanupDone {
+		if err := h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL); err != nil {
+			return err
+		}
+		cleanupDone = true
+	}
 	if event, ok := h.compatScrobbleEvent(
 		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
 	); ok {
-		h.stageCompatTerminal(ctx, playSession, upstreamSession, transcodeNodeURL, event, true, false, 0)
+		h.stageCompatTerminal(ctx, playSession, upstreamSession, transcodeNodeURL, event, true, cleanupDone, 0)
 	} else if playSession.Terminal {
 		// A late Stopped report without PositionTicks cannot replace a staged
 		// fallback after ActiveEncodings already removed the native session. Keep
 		// that durable event (or terminal shell) and retry its delivery instead of
 		// deleting the only recoverable stop position.
-		h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
 		if playSession.TerminalScrobbleEvent != nil {
 			h.deliverCompatTerminal(
 				ctx,
@@ -856,9 +914,9 @@ func (h *PlaybackHandler) teardownPlaySession(
 			)
 		}
 	} else {
-		h.playbackStore.Delete(playSession.ID)
-		h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
+		_, _ = h.deleteCompatPlayback(playSession)
 	}
+	return nil
 }
 
 func (h *PlaybackHandler) compatStopSnapshot(
@@ -884,32 +942,133 @@ func (h *PlaybackHandler) compatStopSnapshot(
 	return upstreamSession, transcodeNodeURL
 }
 
-// cleanupPlaySession performs idempotent process/resource cleanup after the
-// terminal provider event has been staged (or intentionally omitted).
+// cleanupPlaySession persists the generation tombstone before any process,
+// recipe, routing, or terminal side effect. A failed stop leaves all compat
+// state available for a retry.
 func (h *PlaybackHandler) cleanupPlaySession(
 	ctx context.Context,
 	playSession *PlaybackSession,
 	upstreamSession *playback.Session,
 	transcodeNodeURL string,
-) {
-	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
-	if h.sessionMgr != nil {
-		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
-	}
-	// Deliberate stop: drop the node recipe so a buffered/retrying request after
-	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
-	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
-	if h.RecipeNodeStore != nil {
-		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
-			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.UpstreamSessionID)
+) error {
+	err := h.terminateCompatUpstream(ctx, playSession, func() error {
+		_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+			playSession.ID,
+			playSession.upstreamIdentity(),
+			func(*PlaybackSession) (bool, error) { return false, nil },
+		)
+		if err != nil || !matched {
+			return err
 		}
+		h.closeCompatTranscode(playSession, upstreamSession, transcodeNodeURL)
+		// Deliberate stop: drop the node recipe so a buffered/retrying request after
+		// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
+		if h.RecipeNodeStore != nil {
+			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
+			defer cancel()
+			if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
+				slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
+					"playback_session_id", playSession.UpstreamSessionID)
+			}
+		}
+		// Clients often drop the connection right after reporting a stop, so detach
+		// the sync from request cancellation to keep the admin view accurate.
+		h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
+		return nil
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat playback stop remains retryable", "component", "jellycompat",
+			"playback_session_id", playSession.UpstreamSessionID, "error", err)
+		return compatSessionStopError(playSession.UpstreamSessionID, err)
 	}
-	// Clients often drop the connection right after reporting a stop, so detach
-	// the sync from request cancellation to keep the admin view accurate.
-	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
+	return nil
+}
+
+type exactSessionGenerationTerminator interface {
+	TerminateSessionGeneration(context.Context, string, string, func() error) error
+}
+
+func (s *PlaybackSession) upstreamIdentity() UpstreamSessionIdentity {
+	if s == nil {
+		return UpstreamSessionIdentity{}
+	}
+	return UpstreamSessionIdentity{ID: s.UpstreamSessionID, Generation: s.UpstreamSessionGeneration}
+}
+
+// terminateCompatUpstream binds all destructive Jellyfin cleanup to one exact
+// native-session lifetime. The exact manager treats an empty generation as the
+// legacy lifetime and persists its reserved internal tombstone sentinel without
+// ever adopting a nonempty successor.
+func (h *PlaybackHandler) terminateCompatUpstream(ctx context.Context, playSession *PlaybackSession, finalizer func() error) error {
+	if playSession == nil || strings.TrimSpace(playSession.UpstreamSessionID) == "" {
+		return fmt.Errorf("%w: exact upstream identity unavailable", playback.ErrSessionGenerationTombstoneUnavailable)
+	}
+	if h.sessionMgr == nil {
+		return finalizer()
+	}
+	terminator, ok := h.sessionMgr.(exactSessionGenerationTerminator)
+	if !ok {
+		// Lightweight legacy test doubles do not model generations. Production's
+		// SessionManager always implements the exact lifecycle API.
+		if err := h.sessionMgr.StopSession(playSession.UpstreamSessionID); err != nil {
+			return err
+		}
+		return finalizer()
+	}
+	return terminator.TerminateSessionGeneration(ctx, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, finalizer)
+}
+
+func (h *PlaybackHandler) terminateUnattachedUpstream(ctx context.Context, session *playback.Session) error {
+	if h.sessionMgr == nil || session == nil {
+		return nil
+	}
+	if terminator, ok := h.sessionMgr.(exactSessionGenerationTerminator); ok {
+		return terminator.TerminateSessionGeneration(ctx, session.ID, session.Generation, func() error { return nil })
+	}
+	return h.sessionMgr.StopSession(session.ID)
+}
+
+func (h *PlaybackHandler) compatLiveGeneration(playSession *PlaybackSession) (string, error) {
+	if playSession == nil || h.sessionMgr == nil || playSession.UpstreamSessionID == "" {
+		return "", playback.ErrSessionNotFound
+	}
+	// Empty is a valid legacy identity only when the native session is also
+	// generation-less; exact manager mutations perform that equality check.
+	// Never reload by reusable ID and adopt a nonempty successor generation.
+	return playSession.UpstreamSessionGeneration, nil
+}
+
+func (h *PlaybackHandler) updateCompatProgress(playSession *PlaybackSession, position float64, paused bool) error {
+	if updater, ok := h.sessionMgr.(interface {
+		UpdateProgressGeneration(string, string, float64, bool) error
+	}); ok {
+		generation, err := h.compatLiveGeneration(playSession)
+		if err != nil {
+			return err
+		}
+		return updater.UpdateProgressGeneration(playSession.UpstreamSessionID, generation, position, paused)
+	}
+	return h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, position, paused)
+}
+
+func (h *PlaybackHandler) beginCompatTransport(playSession *PlaybackSession) (func(), error) {
+	if tracker, ok := h.sessionMgr.(interface {
+		BeginTransportGeneration(string, string) error
+		EndTransportGeneration(string, string) error
+	}); ok {
+		generation, err := h.compatLiveGeneration(playSession)
+		if err != nil {
+			return func() {}, err
+		}
+		if err := tracker.BeginTransportGeneration(playSession.UpstreamSessionID, generation); err != nil {
+			return func() {}, err
+		}
+		return func() { _ = tracker.EndTransportGeneration(playSession.UpstreamSessionID, generation) }, nil
+	}
+	if err := h.sessionMgr.BeginTransport(playSession.UpstreamSessionID); err != nil {
+		return func() {}, err
+	}
+	return func() { _ = h.sessionMgr.EndTransport(playSession.UpstreamSessionID) }, nil
 }
 
 const (
@@ -947,32 +1106,47 @@ func (h *PlaybackHandler) stageCompatTerminal(
 	cleanupDone bool,
 	attempt int,
 ) {
-	staged, err := h.playbackStore.StageTerminal(playSession.ID, playSession.CompatToken, event, authoritative)
-	if err != nil {
-		// Production durable staging installs its local marker before I/O. Keep
-		// the interface invariant for alternate stores that fail before doing so.
-		_ = h.playbackStore.HideFromRouting(playSession.ID, playSession.CompatToken)
-		if errors.Is(err, ErrSessionNotFound) {
-			if !cleanupDone {
-				h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
-			}
+	if !cleanupDone {
+		if err := h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL); err != nil {
+			slog.WarnContext(ctx, "jellycompat terminal staging deferred until playback stop succeeds",
+				"component", "jellycompat", "playback_session_id", playSession.UpstreamSessionID, "error", err)
 			return
 		}
-		if !cleanupDone {
-			h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
-			cleanupDone = true
+		cleanupDone = true
+	}
+	staged, matched, err := h.playbackStore.CompareAndSwapUpstream(
+		playSession.ID,
+		playSession.upstreamIdentity(),
+		func(current *PlaybackSession) (bool, error) {
+			if current.CompatToken != playSession.CompatToken {
+				return false, ErrSessionNotFound
+			}
+			if !current.TerminalAuthoritative || authoritative {
+				eventCopy := event
+				current.TerminalScrobbleEvent = &eventCopy
+				current.TerminalAuthoritative = authoritative
+				current.TerminalEventVersion++
+			}
+			current.Terminal = true
+			return false, nil
+		},
+	)
+	if err != nil {
+		// Keep this exact lifetime off the local routing path while durable staging
+		// retries. A replacement generation will fail this CAS and stay visible.
+		_ = h.hideCompatPlayback(playSession)
+		if errors.Is(err, ErrSessionNotFound) {
+			return
 		}
 		if playSession.ExpiresAt.IsZero() || time.Now().Before(playSession.ExpiresAt) {
 			h.scheduleCompatTerminalStage(
 				playSession, upstreamSession, transcodeNodeURL, event, authoritative, cleanupDone, attempt+1,
 			)
-		} else if !cleanupDone {
-			h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
 		}
 		return
 	}
-	if !cleanupDone {
-		h.cleanupPlaySession(ctx, staged, upstreamSession, transcodeNodeURL)
+	if !matched || staged == nil {
+		return
 	}
 	if authoritative {
 		h.deliverCompatTerminal(ctx, staged.ID, staged.CompatToken, true, staged.ExpiresAt, 0, true)
@@ -984,20 +1158,54 @@ func (h *PlaybackHandler) stageCompatTerminal(
 }
 
 func (h *PlaybackHandler) scheduleCompatTerminalHide(
-	playSessionID string,
-	compatToken string,
-	expiresAt time.Time,
+	playSession *PlaybackSession,
 	attempt int,
 ) {
+	playSessionCopy := *playSession
 	time.AfterFunc(compatTerminalRetryDelay(attempt), func() {
-		if !expiresAt.IsZero() && !time.Now().Before(expiresAt) {
+		if !playSessionCopy.ExpiresAt.IsZero() && !time.Now().Before(playSessionCopy.ExpiresAt) {
 			return
 		}
-		err := h.playbackStore.HideFromRouting(playSessionID, compatToken)
+		err := h.hideCompatPlayback(&playSessionCopy)
 		if err != nil && !errors.Is(err, ErrSessionNotFound) {
-			h.scheduleCompatTerminalHide(playSessionID, compatToken, expiresAt, attempt+1)
+			h.scheduleCompatTerminalHide(&playSessionCopy, attempt+1)
 		}
 	})
+}
+
+func (h *PlaybackHandler) hideCompatPlayback(playSession *PlaybackSession) error {
+	_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+		playSession.ID,
+		playSession.upstreamIdentity(),
+		func(current *PlaybackSession) (bool, error) {
+			if current.CompatToken != playSession.CompatToken {
+				return false, ErrSessionNotFound
+			}
+			current.Terminal = true
+			return false, nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
+func (h *PlaybackHandler) deleteCompatPlayback(playSession *PlaybackSession) (bool, error) {
+	_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+		playSession.ID,
+		playSession.upstreamIdentity(),
+		func(current *PlaybackSession) (bool, error) {
+			if current.CompatToken != playSession.CompatToken {
+				return false, ErrSessionNotFound
+			}
+			return true, nil
+		},
+	)
+	return matched, err
 }
 
 func (h *PlaybackHandler) scheduleCompatTerminalStage(
@@ -1234,7 +1442,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		// Key store mutations by the resolved session id: after an alias or
 		// route fallback, req.PlaySessionID is the client's own id and is not
 		// a store key.
-		updatedPlaySession, updatedSource, updateErr := h.setSelectedAudioStream(playSession.ID, req.MediaSourceID, selectedAudioStreamIndex)
+		updatedPlaySession, updatedSource, updateErr := h.setSelectedAudioStream(playSession, req.MediaSourceID, selectedAudioStreamIndex)
 		if updateErr == nil {
 			playSession = updatedPlaySession
 			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
@@ -1272,7 +1480,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			copy := *current
 			previousSession = &copy
 		}
-		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused)
+		err := h.updateCompatProgress(playSession, positionSeconds, req.IsPaused)
 		progressUpdated = err == nil
 		if errors.Is(err, playback.ErrSessionNotFound) && !stop {
 			// The upstream session was reaped as stale (e.g. the client buffered
@@ -1281,7 +1489,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			// dropping it from session tracking for the rest of playback.
 			if revived := h.reviveUpstreamForReport(r.Context(), session, playSession, req.MediaSourceID); revived != nil {
 				playSession = revived
-				progressUpdated = h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused) == nil
+				progressUpdated = h.updateCompatProgress(playSession, positionSeconds, req.IsPaused) == nil
 				previousSession = nil
 			}
 		}
@@ -1328,7 +1536,10 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		if positionReported {
 			positionOverride = &positionSeconds
 		}
-		h.teardownPlaySession(r.Context(), playSession, fallback, positionOverride)
+		if err := h.teardownPlaySession(r.Context(), playSession, fallback, positionOverride); err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1340,12 +1551,16 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 // the compat session and the negotiated source.
 func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, source PlaybackMediaSource, method string) playback.RecipeCard {
 	if ps != nil && ps.Recipe != nil {
-		return *ps.Recipe
+		card := *ps.Recipe
+		return card.WithSessionIdentity(ps.UpstreamSessionGeneration, ps.UpstreamStartedAt)
 	}
+	var card playback.RecipeCard
 	if method == "remux" {
-		return playback.NewRemuxRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID, source.TranscodeAudio, compatAudioTrackIndexOrDefault(source))
+		card = playback.NewRemuxRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID, source.TranscodeAudio, compatAudioTrackIndexOrDefault(source))
+	} else {
+		card = playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
 	}
-	return playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+	return card.WithSessionIdentity(ps.UpstreamSessionGeneration, ps.UpstreamStartedAt)
 }
 
 // reportMatchesPlaySession rejects an alias-resolved session whose item or
@@ -1394,7 +1609,10 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 	// Captured before any mutation: the CAS attach below verifies no concurrent
 	// request replaced the upstream session this request observed.
-	observedUpstreamID := playSession.UpstreamSessionID
+	observedUpstream := UpstreamSessionIdentity{
+		ID:         playSession.UpstreamSessionID,
+		Generation: playSession.UpstreamSessionGeneration,
+	}
 	if h.sessionMgr == nil {
 		return nil, fmt.Errorf("session manager not available")
 	}
@@ -1417,10 +1635,43 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				if card.ClientName == "" && card.ClientUserAgent == "" {
 					card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
 				}
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
+				reconstructed, reconstructErr := h.tm.ReconstructSessionChecked(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card)
+				if reconstructErr != nil {
+					return nil, reconstructErr
+				}
+				if reconstructed != nil {
+					updated, matched, updateErr := h.playbackStore.CompareAndSwapUpstream(
+						playSessionID,
+						observedUpstream,
+						func(current *PlaybackSession) (bool, error) {
+							current.UpstreamSessionID = reconstructed.ID
+							current.UpstreamSessionGeneration = reconstructed.Generation
+							current.UpstreamStartedAt = reconstructed.StartedAt
+							current.UpstreamPlayMethod = method
+							return false, nil
+						},
+					)
+					if updateErr != nil {
+						if stopErr := h.terminateUnattachedUpstream(ctx, reconstructed); stopErr != nil {
+							return nil, compatSessionStopError(reconstructed.ID, stopErr)
+						}
+						return nil, updateErr
+					}
+					if !matched {
+						if updated == nil || updated.UpstreamSessionID != reconstructed.ID || updated.UpstreamSessionGeneration != reconstructed.Generation {
+							if stopErr := h.terminateUnattachedUpstream(ctx, reconstructed); stopErr != nil {
+								return nil, compatSessionStopError(reconstructed.ID, stopErr)
+							}
+						}
+						if updated != nil && updated.UpstreamPlayMethod == method {
+							return updated, nil
+						}
+						return nil, errUpstreamReplaced
+					}
+					playSession = updated
 					if !playSession.ProgressPersistenceKnown ||
 						playSession.DisableProgressPersistence != reconstructed.DisableProgressPersistence {
-						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
+						h.recordCompatProgressPersistence(playSession, reconstructed.DisableProgressPersistence)
 					}
 					_ = h.syncUpstreamAudioSelection(playSession, source)
 					h.dispatchCompatScrobble(ctx, compatScrobbleStart, playSession, reconstructed, &source)
@@ -1428,12 +1679,28 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				}
 			}
 			// The durable compat row outlived the native session and no recipe card
-			// can rebuild it. Any transcode still keyed to the stale id must go
-			// first, or a second ffmpeg would start alongside it. Then fall through
-			// to create a fresh upstream session and persist the replacement
-			// instead of serving under a stale ID.
-			if h.tm != nil {
-				h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, "")
+			// can rebuild it. End and re-check this exact generation before touching
+			// any transcode keyed by the reusable public ID.
+			ownsStaleIdentity := false
+			if err := h.terminateCompatUpstream(ctx, playSession, func() error {
+				_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+					playSession.ID,
+					playSession.upstreamIdentity(),
+					func(*PlaybackSession) (bool, error) { return false, nil },
+				)
+				if err != nil || !matched {
+					return err
+				}
+				ownsStaleIdentity = true
+				if h.tm != nil {
+					h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, "")
+				}
+				return nil
+			}); err != nil {
+				return nil, compatSessionStopError(playSession.UpstreamSessionID, err)
+			}
+			if !ownsStaleIdentity {
+				return nil, errUpstreamReplaced
 			}
 			playSession.UpstreamSessionID = ""
 			playSession.UpstreamPlayMethod = ""
@@ -1442,7 +1709,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			if current, currentErr := h.sessionMgr.GetSession(playSession.UpstreamSessionID); currentErr == nil &&
 				(!playSession.ProgressPersistenceKnown ||
 					playSession.DisableProgressPersistence != current.DisableProgressPersistence) {
-				h.recordCompatProgressPersistence(playSession.ID, current.DisableProgressPersistence)
+				h.recordCompatProgressPersistence(playSession, current.DisableProgressPersistence)
 			}
 			_ = h.syncUpstreamAudioSelection(playSession, source)
 			return playSession, nil
@@ -1468,22 +1735,44 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" && playSession.UpstreamPlayMethod != method {
 		oldUpstreamSessionID := playSession.UpstreamSessionID
 		transcodeNodeURL := ""
+		var currentSession *playback.Session
 		if current, err := h.sessionMgr.GetSession(oldUpstreamSessionID); err == nil {
+			currentSession = current
 			transcodeNodeURL = current.TranscodeNodeURL
-			h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, current, nil)
 		}
-		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
-		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
-		// Method switch discards the old upstream session: drop its node recipe so
-		// the abandoned id cannot reconstruct ffmpeg after a node restart. Best
-		// effort and bounded — never block the new method's start on a store hiccup.
-		if h.RecipeNodeStore != nil {
-			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-			if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
-				slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
-					"playback_session_id", oldUpstreamSessionID)
+		ownsOldIdentity := false
+		if err := h.terminateCompatUpstream(ctx, playSession, func() error {
+			_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+				playSession.ID,
+				playSession.upstreamIdentity(),
+				func(*PlaybackSession) (bool, error) { return false, nil },
+			)
+			if err != nil || !matched {
+				return err
 			}
-			cancel()
+			ownsOldIdentity = true
+			if currentSession != nil {
+				h.dispatchCompatScrobble(ctx, compatScrobbleStop, playSession, currentSession, nil)
+			}
+			h.closeCompatTranscode(playSession, currentSession, transcodeNodeURL)
+			// Method switch discards the old upstream session: drop its node recipe so
+			// the abandoned id cannot reconstruct ffmpeg after a node restart.
+			if h.RecipeNodeStore != nil {
+				delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
+				defer cancel()
+				if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
+					slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
+						"playback_session_id", oldUpstreamSessionID)
+				}
+			}
+			return nil
+		}); err != nil {
+			slog.WarnContext(ctx, "jellycompat method switch remains retryable", "component", "jellycompat",
+				"playback_session_id", oldUpstreamSessionID, "error", err)
+			return nil, compatSessionStopError(oldUpstreamSessionID, err)
+		}
+		if !ownsOldIdentity {
+			return nil, errUpstreamReplaced
 		}
 	}
 
@@ -1498,26 +1787,33 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, err
 	}
 	_ = h.syncUpstreamAudioSelection(&PlaybackSession{
-		UpstreamSessionID:  session.ID,
-		UpstreamPlayMethod: method,
+		UpstreamSessionID:         session.ID,
+		UpstreamSessionGeneration: session.Generation,
+		UpstreamStartedAt:         session.StartedAt,
+		UpstreamPlayMethod:        method,
 	}, source)
 	// Attach the new upstream session only if no concurrent request replaced
 	// the one we observed (range requests race with progress-report revives).
 	// The loser stops its session instead of leaving an orphan that counts
 	// toward the user's stream limits until stale cleanup.
-	if updateErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
-		if current.UpstreamSessionID != observedUpstreamID {
-			return errUpstreamReplaced
-		}
+	updated, matched, updateErr := h.playbackStore.CompareAndSwapUpstream(playSessionID, observedUpstream, func(current *PlaybackSession) (bool, error) {
 		current.UpstreamSessionID = session.ID
+		current.UpstreamSessionGeneration = session.Generation
+		current.UpstreamStartedAt = session.StartedAt
 		current.UpstreamPlayMethod = method
 		current.TranscodeStarted = false
 		current.ProgressPersistenceKnown = true
 		current.DisableProgressPersistence = session.DisableProgressPersistence
-		return nil
-	}); updateErr != nil {
-		_ = h.sessionMgr.StopSession(session.ID)
-		if errors.Is(updateErr, errUpstreamReplaced) {
+		return false, nil
+	})
+	if updateErr != nil || !matched {
+		stopErr := h.terminateUnattachedUpstream(ctx, session)
+		if stopErr != nil {
+			slog.WarnContext(ctx, "jellycompat concurrent replacement loser remains retryable", "component", "jellycompat",
+				"playback_session_id", session.ID, "error", stopErr)
+			return nil, compatSessionStopError(session.ID, stopErr)
+		}
+		if updateErr == nil && !matched {
 			// Adopt the winner only when it serves the same play method;
 			// otherwise a concurrent method switch made this caller's
 			// negotiated stream obsolete — surface the conflict rather than
@@ -1529,8 +1825,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		}
 		return nil, updateErr
 	}
-	updated, ok := h.playbackStore.Get(playSessionID)
-	if !ok {
+	if updated == nil {
 		return nil, ErrSessionNotFound
 	}
 	h.syncSessionsNow(ctx, "compat_start")
@@ -1538,14 +1833,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	return updated, nil
 }
 
-func (h *PlaybackHandler) recordCompatProgressPersistence(playSessionID string, disabled bool) {
-	if h == nil || h.playbackStore == nil || playSessionID == "" {
+func (h *PlaybackHandler) recordCompatProgressPersistence(playSession *PlaybackSession, disabled bool) {
+	if h == nil || h.playbackStore == nil || playSession == nil || playSession.ID == "" {
 		return
 	}
-	_ = h.playbackStore.Update(playSessionID, func(session *PlaybackSession) error {
+	_, _, _ = h.playbackStore.CompareAndSwapUpstream(playSession.ID, playSession.upstreamIdentity(), func(session *PlaybackSession) (bool, error) {
 		session.ProgressPersistenceKnown = true
 		session.DisableProgressPersistence = disabled
-		return nil
+		return false, nil
 	})
 }
 
@@ -1555,11 +1850,13 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 		return nil, err
 	}
 
-	transcodeSession, err := h.ensureTranscodeSession(ctx, playSessionID, playSession.UpstreamSessionID, source)
+	transcodeSession, err := h.ensureTranscodeSession(ctx, playSessionID, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, source)
 	if err != nil {
 		requestErr := ctx.Err()
 		if requestErr == nil || !errors.Is(err, requestErr) {
-			h.teardownPlaySession(ctx, playSession, nil, nil)
+			if cleanupErr := h.teardownPlaySession(ctx, playSession, nil, nil); cleanupErr != nil {
+				return nil, cleanupErr
+			}
 		}
 		return nil, err
 	}
@@ -1588,14 +1885,28 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline:
-			h.teardownPlaySession(ctx, playSession, nil, nil)
+			if cleanupErr := h.teardownPlaySession(ctx, playSession, nil, nil); cleanupErr != nil {
+				return nil, cleanupErr
+			}
 			return nil, playback.ErrManifestNotReady
 		case <-time.After(pollInterval):
 		}
 	}
 }
 
-func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessionID, upstreamSessionID string, source PlaybackMediaSource) (*playback.TranscodeSession, error) {
+func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessionID, upstreamSessionID, upstreamGeneration string, source PlaybackMediaSource) (*playback.TranscodeSession, error) {
+	var transcodeSession *playback.TranscodeSession
+	err := h.withCompatSessionGeneration(ctx, upstreamSessionID, upstreamGeneration, func() error {
+		var setupErr error
+		transcodeSession, setupErr = h.ensureTranscodeSessionGenerationLocked(ctx, playSessionID, upstreamSessionID, upstreamGeneration, source)
+		return setupErr
+	})
+	return transcodeSession, err
+}
+
+// ensureTranscodeSessionGenerationLocked runs while the native session's keyed
+// lifecycle guard excludes same-ID termination, rotation, and reconstruction.
+func (h *PlaybackHandler) ensureTranscodeSessionGenerationLocked(ctx context.Context, playSessionID, upstreamSessionID, upstreamGeneration string, source PlaybackMediaSource) (*playback.TranscodeSession, error) {
 	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil {
 		return existing, nil
 	}
@@ -1605,7 +1916,12 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	// is a no-op and we fall through to the normal start below.
 	if h.playbackStore != nil {
 		if ps, ok := h.playbackStore.Get(playSessionID); ok && ps.Recipe != nil {
-			if reconstructed := h.tm.ReconstructTranscode(ctx, upstreamSessionID, -1, *ps.Recipe); reconstructed != nil {
+			if ps.UpstreamSessionID != upstreamSessionID || ps.UpstreamSessionGeneration != upstreamGeneration {
+				return nil, errUpstreamReplaced
+			}
+			if reconstructed, reconstructErr := h.reconstructCompatTranscodeGenerationLocked(ctx, ps, -1); reconstructErr != nil {
+				return nil, reconstructErr
+			} else if reconstructed != nil {
 				return reconstructed, nil
 			}
 		}
@@ -1658,34 +1974,114 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	// run a second ffmpeg writer against this session's output dir. Re-check under
 	// the lock and yield to any live session instead of spawning a duplicate.
 	unlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+	defer unlock()
 	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil {
-		unlock()
 		return existing, nil
 	}
 	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(ctx), opts)
 	if err != nil {
-		unlock()
 		return nil, err
 	}
 	// Safe under the lifecycle lock: the re-check above held, so no other path
 	// registered this session.
 	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
-	unlock()
 
 	// Mirror the actual encode decisions onto the upstream session before the
 	// recipe is persisted — video-copy HLS must not sync as a video transcode.
-	h.recordTranscodeStreamDetails(ctx, upstreamSessionID, opts)
+	if err := h.recordTranscodeStreamDetails(ctx, upstreamSessionID, upstreamGeneration, opts); err != nil {
+		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		return nil, err
+	}
 
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned
 	// transcode rather than leaking it.
-	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
+	h.monitorLocalTranscodeExit(upstreamSessionID, upstreamGeneration, transcodeSession)
 
-	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
-		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, upstreamGeneration, opts); err != nil {
+		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
 		return nil, err
 	}
 
+	return transcodeSession, nil
+}
+
+func (h *PlaybackHandler) monitorLocalTranscodeExit(upstreamSessionID, upstreamGeneration string, transcodeSession *playback.TranscodeSession) {
+	if h == nil || h.tm == nil {
+		return
+	}
+	h.tm.MonitorLocalTranscodeExitGeneration(upstreamSessionID, upstreamGeneration, transcodeSession)
+}
+
+func (h *PlaybackHandler) restartCompatTranscodeProcess(
+	ctx context.Context,
+	playSession *PlaybackSession,
+	transcodeSession *playback.TranscodeSession,
+	seekSeconds float64,
+	startSegment int,
+) error {
+	if playSession == nil {
+		return ErrSessionNotFound
+	}
+	return h.withCompatSessionGeneration(ctx, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, func() error {
+		if err := h.tm.RestartSessionLocked(ctx, playSession.UpstreamSessionID, transcodeSession, seekSeconds, startSegment); err != nil {
+			return err
+		}
+		_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+			playSession.ID,
+			playSession.upstreamIdentity(),
+			func(*PlaybackSession) (bool, error) { return false, nil },
+		)
+		if err != nil || !matched {
+			h.tm.CloseTranscodeSessionIf(playSession.UpstreamSessionID, transcodeSession, "")
+			if err != nil {
+				return err
+			}
+			return errUpstreamReplaced
+		}
+		return nil
+	})
+}
+
+func (h *PlaybackHandler) reconstructCompatTranscode(ctx context.Context, playSession *PlaybackSession, requestedSegment int) (*playback.TranscodeSession, error) {
+	if playSession == nil {
+		return nil, ErrSessionNotFound
+	}
+	var transcodeSession *playback.TranscodeSession
+	err := h.withCompatSessionGeneration(ctx, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, func() error {
+		var reconstructErr error
+		transcodeSession, reconstructErr = h.reconstructCompatTranscodeGenerationLocked(ctx, playSession, requestedSegment)
+		return reconstructErr
+	})
+	return transcodeSession, err
+}
+
+// reconstructCompatTranscodeGenerationLocked requires the native session's
+// keyed lifecycle guard. A process created from the captured recipe is retained
+// only if the compat row still owns the same full upstream identity.
+func (h *PlaybackHandler) reconstructCompatTranscodeGenerationLocked(ctx context.Context, playSession *PlaybackSession, requestedSegment int) (*playback.TranscodeSession, error) {
+	if existing := h.tm.GetTranscodeSession(playSession.UpstreamSessionID); existing != nil {
+		return existing, nil
+	}
+	if playSession.Recipe == nil {
+		return nil, nil
+	}
+	transcodeSession := h.tm.ReconstructTranscode(ctx, playSession.UpstreamSessionID, requestedSegment, *playSession.Recipe)
+	if transcodeSession == nil {
+		return nil, nil
+	}
+	_, matched, err := h.playbackStore.CompareAndSwapUpstream(
+		playSession.ID,
+		playSession.upstreamIdentity(),
+		func(*PlaybackSession) (bool, error) { return false, nil },
+	)
+	if err != nil || !matched {
+		h.tm.CloseTranscodeSessionIf(playSession.UpstreamSessionID, transcodeSession, "")
+		if err != nil {
+			return nil, err
+		}
+		return nil, errUpstreamReplaced
+	}
 	return transcodeSession, nil
 }
 
@@ -1711,9 +2107,9 @@ func audioSelectionChanged(session *PlaybackSession, mediaSourceID string, incom
 	return true
 }
 
-func (h *PlaybackHandler) setSelectedAudioStream(playSessionID, mediaSourceID string, audioStreamIndex int) (*PlaybackSession, *PlaybackMediaSource, error) {
+func (h *PlaybackHandler) setSelectedAudioStream(playSession *PlaybackSession, mediaSourceID string, audioStreamIndex int) (*PlaybackSession, *PlaybackMediaSource, error) {
 	var updatedSource PlaybackMediaSource
-	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+	updatedPlaySession, matched, err := h.playbackStore.CompareAndSwapUpstream(playSession.ID, playSession.upstreamIdentity(), func(current *PlaybackSession) (bool, error) {
 		sourceIndex := 0
 		if mediaSourceID != "" {
 			sourceIndex = -1
@@ -1725,21 +2121,20 @@ func (h *PlaybackHandler) setSelectedAudioStream(playSessionID, mediaSourceID st
 			}
 		}
 		if sourceIndex < 0 || sourceIndex >= len(current.MediaSources) {
-			return ErrSessionNotFound
+			return false, ErrSessionNotFound
 		}
 		if !isValidCompatAudioStreamIndex(current.MediaSources[sourceIndex].Version, audioStreamIndex) {
-			return fmt.Errorf("invalid compat audio stream index")
+			return false, fmt.Errorf("invalid compat audio stream index")
 		}
 		current.MediaSources[sourceIndex].SelectedAudioStreamIndex = intPtr(audioStreamIndex)
 		updatedSource = current.MediaSources[sourceIndex]
-		return nil
-	}); err != nil {
+		return false, nil
+	})
+	if err != nil {
 		return nil, nil, err
 	}
-
-	updatedPlaySession, ok := h.playbackStore.Get(playSessionID)
-	if !ok {
-		return nil, nil, ErrSessionNotFound
+	if !matched || updatedPlaySession == nil {
+		return nil, nil, errUpstreamReplaced
 	}
 	return updatedPlaySession, &updatedSource, nil
 }
@@ -1752,11 +2147,16 @@ func (h *PlaybackHandler) syncUpstreamAudioSelection(playSession *PlaybackSessio
 	if !ok {
 		return nil
 	}
-	return h.sessionMgr.UpdateAudioTrack(
-		playSession.UpstreamSessionID,
-		audioTrackIndex,
-		compatPlayMethod(playSession.UpstreamPlayMethod),
-	)
+	if updater, ok := h.sessionMgr.(interface {
+		UpdateAudioTrackGeneration(string, string, int, playback.PlayMethod) error
+	}); ok {
+		generation, err := h.compatLiveGeneration(playSession)
+		if err != nil {
+			return err
+		}
+		return updater.UpdateAudioTrackGeneration(playSession.UpstreamSessionID, generation, audioTrackIndex, compatPlayMethod(playSession.UpstreamPlayMethod))
+	}
+	return h.sessionMgr.UpdateAudioTrack(playSession.UpstreamSessionID, audioTrackIndex, compatPlayMethod(playSession.UpstreamPlayMethod))
 }
 
 func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
@@ -1775,23 +2175,30 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	}
 
 	if transcodeSession := h.tm.GetTranscodeSession(playSession.UpstreamSessionID); transcodeSession != nil {
-		transcodeSession.SetAudioTrackIndex(audioTrackIndex)
-		startSegment := 0
-		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
-			startSegment = int(positionSeconds / float64(segmentDuration))
-		}
-		if err := h.tm.RestartSessionLocked(context.WithoutCancel(ctx), playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
+		err := h.withCompatSessionGeneration(context.WithoutCancel(ctx), playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, func() error {
+			if h.tm.GetTranscodeSession(playSession.UpstreamSessionID) != transcodeSession {
+				return playback.ErrSessionSuperseded
+			}
+			transcodeSession.SetAudioTrackIndex(audioTrackIndex)
+			startSegment := 0
+			if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
+				startSegment = int(positionSeconds / float64(segmentDuration))
+			}
+			if err := h.tm.RestartSessionLocked(context.WithoutCancel(ctx), playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
+				return err
+			}
+			// Persist the restarted recipe while the exact native generation is
+			// still leased. On a compat replacement or store failure, roll back the
+			// restarted G1 process before allowing same-ID G2 installation.
+			opts := transcodeSession.Opts()
+			if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, opts); err != nil {
+				h.tm.CloseTranscodeSessionIf(playSession.UpstreamSessionID, transcodeSession, "")
+				return err
+			}
+			return nil
+		})
+		if err != nil {
 			return false, err
-		}
-		// Re-persist the durable recipe so reconstruct after a central restart
-		// rebuilds ffmpeg from the newly selected audio track rather than the
-		// stale original. SetAudioTrackIndex mutated the live opts, so read them
-		// back. Best-effort: a stale recipe only costs node-restart resilience,
-		// not the live stream.
-		opts := transcodeSession.Opts()
-		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
-			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
-				"playback_session_id", playSession.ID)
 		}
 		return true, nil
 	}
@@ -1813,7 +2220,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, playSession.UpstreamSessionGeneration, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1902,11 +2309,12 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	if clientPlaySessionID != "" && playSession.ClientPlaySessionID != clientPlaySessionID {
 		// Remember the client's own PlaySessionId so playback reports carrying
 		// it resolve to this session directly instead of by ambiguous route.
-		if h.playbackStore.Update(playSession.ID, func(current *PlaybackSession) error {
+		updated, matched, updateErr := h.playbackStore.CompareAndSwapUpstream(playSession.ID, playSession.upstreamIdentity(), func(current *PlaybackSession) (bool, error) {
 			current.ClientPlaySessionID = clientPlaySessionID
-			return nil
-		}) == nil {
-			playSession.ClientPlaySessionID = clientPlaySessionID
+			return false, nil
+		})
+		if updateErr == nil && matched && updated != nil {
+			playSession = updated
 		}
 	}
 	if source == nil && mediaSourceID != "" {
