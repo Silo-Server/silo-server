@@ -37,7 +37,7 @@ import {
 import { Download, ListPlus, Sparkles, TrendingUp } from "lucide-react";
 import { SyncScheduleField } from "@/components/collections/SyncScheduleField";
 
-export type CollectionSourceType = "manual" | "mdblist" | "tmdb" | "trakt";
+export type TMDBSourceKind = "preset" | "collection";
 export type TMDBPreset =
   | "trending"
   | "popular"
@@ -52,7 +52,9 @@ type TraktSourceKind = "preset" | "list";
 type TraktPreset = "trending" | "popular" | "recommended";
 type TraktMediaType = "movie" | "tv";
 
-interface TMDBPresetSourceConfig {
+interface TMDBSourceConfig {
+  sourceKind: TMDBSourceKind;
+  collectionId: string;
   preset: TMDBPreset;
   mediaType: TMDBMediaType;
   timeWindow: TMDBTimeWindow;
@@ -216,8 +218,15 @@ function normalizeTMDBPresetMediaType(preset: TMDBPreset, mediaType: TMDBMediaTy
 
 export function parseTMDBPresetSourceConfig(
   collection: LibraryCollection | null,
-): TMDBPresetSourceConfig {
+): TMDBSourceConfig {
   const cfg = collection?.source_config;
+  const sourceKind: TMDBSourceKind = cfg?.mode === "tmdb_collection" ? "collection" : "preset";
+  const collectionId =
+    typeof cfg?.collection_id === "number"
+      ? String(cfg.collection_id)
+      : typeof cfg?.collection_id === "string"
+        ? cfg.collection_id
+        : "";
   const preset: TMDBPreset =
     cfg?.preset === "trending" ||
     cfg?.preset === "popular" ||
@@ -243,7 +252,7 @@ export function parseTMDBPresetSourceConfig(
       ? String(cfg.limit)
       : "";
 
-  return { preset, mediaType, timeWindow, limit };
+  return { sourceKind, collectionId, preset, mediaType, timeWindow, limit };
 }
 
 export function parseTraktPresetSourceConfig(
@@ -1422,6 +1431,8 @@ export function CollectionEditForm({
   const [editSyncSchedule, setEditSyncSchedule] = useState(collection.sync_schedule ?? "");
 
   const tmdbDefaults = parseTMDBPresetSourceConfig(collection);
+  const [tmdbSourceKind, setTmdbSourceKind] = useState<TMDBSourceKind>(tmdbDefaults.sourceKind);
+  const [tmdbCollectionID, setTmdbCollectionID] = useState(tmdbDefaults.collectionId);
   const [tmdbPreset, setTmdbPreset] = useState<TMDBPreset>(tmdbDefaults.preset);
   const [tmdbTimeWindow, setTmdbTimeWindow] = useState<TMDBTimeWindow>(tmdbDefaults.timeWindow);
   const [tmdbMediaType, setTmdbMediaType] = useState<TMDBMediaType>(tmdbDefaults.mediaType);
@@ -1484,15 +1495,26 @@ export function CollectionEditForm({
         ...(parsedSourceLimit ? { limit: parsedSourceLimit } : {}),
       };
     } else if (isTMDBCollection) {
-      const tmdbSource = buildTMDBPresetSourceInput({
-        preset: tmdbPreset,
-        mediaType: normalizedTMDBMediaType,
-        timeWindow: tmdbTimeWindow,
-        limit: tmdbLimit,
-      });
-      sourceUrlValue = tmdbSource.source_url;
-      sourceConfig = tmdbSource.source_config;
-      sourceConfig.virtual_playback = virtualPlayback;
+      if (tmdbSourceKind === "collection") {
+        const parsedCollID = Number.parseInt(tmdbCollectionID, 10);
+        sourceConfig = {
+          mode: "tmdb_collection",
+          collection_id: Number.isFinite(parsedCollID) ? parsedCollID : tmdbCollectionID,
+          virtual_playback: virtualPlayback,
+          ...(parsedTmdbLimit ? { limit: parsedTmdbLimit } : {}),
+        };
+        sourceUrlValue = `tmdb://collection/${tmdbCollectionID}`;
+      } else {
+        const tmdbSource = buildTMDBPresetSourceInput({
+          preset: tmdbPreset,
+          mediaType: normalizedTMDBMediaType,
+          timeWindow: tmdbTimeWindow,
+          limit: tmdbLimit,
+        });
+        sourceUrlValue = tmdbSource.source_url;
+        sourceConfig = tmdbSource.source_config;
+        sourceConfig.virtual_playback = virtualPlayback;
+      }
     } else if (isTraktCollection) {
       if (isTraktListMode) {
         const traktListSource = buildTraktListSourceInput({
@@ -1676,62 +1698,89 @@ export function CollectionEditForm({
         {isTMDBCollection ? (
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Preset</Label>
-              <Select value={tmdbPreset} onValueChange={(v) => setTmdbPreset(v as TMDBPreset)}>
+              <Label>Source Type</Label>
+              <Select value={tmdbSourceKind} onValueChange={(v) => setTmdbSourceKind(v as TMDBSourceKind)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="trending">Trending</SelectItem>
-                  <SelectItem value="popular">Popular</SelectItem>
-                  <SelectItem value="top_rated">Top Rated</SelectItem>
-                  <SelectItem value="now_playing">Now Playing</SelectItem>
-                  <SelectItem value="upcoming">Upcoming</SelectItem>
-                  <SelectItem value="airing_today">Airing Today</SelectItem>
-                  <SelectItem value="on_the_air">On The Air</SelectItem>
+                  <SelectItem value="collection">TMDB Franchise Collection</SelectItem>
+                  <SelectItem value="preset">TMDB Feed / Preset</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {tmdbPresetNeedsTimeWindow(tmdbPreset) ? (
+            {tmdbSourceKind === "collection" ? (
               <div className="space-y-2">
-                <Label>Time Window</Label>
-                <Select
-                  value={tmdbTimeWindow}
-                  onValueChange={(v) => setTmdbTimeWindow(v as TMDBTimeWindow)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="day">Daily</SelectItem>
-                    <SelectItem value="week">Weekly</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="collection-tmdb-id">TMDB Collection ID</Label>
+                <Input
+                  id="collection-tmdb-id"
+                  type="number"
+                  value={tmdbCollectionID}
+                  onChange={(e) => setTmdbCollectionID(e.target.value)}
+                  placeholder="e.g. 645 for James Bond, 119 for Lord of the Rings"
+                />
               </div>
-            ) : null}
-            <div className="space-y-2">
-              <Label>Media Type</Label>
-              <Select
-                value={normalizedTMDBMediaType}
-                onValueChange={(v) => setTmdbMediaType(v as TMDBMediaType)}
-                disabled={allowedTMDBMediaTypes.length === 1}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {allowedTMDBMediaTypes.includes("all") ? (
-                    <SelectItem value="all">All</SelectItem>
-                  ) : null}
-                  {allowedTMDBMediaTypes.includes("movie") ? (
-                    <SelectItem value="movie">Movies</SelectItem>
-                  ) : null}
-                  {allowedTMDBMediaTypes.includes("tv") ? (
-                    <SelectItem value="tv">TV Shows</SelectItem>
-                  ) : null}
-                </SelectContent>
-              </Select>
-            </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label>Preset</Label>
+                  <Select value={tmdbPreset} onValueChange={(v) => setTmdbPreset(v as TMDBPreset)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="trending">Trending</SelectItem>
+                      <SelectItem value="popular">Popular</SelectItem>
+                      <SelectItem value="top_rated">Top Rated</SelectItem>
+                      <SelectItem value="now_playing">Now Playing</SelectItem>
+                      <SelectItem value="upcoming">Upcoming</SelectItem>
+                      <SelectItem value="airing_today">Airing Today</SelectItem>
+                      <SelectItem value="on_the_air">On The Air</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {tmdbPresetNeedsTimeWindow(tmdbPreset) ? (
+                  <div className="space-y-2">
+                    <Label>Time Window</Label>
+                    <Select
+                      value={tmdbTimeWindow}
+                      onValueChange={(v) => setTmdbTimeWindow(v as TMDBTimeWindow)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="day">Daily</SelectItem>
+                        <SelectItem value="week">Weekly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  <Label>Media Type</Label>
+                  <Select
+                    value={normalizedTMDBMediaType}
+                    onValueChange={(v) => setTmdbMediaType(v as TMDBMediaType)}
+                    disabled={allowedTMDBMediaTypes.length === 1}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allowedTMDBMediaTypes.includes("all") ? (
+                        <SelectItem value="all">All</SelectItem>
+                      ) : null}
+                      {allowedTMDBMediaTypes.includes("movie") ? (
+                        <SelectItem value="movie">Movies</SelectItem>
+                      ) : null}
+                      {allowedTMDBMediaTypes.includes("tv") ? (
+                        <SelectItem value="tv">TV Shows</SelectItem>
+                      ) : null}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
             <div className="space-y-2">
               <Label htmlFor="collection-tmdb-limit">Max Items</Label>
               <Input

@@ -4,7 +4,11 @@ import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import { useDeleteMediaItem, useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
+import {
+  useDeleteMediaItem,
+  useRefreshItemMetadata,
+  useWatchedStateMutation,
+} from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
@@ -278,7 +282,11 @@ export default function MediaItemMenu({
         return;
       }
       case "deleteItem": {
-        if (window.confirm("Delete this show/movie from library? Home and sections will update immediately.")) {
+        if (
+          window.confirm(
+            "Delete this show/movie from library? Home and sections will update immediately.",
+          )
+        ) {
           deleteMediaItem.mutate(contentId);
         }
         return;
@@ -321,8 +329,14 @@ export default function MediaItemMenu({
                 return (
                   <DropdownMenuItem
                     key={entry.key}
-                    disabled={isPending || (entry.key === "deleteItem" && deleteMediaItem.isPending)}
-                    className={entry.key === "deleteItem" ? "text-red-500 focus:text-red-400 focus:bg-red-500/10" : undefined}
+                    disabled={
+                      isPending || (entry.key === "deleteItem" && deleteMediaItem.isPending)
+                    }
+                    className={
+                      entry.key === "deleteItem"
+                        ? "text-red-500 focus:bg-red-500/10 focus:text-red-400"
+                        : undefined
+                    }
                     onSelect={() => {
                       void handleAction(entry.key);
                     }}
