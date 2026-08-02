@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -197,7 +198,12 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 		listCtx, neutralKey, userID, profileID, file.VirtualOwnerInstallationID,
 	)
 	cancel()
-	if listErr != nil || len(streams) == 0 {
+	if listErr != nil {
+		slog.ErrorContext(ctx, "virtual stale fallback: list failed", "component", "api", "neutral_key", neutralKey, "error", listErr)
+		return nil
+	}
+	if len(streams) == 0 {
+		slog.ErrorContext(ctx, "virtual stale fallback: no streams listed", "component", "api", "neutral_key", neutralKey)
 		return nil
 	}
 	if len(streams) > maxVirtualPlaybackStreams {
@@ -209,8 +215,10 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 		}
 		resolved, err := h.resolveVirtualCandidateSource(ctx, file, stream, userID, profileID)
 		if err == nil {
+			slog.InfoContext(ctx, "virtual stale fallback: resolved substitute", "component", "api", "original", file.FilePath, "substitute", stream.URI)
 			return resolved
 		}
+		slog.ErrorContext(ctx, "virtual stale fallback: candidate failed", "component", "api", "candidate", stream.URI, "error", err)
 	}
 	return nil
 }
