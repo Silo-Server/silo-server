@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -2023,4 +2024,35 @@ func (h *ItemsHandler) requestCanViewFilePaths(r *http.Request) bool {
 		return false
 	}
 	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
+}
+
+// HandleDelete handles DELETE /api/v1/admin/items/{id}.
+func (h *ItemsHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
+	if h.itemRepo == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "item repository unavailable")
+		return
+	}
+	contentID := chi.URLParam(r, "id")
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "item ID is required")
+		return
+	}
+	images, err := h.itemRepo.Delete(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "items: delete media item failed", "component", "api", "content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("failed to delete media item: %v", err))
+		return
+	}
+	sections.InvalidateResolvedListCache()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"content_id": contentID,
+		"images_cleaned": len(images),
+		"message": "Media item deleted successfully",
+	})
 }

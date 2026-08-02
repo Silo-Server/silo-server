@@ -557,3 +557,23 @@ export function useMetadataTranslationJobs(contentId: string, enabled: boolean) 
     },
   });
 }
+
+export function useDeleteMediaItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (contentId: string) =>
+      api<{ success: boolean; content_id: string; message: string }>(
+        `/admin/items/${itemPathID(contentId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (result) => {
+      toast.success(result.message || "Item deleted");
+      void queryClient.invalidateQueries({ queryKey: sectionKeys.all });
+      void queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete item");
+    },
+  });
+}

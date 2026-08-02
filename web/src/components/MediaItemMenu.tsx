@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { MoreVertical, RefreshCw } from "lucide-react";
+import { MoreVertical, RefreshCw, Trash2 } from "lucide-react";
 import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
+import { useDeleteMediaItem, useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { usePurgeVirtualPlaybackItems } from "@/hooks/queries/admin/collections";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
@@ -35,7 +36,8 @@ type MediaItemMenuEntry =
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
-        | "refreshMetadata";
+        | "refreshMetadata"
+        | "deleteItem";
       label: string;
     }
   | { kind: "separator" };
@@ -125,6 +127,11 @@ export function buildMediaItemMenuModel({
         kind: "action",
         key: "refreshMetadata",
         label: "Refresh Metadata",
+      },
+      {
+        kind: "action",
+        key: "deleteItem",
+        label: "Delete Item",
       },
     );
   }
@@ -216,6 +223,8 @@ export default function MediaItemMenu({
     "opacity-100 md:opacity-0 md:group-hover/card:opacity-100 md:group-focus-within/card:opacity-100",
   );
 
+  const deleteMediaItem = useDeleteMediaItem();
+
   async function handleAction(actionKey: Extract<MediaItemMenuEntry, { kind: "action" }>["key"]) {
     switch (actionKey) {
       case "playFromBeginning": {
@@ -268,6 +277,12 @@ export default function MediaItemMenu({
         setRefreshDialogOpen(true);
         return;
       }
+      case "deleteItem": {
+        if (window.confirm("Delete this show/movie from library? Home and sections will update immediately.")) {
+          deleteMediaItem.mutate(contentId);
+        }
+        return;
+      }
     }
   }
 
@@ -306,13 +321,16 @@ export default function MediaItemMenu({
                 return (
                   <DropdownMenuItem
                     key={entry.key}
-                    disabled={isPending}
+                    disabled={isPending || (entry.key === "deleteItem" && deleteMediaItem.isPending)}
+                    className={entry.key === "deleteItem" ? "text-red-500 focus:text-red-400 focus:bg-red-500/10" : undefined}
                     onSelect={() => {
                       void handleAction(entry.key);
                     }}
                   >
                     {entry.key === "refreshMetadata" && refreshMetadataMutation.isPending ? (
                       <RefreshCw className="size-4 animate-spin" />
+                    ) : entry.key === "deleteItem" ? (
+                      <Trash2 className="size-4 text-red-500" />
                     ) : null}
                     {entry.label}
                   </DropdownMenuItem>

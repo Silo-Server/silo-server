@@ -17,7 +17,9 @@ import {
   Search,
   RotateCcw,
   Tags,
+  Trash2,
 } from "lucide-react";
+import { useDeleteMediaItem } from "@/hooks/queries/items";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -164,6 +166,7 @@ export default function ActionBar({
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [markerEditorOpen, setMarkerEditorOpen] = useState(false);
+  const deleteMediaItem = useDeleteMediaItem();
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
@@ -456,6 +459,24 @@ export default function ActionBar({
                   <DropdownMenuItem onSelect={onSplitItem}>
                     <Scissors className="size-4" />
                     Split Versions
+                  </DropdownMenuItem>
+                )}
+                {isAdmin && contentId && (
+                  <DropdownMenuItem
+                    className="text-red-500 focus:text-red-400 focus:bg-red-500/10"
+                    disabled={deleteMediaItem.isPending}
+                    onSelect={() => {
+                      if (window.confirm("Delete this show/movie? Home and library will update immediately.")) {
+                        deleteMediaItem.mutate(contentId, {
+                          onSuccess: () => {
+                            navigate("/");
+                          }
+                        });
+                      }
+                    }}
+                  >
+                    <Trash2 className="size-4 text-red-500" />
+                    Delete Show / Movie
                   </DropdownMenuItem>
                 )}
               </>
