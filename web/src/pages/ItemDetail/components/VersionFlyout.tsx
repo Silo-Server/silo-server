@@ -28,6 +28,11 @@ export function buildQualitySummary(version: FileVersion): string {
   const parts: string[] = [];
 
   if (version.resolution) parts.push(version.resolution);
+
+  const textToScan = [version.file_name, version.edition_raw].filter(Boolean).join(" ");
+  const sourceHint = textToScan ? extractSourceHint(textToScan) : null;
+  if (sourceHint) parts.push(sourceHint);
+
   if (version.codec_video) parts.push(version.codec_video.toUpperCase());
   const rangeLabel = videoRangeLabel(version);
   if (rangeLabel) parts.push(rangeLabel);
@@ -45,7 +50,8 @@ export function buildDetailLine(version: FileVersion): string {
   const size = formatFileSize(version.file_size);
   if (size) parts.push(size);
 
-  const hint = version.file_name ? extractSourceHint(version.file_name) : null;
+  const textToScan = [version.file_name, version.edition_raw].filter(Boolean).join(" ");
+  const hint = textToScan ? extractSourceHint(textToScan) : null;
   if (hint) parts.push(hint);
 
   return parts.join(" · ");
