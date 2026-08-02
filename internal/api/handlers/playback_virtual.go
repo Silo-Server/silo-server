@@ -21,6 +21,11 @@ const maxVirtualPlaybackStreams = 50
 const (
 	maxVirtualFailoverAttempts = 5
 	virtualStartupBudget       = 45 * time.Second
+	// virtualProbeBudget caps how long a single ffprobe on a virtual/remote
+	// stream may take. Large remote sources (e.g. 2160p remuxes behind an
+	// origin proxy) can be slow to open and to present media headers, so the
+	// budget is deliberately larger than the local-file probe window.
+	virtualProbeBudget = 30 * time.Second
 )
 
 type VirtualPlaybackResolver interface {
@@ -140,7 +145,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		if h.VirtualPlaybackSourceProber == nil {
 			return resolved, nil
 		}
-		probeCtx, probeCancel := context.WithTimeout(attemptCtx, 10*time.Second)
+		probeCtx, probeCancel := context.WithTimeout(attemptCtx, virtualProbeBudget)
 		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
 		probeCancel()
 		if probeErr != nil || probed == nil {
@@ -249,7 +254,7 @@ func (h *PlaybackHandler) resolveVirtualCandidateSource(
 	if h.VirtualPlaybackSourceProber == nil {
 		return &resolved, nil
 	}
-	probeCtx, probeCancel := context.WithTimeout(ctx, 10*time.Second)
+	probeCtx, probeCancel := context.WithTimeout(ctx, virtualProbeBudget)
 	probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
 	probeCancel()
 	if probeErr != nil || probed == nil {

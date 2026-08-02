@@ -2412,7 +2412,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		return
 	}
 	if isVirtualPlaybackFile(file) {
-		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probeCtx, cancel := context.WithTimeout(r.Context(), virtualProbeBudget)
 		probed, _, probeErr := h.probeVirtualSessionFile(probeCtx, file, session)
 		cancel()
 		if probeErr != nil || probed == nil {
@@ -3202,7 +3202,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if isVirtualPlaybackFile(file) {
-		probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		probeCtx, cancel := context.WithTimeout(r.Context(), virtualProbeBudget)
 		probed, _, probeErr := h.probeVirtualSessionFile(probeCtx, file, session)
 		cancel()
 		if probeErr != nil || probed == nil {
@@ -3219,7 +3219,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		if loadErr != nil || originalFile == nil {
 			requestedFile = nil
 		} else if isVirtualPlaybackFile(originalFile) {
-			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			probeCtx, cancel := context.WithTimeout(r.Context(), virtualProbeBudget)
 			requestedFile, _, loadErr = h.probeVirtualSessionFile(probeCtx, originalFile, session)
 			cancel()
 			if loadErr != nil {
