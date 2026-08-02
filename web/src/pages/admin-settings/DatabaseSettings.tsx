@@ -160,61 +160,71 @@ export default function DatabaseSettings() {
       </div>
 
       <FieldGroup label="Danger Zone">
-        <div className="border-border/70 flex items-center justify-between gap-4 py-3">
+        <div className="flex flex-col justify-between gap-4 py-3 sm:flex-row sm:items-center">
           <div className="space-y-1">
             <span className="text-sm font-medium">Purge Virtual Library</span>
             <p className="text-muted-foreground text-xs">
               Remove all zero-storage virtual files and their orphaned catalog items.
             </p>
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={purgeVirtual.isPending}
+              onClick={() => {
+                const libraryId = Number.parseInt(purgeLibraryID, 10);
+                const installationId = Number.parseInt(purgeInstallationID, 10);
+                purgeVirtual.mutate({
+                  dryRun: true,
+                  libraryId: libraryId > 0 ? libraryId : undefined,
+                  installationId: installationId > 0 ? installationId : undefined,
+                });
+              }}
+            >
+              {purgeVirtual.isPending && purgeDryRun ? "Previewing..." : "Preview Purge"}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={purgeVirtual.isPending}
+              onClick={() => {
+                const libraryId = Number.parseInt(purgeLibraryID, 10);
+                const installationId = Number.parseInt(purgeInstallationID, 10);
+                const scope =
+                  libraryId > 0 || installationId > 0 ? "the selected scope" : "all virtual items";
+                if (
+                  window.confirm(
+                    `Purge all zero-storage virtual library items for ${scope}? This cannot be undone.`,
+                  )
+                ) {
+                  purgeVirtual.mutate({
+                    dryRun: false,
+                    libraryId: libraryId > 0 ? libraryId : undefined,
+                    installationId: installationId > 0 ? installationId : undefined,
+                  });
+                }
+              }}
+            >
+              {purgeVirtual.isPending && !purgeDryRun ? "Purging..." : "Purge Virtual Items"}
+            </Button>
+          </div>
         </div>
-        <div className="grid gap-3 py-2 md:grid-cols-3">
+        <div className="grid gap-3 pt-2 pb-1 md:grid-cols-2">
           <SettingField
-            label="Library ID (optional)"
+            label="Library ID Filter (optional)"
             type="number"
             value={purgeLibraryID}
             onChange={setPurgeLibraryID}
           />
           <SettingField
-            label="Plugin installation ID (optional)"
+            label="Plugin Installation ID Filter (optional)"
             type="number"
             value={purgeInstallationID}
             onChange={setPurgeInstallationID}
           />
-          <SettingField
-            label="Dry run"
-            type="toggle"
-            hint="Preview counts without deleting anything"
-            value={purgeDryRun ? "true" : "false"}
-            onChange={(value) => setPurgeDryRun(value === "true")}
-          />
-        </div>
-        <div className="flex justify-end py-2">
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={purgeVirtual.isPending}
-            onClick={() => {
-              const libraryId = Number.parseInt(purgeLibraryID, 10);
-              const installationId = Number.parseInt(purgeInstallationID, 10);
-              const scope =
-                libraryId > 0 || installationId > 0 ? "the selected scope" : "all virtual items";
-              if (window.confirm(`${purgeDryRun ? "Preview purge for" : "Purge"} ${scope}?`)) {
-                purgeVirtual.mutate({
-                  dryRun: purgeDryRun,
-                  libraryId: libraryId > 0 ? libraryId : undefined,
-                  installationId: installationId > 0 ? installationId : undefined,
-                });
-              }
-            }}
-          >
-            {purgeVirtual.isPending
-              ? "Purging..."
-              : purgeDryRun
-                ? "Preview Purge"
-                : "Purge Virtual Items"}
-          </Button>
         </div>
       </FieldGroup>
 
