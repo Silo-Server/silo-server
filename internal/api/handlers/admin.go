@@ -36,6 +36,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
@@ -138,6 +139,7 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	SnapshotRegistry             *playback.SnapshotRegistry
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given

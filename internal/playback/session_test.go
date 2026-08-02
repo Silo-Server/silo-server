@@ -205,6 +205,38 @@ func TestLegacyEmptyGenerationTerminationPersistsSentinelAndRotatesReplay(t *tes
 	}
 }
 
+func TestTerminateSessionGenerationStatusDistinguishesTerminatedEndedUnknownAndStale(t *testing.T) {
+	mgr := playback.NewSessionManager(0, 0)
+	session, err := mgr.StartSession(1, "profile", 1, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	status, err := mgr.TerminateSessionGenerationStatus(t.Context(), session.ID, session.Generation, nil)
+	if err != nil || status != playback.TerminationStatusTerminated {
+		t.Fatalf("first termination status=%q err=%v", status, err)
+	}
+	status, err = mgr.TerminateSessionGenerationStatus(t.Context(), session.ID, session.Generation, nil)
+	if err != nil || status != playback.TerminationStatusAlreadyTerminated {
+		t.Fatalf("ended termination status=%q err=%v", status, err)
+	}
+	if _, err := mgr.TerminateSessionGenerationStatus(t.Context(), "unknown", uuid.NewString(), nil); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("unknown termination error=%v, want ErrSessionNotFound", err)
+	}
+
+	reused := *session
+	reused.Generation = uuid.NewString()
+	if _, err := mgr.RegisterReconstructedChecked(t.Context(), &reused); err != nil {
+		t.Fatalf("RegisterReconstructedChecked: %v", err)
+	}
+	if _, err := mgr.TerminateSessionGenerationStatus(t.Context(), session.ID, session.Generation, nil); !errors.Is(err, playback.ErrSessionSuperseded) {
+		t.Fatalf("stale termination error=%v, want ErrSessionSuperseded", err)
+	}
+	if current, err := mgr.GetSession(session.ID); err != nil || current.Generation != reused.Generation {
+		t.Fatalf("new generation disturbed: current=%+v err=%v", current, err)
+	}
+}
+
 func TestAbsentLegacyEmptyTerminationIsIdempotentAcrossRestart(t *testing.T) {
 	store := &memoryGenerationTombstoneStore{}
 	first := playback.NewSessionManager(0, 0)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -135,7 +136,7 @@ type snapshotWatermark struct {
 }
 
 const (
-	snapshotCoverageFreshness            = 45 * time.Second
+	SessionSnapshotFreshness             = 45 * time.Second
 	snapshotClockSkewTolerance           = 5 * time.Second
 	snapshotReasonNoReportingNodes       = "no_reporting_nodes"
 	snapshotReasonStaleHeartbeat         = "stale_reporting_node"
@@ -147,6 +148,7 @@ const (
 	snapshotReasonInvalidIdentity        = "invalid_session_identity"
 	snapshotReasonInvalidStartedAt       = "invalid_started_at"
 	snapshotReasonQueryFailed            = "snapshot_query_failed"
+	snapshotReasonRegistryCapacity       = "registry_capacity"
 )
 
 type playbackSessionsReader interface {
@@ -428,14 +430,14 @@ func evaluateSnapshotCompleteness(
 	for _, node := range nodes {
 		nodeID := node.ID
 		nodeSet[nodeID] = struct{}{}
-		if strings.TrimSpace(nodeID) == "" || node.UpdatedAt.IsZero() || node.UpdatedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(node.UpdatedAt) > snapshotCoverageFreshness {
+		if strings.TrimSpace(nodeID) == "" || node.UpdatedAt.IsZero() || node.UpdatedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(node.UpdatedAt) > SessionSnapshotFreshness {
 			return snapshotReasonStaleHeartbeat
 		}
 		watermark, ok := watermarkByNode[nodeID]
 		if !ok {
 			return snapshotReasonMissingWatermark
 		}
-		if watermark.CompletedAt.IsZero() || watermark.CompletedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(watermark.CompletedAt) > snapshotCoverageFreshness {
+		if watermark.CompletedAt.IsZero() || watermark.CompletedAt.After(generatedAt.Add(snapshotClockSkewTolerance)) || generatedAt.Sub(watermark.CompletedAt) > SessionSnapshotFreshness {
 			return snapshotReasonStaleWatermark
 		}
 		if node.BootGeneration != watermark.BootGeneration {
@@ -506,7 +508,29 @@ func (h *AdminHandler) HandleGetSessionsSnapshot(w http.ResponseWriter, r *http.
 	response.Sessions = sessions
 	response.IncompleteReason = evaluateSnapshotCompleteness(generatedAt, nodes, watermarks, sessions)
 	response.Complete = response.IncompleteReason == ""
+	if err := h.registerCompleteSnapshot(&response); err != nil {
+		slog.WarnContext(r.Context(), "complete playback snapshot could not be registered", "snapshot_id", response.SnapshotID, "error", err)
+	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *AdminHandler) registerCompleteSnapshot(response *sessionSnapshotResponse) error {
+	if h == nil || h.SnapshotRegistry == nil || response == nil || !response.Complete {
+		return nil
+	}
+	identities := make([]playback.SnapshotSessionIdentity, 0, len(response.Sessions))
+	for _, session := range response.Sessions {
+		identities = append(identities, playback.SnapshotSessionIdentity{
+			SessionID:  session.SessionID,
+			Generation: session.SessionGeneration,
+		})
+	}
+	if err := h.SnapshotRegistry.Store(response.SnapshotID, response.GeneratedAt, true, identities); err != nil {
+		response.Complete = false
+		response.IncompleteReason = snapshotReasonRegistryCapacity
+		return err
+	}
+	return nil
 }
 
 func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, path string) string {

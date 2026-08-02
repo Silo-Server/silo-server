@@ -378,6 +378,7 @@ type CommandEnvelope struct {
 	SessionID  string              `json:"session_id"`
 	Name       CommandName         `json:"name"`
 	Reason     string              `json:"reason,omitempty"`
+	ReasonCode string              `json:"reason_code,omitempty"`
 	IssuedBy   *CommandIssuedBy    `json:"issued_by,omitempty"`
 	DeadlineMS int                 `json:"deadline_ms,omitempty"`
 	Payload    json.RawMessage     `json:"payload,omitempty"`

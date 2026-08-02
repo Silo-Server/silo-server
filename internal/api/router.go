@@ -309,6 +309,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		healthServerID = deps.Config.JellyfinCompat.ServerID
 	}
 	healthHandler := handlers.NewHealthHandler(healthServerName, healthServerID)
+	sessionSnapshotRegistry := playback.NewSnapshotRegistry(1024, handlers.SessionSnapshotFreshness, 65536)
+	terminationIdempotency := playback.NewIdempotencyStore(4096, 24*time.Hour)
 
 	// Build server settings repo if DB is available (needed by auth and admin).
 	// Wrap it in the encrypting decorator so sensitive keys rest as ciphertext
@@ -1038,7 +1040,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
 		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub)
-		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
+		adminPlaybackControlHandler = handlers.NewGuardedAdminPlaybackControlHandler(
+			playbackHandler,
+			sessionSnapshotRegistry,
+			terminationIdempotency,
+			healthServerID,
+		)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
 			roomTokenService := watchtogether.NewRoomTokenService(deps.Config.Auth.JWTSecret, 24*time.Hour)
@@ -1086,6 +1093,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if userRepo != nil {
 		adminHandler = handlers.NewAdminHandler(userRepo, deps.DB, deps.UserStoreProvider)
 		adminHandler.SessionsLoader = playbackSessionsLoader
+		adminHandler.SnapshotRegistry = sessionSnapshotRegistry
 		adminHandler.DetailSvc = detailSvc
 		adminHandler.EventBus = deps.EventBus
 		adminHandler.EventsHub = deps.EventsHub

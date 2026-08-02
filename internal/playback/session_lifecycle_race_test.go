@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -261,6 +262,63 @@ func TestTerminateSessionGenerationBlocksReconstructionThroughFinalizer(t *testi
 	}
 	if got == nil || got.Generation != newGeneration {
 		t.Fatalf("reconstructed session = %+v, want newer generation %s", got, newGeneration)
+	}
+}
+
+type snapshotBoundaryTombstoneStore struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *snapshotBoundaryTombstoneStore) WasSessionGenerationEnded(context.Context, string, string, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (s *snapshotBoundaryTombstoneStore) RecordEndedSessionGeneration(context.Context, string, string, time.Time) error {
+	close(s.started)
+	<-s.release
+	return nil
+}
+
+func TestTerminateSessionGenerationSnapshotCapturesLatestStateUnderLock(t *testing.T) {
+	store := &snapshotBoundaryTombstoneStore{started: make(chan struct{}), release: make(chan struct{})}
+	mgr := NewSessionManager(0, 0)
+	mgr.SetSessionGenerationTombstoneStore(store)
+	session, err := mgr.StartSession(1, "profile", 1, PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	staleLookup, err := mgr.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("initial lookup: %v", err)
+	}
+	if staleLookup.Position != 0 {
+		t.Fatalf("initial position = %v", staleLookup.Position)
+	}
+
+	finalized := make(chan *Session, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.TerminateSessionGenerationSnapshotStatus(t.Context(), session.ID, session.Generation, func(snapshot *Session) error {
+			if _, lookupErr := mgr.GetSession(session.ID); !errors.Is(lookupErr, ErrSessionNotFound) {
+				return fmt.Errorf("manager mutex held or session still live: %v", lookupErr)
+			}
+			finalized <- snapshot
+			return nil
+		})
+		done <- err
+	}()
+	<-store.started
+	if err := mgr.UpdateProgressGeneration(session.ID, session.Generation, 321.5, true); err != nil {
+		t.Fatalf("UpdateProgressGeneration at boundary: %v", err)
+	}
+	close(store.release)
+	if err := <-done; err != nil {
+		t.Fatalf("TerminateSessionGenerationSnapshotStatus: %v", err)
+	}
+	snapshot := <-finalized
+	if snapshot == nil || snapshot.Position != 321.5 || !snapshot.IsPaused {
+		t.Fatalf("finalizer snapshot = %+v, want latest progress/state", snapshot)
 	}
 }
 

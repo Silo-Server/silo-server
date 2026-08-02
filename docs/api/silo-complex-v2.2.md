@@ -29,8 +29,10 @@ The stable error statuses are:
 - `404 Not Found`: the requested resource does not exist.
 - `409 Conflict`: a request conflicts with the current session generation or
   an idempotency binding.
+- `413 Content Too Large`: an admin playback-control request body exceeds 16
+  KiB.
 - `422 Unprocessable Entity`: the JSON request is syntactically valid but its
-  values are invalid.
+  values are invalid, including an oversized playback-control field.
 - `500 Internal Server Error`: an unexpected server-side failure prevented a
   safe response.
 
@@ -85,7 +87,19 @@ playback `state`, `is_transcoded`, and optional device/client labels.
 When an authoritative snapshot cannot be produced, the endpoint still returns
 `200 OK` with `complete:false`, a safe machine-readable `incomplete_reason`,
 and the available `sessions` array. An incomplete snapshot must never be used
-for termination decisions.
+for termination decisions. This includes a snapshot that is otherwise complete
+but cannot fit in the bounded termination registry; it returns
+`incomplete_reason:"registry_capacity"` and never advertises `complete:true`.
+
+## Admin playback control limits
+
+Existing admin playback-control response statuses remain unchanged for
+compatibility. Request bodies are limited to 16 KiB. Identifier fields are
+bounded to 512 bytes for `session_id`, 128 bytes for `session_generation`,
+`snapshot_id`, and `reason_code`, and 255 bytes for `idempotency_key`. Display
+text is bounded to 1,024 Unicode code points for `reason`, 256 for `title`, and
+4,096 for `message`. Bodies over the request limit return `413`; syntactically
+valid requests with oversized fields return `422`.
 
 ## Compatibility guarantees
 

@@ -1422,6 +1422,74 @@ func (m *SessionManager) TerminateSessionGeneration(
 	return m.terminateSessionGenerationLocked(ctx, sessionID, generation, finalizer)
 }
 
+// TerminateSessionGenerationStatus durably ends one exact live identity and
+// reports whether this call or an earlier call performed the transition.
+// Unlike the lower-level idempotent termination primitive, an identity that
+// was never live is not tombstoned: callers receive ErrSessionNotFound.
+func (m *SessionManager) TerminateSessionGenerationStatus(
+	ctx context.Context,
+	sessionID string,
+	generation string,
+	finalizer func() error,
+) (TerminationStatus, error) {
+	return m.TerminateSessionGenerationSnapshotStatus(ctx, sessionID, generation, func(*Session) error {
+		if finalizer == nil {
+			return nil
+		}
+		return finalizer()
+	})
+}
+
+// TerminateSessionGenerationSnapshotStatus is TerminateSessionGenerationStatus
+// with an exact, manager-owned snapshot captured under m.mu immediately before
+// deletion. Already-ended retries receive a nil snapshot. The callback runs
+// with the global session mutex released while the per-ID lifecycle lock stays
+// held.
+func (m *SessionManager) TerminateSessionGenerationSnapshotStatus(
+	ctx context.Context,
+	sessionID string,
+	generation string,
+	finalizer func(*Session) error,
+) (TerminationStatus, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return "", ErrSessionNotFound
+	}
+	if err := validatePublicSessionGeneration(generation); err != nil {
+		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	release := m.acquireSessionLifecycleLock(sessionID)
+	defer release()
+
+	m.mu.RLock()
+	current := m.sessions[sessionID]
+	m.mu.RUnlock()
+	if current != nil && current.Generation != generation {
+		return "", ErrSessionSuperseded
+	}
+	if current == nil {
+		ended, err := m.wasSessionGenerationEnded(ctx, sessionID, generation, time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+		if !ended {
+			return "", ErrSessionNotFound
+		}
+		if finalizer != nil {
+			if err := finalizer(nil); err != nil {
+				return "", fmt.Errorf("finalizing already-ended playback session %s generation %s: %w", sessionID, generation, err)
+			}
+		}
+		return TerminationStatusAlreadyTerminated, nil
+	}
+	if err := m.terminateSessionGenerationSnapshotLocked(ctx, sessionID, generation, finalizer); err != nil {
+		return "", err
+	}
+	return TerminationStatusTerminated, nil
+}
+
 // terminateSessionGenerationLocked requires the caller to own sessionID's
 // lifecycle guard.
 func (m *SessionManager) terminateSessionGenerationLocked(
@@ -1429,6 +1497,20 @@ func (m *SessionManager) terminateSessionGenerationLocked(
 	sessionID string,
 	generation string,
 	finalizer func() error,
+) error {
+	return m.terminateSessionGenerationSnapshotLocked(ctx, sessionID, generation, func(*Session) error {
+		if finalizer == nil {
+			return nil
+		}
+		return finalizer()
+	})
+}
+
+func (m *SessionManager) terminateSessionGenerationSnapshotLocked(
+	ctx context.Context,
+	sessionID string,
+	generation string,
+	finalizer func(*Session) error,
 ) error {
 	if generation == "" {
 		m.mu.RLock()
@@ -1445,14 +1527,17 @@ func (m *SessionManager) terminateSessionGenerationLocked(
 		return err
 	}
 
+	var snapshot *Session
 	m.mu.Lock()
 	if current := m.sessions[sessionID]; current != nil && current.Generation == generation {
+		copy := *current
+		snapshot = &copy
 		delete(m.sessions, sessionID)
 	}
 	m.mu.Unlock()
 
 	if finalizer != nil {
-		if err := finalizer(); err != nil {
+		if err := finalizer(snapshot); err != nil {
 			return fmt.Errorf("finalizing playback session %s generation %s: %w", sessionID, generation, err)
 		}
 	}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -155,6 +156,65 @@ func TestSnapshotQueryIsUncappedWhileLegacyListRemainsCapped(t *testing.T) {
 	legacySQL, _ := finishPlaybackSessionsSQL("SELECT * FROM playback_sessions_sync s", PlaybackSessionsQuery{}, true)
 	if !strings.Contains(legacySQL, "LIMIT 200") {
 		t.Fatalf("legacy SQL lost its compatibility cap: %s", legacySQL)
+	}
+}
+
+func TestTerminateSessionSnapshotHandlerRegistersOnlyCompleteSnapshotIdentities(t *testing.T) {
+	registry := playback.NewSnapshotRegistry(4, SessionSnapshotFreshness)
+	handler := NewAdminHandler(nil, nil, nil)
+	handler.SnapshotRegistry = registry
+	generation := uuid.NewString()
+	complete := sessionSnapshotResponse{
+		SnapshotID:  "complete",
+		GeneratedAt: time.Now().UTC(),
+		Complete:    true,
+		Sessions: []playbackSessionRow{{
+			SessionID:         "session-1",
+			SessionGeneration: generation,
+		}},
+	}
+	if err := handler.registerCompleteSnapshot(&complete); err != nil {
+		t.Fatalf("register complete snapshot: %v", err)
+	}
+	if err := registry.Validate("complete", playback.SnapshotSessionIdentity{SessionID: "session-1", Generation: generation}); err != nil {
+		t.Fatalf("complete snapshot was not registered: %v", err)
+	}
+
+	incomplete := complete
+	incomplete.SnapshotID = "incomplete"
+	incomplete.Complete = false
+	incomplete.IncompleteReason = snapshotReasonCountMismatch
+	if err := handler.registerCompleteSnapshot(&incomplete); err != nil {
+		t.Fatalf("register incomplete snapshot: %v", err)
+	}
+	if err := registry.Validate("incomplete", playback.SnapshotSessionIdentity{SessionID: "session-1", Generation: generation}); !errors.Is(err, playback.ErrSnapshotUnknown) {
+		t.Fatalf("incomplete snapshot validation error = %v, want ErrSnapshotUnknown", err)
+	}
+}
+
+func TestSnapshotResponseIsIncompleteWhenRegistryCannotStoreIt(t *testing.T) {
+	registry := playback.NewSnapshotRegistry(4, SessionSnapshotFreshness, 1)
+	handler := NewAdminHandler(nil, nil, nil)
+	handler.SnapshotRegistry = registry
+	response := sessionSnapshotResponse{
+		SnapshotID:  "too-large",
+		GeneratedAt: time.Now().UTC(),
+		Complete:    true,
+		Sessions: []playbackSessionRow{
+			{SessionID: "session-1", SessionGeneration: uuid.NewString()},
+			{SessionID: "session-2", SessionGeneration: uuid.NewString()},
+		},
+	}
+
+	err := handler.registerCompleteSnapshot(&response)
+	if !errors.Is(err, playback.ErrSnapshotCapacity) {
+		t.Fatalf("register oversized snapshot error = %v, want ErrSnapshotCapacity", err)
+	}
+	if response.Complete || response.IncompleteReason != "registry_capacity" {
+		t.Fatalf("response = %+v, want safe registry-capacity incomplete envelope", response)
+	}
+	if got := registry.Len(); got != 0 {
+		t.Fatalf("registry size = %d, want 0", got)
 	}
 }
 
