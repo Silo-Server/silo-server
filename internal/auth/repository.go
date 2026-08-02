@@ -219,8 +219,8 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 
 	user, err := scanUser(row)
 	if err != nil {
-		if isDuplicateKeyError(err) {
-			return nil, fmt.Errorf("%w: %s", ErrDuplicate, extractConstraint(err))
+		if duplicate, constraint := isUserIdentityDuplicateError(err); duplicate {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, constraint)
 		}
 		return nil, fmt.Errorf("creating user: %w", err)
 	}
@@ -377,8 +377,8 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		if isDuplicateKeyError(err) {
-			return fmt.Errorf("%w: %s", ErrDuplicate, extractConstraint(err))
+		if duplicate, constraint := isUserIdentityDuplicateError(err); duplicate {
+			return fmt.Errorf("%w: %s", ErrDuplicate, constraint)
 		}
 		return fmt.Errorf("updating user: %w", err)
 	}
@@ -425,20 +425,18 @@ func (r *UserRepository) Count(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// isDuplicateKeyError checks if the error is a PostgreSQL unique_violation (code 23505).
-func isDuplicateKeyError(err error) bool {
+// isUserIdentityDuplicateError reports unique username/email violations that
+// callers may safely expose as identity conflicts. Other unique violations are
+// unexpected repository errors and must not be collapsed into ErrDuplicate.
+func isUserIdentityDuplicateError(err error) (bool, string) {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return false, ""
 	}
-	return false
-}
-
-// extractConstraint extracts the constraint name from a PgError for diagnostic messages.
-func extractConstraint(err error) string {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.ConstraintName
+	switch pgErr.ConstraintName {
+	case "users_username_key", "users_email_key":
+		return true, pgErr.ConstraintName
+	default:
+		return false, ""
 	}
-	return "unknown"
 }

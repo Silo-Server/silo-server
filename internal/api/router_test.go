@@ -28,7 +28,7 @@ func (routerContractSettings) Set(context.Context, string, string) error   { ret
 func TestRouterSystemCapabilitiesRoute(t *testing.T) {
 	assertRouterContractRoutes(t, "GET /api/v1/system/capabilities")
 	assertSiloComplexAccess(t, http.HandlerFunc(handlers.NewSystemCapabilitiesHandler().HandleGet),
-		`{"api_version":"2.2","capabilities":["branding.v1","sessions.snapshot.v2","sessions.terminate.v1"]}`+"\n")
+		`{"api_version":"2.2","capabilities":["branding.v1","sessions.snapshot.v2","sessions.terminate.v1","users.identity.v1"]}`+"\n")
 }
 
 func TestRouterAdminBrandingRoute(t *testing.T) {

@@ -14,11 +14,17 @@ Authorization: Bearer sa_...
 ```
 
 Successful responses use `Content-Type: application/json`. Timestamps are UTC
-RFC 3339 strings. Errors use the existing JSON envelope:
+RFC 3339 strings. Errors from the newer additive 2.2 contract endpoints use
+this envelope:
 
 ```json
 {"error":{"code":"machine_readable_code","message":"Safe human-readable message"}}
 ```
+
+Preserved legacy endpoints retain their existing error bodies and status
+semantics. In particular, the admin-user routes use the flat envelope
+`{"error":"machine_readable_code","message":"Safe human-readable message"}`;
+2.2 does not retype that response.
 
 The stable error statuses are:
 
@@ -27,8 +33,8 @@ The stable error statuses are:
 - `403 Forbidden`: the authenticated account is not authorized as an acting
   administrator or lacks the capability's required scope.
 - `404 Not Found`: the requested resource does not exist.
-- `409 Conflict`: a request conflicts with the current session generation or
-  an idempotency binding.
+- `409 Conflict`: a request conflicts with the current session generation, an
+  idempotency binding, or an existing normalized admin-user username/email.
 - `413 Content Too Large`: an admin playback-control request body exceeds 16
   KiB.
 - `422 Unprocessable Entity`: the JSON request is syntactically valid but its
@@ -108,3 +114,38 @@ These routes are additive. In particular, the existing
 control routes remain registered with their existing bodies and status
 semantics. Existing `/api/v1` fields are not renamed, removed, retyped, or
 repurposed by this contract.
+
+### Admin user identity compatibility
+
+The existing admin user routes are the identity contract advertised by
+`users.identity.v1`:
+
+| Route | Response fields already present before 2.2 | Fields added by 2.2 | 2.2 guarantee |
+| --- | --- | --- | --- |
+| `GET /api/v1/admin/users` | `id`, `username`, `email`, `enabled`, and all other existing admin-user fields | None | Every row exposes its stable numeric ID and normalized username/email. |
+| `GET /api/v1/admin/users/{id}` | `id`, `username`, `email`, `enabled`, and all other existing admin-user fields | None | The response preserves the requested stable numeric ID and normalized username/email. |
+| `POST /api/v1/admin/users` | `id`, `username`, `email`, `enabled`, and all other existing admin-user fields | None | The created identity is returned with normalized username/email. |
+| `PUT /api/v1/admin/users/{id}` | `id`, `username`, `email`, `enabled`, and all other existing admin-user fields | None | The updated identity is returned with normalized username/email. |
+
+Legacy create and update request bodies remain valid. Create still accepts the
+existing username, email, password, role, permissions, profile, library, and
+playback-policy fields. Update remains a partial mutation addressed by numeric
+`{id}`; it can change username, email, password, enabled status, and the other
+existing optional fields without a username lookup. Omitted update fields are
+left unchanged.
+
+For create or update, a normalized username or email already owned by another
+account returns `409 Conflict` with the preserved flat legacy envelope
+`{"error":"conflict","message":"Username or email already exists"}`. The
+rejected operation is atomic and modifies neither account. Existing flat error
+codes and `400` validation, `404` missing-user, and `500` unexpected-error
+status behavior are unchanged.
+
+Complex must require the exact capability key for each feature:
+
+| Capability key | Contract enabled |
+| --- | --- |
+| `branding.v1` | Safe server branding metadata |
+| `sessions.snapshot.v2` | Complete generation-stable playback snapshots |
+| `sessions.terminate.v1` | Generation-bound idempotent playback termination |
+| `users.identity.v1` | Stable normalized admin-user identities and collision handling |

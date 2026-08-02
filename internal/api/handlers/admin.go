@@ -346,8 +346,8 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 func toAdminUserResponse(u *models.User) adminUserResponse {
 	resp := adminUserResponse{
 		ID:                       u.ID,
-		Username:                 u.Username,
-		Email:                    u.Email,
+		Username:                 auth.NormalizeUsername(u.Username),
+		Email:                    auth.NormalizeEmail(u.Email),
 		Role:                     u.Role,
 		Permissions:              append([]string{}, u.Permissions...),
 		Enabled:                  u.Enabled,
@@ -520,6 +520,10 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 	if err != nil {
+		if auth.IsDuplicate(err) {
+			writeError(w, http.StatusConflict, "conflict", "Username or email already exists")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
 		return
 	}
@@ -541,6 +545,14 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
+	}
+	if req.Username != nil {
+		normalized := auth.NormalizeUsername(*req.Username)
+		req.Username = &normalized
+	}
+	if req.Email != nil {
+		normalized := auth.NormalizeEmail(*req.Email)
+		req.Email = &normalized
 	}
 
 	var maxPlaybackQuality *string
@@ -623,6 +635,10 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if auth.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
+		if auth.IsDuplicate(err) {
+			writeError(w, http.StatusConflict, "conflict", "Username or email already exists")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
