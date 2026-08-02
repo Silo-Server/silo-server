@@ -1733,20 +1733,17 @@ func syncTimestamp() time.Time {
 }
 
 // tmdbEntryIsUnreleased reports whether a TMDB collection entry should be
-// excluded from collection sync because it has not yet been released. Only
-// movies are gated: TV series first-air-date semantics differ (a series is
-// "releasing" as long as it has aired at least one episode), so they always
-// pass. An empty or unparseable ReleaseDate is treated as unreleased to avoid
-// surfacing placeholder entries that have no confirmed release.
+// excluded from collection sync because it has not yet been released. Both
+// movies and TV series are gated: for movies this is the primary_release_date,
+// for TV it is the first_air_date. An empty or unparseable ReleaseDate is
+// treated as unreleased to avoid surfacing placeholder entries that have no
+// confirmed air/release date.
 func tmdbEntryIsUnreleased(entry TMDBCollectionEntry) bool {
-	if entry.MediaType != "movie" {
-		return false
-	}
 	rd := strings.TrimSpace(entry.ReleaseDate)
 	if rd == "" {
-		return true // no release date known yet
+		return true // no release/air date known yet
 	}
-	// Accept YYYY-MM-DD or YYYY prefix; any well-formed date in the future is unreleased.
+	// Accept YYYY-MM-DD; any well-formed date in the future is unreleased.
 	t, err := time.Parse("2006-01-02", rd)
 	if err != nil {
 		// Malformed date — treat as unreleased.
