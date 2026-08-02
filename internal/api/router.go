@@ -2513,11 +2513,20 @@ func NewRouter(deps Dependencies) chi.Router {
 				// non-admin, item-scoped metadata action guarded by item
 				// access plus a per-user limiter, with the real budget being
 				// the per-item cooldown the metadata service enforces.
+				//
+				// The action route is conditional (it needs the metadata
+				// service to implement the optional interface), so the
+				// capability probe beside it is not: per the v1 rules a client
+				// feature-detects rather than version-sniffs, and a probe that
+				// itself 404s would leave it interpreting the same ambiguous
+				// status it was meant to replace. Unwired, the probe answers
+				// refresh:false.
 				if itemsHandler != nil && itemRepo != nil {
 					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
 						itemsHandler.SetTrailerRefreshRequester(requester)
 						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
 					}
+					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
 				}
 
 				// Subtitle search + AI translation routes.

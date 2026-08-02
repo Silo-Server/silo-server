@@ -447,3 +447,53 @@ func TestTrailersRefreshServiceErrorReturns500(t *testing.T) {
 		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusInternalServerError, rr.Body.String())
 	}
 }
+
+// The capability probe is what lets a client tell "this server does not have
+// the trailer action" from "that item does not exist", so it must answer on
+// both a wired and an unwired handler.
+func TestTrailerRefreshCapability(t *testing.T) {
+	t.Run("wired", func(t *testing.T) {
+		h := newTrailerRefreshHandler(&fakeTrailerItemAccess{}, &fakeTrailerRefreshRequester{})
+		rr := httptest.NewRecorder()
+		h.HandleTrailerRefreshCapability(rr, httptest.NewRequest(http.MethodGet, "/items/trailers/capability", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		body := decodeTrailerResponse(t, rr)
+		if body["refresh"] != true {
+			t.Fatalf("refresh = %v, want true", body["refresh"])
+		}
+		if got, want := body["cooldown_seconds"], float64(metadata.TrailerRefreshCooldown/time.Second); got != want {
+			t.Fatalf("cooldown_seconds = %v, want %v", got, want)
+		}
+		// The advertised statuses are the contract the client switches on, so
+		// they must be the service's constants rather than a stale copy.
+		statuses, _ := body["statuses"].([]any)
+		want := []string{
+			metadata.TrailerRefreshStatusQueued,
+			metadata.TrailerRefreshStatusCooldown,
+			metadata.TrailerRefreshStatusDisabled,
+		}
+		if len(statuses) != len(want) {
+			t.Fatalf("statuses = %v, want %v", statuses, want)
+		}
+		for i, status := range want {
+			if statuses[i] != status {
+				t.Fatalf("statuses[%d] = %v, want %q", i, statuses[i], status)
+			}
+		}
+	})
+
+	t.Run("unwired", func(t *testing.T) {
+		h := &ItemsHandler{}
+		rr := httptest.NewRecorder()
+		h.HandleTrailerRefreshCapability(rr, httptest.NewRequest(http.MethodGet, "/items/trailers/capability", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 — the probe itself must never 404", rr.Code)
+		}
+		body := decodeTrailerResponse(t, rr)
+		if body["refresh"] != false {
+			t.Fatalf("refresh = %v, want false", body["refresh"])
+		}
+	})
+}

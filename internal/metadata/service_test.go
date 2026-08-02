@@ -37,10 +37,20 @@ type fakeItemRepo struct {
 	trailersRequestedAt map[string]time.Time
 	trailersClaims      int
 	trailersClaimErr    error
+	trailersClaimResult *trailersClaimResult
 	trailersReleases    int
 	trailersReleased    chan struct{}
 	trailersReleaseGate chan struct{}
 	now                 func() time.Time
+}
+
+// trailersClaimResult forces a fixed answer out of the cooldown gate, for the
+// outcomes the in-memory model cannot reach on its own — notably the real
+// repository's "lost the gate but the slot kept being freed" answer, which
+// carries no timestamp.
+type trailersClaimResult struct {
+	claimed     bool
+	requestedAt *time.Time
 }
 
 func newFakeItemRepo() *fakeItemRepo {
@@ -147,6 +157,9 @@ func (r *fakeItemRepo) TryClaimTrailersRefresh(_ context.Context, contentID stri
 	}
 	if r.trailersClaimErr != nil {
 		return false, nil, r.trailersClaimErr
+	}
+	if forced := r.trailersClaimResult; forced != nil {
+		return forced.claimed, forced.requestedAt, nil
 	}
 	stored, ok := r.trailersRequestedAt[contentID]
 	if !ok || stored.Before(now.Add(-cooldown)) {
@@ -829,14 +842,21 @@ func (r *fakeLibraryRepo) CountFoldersForItem(ctx context.Context, contentID str
 
 type fakeMetadataFolderRepo struct {
 	folders map[int]*models.MediaFolder
+	// lookupErrs forces a transient failure for a folder that otherwise
+	// exists. Callers distinguish "this library is gone" from "this library
+	// could not be read", so the fake has to be able to produce both.
+	lookupErrs map[int]error
 }
 
 func (r *fakeMetadataFolderRepo) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
+	if err, ok := r.lookupErrs[id]; ok {
+		return nil, err
+	}
 	if folder, ok := r.folders[id]; ok {
 		cp := *folder
 		return &cp, nil
 	}
-	return nil, fmt.Errorf("folder not found: %d", id)
+	return nil, catalog.ErrFolderNotFound
 }
 
 // fakeRootClaimRepo implements metadataRootClaimRepo.

@@ -1887,38 +1887,64 @@ func (r *ItemRepository) IncrementRefreshFailure(ctx context.Context, contentID 
 // time. Losing the gate means either the item is in cooldown or it no longer
 // exists, which the follow-up read distinguishes — a missing row yields
 // ErrItemNotFound.
+//
+// The classification spans two statements, so a concurrent release can land
+// between them: the UPDATE loses to another request's claim, that request's
+// refresh fails and NULLs the column, and the follow-up SELECT then reads a
+// free slot. Reporting that as cooldown would be a cooldown with no
+// next-allowed time and no refresh actually running, so a NULL read retries
+// the claim once — the slot is demonstrably free, and this caller may take it.
+//
+// Contract for the three outcomes, which callers rely on to avoid emitting an
+// undateable cooldown:
+//   - (true, ts, nil): claimed; ts is the stored timestamp to release on.
+//   - (false, ts, nil): in cooldown until ts plus the window.
+//   - (false, nil, nil): lost the gate twice while the slot kept being freed,
+//     so another request is claiming it right now. Not a cooldown — the caller
+//     should treat it as "an equivalent refresh is already in flight", the same
+//     answer it gives when it loses the in-process dedup claim.
 func (r *ItemRepository) TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
-	var claimedAt time.Time
-	err := r.pool.QueryRow(ctx, `
-		UPDATE media_items
-		SET trailers_refresh_requested_at = NOW()
-		WHERE content_id = $1
-		  AND (trailers_refresh_requested_at IS NULL
-		       OR trailers_refresh_requested_at < NOW() - $2::interval)
-		RETURNING trailers_refresh_requested_at`,
-		contentID, fmt.Sprintf("%d seconds", int64(cooldown.Seconds())),
-	).Scan(&claimedAt)
-	switch {
-	case err == nil:
-		return true, &claimedAt, nil
-	case !errors.Is(err, pgx.ErrNoRows):
-		return false, nil, fmt.Errorf("claiming trailers refresh: %w", err)
-	}
-
-	var requestedAt *time.Time
-	err = r.pool.QueryRow(ctx, `
-		SELECT trailers_refresh_requested_at
-		FROM media_items
-		WHERE content_id = $1`,
-		contentID,
-	).Scan(&requestedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil, ErrItemNotFound
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var claimedAt time.Time
+		err := r.pool.QueryRow(ctx, `
+			UPDATE media_items
+			SET trailers_refresh_requested_at = NOW()
+			WHERE content_id = $1
+			  AND (trailers_refresh_requested_at IS NULL
+			       OR trailers_refresh_requested_at < NOW() - $2::interval)
+			RETURNING trailers_refresh_requested_at`,
+			contentID, fmt.Sprintf("%d seconds", int64(cooldown.Seconds())),
+		).Scan(&claimedAt)
+		switch {
+		case err == nil:
+			return true, &claimedAt, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return false, nil, fmt.Errorf("claiming trailers refresh: %w", err)
 		}
-		return false, nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+
+		var requestedAt *time.Time
+		err = r.pool.QueryRow(ctx, `
+			SELECT trailers_refresh_requested_at
+			FROM media_items
+			WHERE content_id = $1`,
+			contentID,
+		).Scan(&requestedAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil, ErrItemNotFound
+			}
+			return false, nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+		}
+		if requestedAt != nil {
+			return false, requestedAt, nil
+		}
+		// The slot was released underneath us; go around and try to take it.
 	}
-	return false, requestedAt, nil
+	// Both attempts lost the gate and both read a freed slot. Rather than
+	// report a cooldown we cannot date, treat it as contention lost to whoever
+	// is claiming and releasing in a tight loop: no timestamp, no claim.
+	return false, nil, nil
 }
 
 // ReleaseTrailersRefreshClaim hands an item's trailer-refresh cooldown slot

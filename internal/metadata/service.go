@@ -808,6 +808,16 @@ func (s *MetadataService) resolveFolderLanguage(ctx context.Context, folderID in
 // is provided. The union (most-permissive) mirrors the multi-library language
 // posture. A nil return means "allow all": unknown scope or a transient
 // lookup failure must never wipe stored trailers.
+//
+// The empty (non-nil) result is load-bearing in the other direction — it means
+// every containing library turned remote videos off, which filters everything
+// out and which RequestTrailersRefresh reports to the viewer as "disabled". So
+// a partially-resolved union cannot be returned as if it were complete: an
+// unreadable library might be the one that enables trailers, and answering
+// "disabled" (or filtering everything away) on its behalf would be a guess.
+// Any lookup failure therefore degrades the whole answer to unknown scope. A
+// folder that is genuinely gone is not a failure and is simply skipped — a
+// library that no longer exists cannot be the one enabling trailers.
 func (s *MetadataService) resolveAllowedVideoKinds(ctx context.Context, contentID string, folderID int) map[models.ExtraKind]bool {
 	if s.folderRepo == nil {
 		return nil
@@ -831,7 +841,12 @@ func (s *MetadataService) resolveAllowedVideoKinds(ctx context.Context, contentI
 	resolvedAny := false
 	for _, id := range folderIDs {
 		folder, err := s.folderRepo.GetByID(ctx, id)
-		if err != nil || folder == nil {
+		switch {
+		case err != nil && !errors.Is(err, catalog.ErrFolderNotFound):
+			slog.WarnContext(ctx, "metadata: reading library trailer kinds failed; treating video scope as unknown",
+				"component", "metadata", "content_id", contentID, "folder_id", id, "error", err)
+			return nil
+		case err != nil, folder == nil:
 			continue
 		}
 		resolvedAny = true
@@ -2415,6 +2430,11 @@ func (s *MetadataService) mergeAndPersist(
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
 			if err := s.videoRepo.ReplaceByContentID(ctx, contentID, itemVideosFromRemote(contentID, filtered)); err != nil {
 				slog.WarnContext(ctx, "metadata: failed to replace item videos", "component", "metadata", "content_id", contentID, "error", err)
+				// A failed write is invisible in ProcessResult by design (the
+				// rest of the refresh still succeeded), so tell any observer
+				// that asked — today, the viewer trailer action, which must
+				// not charge a cooldown for trailers it did not store.
+				reportVideoPersistFailure(ctx, err)
 			}
 		}
 	}
@@ -2714,6 +2734,37 @@ type TrailerRefreshOutcome struct {
 // release exists for.
 const trailerRefreshReleaseTimeout = 15 * time.Second
 
+// trailerRefreshClaimTimeout bounds the durable claim. The claim runs on a
+// context detached from the request (see RequestTrailersRefresh) and so needs
+// a deadline of its own; it is a single indexed UPDATE, so this is generous.
+const trailerRefreshClaimTimeout = 15 * time.Second
+
+// videoPersistFailureContextKey scopes a videos-persistence observer to one
+// refresh. mergeAndPersist logs and continues when videoRepo.ReplaceByContentID
+// fails, because a video write failure must not fail a whole metadata refresh
+// that otherwise succeeded — but the viewer-triggered trailer action needs to
+// know, since "refresh succeeded" is then not the same as "trailers were
+// saved", and it would otherwise consume a week-long cooldown for nothing.
+type videoPersistFailureContextKey struct{}
+
+// withVideoPersistFailureObserver returns a context that reports a failed
+// item_videos write to the supplied callback. Refreshes that do not install
+// one — every background and admin path — are unaffected.
+func withVideoPersistFailureObserver(ctx context.Context, observe func(error)) context.Context {
+	if observe == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, videoPersistFailureContextKey{}, observe)
+}
+
+// reportVideoPersistFailure notifies an installed observer, if any.
+func reportVideoPersistFailure(ctx context.Context, err error) {
+	observe, _ := ctx.Value(videoPersistFailureContextKey{}).(func(error))
+	if observe != nil {
+		observe(err)
+	}
+}
+
 // RequestTrailersRefresh is the viewer-facing trailer fetch: it starts a full
 // single-item metadata refresh at most once per TrailerRefreshCooldown.
 //
@@ -2772,32 +2823,103 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 		}
 	}()
 
-	claimed, requestedAt, err := gate.TryClaimTrailersRefresh(ctx, contentID, TrailerRefreshCooldown)
+	// The claim is a durable side effect, so it must not ride the request's
+	// context: a cancellation landing after Postgres commits the UPDATE but
+	// before pgx returns would consume the slot for the whole window with no
+	// refresh started and nothing left holding the information needed to
+	// release it. Detaching from cancellation (with a deadline of its own)
+	// keeps the claim and the goroutine that owns its release inseparable.
+	claimCtx, cancelClaim := context.WithTimeout(context.WithoutCancel(ctx), trailerRefreshClaimTimeout)
+	claimed, requestedAt, err := gate.TryClaimTrailersRefresh(claimCtx, contentID, TrailerRefreshCooldown)
+	cancelClaim()
 	if err != nil {
 		return TrailerRefreshOutcome{}, err
 	}
 	if !claimed {
-		outcome := TrailerRefreshOutcome{Status: TrailerRefreshStatusCooldown}
-		if requestedAt != nil {
-			next := requestedAt.Add(TrailerRefreshCooldown).UTC()
-			outcome.NextAllowedAt = &next
+		// A nil timestamp on a lost claim means the repository saw the slot
+		// freed underneath it twice over: another request is claiming it right
+		// now, so the honest answer is the same one a lost in-process claim
+		// gets rather than a cooldown nobody can date.
+		if requestedAt == nil {
+			return TrailerRefreshOutcome{Status: TrailerRefreshStatusQueued}, nil
 		}
-		return outcome, nil
+		next := requestedAt.Add(TrailerRefreshCooldown).UTC()
+		return TrailerRefreshOutcome{
+			Status:        TrailerRefreshStatusCooldown,
+			NextAllowedAt: &next,
+		}, nil
 	}
+
+	// Record the refresh in the durable debt queue as well. The goroutine below
+	// is the fast path and normally finishes in seconds, but it does not
+	// survive a restart; the debt row does, so a process that dies mid-refresh
+	// leaves behind work the refresh worker will pick up instead of an item
+	// that waits out the window having fetched nothing. The queue is
+	// idempotent (RequestDue merges into any existing row and never pulls a
+	// leased or recently-attempted target forward), so this is additive: on the
+	// normal path the refresh completes first and syncRefreshDebtForItem
+	// resolves the row.
+	s.enqueueTrailersRefreshDebt(ctx, contentID)
 
 	// Hand the slot back if the refresh this request started fails, including
 	// on timeout: otherwise a provider outage would lock the item for the whole
 	// cooldown window without ever having fetched anything.
-	var onFailure func(error)
+	hooks := onDemandRefreshHooks{}
 	if requestedAt != nil {
 		claimedAt := *requestedAt
-		onFailure = func(refreshErr error) {
+		// A refresh can report success while the item_videos write inside it
+		// failed and was logged — from this action's point of view that is a
+		// failure, because the cooldown is a budget for *fetching trailers*.
+		var videoPersistErr atomic.Pointer[error]
+		hooks.decorateContext = func(refreshCtx context.Context) context.Context {
+			return withVideoPersistFailureObserver(refreshCtx, func(persistErr error) {
+				videoPersistErr.CompareAndSwap(nil, &persistErr)
+			})
+		}
+		hooks.onComplete = func(refreshErr error) {
+			if refreshErr == nil {
+				if stored := videoPersistErr.Load(); stored != nil {
+					refreshErr = fmt.Errorf("persisting item videos: %w", *stored)
+				}
+			}
+			if refreshErr == nil {
+				return
+			}
 			s.releaseTrailersRefreshClaim(gate, contentID, claimedAt, refreshErr)
 		}
 	}
-	s.runOnDemandMetadataRefresh(RefreshTargetItem, contentID, onFailure)
+	s.runOnDemandMetadataRefresh(RefreshTargetItem, contentID, hooks)
 	startedRefresh = true
 	return TrailerRefreshOutcome{Status: TrailerRefreshStatusQueued}, nil
+}
+
+// enqueueTrailersRefreshDebt records the item in the durable refresh-debt queue
+// so a restart that kills the detached goroutine does not leave the cooldown
+// consumed with no refresh ever performed. Best effort by design: failing to
+// write the safety net must not fail a request whose refresh is about to start.
+func (s *MetadataService) enqueueTrailersRefreshDebt(ctx context.Context, contentID string) {
+	if s == nil || s.refreshDebtRepo == nil {
+		return
+	}
+	// RefreshDebtReasonTrailersRequested rather than the generic failure reason:
+	// nothing is wrong with this item, so it must not land in the failure band
+	// ahead of real debt, nor be counted as a failure in the operator metrics.
+	// Nothing recomputes the bit, so the next successful refresh clears it.
+	reasonMask := RefreshDebtReasonTrailersRequested
+	dueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), trailerRefreshClaimTimeout)
+	defer cancel()
+	if err := s.refreshDebtRepo.RequestDue(
+		dueCtx,
+		RefreshTargetItem,
+		contentID,
+		refreshDebtPriority(reasonMask),
+		reasonMask,
+		time.Now().UTC(),
+		metadataRefreshNudgeCooldown,
+	); err != nil {
+		slog.WarnContext(dueCtx, "metadata: failed to record durable debt for a trailers refresh", "component", "metadata",
+			"content_id", contentID, "error", err)
+	}
 }
 
 // releaseTrailersRefreshClaim clears the cooldown slot this request consumed.
@@ -2851,41 +2973,59 @@ func (s *MetadataService) startOnDemandMetadataRefresh(targetType, contentID str
 	if !s.claimOnDemandMetadataRefresh(targetType, contentID) {
 		return
 	}
-	s.runOnDemandMetadataRefresh(targetType, contentID, nil)
+	s.runOnDemandMetadataRefresh(targetType, contentID, onDemandRefreshHooks{})
+}
+
+// onDemandRefreshHooks lets a caller that consumed durable state to start a
+// detached refresh observe how that refresh went, so it can put the state back.
+// The zero value is the plain fire-and-forget refresh every background caller
+// wants.
+type onDemandRefreshHooks struct {
+	// decorateContext wraps the detached refresh's context before the refresh
+	// runs — the way a caller installs an observer scoped to just this refresh
+	// (see withVideoPersistFailureObserver).
+	decorateContext func(context.Context) context.Context
+	// onComplete runs in the detached goroutine once the refresh has finished,
+	// with the refresh error or nil on success. "Success" here is only the
+	// pipeline's own verdict: a caller that cares about a specific sub-result
+	// has to observe that separately, because a refresh can succeed overall
+	// while a single persistence step logged and continued.
+	onComplete func(error)
 }
 
 // runOnDemandMetadataRefresh runs the detached refresh for a claim the caller
-// already holds, and takes ownership of releasing it. Callers that need to know
-// whether the refresh failed — to undo durable state they consumed to start it —
-// pass onFailure; it runs in the detached goroutine with the refresh error,
-// including a timeout.
+// already holds, and takes ownership of releasing it.
 //
-// onFailure runs *before* the in-process claim is released, which keeps a
-// useful invariant for whoever picks the claim up next: by the time it is free,
-// the durable state has already been put back. The alternative ordering leaves
-// a window in which a concurrent request sees consumed state for a refresh that
-// has already failed.
-func (s *MetadataService) runOnDemandMetadataRefresh(targetType, contentID string, onFailure func(error)) {
+// hooks.onComplete runs *before* the in-process claim is released, which keeps
+// a useful invariant for whoever picks the claim up next: by the time it is
+// free, the durable state has already been put back. The alternative ordering
+// leaves a window in which a concurrent request sees consumed state for a
+// refresh that has already finished.
+func (s *MetadataService) runOnDemandMetadataRefresh(targetType, contentID string, hooks onDemandRefreshHooks) {
 	go func() {
 		defer s.releaseOnDemandMetadataRefresh(targetType, contentID)
 		ctx, cancel := context.WithTimeout(context.Background(), metadataOnDemandRefreshTimeout)
 		defer cancel()
+		if hooks.decorateContext != nil {
+			ctx = hooks.decorateContext(ctx)
+		}
 		slog.Info("metadata: starting on-demand stale refresh",
 			"target_type", targetType,
 			"content_id", contentID)
-		if err := s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false); err != nil {
+		err := s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false)
+		if err != nil {
 			slog.Warn("metadata: on-demand stale refresh failed",
 				"target_type", targetType,
 				"content_id", contentID,
 				"error", err)
-			if onFailure != nil {
-				onFailure(err)
-			}
-			return
+		} else {
+			slog.Info("metadata: completed on-demand stale refresh",
+				"target_type", targetType,
+				"content_id", contentID)
 		}
-		slog.Info("metadata: completed on-demand stale refresh",
-			"target_type", targetType,
-			"content_id", contentID)
+		if hooks.onComplete != nil {
+			hooks.onComplete(err)
+		}
 	}()
 }
 

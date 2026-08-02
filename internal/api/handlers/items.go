@@ -502,6 +502,57 @@ type trailerRefreshResponse struct {
 	NextAllowedAt string `json:"next_allowed_at,omitempty"`
 }
 
+// trailerRefreshCapabilityResponse tells a client whether this server offers
+// the viewer-facing trailer fetch, following the per-subsystem convention
+// (/events/capability, /playback/capability, /ebooks/capability).
+//
+// Without it the only signal is a 404 from the POST, which a client cannot
+// tell apart from a missing item — and the route is registered conditionally
+// (it needs the metadata service to implement the optional interface), so
+// "this build has the feature" is not the same question as "this deployment
+// serves it". A client that finds refresh false should hide the action rather
+// than offer a button that cannot work.
+type trailerRefreshCapabilityResponse struct {
+	SchemaVersion int `json:"schema_version"`
+	// Refresh reports that POST /items/{id}/trailers/refresh is served here.
+	Refresh bool `json:"refresh"`
+	// CooldownSeconds is the per-item window between viewer-triggered
+	// refreshes, so a client can explain the wait without having received a
+	// cooldown response first.
+	CooldownSeconds int `json:"cooldown_seconds"`
+	// Statuses is every value the refresh endpoint's status field may take.
+	Statuses []string `json:"statuses"`
+	// SupportedTypes is the item types the action applies to; nothing else
+	// carries remote videos, so clients should not show the action elsewhere.
+	SupportedTypes []string `json:"supported_types"`
+}
+
+// HandleTrailerRefreshCapability reports whether the trailer refresh action is
+// available. GET /api/v1/items/trailers/capability.
+//
+// It answers even when the feature is unwired, because "refresh": false is the
+// answer in that case; the router registers it unconditionally so a client
+// never has to interpret a 404 on the probe itself.
+func (h *ItemsHandler) HandleTrailerRefreshCapability(w http.ResponseWriter, _ *http.Request) {
+	enabled := h != nil && h.trailerRefreshRequester != nil && h.trailerItemAccess != nil
+	resp := trailerRefreshCapabilityResponse{
+		SchemaVersion:  1,
+		Refresh:        enabled,
+		Statuses:       []string{},
+		SupportedTypes: []string{},
+	}
+	if enabled {
+		resp.CooldownSeconds = int(metadata.TrailerRefreshCooldown / time.Second)
+		resp.Statuses = []string{
+			metadata.TrailerRefreshStatusQueued,
+			metadata.TrailerRefreshStatusCooldown,
+			metadata.TrailerRefreshStatusDisabled,
+		}
+		resp.SupportedTypes = []string{"movie", "series"}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // HandleRequestTrailersRefresh handles POST /api/v1/items/{id}/trailers/refresh:
 // any authenticated viewer with access to a movie or series may ask the server
 // to fetch its remote trailers, at most once per item per cooldown window.

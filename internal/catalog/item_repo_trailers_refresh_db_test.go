@@ -232,3 +232,73 @@ func TestTryClaimTrailersRefreshIsAtomic(t *testing.T) {
 		t.Fatalf("concurrent claims won %d times, want exactly 1", wins)
 	}
 }
+
+// TestTryClaimTrailersRefreshRetriesWhenSlotIsFreedMidClassification covers the
+// window between the conditional UPDATE and the follow-up SELECT: a caller can
+// lose the gate to another request and then have that request's refresh fail
+// and clear the timestamp before the read. Classifying that as a cooldown would
+// report one with no next-allowed time while the slot is in fact free, so the
+// claim is retried and this caller takes it.
+func TestTryClaimTrailersRefreshRetriesWhenSlotIsFreedMidClassification(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	repo := NewItemRepository(pool)
+	contentID := fmt.Sprintf("trailer-claim-retry-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres)
+		VALUES ($1, 'movie', 'Trailer Claim Retry', 'matched', '{}'::text[])
+	`, contentID); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+
+	const cooldown = 7 * 24 * time.Hour
+
+	// Another request owns the slot, so the first UPDATE below loses.
+	claimed, claimedAt, err := repo.TryClaimTrailersRefresh(ctx, contentID, cooldown)
+	if err != nil || !claimed || claimedAt == nil {
+		t.Fatalf("seed claim = %v, at = %v, err = %v", claimed, claimedAt, err)
+	}
+
+	// That request's refresh fails and hands the slot back. Doing it here
+	// models the release landing between our lost UPDATE and our follow-up
+	// read: either way the read observes NULL, which is the state under test.
+	if err := repo.ReleaseTrailersRefreshClaim(ctx, contentID, *claimedAt); err != nil {
+		t.Fatalf("release the competing claim: %v", err)
+	}
+
+	claimed, requestedAt, err := repo.TryClaimTrailersRefresh(ctx, contentID, cooldown)
+	if err != nil {
+		t.Fatalf("claim after the competing release: %v", err)
+	}
+	if !claimed {
+		t.Fatalf("a freed slot must be claimable, got claimed=false requestedAt=%v", requestedAt)
+	}
+	if requestedAt == nil {
+		t.Fatal("a winning claim must report the timestamp it stored")
+	}
+
+	// And the state really is a claim, not a phantom: the next request is in
+	// cooldown against the timestamp we just wrote.
+	claimed, requestedAt, err = repo.TryClaimTrailersRefresh(ctx, contentID, cooldown)
+	if err != nil {
+		t.Fatalf("claim after the retry won: %v", err)
+	}
+	if claimed {
+		t.Fatal("the slot must be held after the retry won it")
+	}
+	if requestedAt == nil {
+		t.Fatal("a cooldown must be dateable")
+	}
+}
