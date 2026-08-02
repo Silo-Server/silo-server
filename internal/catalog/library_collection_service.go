@@ -21,11 +21,14 @@ import (
 
 // TMDBCollectionEntry is a lightweight TMDB preset result used by the collection sync.
 type TMDBCollectionEntry struct {
-	ID        int
-	MediaType string
-	Title     string
-	IMDbID    string
-	TVDBID    int
+	ID          int
+	MediaType   string
+	Title       string
+	IMDbID      string
+	TVDBID      int
+	// ReleaseDate is the TMDB primary_release_date (movies) or first_air_date
+	// (TV) in "YYYY-MM-DD" format. An empty string means the date is unknown.
+	ReleaseDate string
 }
 
 // TraktCollectionEntry is a lightweight Trakt discovery result used by collection sync.
@@ -730,6 +733,13 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 
 	for i, entry := range results {
 		scannedEntries = i + 1
+		if tmdbEntryIsUnreleased(entry) {
+			slog.DebugContext(ctx, "TMDB preset sync: skipping unreleased entry", "component", "catalog",
+				"rank", i+1, "title", entry.Title, "release_date", entry.ReleaseDate)
+			unmatchedCount++
+			warnings = append(warnings, fmt.Sprintf("Skipped unreleased %s (release: %s)", entry.Title, entry.ReleaseDate))
+			continue
+		}
 		item, err := s.resolveTMDBEntry(ctx, collection.LibraryIDs, entry)
 		if err != nil {
 			return nil, err
@@ -902,6 +912,13 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 
 	for i, entry := range results {
 		scannedEntries = i + 1
+		if tmdbEntryIsUnreleased(entry) {
+			slog.DebugContext(ctx, "TMDB franchise sync: skipping unreleased entry", "component", "catalog",
+				"rank", i+1, "title", entry.Title, "release_date", entry.ReleaseDate)
+			unmatchedCount++
+			warnings = append(warnings, fmt.Sprintf("Skipped unreleased %s (release: %s)", entry.Title, entry.ReleaseDate))
+			continue
+		}
 		item, err := s.resolveTMDBEntry(ctx, collection.LibraryIDs, entry)
 		if err != nil {
 			return nil, err
@@ -1085,6 +1102,13 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 
 	for i, entry := range results {
 		scannedEntries = i + 1
+		if tmdbEntryIsUnreleased(entry) {
+			slog.DebugContext(ctx, "TMDB discover sync: skipping unreleased entry", "component", "catalog",
+				"rank", i+1, "title", entry.Title, "release_date", entry.ReleaseDate)
+			unmatchedCount++
+			warnings = append(warnings, fmt.Sprintf("Skipped unreleased %s (release: %s)", entry.Title, entry.ReleaseDate))
+			continue
+		}
 		item, err := s.resolveTMDBEntry(ctx, collection.LibraryIDs, entry)
 		if err != nil {
 			return nil, err
@@ -1706,4 +1730,29 @@ func (s *LibraryCollectionService) maybeGenerateCollage(ctx context.Context, col
 
 func syncTimestamp() time.Time {
 	return time.Now().UTC().Truncate(time.Microsecond)
+}
+
+// tmdbEntryIsUnreleased reports whether a TMDB collection entry should be
+// excluded from collection sync because it has not yet been released. Only
+// movies are gated: TV series first-air-date semantics differ (a series is
+// "releasing" as long as it has aired at least one episode), so they always
+// pass. An empty or unparseable ReleaseDate is treated as unreleased to avoid
+// surfacing placeholder entries that have no confirmed release.
+func tmdbEntryIsUnreleased(entry TMDBCollectionEntry) bool {
+	if entry.MediaType != "movie" {
+		return false
+	}
+	rd := strings.TrimSpace(entry.ReleaseDate)
+	if rd == "" {
+		return true // no release date known yet
+	}
+	// Accept YYYY-MM-DD or YYYY prefix; any well-formed date in the future is unreleased.
+	t, err := time.Parse("2006-01-02", rd)
+	if err != nil {
+		// Malformed date — treat as unreleased.
+		return true
+	}
+	// Truncate today to date-only for a fair UTC comparison.
+	now := time.Now().UTC().Truncate(24 * time.Hour)
+	return t.After(now)
 }

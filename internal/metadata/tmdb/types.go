@@ -10,29 +10,34 @@ type paginatedResponse[T any] struct {
 
 // MovieResult is a single movie from a TMDB collection endpoint.
 type MovieResult struct {
-	ID    int    `json:"id"`
-	Title string `json:"title"`
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	ReleaseDate string `json:"release_date"`
 }
 
 // TVResult is a single TV show from a TMDB collection endpoint.
 type TVResult struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	FirstAirDate string `json:"first_air_date"`
 }
 
 // TrendingResult is a single item from the TMDB trending endpoint.
 type TrendingResult struct {
-	ID        int    `json:"id"`
-	MediaType string `json:"media_type"`
-	Title     string `json:"title"`
-	Name      string `json:"name"`
+	ID           int    `json:"id"`
+	MediaType    string `json:"media_type"`
+	Title        string `json:"title"`
+	Name         string `json:"name"`
+	ReleaseDate  string `json:"release_date"`
+	FirstAirDate string `json:"first_air_date"`
 }
 
 // CollectionResult is a normalized item returned from a TMDB collection preset.
 type CollectionResult struct {
-	ID        int
-	MediaType string
-	Title     string
+	ID          int
+	MediaType   string
+	Title       string
+	ReleaseDate string
 }
 
 // MediaResult is a normalized TMDB movie or TV result for request search and

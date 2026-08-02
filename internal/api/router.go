@@ -3515,9 +3515,10 @@ func (a *tmdbCollectionAdapter) GetCollectionPreset(ctx context.Context, preset,
 	entries := make([]catalog.TMDBCollectionEntry, len(results))
 	for i, r := range results {
 		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
+			ID:          r.ID,
+			MediaType:   r.MediaType,
+			Title:       r.Title,
+			ReleaseDate: r.ReleaseDate,
 		}
 
 		// Fetch external IDs (IMDb, TVDB) for better matching against local library.
@@ -3554,9 +3555,10 @@ func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]cat
 			mediaType = "movie"
 		}
 		entry := catalog.TMDBCollectionEntry{
-			ID:        p.ID,
-			MediaType: mediaType,
-			Title:     p.Title,
+			ID:          p.ID,
+			MediaType:   mediaType,
+			Title:       p.Title,
+			ReleaseDate: p.ReleaseDate,
 		}
 		if externalIDs, err := a.client.GetExternalIDs(ctx, mediaType, p.ID); err == nil && externalIDs != nil {
 			entry.IMDbID = externalIDs.IMDbID
@@ -3597,9 +3599,10 @@ func (a *tmdbDiscoverAdapter) Discover(ctx context.Context, mediaType string, pa
 	entries := make([]catalog.TMDBCollectionEntry, len(results))
 	for i, r := range results {
 		entry := catalog.TMDBCollectionEntry{
-			ID:        r.ID,
-			MediaType: r.MediaType,
-			Title:     r.Title,
+			ID:          r.ID,
+			MediaType:   r.MediaType,
+			Title:       r.Title,
+			ReleaseDate: r.ReleaseDate,
 		}
 		if externalIDs, err := a.client.GetExternalIDs(ctx, r.MediaType, r.ID); err == nil && externalIDs != nil {
 			entry.IMDbID = externalIDs.IMDbID

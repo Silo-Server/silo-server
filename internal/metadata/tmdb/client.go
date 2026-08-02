@@ -489,10 +489,15 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 				if title == "" {
 					title = item.Name
 				}
+				releaseDate := item.ReleaseDate
+				if releaseDate == "" {
+					releaseDate = item.FirstAirDate
+				}
 				results = append(results, CollectionResult{
-					ID:        item.ID,
-					MediaType: item.MediaType,
-					Title:     title,
+					ID:          item.ID,
+					MediaType:   item.MediaType,
+					Title:       title,
+					ReleaseDate: releaseDate,
 				})
 			}
 			if page >= resp.TotalPages {
@@ -506,9 +511,10 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 				}
 				for _, item := range resp.Results {
 					results = append(results, CollectionResult{
-						ID:        item.ID,
-						MediaType: "tv",
-						Title:     item.Name,
+						ID:          item.ID,
+						MediaType:   "tv",
+						Title:       item.Name,
+						ReleaseDate: item.FirstAirDate,
 					})
 				}
 				if page >= resp.TotalPages {
@@ -523,9 +529,10 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 			}
 			for _, item := range resp.Results {
 				results = append(results, CollectionResult{
-					ID:        item.ID,
-					MediaType: "movie",
-					Title:     item.Title,
+					ID:          item.ID,
+					MediaType:   "movie",
+					Title:       item.Title,
+					ReleaseDate: item.ReleaseDate,
 				})
 			}
 			if page >= resp.TotalPages {
@@ -538,9 +545,10 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 			}
 			for _, item := range resp.Results {
 				results = append(results, CollectionResult{
-					ID:        item.ID,
-					MediaType: "movie",
-					Title:     item.Title,
+					ID:          item.ID,
+					MediaType:   "movie",
+					Title:       item.Title,
+					ReleaseDate: item.ReleaseDate,
 				})
 			}
 			if page >= resp.TotalPages {
@@ -553,9 +561,10 @@ func (c *Client) GetCollectionPreset(ctx context.Context, preset, mediaType, tim
 			}
 			for _, item := range resp.Results {
 				results = append(results, CollectionResult{
-					ID:        item.ID,
-					MediaType: "tv",
-					Title:     item.Name,
+					ID:          item.ID,
+					MediaType:   "tv",
+					Title:       item.Name,
+					ReleaseDate: item.FirstAirDate,
 				})
 			}
 			if page >= resp.TotalPages {
@@ -613,9 +622,10 @@ func (c *Client) Discover(ctx context.Context, mediaType string, params Discover
 			}
 			for _, item := range resp.Results {
 				results = append(results, CollectionResult{
-					ID:        item.ID,
-					MediaType: "tv",
-					Title:     item.Name,
+					ID:          item.ID,
+					MediaType:   "tv",
+					Title:       item.Name,
+					ReleaseDate: item.FirstAirDate,
 				})
 			}
 			if page >= resp.TotalPages || len(resp.Results) == 0 {
@@ -630,9 +640,10 @@ func (c *Client) Discover(ctx context.Context, mediaType string, params Discover
 		}
 		for _, item := range resp.Results {
 			results = append(results, CollectionResult{
-				ID:        item.ID,
-				MediaType: "movie",
-				Title:     item.Title,
+				ID:          item.ID,
+				MediaType:   "movie",
+				Title:       item.Title,
+				ReleaseDate: item.ReleaseDate,
 			})
 		}
 		if page >= resp.TotalPages || len(resp.Results) == 0 {
