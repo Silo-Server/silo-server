@@ -35,6 +35,14 @@ const (
 	maxPlaybackV3EventBodyBytes = 32 << 10
 	replanLeaseDurationV3       = 15 * time.Second
 	v3NodeCapabilityTTL         = time.Minute
+	subtitleFormatSRT           = "srt"
+	subtitleFormatSubRip        = "subrip"
+	subtitleFormatVTT           = "vtt"
+	subtitleFormatWebVTT        = "webvtt"
+	subtitleExtensionSRT        = ".srt"
+	subtitleExtensionVTT        = ".vtt"
+	subtitleMIMESubRip          = "application/x-subrip"
+	subtitleMIMEWebVTT          = "text/vtt"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -863,9 +871,9 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		mime := subtitleMIMEV3(format)
 		url := value.URL
 		if plan.Subtitle.Mode == playback.SubtitleConvertV3 {
-			format = "vtt"
-			mime = "text/vtt"
-			url = forceSubtitleExtensionV3(value.URL, ".vtt")
+			format = subtitleFormatVTT
+			mime = subtitleMIMEWebVTT
+			url = forceSubtitleExtensionV3(value.URL, subtitleExtensionVTT)
 		}
 		plan.Subtitle.Artifact = &playback.SubtitleArtifactV3{URL: url, MIMEType: mime, Format: format, TimingOriginSeconds: plan.Timeline.StreamOriginSeconds}
 		return nil
@@ -880,10 +888,10 @@ func supportsExternalTextSidecarSetV3(req playback.StartRequestV3) bool {
 
 func externalTextSidecarFormatV3(format string) (extension, mime, normalized string, ok bool) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "srt", "subrip":
-		return ".srt", "application/x-subrip", "srt", true
-	case "vtt", "webvtt":
-		return ".vtt", "text/vtt", "vtt", true
+	case subtitleFormatSRT, subtitleFormatSubRip:
+		return subtitleExtensionSRT, subtitleMIMESubRip, subtitleFormatSRT, true
+	case subtitleFormatVTT, subtitleFormatWebVTT:
+		return subtitleExtensionVTT, subtitleMIMEWebVTT, subtitleFormatVTT, true
 	default:
 		return "", "", "", false
 	}
@@ -1990,12 +1998,12 @@ func subtitleMIMEV3(format string) string {
 	switch strings.ToLower(format) {
 	case "ass", "ssa":
 		return "text/x-ssa"
-	case "srt", "subrip":
-		return "application/x-subrip"
+	case subtitleFormatSRT, subtitleFormatSubRip:
+		return subtitleMIMESubRip
 	case "pgs", "hdmv_pgs_subtitle":
 		return "application/octet-stream"
 	default:
-		return "text/vtt"
+		return subtitleMIMEWebVTT
 	}
 }
 

@@ -72,6 +72,10 @@ func TestSubtitleDecisionV3SidecarsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const wantJSON = `{"mode":"","sidecars":[{"track_id":"file:42:subtitle:1","index":1,"url":"/stream/session/subtitles/1.srt?file_id=42","mime_type":"application/x-subrip","format":"srt","timing_origin_seconds":12.5}]}`
+	if got := string(body); got != wantJSON {
+		t.Fatalf("wire JSON = %s, want %s", got, wantJSON)
+	}
 	var got SubtitleDecisionV3
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatal(err)

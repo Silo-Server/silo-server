@@ -91,7 +91,10 @@ video transport replan.
 The shared Kotlin protocol model decodes `subtitle.sidecars`. The V3-to-session
 adapter converts each entry to `PlayerSubtitleInfo` using the supplied combined
 index and stable identity, then merges the selected singular artifact and
-deduplicates by combined index.
+deduplicates by combined index. When a validated raw sidecar and the selected
+converted artifact share an index, the raw sidecar wins: it is the mountable,
+conversion-free representation that enables instant switching. The singular
+artifact remains authoritative when no validated sidecar occupies that index.
 
 The existing catalog merge supplies language, title, forced, default, and SDH
 metadata. `SubtitleManager` turns each nonblank eligible URL into a Media3

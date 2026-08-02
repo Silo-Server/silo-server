@@ -227,8 +227,8 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		// Protocol V3 can advertise validated external text sidecars in their
 		// native format. Keep these requests byte-for-byte raw so Media3 can
 		// parse the small text resource without a conversion step.
-		if (requestedFormat == "srt" && (format == "srt" || format == "subrip")) ||
-			(requestedFormat == "vtt" && (format == "vtt" || format == "webvtt")) {
+		if (requestedFormat == subtitleFormatSRT && (format == subtitleFormatSRT || format == subtitleFormatSubRip)) ||
+			(requestedFormat == subtitleFormatVTT && (format == subtitleFormatVTT || format == subtitleFormatWebVTT)) {
 			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error",
