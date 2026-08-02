@@ -18,7 +18,7 @@ import {
   type MetadataLanguageOverrides,
 } from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
+import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
@@ -50,80 +50,103 @@ const PLAYBACK_KEYS: SettingKey[] = [
 
 const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
 
+// Radix Select cannot represent "" as an item value, so the unset entry needs
+// a sentinel that never collides with a stored bitrate.
+const NO_BITRATE_LIMIT = "__no_limit__";
+
 /**
- * Quality is two settings behind one picker.
+ * Quality is the same two settings every other surface edits.
  *
- * The server stores a resolution cap and a bandwidth cap independently, which
- * is what the player has always sent on the wire. Presenting them as one list
- * keeps the choice simple while leaving the two axes free: a preset is a
- * client-side pairing, so retuning what "High" means never needs the server to
- * agree, and someone who sets the axes separately through the API still gets a
- * truthful label rather than a picker showing the wrong entry.
+ * The server stores a resolution cap and a bandwidth cap independently, and
+ * the device screen already presents them as two controls. Offering the same
+ * two rows here means a device override reads as an override of something the
+ * user can see, rather than of half a compound preset — and combinations no
+ * preset covered ("Original but capped at 40 Mbps" for a remote box) become
+ * expressible instead of rendering as a disabled "custom" entry.
  */
 function QualitySetting() {
   const { data: effective } = useEffectiveSettings({
-    keys: ["playback.preferred_quality", "playback.max_bitrate_kbps"],
+    keys: [SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY, SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS],
   });
   const { save, reset, isSaving } = useProfileDefaultWriter(effective);
 
-  const resolution = effective?.["playback.preferred_quality"]?.value as string | undefined;
-  const bitrate = effective?.["playback.max_bitrate_kbps"]?.value as number | null | undefined;
-  const selected = presetIdFor(resolution, bitrate);
+  const qualityDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY];
+  const bitrateDefinition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS];
 
-  const apply = (presetId: string) => {
-    const preset = presetById(presetId);
-    if (!preset) return;
-
-    save("playback.preferred_quality", preset.resolution).catch(() =>
-      toast.error("Failed to save video quality"),
-    );
-
-    // An uncapped preset clears the bitrate rather than storing a sentinel, so
-    // "no cap" stays the absence of a value at every layer. Both axes are
-    // device-overridable, so the reset clears the device row too — otherwise
-    // an override would keep capping playback after the picker said it did not.
-    if (preset.bitrateKbps === null) {
-      reset("playback.max_bitrate_kbps").catch(() =>
-        toast.error("Failed to clear the bitrate cap"),
-      );
-    } else {
-      save("playback.max_bitrate_kbps", preset.bitrateKbps).catch(() =>
-        toast.error("Failed to save maximum bitrate"),
-      );
-    }
-  };
-
-  const pending = isSaving;
+  const resolution = (effective?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]?.value ??
+    qualityDefinition.defaultValue) as string;
+  const bitrate = effective?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]?.value as
+    | number
+    | null
+    | undefined;
+  const bitrateValue = bitrate == null ? "" : String(bitrate);
+  const bitrateChoices = bitrateSelectChoices(bitrateDefinition, bitrateValue, "No limit");
 
   return (
-    <SettingRow
-      label="Video quality"
-      description="Choose the quality your profile should request when playback begins."
-      control={(id) => (
-        <div className="w-full">
-          <Select value={selected ?? "__custom"} onValueChange={apply}>
-            <SelectTrigger id={id} className="w-full sm:w-[260px]" disabled={pending}>
+    <>
+      <SettingRow
+        label="Preferred quality"
+        description="The resolution your profile should request when playback begins. Auto lets Silo pick based on your connection."
+        control={(id) => (
+          <Select
+            value={resolution}
+            disabled={isSaving}
+            onValueChange={(value) =>
+              save(SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY, value).catch(() =>
+                toast.error("Failed to save preferred quality"),
+              )
+            }
+          >
+            <SelectTrigger id={id} className="w-full sm:w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {selected === null && (
-                <SelectItem value="__custom" disabled>
-                  {describeQuality(resolution, bitrate)}
-                </SelectItem>
-              )}
-              {QUALITY_PRESETS.map((preset) => (
-                <SelectItem key={preset.id} value={preset.id}>
-                  {preset.label}
+              {optionsFor(qualityDefinition).map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-muted-foreground mt-1.5 text-xs">
-            {describeQuality(resolution, bitrate)}
-          </p>
-        </div>
-      )}
-    />
+        )}
+      />
+
+      <SettingRow
+        label="Maximum bitrate"
+        description="Cap how much bandwidth playback may use. No limit means Silo picks for the chosen resolution."
+        control={(id) => (
+          <Select
+            value={bitrateValue === "" ? NO_BITRATE_LIMIT : bitrateValue}
+            disabled={isSaving}
+            onValueChange={(next) => {
+              // "No limit" clears the rows rather than storing a sentinel, so
+              // "no cap" stays the absence of a value at every layer. The reset
+              // clears the device row too — otherwise an override would keep
+              // capping playback after this control said it did not.
+              const request =
+                next === NO_BITRATE_LIMIT
+                  ? reset(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS)
+                  : save(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, Number(next));
+              request.catch(() => toast.error("Failed to save maximum bitrate"));
+            }}
+          >
+            <SelectTrigger id={id} className="w-full sm:w-[220px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {bitrateChoices.map((choice) => (
+                <SelectItem
+                  key={choice.value || NO_BITRATE_LIMIT}
+                  value={choice.value === "" ? NO_BITRATE_LIMIT : choice.value}
+                >
+                  {choice.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      />
+    </>
   );
 }
 

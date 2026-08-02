@@ -290,6 +290,8 @@ export interface WatchPageProps {
   initialPosition?: number;
   forceInitialPosition?: boolean;
   qualityPreference?: string | null;
+  /** Bandwidth cap in kbps from playback.max_bitrate_kbps; null/undefined is uncapped. */
+  maxBitrateKbps?: number | null;
   explicitAudioTrackIndex?: number | null;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;

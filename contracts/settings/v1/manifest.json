@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 3,
+  "revision": 4,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -801,7 +801,7 @@
         "nullable": true
       },
       "default_value": null,
-      "platforms": ["web"],
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",

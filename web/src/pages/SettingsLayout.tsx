@@ -67,6 +67,8 @@ const NAV_SECTIONS: NavSection[] = [
         description: "Quality, language, and skipping",
         keywords: [
           "video quality",
+          "bitrate",
+          "bandwidth",
           "spoken language",
           "metadata language",
           "auto skip",
@@ -75,7 +77,8 @@ const NAV_SECTIONS: NavSection[] = [
           "preview",
         ],
         settings: settingIndex(
-          "Video quality",
+          "Preferred quality",
+          "Maximum bitrate",
           "Spoken language",
           "Metadata language",
           "Auto-skip intros",
@@ -310,8 +313,8 @@ const NAV_SECTIONS: NavSection[] = [
           "lip sync",
         ],
         settings: settingIndex(
-          "Video quality",
-          "Data use limit",
+          "Preferred quality",
+          "Maximum bitrate",
           "HDR",
           "Dolby Vision",
           "Play Dolby Vision films as HDR10",

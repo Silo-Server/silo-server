@@ -10,6 +10,7 @@ import type {
   TranscodeStartRequest,
 } from "../types";
 import { QUALITY_TO_RESOLUTION } from "./useCodecDetection";
+import { formatBitrateKbps } from "@/lib/bitrateOptions";
 
 /** Quality tier definition. ID is frontend-only; backend receives resolution + bitrate separately. */
 interface QualityTierDef {
@@ -57,6 +58,14 @@ interface UseTranscodeQualityParams {
   playMethod: PlayMethod | null;
   initialPosition: number;
   qualityPreference?: string | null;
+  /**
+   * Bandwidth cap in kbps (playback.max_bitrate_kbps); null/undefined is
+   * uncapped. Applied when picking the startup tier for HLS sessions. A
+   * direct-play base is not restarted to enforce it — the server chooses the
+   * play method without seeing this cap, and an explicit in-player pick
+   * always wins over it.
+   */
+  maxBitrateKbps?: number | null;
   transportRestart?: PlaybackTransportRestart | null;
 }
 
@@ -102,11 +111,7 @@ export const COMPATIBILITY_QUALITY_ID = "compatibility";
 // switcher; the two pick from the same ladder and should not disagree about how
 // to spell a number.
 export function formatQualityBitrate(kbps: number): string {
-  if (kbps >= 1000) {
-    const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
-  }
-  return `${kbps} kbps`;
+  return formatBitrateKbps(kbps);
 }
 
 function fallbackBitrateForResolution(resolution: string, sourceBitrate: number): number {
@@ -118,6 +123,34 @@ function fallbackBitrateForResolution(resolution: string, sourceBitrate: number)
     return Math.min(sourceBitrate, 10000);
   }
   return 6000;
+}
+
+/**
+ * The startup tier after the bandwidth cap: the given id when it fits (or no
+ * cap is set), otherwise the highest tier at or under the cap.
+ *
+ * "Original" carries the file's own bitrate; tiers carry their preset. An
+ * unknown file bitrate (0) is left alone rather than transcoded on a guess.
+ * Options arrive in descending quality order, so the first tier under the cap
+ * is also the best one; when even the smallest tier exceeds the cap, that
+ * smallest tier is the closest the ladder can get.
+ */
+function capStartupQuality(
+  qualityId: string,
+  options: QualityOption[],
+  version: PlayerFileVersion | undefined,
+  maxBitrateKbps: number | null | undefined,
+): string {
+  if (maxBitrateKbps == null) return qualityId;
+  const chosen = options.find((o) => o.id === qualityId);
+  const chosenBitrate = chosen?.isOriginal ? (version?.bitrate ?? 0) : (chosen?.bitrateKbps ?? 0);
+  if (chosenBitrate <= 0 || chosenBitrate <= maxBitrateKbps) return qualityId;
+
+  const tiers = options.filter((o) => !o.isOriginal && o.bitrateKbps > 0);
+  const withinCap = tiers.find((o) => o.bitrateKbps <= maxBitrateKbps);
+  if (withinCap) return withinCap.id;
+  const smallest = tiers[tiers.length - 1];
+  return smallest ? smallest.id : qualityId;
 }
 
 function playMethodLabel(method: PlayMethod | null): string {
@@ -194,6 +227,7 @@ export function useTranscodeQuality({
   playMethod,
   initialPosition,
   qualityPreference,
+  maxBitrateKbps,
   transportRestart,
 }: UseTranscodeQualityParams): UseTranscodeQualityResult {
   const config = usePlayerConfig();
@@ -601,9 +635,18 @@ export function useTranscodeQuality({
       }
     }
 
+    autoStartQuality = capStartupQuality(
+      autoStartQuality,
+      qualityOptions,
+      effectiveVersion,
+      maxBitrateKbps,
+    );
+
     startTranscode(autoStartQuality, initialPosition, true);
   }, [
+    effectiveVersion,
     initialPosition,
+    maxBitrateKbps,
     playMethod,
     qualityOptions,
     qualityPreference,

@@ -13,6 +13,22 @@ export function buildDefaultPrefs(): CardOverlayPrefs {
   return { version: 2, preset: "classic", order: [], items: buildItems(undefined) };
 }
 
+// Ids that are legal in the contract schema (card-overlays.json) but have no
+// registry entry yet because no API field backs them. The web client neither
+// renders nor edits these, but their stored config must survive a round-trip:
+// the native clients' settings UIs can author them, and dropping them here
+// would erase another client's preference on the next web save. Their bases
+// mirror the native registries' defaults (ribbons: top-right, disabled).
+const PASSTHROUGH_IDS = ["imdb_top_250", "rt_certified_fresh"] as const satisfies readonly OverlayId[];
+const PASSTHROUGH_BASE: OverlayItemConfig = { enabled: false, position: "top-right" };
+
+function isKnownOverlayId(v: unknown): v is OverlayId {
+  return (
+    typeof v === "string" &&
+    (OVERLAY_MAP.has(v as OverlayId) || (PASSTHROUGH_IDS as readonly string[]).includes(v))
+  );
+}
+
 function isValidPosition(v: unknown): v is OverlayPosition {
   return typeof v === "string" && (OVERLAY_POSITIONS as readonly string[]).includes(v);
 }
@@ -61,6 +77,12 @@ function buildItems(
         ? applyItemPatch(base, entry as Record<string, unknown>)
         : base;
   }
+  for (const id of PASSTHROUGH_IDS) {
+    const entry = source?.[id];
+    if (entry && typeof entry === "object") {
+      items[id] = applyItemPatch(PASSTHROUGH_BASE, entry as Record<string, unknown>);
+    }
+  }
   return items;
 }
 
@@ -75,11 +97,7 @@ function parseV2(parsed: Record<string, unknown>): CardOverlayPrefs {
   return {
     version: 2,
     preset: isValidPreset(parsed.preset) ? parsed.preset : "classic",
-    order: Array.isArray(parsed.order)
-      ? (parsed.order as unknown[]).filter(
-          (id): id is OverlayId => typeof id === "string" && OVERLAY_MAP.has(id as OverlayId),
-        )
-      : [],
+    order: Array.isArray(parsed.order) ? (parsed.order as unknown[]).filter(isKnownOverlayId) : [],
     items: buildItems(sourceItems),
   };
 }

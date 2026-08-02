@@ -1,7 +1,24 @@
 // @vitest-environment jsdom
 
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Radix Select reads element sizes via ResizeObserver and opens through
+// pointer capture; jsdom provides neither.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
 
 import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
@@ -198,5 +215,82 @@ describe("PlaybackSettings", () => {
       key: SETTING_KEYS.UI_NEXT_UP_MODE,
       identity: { scope: "profile" },
     });
+  });
+
+  // Quality is the same two axes the device screen edits — a resolution cap
+  // and a bandwidth cap — not a compound preset only this screen understands.
+  it("offers the resolution cap and the bandwidth cap as separate controls", () => {
+    render(<PlaybackSettings />);
+
+    expect(screen.getByText("Preferred quality")).toBeTruthy();
+    expect(screen.getByText("Maximum bitrate")).toBeTruthy();
+    expect(screen.queryByText("Video quality")).toBeNull();
+  });
+
+  it("saves the resolution cap as its own key", async () => {
+    render(<PlaybackSettings />);
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Preferred quality" }));
+    await userEvent.click(await screen.findByRole("option", { name: "1080p" }));
+
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
+        value: "1080p",
+        identity: { scope: "profile" },
+      }),
+    );
+  });
+
+  it("saves the bandwidth cap as a number", async () => {
+    render(<PlaybackSettings />);
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Maximum bitrate" }));
+    await userEvent.click(await screen.findByRole("option", { name: "10 Mbps" }));
+
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
+        value: 10000,
+        identity: { scope: "profile" },
+      }),
+    );
+  });
+
+  it("clears the bandwidth cap rather than storing a sentinel for No limit", async () => {
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, 6000, "profile"),
+      isLoading: false,
+    });
+
+    render(<PlaybackSettings />);
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Maximum bitrate" }));
+    await userEvent.click(await screen.findByRole("option", { name: "No limit" }));
+
+    // "No cap" is the absence of a value at every layer, so choosing it
+    // deletes the profile row (and any device row) instead of writing one.
+    await waitFor(() =>
+      expect(clearMutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
+        identity: { scope: "profile" },
+      }),
+    );
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("keeps a bandwidth cap set elsewhere selectable", async () => {
+    // A value from another client or the API that is not on the ladder must
+    // read back as itself, not silently as "No limit".
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS, 12345, "profile"),
+      isLoading: false,
+    });
+
+    render(<PlaybackSettings />);
+
+    expect(screen.getByRole("combobox", { name: "Maximum bitrate" }).textContent).toContain(
+      "12.3 Mbps",
+    );
   });
 });
