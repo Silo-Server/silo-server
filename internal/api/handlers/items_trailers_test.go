@@ -56,6 +56,27 @@ func (f *fakeTrailerRefreshRequester) RequestTrailersRefresh(_ context.Context, 
 	return f.outcome, nil
 }
 
+// fakeTrailerSeasonLookup and fakeTrailerEpisodeLookup stand in for the season
+// and episode tables. Their content IDs are real and resolvable, they are just
+// not media_items rows — which is exactly why the route needs them.
+type fakeTrailerSeasonLookup map[string]*models.Season
+
+func (f fakeTrailerSeasonLookup) GetByID(_ context.Context, contentID string) (*models.Season, error) {
+	if season := f[contentID]; season != nil {
+		return season, nil
+	}
+	return nil, catalog.ErrSeasonNotFound
+}
+
+type fakeTrailerEpisodeLookup map[string]*models.Episode
+
+func (f fakeTrailerEpisodeLookup) GetByID(_ context.Context, contentID string) (*models.Episode, error) {
+	if episode := f[contentID]; episode != nil {
+		return episode, nil
+	}
+	return nil, catalog.ErrEpisodeNotFound
+}
+
 func newTrailerRefreshHandler(
 	access *fakeTrailerItemAccess,
 	requester *fakeTrailerRefreshRequester,
@@ -64,6 +85,8 @@ func newTrailerRefreshHandler(
 		trailerItemAccess:       access,
 		trailerRefreshRequester: requester,
 		trailerRefreshLimiter:   ratelimit.NewMemoryLimiter(),
+		trailerSeasonLookup:     fakeTrailerSeasonLookup{},
+		trailerEpisodeLookup:    fakeTrailerEpisodeLookup{},
 	}
 }
 
@@ -97,6 +120,16 @@ func TestTrailerRefreshWiringAssertionsHold(t *testing.T) {
 	var repo any = (*catalog.ItemRepository)(nil)
 	if _, ok := repo.(trailerItemAccess); !ok {
 		t.Fatal("*catalog.ItemRepository must satisfy trailerItemAccess")
+	}
+	// SetTrailerRefreshRequester adopts these from the handler's own repos, so
+	// drift here would silently downgrade every episode ID back to a 404.
+	var seasons any = (*catalog.SeasonRepository)(nil)
+	if _, ok := seasons.(trailerSeasonLookup); !ok {
+		t.Fatal("*catalog.SeasonRepository must satisfy trailerSeasonLookup")
+	}
+	var episodes any = (*catalog.EpisodeRepository)(nil)
+	if _, ok := episodes.(trailerEpisodeLookup); !ok {
+		t.Fatal("*catalog.EpisodeRepository must satisfy trailerEpisodeLookup")
 	}
 }
 
@@ -184,10 +217,12 @@ func TestTrailersRefreshReturnsDisabled(t *testing.T) {
 	}
 }
 
-// Episode (and any non movie/series) detail responses never carry videos, so
-// asking for their trailers is a client bug rather than an empty result.
+// Only movie and series detail responses carry videos, so any other
+// media_items type is a client bug rather than an empty result. These are the
+// types that actually exist as media_items rows; episodes and seasons live in
+// their own tables and are covered separately below.
 func TestTrailersRefreshRejectsNonMovieSeriesTypes(t *testing.T) {
-	for _, itemType := range []string{"episode", "audiobook", "ebook"} {
+	for _, itemType := range []string{"audiobook", "ebook", "manga"} {
 		t.Run(itemType, func(t *testing.T) {
 			itemAccess := &fakeTrailerItemAccess{
 				items:     map[string]*models.MediaItem{"item-1": {ContentID: "item-1", Type: itemType}},
@@ -206,6 +241,80 @@ func TestTrailersRefreshRejectsNonMovieSeriesTypes(t *testing.T) {
 				t.Fatalf("unsupported type must not reach the service, got %v", requester.requests)
 			}
 		})
+	}
+}
+
+// Episodes and seasons are not media_items rows, so the item lookup misses on
+// their real content IDs. Without the fallbacks the route would answer 404
+// "Item not found" for content that plainly exists; the contract is 400
+// unsupported-type. Authorization runs against the parent series, as on the
+// on-view translation route.
+func TestTrailersRefreshRejectsEpisodeAndSeasonIDsWith400(t *testing.T) {
+	tests := []struct {
+		name       string
+		contentID  string
+		wantAccess string
+	}{
+		{name: "episode", contentID: "episode-1", wantAccess: "series-1"},
+		{name: "season", contentID: "season-1", wantAccess: "series-1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			itemAccess := &fakeTrailerItemAccess{
+				items:     map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+				ensureErr: map[string]error{},
+			}
+			requester := &fakeTrailerRefreshRequester{}
+			handler := newTrailerRefreshHandler(itemAccess, requester)
+			handler.trailerSeasonLookup = fakeTrailerSeasonLookup{
+				"season-1": {ContentID: "season-1", SeriesID: "series-1"},
+			}
+			handler.trailerEpisodeLookup = fakeTrailerEpisodeLookup{
+				"episode-1": {ContentID: "episode-1", SeriesID: "series-1"},
+			}
+
+			rr := httptest.NewRecorder()
+			handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest(tc.contentID, 7))
+
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusBadRequest, rr.Body.String())
+			}
+			body := decodeTrailerResponse(t, rr)
+			if code, _ := body["error"].(string); code != "unsupported_type" {
+				t.Fatalf("error code = %v, want unsupported_type (%s)", body["error"], rr.Body.String())
+			}
+			if len(itemAccess.checked) != 1 || itemAccess.checked[0] != tc.wantAccess {
+				t.Fatalf("access checks = %v, want [%s]", itemAccess.checked, tc.wantAccess)
+			}
+			if len(requester.requests) != 0 {
+				t.Fatalf("unsupported type must not reach the service, got %v", requester.requests)
+			}
+		})
+	}
+}
+
+// An episode inside a series the caller cannot see must not be distinguishable
+// from content that does not exist, so the access check runs before the type
+// answer.
+func TestTrailersRefreshEpisodeInInaccessibleSeriesReturns404(t *testing.T) {
+	itemAccess := &fakeTrailerItemAccess{
+		items:     map[string]*models.MediaItem{"series-1": {ContentID: "series-1", Type: "series"}},
+		ensureErr: map[string]error{"series-1": catalog.ErrItemNotFound},
+	}
+	requester := &fakeTrailerRefreshRequester{}
+	handler := newTrailerRefreshHandler(itemAccess, requester)
+	handler.trailerEpisodeLookup = fakeTrailerEpisodeLookup{
+		"episode-1": {ContentID: "episode-1", SeriesID: "series-1"},
+	}
+
+	rr := httptest.NewRecorder()
+	handler.HandleRequestTrailersRefresh(rr, newTrailerRefreshRequest("episode-1", 7))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusNotFound, rr.Body.String())
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("denied request must not reach the service, got %v", requester.requests)
 	}
 }
 

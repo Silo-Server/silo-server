@@ -37,6 +37,9 @@ type fakeItemRepo struct {
 	trailersRequestedAt map[string]time.Time
 	trailersClaims      int
 	trailersClaimErr    error
+	trailersReleases    int
+	trailersReleased    chan struct{}
+	trailersReleaseGate chan struct{}
 	now                 func() time.Time
 }
 
@@ -130,7 +133,8 @@ func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ i
 
 // TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the
 // claim succeeds only when no timestamp is stored or the stored one predates
-// the cooldown window, and a losing caller reads back the stored timestamp.
+// the cooldown window, and either way the caller reads back the timestamp now
+// stored in the column.
 func (r *fakeItemRepo) TryClaimTrailersRefresh(_ context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -151,16 +155,71 @@ func (r *fakeItemRepo) TryClaimTrailersRefresh(_ context.Context, contentID stri
 		}
 		r.trailersRequestedAt[contentID] = now
 		r.trailersClaims++
-		return true, nil, nil
+		claimed := now
+		return true, &claimed, nil
 	}
 	blocked := stored
 	return false, &blocked, nil
+}
+
+// ReleaseTrailersRefreshClaim mirrors the equality-guarded UPDATE: a slot that
+// has since been re-claimed by a newer request is left alone.
+//
+// trailersReleaseGate, when set, holds the release until the test closes it,
+// which lets a test interleave a newer claim with a late-arriving release.
+func (r *fakeItemRepo) ReleaseTrailersRefreshClaim(_ context.Context, contentID string, claimedAt time.Time) error {
+	r.mu.Lock()
+	gate := r.trailersReleaseGate
+	r.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.trailersReleases++
+	if stored, ok := r.trailersRequestedAt[contentID]; ok && stored.Equal(claimedAt) {
+		delete(r.trailersRequestedAt, contentID)
+	}
+	if r.trailersReleased != nil {
+		close(r.trailersReleased)
+		r.trailersReleased = nil
+	}
+	return nil
+}
+
+// expectTrailersRelease arms a channel closed by the next
+// ReleaseTrailersRefreshClaim, so a test can wait for the detached refresh's
+// failure path instead of polling.
+func (r *fakeItemRepo) expectTrailersRelease() chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	released := make(chan struct{})
+	r.trailersReleased = released
+	return released
 }
 
 func (r *fakeItemRepo) trailersClaimCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.trailersClaims
+}
+
+func (r *fakeItemRepo) trailersReleaseCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trailersReleases
+}
+
+// trailersStoredAt reports the timestamp currently stored for the item, or nil
+// when the slot is free.
+func (r *fakeItemRepo) trailersStoredAt(contentID string) *time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if stored, ok := r.trailersRequestedAt[contentID]; ok {
+		return &stored
+	}
+	return nil
 }
 
 type fakeRefreshDebtRepo struct {

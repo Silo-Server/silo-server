@@ -86,6 +86,7 @@ type metadataItemDeleteRepo interface {
 // concrete *catalog.ItemRepository satisfies it.
 type metadataTrailerRefreshRepo interface {
 	TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error)
+	ReleaseTrailersRefreshClaim(ctx context.Context, contentID string, claimedAt time.Time) error
 }
 
 type metadataProviderIDRepo interface {
@@ -2707,6 +2708,12 @@ type TrailerRefreshOutcome struct {
 	NextAllowedAt *time.Time
 }
 
+// trailerRefreshReleaseTimeout bounds the write that hands a cooldown slot back
+// after a failed refresh. It runs on its own context because the refresh's
+// context is frequently already expired — a timeout is one of the failures the
+// release exists for.
+const trailerRefreshReleaseTimeout = 15 * time.Second
+
 // RequestTrailersRefresh is the viewer-facing trailer fetch: it starts a full
 // single-item metadata refresh at most once per TrailerRefreshCooldown.
 //
@@ -2716,8 +2723,18 @@ type TrailerRefreshOutcome struct {
 // any, and skips the write when they returned none, so a transient empty
 // result cannot wipe stored trailers.
 //
-// Ordering matters: the disabled check runs before the gate so an item whose
-// libraries have remote videos turned off never burns a cooldown slot.
+// Ordering matters, and each step is a way to answer without burning the
+// item's weekly slot on work that will not happen:
+//   - the disabled check runs first, so an item whose libraries have remote
+//     videos turned off never consumes a slot;
+//   - the in-process dedup claim runs next, so a request that lands while an
+//     equivalent refresh is already in flight reports "queued" (truthfully —
+//     one is running) and leaves the slot for a real retry;
+//   - only then is the durable slot consumed, and it is handed back if the
+//     refresh it started fails.
+//
+// A refresh that succeeds but finds no videos keeps the slot: that is the
+// accepted "nothing to find, come back next week" outcome.
 func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID string) (TrailerRefreshOutcome, error) {
 	if s == nil {
 		return TrailerRefreshOutcome{}, ErrMetadataNotFound
@@ -2738,6 +2755,23 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 	if !ok || gate == nil {
 		return TrailerRefreshOutcome{}, ErrMetadataNotFound
 	}
+
+	// Losing the in-process claim means an equivalent full refresh for this
+	// item is already running (this action or the detail view's stale nudge —
+	// they share the key). Report it as queued and leave the slot alone: if
+	// that refresh fails, the viewer can retry immediately.
+	if !s.claimOnDemandMetadataRefresh(RefreshTargetItem, contentID) {
+		return TrailerRefreshOutcome{Status: TrailerRefreshStatusQueued}, nil
+	}
+	// The claim is ours from here: either the detached refresh takes ownership
+	// of it, or it is released before this call returns.
+	startedRefresh := false
+	defer func() {
+		if !startedRefresh {
+			s.releaseOnDemandMetadataRefresh(RefreshTargetItem, contentID)
+		}
+	}()
+
 	claimed, requestedAt, err := gate.TryClaimTrailersRefresh(ctx, contentID, TrailerRefreshCooldown)
 	if err != nil {
 		return TrailerRefreshOutcome{}, err
@@ -2751,8 +2785,43 @@ func (s *MetadataService) RequestTrailersRefresh(ctx context.Context, contentID 
 		return outcome, nil
 	}
 
-	s.startOnDemandMetadataRefresh(RefreshTargetItem, contentID)
+	// Hand the slot back if the refresh this request started fails, including
+	// on timeout: otherwise a provider outage would lock the item for the whole
+	// cooldown window without ever having fetched anything.
+	var onFailure func(error)
+	if requestedAt != nil {
+		claimedAt := *requestedAt
+		onFailure = func(refreshErr error) {
+			s.releaseTrailersRefreshClaim(gate, contentID, claimedAt, refreshErr)
+		}
+	}
+	s.runOnDemandMetadataRefresh(RefreshTargetItem, contentID, onFailure)
+	startedRefresh = true
 	return TrailerRefreshOutcome{Status: TrailerRefreshStatusQueued}, nil
+}
+
+// releaseTrailersRefreshClaim clears the cooldown slot this request consumed.
+// The repository's equality guard means a slot already re-claimed by a newer
+// request is left alone, so this is safe to run long after the fact.
+func (s *MetadataService) releaseTrailersRefreshClaim(
+	gate metadataTrailerRefreshRepo,
+	contentID string,
+	claimedAt time.Time,
+	refreshErr error,
+) {
+	ctx, cancel := context.WithTimeout(context.Background(), trailerRefreshReleaseTimeout)
+	defer cancel()
+	if err := gate.ReleaseTrailersRefreshClaim(ctx, contentID, claimedAt); err != nil {
+		slog.WarnContext(ctx, "metadata: failed to release trailers refresh cooldown slot", "component", "metadata",
+			"content_id", contentID,
+			"refresh_error", refreshErr,
+			"error", err)
+		return
+	}
+	slog.InfoContext(ctx, "metadata: released trailers refresh cooldown slot after a failed refresh",
+		"component", "metadata",
+		"content_id", contentID,
+		"refresh_error", refreshErr)
 }
 
 func (s *MetadataService) refreshDebtTargetIsDue(ctx context.Context, targetType, contentID string, now time.Time) (bool, error) {
@@ -2775,10 +2844,28 @@ func (s *MetadataService) refreshDebtTargetIsDue(ctx context.Context, targetType
 	return !debt.NextRefreshAt.After(now), nil
 }
 
+// startOnDemandMetadataRefresh takes the in-process claim for the target and,
+// if it wins, runs a detached refresh. Losing the claim means an equivalent
+// refresh is already in flight and this call is a no-op.
 func (s *MetadataService) startOnDemandMetadataRefresh(targetType, contentID string) {
 	if !s.claimOnDemandMetadataRefresh(targetType, contentID) {
 		return
 	}
+	s.runOnDemandMetadataRefresh(targetType, contentID, nil)
+}
+
+// runOnDemandMetadataRefresh runs the detached refresh for a claim the caller
+// already holds, and takes ownership of releasing it. Callers that need to know
+// whether the refresh failed — to undo durable state they consumed to start it —
+// pass onFailure; it runs in the detached goroutine with the refresh error,
+// including a timeout.
+//
+// onFailure runs *before* the in-process claim is released, which keeps a
+// useful invariant for whoever picks the claim up next: by the time it is free,
+// the durable state has already been put back. The alternative ordering leaves
+// a window in which a concurrent request sees consumed state for a refresh that
+// has already failed.
+func (s *MetadataService) runOnDemandMetadataRefresh(targetType, contentID string, onFailure func(error)) {
 	go func() {
 		defer s.releaseOnDemandMetadataRefresh(targetType, contentID)
 		ctx, cancel := context.WithTimeout(context.Background(), metadataOnDemandRefreshTimeout)
@@ -2791,6 +2878,9 @@ func (s *MetadataService) startOnDemandMetadataRefresh(targetType, contentID str
 				"target_type", targetType,
 				"content_id", contentID,
 				"error", err)
+			if onFailure != nil {
+				onFailure(err)
+			}
 			return
 		}
 		slog.Info("metadata: completed on-demand stale refresh",

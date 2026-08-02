@@ -1879,25 +1879,30 @@ func (r *ItemRepository) IncrementRefreshFailure(ctx context.Context, contentID 
 // TryClaimTrailersRefresh atomically consumes an item's trailer-refresh
 // cooldown slot. The UPDATE is the gate: it writes NOW() only when the stored
 // timestamp is NULL or older than the cooldown window, so concurrent callers
-// cannot both win. A caller that wins gets (true, nil, nil).
+// cannot both win.
 //
-// Losing the gate means either the item is in cooldown or it no longer exists,
-// which the follow-up read distinguishes: it returns the stored timestamp (the
-// basis for the caller's next-allowed time) or ErrItemNotFound.
+// Either way the returned timestamp is the value now stored in the column. A
+// winner needs it to release its own claim later (see
+// ReleaseTrailersRefreshClaim); a loser needs it to compute the next-allowed
+// time. Losing the gate means either the item is in cooldown or it no longer
+// exists, which the follow-up read distinguishes — a missing row yields
+// ErrItemNotFound.
 func (r *ItemRepository) TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
-	tag, err := r.pool.Exec(ctx, `
+	var claimedAt time.Time
+	err := r.pool.QueryRow(ctx, `
 		UPDATE media_items
 		SET trailers_refresh_requested_at = NOW()
 		WHERE content_id = $1
 		  AND (trailers_refresh_requested_at IS NULL
-		       OR trailers_refresh_requested_at < NOW() - $2::interval)`,
+		       OR trailers_refresh_requested_at < NOW() - $2::interval)
+		RETURNING trailers_refresh_requested_at`,
 		contentID, fmt.Sprintf("%d seconds", int64(cooldown.Seconds())),
-	)
-	if err != nil {
+	).Scan(&claimedAt)
+	switch {
+	case err == nil:
+		return true, &claimedAt, nil
+	case !errors.Is(err, pgx.ErrNoRows):
 		return false, nil, fmt.Errorf("claiming trailers refresh: %w", err)
-	}
-	if tag.RowsAffected() > 0 {
-		return true, nil, nil
 	}
 
 	var requestedAt *time.Time
@@ -1914,6 +1919,29 @@ func (r *ItemRepository) TryClaimTrailersRefresh(ctx context.Context, contentID 
 		return false, nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
 	}
 	return false, requestedAt, nil
+}
+
+// ReleaseTrailersRefreshClaim hands an item's trailer-refresh cooldown slot
+// back after the refresh it started failed, so the viewer can retry instead of
+// waiting out the whole window for work that never happened.
+//
+// claimedAt is the timestamp TryClaimTrailersRefresh wrote, and the equality
+// guard is what makes this safe to run from a detached goroutine: if the window
+// has since lapsed and another request claimed the slot, this UPDATE matches no
+// row and the newer claim survives untouched. Zero rows affected is therefore a
+// normal outcome, not an error.
+func (r *ItemRepository) ReleaseTrailersRefreshClaim(ctx context.Context, contentID string, claimedAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_items
+		SET trailers_refresh_requested_at = NULL
+		WHERE content_id = $1
+		  AND trailers_refresh_requested_at = $2`,
+		contentID, claimedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("releasing trailers refresh claim: %w", err)
+	}
+	return nil
 }
 
 // MediaTMDBRow is a single result row from LookupTMDBIDs, containing the

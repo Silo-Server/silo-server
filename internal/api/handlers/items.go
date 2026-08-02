@@ -63,6 +63,18 @@ type trailerItemAccess interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 }
 
+// trailerSeasonLookup and trailerEpisodeLookup resolve the content IDs that are
+// not media_items rows. Season and episode detail pages carry their own IDs, so
+// without these a client that asks for their trailers would get a 404 that
+// looks like a missing item instead of the contracted "wrong type" answer.
+type trailerSeasonLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Season, error)
+}
+
+type trailerEpisodeLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
+}
+
 type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
@@ -88,6 +100,8 @@ type ItemsHandler struct {
 	metadataRefreshRequester MetadataRefreshRequester
 	trailerRefreshRequester  TrailerRefreshRequester
 	trailerItemAccess        trailerItemAccess
+	trailerSeasonLookup      trailerSeasonLookup
+	trailerEpisodeLookup     trailerEpisodeLookup
 	trailerRefreshLimiter    ratelimit.RateLimiter
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
@@ -162,6 +176,14 @@ func (h *ItemsHandler) SetTrailerRefreshRequester(requester TrailerRefreshReques
 	}
 	if h.trailerItemAccess == nil && h.itemRepo != nil {
 		h.trailerItemAccess = h.itemRepo
+	}
+	// Seasons and episodes are not media_items rows, so the route needs these
+	// to tell "this ID is an episode" from "no such content".
+	if h.trailerSeasonLookup == nil && h.seasonRepo != nil {
+		h.trailerSeasonLookup = h.seasonRepo
+	}
+	if h.trailerEpisodeLookup == nil && h.episodeRepo != nil {
+		h.trailerEpisodeLookup = h.episodeRepo
 	}
 }
 
@@ -487,7 +509,9 @@ type trailerRefreshResponse struct {
 // "cooldown" and "disabled" are expected client-rendered states, not errors,
 // so they answer 200; 429 stays reserved for the per-user limiter. The access
 // check runs before the metadata service is called so a caller who cannot see
-// the item can never consume its cooldown slot.
+// the item can never consume its cooldown slot. A season or episode ID resolves
+// through its own table to 400 unsupported-type; only genuinely unknown content
+// answers 404.
 func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.trailerRefreshRequester == nil || h.trailerItemAccess == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Trailer refresh is not configured")
@@ -517,18 +541,21 @@ func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *ht
 		}
 	}
 
-	item, err := h.trailerItemAccess.GetByID(r.Context(), contentID)
-	if err != nil || item == nil {
-		if err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-			slog.ErrorContext(r.Context(), "trailers: failed to look up item", "component", "api",
-				"content_id", contentID, "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+	target, err := h.resolveTrailerRefreshTarget(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		writeError(w, http.StatusNotFound, "not_found", "Item not found")
+		slog.ErrorContext(r.Context(), "trailers: failed to look up item", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
 		return
 	}
-	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), contentID, h.accessFilter(r)); err != nil {
+	// Authorize against the series for a season or episode ID, exactly as the
+	// on-view translation route does, so an unsupported-type answer never
+	// leaks the existence of content the caller cannot see.
+	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), target.accessContentID, h.accessFilter(r)); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
@@ -539,11 +566,10 @@ func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Only movie and series detail responses carry videos/extras, so any other
-	// type is a client bug rather than an empty result.
-	switch item.Type {
-	case "movie", "series":
-	default:
+	// Only movie and series detail responses carry videos/extras, so anything
+	// else — another media_items type, or a season/episode ID, which is not a
+	// media_items row at all — is a client bug rather than an empty result.
+	if !target.supportsTrailers {
 		writeError(w, http.StatusBadRequest, "unsupported_type", "Trailers are only available for movies and series")
 		return
 	}
@@ -576,6 +602,58 @@ func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *ht
 			"content_id", contentID, "status", outcome.Status)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request trailers")
 	}
+}
+
+// trailerRefreshTarget is what a content ID on the trailer refresh route turned
+// out to be: whether trailers apply to it at all, and which item ID authorizes
+// it (a season or episode is authorized through its series).
+type trailerRefreshTarget struct {
+	supportsTrailers bool
+	accessContentID  string
+}
+
+// resolveTrailerRefreshTarget identifies the content behind an ID the same way
+// the on-view translation route does. Seasons and episodes live in their own
+// tables, so a media_items miss is not proof the content is absent — falling
+// through to those lookups is what lets a real episode ID answer 400
+// unsupported-type instead of a misleading 404.
+func (h *ItemsHandler) resolveTrailerRefreshTarget(ctx context.Context, contentID string) (trailerRefreshTarget, error) {
+	item, err := h.trailerItemAccess.GetByID(ctx, contentID)
+	switch {
+	case err == nil && item != nil:
+		return trailerRefreshTarget{
+			supportsTrailers: item.Type == "movie" || item.Type == "series",
+			accessContentID:  contentID,
+		}, nil
+	case err == nil, errors.Is(err, catalog.ErrItemNotFound):
+		// Fall through to the season and episode lookups.
+	default:
+		return trailerRefreshTarget{}, err
+	}
+
+	if h.trailerSeasonLookup != nil {
+		season, err := h.trailerSeasonLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil && season != nil:
+			return trailerRefreshTarget{accessContentID: season.SeriesID}, nil
+		case err == nil, errors.Is(err, catalog.ErrSeasonNotFound):
+		default:
+			return trailerRefreshTarget{}, err
+		}
+	}
+
+	if h.trailerEpisodeLookup != nil {
+		episode, err := h.trailerEpisodeLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil && episode != nil:
+			return trailerRefreshTarget{accessContentID: episode.SeriesID}, nil
+		case err == nil, errors.Is(err, catalog.ErrEpisodeNotFound):
+		default:
+			return trailerRefreshTarget{}, err
+		}
+	}
+
+	return trailerRefreshTarget{}, catalog.ErrItemNotFound
 }
 
 // HandleMarkWatched handles POST /watched/{id}.
