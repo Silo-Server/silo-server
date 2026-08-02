@@ -1729,7 +1729,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	s.populateRequesterIdentity(ctx, &req)
 	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
 	if err != nil {
-		return nil, err
+		return s.markSubmissionFailed(ctx, req.ID, actor, err)
 	}
 	// Fulfill is allowed to create virtual catalog rows before returning. Flush
 	// shared home-section membership now so Recently Added reflects the change
