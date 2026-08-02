@@ -1031,16 +1031,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			virtualProbeCache := scanner.NewVirtualProbeCache(10*time.Minute, 256)
 			virtualSourceProber := func(ctx context.Context, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
 				return virtualProbeCache.Probe(ctx, sourceURL, file, func(probeCtx context.Context, probeURL string, probeFile *models.MediaFile) (*models.MediaFile, error) {
-					relayURL, cleanup, err := remoteStreamRelay.Register(probeCtx, probeURL)
-					if err != nil {
-						return probeFile, err
-					}
-					defer cleanup()
+					// Probe the resolved provider URL directly instead of routing it
+					// through the loopback relay (see /playback/start 502 regression).
 					return scanner.ProbeVirtualSource(
 						probeCtx,
 						ffprobePath,
 						deps.Config.Playback.FFmpegPath,
-						relayURL,
+						probeURL,
 						probeFile,
 						func(dvCtx context.Context, input string) bool {
 							return playback.DVRPUStrippable(dvCtx, deps.Config.Playback.FFmpegPath, input)

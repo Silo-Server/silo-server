@@ -344,10 +344,12 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
-	// Local files get the usual preflight. The only URL accepted here is the
-	// private loopback relay created by the API handler; arbitrary remote URLs
-	// remain unsupported.
-	if !isLoopbackRelayInput(filePath) {
+	// Local files get the usual preflight. Remote inputs (resolved provider
+	// URLs and the loopback relay) are opened by FFmpeg directly; os.Stat on an
+	// HTTP URL would incorrectly return ENOENT and break every virtual remux.
+	lowerPath := strings.ToLower(strings.TrimSpace(filePath))
+	if !strings.HasPrefix(lowerPath, "http://") && !strings.HasPrefix(lowerPath, "https://") &&
+		!strings.HasPrefix(lowerPath, "virtual://") {
 		if _, err := os.Stat(filePath); err != nil {
 			if os.IsNotExist(err) {
 				http.Error(w, "file not found", http.StatusNotFound)

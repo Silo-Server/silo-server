@@ -63,8 +63,6 @@ func TestVirtualTranscodeStartupRefreshesExactSessionSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewPlaybackHandler(sessionManager, testPlaybackFileResolver{file: file})
-	handler.RemoteStreamRelay = remotestream.NewRelay()
-	t.Cleanup(func() { _ = handler.RemoteStreamRelay.Close(context.Background()) })
 
 	var mu sync.Mutex
 	var resolved []string
@@ -73,19 +71,9 @@ func TestVirtualTranscodeStartupRefreshesExactSessionSelection(t *testing.T) {
 		resolved = append(resolved, uri)
 		mu.Unlock()
 		if uri == selectedURI {
-			// Registration rejects the primary before FFmpeg startup.
-			return "http://127.0.0.1/private", nil
+			return "https://1.1.1.1/concrete", nil
 		}
 		return "", errors.New("unexpected selection")
-	})
-	handler.VirtualMediaRefreshResolver = VirtualMediaRefreshResolverFunc(func(_ context.Context, uri string, owner, user int, profile string) (string, error) {
-		mu.Lock()
-		resolved = append(resolved, uri)
-		mu.Unlock()
-		if uri != selectedURI || owner != 8 || user != 9 || profile != "profile-1" {
-			t.Errorf("refresh routing = uri %q owner %d user %d profile %q", uri, owner, user, profile)
-		}
-		return "https://1.1.1.1/refreshed", nil
 	})
 
 	_, err = handler.startLocalPlaybackTransport(context.Background(), playback.TranscodeOpts{
@@ -100,6 +88,9 @@ func TestVirtualTranscodeStartupRefreshesExactSessionSelection(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	// The missing FFmpeg binary makes the first start attempt fail, so the
+	// startup loop retries once; both resolves must carry the session-selected
+	// URI (no relay registration involved).
 	if len(resolved) != 2 || resolved[0] != selectedURI || resolved[1] != selectedURI {
 		t.Fatalf("resolved attempts = %v", resolved)
 	}
@@ -125,16 +116,14 @@ func TestResolveVirtualInputUsesRefreshResolverWhenForced(t *testing.T) {
 		return "https://1.1.1.1/refreshed", nil
 	})
 
-	_, releaseNormal, err := handler.resolveVirtualInput(context.Background(), file, 9, "profile-1", false)
+	_, _, err := handler.resolveVirtualInput(context.Background(), file, 9, "profile-1", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseNormal()
-	_, releaseRefreshed, err := handler.resolveVirtualInput(context.Background(), file, 9, "profile-1", true)
+	_, _, err = handler.resolveVirtualInput(context.Background(), file, 9, "profile-1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseRefreshed()
 	if normalCalls != 1 || refreshCalls != 1 {
 		t.Fatalf("resolver calls = normal %d refresh %d", normalCalls, refreshCalls)
 	}

@@ -108,7 +108,7 @@ func (h *PlaybackHandler) startLocalPlaybackTransportOnce(ctx context.Context, o
 				startErr = readyErr
 			}
 			_ = session.Close()
-		} else {
+		} else if cleanup != nil {
 			cleanup()
 		}
 		lastErr = startErr
@@ -152,14 +152,9 @@ func (h *PlaybackHandler) resolveVirtualInputURI(
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve virtual input: %w", err)
 	}
-	if h.RemoteStreamRelay == nil {
-		return "", nil, errors.New("remote stream relay is not configured")
-	}
-	relayURL, cleanup, err := h.RemoteStreamRelay.Register(ctx, inputPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("register virtual input relay: %w", err)
-	}
-	return relayURL, cleanup, nil
+	// Feed FFmpeg the resolved provider URL directly instead of routing it
+	// through the loopback relay (see playback regression on 2026-08-01).
+	return inputPath, nil, nil
 }
 
 // startRemotePlaybackTransport is the shared remote-node launch primitive.

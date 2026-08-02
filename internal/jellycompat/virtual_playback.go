@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -328,14 +327,9 @@ func (h *PlaybackHandler) registerVirtualInputForIdentity(ctx context.Context, u
 	if err != nil {
 		return "", nil, err
 	}
-	if h.RemoteStreamRelay == nil {
-		return "", nil, errors.New("remote stream relay is not configured")
-	}
-	relayURL, cleanup, err := h.RemoteStreamRelay.Register(ctx, resolved)
-	if err != nil {
-		return "", nil, fmt.Errorf("register remote stream relay: %w", err)
-	}
-	return relayURL, cleanup, nil
+	// Feed FFmpeg the resolved provider URL directly instead of routing it
+	// through the loopback relay (see playback regression on 2026-08-01).
+	return resolved, nil, nil
 }
 
 func (h *PlaybackHandler) serveVirtualDirect(w http.ResponseWriter, r *http.Request, session *Session, source PlaybackMediaSource) error {

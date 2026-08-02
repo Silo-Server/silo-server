@@ -320,19 +320,13 @@ func (h *StreamHandler) serveVirtualRemux(
 				continue
 			}
 		}
-		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(attemptCtx, resolved)
-		if relayErr != nil {
-			lastErr = relayErr
-			continue
-		}
 		deferred := newDeferredErrorResponseWriter(w, startupTimer.Stop)
 		attemptRequest := r.Clone(attemptCtx)
 		remuxErr := playback.ServeRemuxWithDVMode(
-			deferred, attemptRequest, relayURL, "mp4", seekSeconds,
+			deferred, attemptRequest, resolved, "mp4", seekSeconds,
 			session.TranscodeAudio, session.AudioTrackIndex,
 			file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath(),
 		)
-		cleanup()
 		if remuxErr == nil {
 			return nil
 		}
