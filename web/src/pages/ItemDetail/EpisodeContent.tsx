@@ -207,9 +207,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
       : null;
   const watchedMutation = useWatchedStateMutation(item);
   const navigationState = location.state as EpisodeNavigationState | null;
+  const isPlayable = (item.versions?.length ?? 0) > 0 || (item.playback_variants?.length ?? 0) > 0 || Boolean(item.content_id);
   const primaryAction = resolveLeafPrimaryAction(item, "Play Episode");
   const restartHref =
-    primaryAction.label === "Resume" && (item.versions?.length ?? 0) > 0
+    primaryAction.label === "Resume" && isPlayable
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
 
@@ -321,9 +322,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         actions={
           <ActionBar
             contentId={item.content_id}
-            playHref={
-              item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
-            }
+            playHref={isPlayable ? `/watch/${item.content_id}` : undefined}
             playLabel={primaryAction.label}
             playProgress={primaryAction.progress}
             restartHref={restartHref}

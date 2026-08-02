@@ -184,9 +184,10 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
     deleteSubtitlePreference.mutate(item.content_id);
   };
 
+  const isPlayable = (item.versions?.length ?? 0) > 0 || (item.playback_variants?.length ?? 0) > 0 || Boolean(item.content_id);
   const primaryAction = resolveLeafPrimaryAction(item, "Play");
   const restartHref =
-    primaryAction.label === "Resume" && item.versions.length > 0
+    primaryAction.label === "Resume" && isPlayable
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
@@ -259,7 +260,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
         actions={
           <ActionBar
             contentId={item.content_id}
-            playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
+            playHref={isPlayable ? `/watch/${item.content_id}` : undefined}
             playLabel={primaryAction.label}
             playProgress={primaryAction.progress}
             restartHref={restartHref}
