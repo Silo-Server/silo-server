@@ -4,7 +4,9 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { usePurgeVirtualPlaybackItems } from "@/hooks/queries/admin/collections";
+import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "./SettingField";
 import { SaveBar } from "./SaveBar";
@@ -25,6 +27,8 @@ export default function DatabaseSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const checkConnection = useCheckAdminSettingsConnection();
   const purgeVirtual = usePurgeVirtualPlaybackItems();
+  const { data: librariesData } = useAvailableUserLibraries();
+  const { data: pluginInstallations } = useAdminPluginInstallations();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
   const [purgeLibraryID, setPurgeLibraryID] = useState("");
   const [purgeInstallationID, setPurgeInstallationID] = useState("");
@@ -33,6 +37,29 @@ export default function DatabaseSettings() {
   const redisConfigured = redisUrl.trim() !== "" || form.sensitiveConfigured.includes("redis.url");
   const [redisEnabledOverride, setRedisEnabledOverride] = useState<boolean | null>(null);
   const effectiveRedisEnabled = redisEnabledOverride ?? redisConfigured;
+
+  const libraryOptions = useMemo(() => {
+    const opts = [{ value: "", label: "All Libraries" }];
+    if (librariesData) {
+      for (const lib of librariesData) {
+        opts.push({ value: String(lib.id), label: `${lib.name} (ID: ${lib.id})` });
+      }
+    }
+    return opts;
+  }, [librariesData]);
+
+  const pluginOptions = useMemo(() => {
+    const opts = [{ value: "", label: "All Plugins" }];
+    if (pluginInstallations) {
+      for (const plugin of pluginInstallations) {
+        opts.push({
+          value: String(plugin.id),
+          label: `${plugin.plugin_id} v${plugin.version} (ID: ${plugin.id})`,
+        });
+      }
+    }
+    return opts;
+  }, [pluginInstallations]);
 
   useEffect(() => {
     if (form.dirtyCount === 0) {
@@ -217,14 +244,16 @@ export default function DatabaseSettings() {
         </div>
         <div className="grid gap-3 pt-2 pb-1 md:grid-cols-2">
           <SettingField
-            label="Library ID Filter (optional)"
-            type="number"
+            label="Library Scope"
+            type="select"
+            options={libraryOptions}
             value={purgeLibraryID}
             onChange={setPurgeLibraryID}
           />
           <SettingField
-            label="Plugin Installation ID Filter (optional)"
-            type="number"
+            label="Plugin Installation Scope"
+            type="select"
+            options={pluginOptions}
             value={purgeInstallationID}
             onChange={setPurgeInstallationID}
           />
