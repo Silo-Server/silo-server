@@ -21,11 +21,11 @@ import (
 
 // TMDBCollectionEntry is a lightweight TMDB preset result used by the collection sync.
 type TMDBCollectionEntry struct {
-	ID          int
-	MediaType   string
-	Title       string
-	IMDbID      string
-	TVDBID      int
+	ID        int
+	MediaType string
+	Title     string
+	IMDbID    string
+	TVDBID    int
 	// ReleaseDate is the TMDB primary_release_date (movies) or first_air_date
 	// (TV) in "YYYY-MM-DD" format. An empty string means the date is unknown.
 	ReleaseDate string
