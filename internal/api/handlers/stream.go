@@ -675,17 +675,11 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 
 	inputPath := file.FilePath
 	if isVirtualPlaybackFile(file) {
-		if virtualSourceURL == "" || h.RemoteStreamRelay == nil {
+		if virtualSourceURL == "" {
 			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
 			return
 		}
-		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(r.Context(), virtualSourceURL)
-		if relayErr != nil {
-			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
-			return
-		}
-		defer cleanup()
-		inputPath = relayURL
+		inputPath = virtualSourceURL
 	}
 
 	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), inputPath, h.ffmpegPath())
@@ -821,17 +815,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 				return
 			}
 		}
-		if h.RemoteStreamRelay == nil {
-			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
-			return
-		}
-		relayURL, cleanup, relayErr := h.RemoteStreamRelay.Register(r.Context(), resolved)
-		if relayErr != nil {
-			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to prepare virtual media stream")
-			return
-		}
-		defer cleanup()
-		inputPath = relayURL
+		inputPath = resolved
 	}
 	opts := playback.StreamExtractOpts{
 		InputPath:       inputPath,

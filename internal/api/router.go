@@ -1123,7 +1123,12 @@ func NewRouter(deps Dependencies) chi.Router {
 				if err != nil {
 					return "", nil, err
 				}
-				return remoteStreamRelay.Register(ctx, resolved)
+				// Restore pre-Aug-1 behavior: feed FFmpeg the resolved provider
+				// URL directly instead of routing it through the loopback relay.
+				// The relay indirection (introduced 2026-08-01) made FFmpeg's
+				// transcode input stall, tearing transcode sessions down
+				// (ffmpeg SIGKILLed). See feat/virtual-playback-greenfield.
+				return resolved, nil, nil
 			}
 		}
 

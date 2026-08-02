@@ -320,7 +320,9 @@ func NewPlaybackHandler(
 		if err != nil {
 			return "", nil, err
 		}
-		return h.RemoteStreamRelay.Register(ctx, resolved)
+		// Restore pre-relay delivery: feed FFmpeg the resolved provider URL
+		// directly instead of the loopback relay. See internal/api/router.go.
+		return resolved, nil, nil
 	}
 	if reg, ok := sessionMgr.(interface {
 		GetSession(string) (*playback.Session, error)
