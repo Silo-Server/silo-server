@@ -117,12 +117,6 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
-	// softwareFallbackAttempted prevents a hardware encoder failure from
-	// repeatedly restarting the same broken hardware pipeline. The fallback
-	// keeps the selected source and resume position, changing only the video
-	// execution path to software.
-	softwareFallbackAttempted bool
-	softwareFallbackPending   bool
 	inputCleanupOnce          sync.Once
 }
 
@@ -1539,20 +1533,6 @@ func (s *TranscodeSession) WaitError() error {
 	return s.waitErr
 }
 
-// TrySoftwareFallback switches a failed hardware-accelerated encode to the
-// software encoder while preserving the current source, seek position, and
-// segment numbering. Hardware remains the normal first choice; this is only
-// eligible after FFmpeg has exited with an error. It returns true when a
-// replacement process was started (or is already being restarted).
-//
-// The caller must re-arm any external exit monitor through the usual restart
-// hook. Keeping this decision on the session avoids losing the resume point or
-// accidentally selecting a different provider version before software has had
-// a chance to recover the same stream.
-func (s *TranscodeSession) TrySoftwareFallback(ctx context.Context) bool {
-	return false
-}
-
 func IsHardwareTranscode(hwAccel string) bool {
 	switch strings.ToLower(strings.TrimSpace(hwAccel)) {
 	case "qsv", "vaapi", "nvenc", "cuda", "videotoolbox", "amf", "auto":
@@ -1683,20 +1663,6 @@ func (s *TranscodeSession) restart(
 	}
 	s.restartCount++
 	opts := s.opts
-	if s.softwareFallbackPending {
-		// QSV/VAAPI/NVENC remain the preferred path. This flag is set only after
-		// that path has exited with an error; consume it exactly once for the
-		// replacement process so ordinary seek restarts retain their policy.
-		opts.HWAccel = "none"
-		if strings.EqualFold(opts.TargetCodecVideo, "copy") {
-			opts.TargetCodecVideo = "h264"
-			opts.VideoBitstreamFilter = ""
-		}
-		s.softwareFallbackPending = false
-		s.opts.HWAccel = "none"
-		s.opts.TargetCodecVideo = opts.TargetCodecVideo
-		s.opts.VideoBitstreamFilter = ""
-	}
 	if refreshedPath != "" {
 		if opts.InputCleanup != nil {
 			opts.InputCleanup()
@@ -1827,9 +1793,6 @@ func (s *TranscodeSession) WaitForSegment(name string, timeout time.Duration) (s
 		}
 
 		if !running && waitErr != nil {
-			if s.TrySoftwareFallback(context.Background()) {
-				continue
-			}
 			stderr := ""
 			if s.stderr != nil {
 				stderr = truncateStderr(s.stderr.String())

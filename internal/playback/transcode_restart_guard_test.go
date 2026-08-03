@@ -2,25 +2,10 @@ package playback
 
 import (
 	"context"
-	"errors"
 	"os/exec"
 	"testing"
 	"time"
 )
-
-func TestTrySoftwareFallbackDisabled(t *testing.T) {
-	session := &TranscodeSession{
-		outputDir: t.TempDir(),
-		waitErr:   errors.New("qsv encoder error"),
-		opts: TranscodeOpts{
-			HWAccel:          "qsv",
-			TargetCodecVideo: "h264",
-		},
-	}
-	if session.TrySoftwareFallback(context.Background()) {
-		t.Fatal("TrySoftwareFallback() = true, want false (automatic software fallback disabled)")
-	}
-}
 
 func TestIsHardwareTranscodeRecognizesAutoAndQSV(t *testing.T) {
 	for _, hw := range []string{"qsv", "vaapi", "nvenc", "auto", "QSV", "Auto"} {

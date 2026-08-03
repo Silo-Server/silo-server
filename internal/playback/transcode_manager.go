@@ -730,15 +730,6 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			return
 		}
 
-		// Hardware encoders are preferred, but a killed QSV/VAAPI/NVENC
-		// process must not turn a resumable playback session into a generic
-		// unavailable error. Retry the same source and seek position through
-		// software before tearing the session down; the restart hook re-arms
-		// this monitor for the replacement process.
-		if session.TrySoftwareFallback(context.Background()) {
-			return
-		}
-
 		// ffmpeg crash — tear the session down; a client holding a valid token can
 		// reconstruct it on the next request. Pass the dead session so teardown is a
 		// compare-and-delete: a reconstruct that registered a successor under this id
