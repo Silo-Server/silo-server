@@ -451,6 +451,7 @@ func (r *RefreshDebtRepository) GetMetrics(ctx context.Context, sampleLimit int)
 		{reason: "provider_id_incomplete", mask: RefreshDebtReasonProviderIDIncomplete},
 		{reason: "refresh_failure", mask: RefreshDebtReasonRefreshFailure},
 		{reason: "core_metadata_incomplete", mask: RefreshDebtReasonCoreMetadataIncomplete},
+		{reason: "trailers_requested", mask: RefreshDebtReasonTrailersRequested},
 	}
 	for _, def := range reasonDefs {
 		var count int

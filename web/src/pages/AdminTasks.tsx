@@ -31,6 +31,7 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   stale_provider_id: "Stale provider ID",
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
+  trailers_requested: "Trailers requested",
 };
 
 function useTaskClock() {

@@ -2670,6 +2670,33 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
 				}
 
+				// Viewer-facing trailer fetch. Registered beside the on-view
+				// translation trigger because it is the same shape: a
+				// non-admin, item-scoped metadata action guarded by item
+				// access plus a per-user limiter, with the real budget being
+				// the per-item cooldown the metadata service enforces.
+				//
+				// The action route is conditional (it needs the metadata
+				// service to implement the optional interface), so the
+				// capability probe beside it is not: per the v1 rules a client
+				// feature-detects rather than version-sniffs, and a probe that
+				// itself 404s would leave it interpreting the same ambiguous
+				// status it was meant to replace. Unwired, the probe answers
+				// refresh:false.
+				if itemsHandler != nil && itemRepo != nil {
+					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
+						// Share the process's configured limiter so the
+						// per-user budget is one budget on Redis deployments
+						// rather than one per instance. Nil when rate limiting
+						// is disabled; the handler then keeps its private
+						// in-memory fallback.
+						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
+						itemsHandler.SetTrailerRefreshRequester(requester)
+						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
+					}
+					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
+				}
+
 				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
