@@ -200,7 +200,20 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
-		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))`, opts.LibraryID, opts.InstallationID); err != nil {
+		  AND ($2 = 0 OR mf.virtual_owner_installation_id = $2 OR (mf.virtual_owner_installation_id = 0 AND mi.virtual_owner_installation_id = $2))
+		UNION
+		SELECT DISTINCT mi.content_id FROM media_items mi
+		WHERE mi.virtual_owner_installation_id IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_files mf
+		      WHERE mf.content_id = mi.content_id
+		        AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		  )
+		  AND ($1 = 0 OR EXISTS (
+		      SELECT 1 FROM media_item_libraries mil
+		      WHERE mil.content_id = mi.content_id AND mil.media_folder_id = $1
+		  ))
+		  AND ($2 = 0 OR mi.virtual_owner_installation_id = $2)`, opts.LibraryID, opts.InstallationID); err != nil {
 		return 0, 0, fmt.Errorf("identify virtual media items: %w", err)
 	}
 	// Source claims are independent catalog ownership records, not foreign
