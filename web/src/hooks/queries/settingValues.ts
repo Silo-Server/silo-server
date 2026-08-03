@@ -208,7 +208,7 @@ export function useSetSettingValue() {
         },
         body: JSON.stringify({ value }),
       }),
-    onSettled: (_data, _error, variables) => {
+    onSuccess: (_data, variables) => {
       void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
       // A device-scoped write changes that device's "how many things differ"
       // count, which the device list shows. Without this the badge stays stale
@@ -227,7 +227,7 @@ export function useClearSettingValue() {
   return useMutation({
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
-    onSettled: (_data, _error, variables) => {
+    onSuccess: (_data, variables) => {
       void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
       if (variables.identity.scope === "profile_device") {
         void qc.invalidateQueries({ queryKey: deviceKeys.all });

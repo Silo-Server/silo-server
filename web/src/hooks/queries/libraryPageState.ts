@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
@@ -90,23 +90,65 @@ export function useLibraryPageStatePreference() {
   const enabled = Boolean(storage.get(storage.KEYS.PROFILE_ID));
   const { data, isLoading } = useEffectiveSettings({ keys: PAGE_STATE_KEYS, enabled });
   const mutation = useSetSettingValue();
-  const { mutate } = mutation;
+  const { mutateAsync } = mutation;
 
   const stateValue = data?.[SETTING_KEYS.UI_LIBRARY_PAGE_STATE]?.value;
   const preference = useMemo(() => parseLibraryPageStatePreference(stateValue), [stateValue]);
+  // This setting is one last-write-wins document. Keep queued changes in the
+  // same document and send them in order so a slower request cannot restore an
+  // older library state over a newer one.
+  const queuedPreferenceRef = useRef(preference);
+  const pendingWriteCountRef = useRef(0);
+  const writeChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const callerTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (pendingWriteCountRef.current === 0) {
+      queuedPreferenceRef.current = preference;
+    }
+  }, [preference]);
   // The contract default is true; anything but an explicit false keeps the
   // feature on, matching the legacy `!== "false"` reading.
   const rememberEnabled = data?.[SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE]?.value !== false;
   const saveLibrarySearch = useCallback(
     (libraryId: number, search: string) => {
-      const nextPreference = updateLibraryPageStatePreference(preference, libraryId, search);
-      mutate({
-        key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-        value: nextPreference,
-        identity: DEVICE_SCOPE,
-      });
+      if (
+        pendingWriteCountRef.current > 0 &&
+        queuedPreferenceRef.current.libraries[String(libraryId)]?.search === search
+      ) {
+        return callerTailRef.current;
+      }
+
+      const nextPreference = updateLibraryPageStatePreference(
+        queuedPreferenceRef.current,
+        libraryId,
+        search,
+      );
+      queuedPreferenceRef.current = nextPreference;
+      pendingWriteCountRef.current += 1;
+
+      const write = writeChainRef.current
+        .catch(() => undefined)
+        .then(() =>
+          mutateAsync({
+            key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+            value: nextPreference,
+            identity: DEVICE_SCOPE,
+          }),
+        );
+      callerTailRef.current = write;
+      writeChainRef.current = write.then(
+        (result) => {
+          pendingWriteCountRef.current -= 1;
+          return result;
+        },
+        () => {
+          pendingWriteCountRef.current -= 1;
+          return undefined;
+        },
+      );
+      return write;
     },
-    [mutate, preference],
+    [mutateAsync],
   );
 
   return {

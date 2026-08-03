@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { QueryDefinition } from "@/api/types";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -32,6 +32,7 @@ export default function LibraryPage() {
   const savedStateHydratedLibraryIdRef = useRef<number | null>(null);
   const applyingSavedSearchParamsRef = useRef<string | null>(null);
   const applyingSavedSearchParamsLibraryIdRef = useRef<number | null>(null);
+  const submittedLibrarySearchRef = useRef<{ libraryId: number; search: string } | null>(null);
 
   const id = Number(libraryId);
   const library = libraries?.find((l) => l.id === id);
@@ -57,9 +58,10 @@ export default function LibraryPage() {
     libraryPageStateLoading &&
     savedStateHydratedLibraryIdRef.current !== id &&
     !hasLibraryPageSearchParams(searchParams);
-  const { activeTab, browseType, queryDefinition } = parseLibraryPageState(
-    searchParams,
-    libraryType,
+  const searchParamsKey = searchParams.toString();
+  const { activeTab, browseType, queryDefinition } = useMemo(
+    () => parseLibraryPageState(new URLSearchParams(searchParamsKey), libraryType),
+    [libraryType, searchParamsKey],
   );
 
   // Tracks whether LibraryRecommended is currently rendering a hero banner.
@@ -127,6 +129,7 @@ export default function LibraryPage() {
   }, [
     activeTab,
     browseType,
+    id,
     queryDefinition,
     libraryType,
     searchParams,
@@ -162,9 +165,26 @@ export default function LibraryPage() {
       }
       return;
     }
-    if (savedLibrarySearch !== canonicalSearch) {
-      saveLibrarySearch(id, canonicalSearch);
+    // Mutation state and cache invalidation can rerender before the effective
+    // read catches up. Treat one canonical URL as one logical submission.
+    const submitted = submittedLibrarySearchRef.current;
+    if (savedLibrarySearch === canonicalSearch) {
+      if (submitted?.libraryId === id && submitted.search === canonicalSearch) {
+        submittedLibrarySearchRef.current = null;
+      }
+      return;
     }
+    if (submitted?.libraryId === id && submitted.search === canonicalSearch) {
+      return;
+    }
+
+    const nextSubmission = { libraryId: id, search: canonicalSearch };
+    submittedLibrarySearchRef.current = nextSubmission;
+    void saveLibrarySearch(id, canonicalSearch).catch(() => {
+      if (submittedLibrarySearchRef.current === nextSubmission) {
+        submittedLibrarySearchRef.current = null;
+      }
+    });
   }, [
     activeTab,
     browseType,
