@@ -5,6 +5,7 @@ import {
   bootstrapAccessToken,
   getAccessToken,
   getPersonCatalogItems,
+  onProfileUnverified,
   setAccessToken,
   setProfileId,
   setProfileToken,
@@ -169,7 +170,7 @@ describe("apiBlob", () => {
 });
 
 describe("api", () => {
-  it("keeps the originating profile headers when retrying after token refresh", async () => {
+  it("keeps the originating profile isolated when retrying after token refresh", async () => {
     const localStorageState = new Map<string, string>();
     Object.defineProperty(globalThis, "localStorage", {
       value: {
@@ -203,6 +204,8 @@ describe("api", () => {
     setRefreshToken("old");
     setProfileId("profile-old");
     setProfileToken("old");
+    const profileUnverified = vi.fn();
+    onProfileUnverified(profileUnverified);
 
     let protectedRequestCount = 0;
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
@@ -223,7 +226,13 @@ describe("api", () => {
       protectedRequestCount += 1;
       return protectedRequestCount === 1
         ? new Response(null, { status: 401 })
-        : new Response(null, { status: 204 });
+        : new Response(
+            JSON.stringify({
+              error: "profile_unverified",
+              message: "Profile verification required.",
+            }),
+            { status: 403, headers: { "Content-Type": "application/json" } },
+          );
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -232,7 +241,7 @@ describe("api", () => {
         method: "PUT",
         body: JSON.stringify({ value: { version: 1, libraries: {} } }),
       }),
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ status: 403, code: "profile_unverified" });
 
     const requestCalls = fetchMock.mock.calls.filter(
       ([input]) => String(input) !== "/api/v1/auth/refresh",
@@ -250,6 +259,10 @@ describe("api", () => {
       "X-Profile-Id": "profile-old",
       "X-Profile-Token": "old",
     });
+    expect(localStorage.getItem("profile_id")).toBe("profile-new");
+    expect(localStorage.getItem("profile_token")).toBe("new");
+    expect(profileUnverified).not.toHaveBeenCalled();
+    onProfileUnverified(null);
   });
 
   it("forwards AbortSignal from options to fetch", async () => {

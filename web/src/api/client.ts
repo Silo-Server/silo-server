@@ -343,6 +343,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 /** Performs an authenticated API request while leaving the successful body unread. */
 export async function apiResponse(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = buildApiHeaders(options);
+  const requestProfileId = headers["X-Profile-Id"] ?? null;
+  const requestProfileToken = headers["X-Profile-Token"] ?? null;
 
   let res = await fetch(`/api/v1${path}`, { ...options, headers });
 
@@ -372,7 +374,12 @@ export async function apiResponse(path: string, options: RequestInit = {}): Prom
 
   if (!res.ok) {
     const parsed = await parseApiError(res);
-    if (res.status === 403 && parsed.apiErr.error === "profile_unverified") {
+    if (
+      res.status === 403 &&
+      parsed.apiErr.error === "profile_unverified" &&
+      getProfileId() === requestProfileId &&
+      getProfileToken() === requestProfileToken
+    ) {
       setProfileToken(null);
       profileUnverifiedListener?.();
     }
