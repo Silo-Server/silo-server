@@ -25,34 +25,34 @@ vi.mock("@/utils/storage", () => ({
   },
 }));
 
-vi.mock("@/hooks/queries/settingValues", () => ({
-  isDefinitiveSettingMutationRejection: (error: unknown) => {
-    const status =
-      typeof error === "object" && error !== null && "status" in error
-        ? (error as { status?: unknown }).status
-        : undefined;
-    return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
-  },
-  useEffectiveSettings: () => ({
-    data: {
-      "ui.library_page_state": {
-        value: mocks.preference,
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/queries/settingValues")>();
+  return {
+    ...actual,
+    useEffectiveSettings: () => ({
+      data: {
+        "ui.library_page_state": {
+          value: mocks.preference,
+        },
+        "ui.remember_library_page_state": { value: true },
       },
-      "ui.remember_library_page_state": { value: true },
-    },
-    isLoading: false,
-  }),
-  useSetSettingValue: () => ({
-    mutate: mocks.mutate,
-    mutateAsync: mocks.mutateAsync,
-  }),
-}));
+      isLoading: false,
+    }),
+    useSetSettingValue: () => ({
+      mutate: mocks.mutate,
+      mutateAsync: mocks.mutateAsync,
+    }),
+  };
+});
+
+let profileSequence = 0;
 
 describe("useLibraryPageStatePreference", () => {
   beforeEach(() => {
     mocks.mutate.mockReset();
     mocks.mutateAsync.mockReset();
-    mocks.profileId = "profile-1";
+    profileSequence += 1;
+    mocks.profileId = `profile-test-${profileSequence}`;
     mocks.preference = {
       version: 1,
       libraries: { "3": { search: "tab=collections" } },
@@ -512,7 +512,7 @@ describe("useLibraryPageStatePreference", () => {
     });
   });
 
-  it("preserves a queued tail failure for a coalesced save", async () => {
+  it("returns the promise for the matching in-flight save", async () => {
     let resolveFirst: ((value: unknown) => void) | undefined;
     mocks.mutateAsync
       .mockImplementationOnce(
@@ -528,7 +528,8 @@ describe("useLibraryPageStatePreference", () => {
     const tail = result.current.saveLibrarySearch(9, "tab=collections");
     const coalesced = result.current.saveLibrarySearch(7, "tab=library&sort=year");
     const tailError = tail.catch((error: unknown) => error);
-    const coalescedError = coalesced.catch((error: unknown) => error);
+
+    expect(coalesced).toBe(first);
 
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
     await act(async () => {
@@ -536,9 +537,142 @@ describe("useLibraryPageStatePreference", () => {
       await first;
     });
 
+    await expect(coalesced).resolves.toEqual({});
     expect(await tailError).toEqual(new ApiClientError(429, "rate_limited", "rate limited"));
-    expect(await coalescedError).toEqual(new ApiClientError(429, "rate_limited", "rate limited"));
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the rejected promise for a matching middle write", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    const rejected = new ApiClientError(429, "rate_limited", "rate limited");
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockRejectedValueOnce(rejected)
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useLibraryPageStatePreference());
+
+    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    const middle = result.current.saveLibrarySearch(9, "tab=collections");
+    void result.current.saveLibrarySearch(7, "tab=library&sort=title");
+    const revisitedMiddle = result.current.saveLibrarySearch(9, "tab=collections");
+
+    expect(revisitedMiddle).toBe(middle);
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveFirst?.({});
+      await first;
+    });
+
+    await expect(revisitedMiddle).rejects.toEqual(rejected);
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(3));
+  });
+
+  it("does not coalesce past a newer value for the same library", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({});
+    const { result } = renderHook(() => useLibraryPageStatePreference());
+
+    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    void result.current.saveLibrarySearch(7, "tab=library&sort=title");
+    const latest = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+
+    expect(latest).not.toBe(first);
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveFirst?.({});
+      await first;
+      await latest;
+    });
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(3);
+    expect(mocks.mutateAsync.mock.calls[2][0].value.libraries["7"]).toEqual({
+      search: "tab=library&sort=year",
+    });
+  });
+
+  it("does not share a cancellable queued write across hook instances", async () => {
+    let resolveBlocker: ((value: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBlocker = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({});
+    const firstHook = renderHook(() => useLibraryPageStatePreference());
+
+    const blocker = firstHook.result.current.saveLibrarySearch(5, "tab=collections");
+    const cancelled = firstHook.result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    const cancellation = cancelled.catch((error: unknown) => error);
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+
+    const secondHook = renderHook(() => useLibraryPageStatePreference());
+    const retained = secondHook.result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    expect(retained).not.toBe(cancelled);
+    firstHook.unmount();
+
+    await act(async () => {
+      resolveBlocker?.({});
+      await blocker;
+      await cancellation;
+      await retained;
+    });
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
+    expect(mocks.mutateAsync.mock.calls[1][0].value.libraries["7"]).toEqual({
+      search: "tab=library&sort=year",
+    });
+  });
+
+  it("serializes whole-document saves across hook remounts", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({});
+    const firstHook = renderHook(() => useLibraryPageStatePreference());
+
+    const first = firstHook.result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    firstHook.unmount();
+
+    const secondHook = renderHook(() => useLibraryPageStatePreference());
+    const second = secondHook.result.current.saveLibrarySearch(9, "tab=collections");
+    await Promise.resolve();
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveFirst?.({});
+      await first;
+      await second;
+    });
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "7": { search: "tab=library&sort=year" },
+        "9": { search: "tab=collections" },
+      },
+    });
   });
 
   it("cancels queued writes when the active profile changes", async () => {
@@ -557,7 +691,7 @@ describe("useLibraryPageStatePreference", () => {
 
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
     act(() => {
-      mocks.profileId = "profile-2";
+      mocks.profileId = `${mocks.profileId}-next`;
       rerender();
     });
     await act(async () => {
@@ -572,6 +706,53 @@ describe("useLibraryPageStatePreference", () => {
     expect(shouldRetryLibraryPageStateWrite(cancellation)).toBe(true);
     expect(libraryPageStateWriteRetryDelay(cancellation, 2_000)).toBe(0);
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the local overlay when a queued write is cancelled before dispatch", async () => {
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValueOnce({});
+    const originalProfileId = mocks.profileId;
+    const { result, rerender } = renderHook(() => useLibraryPageStatePreference());
+
+    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    const firstError = first.catch((error: unknown) => error);
+    const cancelled = result.current.saveLibrarySearch(9, "tab=collections");
+    const cancellation = cancelled.catch((error: unknown) => error);
+
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    act(() => {
+      mocks.profileId = `${originalProfileId}-next`;
+      rerender();
+    });
+    await act(async () => {
+      rejectFirst?.(new TypeError("response connection lost"));
+      await firstError;
+      await cancellation;
+    });
+
+    act(() => {
+      mocks.profileId = originalProfileId;
+      rerender();
+    });
+    await act(async () => {
+      await result.current.saveLibrarySearch(13, "tab=library&sort=added");
+    });
+
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "7": { search: "tab=library&sort=year" },
+        "13": { search: "tab=library&sort=added" },
+      },
+    });
   });
 
   it("honors a rate-limit retry hint while keeping retries bounded by the caller", () => {

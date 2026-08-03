@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiClientError } from "@/api/client";
 import {
   isDefinitiveSettingMutationRejection,
@@ -24,20 +24,30 @@ export interface LibraryPageStatePreference {
 
 interface PreferenceWriteQueue {
   ownerProfileId: string | null;
-  active: boolean;
+  subscribers: number;
   resolvedPreference: LibraryPageStatePreference;
-  queuedPreference: LibraryPageStatePreference;
   deferredPreference: LibraryPageStatePreference | null;
   unconfirmedWrites: PendingPreferenceWrite[];
   pendingWrites: PendingPreferenceWrite[];
   writeChain: Promise<unknown>;
-  callerTail: Promise<unknown>;
+}
+
+interface PreferenceWriteLease {
+  ownerProfileId: string | null;
+  active: boolean;
 }
 
 interface PendingPreferenceWrite {
   libraryId: number;
   search: string;
+  lease: PreferenceWriteLease;
+  promise?: Promise<unknown>;
 }
+
+// The setting is a whole-document value. Keep one queue per profile for the
+// lifetime of this browser context so an unmount/remount cannot let a newer
+// document race an older in-flight PUT.
+const preferenceWriteQueues = new Map<string, PreferenceWriteQueue>();
 
 /**
  * Accepts the canonical object value, the legacy JSON-string encoding, or
@@ -112,15 +122,29 @@ function createPreferenceWriteQueue(
 ): PreferenceWriteQueue {
   return {
     ownerProfileId,
-    active: true,
+    subscribers: 0,
     resolvedPreference: preference,
-    queuedPreference: preference,
     deferredPreference: null,
     unconfirmedWrites: [],
     pendingWrites: [],
     writeChain: Promise.resolve(),
-    callerTail: Promise.resolve(),
   };
+}
+
+function getPreferenceWriteQueue(
+  ownerProfileId: string | null,
+  preference: LibraryPageStatePreference,
+): PreferenceWriteQueue {
+  if (ownerProfileId === null) {
+    return createPreferenceWriteQueue(null, preference);
+  }
+  const existing = preferenceWriteQueues.get(ownerProfileId);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const queue = createPreferenceWriteQueue(ownerProfileId, preference);
+  preferenceWriteQueues.set(ownerProfileId, queue);
+  return queue;
 }
 
 function applyPendingPreferenceWrites(
@@ -138,6 +162,23 @@ function appendPreferenceWrite(
   write: PendingPreferenceWrite,
 ): PendingPreferenceWrite[] {
   return [...writes.filter((candidate) => candidate.libraryId !== write.libraryId), write];
+}
+
+function findMatchingPendingWrite(
+  writes: PendingPreferenceWrite[],
+  lease: PreferenceWriteLease,
+  libraryId: number,
+  search: string,
+): PendingPreferenceWrite | undefined {
+  for (let index = writes.length - 1; index >= 0; index -= 1) {
+    const write = writes[index];
+    if (write?.libraryId === libraryId) {
+      return write.lease === lease && write.lease.active && write.search === search
+        ? write
+        : undefined;
+    }
+  }
+  return undefined;
 }
 
 function removeConfirmedPreferenceWrites(
@@ -178,10 +219,6 @@ function settlePreferenceWrite(
   queue.resolvedPreference = applyPendingPreferenceWrites(resolvedBase, queue.unconfirmedWrites);
   queue.deferredPreference = null;
   queue.pendingWrites = queue.pendingWrites.filter((write) => write !== pendingWrite);
-  queue.queuedPreference = applyPendingPreferenceWrites(
-    queue.resolvedPreference,
-    queue.pendingWrites,
-  );
 }
 
 class LibraryPreferenceWriteCancelledError extends Error {}
@@ -246,29 +283,44 @@ export function useLibraryPageStatePreference() {
   // This setting is one last-write-wins document. Keep queued changes in the
   // same document and send them in order so a slower request cannot restore an
   // older library state over a newer one.
-  // Eager initialization makes `current` non-null before any effect or save.
-  const writeQueueRef = useRef(createPreferenceWriteQueue(activeProfileId, preference));
+  const [initialWriteQueue] = useState(() => getPreferenceWriteQueue(activeProfileId, preference));
+  const [initialWriteLease] = useState<PreferenceWriteLease>(() => ({
+    ownerProfileId: activeProfileId,
+    active: false,
+  }));
+  const writeQueueRef = useRef(initialWriteQueue);
+  const writeLeaseRef = useRef(initialWriteLease);
   useEffect(() => {
     let currentQueue = writeQueueRef.current;
+    let currentLease = writeLeaseRef.current;
     if (currentQueue.ownerProfileId !== activeProfileId) {
-      currentQueue.active = false;
+      currentLease.active = false;
       // The following preference-sync effect supplies this owner's resolved
       // document before callers' effects can enqueue a write.
-      currentQueue = createPreferenceWriteQueue(
+      currentQueue = getPreferenceWriteQueue(
         activeProfileId,
         createEmptyLibraryPageStatePreference(),
       );
+      currentLease = { ownerProfileId: activeProfileId, active: false };
       writeQueueRef.current = currentQueue;
+      writeLeaseRef.current = currentLease;
     }
-    currentQueue.active = true;
+    currentQueue.subscribers += 1;
+    currentLease.active = true;
 
     return () => {
-      currentQueue.active = false;
+      currentLease.active = false;
+      currentQueue.subscribers = Math.max(0, currentQueue.subscribers - 1);
     };
   }, [activeProfileId]);
   useEffect(() => {
     const queue = writeQueueRef.current;
-    if (!queue.active || queue.ownerProfileId !== activeProfileId) {
+    const lease = writeLeaseRef.current;
+    if (
+      !lease.active ||
+      lease.ownerProfileId !== activeProfileId ||
+      queue.ownerProfileId !== activeProfileId
+    ) {
       return;
     }
     if (queue.pendingWrites.length === 0) {
@@ -277,7 +329,6 @@ export function useLibraryPageStatePreference() {
         queue.unconfirmedWrites,
       );
       queue.resolvedPreference = applyPendingPreferenceWrites(preference, queue.unconfirmedWrites);
-      queue.queuedPreference = queue.resolvedPreference;
       queue.deferredPreference = null;
     } else {
       // A realtime update or mutation refetch can arrive while a local write
@@ -296,33 +347,30 @@ export function useLibraryPageStatePreference() {
   const saveLibrarySearch = useCallback(
     (libraryId: number, search: string) => {
       const queue = writeQueueRef.current;
+      const lease = writeLeaseRef.current;
       if (
-        !queue.active ||
+        !lease.active ||
+        lease.ownerProfileId !== activeProfileId ||
         queue.ownerProfileId === null ||
         queue.ownerProfileId !== activeProfileId
       ) {
         return Promise.reject(cancelledPreferenceWrite());
       }
-      if (
-        queue.pendingWrites.length > 0 &&
-        queue.queuedPreference.libraries[String(libraryId)]?.search === search
-      ) {
-        return queue.callerTail;
+      const matchingWrite = findMatchingPendingWrite(queue.pendingWrites, lease, libraryId, search);
+      if (matchingWrite?.promise !== undefined) {
+        return matchingWrite.promise;
       }
 
-      const pendingWrite = { libraryId, search };
+      const pendingWrite: PendingPreferenceWrite = { libraryId, search, lease };
       queue.pendingWrites.push(pendingWrite);
-      queue.queuedPreference = applyPendingPreferenceWrites(
-        queue.resolvedPreference,
-        queue.pendingWrites,
-      );
 
       let attemptedPreference: LibraryPageStatePreference | undefined;
       let attemptedWrites: PendingPreferenceWrite[] = [];
+      let mutationStarted = false;
       const write = queue.writeChain
         .catch(() => undefined)
         .then(() => {
-          if (!queue.active || storage.get(storage.KEYS.PROFILE_ID) !== queue.ownerProfileId) {
+          if (!lease.active || storage.get(storage.KEYS.PROFILE_ID) !== queue.ownerProfileId) {
             throw cancelledPreferenceWrite();
           }
           attemptedPreference = updateLibraryPageStatePreference(
@@ -331,13 +379,14 @@ export function useLibraryPageStatePreference() {
             search,
           );
           attemptedWrites = appendPreferenceWrite(queue.unconfirmedWrites, pendingWrite);
+          mutationStarted = true;
           return mutateAsync({
             key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
             value: attemptedPreference,
             identity: DEVICE_SCOPE,
           });
         });
-      queue.callerTail = write;
+      pendingWrite.promise = write;
       queue.writeChain = write.then(
         (result) => {
           settlePreferenceWrite(
@@ -353,7 +402,7 @@ export function useLibraryPageStatePreference() {
           settlePreferenceWrite(
             queue,
             pendingWrite,
-            isDefinitiveSettingMutationRejection(error)
+            !mutationStarted || isDefinitiveSettingMutationRejection(error)
               ? "definitive_failure"
               : "ambiguous_failure",
             attemptedPreference,

@@ -48,8 +48,10 @@ export default function LibraryPage() {
     rememberEnabled: rememberLibraryPageState,
     saveLibrarySearch,
   } = useLibraryPageStatePreference();
-  const savedStateHydratedKeyRef = useRef<string | null>(null);
-  const hydratedLibrarySearchRef = useRef<HydratedLibrarySearch | null>(null);
+  const [savedStateHydratedKey, setSavedStateHydratedKey] = useState<string | null>(null);
+  const [hydratedLibrarySearch, setHydratedLibrarySearch] = useState<HydratedLibrarySearch | null>(
+    null,
+  );
   const applyingSavedSearchParamsRef = useRef<string | null>(null);
   const applyingSavedSearchParamsKeyRef = useRef<string | null>(null);
   const submittedLibrarySearchRef = useRef<{ key: string } | null>(null);
@@ -74,29 +76,27 @@ export default function LibraryPage() {
       ? libraryPageStatePreference.libraries[String(id)]?.search
       : undefined;
   const currentLibrarySearch = serializeLibraryPageSearchParams(searchParams);
-  const hydratedLibrarySearch = hydratedLibrarySearchRef.current;
   const hasInheritedHydratedSearch =
     hydratedLibrarySearch !== null &&
     hydratedLibrarySearch.ownerProfileId !== libraryPageStateOwnerProfileId &&
     hydratedLibrarySearch.libraryId === id &&
     hydratedLibrarySearch.search === currentLibrarySearch;
-  const shouldApplySavedLibrarySearch =
+  const hasUnhydratedLibraryState =
     Boolean(libraryType) &&
     Number.isFinite(id) &&
     id > 0 &&
+    savedStateHydratedKey !== libraryPageStateKey;
+  const shouldApplySavedLibrarySearch =
+    hasUnhydratedLibraryState &&
     !libraryPageStateLoading &&
-    savedStateHydratedKeyRef.current !== libraryPageStateKey &&
     ((hasInheritedHydratedSearch && !rememberLibraryPageState) ||
       (rememberLibraryPageState &&
         (!hasLibraryPageSearchParams(searchParams) || hasInheritedHydratedSearch) &&
         ((savedLibrarySearch != null && savedLibrarySearch !== currentLibrarySearch) ||
           hasInheritedHydratedSearch)));
   const shouldWaitForSavedLibrarySearch =
-    Boolean(libraryType) &&
-    Number.isFinite(id) &&
-    id > 0 &&
+    hasUnhydratedLibraryState &&
     libraryPageStateLoading &&
-    savedStateHydratedKeyRef.current !== libraryPageStateKey &&
     (!hasLibraryPageSearchParams(searchParams) || hasInheritedHydratedSearch);
   const searchParamsKey = searchParams.toString();
   const { activeTab, browseType, queryDefinition } = useMemo(
@@ -116,18 +116,19 @@ export default function LibraryPage() {
 
   useDocumentTitle(library?.name ?? "Library");
 
+  /* eslint-disable react-hooks/set-state-in-effect -- hydration provenance is synchronized with router state */
   useEffect(() => {
-    const hydrated = hydratedLibrarySearchRef.current;
     if (
-      hydrated?.ownerProfileId === libraryPageStateOwnerProfileId &&
-      hydrated.libraryId === id &&
-      hydrated.search !== currentLibrarySearch
+      applyingSavedSearchParamsRef.current === null &&
+      hydratedLibrarySearch?.ownerProfileId === libraryPageStateOwnerProfileId &&
+      hydratedLibrarySearch.libraryId === id &&
+      hydratedLibrarySearch.search !== currentLibrarySearch
     ) {
       // The URL no longer matches what this profile hydrated, so a later
       // profile switch must treat it as an explicit user choice.
-      hydratedLibrarySearchRef.current = null;
+      setHydratedLibrarySearch(null);
     }
-  }, [currentLibrarySearch, id, libraryPageStateOwnerProfileId]);
+  }, [currentLibrarySearch, hydratedLibrarySearch, id, libraryPageStateOwnerProfileId]);
 
   useEffect(() => {
     if (
@@ -135,23 +136,23 @@ export default function LibraryPage() {
       !Number.isFinite(id) ||
       id <= 0 ||
       libraryPageStateLoading ||
-      savedStateHydratedKeyRef.current === libraryPageStateKey ||
+      savedStateHydratedKey === libraryPageStateKey ||
       !shouldApplySavedLibrarySearch
     ) {
       return;
     }
 
-    savedStateHydratedKeyRef.current = libraryPageStateKey;
+    setSavedStateHydratedKey(libraryPageStateKey);
     const nextSearchParams = applySavedLibraryPageSearchParams(
       searchParams,
       rememberLibraryPageState ? (savedLibrarySearch ?? "") : "",
     );
     const hydratedSearch = serializeLibraryPageSearchParams(nextSearchParams);
-    hydratedLibrarySearchRef.current = {
+    setHydratedLibrarySearch({
       ownerProfileId: libraryPageStateOwnerProfileId,
       libraryId: id,
       search: hydratedSearch,
-    };
+    });
     if (nextSearchParams.toString() !== searchParams.toString()) {
       applyingSavedSearchParamsRef.current = hydratedSearch;
       applyingSavedSearchParamsKeyRef.current = libraryPageStateKey;
@@ -164,11 +165,13 @@ export default function LibraryPage() {
     libraryPageStateOwnerProfileId,
     libraryType,
     rememberLibraryPageState,
+    savedStateHydratedKey,
     savedLibrarySearch,
     searchParams,
     setSearchParams,
     shouldApplySavedLibrarySearch,
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!libraryType || shouldApplySavedLibrarySearch) {
