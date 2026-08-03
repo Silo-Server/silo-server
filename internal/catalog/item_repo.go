@@ -344,6 +344,22 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 	if opts.DryRun {
 		return filesDeleted, itemsDeleted, nil
 	}
+	// Remove orphaned library memberships: items that have no files and no
+	// virtual owner should not appear in any library's browse results.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_libraries mil
+		WHERE mil.content_id IN (SELECT content_id FROM purge_virtual_items)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_files mf WHERE mf.content_id = mil.content_id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM media_items mi
+		      WHERE mi.content_id = mil.content_id
+		        AND mi.virtual_owner_installation_id IS NOT NULL
+		        AND mi.virtual_owner_installation_id != 0
+		  )`); err != nil {
+		return 0, 0, fmt.Errorf("clean orphaned library memberships: %w", err)
+	}
 	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
 		return 0, 0, fmt.Errorf("enqueue virtual media search deletes: %w", err)
 	}
