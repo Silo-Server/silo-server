@@ -32,7 +32,7 @@ interface LibrarySaveRetry {
 }
 
 interface HydratedLibrarySearch {
-  ownerProfileId: string | null;
+  ownerKey: string | null;
   libraryId: number;
   search: string;
 }
@@ -42,7 +42,7 @@ export default function LibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
   const {
-    ownerProfileId: libraryPageStateOwnerProfileId,
+    ownerKey: libraryPageStateOwnerKey,
     isLoading: libraryPageStateLoading,
     preference: libraryPageStatePreference,
     rememberEnabled: rememberLibraryPageState,
@@ -68,7 +68,7 @@ export default function LibraryPage() {
   }, []);
 
   const id = Number(libraryId);
-  const libraryPageStateKey = `${libraryPageStateOwnerProfileId ?? "none"}:${id}`;
+  const libraryPageStateKey = `${libraryPageStateOwnerKey ?? "none"}:${id}`;
   const library = libraries?.find((l) => l.id === id);
   const libraryType = library?.type ?? "";
   const savedLibrarySearch =
@@ -78,7 +78,7 @@ export default function LibraryPage() {
   const currentLibrarySearch = serializeLibraryPageSearchParams(searchParams);
   const hasInheritedHydratedSearch =
     hydratedLibrarySearch !== null &&
-    hydratedLibrarySearch.ownerProfileId !== libraryPageStateOwnerProfileId &&
+    hydratedLibrarySearch.ownerKey !== libraryPageStateOwnerKey &&
     hydratedLibrarySearch.libraryId === id &&
     hydratedLibrarySearch.search === currentLibrarySearch;
   const hasUnhydratedLibraryState =
@@ -120,7 +120,7 @@ export default function LibraryPage() {
   useEffect(() => {
     if (
       applyingSavedSearchParamsRef.current === null &&
-      hydratedLibrarySearch?.ownerProfileId === libraryPageStateOwnerProfileId &&
+      hydratedLibrarySearch?.ownerKey === libraryPageStateOwnerKey &&
       hydratedLibrarySearch.libraryId === id &&
       hydratedLibrarySearch.search !== currentLibrarySearch
     ) {
@@ -128,7 +128,7 @@ export default function LibraryPage() {
       // profile switch must treat it as an explicit user choice.
       setHydratedLibrarySearch(null);
     }
-  }, [currentLibrarySearch, hydratedLibrarySearch, id, libraryPageStateOwnerProfileId]);
+  }, [currentLibrarySearch, hydratedLibrarySearch, id, libraryPageStateOwnerKey]);
 
   useEffect(() => {
     if (
@@ -149,7 +149,7 @@ export default function LibraryPage() {
     );
     const hydratedSearch = serializeLibraryPageSearchParams(nextSearchParams);
     setHydratedLibrarySearch({
-      ownerProfileId: libraryPageStateOwnerProfileId,
+      ownerKey: libraryPageStateOwnerKey,
       libraryId: id,
       search: hydratedSearch,
     });
@@ -162,7 +162,7 @@ export default function LibraryPage() {
     id,
     libraryPageStateKey,
     libraryPageStateLoading,
-    libraryPageStateOwnerProfileId,
+    libraryPageStateOwnerKey,
     libraryType,
     rememberLibraryPageState,
     savedStateHydratedKey,

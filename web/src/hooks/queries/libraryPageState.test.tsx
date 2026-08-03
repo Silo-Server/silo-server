@@ -11,6 +11,7 @@ import {
 const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
   mutateAsync: vi.fn(),
+  accountId: 1,
   profileId: "profile-1",
   preference: {
     version: 1 as const,
@@ -23,6 +24,10 @@ vi.mock("@/utils/storage", () => ({
     KEYS: { PROFILE_ID: "profile_id" },
     get: () => mocks.profileId,
   },
+}));
+
+vi.mock("@/hooks/useAuth", () => ({
+  useOptionalAuth: () => ({ user: { id: mocks.accountId } }),
 }));
 
 vi.mock("@/hooks/queries/settingValues", async (importOriginal) => {
@@ -52,6 +57,7 @@ describe("useLibraryPageStatePreference", () => {
     mocks.mutate.mockReset();
     mocks.mutateAsync.mockReset();
     profileSequence += 1;
+    mocks.accountId = profileSequence;
     mocks.profileId = `profile-test-${profileSequence}`;
     mocks.preference = {
       version: 1,
@@ -706,6 +712,35 @@ describe("useLibraryPageStatePreference", () => {
     expect(shouldRetryLibraryPageStateWrite(cancellation)).toBe(true);
     expect(libraryPageStateWriteRetryDelay(cancellation, 2_000)).toBe(0);
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not carry an old account's overlay into the same profile id", async () => {
+    mocks.mutateAsync
+      .mockRejectedValueOnce(new TypeError("response connection lost"))
+      .mockResolvedValueOnce({});
+    const { result, rerender } = renderHook(() => useLibraryPageStatePreference());
+
+    await act(async () => {
+      await expect(result.current.saveLibrarySearch(7, "tab=library&sort=year")).rejects.toThrow(
+        "response connection lost",
+      );
+    });
+
+    act(() => {
+      mocks.accountId += 10_000;
+      rerender();
+    });
+    await act(async () => {
+      await result.current.saveLibrarySearch(9, "tab=collections");
+    });
+
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "9": { search: "tab=collections" },
+      },
+    });
   });
 
   it("preserves the local overlay when a queued write is cancelled before dispatch", async () => {

@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  ownerProfileId: "profile-1",
+  ownerKey: "profile-1",
   rememberEnabled: true,
   savedSearch: "tab=library" as string | undefined,
   saveLibrarySearch: vi.fn<(libraryId: number, search: string) => Promise<void>>(),
@@ -36,7 +36,7 @@ vi.mock("@/hooks/queries/libraryPageState", () => ({
     return fallbackDelayMs;
   },
   useLibraryPageStatePreference: () => ({
-    ownerProfileId: mocks.ownerProfileId,
+    ownerKey: mocks.ownerKey,
     isLoading: false,
     preference: {
       version: 1,
@@ -99,7 +99,7 @@ function renderPage(initialEntry?: string) {
 
 describe("LibraryPage saved state", () => {
   beforeEach(() => {
-    mocks.ownerProfileId = "profile-1";
+    mocks.ownerKey = "profile-1";
     mocks.rememberEnabled = true;
     mocks.savedSearch = "tab=library";
     mocks.saveLibrarySearch.mockReset();
@@ -253,7 +253,7 @@ describe("LibraryPage saved state", () => {
     expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
     await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
 
-    mocks.ownerProfileId = "profile-2";
+    mocks.ownerKey = "profile-2";
     view.rerender(page());
 
     await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
@@ -272,7 +272,7 @@ describe("LibraryPage saved state", () => {
 
     expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
 
-    mocks.ownerProfileId = "profile-2";
+    mocks.ownerKey = "profile-2";
     view.rerender(page());
 
     await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
@@ -290,7 +290,7 @@ describe("LibraryPage saved state", () => {
     );
     expect(mocks.saveLibrarySearch).not.toHaveBeenCalled();
 
-    mocks.ownerProfileId = "profile-2";
+    mocks.ownerKey = "profile-2";
     mocks.savedSearch = "tab=library&sort=year&order=desc";
     view.rerender(page("/libraries/7"));
 
@@ -310,7 +310,7 @@ describe("LibraryPage saved state", () => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("?tab=collections"),
     );
 
-    mocks.ownerProfileId = "profile-2";
+    mocks.ownerKey = "profile-2";
     mocks.savedSearch = undefined;
     view.rerender(page("/libraries/7"));
 
@@ -326,7 +326,7 @@ describe("LibraryPage saved state", () => {
       expect(screen.getByTestId("location-search")).toHaveTextContent("?tab=collections"),
     );
 
-    mocks.ownerProfileId = "profile-2";
+    mocks.ownerKey = "profile-2";
     mocks.rememberEnabled = false;
     mocks.savedSearch = "tab=library&sort=year&order=desc";
     view.rerender(page("/libraries/7"));

@@ -5,6 +5,7 @@ import {
   useEffectiveSettings,
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
+import { useOptionalAuth } from "@/hooks/useAuth";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
@@ -23,6 +24,7 @@ export interface LibraryPageStatePreference {
 }
 
 interface PreferenceWriteQueue {
+  ownerKey: string | null;
   ownerProfileId: string | null;
   subscribers: number;
   resolvedPreference: LibraryPageStatePreference;
@@ -33,7 +35,7 @@ interface PreferenceWriteQueue {
 }
 
 interface PreferenceWriteLease {
-  ownerProfileId: string | null;
+  ownerKey: string | null;
   active: boolean;
 }
 
@@ -44,10 +46,19 @@ interface PendingPreferenceWrite {
   promise?: Promise<unknown>;
 }
 
-// The setting is a whole-document value. Keep one queue per profile for the
-// lifetime of this browser context so an unmount/remount cannot let a newer
-// document race an older in-flight PUT.
+// The setting is a whole-document value. Keep one queue per account+profile
+// for the lifetime of this browser context so an unmount/remount cannot let a
+// newer document race an older in-flight PUT. Profile IDs are not globally
+// unique, so the account must be part of the key to prevent logout/login from
+// carrying an old account's overlay into a new account's document.
 const preferenceWriteQueues = new Map<string, PreferenceWriteQueue>();
+
+function preferenceWriteOwnerKey(
+  accountId: number | null,
+  profileId: string | null,
+): string | null {
+  return accountId === null || profileId === null ? null : JSON.stringify([accountId, profileId]);
+}
 
 /**
  * Accepts the canonical object value, the legacy JSON-string encoding, or
@@ -117,10 +128,12 @@ function createEmptyLibraryPageStatePreference(): LibraryPageStatePreference {
 }
 
 function createPreferenceWriteQueue(
+  ownerKey: string | null,
   ownerProfileId: string | null,
   preference: LibraryPageStatePreference,
 ): PreferenceWriteQueue {
   return {
+    ownerKey,
     ownerProfileId,
     subscribers: 0,
     resolvedPreference: preference,
@@ -132,18 +145,19 @@ function createPreferenceWriteQueue(
 }
 
 function getPreferenceWriteQueue(
+  ownerKey: string | null,
   ownerProfileId: string | null,
   preference: LibraryPageStatePreference,
 ): PreferenceWriteQueue {
-  if (ownerProfileId === null) {
-    return createPreferenceWriteQueue(null, preference);
+  if (ownerKey === null) {
+    return createPreferenceWriteQueue(null, ownerProfileId, preference);
   }
-  const existing = preferenceWriteQueues.get(ownerProfileId);
+  const existing = preferenceWriteQueues.get(ownerKey);
   if (existing !== undefined) {
     return existing;
   }
-  const queue = createPreferenceWriteQueue(ownerProfileId, preference);
-  preferenceWriteQueues.set(ownerProfileId, queue);
+  const queue = createPreferenceWriteQueue(ownerKey, ownerProfileId, preference);
+  preferenceWriteQueues.set(ownerKey, queue);
   return queue;
 }
 
@@ -272,8 +286,11 @@ export function libraryPageStateWriteRetryDelay(
 export function useLibraryPageStatePreference() {
   // The effective endpoint requires a profile header; before one is chosen
   // there is no saved state to restore and nowhere to save it.
+  const auth = useOptionalAuth();
+  const activeAccountId = auth?.user?.id ?? null;
   const activeProfileId = storage.get(storage.KEYS.PROFILE_ID);
-  const enabled = Boolean(activeProfileId);
+  const activeOwnerKey = preferenceWriteOwnerKey(activeAccountId, activeProfileId);
+  const enabled = activeOwnerKey !== null;
   const { data, isLoading } = useEffectiveSettings({ keys: PAGE_STATE_KEYS, enabled });
   const mutation = useSetSettingValue();
   const { mutateAsync } = mutation;
@@ -283,9 +300,11 @@ export function useLibraryPageStatePreference() {
   // This setting is one last-write-wins document. Keep queued changes in the
   // same document and send them in order so a slower request cannot restore an
   // older library state over a newer one.
-  const [initialWriteQueue] = useState(() => getPreferenceWriteQueue(activeProfileId, preference));
+  const [initialWriteQueue] = useState(() =>
+    getPreferenceWriteQueue(activeOwnerKey, activeProfileId, preference),
+  );
   const [initialWriteLease] = useState<PreferenceWriteLease>(() => ({
-    ownerProfileId: activeProfileId,
+    ownerKey: activeOwnerKey,
     active: false,
   }));
   const writeQueueRef = useRef(initialWriteQueue);
@@ -293,15 +312,16 @@ export function useLibraryPageStatePreference() {
   useEffect(() => {
     let currentQueue = writeQueueRef.current;
     let currentLease = writeLeaseRef.current;
-    if (currentQueue.ownerProfileId !== activeProfileId) {
+    if (currentQueue.ownerKey !== activeOwnerKey) {
       currentLease.active = false;
       // The following preference-sync effect supplies this owner's resolved
       // document before callers' effects can enqueue a write.
       currentQueue = getPreferenceWriteQueue(
+        activeOwnerKey,
         activeProfileId,
         createEmptyLibraryPageStatePreference(),
       );
-      currentLease = { ownerProfileId: activeProfileId, active: false };
+      currentLease = { ownerKey: activeOwnerKey, active: false };
       writeQueueRef.current = currentQueue;
       writeLeaseRef.current = currentLease;
     }
@@ -312,15 +332,11 @@ export function useLibraryPageStatePreference() {
       currentLease.active = false;
       currentQueue.subscribers = Math.max(0, currentQueue.subscribers - 1);
     };
-  }, [activeProfileId]);
+  }, [activeOwnerKey, activeProfileId]);
   useEffect(() => {
     const queue = writeQueueRef.current;
     const lease = writeLeaseRef.current;
-    if (
-      !lease.active ||
-      lease.ownerProfileId !== activeProfileId ||
-      queue.ownerProfileId !== activeProfileId
-    ) {
+    if (!lease.active || lease.ownerKey !== activeOwnerKey || queue.ownerKey !== activeOwnerKey) {
       return;
     }
     if (queue.pendingWrites.length === 0) {
@@ -340,7 +356,7 @@ export function useLibraryPageStatePreference() {
       );
       queue.deferredPreference = preference;
     }
-  }, [activeProfileId, preference]);
+  }, [activeOwnerKey, preference]);
   // The contract default is true; anything but an explicit false keeps the
   // feature on, matching the legacy `!== "false"` reading.
   const rememberEnabled = data?.[SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE]?.value !== false;
@@ -350,9 +366,9 @@ export function useLibraryPageStatePreference() {
       const lease = writeLeaseRef.current;
       if (
         !lease.active ||
-        lease.ownerProfileId !== activeProfileId ||
-        queue.ownerProfileId === null ||
-        queue.ownerProfileId !== activeProfileId
+        lease.ownerKey !== activeOwnerKey ||
+        queue.ownerKey === null ||
+        queue.ownerKey !== activeOwnerKey
       ) {
         return Promise.reject(cancelledPreferenceWrite());
       }
@@ -413,11 +429,11 @@ export function useLibraryPageStatePreference() {
       );
       return write;
     },
-    [activeProfileId, mutateAsync],
+    [activeOwnerKey, mutateAsync],
   );
 
   return {
-    ownerProfileId: activeProfileId,
+    ownerKey: activeOwnerKey,
     isLoading: enabled && isLoading,
     preference,
     rememberEnabled,
