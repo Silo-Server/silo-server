@@ -6,14 +6,14 @@ import (
 )
 
 var deviceMatchAdjectives = []string{
-	"calm", "fern", "ivy", "jade", "navy", "nova",
-	"oak", "opal", "pine", "plum", "rose", "sage",
+	"blue", "busy", "calm", "cozy", "fast", "gold",
+	"kind", "soft", "tall", "tame", "tiny", "warm",
 }
 
 var deviceMatchNouns = []string{
-	"cove", "dawn", "hawk", "hill", "lake", "mesa", "moon", "owl",
-	"pine", "pond", "rain", "reef", "rock", "snow", "star", "sun",
-	"tree", "wave", "wind", "wolf",
+	"barn", "bell", "cart", "coop", "corn", "cow", "duck", "goat",
+	"hay", "hen", "lamb", "milk", "oats", "pail", "pond", "pony",
+	"rake", "shed", "silo", "wool",
 }
 
 func randomMatchCode() (string, error) {
