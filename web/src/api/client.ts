@@ -355,7 +355,17 @@ export async function apiResponse(path: string, options: RequestInit = {}): Prom
     }
     const refreshed = await refreshPromise;
     if (refreshed) {
-      const refreshedHeaders = buildApiHeaders(options);
+      // Keep the profile and device identity captured for the original
+      // request. A household profile can change while refresh is pending;
+      // rebuilding every header here could replay an old-profile mutation
+      // under the newly selected profile. Only the refreshed account token
+      // is allowed to change for this retry.
+      const refreshedHeaders = { ...headers };
+      if (accessToken) {
+        refreshedHeaders.Authorization = `Bearer ${accessToken}`;
+      } else {
+        delete refreshedHeaders.Authorization;
+      }
       res = await fetch(`/api/v1${path}`, { ...options, headers: refreshedHeaders });
     }
   }

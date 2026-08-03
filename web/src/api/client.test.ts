@@ -6,6 +6,8 @@ import {
   getAccessToken,
   getPersonCatalogItems,
   setAccessToken,
+  setProfileId,
+  setProfileToken,
   setRefreshToken,
 } from "./client";
 
@@ -167,6 +169,89 @@ describe("apiBlob", () => {
 });
 
 describe("api", () => {
+  it("keeps the originating profile headers when retrying after token refresh", async () => {
+    const localStorageState = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      value: {
+        get length() {
+          return localStorageState.size;
+        },
+        getItem: (key: string) => localStorageState.get(key) ?? null,
+        key: (index: number) => Array.from(localStorageState.keys())[index] ?? null,
+        setItem: (key: string, value: string) => {
+          localStorageState.set(key, value);
+        },
+        removeItem: (key: string) => {
+          localStorageState.delete(key);
+        },
+        clear: () => {
+          localStorageState.clear();
+        },
+      } satisfies Storage,
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "sessionStorage", {
+      value: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+        clear: () => {},
+      },
+      configurable: true,
+    });
+    setAccessToken("old");
+    setRefreshToken("old");
+    setProfileId("profile-old");
+    setProfileToken("old");
+
+    let protectedRequestCount = 0;
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const path = String(input);
+      if (path === "/api/v1/auth/refresh") {
+        // Model a household profile switch while refresh is in flight.
+        setProfileId("profile-new");
+        setProfileToken("new");
+        return new Response(
+          JSON.stringify({
+            access_token: "new",
+            refresh_token: "new",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      protectedRequestCount += 1;
+      return protectedRequestCount === 1
+        ? new Response(null, { status: 401 })
+        : new Response(null, { status: 204 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      api("/settings/values/ui.library_page_state?scope=profile_device", {
+        method: "PUT",
+        body: JSON.stringify({ value: { version: 1, libraries: {} } }),
+      }),
+    ).resolves.toBeUndefined();
+
+    const requestCalls = fetchMock.mock.calls.filter(
+      ([input]) => String(input) !== "/api/v1/auth/refresh",
+    );
+    expect(requestCalls).toHaveLength(2);
+    const firstHeaders = requestCalls[0]?.[1]?.headers as Record<string, string>;
+    const retryHeaders = requestCalls[1]?.[1]?.headers as Record<string, string>;
+    expect(firstHeaders).toMatchObject({
+      Authorization: "Bearer old",
+      "X-Profile-Id": "profile-old",
+      "X-Profile-Token": "old",
+    });
+    expect(retryHeaders).toMatchObject({
+      Authorization: "Bearer new",
+      "X-Profile-Id": "profile-old",
+      "X-Profile-Token": "old",
+    });
+  });
+
   it("forwards AbortSignal from options to fetch", async () => {
     Object.defineProperty(globalThis, "sessionStorage", {
       value: {
