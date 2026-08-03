@@ -20,10 +20,16 @@ export interface LibraryPageStatePreference {
 interface PreferenceWriteQueue {
   ownerProfileId: string | null;
   active: boolean;
+  resolvedPreference: LibraryPageStatePreference;
   queuedPreference: LibraryPageStatePreference;
-  pendingWriteCount: number;
+  pendingWrites: PendingPreferenceWrite[];
   writeChain: Promise<unknown>;
   callerTail: Promise<unknown>;
+}
+
+interface PendingPreferenceWrite {
+  libraryId: number;
+  search: string;
 }
 
 /**
@@ -100,11 +106,37 @@ function createPreferenceWriteQueue(
   return {
     ownerProfileId,
     active: true,
+    resolvedPreference: preference,
     queuedPreference: preference,
-    pendingWriteCount: 0,
+    pendingWrites: [],
     writeChain: Promise.resolve(),
     callerTail: Promise.resolve(),
   };
+}
+
+function applyPendingPreferenceWrites(
+  preference: LibraryPageStatePreference,
+  writes: PendingPreferenceWrite[],
+): LibraryPageStatePreference {
+  return writes.reduce(
+    (next, write) => updateLibraryPageStatePreference(next, write.libraryId, write.search),
+    preference,
+  );
+}
+
+function settlePreferenceWrite(
+  queue: PreferenceWriteQueue,
+  pendingWrite: PendingPreferenceWrite,
+  resolvedPreference?: LibraryPageStatePreference,
+) {
+  if (resolvedPreference !== undefined) {
+    queue.resolvedPreference = resolvedPreference;
+  }
+  queue.pendingWrites = queue.pendingWrites.filter((write) => write !== pendingWrite);
+  queue.queuedPreference = applyPendingPreferenceWrites(
+    queue.resolvedPreference,
+    queue.pendingWrites,
+  );
 }
 
 function cancelledPreferenceWrite(): Error {
@@ -150,8 +182,9 @@ export function useLibraryPageStatePreference() {
       queue !== null &&
       queue.active &&
       queue.ownerProfileId === activeProfileId &&
-      queue.pendingWriteCount === 0
+      queue.pendingWrites.length === 0
     ) {
+      queue.resolvedPreference = preference;
       queue.queuedPreference = preference;
     }
   }, [activeProfileId, preference]);
@@ -169,40 +202,45 @@ export function useLibraryPageStatePreference() {
         return Promise.reject(cancelledPreferenceWrite());
       }
       if (
-        queue.pendingWriteCount > 0 &&
+        queue.pendingWrites.length > 0 &&
         queue.queuedPreference.libraries[String(libraryId)]?.search === search
       ) {
         return queue.callerTail;
       }
 
-      const nextPreference = updateLibraryPageStatePreference(
-        queue.queuedPreference,
-        libraryId,
-        search,
+      const pendingWrite = { libraryId, search };
+      queue.pendingWrites.push(pendingWrite);
+      queue.queuedPreference = applyPendingPreferenceWrites(
+        queue.resolvedPreference,
+        queue.pendingWrites,
       );
-      queue.queuedPreference = nextPreference;
-      queue.pendingWriteCount += 1;
 
+      let attemptedPreference: LibraryPageStatePreference | undefined;
       const write = queue.writeChain
         .catch(() => undefined)
         .then(() => {
           if (!queue.active || storage.get(storage.KEYS.PROFILE_ID) !== queue.ownerProfileId) {
             throw cancelledPreferenceWrite();
           }
+          attemptedPreference = updateLibraryPageStatePreference(
+            queue.resolvedPreference,
+            libraryId,
+            search,
+          );
           return mutateAsync({
             key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
-            value: nextPreference,
+            value: attemptedPreference,
             identity: DEVICE_SCOPE,
           });
         });
       queue.callerTail = write;
       queue.writeChain = write.then(
         (result) => {
-          queue.pendingWriteCount -= 1;
+          settlePreferenceWrite(queue, pendingWrite, attemptedPreference);
           return result;
         },
         () => {
-          queue.pendingWriteCount -= 1;
+          settlePreferenceWrite(queue, pendingWrite);
           return undefined;
         },
       );

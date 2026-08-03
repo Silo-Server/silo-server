@@ -98,6 +98,39 @@ describe("useLibraryPageStatePreference", () => {
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
   });
 
+  it("removes a rejected value before applying later queued writes", async () => {
+    let rejectFirst: ((reason?: unknown) => void) | undefined;
+    mocks.mutateAsync
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValueOnce({});
+    const { result } = renderHook(() => useLibraryPageStatePreference());
+
+    const rejected = result.current.saveLibrarySearch(3, "tab=library&sort=year");
+    const rejectedError = rejected.catch((error: unknown) => error);
+    const queued = result.current.saveLibrarySearch(9, "tab=collections");
+
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      rejectFirst?.(new Error("rate limited"));
+      expect(await rejectedError).toEqual(new Error("rate limited"));
+      await queued;
+    });
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
+    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "9": { search: "tab=collections" },
+      },
+    });
+  });
+
   it("preserves a queued tail failure for a coalesced save", async () => {
     let resolveFirst: ((value: unknown) => void) | undefined;
     mocks.mutateAsync

@@ -108,6 +108,27 @@ describe("typed setting mutations", () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
+  it("reconciles effective settings and device summaries after an already-cleared response", async () => {
+    apiMock.mockRejectedValueOnce(new ApiClientError(404, "not_found", "setting not found"));
+    const { queryClient, wrapper } = createHarness();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+          identity: { scope: "profile_device" },
+        }),
+      ).rejects.toThrow("setting not found");
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [...settingsKeys.all, "values"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+
   it("invalidates effective settings and device summaries after a successful device clear", async () => {
     apiMock.mockResolvedValueOnce({});
     const { queryClient, wrapper } = createHarness();

@@ -60,14 +60,18 @@ vi.mock("./LibraryCollections", () => ({
 
 import LibraryPage from "./LibraryPage";
 
-function renderPage() {
-  return render(
+function page() {
+  return (
     <MemoryRouter initialEntries={["/libraries/7?tab=library&sort=year&order=desc"]}>
       <Routes>
         <Route path="/libraries/:libraryId" element={<LibraryPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderPage() {
+  return render(page());
 }
 
 describe("LibraryPage saved state", () => {
@@ -95,7 +99,7 @@ describe("LibraryPage saved state", () => {
 
   it("retries the same canonical search after a failed save", async () => {
     mocks.saveLibrarySearch.mockRejectedValueOnce(new Error("rate limited"));
-    renderPage();
+    const view = renderPage();
 
     await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1));
     const firstResult = mocks.saveLibrarySearch.mock.results[0]?.value;
@@ -106,5 +110,13 @@ describe("LibraryPage saved state", () => {
 
     await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
     expect(mocks.saveLibrarySearch.mock.calls[1]).toEqual(mocks.saveLibrarySearch.mock.calls[0]);
+    const retryResult = mocks.saveLibrarySearch.mock.results[1]?.value;
+    expect(retryResult).toBeDefined();
+    await expect(retryResult).resolves.toBeUndefined();
+
+    view.rerender(page());
+    await Promise.resolve();
+
+    expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
   });
 });

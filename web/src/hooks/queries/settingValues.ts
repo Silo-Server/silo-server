@@ -251,7 +251,12 @@ export function useClearSettingValue() {
       invalidateSettingValueQueries(qc, variables.identity);
     },
     onError: (error, variables) => {
-      if (shouldReconcileAfterMutationError(error)) {
+      // DELETE is idempotent for reset callers: a 404 means another client
+      // already cleared the value, so stale effective caches must catch up.
+      if (
+        shouldReconcileAfterMutationError(error) ||
+        (error instanceof ApiClientError && error.status === 404)
+      ) {
         invalidateSettingValueQueries(qc, variables.identity);
       }
     },
