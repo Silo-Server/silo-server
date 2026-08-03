@@ -183,12 +183,20 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+export function isDefinitiveSettingMutationRejection(error: unknown): boolean {
+  // Ordinary 4xx responses reject the request before applying it. A 408 or
+  // 5xx can be emitted by the server or a gateway after the mutation reached
+  // the handler, so those remain ambiguous and require reconciliation.
+  return (
+    error instanceof ApiClientError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408
+  );
+}
+
 function shouldReconcileAfterMutationError(error: unknown): boolean {
-  // ApiClientError means the server returned a definitive non-2xx response,
-  // so refetching on a 429/4xx would only amplify the failure. Network errors
-  // and failures while reading a successful response are ambiguous: the write
-  // may have committed, so invalidate to reconcile with the server.
-  return !(error instanceof ApiClientError);
+  return !isDefinitiveSettingMutationRejection(error);
 }
 
 function invalidateSettingValueQueries(

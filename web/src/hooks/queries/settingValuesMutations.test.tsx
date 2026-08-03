@@ -90,6 +90,28 @@ describe("typed setting mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
   });
 
+  it("reconciles effective settings and device summaries after a server write failure", async () => {
+    apiMock.mockRejectedValueOnce(new ApiClientError(503, "unavailable", "service unavailable"));
+    const { queryClient, wrapper } = createHarness();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+          value: { version: 1, libraries: {} },
+          identity: { scope: "profile_device" },
+        }),
+      ).rejects.toThrow("service unavailable");
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [...settingsKeys.all, "values"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+
   it("does not invalidate effective settings after a definitive rejected clear", async () => {
     apiMock.mockRejectedValueOnce(new ApiClientError(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
