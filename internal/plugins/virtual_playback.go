@@ -29,9 +29,9 @@ const (
 	maxVirtualPlaybackCacheEntries      = 256
 	maxVirtualPlaybackCacheBytes        = 16 << 20
 	maxVirtualProfileCacheEntries       = 128
-	virtualStreamsCacheTTL              = 10 * time.Minute
+	virtualStreamsCacheTTL              = 1 * time.Minute
 	virtualProfilesCacheTTL             = time.Minute
-	minVirtualStreamsCacheTTL           = time.Minute
+	minVirtualStreamsCacheTTL           = 10 * time.Second
 	maxVirtualStreamsCacheTTL           = 7 * 24 * time.Hour
 	maxVirtualIDLen                     = 256
 	maxVirtualLabelLen                  = 256
