@@ -22,7 +22,7 @@ import type {
   ApplyCollectionTemplateBundleRequest,
   ApplyCollectionTemplateBundleResponse,
 } from "@/lib/collectionTemplates";
-import { adminKeys, sectionKeys } from "../keys";
+import { adminKeys, catalogKeys, sectionKeys } from "../keys";
 import { invalidateAdminCollectionQueries } from "../collectionSurfaceRefresh";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -607,6 +607,7 @@ export function usePurgeVirtualPlaybackItems() {
       toast.success(result.message);
       void invalidateAdminCollectionQueries(queryClient);
       void queryClient.invalidateQueries({ queryKey: sectionKeys.all });
+      void queryClient.invalidateQueries({ queryKey: catalogKeys.all });
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Virtual library purge failed");
