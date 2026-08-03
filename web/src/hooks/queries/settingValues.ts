@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import { api, ApiClientError } from "@/api/client";
 import { storage } from "@/utils/storage";
 import { SETTING_DEFINITIONS, SETTINGS_REVISION, type SettingKey } from "@/lib/settingsContract";
 import { useEventChannel } from "@/components/realtimeEventsContext";
@@ -183,6 +183,27 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+function shouldReconcileAfterMutationError(error: unknown): boolean {
+  // ApiClientError means the server returned a definitive non-2xx response,
+  // so refetching on a 429/4xx would only amplify the failure. Network errors
+  // and failures while reading a successful response are ambiguous: the write
+  // may have committed, so invalidate to reconcile with the server.
+  return !(error instanceof ApiClientError);
+}
+
+function invalidateSettingValueQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  identity: SettingIdentity,
+) {
+  void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+  // A device-scoped write changes that device's "how many things differ"
+  // count, which the device list shows. Without this the badge stays stale
+  // until the list's own staleTime expires.
+  if (identity.scope === "profile_device") {
+    void queryClient.invalidateQueries({ queryKey: deviceKeys.all });
+  }
+}
+
 /** Write one value at one scope. */
 export function useSetSettingValue() {
   const qc = useQueryClient();
@@ -209,12 +230,11 @@ export function useSetSettingValue() {
         body: JSON.stringify({ value }),
       }),
     onSuccess: (_data, variables) => {
-      void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
-      // A device-scoped write changes that device's "how many things differ"
-      // count, which the device list shows. Without this the badge stays stale
-      // until the list's own staleTime expires.
-      if (variables.identity.scope === "profile_device") {
-        void qc.invalidateQueries({ queryKey: deviceKeys.all });
+      invalidateSettingValueQueries(qc, variables.identity);
+    },
+    onError: (error, variables) => {
+      if (shouldReconcileAfterMutationError(error)) {
+        invalidateSettingValueQueries(qc, variables.identity);
       }
     },
   });
@@ -228,9 +248,11 @@ export function useClearSettingValue() {
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
     onSuccess: (_data, variables) => {
-      void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
-      if (variables.identity.scope === "profile_device") {
-        void qc.invalidateQueries({ queryKey: deviceKeys.all });
+      invalidateSettingValueQueries(qc, variables.identity);
+    },
+    onError: (error, variables) => {
+      if (shouldReconcileAfterMutationError(error)) {
+        invalidateSettingValueQueries(qc, variables.identity);
       }
     },
   });

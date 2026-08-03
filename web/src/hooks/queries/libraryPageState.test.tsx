@@ -6,6 +6,14 @@ import { useLibraryPageStatePreference } from "./libraryPageState";
 const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
   mutateAsync: vi.fn(),
+  profileId: "profile-1",
+}));
+
+vi.mock("@/utils/storage", () => ({
+  storage: {
+    KEYS: { PROFILE_ID: "profile_id" },
+    get: () => mocks.profileId,
+  },
 }));
 
 vi.mock("@/hooks/queries/settingValues", () => ({
@@ -28,6 +36,7 @@ describe("useLibraryPageStatePreference", () => {
   beforeEach(() => {
     mocks.mutate.mockReset();
     mocks.mutateAsync.mockReset();
+    mocks.profileId = "profile-1";
   });
 
   it("serializes whole-document saves and preserves queued library changes", async () => {
@@ -104,8 +113,8 @@ describe("useLibraryPageStatePreference", () => {
     const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
     const tail = result.current.saveLibrarySearch(9, "tab=collections");
     const coalesced = result.current.saveLibrarySearch(7, "tab=library&sort=year");
-    const tailRejection = expect(tail).rejects.toThrow("rate limited");
-    const coalescedRejection = expect(coalesced).rejects.toThrow("rate limited");
+    const tailError = tail.catch((error: unknown) => error);
+    const coalescedError = coalesced.catch((error: unknown) => error);
 
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
     await act(async () => {
@@ -113,8 +122,38 @@ describe("useLibraryPageStatePreference", () => {
       await first;
     });
 
-    await tailRejection;
-    await coalescedRejection;
+    expect(await tailError).toEqual(new Error("rate limited"));
+    expect(await coalescedError).toEqual(new Error("rate limited"));
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels queued writes when the active profile changes", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    mocks.mutateAsync.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const { result, rerender } = renderHook(() => useLibraryPageStatePreference());
+
+    const first = result.current.saveLibrarySearch(7, "tab=library&sort=year");
+    const queued = result.current.saveLibrarySearch(9, "tab=collections");
+    const queuedError = queued.catch((error: unknown) => error);
+
+    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    act(() => {
+      mocks.profileId = "profile-2";
+      rerender();
+    });
+    await act(async () => {
+      resolveFirst?.({});
+      await first;
+    });
+
+    expect(await queuedError).toEqual(
+      new Error("Library preference write cancelled because the active profile changed"),
+    );
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
   });
 });

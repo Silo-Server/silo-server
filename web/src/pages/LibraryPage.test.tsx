@@ -92,4 +92,19 @@ describe("LibraryPage saved state", () => {
       new URLSearchParams("tab=library&sort=year&order=desc"),
     );
   });
+
+  it("retries the same canonical search after a failed save", async () => {
+    mocks.saveLibrarySearch.mockRejectedValueOnce(new Error("rate limited"));
+    renderPage();
+
+    await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1));
+    const firstResult = mocks.saveLibrarySearch.mock.results[0]?.value;
+    expect(firstResult).toBeDefined();
+    await expect(firstResult).rejects.toThrow("rate limited");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show hero" }));
+
+    await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
+    expect(mocks.saveLibrarySearch.mock.calls[1]).toEqual(mocks.saveLibrarySearch.mock.calls[0]);
+  });
 });

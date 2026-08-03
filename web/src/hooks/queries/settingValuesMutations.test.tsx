@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiClientError } from "@/api/client";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { deviceKeys, settingsKeys } from "./keys";
 import { useClearSettingValue, useSetSettingValue } from "./settingValues";
@@ -28,8 +29,8 @@ describe("typed setting mutations", () => {
     apiMock.mockReset();
   });
 
-  it("does not invalidate effective settings after a rejected write", async () => {
-    apiMock.mockRejectedValueOnce(new Error("rate limited"));
+  it("does not invalidate effective settings after a definitive rejected write", async () => {
+    apiMock.mockRejectedValueOnce(new ApiClientError(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
@@ -67,8 +68,30 @@ describe("typed setting mutations", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
   });
 
-  it("does not invalidate effective settings after a rejected clear", async () => {
-    apiMock.mockRejectedValueOnce(new Error("rate limited"));
+  it("reconciles effective settings and device summaries after an ambiguous write failure", async () => {
+    apiMock.mockRejectedValueOnce(new TypeError("network connection lost"));
+    const { queryClient, wrapper } = createHarness();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+          value: { version: 1, libraries: {} },
+          identity: { scope: "profile_device" },
+        }),
+      ).rejects.toThrow("network connection lost");
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [...settingsKeys.all, "values"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+
+  it("does not invalidate effective settings after a definitive rejected clear", async () => {
+    apiMock.mockRejectedValueOnce(new ApiClientError(429, "rate_limited", "rate limited"));
     const { queryClient, wrapper } = createHarness();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useClearSettingValue(), { wrapper });
@@ -83,5 +106,45 @@ describe("typed setting mutations", () => {
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("invalidates effective settings and device summaries after a successful device clear", async () => {
+    apiMock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+        identity: { scope: "profile_device" },
+      });
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [...settingsKeys.all, "values"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
+  });
+
+  it("reconciles effective settings and device summaries after an ambiguous clear failure", async () => {
+    apiMock.mockRejectedValueOnce(new TypeError("response connection lost"));
+    const { queryClient, wrapper } = createHarness();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          key: SETTING_KEYS.UI_LIBRARY_PAGE_STATE,
+          identity: { scope: "profile_device" },
+        }),
+      ).rejects.toThrow("response connection lost");
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [...settingsKeys.all, "values"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: deviceKeys.all });
   });
 });
