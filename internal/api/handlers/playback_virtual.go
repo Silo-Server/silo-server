@@ -214,6 +214,9 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 	if len(streams) > maxVirtualPlaybackStreams {
 		streams = streams[:maxVirtualPlaybackStreams]
 	}
+	// Guard against cross-identity candidates: only consider streams that
+	// share the same scheme, host, path, and profile as the original file.
+	streams = filterVirtualPlaybackStreams(file, streams)
 	for _, stream := range streams {
 		if stream.URI == "" || stream.URI == file.FilePath {
 			continue

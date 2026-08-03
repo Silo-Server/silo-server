@@ -100,7 +100,15 @@ func (h *PlaybackHandler) startLocalPlaybackTransportOnce(ctx context.Context, o
 		attemptOpts := opts
 		attemptOpts.InputPath = relayURL
 		attemptOpts.InputCleanup = cleanup
-		session, startErr := playback.StartTranscode(context.WithoutCancel(startupCtx), attemptOpts)
+		// Derive a transcode context with a safety-net deadline so
+		// ffmpeg cannot hang indefinitely. The startup timeout (startupCtx)
+		// is separate — it only bounds pre-transcode resolution.
+		transcodeCtx, transcodeCancel := context.WithCancel(context.Background())
+		time.AfterFunc(4*time.Hour, transcodeCancel)
+		session, startErr := playback.StartTranscode(transcodeCtx, attemptOpts)
+		if startErr != nil {
+			transcodeCancel()
+		}
 		if startErr == nil {
 			if _, readyErr := session.WaitForManifest(20 * time.Second); readyErr == nil {
 				return session, nil

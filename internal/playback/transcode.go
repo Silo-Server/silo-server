@@ -117,7 +117,7 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
-	inputCleanupOnce          sync.Once
+	inputCleanupOnce     sync.Once
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.

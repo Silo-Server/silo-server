@@ -2,6 +2,8 @@ package catalog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -915,7 +917,13 @@ func virtualContentID(in VirtualMedia) string {
 	if in.TMDBID != "" {
 		return in.MediaType + "-tmdb-" + in.TMDBID
 	}
-	return in.MediaType + "-imdb-" + in.IMDbID
+	if in.IMDbID != "" {
+		return in.MediaType + "-imdb-" + in.IMDbID
+	}
+	// No external ID available: build a deterministic fallback so distinct
+	// items do not silently collide on the same content_id.
+	h := sha256.Sum256([]byte(in.Source + "|" + in.MediaType + "|" + in.Title + "|" + strconv.Itoa(in.Year) + "|" + in.VirtualURI))
+	return in.MediaType + "-hash-" + hex.EncodeToString(h[:12])
 }
 
 func virtualLibraryCompatible(folderType, mediaType string) bool {
