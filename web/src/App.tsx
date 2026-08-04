@@ -468,6 +468,7 @@ function AppRoutes() {
                     </RequireProfile>
                   }
                 >
+                  <Route index element={null} />
                   <Route path="appearance" element={<AppearanceSettings />} />
                   <Route path="theme-editor" element={<ThemeEditorSettings />} />
                   <Route path="accessibility" element={<AccessibilitySettings />} />

@@ -521,6 +521,7 @@ export default function SettingsLayout() {
                 resultCount={filteredSettingsCount}
                 totalCount={flatItems.length}
                 className="w-full sm:max-w-sm"
+                shortcutMediaQuery={activeSegment ? "(min-width: 64rem)" : undefined}
               />
             </div>
 

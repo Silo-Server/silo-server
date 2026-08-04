@@ -13,6 +13,7 @@ interface SettingsSearchInputProps {
   itemLabel?: string;
   emptyLabel?: string;
   className?: string;
+  shortcutMediaQuery?: string;
 }
 
 export function SettingsSearchInput({
@@ -24,6 +25,7 @@ export function SettingsSearchInput({
   itemLabel = "settings sections",
   emptyLabel = "No matching settings",
   className,
+  shortcutMediaQuery,
 }: SettingsSearchInputProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,6 +40,7 @@ export function SettingsSearchInput({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() !== "k") return;
+      if (shortcutMediaQuery && !window.matchMedia(shortcutMediaQuery).matches) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -52,7 +55,7 @@ export function SettingsSearchInput({
       window.removeEventListener("keydown", onKeyDown, { capture: true });
       document.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-  }, []);
+  }, [shortcutMediaQuery]);
 
   return (
     <div className={cn("w-full", className)}>

@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { AlertTriangle, ChevronLeft } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 
@@ -89,9 +89,13 @@ const SETTINGS_NAV: SettingsNav[] = ADMIN_SETTINGS_NAV.map((item) => ({
   component: settingsComponent(item.id),
 }));
 
+const SHELL_HEADING_SETTINGS = new Set(["branding", "theming"]);
+
 export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [settingsSearch, setSettingsSearch] = useState("");
+  const activeContentRef = useRef<HTMLDivElement>(null);
+  const activeHeadingRef = useRef<HTMLHeadingElement>(null);
   const { data: serverStatus } = useAdminServerStatus();
   const rawActiveId = searchParams.get("tab");
   const activeId = rawActiveId === "jellyfin" ? "compatibility-proxies" : rawActiveId;
@@ -121,6 +125,16 @@ export default function AdminSettingsLayout() {
   const active = activeId ? SETTINGS_NAV.find((item) => item.id === activeId) : undefined;
   const ActiveComponent = active?.component;
 
+  useEffect(() => {
+    if (!active) return;
+
+    window.scrollTo(0, 0);
+    if (activeContentRef.current) {
+      activeContentRef.current.scrollTop = 0;
+    }
+    (activeHeadingRef.current ?? activeContentRef.current)?.focus({ preventScroll: true });
+  }, [active]);
+
   return (
     <div className="space-y-6">
       {active ? (
@@ -147,6 +161,7 @@ export default function AdminSettingsLayout() {
           resultCount={filteredSettingsCount}
           totalCount={SETTINGS_NAV.length}
           className="w-full sm:max-w-sm"
+          shortcutMediaQuery={active ? "(min-width: 64rem)" : undefined}
         />
       </div>
 
@@ -187,7 +202,22 @@ export default function AdminSettingsLayout() {
             ) : null}
           </nav>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div
+            ref={activeContentRef}
+            role="region"
+            aria-label={`${active.label} settings`}
+            tabIndex={-1}
+            className="flex-1 space-y-6 overflow-y-auto p-4 focus:outline-none sm:p-6"
+          >
+            {SHELL_HEADING_SETTINGS.has(active.id) ? (
+              <h2
+                ref={activeHeadingRef}
+                tabIndex={-1}
+                className="text-2xl font-semibold tracking-tight focus:outline-none sm:text-3xl lg:sr-only"
+              >
+                {active.label}
+              </h2>
+            ) : null}
             <ActiveComponent />
           </div>
         </div>

@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminSettingsLayout from "./AdminSettingsLayout";
 
@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: () => ({
     isLoading: true,
+    dirtyCount: 0,
+    getValue: () => "",
     sensitiveConfigured: [],
     sensitiveManagedByEnv: [],
   }),
@@ -28,6 +30,10 @@ vi.mock("@/hooks/queries/admin/settings", async (importOriginal) => ({
 
 beforeEach(() => {
   mocks.useAdminServerStatus.mockReturnValue({ data: { restart_required: false } });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 function renderLayout(search = "") {
@@ -106,6 +112,40 @@ describe("AdminSettingsLayout", () => {
     expect(detail).toContain('href="/admin/settings"');
   });
 
+  it("focuses the detail heading and resets scroll when an overview link opens", async () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal("scrollTo", scrollTo);
+    renderInteractiveLayout();
+
+    await userEvent.click(screen.getByRole("link", { name: /Database.*Postgres/ }));
+
+    const detailRegion = await screen.findByRole("region", { name: "Database settings" });
+    expect(scrollTo).toHaveBeenCalledWith(0, 0);
+    expect(detailRegion).toHaveFocus();
+  });
+
+  it("adds a mobile detail heading when the settings component has none", () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+
+    renderInteractiveLayout("?tab=branding");
+
+    expect(screen.getByRole("heading", { name: "Branding", level: 2 })).toHaveFocus();
+  });
+
+  it("resets the scrolling detail pane when switching admin tabs", async () => {
+    vi.stubGlobal("scrollTo", vi.fn());
+    renderInteractiveLayout("?tab=general");
+
+    const generalRegion = screen.getByRole("region", { name: "General settings" });
+    generalRegion.scrollTop = 400;
+
+    await userEvent.click(screen.getByRole("button", { name: "Database" }));
+
+    const databaseRegion = await screen.findByRole("region", { name: "Database settings" });
+    expect(databaseRegion.scrollTop).toBe(0);
+    expect(databaseRegion).toHaveFocus();
+  });
+
   it("surfaces durable restart-required state above the active tab", () => {
     mocks.useAdminServerStatus.mockReturnValue({ data: { restart_required: true } });
 
@@ -150,5 +190,23 @@ describe("AdminSettingsLayout", () => {
     fireEvent.keyDown(document, { key: "k", metaKey: true });
 
     expect(searchBox).toHaveFocus();
+  });
+
+  it("does not consume Cmd+K when the admin detail search is hidden", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+    vi.stubGlobal("scrollTo", vi.fn());
+    renderInteractiveLayout("?tab=general");
+
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    expect(document.dispatchEvent(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
   });
 });

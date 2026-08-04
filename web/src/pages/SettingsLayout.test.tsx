@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
@@ -25,6 +25,10 @@ describe("SettingsLayout", () => {
     mocks.useAuth.mockReturnValue({
       user: { role: "admin" },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("includes a PageBack control at the top of the page", () => {
@@ -162,7 +166,7 @@ describe("SettingsLayout", () => {
 
   it("focuses personal settings search with Cmd+K", () => {
     render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
+      <MemoryRouter initialEntries={["/settings"]}>
         <SettingsLayout />
       </MemoryRouter>,
     );
@@ -171,5 +175,27 @@ describe("SettingsLayout", () => {
     fireEvent.keyDown(document, { key: "k", metaKey: true });
 
     expect(searchBox).toHaveFocus();
+  });
+
+  it("does not consume Cmd+K when the detail search is hidden", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    const event = new KeyboardEvent("keydown", {
+      key: "k",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    expect(document.dispatchEvent(event)).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
   });
 });
