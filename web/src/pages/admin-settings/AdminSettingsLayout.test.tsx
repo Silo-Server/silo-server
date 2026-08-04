@@ -69,6 +69,52 @@ describe("AdminSettingsLayout", () => {
     }
   });
 
+  it("renders desktop category jump links with section counts", () => {
+    renderInteractiveLayout();
+
+    const categoryNavigation = screen.getByRole("navigation", {
+      name: "Admin settings sections categories",
+    });
+
+    expect(categoryNavigation).toContainElement(
+      screen.getByRole("link", { name: "Server, 4 settings sections" }),
+    );
+    expect(screen.getByRole("link", { name: "Media, 7 settings sections" })).toHaveAttribute(
+      "href",
+      "#admin-settings-index-media",
+    );
+    expect(screen.getByRole("link", { name: "Connections, 6 settings sections" })).toHaveAttribute(
+      "href",
+      "#admin-settings-index-connections",
+    );
+    expect(screen.getByRole("link", { name: "Data, 3 settings sections" })).toHaveAttribute(
+      "href",
+      "#admin-settings-index-data",
+    );
+  });
+
+  it("uses one desktop grid and card geometry for every settings group", () => {
+    const markup = renderLayout();
+
+    expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(4);
+    expect(markup).not.toContain("2xl:grid-cols-3");
+    expect(markup.match(/lg:h-28/g)).toHaveLength(20);
+    expect(markup.match(/lg:line-clamp-3/g)).toHaveLength(20);
+  });
+
+  it("marks a selected category jump link as the current location", async () => {
+    renderInteractiveLayout();
+
+    const server = screen.getByRole("link", { name: "Server, 4 settings sections" });
+    const data = screen.getByRole("link", { name: "Data, 3 settings sections" });
+
+    expect(server).toHaveAttribute("aria-current", "location");
+    await userEvent.click(data);
+
+    expect(server).not.toHaveAttribute("aria-current");
+    expect(data).toHaveAttribute("aria-current", "location");
+  });
+
   it("renders every settings tab", () => {
     const markup = renderLayout();
 
@@ -188,6 +234,15 @@ describe("AdminSettingsLayout", () => {
 
     const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
     fireEvent.keyDown(document, { key: "k", metaKey: true });
+
+    expect(searchBox).toHaveFocus();
+  });
+
+  it("focuses admin settings search with Ctrl+K", () => {
+    renderInteractiveLayout();
+
+    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
 
     expect(searchBox).toHaveFocus();
   });

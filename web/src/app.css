@@ -1805,8 +1805,43 @@
 
   .admin-shell {
     width: 100%;
+    min-width: 0;
     max-width: 1560px;
     margin-inline: auto;
+  }
+
+  /* AdminLayout owns the outer gutter. Older admin pages still use page-shell
+     for their max-width, so remove its second horizontal gutter when nested. */
+  .admin-shell > .page-shell,
+  .admin-shell > .page-shell-wide {
+    padding-inline: 0;
+  }
+
+  .admin-dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr));
+    gap: 0.875rem;
+  }
+
+  @media (max-width: 639px) {
+    .admin-shell .page-header {
+      align-items: stretch;
+    }
+
+    .admin-shell .page-header > * {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .admin-shell .page-header > :not(:first-child) {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      text-align: left;
+    }
+
+    .admin-shell .page-header [data-slot="button"] {
+      min-height: 2.75rem;
+    }
   }
 
   /* ── Section Header ──────────────────────────────────────── */

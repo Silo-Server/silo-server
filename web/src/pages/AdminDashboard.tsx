@@ -240,17 +240,17 @@ export default function AdminDashboard() {
             Live sessions, content health, and server activity in one view.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2">
+        <div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+          <div className="grid gap-2 sm:flex sm:items-center">
             {lastUpdatedLabel && (
-              <span className="text-muted-foreground text-xs whitespace-nowrap">
+              <span className="text-muted-foreground text-xs sm:whitespace-nowrap">
                 Updated {lastUpdatedLabel}
               </span>
             )}
             <Button
               variant="outline"
               size="sm"
-              className="min-w-[8.25rem] justify-center"
+              className="min-w-[8.25rem] justify-center sm:w-auto"
               onClick={() => {
                 void refreshDashboard({ manual: true });
               }}
@@ -266,7 +266,7 @@ export default function AdminDashboard() {
           <Button
             variant="default"
             size="sm"
-            className="cursor-pointer"
+            className="w-full cursor-pointer sm:w-auto"
             onClick={() => {
               if (libraries.length > 0) {
                 scanAll.mutate();
@@ -333,7 +333,7 @@ function StatsRow({
       return <SectionError message="Failed to load stats." />;
     }
     return (
-      <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="admin-dashboard-stats">
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-24 rounded-2xl" />
         ))}
@@ -380,7 +380,7 @@ function StatsRow({
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-5">
+    <div className="admin-dashboard-stats">
       {statCards.map((card) => (
         <div
           key={card.label}
@@ -851,7 +851,7 @@ function UsersCard({
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead className="hidden sm:table-cell">Role</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -872,11 +872,13 @@ function UsersCard({
                       </div>
                       <div>
                         <div className="text-[13px] font-semibold">{u.username}</div>
-                        <div className="text-muted-foreground text-[10px]">{u.email}</div>
+                        <div className="text-muted-foreground hidden text-[10px] sm:block">
+                          {u.email}
+                        </div>
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role}</Badge>
                   </TableCell>
                   <TableCell>

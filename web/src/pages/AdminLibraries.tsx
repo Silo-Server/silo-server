@@ -759,7 +759,7 @@ function ScanQueuePopover({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent align="end" className="w-[400px] p-0">
+      <PopoverContent align="end" className="w-[400px] max-w-[calc(100vw-1rem)] p-0">
         {/* Accent bar */}
         <div className="scan-queue-accent absolute inset-x-0 top-0 h-px rounded-t-xl" />
 

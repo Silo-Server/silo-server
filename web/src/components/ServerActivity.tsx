@@ -16,6 +16,7 @@ import {
   classifyActivityMethod,
   compareActivityMethods,
 } from "@/pages/adminActivityPresentation";
+import { cn } from "@/lib/utils";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -25,6 +26,7 @@ const ACTIVE_SCAN_SNAPSHOT_LIMIT = 500;
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
   hideWhenEmpty?: boolean;
+  className?: string;
 }
 
 // ── Data hook ────────────────────────────────────────────────
@@ -99,7 +101,7 @@ function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   return isNonLive && connectionProblemState;
 }
 
-export default function ServerActivity({ hideWhenEmpty = false }: ServerActivityProps) {
+export default function ServerActivity({ hideWhenEmpty = false, className }: ServerActivityProps) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
@@ -132,7 +134,10 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
               ? `Server activity: ${activeScansMayBeTruncated ? "at least " : ""}${totalActive} active`
               : "Server activity"
           }
-          className="hover:bg-accent/60 relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors"
+          className={cn(
+            "hover:bg-accent/60 relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+            className,
+          )}
         >
           <Activity
             className={`h-[18px] w-[18px] ${

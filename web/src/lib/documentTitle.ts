@@ -42,8 +42,10 @@ const SETTINGS_TITLES: Record<string, string> = {
 };
 
 const ADMIN_TITLES: Record<string, string> = {
+  "access-groups": "Admin Access Groups",
   activity: "Admin Activity",
   "api-keys": "Admin API Keys",
+  autoscan: "Admin Autoscan",
   collections: "Admin Collections",
   devices: "Admin Devices",
   "settings/devices": "Your Devices",
@@ -56,6 +58,7 @@ const ADMIN_TITLES: Record<string, string> = {
   maintenance: "Admin Maintenance",
   nodes: "Admin Nodes",
   plugins: "Admin Plugins",
+  policy: "Admin Policy",
   recommendations: "Admin Recommendations",
   requests: "Admin Requests",
   sections: "Admin Sections",

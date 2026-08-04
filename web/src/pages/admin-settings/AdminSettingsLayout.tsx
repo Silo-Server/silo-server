@@ -136,7 +136,7 @@ export default function AdminSettingsLayout() {
   }, [active]);
 
   return (
-    <div className="space-y-6">
+    <div className="w-full max-w-[96rem] space-y-6">
       {active ? (
         <Link
           to="/admin/settings"
@@ -160,8 +160,9 @@ export default function AdminSettingsLayout() {
           onChange={setSettingsSearch}
           resultCount={filteredSettingsCount}
           totalCount={SETTINGS_NAV.length}
-          className="w-full sm:max-w-sm"
+          className="w-full sm:max-w-sm lg:w-[26rem] lg:max-w-none"
           shortcutMediaQuery={active ? "(min-width: 64rem)" : undefined}
+          showShortcutHint={!active}
         />
       </div>
 
@@ -222,11 +223,12 @@ export default function AdminSettingsLayout() {
           </div>
         </div>
       ) : (
-        <div className="mx-auto w-full max-w-6xl">
+        <div className="w-full">
           <SettingsOverviewNav
             groups={overviewGroups}
             ariaLabel="Admin settings sections"
             idPrefix="admin-settings-index"
+            variant="directory"
           />
         </div>
       )}
