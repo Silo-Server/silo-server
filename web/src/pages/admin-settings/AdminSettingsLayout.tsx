@@ -1,8 +1,9 @@
 import { useMemo, useState, type ComponentType } from "react";
-import { AlertTriangle } from "lucide-react";
-import { useSearchParams } from "react-router";
+import { AlertTriangle, ChevronLeft } from "lucide-react";
+import { Link, useSearchParams } from "react-router";
 
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
+import { SettingsOverviewNav } from "@/components/settings/SettingsOverviewNav";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import {
   countSettingsSearchItems,
@@ -92,14 +93,24 @@ export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [settingsSearch, setSettingsSearch] = useState("");
   const { data: serverStatus } = useAdminServerStatus();
-  const rawActiveId = searchParams.get("tab") || "general";
+  const rawActiveId = searchParams.get("tab");
   const activeId = rawActiveId === "jellyfin" ? "compatibility-proxies" : rawActiveId;
   const filteredSettingsGroups = useMemo(
     () => filterSettingsSearchGroups(SETTINGS_GROUPS, settingsSearch),
     [settingsSearch],
   );
-  const filteredSettingsNav = useMemo(
-    () => filteredSettingsGroups.flatMap((group) => group.items),
+  const overviewGroups = useMemo(
+    () =>
+      filteredSettingsGroups.map((group) => ({
+        ...group,
+        items: group.items.map((item) => ({
+          id: item.id,
+          label: item.label,
+          description: item.description,
+          icon: item.icon,
+          href: `/admin/settings?tab=${encodeURIComponent(item.id)}`,
+        })),
+      })),
     [filteredSettingsGroups],
   );
   const filteredSettingsCount = countSettingsSearchItems(filteredSettingsGroups);
@@ -107,12 +118,22 @@ export default function AdminSettingsLayout() {
   function setActiveId(id: string) {
     setSearchParams({ tab: id }, { replace: true });
   }
-  const active = SETTINGS_NAV.find((n) => n.id === activeId) ?? SETTINGS_NAV[0]!;
-  const ActiveComponent = active.component;
+  const active = activeId ? SETTINGS_NAV.find((item) => item.id === activeId) : undefined;
+  const ActiveComponent = active?.component;
 
   return (
     <div className="space-y-6">
-      <div className="page-header gap-5">
+      {active ? (
+        <Link
+          to="/admin/settings"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex w-fit items-center gap-1.5 rounded-lg pr-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none lg:hidden"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          All settings
+        </Link>
+      ) : null}
+
+      <div className={cn("page-header gap-5", active && "hidden lg:flex")}>
         <div className="min-w-0 space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
           <p className="page-subtitle text-sm sm:text-base">
@@ -142,70 +163,43 @@ export default function AdminSettingsLayout() {
         </div>
       )}
 
-      <div className="surface-panel flex min-h-[500px] flex-col overflow-hidden rounded-[1.8rem] border-0 lg:flex-row">
-        {/* Mobile: horizontal scrolling pill bar */}
-        <nav
-          aria-label="Admin settings sections"
-          className="border-border overflow-x-auto border-b p-2 lg:hidden"
-          style={{ WebkitOverflowScrolling: "touch" }}
-        >
-          <div className="flex min-w-max items-stretch gap-1">
-            {filteredSettingsNav.map((item) => {
-              const isActive = item.id === active.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveId(item.id)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-[1rem] px-3 py-2.5 text-[13px] font-medium whitespace-nowrap transition-colors",
-                    isActive
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                  )}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </button>
-              );
-            })}
-            {filteredSettingsNav.length === 0 ? (
-              <p className="text-muted-foreground px-3 py-2.5 text-sm whitespace-nowrap">
-                No matching settings
-              </p>
+      {active && ActiveComponent ? (
+        <div className="surface-panel flex min-h-[500px] flex-col overflow-hidden rounded-[1.8rem] border-0 lg:flex-row">
+          <nav
+            aria-label="Admin settings sections"
+            className="border-border hidden space-y-5 border-r px-3 py-4 lg:block lg:w-60 lg:flex-shrink-0"
+          >
+            {filteredSettingsGroups.map((group) => (
+              <SideNavSection key={group.label} label={group.label} idPrefix="admin-settings-nav">
+                {group.items.map((item) => (
+                  <SideNavItem
+                    key={item.id}
+                    label={item.label}
+                    icon={item.icon}
+                    active={item.id === active.id}
+                    onClick={() => setActiveId(item.id)}
+                  />
+                ))}
+              </SideNavSection>
+            ))}
+            {filteredSettingsGroups.length === 0 ? (
+              <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
             ) : null}
+          </nav>
+
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <ActiveComponent />
           </div>
-        </nav>
-
-        {/* Desktop: grouped vertical rail */}
-        <nav
-          aria-label="Admin settings sections"
-          className="border-border hidden space-y-5 border-r px-3 py-4 lg:block lg:w-60 lg:flex-shrink-0"
-        >
-          {filteredSettingsGroups.map((group) => (
-            <SideNavSection key={group.label} label={group.label} idPrefix="admin-settings-nav">
-              {group.items.map((item) => (
-                <SideNavItem
-                  key={item.id}
-                  label={item.label}
-                  icon={item.icon}
-                  active={item.id === active.id}
-                  onClick={() => setActiveId(item.id)}
-                />
-              ))}
-            </SideNavSection>
-          ))}
-          {filteredSettingsGroups.length === 0 ? (
-            <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
-          ) : null}
-        </nav>
-
-        {/* Content area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <ActiveComponent />
         </div>
-      </div>
+      ) : (
+        <div className="mx-auto w-full max-w-6xl">
+          <SettingsOverviewNav
+            groups={overviewGroups}
+            ariaLabel="Admin settings sections"
+            idPrefix="admin-settings-index"
+          />
+        </div>
+      )}
     </div>
   );
 }

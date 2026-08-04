@@ -24,6 +24,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import PageBack from "@/components/PageBack";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
+import { SettingsOverviewNav } from "@/components/settings/SettingsOverviewNav";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -441,60 +442,20 @@ function SettingsOverview({
         className="w-full sm:max-w-md"
       />
 
-      {sections.length > 0 ? (
-        <nav aria-label="Settings sections" className="grid items-start gap-6 lg:grid-cols-2">
-          {sections.map((section) => {
-            const sectionId = `settings-index-${section.label
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")}`;
-
-            return (
-              <section key={section.label} aria-labelledby={sectionId}>
-                <h2
-                  id={sectionId}
-                  className="text-muted-foreground mb-2 px-1 text-[11px] font-semibold tracking-[0.16em] uppercase"
-                >
-                  {section.label}
-                </h2>
-                <ul className="surface-panel overflow-hidden rounded-2xl border-0 shadow-none">
-                  {section.items.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <li key={item.path} className="border-border/60 border-b last:border-b-0">
-                        <Link
-                          to={`/settings/${item.path}`}
-                          className="hover:bg-surface-hover/70 focus-visible:bg-surface-hover/70 focus-visible:ring-ring/70 flex min-h-[4.5rem] items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
-                        >
-                          <span className="bg-accent text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
-                            <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold">{item.label}</span>
-                            <span className="text-muted-foreground mt-0.5 block text-xs leading-snug">
-                              {item.description}
-                            </span>
-                          </span>
-                          <ChevronRight
-                            className="text-muted-foreground h-4 w-4 shrink-0"
-                            aria-hidden="true"
-                          />
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            );
-          })}
-        </nav>
-      ) : (
-        <div className="surface-panel-subtle rounded-2xl px-5 py-8 text-center">
-          <p className="font-medium">No matching settings</p>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Try a category, feature, or setting name.
-          </p>
-        </div>
-      )}
+      <SettingsOverviewNav
+        groups={sections.map((section) => ({
+          ...section,
+          items: section.items.map((item) => ({
+            id: item.path,
+            label: item.label,
+            description: item.description,
+            icon: item.icon,
+            href: `/settings/${item.path}`,
+          })),
+        }))}
+        ariaLabel="Settings sections"
+        idPrefix="settings-index"
+      />
     </div>
   );
 }

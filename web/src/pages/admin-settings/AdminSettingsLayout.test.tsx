@@ -92,11 +92,18 @@ describe("AdminSettingsLayout", () => {
     }
   });
 
-  it("defaults to the General tab", () => {
-    const markup = renderLayout();
+  it("renders the settings index at the root and preserves tab deep links", () => {
+    renderInteractiveLayout();
 
-    expect(markup).toContain('aria-current="page"');
-    expect(markup).toBe(renderLayout("?tab=general"));
+    expect(screen.getByRole("link", { name: /General.*Authentication/ })).toHaveAttribute(
+      "href",
+      "/admin/settings?tab=general",
+    );
+    expect(screen.queryByRole("link", { name: "All settings" })).not.toBeInTheDocument();
+
+    const detail = renderLayout("?tab=general");
+    expect(detail).toContain('aria-current="page"');
+    expect(detail).toContain('href="/admin/settings"');
   });
 
   it("surfaces durable restart-required state above the active tab", () => {
@@ -119,8 +126,8 @@ describe("AdminSettingsLayout", () => {
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "redis");
 
-    expect(screen.getAllByRole("button", { name: /Database/ })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: /Playback/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Database/ })).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
     expect(screen.getByText("1 match")).toBeInTheDocument();
   });
 
@@ -132,8 +139,8 @@ describe("AdminSettingsLayout", () => {
       "pool max open",
     );
 
-    expect(screen.getAllByRole("button", { name: /Database/ })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: /General/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Database/ })).toHaveLength(1);
+    expect(screen.queryByRole("link", { name: /General/ })).not.toBeInTheDocument();
   });
 
   it("focuses admin settings search with Cmd+K", () => {
