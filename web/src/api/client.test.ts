@@ -42,13 +42,13 @@ describe("bootstrapAccessToken", () => {
   });
 
   it("refreshes the access token before protected requests on startup", async () => {
-    setRefreshToken("startup-refresh");
+    setRefreshToken("fake");
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       expect(String(input)).toBe("/api/v1/auth/refresh");
       return new Response(
         JSON.stringify({
-          access_token: "startup-access",
-          refresh_token: "rotated-refresh",
+          access_token: "dummy",
+          refresh_token: "example",
           expires_in: 3600,
         }),
         {
@@ -61,19 +61,19 @@ describe("bootstrapAccessToken", () => {
     await expect(bootstrapAccessToken(fetchMock)).resolves.toBe(true);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(getAccessToken()).toBe("startup-access");
-    expect(localStorage.getItem("refresh_token")).toBe("rotated-refresh");
+    expect(getAccessToken()).toBe("dummy");
+    expect(localStorage.getItem("refresh_token")).toBe("example");
   });
 
   it("does not refresh when an access token is already present", async () => {
-    setAccessToken("already-present");
-    setRefreshToken("startup-refresh");
+    setAccessToken("sample");
+    setRefreshToken("fake");
     const fetchMock = vi.fn<typeof fetch>();
 
     await expect(bootstrapAccessToken(fetchMock)).resolves.toBe(true);
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(getAccessToken()).toBe("already-present");
+    expect(getAccessToken()).toBe("sample");
   });
 });
 
