@@ -1208,10 +1208,10 @@ func (s *Service) installationAllowsInsecure(ctx context.Context, installationID
 		return false
 	}
 	for _, cfg := range configs {
-		if cfg == nil || cfg.ConfigKey != "allow_insecure_http" {
+		if cfg == nil || cfg.Key != "allow_insecure_http" {
 			continue
 		}
-		if val, ok := cfg.ConfigValue["enabled"]; ok {
+		if val, ok := cfg.Value["enabled"]; ok {
 			switch v := val.(type) {
 			case bool:
 				return v
