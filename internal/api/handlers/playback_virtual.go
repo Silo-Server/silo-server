@@ -156,6 +156,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			continue
 		}
 		resolved.File = probed
+		mergeVirtualCandidateTracks(resolved.File, candidate)
 		resolved.ProbeSucceeded = true
 		return resolved, nil
 	}
@@ -163,6 +164,9 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		// Unknown technical metadata routes through the conservative H264/AAC
 		// planner fallback; retaining the first resolved URI is safer than
 		// guessing direct-play compatibility.
+		if len(candidates) > 0 {
+			mergeVirtualCandidateTracks(firstResolved.File, candidates[0])
+		}
 		return *firstResolved, nil
 	}
 	if attemptErr == nil {
@@ -264,6 +268,7 @@ func (h *PlaybackHandler) resolveVirtualCandidateSource(
 		return nil, errors.New("virtual stream probe failed during fallback")
 	}
 	resolved.File = probed
+	mergeVirtualCandidateTracks(resolved.File, candidate)
 	resolved.ProbeSucceeded = true
 	return &resolved, nil
 }
@@ -383,3 +388,52 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 	}
 	return strings.Contains(strings.ToLower(u.Path), ".m3u8") || strings.Contains(strings.ToLower(u.RawQuery), ".m3u8")
 }
+
+// mergeVirtualCandidateTracks supplements probed virtual file tracks with
+// language metadata from the provider candidate. ffprobe may not always
+// detect language tags on remote streams (especially HLS and DASH), so
+// candidate audio/subtitle languages fill the gap so the player can display
+// track choices before and during playback.
+func mergeVirtualCandidateTracks(probed *models.MediaFile, candidate VirtualPlaybackStream) {
+	if probed == nil {
+		return
+	}
+	if len(candidate.AudioLanguages) > 0 {
+		existing := make(map[string]bool, len(probed.AudioTracks))
+		for _, t := range probed.AudioTracks {
+			if lang := strings.TrimSpace(t.Language); lang != "" {
+				existing[strings.ToLower(lang)] = true
+			}
+		}
+		for _, lang := range candidate.AudioLanguages {
+			lang = strings.TrimSpace(lang)
+			if lang == "" || existing[strings.ToLower(lang)] {
+				continue
+			}
+			existing[strings.ToLower(lang)] = true
+			probed.AudioTracks = append(probed.AudioTracks, models.AudioTrack{
+				Language: lang,
+			})
+		}
+	}
+	if len(candidate.SubtitleLanguages) > 0 {
+		existing := make(map[string]bool, len(probed.SubtitleTracks))
+		for _, t := range probed.SubtitleTracks {
+			if lang := strings.TrimSpace(t.Language); lang != "" {
+				existing[strings.ToLower(lang)] = true
+			}
+		}
+		for i, lang := range candidate.SubtitleLanguages {
+			lang = strings.TrimSpace(lang)
+			if lang == "" || existing[strings.ToLower(lang)] {
+				continue
+			}
+			existing[strings.ToLower(lang)] = true
+			probed.SubtitleTracks = append(probed.SubtitleTracks, models.SubtitleTrack{
+				Index:    len(probed.SubtitleTracks) + i,
+				Language: lang,
+			})
+		}
+	}
+}
+
