@@ -120,8 +120,10 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	attemptCtx, cancel := context.WithTimeout(r.Context(), virtualStartupBudget)
 	defer cancel()
 
-	// Resolve every candidate in parallel so the per-candidate provider-RTT
-	// is paid once for the whole set, not repeatedly for each failover.
+	// Resolve the best candidate immediately. While it probes, resolve the
+	// remaining candidates in the background as failover insurance. This
+	// avoids hitting the provider N times in the common case where the
+	// first candidate works, while saving a round-trip when it doesn't.
 	type resolveResult struct {
 		index     int
 		candidate VirtualPlaybackStream
@@ -129,66 +131,90 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		url       string
 		err       error
 	}
+	// Fire background resolves for candidates[1:] before probing candidate[0].
+	bgCtx, bgCancel := context.WithCancel(attemptCtx)
+	defer bgCancel()
 	resolveResults := make([]resolveResult, len(candidates))
-	var wg sync.WaitGroup
-	wg.Add(len(candidates))
-	for i, c := range candidates {
-		go func(idx int, cand VirtualPlaybackStream) {
-			defer wg.Done()
-			oid := cand.OwnerInstallationID
-			if oid <= 0 {
-				oid = file.VirtualOwnerInstallationID
-			}
-			url, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
+	var bg sync.WaitGroup
+	if len(candidates) > 1 {
+		bg.Add(len(candidates) - 1)
+		for i, c := range candidates[1:] {
+			go func(idx int, cand VirtualPlaybackStream) {
+				defer bg.Done()
+				oid := cand.OwnerInstallationID
+				if oid <= 0 {
+					oid = file.VirtualOwnerInstallationID
+				}
+				url, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
+					bgCtx, cand.URI, userID, profileID, oid,
+				)
+				resolveResults[idx+1] = resolveResult{
+					index: idx + 1, candidate: cand, ownerID: oid, url: url, err: err,
+				}
+			}(i, c)
+		}
+	}
+
+	resolveAndProbe := func(i int, cand VirtualPlaybackStream) (*resolvedVirtualPlaybackSource, error) {
+		oid := cand.OwnerInstallationID
+		if oid <= 0 {
+			oid = file.VirtualOwnerInstallationID
+		}
+		// If results already filled from a background resolve, use it.
+		var streamURL string
+		var resolveErr error
+		if resolveResults[i].url != "" || resolveResults[i].err != nil {
+			streamURL = resolveResults[i].url
+			resolveErr = resolveResults[i].err
+		} else {
+			streamURL, resolveErr = h.VirtualPlaybackResolver.ResolveVirtualPlayback(
 				attemptCtx, cand.URI, userID, profileID, oid,
 			)
-			resolveResults[idx] = resolveResult{
-				index: idx, candidate: cand, ownerID: oid, url: url, err: err,
-			}
-		}(i, c)
-	}
-	wg.Wait()
-
-	var firstResolved *resolvedVirtualPlaybackSource
-	var attemptErr error
-	for i := range candidates {
-		rr := resolveResults[i]
-		if rr.err != nil {
-			attemptErr = errors.Join(attemptErr, rr.err)
-			continue
+		}
+		if resolveErr != nil {
+			return nil, resolveErr
 		}
 		transient := *file
-		transient.FilePath = rr.candidate.URI
-		transient.VirtualOwnerInstallationID = rr.ownerID
-		resolved := resolvedVirtualPlaybackSource{
-			URL: rr.url, URI: rr.candidate.URI, OwnerID: rr.ownerID, File: &transient,
-		}
-		if firstResolved == nil {
-			copy := resolved
-			firstResolved = &copy
-		}
+		transient.FilePath = cand.URI
+		transient.VirtualOwnerInstallationID = oid
 		if h.VirtualPlaybackSourceProber == nil {
-			return resolved, nil
+			return &resolvedVirtualPlaybackSource{
+				URL: streamURL, URI: cand.URI, OwnerID: oid, File: &transient,
+			}, nil
 		}
 		probeCtx, probeCancel := context.WithTimeout(attemptCtx, virtualProbeBudget)
-		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, rr.url, &transient)
+		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
 		probeCancel()
 		if probeErr != nil || probed == nil {
 			if probeErr == nil {
 				probeErr = errors.New("virtual stream probe returned no metadata")
 			}
-			attemptErr = errors.Join(attemptErr, probeErr)
+			return nil, probeErr
+		}
+		mergeVirtualCandidateTracks(probed, cand)
+		return &resolvedVirtualPlaybackSource{
+			URL: streamURL, URI: cand.URI, OwnerID: oid, File: probed, ProbeSucceeded: true,
+		}, nil
+	}
+
+	var firstResolved *resolvedVirtualPlaybackSource
+	var attemptErr error
+	for i, candidate := range candidates {
+		result, err := resolveAndProbe(i, candidate)
+		if err != nil {
+			attemptErr = errors.Join(attemptErr, err)
 			continue
 		}
-		resolved.File = probed
-		mergeVirtualCandidateTracks(resolved.File, rr.candidate)
-		resolved.ProbeSucceeded = true
-		return resolved, nil
+		if result.ProbeSucceeded || h.VirtualPlaybackSourceProber == nil {
+			bgCancel() // cancel background resolves, we're done
+			return *result, nil
+		}
+		if firstResolved == nil {
+			copy := *result
+			firstResolved = &copy
+		}
 	}
 	if firstResolved != nil {
-		// Unknown technical metadata routes through the conservative H264/AAC
-		// planner fallback; retaining the first resolved URI is safer than
-		// guessing direct-play compatibility.
 		if len(candidates) > 0 {
 			mergeVirtualCandidateTracks(firstResolved.File, candidates[0])
 		}
