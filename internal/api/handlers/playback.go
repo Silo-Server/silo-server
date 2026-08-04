@@ -168,6 +168,22 @@ type copySeekAnchorResolver func(
 ) (float64, int, error)
 
 // PlaybackHandler handles playback session HTTP endpoints.
+// SubtitleSearchTrigger is an optional callback that fires a background
+// subtitle search when a virtual stream enters playback with no embedded or
+// external subtitle tracks. The player receives subtitle choices as soon as
+// results are downloaded.
+type SubtitleSearchTrigger func(
+	ctx context.Context,
+	contentID string,
+	imdbID string,
+	title string,
+	year int,
+	season int,
+	episode int,
+	fileID int,
+	languages []string,
+)
+
 type PlaybackHandler struct {
 	sessionMgr                  SessionManagerInterface
 	fileResolver                FilePathResolver // optional; enables stream_url in responses
@@ -207,6 +223,7 @@ type PlaybackHandler struct {
 	MarkerLazyContext           context.Context
 	MarkerLazyInFlight          sync.Map
 	SubtitleRepo                subtitles.Repository // optional; enables downloaded subtitles in playback
+	VirtualSubtitleSearcher      SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
 	RealtimeHub                 *playback.RealtimeHub
 	CommandTracker              *playback.CommandTracker
 	CommandDispatcher           *playback.CommandDispatcher

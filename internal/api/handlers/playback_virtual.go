@@ -192,6 +192,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			if !transient.HDR && cand.HDR != "" {
 				transient.HDR = true
 			}
+			h.maybeTriggerSubtitleSearch(attemptCtx, &transient, cand)
 			return &resolvedVirtualPlaybackSource{
 				URL: streamURL, URI: cand.URI, OwnerID: oid, File: &transient, ProbeSucceeded: true,
 			}, nil
@@ -210,6 +211,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			// best-effort fallback instead of discarding the stream entirely.
 			if cand.hasReliableCodecs() {
 				mergeVirtualCandidateTracks(&transient, cand)
+				h.maybeTriggerSubtitleSearch(attemptCtx, &transient, cand)
 				return &resolvedVirtualPlaybackSource{
 					URL: streamURL, URI: cand.URI, OwnerID: oid,
 					File: &transient, ProbeSucceeded: true,
@@ -221,6 +223,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			return nil, probeErr
 		}
 		mergeVirtualCandidateTracks(probed, cand)
+		h.maybeTriggerSubtitleSearch(probeCtx, probed, cand)
 		return &resolvedVirtualPlaybackSource{
 			URL: streamURL, URI: cand.URI, OwnerID: oid, File: probed, ProbeSucceeded: true,
 		}, nil
@@ -477,6 +480,36 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 func (s VirtualPlaybackStream) hasReliableCodecs() bool {
 	return s.CodecVideo != "" && s.Resolution != ""
 }
+
+// maybeTriggerSubtitleSearch kicks off a background subtitle search when a
+// virtual stream enters playback with no embedded or external subtitle tracks.
+// Results are downloaded and associated with the file so they appear in the
+// player's subtitle selector without blocking playback start.
+func (h *PlaybackHandler) maybeTriggerSubtitleSearch(
+	ctx context.Context,
+	file *models.MediaFile,
+	cand VirtualPlaybackStream,
+) {
+	if h.VirtualSubtitleSearcher == nil || file == nil {
+		return
+	}
+	if len(file.SubtitleTracks) > 0 || len(file.ExternalSubtitles) > 0 {
+		return
+	}
+	// Fire background search — don't block playback on subtitle results.
+	go h.VirtualSubtitleSearcher(
+		context.Background(),
+		file.ContentID,
+		"", // IMDb ID resolved from contentID by the caller
+		"", // title resolved by the caller
+		0,  // year resolved by the caller
+		0,  // season
+		0,  // episode
+		file.ID,
+		cand.SubtitleLanguages,
+	)
+}
+
 // mergeVirtualCandidateTracks supplements probed virtual file tracks with
 // metadata from the provider candidate. ffprobe may not always detect
 // language tags, codecs, or dimensions on remote streams (especially HLS
