@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"net/http"
 	"net/url"
 	"strings"
@@ -118,25 +119,49 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	}
 	attemptCtx, cancel := context.WithTimeout(r.Context(), virtualStartupBudget)
 	defer cancel()
+
+	// Resolve every candidate in parallel so the per-candidate provider-RTT
+	// is paid once for the whole set, not repeatedly for each failover.
+	type resolveResult struct {
+		index     int
+		candidate VirtualPlaybackStream
+		ownerID   int
+		url       string
+		err       error
+	}
+	resolveResults := make([]resolveResult, len(candidates))
+	var wg sync.WaitGroup
+	wg.Add(len(candidates))
+	for i, c := range candidates {
+		go func(idx int, cand VirtualPlaybackStream) {
+			defer wg.Done()
+			oid := cand.OwnerInstallationID
+			if oid <= 0 {
+				oid = file.VirtualOwnerInstallationID
+			}
+			url, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
+				attemptCtx, cand.URI, userID, profileID, oid,
+			)
+			resolveResults[idx] = resolveResult{
+				index: idx, candidate: cand, ownerID: oid, url: url, err: err,
+			}
+		}(i, c)
+	}
+	wg.Wait()
+
 	var firstResolved *resolvedVirtualPlaybackSource
 	var attemptErr error
-	for _, candidate := range candidates {
-		ownerID := candidate.OwnerInstallationID
-		if ownerID <= 0 {
-			ownerID = file.VirtualOwnerInstallationID
-		}
-		streamURL, err := h.VirtualPlaybackResolver.ResolveVirtualPlayback(
-			attemptCtx, candidate.URI, userID, profileID, ownerID,
-		)
-		if err != nil {
-			attemptErr = errors.Join(attemptErr, err)
+	for i := range candidates {
+		rr := resolveResults[i]
+		if rr.err != nil {
+			attemptErr = errors.Join(attemptErr, rr.err)
 			continue
 		}
 		transient := *file
-		transient.FilePath = candidate.URI
-		transient.VirtualOwnerInstallationID = ownerID
+		transient.FilePath = rr.candidate.URI
+		transient.VirtualOwnerInstallationID = rr.ownerID
 		resolved := resolvedVirtualPlaybackSource{
-			URL: streamURL, URI: candidate.URI, OwnerID: ownerID, File: &transient,
+			URL: rr.url, URI: rr.candidate.URI, OwnerID: rr.ownerID, File: &transient,
 		}
 		if firstResolved == nil {
 			copy := resolved
@@ -146,7 +171,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			return resolved, nil
 		}
 		probeCtx, probeCancel := context.WithTimeout(attemptCtx, virtualProbeBudget)
-		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
+		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, rr.url, &transient)
 		probeCancel()
 		if probeErr != nil || probed == nil {
 			if probeErr == nil {
@@ -156,7 +181,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			continue
 		}
 		resolved.File = probed
-		mergeVirtualCandidateTracks(resolved.File, candidate)
+		mergeVirtualCandidateTracks(resolved.File, rr.candidate)
 		resolved.ProbeSucceeded = true
 		return resolved, nil
 	}
