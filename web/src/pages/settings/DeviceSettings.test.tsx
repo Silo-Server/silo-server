@@ -4,11 +4,13 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { SettingsCapabilities } from "@/hooks/queries/settingValues";
+
 const mocks = vi.hoisted(() => ({
   refetchCapabilities: vi.fn(),
   useEffectiveSettings: vi.fn(),
   capabilities: {
-    data: undefined as undefined | { revision: number },
+    data: undefined as SettingsCapabilities | undefined,
     isLoading: false,
     isError: true,
     isFetching: false,
@@ -35,15 +37,19 @@ vi.mock("@/hooks/queries/devices", () => ({
   useForgetDevice: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
-vi.mock("@/hooks/queries/settingValues", () => ({
-  useSettingsCapabilities: () => ({
-    ...mocks.capabilities,
-    refetch: mocks.refetchCapabilities,
-  }),
-  useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
-  useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
-  useClearSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
-}));
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/queries/settingValues")>();
+  return {
+    ...actual,
+    useSettingsCapabilities: () => ({
+      ...mocks.capabilities,
+      refetch: mocks.refetchCapabilities,
+    }),
+    useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
+    useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
+    useClearSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
+  };
+});
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: { id: "profile-1", is_primary: false } }),
@@ -69,6 +75,14 @@ vi.mock("@/components/settings/SubtitleAppearancePanelView", () => ({
 import DeviceSettings from "./DeviceSettings";
 
 describe("DeviceSettings capability discovery", () => {
+  const compatibleCapabilities: SettingsCapabilities = {
+    api_version: 1,
+    revision: 5,
+    contract_etag: "revision-five",
+    supports_batched_effective: true,
+    supports_idempotent_writes: true,
+  };
+
   beforeEach(() => {
     mocks.refetchCapabilities.mockReset();
     mocks.useEffectiveSettings.mockReset();
@@ -97,5 +111,43 @@ describe("DeviceSettings capability discovery", () => {
 
     await user.click(screen.getByRole("button", { name: "Retry compatibility check" }));
     expect(mocks.refetchCapabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["API version is incompatible", { ...compatibleCapabilities, api_version: 2 }],
+    [
+      "batched effective reads are missing",
+      { ...compatibleCapabilities, supports_batched_effective: undefined },
+    ],
+    [
+      "idempotent writes are missing",
+      { ...compatibleCapabilities, supports_idempotent_writes: undefined },
+    ],
+    ["revision is missing", { ...compatibleCapabilities, revision: undefined }],
+  ])("does not request all settings when the %s", (_case, capabilities) => {
+    mocks.capabilities.data = capabilities as SettingsCapabilities;
+
+    render(<DeviceSettings />);
+
+    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ keys: [], enabled: false }),
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("Editable device defaults")).not.toBeInTheDocument();
+  });
+
+  it("enables only revision-supported keys when the full capability contract matches", () => {
+    mocks.capabilities.data = compatibleCapabilities;
+
+    render(<DeviceSettings />);
+
+    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keys: expect.arrayContaining(["player.hdr_enabled", "ui.card_presentation"]),
+        enabled: true,
+      }),
+    );
+    expect(screen.getByText("Editable device defaults")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

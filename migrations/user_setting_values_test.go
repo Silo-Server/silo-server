@@ -93,6 +93,8 @@ func TestProfileClientSettingsMigrationContract(t *testing.T) {
 		"group_row.library_id IS NOT NULL",
 		"CASE WHEN jsonb_typeof(group_row.pins) = 'array' THEN group_row.pins ELSE '[]'::jsonb END",
 		"jsonb_typeof(pin.pin_value) = 'object'",
+		"jsonb_typeof(pin.pin_value->'id') = 'string'",
+		"jsonb_typeof(pin.pin_value->'label') = 'string'",
 		"pin.pin_value->>'id' ~ '[^[:space:]]'",
 		"pin.pin_value->>'label' ~ '[^[:space:]]'",
 		"ON CONFLICT (user_id, profile_id, key) WHERE scope = 'profile' DO NOTHING",

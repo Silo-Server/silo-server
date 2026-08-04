@@ -15,6 +15,7 @@ import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
 import { useClearDeviceSettings, useForgetDevice, useMyDevices } from "@/hooks/queries/devices";
 import {
+  settingsCapabilitiesSupportKey,
   useSettingsCapabilities,
   useClearSettingValue,
   useEffectiveSettings,
@@ -240,20 +241,24 @@ function DeviceDetail({
 
   const capabilities = useSettingsCapabilities();
   const supportedKeys = useMemo(
-    () => deviceSettingKeysForRevision(capabilities.data?.revision),
-    [capabilities.data?.revision],
+    () =>
+      deviceSettingKeysForRevision(capabilities.data?.revision).filter((key) =>
+        settingsCapabilitiesSupportKey(capabilities.data, key),
+      ),
+    [capabilities.data],
   );
+  const canUseDeviceSettings = supportedKeys.length > 0;
 
   const { data: settings = {}, isLoading: settingsLoading } = useEffectiveSettings({
     keys: supportedKeys,
     deviceId: device.device_id,
     profileId: targetProfileId,
     // An empty key list means "all keys" to the API, so wait until the
-    // connected server's revision is known before issuing the batch.
-    enabled: capabilities.data !== undefined,
+    // connected server confirms the complete settings capability contract.
+    enabled: canUseDeviceSettings,
   });
   const isLoading = capabilities.isLoading || settingsLoading;
-  const capabilitiesUnavailable = !capabilities.isLoading && capabilities.data === undefined;
+  const capabilitiesUnavailable = !capabilities.isLoading && !canUseDeviceSettings;
 
   const setValue = useSetSettingValue();
   const clearValue = useClearSettingValue();

@@ -23,7 +23,10 @@ const mockClearProfile = vi.fn();
 const mockTogglePin = vi.fn();
 let mockPrimaryMenu: {
   items: Array<
-    | { type: "builtin"; destination: "home" }
+    | {
+        type: "builtin";
+        destination: "home" | "movies" | "series" | "music" | "audiobooks";
+      }
     | { type: "section"; library_id: number; section_id: string; label: string }
     | {
         type: "collection";
@@ -33,6 +36,7 @@ let mockPrimaryMenu: {
       }
   >;
 } | null = null;
+let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -51,7 +55,7 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
 
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
-    data: [{ id: 7, name: "Movies", type: "movies" }],
+    data: mockLibraries,
   }),
 }));
 
@@ -184,6 +188,7 @@ describe("AppSidebar", () => {
     mockTogglePin.mockReset();
     mockPluginInstallations = [];
     mockPrimaryMenu = null;
+    mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {
@@ -280,6 +285,38 @@ describe("AppSidebar", () => {
     expect(markup).not.toContain("Hidden section");
     expect(markup).not.toContain("Hidden collection");
     expect(markup).toContain("Global collection");
+  });
+
+  it("does not reinterpret global media built-ins as the first matching library", () => {
+    mockLibraries = [
+      { id: 7, name: "Movies A", type: "movies" },
+      { id: 8, name: "Movies B", type: "movie" },
+      { id: 9, name: "TV A", type: "series" },
+      { id: 10, name: "TV B", type: "shows" },
+      { id: 11, name: "Books A", type: "audiobooks" },
+      { id: 12, name: "Books B", type: "audiobook" },
+      { id: 13, name: "Music A", type: "music" },
+      { id: 14, name: "Music B", type: "music" },
+    ];
+    mockPrimaryMenu = {
+      items: [
+        { type: "builtin", destination: "home" },
+        { type: "builtin", destination: "movies" },
+        { type: "builtin", destination: "series" },
+        { type: "builtin", destination: "audiobooks" },
+        { type: "builtin", destination: "music" },
+      ],
+    };
+
+    const document = parseMarkup(renderSidebar("/"));
+    const primaryMenu = document.querySelector('nav[aria-label="Main navigation"] > ul');
+    const primaryHrefs = [...(primaryMenu?.querySelectorAll("a") ?? [])].map((link) =>
+      link.getAttribute("href"),
+    );
+
+    expect(primaryHrefs).toEqual(["/"]);
+    expect(document.querySelector('a[href="/library/7"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/library/14"]')).not.toBeNull();
   });
 
   it("keeps a custom section active while sort and filter params change", () => {

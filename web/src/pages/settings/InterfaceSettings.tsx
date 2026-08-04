@@ -40,10 +40,9 @@ const BUILTIN_LABELS: Record<string, string> = {
 };
 
 const ADDABLE_WEB_BUILTINS: PrimaryMenuItem[] = [
-  { type: "builtin", destination: "movies" },
-  { type: "builtin", destination: "series" },
-  { type: "builtin", destination: "music" },
-  { type: "builtin", destination: "audiobooks" },
+  // Media-family built-ins are global by contract. Until web has global
+  // routes for every family, users can add the explicit library destinations
+  // below without giving a global item first-library semantics.
   { type: "builtin", destination: "for_you" },
   { type: "builtin", destination: "calendar" },
 ];
@@ -255,6 +254,21 @@ export default function InterfaceSettings() {
         <InterfaceHeader />
         <div className="surface-panel-subtle text-muted-foreground rounded-xl border p-5 text-sm">
           Checking server support…
+        </div>
+      </div>
+    );
+  }
+
+  if (customization.isUnavailable) {
+    return (
+      <div className="space-y-6">
+        <InterfaceHeader />
+        <div className="surface-panel-subtle rounded-xl border p-5" role="alert">
+          <p className="font-medium">Customization unavailable</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Saved navigation and card settings could not be loaded. Editing stays disabled to
+            protect your existing choices.
+          </p>
         </div>
       </div>
     );

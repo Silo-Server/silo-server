@@ -65,7 +65,6 @@ import {
   LayoutGrid,
   Puzzle,
   BookHeadphones,
-  Music2,
   Send,
   Bell,
 } from "lucide-react";
@@ -86,22 +85,6 @@ function getLibraryIcon(type: string) {
       return <BookHeadphones className="h-[18px] w-[18px]" />;
     default:
       return <Library className="h-[18px] w-[18px]" />;
-  }
-}
-
-function libraryMatchesBuiltin(type: string, destination: string) {
-  const normalized = type.toLowerCase();
-  switch (destination) {
-    case "movies":
-      return normalized === "movie" || normalized === "movies";
-    case "series":
-      return ["series", "show", "shows", "tv"].includes(normalized);
-    case "music":
-      return normalized === "music";
-    case "audiobooks":
-      return normalized === "audiobook" || normalized === "audiobooks";
-    default:
-      return false;
   }
 }
 
@@ -334,39 +317,16 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
               icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" />,
             },
           ];
-        case "music": {
-          const library = libraries?.find((candidate) =>
-            libraryMatchesBuiltin(candidate.type, item.destination),
-          );
-          if (!library) return [];
-          return [
-            {
-              key,
-              href: `/library/${library.id}`,
-              label: "Music",
-              icon: <Music2 className="h-[18px] w-[18px] shrink-0" />,
-            },
-          ];
-        }
-        default: {
-          const library = libraries?.find((candidate) =>
-            libraryMatchesBuiltin(candidate.type, item.destination),
-          );
-          if (!library) return [];
-          return [
-            {
-              key,
-              href: `/library/${library.id}`,
-              label:
-                item.destination === "movies"
-                  ? "Movies"
-                  : item.destination === "series"
-                    ? "TV Shows"
-                    : "Audiobooks",
-              icon: getLibraryIcon(library.type),
-            },
-          ];
-        }
+        // These contract built-ins identify global media destinations, not a
+        // particular library. Web does not currently have complete global
+        // routes for all four media families (notably music), so omit them
+        // instead of silently changing their meaning to the first matching
+        // library. An explicit `library` menu item remains fully supported.
+        case "movies":
+        case "series":
+        case "music":
+        case "audiobooks":
+          return [];
       }
     });
   }, [libraries, primaryMenu]);

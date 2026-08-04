@@ -17,6 +17,7 @@ describe("RecommendationGridSkeleton", () => {
           isSupported: true,
           supportsAtomicShortcuts: true,
           isLoading: false,
+          isUnavailable: false,
         }}
       >
         <RecommendationGridSkeleton count={2} />

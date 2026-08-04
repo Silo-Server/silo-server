@@ -28,6 +28,10 @@ export function UICustomizationProvider({ children }: { children: ReactNode }) {
     capabilitiesQuery.data,
   );
   const query = useEffectiveSettings({ keys: UI_CUSTOMIZATION_KEYS, enabled: isSupported });
+  const isUnavailable =
+    (!capabilitiesQuery.isLoading &&
+      (capabilitiesQuery.isError || capabilitiesQuery.data === undefined)) ||
+    (isSupported && !query.isLoading && (query.isError || query.data === undefined));
   // A disabled query may still expose data cached before a server downgrade or
   // reconnect. Ignore it until the connected server proves support.
   const primaryMenuValue = isSupported
@@ -52,10 +56,12 @@ export function UICustomizationProvider({ children }: { children: ReactNode }) {
       isSupported,
       supportsAtomicShortcuts,
       isLoading: capabilitiesQuery.isLoading || (isSupported && query.isLoading),
+      isUnavailable,
     }),
     [
       capabilitiesQuery.isLoading,
       cardPresentationValue,
+      isUnavailable,
       isSupported,
       primaryMenuValue,
       query.data,

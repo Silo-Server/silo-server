@@ -57,6 +57,7 @@ describe("RelatedRail", () => {
             isSupported: true,
             supportsAtomicShortcuts: true,
             isLoading: false,
+            isUnavailable: false,
           }}
         >
           <RelatedRail

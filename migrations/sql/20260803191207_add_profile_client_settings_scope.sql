@@ -117,6 +117,8 @@ WITH legacy AS (
    WHERE group_row.library_id IS NOT NULL
      AND jsonb_typeof(pin.pin_value) = 'object'
      AND pin.pin_value->>'type' IN ('section', 'collection')
+     AND jsonb_typeof(pin.pin_value->'id') = 'string'
+     AND jsonb_typeof(pin.pin_value->'label') = 'string'
      AND char_length(COALESCE(pin.pin_value->>'id', '')) BETWEEN 1 AND 128
      AND pin.pin_value->>'id' ~ '[^[:space:]]'
      AND char_length(COALESCE(pin.pin_value->>'label', '')) BETWEEN 1 AND 256

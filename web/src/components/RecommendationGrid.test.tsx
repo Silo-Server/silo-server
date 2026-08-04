@@ -53,6 +53,7 @@ describe("RecommendationGrid", () => {
             isSupported: true,
             supportsAtomicShortcuts: true,
             isLoading: false,
+            isUnavailable: false,
           }}
         >
           <RecommendationGrid items={[{ media_item_id: "ebook 1" }]} />

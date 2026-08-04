@@ -53,6 +53,7 @@ describe("InterfaceSettings card resets", () => {
       isSupported: true,
       supportsAtomicShortcuts: true,
       isLoading: false,
+      isUnavailable: false,
     });
     mocks.useUserLibraries.mockReturnValue({ data: [] });
     mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutateAsync: setMutateAsync });
@@ -254,6 +255,7 @@ describe("InterfaceSettings card resets", () => {
       isSupported: false,
       supportsAtomicShortcuts: false,
       isLoading: false,
+      isUnavailable: false,
     });
 
     render(<InterfaceSettings />);
@@ -261,5 +263,28 @@ describe("InterfaceSettings card resets", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Server upgrade required");
     expect(screen.queryByRole("radiogroup", { name: "Poster size" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save menu" })).not.toBeInTheDocument();
+  });
+
+  it("keeps editors closed when effective customization could not be loaded", () => {
+    mocks.useUICustomization.mockReturnValue({
+      cardPresentation: { poster_size: "standard", caption: "title_metadata" },
+      cardPresentationSource: "default",
+      primaryMenu: null,
+      primaryMenuSource: "default",
+      shortcuts: { items: [] },
+      isSupported: true,
+      supportsAtomicShortcuts: true,
+      isLoading: false,
+      isUnavailable: true,
+    });
+
+    render(<InterfaceSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Customization unavailable");
+    expect(screen.getByRole("alert")).toHaveTextContent("Editing stays disabled");
+    expect(screen.queryByRole("radiogroup", { name: "Poster size" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save menu" })).not.toBeInTheDocument();
+    expect(setMutateAsync).not.toHaveBeenCalled();
+    expect(clearMutateAsync).not.toHaveBeenCalled();
   });
 });

@@ -55,6 +55,7 @@ function Probe() {
       data-supported={String(customization.isSupported)}
       data-atomic={String(customization.supportsAtomicShortcuts)}
       data-loading={String(customization.isLoading)}
+      data-unavailable={String(customization.isUnavailable)}
     >
       {customization.cardPresentation.poster_size}
     </output>
@@ -75,6 +76,7 @@ describe("UICustomizationProvider capability gating", () => {
         },
       },
       isLoading: false,
+      isError: false,
     });
     mocks.useSettingsCapabilities.mockReturnValue({
       data: {
@@ -85,6 +87,7 @@ describe("UICustomizationProvider capability gating", () => {
         supports_idempotent_writes: true,
       },
       isLoading: false,
+      isError: false,
     });
   });
 
@@ -120,6 +123,7 @@ describe("UICustomizationProvider capability gating", () => {
         supports_idempotent_writes: true,
       },
       isLoading: false,
+      isError: false,
     });
 
     render(
@@ -147,6 +151,7 @@ describe("UICustomizationProvider capability gating", () => {
         supports_atomic_shortcuts: true,
       },
       isLoading: false,
+      isError: false,
     });
 
     render(
@@ -175,6 +180,7 @@ describe("UICustomizationProvider capability gating", () => {
         supports_atomic_shortcuts: true,
       },
       isLoading: false,
+      isError: false,
     });
     mocks.useEffectiveSettings.mockReturnValue({
       data: {
@@ -194,5 +200,36 @@ describe("UICustomizationProvider capability gating", () => {
 
     expect(screen.getByRole("status")).toHaveAttribute("data-atomic", "true");
     expect(screen.getByRole("status")).toHaveTextContent("large");
+  });
+
+  it("marks customization unavailable when effective settings fail to load", () => {
+    mocks.useSettingsCapabilities.mockReturnValue({
+      data: {
+        api_version: 1,
+        revision: 5,
+        contract_etag: "revision-five",
+        supports_batched_effective: true,
+        supports_idempotent_writes: true,
+        supports_atomic_shortcuts: true,
+      },
+      isLoading: false,
+      isError: false,
+    });
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    render(
+      <UICustomizationProvider>
+        <Probe />
+      </UICustomizationProvider>,
+    );
+
+    expect(screen.getByRole("status")).toHaveAttribute("data-supported", "true");
+    expect(screen.getByRole("status")).toHaveAttribute("data-loading", "false");
+    expect(screen.getByRole("status")).toHaveAttribute("data-unavailable", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("standard");
   });
 });
