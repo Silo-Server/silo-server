@@ -291,6 +291,24 @@ func (r *Relay) Proxy(w http.ResponseWriter, request *http.Request, source strin
 	return nil
 }
 
+// ProxyInsecure is like Proxy but skips the public-address DNS validation.
+// Use only when the admin has explicitly enabled allow_insecure_http for a
+// plugin — otherwise local and private IP stream URLs are rejected by Proxy.
+func (r *Relay) ProxyInsecure(w http.ResponseWriter, request *http.Request, source string) error {
+	if r == nil {
+		return errors.New("remote stream relay is not configured")
+	}
+	parsed, err := ValidateURLSyntax(source)
+	if err != nil {
+		return err
+	}
+	tracked := &relayResponseWriter{ResponseWriter: w}
+	if err := r.proxy(tracked, request, parsed.String(), ""); err != nil {
+		return &ProxyError{Started: tracked.wroteHeader, Err: err}
+	}
+	return nil
+}
+
 func (r *Relay) proxy(w http.ResponseWriter, request *http.Request, source, relayToken string) error {
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
 		return errors.New("remote stream relay supports only GET and HEAD")

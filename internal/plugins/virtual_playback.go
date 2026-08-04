@@ -209,7 +209,7 @@ func (s *Service) ResolveVirtualPlaybackForInstallation(
 	return s.ResolveVirtualPlaybackWithRouting(ctx, virtualPath, userID, profileID, VirtualPlaybackRouting{
 		OwnerInstallationID: ownerInstallationID,
 		AllowFallback:       allowFallback,
-		AllowInsecure:       s.installationAllowsInsecure(ctx, ownerInstallationID),
+		AllowInsecure:       s.InstallationAllowsInsecure(ctx, ownerInstallationID),
 	})
 }
 
@@ -224,7 +224,7 @@ func (s *Service) RefreshVirtualPlaybackForInstallation(
 	return s.resolveVirtualPlaybackWithRouting(ctx, virtualPath, userID, profileID, VirtualPlaybackRouting{
 		OwnerInstallationID: ownerInstallationID,
 		AllowFallback:       allowFallback,
-		AllowInsecure:       s.installationAllowsInsecure(ctx, ownerInstallationID),
+		AllowInsecure:       s.InstallationAllowsInsecure(ctx, ownerInstallationID),
 	}, true)
 }
 
@@ -1199,7 +1199,7 @@ func (s *Service) storeVirtualProfiles(key string, response *pluginv1.ListVirtua
 // installationAllowsInsecure checks whether a plugin installation has the
 // allow_insecure_http config key enabled, permitting private/local IP stream
 // URLs that would otherwise be blocked by the SSRF guard.
-func (s *Service) installationAllowsInsecure(ctx context.Context, installationID int) bool {
+func (s *Service) InstallationAllowsInsecure(ctx context.Context, installationID int) bool {
 	if s == nil || s.configs == nil || installationID <= 0 {
 		return false
 	}

@@ -1093,6 +1093,11 @@ func NewRouter(deps Dependencies) chi.Router {
 			streamHandler.VirtualMediaResolver = playbackHandler.VirtualMediaResolver
 			streamHandler.VirtualMediaRefreshResolver = playbackHandler.VirtualMediaRefreshResolver
 			streamHandler.VirtualStreamLister = playbackHandler.VirtualPlaybackStreamLister
+			if deps.PluginService != nil {
+				streamHandler.AllowInsecureVirtual = func(installationID int) bool {
+					return deps.PluginService.InstallationAllowsInsecure(context.Background(), installationID)
+				}
+			}
 			streamHandler.RemoteStreamRelay = remoteStreamRelay
 		}
 		if deps.DB != nil {

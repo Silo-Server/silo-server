@@ -31,12 +31,13 @@ type FilePathResolver interface {
 
 // StreamHandler handles HTTP endpoints for streaming media content.
 type StreamHandler struct {
-	sessionMgr    SessionManagerInterface
-	fileResolver  FilePathResolver
-	MissingMarker MissingFileMarker
-	EventsHub     *evt.Hub
-	AdminStore    PlaybackAdminStore
-	SessionSyncer PlaybackSessionSyncer
+	AllowInsecureVirtual func(installationID int) bool // skip SSRF when plugin allows local URLs
+	sessionMgr           SessionManagerInterface
+	fileResolver         FilePathResolver
+	MissingMarker        MissingFileMarker
+	EventsHub            *evt.Hub
+	AdminStore           PlaybackAdminStore
+	SessionSyncer        PlaybackSessionSyncer
 	// TM is the shared transcode/reconstruct manager (same instance as the
 	// PlaybackHandler's). It lets a direct/remux stream rebuild its playback
 	// Session from the recipe card after a server restart instead of 404-ing.
@@ -267,7 +268,12 @@ func (h *StreamHandler) serveVirtualDirect(
 			}
 		}
 		deferred := newDeferredErrorResponseWriter(streamWriter, startupTimer.Stop)
-		proxyErr := h.RemoteStreamRelay.Proxy(deferred, r.Clone(attemptCtx), resolved)
+		var proxyErr error
+		if h.AllowInsecureVirtual != nil && h.AllowInsecureVirtual(file.VirtualOwnerInstallationID) {
+			proxyErr = h.RemoteStreamRelay.ProxyInsecure(deferred, r.Clone(attemptCtx), resolved)
+		} else {
+			proxyErr = h.RemoteStreamRelay.Proxy(deferred, r.Clone(attemptCtx), resolved)
+		}
 		if proxyErr == nil {
 			return nil
 		}
