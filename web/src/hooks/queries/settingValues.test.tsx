@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiClientError } from "@/api/client";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
   settingsCapabilitiesSupportAtomicShortcuts,
@@ -101,6 +102,91 @@ describe("self-service setting identities", () => {
         }),
       },
     );
+  });
+
+  it("keeps an ordinary write pending until effective values reconcile", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let releaseInvalidation!: () => void;
+    const invalidation = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve;
+    });
+    const invalidateQueries = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockReturnValue(invalidation);
+    const localWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const setHook = renderHook(() => useSetSettingValue(), { wrapper: localWrapper });
+
+    let settled = false;
+    const mutation = setHook.result.current
+      .mutateAsync({
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        value: { poster_size: "compact", caption: "title" },
+        identity: { scope: "profile_client" },
+      })
+      .then(() => {
+        settled = true;
+      });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
+    expect(setHook.result.current.isPending).toBe(true);
+    expect(settled).toBe(false);
+
+    await act(async () => {
+      releaseInvalidation();
+      await mutation;
+    });
+    await waitFor(() => expect(setHook.result.current.isPending).toBe(false));
+    expect(settled).toBe(true);
+  });
+
+  it.each([
+    ["a successful reset", undefined],
+    ["an already-cleared 404 reset", new ApiClientError(404, "not_found", "Already cleared")],
+  ])("keeps %s pending until effective values reconcile", async (_label, apiError) => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    let releaseInvalidation!: () => void;
+    const invalidation = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve;
+    });
+    const invalidateQueries = vi
+      .spyOn(queryClient, "invalidateQueries")
+      .mockReturnValue(invalidation);
+    const localWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    if (apiError) apiMock.mockRejectedValueOnce(apiError);
+    const clearHook = renderHook(() => useClearSettingValue(), { wrapper: localWrapper });
+
+    let settled = false;
+    const mutation = clearHook.result.current
+      .mutateAsync({
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        identity: { scope: "profile_client" },
+      })
+      .catch((error: unknown) => {
+        if (!apiError) throw error;
+        expect(error).toBe(apiError);
+      })
+      .then(() => {
+        settled = true;
+      });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
+    expect(clearHook.result.current.isPending).toBe(true);
+    expect(settled).toBe(false);
+
+    await act(async () => {
+      releaseInvalidation();
+      await mutation;
+    });
+    await waitFor(() => expect(clearHook.result.current.isPending).toBe(false));
+    expect(settled).toBe(true);
   });
 });
 

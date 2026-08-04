@@ -224,13 +224,16 @@ function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
 ) {
-  void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+  const invalidations = [
+    queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+  ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
   // until the list's own staleTime expires.
   if (identity.scope === "profile_device") {
-    void queryClient.invalidateQueries({ queryKey: deviceKeys.all });
+    invalidations.push(queryClient.invalidateQueries({ queryKey: deviceKeys.all }));
   }
+  return Promise.all(invalidations).then(() => undefined);
 }
 
 /** Write one value at one scope. */
@@ -267,12 +270,15 @@ export function useSetSettingValue() {
       }),
     onSuccess: (_data, variables) => {
       if (variables.invalidateOnSettled === false) return;
-      invalidateSettingValueQueries(qc, variables.identity);
+      // Keep ordinary controls pending until their active effective-value
+      // reads reconcile. Otherwise a rapid follow-up edit can spread a stale
+      // object and silently undo the first field that was just saved.
+      return invalidateSettingValueQueries(qc, variables.identity);
     },
     onError: (error, variables) => {
       if (variables.invalidateOnSettled === false) return;
       if (shouldReconcileAfterMutationError(error)) {
-        invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity);
       }
     },
   });
@@ -341,7 +347,7 @@ export function useClearSettingValue() {
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
     onSuccess: (_data, variables) => {
-      invalidateSettingValueQueries(qc, variables.identity);
+      return invalidateSettingValueQueries(qc, variables.identity);
     },
     onError: (error, variables) => {
       // DELETE is idempotent for reset callers: a 404 means another client
@@ -350,7 +356,7 @@ export function useClearSettingValue() {
         shouldReconcileAfterMutationError(error) ||
         (error instanceof ApiClientError && error.status === 404)
       ) {
-        invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity);
       }
     },
   });
