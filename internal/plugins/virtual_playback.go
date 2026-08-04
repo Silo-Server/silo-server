@@ -66,6 +66,7 @@ type virtualVariantsCacheEntry struct {
 type VirtualPlaybackRouting struct {
 	OwnerInstallationID int
 	AllowFallback       bool
+	AllowInsecure       bool // skip SSRF validation when plugin allows local URLs
 }
 
 // VirtualPlaybackVariant is a provider-neutral profile placeholder returned
@@ -183,9 +184,16 @@ func (s *Service) resolveVirtualPlaybackWithRouting(
 	if candidate == nil {
 		return "", errors.New("virtual playback provider returned no matching stream")
 	}
-	validated, err := validateProviderStreamURL(ctx, candidate.GetTemporaryUri())
-	if err != nil {
-		return "", fmt.Errorf("virtual playback provider returned an unsafe stream URL: %w", err)
+	raw := candidate.GetTemporaryUri()
+	var validated string
+	var validateErr error
+	if routing.AllowInsecure {
+		validated, validateErr = validateProviderStreamURLSyntax(raw)
+	} else {
+		validated, validateErr = validateProviderStreamURL(ctx, raw)
+	}
+	if validateErr != nil {
+		return "", fmt.Errorf("virtual playback provider returned an unsafe stream URL: %w", validateErr)
 	}
 	return validated, nil
 }
@@ -201,6 +209,7 @@ func (s *Service) ResolveVirtualPlaybackForInstallation(
 	return s.ResolveVirtualPlaybackWithRouting(ctx, virtualPath, userID, profileID, VirtualPlaybackRouting{
 		OwnerInstallationID: ownerInstallationID,
 		AllowFallback:       allowFallback,
+		AllowInsecure:       s.installationAllowsInsecure(ctx, ownerInstallationID),
 	})
 }
 
@@ -215,6 +224,7 @@ func (s *Service) RefreshVirtualPlaybackForInstallation(
 	return s.resolveVirtualPlaybackWithRouting(ctx, virtualPath, userID, profileID, VirtualPlaybackRouting{
 		OwnerInstallationID: ownerInstallationID,
 		AllowFallback:       allowFallback,
+		AllowInsecure:       s.installationAllowsInsecure(ctx, ownerInstallationID),
 	}, true)
 }
 
@@ -1184,4 +1194,32 @@ func (s *Service) storeVirtualProfiles(key string, response *pluginv1.ListVirtua
 		expiresAt: now.Add(virtualProfilesCacheTTL),
 		createdAt: now,
 	}
+}
+
+
+// installationAllowsInsecure checks whether a plugin installation has the
+// allow_insecure_http config key enabled, permitting private/local IP stream
+// URLs that would otherwise be blocked by the SSRF guard.
+func (s *Service) installationAllowsInsecure(ctx context.Context, installationID int) bool {
+	if s == nil || s.configs == nil || installationID <= 0 {
+		return false
+	}
+	configs, err := s.configs.ListGlobalConfigs(ctx, installationID)
+	if err != nil {
+		return false
+	}
+	for _, cfg := range configs {
+		if cfg == nil || cfg.ConfigKey != "allow_insecure_http" {
+			continue
+		}
+		if val, ok := cfg.ConfigValue["enabled"]; ok {
+			switch v := val.(type) {
+			case bool:
+				return v
+			case string:
+				return strings.EqualFold(strings.TrimSpace(v), "true")
+			}
+		}
+	}
+	return false
 }
