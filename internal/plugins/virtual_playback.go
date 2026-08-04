@@ -1196,7 +1196,6 @@ func (s *Service) storeVirtualProfiles(key string, response *pluginv1.ListVirtua
 	}
 }
 
-
 // installationAllowsInsecure checks whether a plugin installation has the
 // allow_insecure_http config key enabled, permitting private/local IP stream
 // URLs that would otherwise be blocked by the SSRF guard.

@@ -227,7 +227,7 @@ type PlaybackHandler struct {
 	MarkerUpdateNotifier        PlaybackMarkerUpdateNotifier
 	MarkerLazyContext           context.Context
 	MarkerLazyInFlight          sync.Map
-	SubtitleRepo                subtitles.Repository // optional; enables downloaded subtitles in playback
+	SubtitleRepo                subtitles.Repository  // optional; enables downloaded subtitles in playback
 	VirtualSubtitleSearcher     SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
 	BestResultCache             *VirtualBestResultCache
 	VirtualFileUpdater          VirtualFileUpdateFunc // optional; updates media_file path after stale fallback

@@ -572,8 +572,6 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 	return strings.Contains(strings.ToLower(u.Path), ".m3u8") || strings.Contains(strings.ToLower(u.RawQuery), ".m3u8")
 }
 
-
-
 // hasReliableCodecs returns true when the candidate carries explicit codec
 // metadata (parsed from provider information, not just a filename guess).
 // HLS streams with known codecs can skip ffprobe entirely.
@@ -649,8 +647,8 @@ func mergeVirtualCandidateTracks(probed *models.MediaFile, candidate VirtualPlay
 	// Create a basic video track when ffprobe didn't detect any.
 	if len(probed.VideoTracks) == 0 && candidate.CodecVideo != "" {
 		probed.VideoTracks = append(probed.VideoTracks, models.VideoTrack{
-			Codec: candidate.CodecVideo,
-			Width: resolutionWidth(candidate.Resolution),
+			Codec:  candidate.CodecVideo,
+			Width:  resolutionWidth(candidate.Resolution),
 			Height: resolutionHeight(candidate.Resolution),
 		})
 		if probed.CodecVideo == "" {
@@ -755,5 +753,3 @@ func resolutionHeight(label string) int {
 		return 0
 	}
 }
-
-

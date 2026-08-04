@@ -1244,7 +1244,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 						_, dlErr := subtitleManager.Download(ctx, subtitles.DownloadRequest{
 							ProviderName: r.Provider, SubtitleID: r.ID,
-							Language: r.Language,
+							Language:    r.Language,
 							ReleaseName: r.ReleaseName, MediaFileID: fileID,
 							HearingImpaired: r.HearingImpaired,
 						})
