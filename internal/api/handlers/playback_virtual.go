@@ -206,6 +206,15 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
 		probeCancel()
 		if probeErr != nil || probed == nil {
+			// Probe failed — if the candidate declares codecs, use them as a
+			// best-effort fallback instead of discarding the stream entirely.
+			if cand.hasReliableCodecs() {
+				mergeVirtualCandidateTracks(&transient, cand)
+				return &resolvedVirtualPlaybackSource{
+					URL: streamURL, URI: cand.URI, OwnerID: oid,
+					File: &transient, ProbeSucceeded: true,
+				}, nil
+			}
 			if probeErr == nil {
 				probeErr = errors.New("virtual stream probe returned no metadata")
 			}
