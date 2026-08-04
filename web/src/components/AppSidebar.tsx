@@ -928,7 +928,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
               <DropdownMenuItem
                 onClick={() => {
-                  navigate("/settings/playback");
+                  navigate("/settings");
                 }}
                 className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
               >

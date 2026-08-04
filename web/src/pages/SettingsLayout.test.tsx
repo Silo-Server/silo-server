@@ -37,6 +37,34 @@ describe("SettingsLayout", () => {
     expect(markup).toContain('aria-label="Go back"');
   });
 
+  it("renders a grouped settings index at the root route", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Playback" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Library & Data" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Playback.*Quality, language, and skipping/ }),
+    ).toHaveAttribute("href", "/settings/playback");
+    expect(screen.getByRole("link", { name: /Connect Apps.*Sign-in details/ })).toBeInTheDocument();
+  });
+
+  it("offers a clear return to the settings index from detail pages", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "All settings" })).toHaveAttribute("href", "/settings");
+  });
+
   it("does not include a plugins section in personal settings", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/settings/playback"]}>
@@ -111,11 +139,10 @@ describe("SettingsLayout", () => {
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "pin");
 
-    // Both nav rails render, so each surviving item appears twice. "pin" hits
-    // Profiles (where PINs are set) and Connect Apps (where the password#PIN
-    // format is explained).
-    expect(screen.getAllByRole("link", { name: /Profiles/ })).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: /Connect Apps/ })).toHaveLength(2);
+    // "pin" hits Profiles (where PINs are set) and Connect Apps (where the
+    // password#PIN format is explained).
+    expect(screen.getAllByRole("link", { name: /Profiles/ })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: /Connect Apps/ })).toHaveLength(1);
     expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
     expect(screen.getByText("2 matches")).toBeInTheDocument();
   });
@@ -129,7 +156,7 @@ describe("SettingsLayout", () => {
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "font family");
 
-    expect(screen.getAllByRole("link", { name: /Subtitles/ })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: /Subtitles/ })).toHaveLength(1);
     expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
   });
 

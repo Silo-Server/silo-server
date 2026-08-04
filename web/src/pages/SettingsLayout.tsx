@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import {
+  ChevronLeft,
+  ChevronRight,
   Play,
   Library,
   Cast,
@@ -23,6 +25,7 @@ import type { LucideIcon } from "lucide-react";
 import PageBack from "@/components/PageBack";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -391,17 +394,122 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
+interface SettingsOverviewProps {
+  sections: readonly { label: string; items: readonly NavItem[] }[];
+  profile: { name: string; avatar_url?: string } | null;
+  search: string;
+  onSearchChange: (value: string) => void;
+  resultCount: number;
+  totalCount: number;
+}
+
+function SettingsOverview({
+  sections,
+  profile,
+  search,
+  onSearchChange,
+  resultCount,
+  totalCount,
+}: SettingsOverviewProps) {
+  const profileName = profile?.name ?? "Your profile";
+
+  return (
+    <div className="mx-auto mt-6 w-full max-w-5xl space-y-6 sm:mt-8">
+      <Link
+        to="/profiles"
+        aria-label={`Current profile: ${profileName}`}
+        className="surface-panel-subtle hover:bg-surface-hover/70 focus-visible:ring-ring flex min-h-16 items-center gap-3 rounded-2xl px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none sm:max-w-md"
+      >
+        <Avatar className="border-border h-10 w-10 border">
+          {profile?.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
+          <AvatarFallback className="bg-accent text-foreground font-semibold">
+            {profileName.charAt(0).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1">
+          <p className="text-muted-foreground text-xs">Current profile</p>
+          <p className="truncate text-sm font-semibold">{profileName}</p>
+        </div>
+        <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
+      </Link>
+
+      <SettingsSearchInput
+        value={search}
+        onChange={onSearchChange}
+        resultCount={resultCount}
+        totalCount={totalCount}
+        className="w-full sm:max-w-md"
+      />
+
+      {sections.length > 0 ? (
+        <nav aria-label="Settings sections" className="grid items-start gap-6 lg:grid-cols-2">
+          {sections.map((section) => {
+            const sectionId = `settings-index-${section.label
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")}`;
+
+            return (
+              <section key={section.label} aria-labelledby={sectionId}>
+                <h2
+                  id={sectionId}
+                  className="text-muted-foreground mb-2 px-1 text-[11px] font-semibold tracking-[0.16em] uppercase"
+                >
+                  {section.label}
+                </h2>
+                <ul className="surface-panel overflow-hidden rounded-2xl border-0 shadow-none">
+                  {section.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.path} className="border-border/60 border-b last:border-b-0">
+                        <Link
+                          to={`/settings/${item.path}`}
+                          className="hover:bg-surface-hover/70 focus-visible:bg-surface-hover/70 focus-visible:ring-ring/70 flex min-h-[4.5rem] items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                        >
+                          <span className="bg-accent text-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-xl">
+                            <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold">{item.label}</span>
+                            <span className="text-muted-foreground mt-0.5 block text-xs leading-snug">
+                              {item.description}
+                            </span>
+                          </span>
+                          <ChevronRight
+                            className="text-muted-foreground h-4 w-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </nav>
+      ) : (
+        <div className="surface-panel-subtle rounded-2xl px-5 py-8 text-center">
+          <p className="font-medium">No matching settings</p>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Try a category, feature, or setting name.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsLayout() {
   const location = useLocation();
   const [settingsSearch, setSettingsSearch] = useState("");
   const { profile } = useCurrentProfile();
   const actingAdmin = useIsActingAdmin();
   const segments = location.pathname.split("/");
-  const activeSegment = segments[2] || "playback";
+  const activeSegment = segments[2] || null;
   const canManageProfiles = actingAdmin || profile?.is_primary === true;
   // Most settings pages are a single column of rows and read best measured.
   // A page that is itself two panes needs the room, so it opts out.
-  const wideSetting = WIDE_SETTINGS_PAGES.has(activeSegment);
+  const wideSetting = activeSegment ? WIDE_SETTINGS_PAGES.has(activeSegment) : false;
 
   const visibleSections = useMemo(
     () =>
@@ -420,10 +528,6 @@ export default function SettingsLayout() {
     () => filterSettingsSearchGroups(visibleSections, settingsSearch),
     [settingsSearch, visibleSections],
   );
-  const filteredFlatItems = useMemo(
-    () => filteredSections.flatMap((section) => section.items),
-    [filteredSections],
-  );
   const filteredSettingsCount = countSettingsSearchItems(filteredSections);
 
   useDocumentTitle(resolveSettingsDocumentTitle(location.pathname));
@@ -431,93 +535,88 @@ export default function SettingsLayout() {
   return (
     <div className="min-h-[100dvh]">
       <main className="page-shell-wide relative flex min-h-[100dvh] flex-col py-4 sm:py-6">
-        <PageBack to="/" preferHistory={false} floating />
-        <div className="page-header mt-10 gap-5 sm:mt-12">
-          <div className="min-w-0 space-y-3">
-            <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
-            <p className="page-subtitle text-sm sm:text-base">
-              Manage your playback preferences, libraries, and display options.
-            </p>
-          </div>
-          <SettingsSearchInput
-            value={settingsSearch}
-            onChange={setSettingsSearch}
-            resultCount={filteredSettingsCount}
-            totalCount={flatItems.length}
-            className="w-full sm:max-w-sm"
-          />
-        </div>
-
-        {/* Mobile: horizontal scrolling tab bar */}
-        <nav
-          aria-label="Settings sections"
-          className="surface-panel-subtle mt-6 overflow-x-auto rounded-[1.4rem] p-1 lg:hidden"
-          style={{
-            WebkitOverflowScrolling: "touch",
-            maskImage:
-              "linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent)",
-            WebkitMaskImage:
-              "linear-gradient(to right, transparent, black 40px, black calc(100% - 40px), transparent)",
-          }}
-        >
-          <div className="flex min-w-max items-stretch gap-1">
-            {filteredFlatItems.map((item) => {
-              const isActive = item.path === activeSegment;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.path}
-                  to={`/settings/${item.path}`}
-                  aria-current={isActive ? "page" : undefined}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-[1rem] px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors",
-                    isActive
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-            {filteredFlatItems.length === 0 ? (
-              <p className="text-muted-foreground px-3 py-2.5 text-sm whitespace-nowrap">
-                No matching settings
-              </p>
-            ) : null}
-          </div>
-        </nav>
-
-        {/* Desktop: two-column with inline vertical sidebar */}
-        <div className="mt-8 min-w-0 flex-1 lg:mt-10 lg:flex lg:gap-10">
-          <aside className="hidden lg:block lg:w-[220px] lg:shrink-0">
-            <nav aria-label="Settings sections" className="sticky top-6 space-y-5 pl-3">
-              {filteredSections.map((section) => (
-                <SideNavSection key={section.label} label={section.label} idPrefix="settings-nav">
-                  {section.items.map((item) => (
-                    <SideNavItem
-                      key={item.path}
-                      label={item.label}
-                      icon={item.icon}
-                      href={`/settings/${item.path}`}
-                      active={item.path === activeSegment}
-                    />
-                  ))}
-                </SideNavSection>
-              ))}
-              {filteredSections.length === 0 ? (
-                <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
-              ) : null}
-            </nav>
-          </aside>
-
-          <div className="min-w-0 flex-1 pt-8 lg:pt-0">
-            <div className={cn("mx-auto w-full", wideSetting ? "max-w-6xl" : "max-w-3xl")}>
-              <Outlet />
+        {activeSegment ? (
+          <>
+            <div className="hidden lg:block">
+              <PageBack to="/" preferHistory={false} floating />
             </div>
-          </div>
-        </div>
+            <Link
+              to="/settings"
+              className="text-muted-foreground hover:text-foreground focus-visible:ring-ring mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg pr-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none lg:hidden"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              All settings
+            </Link>
+            <div className="page-header mt-10 hidden gap-5 sm:mt-12 lg:flex">
+              <div className="min-w-0 space-y-3">
+                <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
+                <p className="page-subtitle text-sm sm:text-base">
+                  Manage your playback preferences, libraries, and display options.
+                </p>
+              </div>
+              <SettingsSearchInput
+                value={settingsSearch}
+                onChange={setSettingsSearch}
+                resultCount={filteredSettingsCount}
+                totalCount={flatItems.length}
+                className="w-full sm:max-w-sm"
+              />
+            </div>
+
+            <div className="mt-5 min-w-0 flex-1 lg:mt-10 lg:flex lg:gap-10">
+              <aside className="hidden lg:block lg:w-[220px] lg:shrink-0">
+                <nav aria-label="Settings sections" className="sticky top-6 space-y-5 pl-3">
+                  {filteredSections.map((section) => (
+                    <SideNavSection
+                      key={section.label}
+                      label={section.label}
+                      idPrefix="settings-nav"
+                    >
+                      {section.items.map((item) => (
+                        <SideNavItem
+                          key={item.path}
+                          label={item.label}
+                          icon={item.icon}
+                          href={`/settings/${item.path}`}
+                          active={item.path === activeSegment}
+                        />
+                      ))}
+                    </SideNavSection>
+                  ))}
+                  {filteredSections.length === 0 ? (
+                    <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
+                  ) : null}
+                </nav>
+              </aside>
+
+              <div className="min-w-0 flex-1 pt-8 lg:pt-0">
+                <div className={cn("mx-auto w-full", wideSetting ? "max-w-6xl" : "max-w-3xl")}>
+                  <Outlet />
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <PageBack to="/" preferHistory={false} floating />
+            <div className="page-header mt-10 gap-5 sm:mt-12">
+              <div className="min-w-0 space-y-3">
+                <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
+                <p className="page-subtitle text-sm sm:text-base">
+                  Make Silo work the way you like.
+                </p>
+              </div>
+            </div>
+            <SettingsOverview
+              sections={filteredSections}
+              profile={profile}
+              search={settingsSearch}
+              onSearchChange={setSettingsSearch}
+              resultCount={filteredSettingsCount}
+              totalCount={flatItems.length}
+            />
+          </>
+        )}
       </main>
     </div>
   );

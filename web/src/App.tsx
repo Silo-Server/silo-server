@@ -468,7 +468,6 @@ function AppRoutes() {
                     </RequireProfile>
                   }
                 >
-                  <Route index element={<Navigate to="playback" replace />} />
                   <Route path="appearance" element={<AppearanceSettings />} />
                   <Route path="theme-editor" element={<ThemeEditorSettings />} />
                   <Route path="accessibility" element={<AccessibilitySettings />} />
