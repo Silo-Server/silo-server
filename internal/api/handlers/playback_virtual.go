@@ -21,6 +21,9 @@ const maxVirtualPlaybackStreams = 50
 
 const (
 	maxVirtualFailoverAttempts = 5
+	// virtualProbeBudgetKnown caps ffprobe time when the candidate already
+	// declares codec and resolution metadata (provider-parsed, not guessed).
+	virtualProbeBudgetKnown = 8 * time.Second
 	virtualStartupBudget       = 45 * time.Second
 	// virtualProbeBudget caps how long a single ffprobe on a virtual/remote
 	// stream may take. Large remote sources (e.g. 2160p remuxes behind an
@@ -182,7 +185,24 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				URL: streamURL, URI: cand.URI, OwnerID: oid, File: &transient,
 			}, nil
 		}
-		probeCtx, probeCancel := context.WithTimeout(attemptCtx, virtualProbeBudget)
+		// HLS (.m3u8) streams always route through server remux or transcode —
+		// ffprobe is wasted work when the candidate already declares codecs.
+		if isHLSVirtualStreamURL(streamURL) && cand.hasReliableCodecs() {
+			mergeVirtualCandidateTracks(&transient, cand)
+			if !transient.HDR && cand.HDR != "" {
+				transient.HDR = true
+			}
+			return &resolvedVirtualPlaybackSource{
+				URL: streamURL, URI: cand.URI, OwnerID: oid, File: &transient, ProbeSucceeded: true,
+			}, nil
+		}
+		// Use a tighter probe budget when the candidate already carries explicit
+		// codec metadata — ffprobe only needs to confirm, not discover.
+		probeBudget := virtualProbeBudget
+		if cand.hasReliableCodecs() {
+			probeBudget = virtualProbeBudgetKnown
+		}
+		probeCtx, probeCancel := context.WithTimeout(attemptCtx, probeBudget)
 		probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, &transient)
 		probeCancel()
 		if probeErr != nil || probed == nil {
@@ -440,6 +460,14 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 	return strings.Contains(strings.ToLower(u.Path), ".m3u8") || strings.Contains(strings.ToLower(u.RawQuery), ".m3u8")
 }
 
+
+
+// hasReliableCodecs returns true when the candidate carries explicit codec
+// metadata (parsed from provider information, not just a filename guess).
+// HLS streams with known codecs can skip ffprobe entirely.
+func (s VirtualPlaybackStream) hasReliableCodecs() bool {
+	return s.CodecVideo != "" && s.Resolution != ""
+}
 // mergeVirtualCandidateTracks supplements probed virtual file tracks with
 // metadata from the provider candidate. ffprobe may not always detect
 // language tags, codecs, or dimensions on remote streams (especially HLS
