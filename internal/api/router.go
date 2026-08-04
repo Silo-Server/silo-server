@@ -930,7 +930,39 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Create subtitleRepo early — only needs DB, shared with playback handler and subtitle search handler.
 	var subtitleRepo *subtitles.PgRepository
-	if deps.DB != nil {
+	var subtitleManager *subtitles.Manager
+	if deps.DB != nil && deps.S3Public != nil {
+		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
+		subtitleManager = subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
+
+		// Load provider configs from DB and register enabled providers.
+		providerConfigs, _ := subtitleRepo.ListProviderConfigs(deps.AppContext)
+		for _, cfg := range providerConfigs {
+			if !cfg.Enabled {
+				continue
+			}
+			switch cfg.ProviderName {
+			case "opensubtitles":
+				if cfg.Username == "" || cfg.Password == "" {
+					continue
+				}
+				subtitleManager.RegisterProvider(opensubtitles.New(opensubtitles.Config{
+					Username: cfg.Username,
+					Password: cfg.Password,
+				}))
+			case "subdl":
+				if cfg.APIKey == "" {
+					continue
+				}
+				subtitleManager.RegisterProvider(subdl.New(subdl.Config{APIKey: cfg.APIKey}))
+			case "subsource":
+				if cfg.APIKey == "" {
+					continue
+				}
+				subtitleManager.RegisterProvider(subsource.New(subsource.Config{APIKey: cfg.APIKey}))
+			}
+		}
+	} else if deps.DB != nil {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 
@@ -1159,6 +1191,63 @@ func NewRouter(deps Dependencies) chi.Router {
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
 		}
+		if subtitleManager != nil && itemRepo != nil {
+			playbackHandler.VirtualSubtitleSearcher = func(
+				ctx context.Context,
+				contentID, imdbID, title string,
+				year, season, episode, fileID int,
+				languages []string,
+			) {
+				// Resolve missing metadata from the catalog.
+				if imdbID == "" || title == "" {
+					item, err := itemRepo.GetByID(ctx, contentID)
+					if err != nil {
+						slog.Warn("auto-subtitle-search: resolve item", "component", "api", "content_id", contentID, "error", err)
+						return
+					}
+					if imdbID == "" {
+						imdbID = item.ImdbID
+					}
+					if title == "" {
+						title = item.Title
+					}
+					if year == 0 {
+						year = item.Year
+					}
+				}
+				if title == "" {
+					return
+				}
+				results, err := subtitleManager.Search(ctx, subtitles.SearchRequest{
+					IMDbID:    imdbID,
+					Title:     title,
+					Year:      year,
+					Season:    season,
+					Episode:   episode,
+					Languages: languages,
+				})
+				if err != nil || len(results.Results) == 0 {
+					return
+				}
+				// Download the best match per language.
+				for _, lang := range languages {
+					for _, r := range results.Results {
+						if !strings.EqualFold(r.Language, lang) {
+							continue
+						}
+						_, dlErr := subtitleManager.Download(ctx, subtitles.DownloadRequest{
+							ProviderName: r.Provider, SubtitleID: r.ID,
+							Language: r.Language,
+							ReleaseName: r.ReleaseName, MediaFileID: fileID,
+							HearingImpaired: r.HearingImpaired,
+						})
+						if dlErr == nil {
+							break // one good match per language is enough
+						}
+					}
+				}
+			}
+		}
 		if recsRepoForStale != nil {
 			playbackHandler.SetProfileStaler(recsRepoForStale)
 			playbackHandler.SetProfileRefreshRequester(deps.RecWorker)
@@ -1378,43 +1467,9 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Admin subtitle config handler only needs the DB repo — no S3 required.
 	var adminSubtitleHandler *handlers.AdminSubtitleHandler
-	var subtitleManager *subtitles.Manager
-	if subtitleRepo != nil {
-		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
-	}
-
-	// Build subtitle search handler if we have DB and S3.
 	var subtitleSearchHandler *handlers.SubtitleSearchHandler
-	if deps.DB != nil && deps.S3Public != nil && subtitleRepo != nil {
-		subtitleManager = subtitles.NewManager(subtitleRepo, deps.S3Public, deps.S3Public.Bucket())
-
-		// Load provider configs from DB and register enabled providers.
-		providerConfigs, _ := subtitleRepo.ListProviderConfigs(deps.AppContext)
-		for _, cfg := range providerConfigs {
-			if !cfg.Enabled {
-				continue
-			}
-			switch cfg.ProviderName {
-			case "opensubtitles":
-				if cfg.Username == "" || cfg.Password == "" {
-					continue
-				}
-				subtitleManager.RegisterProvider(opensubtitles.New(opensubtitles.Config{
-					Username: cfg.Username,
-					Password: cfg.Password,
-				}))
-			case "subdl":
-				if cfg.APIKey == "" {
-					continue
-				}
-				subtitleManager.RegisterProvider(subdl.New(subdl.Config{APIKey: cfg.APIKey}))
-			case "subsource":
-				if cfg.APIKey == "" {
-					continue
-				}
-				subtitleManager.RegisterProvider(subsource.New(subsource.Config{APIKey: cfg.APIKey}))
-			}
-		}
+	if subtitleManager != nil && subtitleRepo != nil {
+		adminSubtitleHandler = handlers.NewAdminSubtitleHandler(subtitleRepo)
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
