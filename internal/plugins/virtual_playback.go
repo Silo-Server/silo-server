@@ -1211,12 +1211,21 @@ func (s *Service) installationAllowsInsecure(ctx context.Context, installationID
 		if cfg == nil || cfg.Key != "allow_insecure_http" {
 			continue
 		}
-		if val, ok := cfg.Value["enabled"]; ok {
-			switch v := val.(type) {
-			case bool:
-				return v
-			case string:
-				return strings.EqualFold(strings.TrimSpace(v), "true")
+		// Value map may contain the boolean under the schema key itself,
+		// or under common generic keys like "enabled" or "value".
+		if v, ok := cfg.Value["allow_insecure_http"]; ok {
+			if b, ok := v.(bool); ok {
+				return b
+			}
+		}
+		for _, k := range []string{"enabled", "value"} {
+			if val, ok := cfg.Value[k]; ok {
+				switch v := val.(type) {
+				case bool:
+					return v
+				case string:
+					return strings.EqualFold(strings.TrimSpace(v), "true")
+				}
 			}
 		}
 	}
