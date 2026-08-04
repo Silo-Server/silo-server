@@ -390,14 +390,64 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 }
 
 // mergeVirtualCandidateTracks supplements probed virtual file tracks with
-// language metadata from the provider candidate. ffprobe may not always
-// detect language tags on remote streams (especially HLS and DASH), so
-// candidate audio/subtitle languages fill the gap so the player can display
-// track choices before and during playback.
+// metadata from the provider candidate. ffprobe may not always detect
+// language tags, codecs, or dimensions on remote streams (especially HLS
+// and DASH), so candidate metadata fills the gaps so virtual files appear
+// as close to local files as possible.
 func mergeVirtualCandidateTracks(probed *models.MediaFile, candidate VirtualPlaybackStream) {
 	if probed == nil {
 		return
 	}
+
+	// Fill empty top-level fields that ffprobe may miss on remote streams.
+	if probed.Resolution == "" {
+		probed.Resolution = candidate.Resolution
+	}
+	if probed.CodecVideo == "" {
+		probed.CodecVideo = candidate.CodecVideo
+	}
+	if probed.CodecAudio == "" {
+		probed.CodecAudio = candidate.CodecAudio
+	}
+	if !probed.HDR && candidate.HDR != "" {
+		probed.HDR = true
+	}
+	if probed.Container == "" {
+		probed.Container = candidate.Container
+	}
+	if probed.FileSize == 0 {
+		probed.FileSize = candidate.FileSize
+	}
+	if probed.Bitrate == 0 {
+		probed.Bitrate = candidate.Bitrate
+	}
+
+	// Infer audio channels from the codec when ffprobe didn't detect them.
+	channels := inferChannelsFromCodec(probed.CodecAudio)
+
+	// Create a basic video track when ffprobe didn't detect any.
+	if len(probed.VideoTracks) == 0 && candidate.CodecVideo != "" {
+		probed.VideoTracks = append(probed.VideoTracks, models.VideoTrack{
+			Codec: candidate.CodecVideo,
+			Width: resolutionWidth(candidate.Resolution),
+			Height: resolutionHeight(candidate.Resolution),
+		})
+		if probed.CodecVideo == "" {
+			probed.CodecVideo = candidate.CodecVideo
+		}
+	}
+
+	// Fill audio channels on existing tracks that lack them.
+	for i := range probed.AudioTracks {
+		if probed.AudioTracks[i].Codec == "" && probed.CodecAudio != "" {
+			probed.AudioTracks[i].Codec = probed.CodecAudio
+		}
+		if probed.AudioTracks[i].Channels == 0 {
+			probed.AudioTracks[i].Channels = channels
+		}
+	}
+
+	// Merge candidate audio languages into tracks.
 	if len(candidate.AudioLanguages) > 0 {
 		existing := make(map[string]bool, len(probed.AudioTracks))
 		for _, t := range probed.AudioTracks {
@@ -413,9 +463,13 @@ func mergeVirtualCandidateTracks(probed *models.MediaFile, candidate VirtualPlay
 			existing[strings.ToLower(lang)] = true
 			probed.AudioTracks = append(probed.AudioTracks, models.AudioTrack{
 				Language: lang,
+				Codec:    probed.CodecAudio,
+				Channels: channels,
 			})
 		}
 	}
+
+	// Merge candidate subtitle languages into tracks.
 	if len(candidate.SubtitleLanguages) > 0 {
 		existing := make(map[string]bool, len(probed.SubtitleTracks))
 		for _, t := range probed.SubtitleTracks {
@@ -436,4 +490,49 @@ func mergeVirtualCandidateTracks(probed *models.MediaFile, candidate VirtualPlay
 		}
 	}
 }
+
+// inferChannelsFromCodec returns a plausible channel count for a codec string.
+func inferChannelsFromCodec(codec string) int {
+	switch strings.ToLower(codec) {
+	case "atmos":
+		return 8
+	case "truehd", "dts-hd", "dts", "eac3", "ac3":
+		return 6
+	default:
+		return 2
+	}
+}
+
+// resolutionWidth returns a typical width for a resolution label.
+func resolutionWidth(label string) int {
+	switch strings.ToLower(label) {
+	case "2160p":
+		return 3840
+	case "1080p":
+		return 1920
+	case "720p":
+		return 1280
+	case "480p":
+		return 720
+	default:
+		return 0
+	}
+}
+
+// resolutionHeight returns a typical height for a resolution label.
+func resolutionHeight(label string) int {
+	switch strings.ToLower(label) {
+	case "2160p":
+		return 2160
+	case "1080p":
+		return 1080
+	case "720p":
+		return 720
+	case "480p":
+		return 480
+	default:
+		return 0
+	}
+}
+
 
