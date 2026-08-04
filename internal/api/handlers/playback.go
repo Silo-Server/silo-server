@@ -172,6 +172,11 @@ type copySeekAnchorResolver func(
 // subtitle search when a virtual stream enters playback with no embedded or
 // external subtitle tracks. The player receives subtitle choices as soon as
 // results are downloaded.
+// VirtualFileUpdateFunc persists a media file path update after a stale
+// virtual result= candidate is replaced by a working substitute during
+// fallback resolution.
+type VirtualFileUpdateFunc func(ctx context.Context, fileID int, newFilePath string) error
+
 type SubtitleSearchTrigger func(
 	ctx context.Context,
 	contentID string,
@@ -223,7 +228,9 @@ type PlaybackHandler struct {
 	MarkerLazyContext           context.Context
 	MarkerLazyInFlight          sync.Map
 	SubtitleRepo                subtitles.Repository // optional; enables downloaded subtitles in playback
-	VirtualSubtitleSearcher      SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
+	VirtualSubtitleSearcher     SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
+	BestResultCache             *VirtualBestResultCache
+	VirtualFileUpdater          VirtualFileUpdateFunc // optional; updates media_file path after stale fallback
 	RealtimeHub                 *playback.RealtimeHub
 	CommandTracker              *playback.CommandTracker
 	CommandDispatcher           *playback.CommandDispatcher

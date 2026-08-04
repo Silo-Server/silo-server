@@ -1057,7 +1057,14 @@ func NewRouter(deps Dependencies) chi.Router {
 				)
 			})
 		}
+		playbackHandler.BestResultCache = handlers.NewVirtualBestResultCache(30*time.Minute, 512)
 		playbackHandler.RemoteStreamRelay = remoteStreamRelay
+		if deps.DB != nil {
+			playbackHandler.VirtualFileUpdater = func(ctx context.Context, fileID int, newFilePath string) error {
+				_, err := deps.DB.Exec(ctx, `UPDATE media_files SET file_path=$1, updated_at=now() WHERE id=$2`, newFilePath, fileID)
+				return err
+			}
+		}
 		if deps.Config != nil {
 			ffprobePath := scanner.FFprobePathFromFFmpeg(deps.Config.Playback.FFmpegPath)
 			virtualProbeCache := scanner.NewVirtualProbeCache(10*time.Minute, 256)

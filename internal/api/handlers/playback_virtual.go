@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"log/slog"
-	"sync"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -21,16 +23,87 @@ const maxVirtualPlaybackStreams = 50
 
 const (
 	maxVirtualFailoverAttempts = 5
-	// virtualProbeBudgetKnown caps ffprobe time when the candidate already
-	// declares codec and resolution metadata (provider-parsed, not guessed).
-	virtualProbeBudgetKnown = 8 * time.Second
+	virtualProbeBudgetKnown    = 8 * time.Second
 	virtualStartupBudget       = 45 * time.Second
-	// virtualProbeBudget caps how long a single ffprobe on a virtual/remote
-	// stream may take. Large remote sources (e.g. 2160p remuxes behind an
-	// origin proxy) can be slow to open and to present media headers, so the
-	// budget is deliberately larger than the local-file probe window.
-	virtualProbeBudget = 30 * time.Second
+	virtualProbeBudget         = 30 * time.Second
 )
+
+const (
+	defaultBestResultCacheTTL     = 30 * time.Minute
+	defaultBestResultCacheEntries = 512
+)
+
+// VirtualBestResultCache remembers which result= URI worked for a content+profile
+// pair. On replay it skips the list+resolve+probe path entirely, jumping
+// directly to the known-good provider-neutral URI.
+type VirtualBestResultCache struct {
+	mu         sync.RWMutex
+	entries    map[string]bestResultCacheEntry
+	ttl        time.Duration
+	maxEntries int
+}
+
+type bestResultCacheEntry struct {
+	resultURI string
+	expiresAt time.Time
+}
+
+// NewVirtualBestResultCache returns an initialised cache. Zero or negative ttl
+// and maxEntries pick safe defaults.
+func NewVirtualBestResultCache(ttl time.Duration, maxEntries int) *VirtualBestResultCache {
+	if ttl <= 0 {
+		ttl = defaultBestResultCacheTTL
+	}
+	if maxEntries <= 0 {
+		maxEntries = defaultBestResultCacheEntries
+	}
+	return &VirtualBestResultCache{
+		entries:    make(map[string]bestResultCacheEntry),
+		ttl:        ttl,
+		maxEntries: maxEntries,
+	}
+}
+
+func (c *VirtualBestResultCache) get(key string, now time.Time) string {
+	c.mu.RLock()
+	entry, ok := c.entries[key]
+	c.mu.RUnlock()
+	if !ok || now.After(entry.expiresAt) {
+		return ""
+	}
+	return entry.resultURI
+}
+
+func (c *VirtualBestResultCache) set(key, resultURI string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, entry := range c.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
+	for len(c.entries) >= c.maxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for k, entry := range c.entries {
+			if oldestKey == "" || entry.expiresAt.Before(oldest) {
+				oldestKey, oldest = k, entry.expiresAt
+			}
+		}
+		delete(c.entries, oldestKey)
+	}
+	c.entries[key] = bestResultCacheEntry{
+		resultURI: resultURI,
+		expiresAt: now.Add(c.ttl),
+	}
+}
+
+// bestResultCacheKey builds a deterministic key from the content_id and
+// neutral URI (without result=).
+func bestResultCacheKey(contentID, neutralURI string) string {
+	digest := sha256.Sum256([]byte(contentID + "\x00" + neutralURI))
+	return hex.EncodeToString(digest[:16])
+}
 
 type VirtualPlaybackResolver interface {
 	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string, ownerInstallationID int) (string, error)
@@ -95,11 +168,25 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		return resolvedVirtualPlaybackSource{}, errors.New("virtual playback resolver is not configured")
 	}
 	userID := apimw.GetUserID(r.Context())
+	parsed, _ := url.Parse(file.FilePath)
 	candidates := []VirtualPlaybackStream{{
 		URI: file.FilePath, OwnerInstallationID: file.VirtualOwnerInstallationID,
 	}}
-	parsed, _ := url.Parse(file.FilePath)
-	if parsed != nil && strings.TrimSpace(parsed.Query().Get("result")) == "" && h.VirtualPlaybackStreamLister != nil {
+	noResult := parsed != nil && strings.TrimSpace(parsed.Query().Get("result")) == ""
+	// Check the best-result cache before listing candidates. A previous
+	// successful play of this content may have a cached result= URI that
+	// lets us skip the entire list+resolve+probe sequence on replay.
+	if noResult && h.BestResultCache != nil {
+		neutralURI := virtualPlaybackNeutralKey(file.FilePath)
+		cacheKey := bestResultCacheKey(file.ContentID, neutralURI)
+		if cached := h.BestResultCache.get(cacheKey, time.Now()); cached != "" {
+			candidates = []VirtualPlaybackStream{{
+				URI: cached, OwnerInstallationID: file.VirtualOwnerInstallationID,
+			}}
+			noResult = false // treated as if file already had a result=
+		}
+	}
+	if noResult && h.VirtualPlaybackStreamLister != nil {
 		listCtx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 		streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(
 			listCtx, file.FilePath, userID, profileID, file.VirtualOwnerInstallationID,
@@ -239,6 +326,12 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		}
 		if result.ProbeSucceeded || h.VirtualPlaybackSourceProber == nil {
 			bgCancel() // cancel background resolves, we're done
+			// Remember the winning candidate for next play.
+			if h.BestResultCache != nil && result.URI != "" && result.URI != file.FilePath {
+				neutralURI := virtualPlaybackNeutralKey(file.FilePath)
+				cacheKey := bestResultCacheKey(file.ContentID, neutralURI)
+				h.BestResultCache.set(cacheKey, result.URI, time.Now())
+			}
 			return *result, nil
 		}
 		if firstResolved == nil {
@@ -311,6 +404,13 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 		resolved, err := h.resolveVirtualCandidateSource(ctx, file, stream, userID, profileID)
 		if err == nil {
 			slog.InfoContext(ctx, "virtual stale fallback: resolved substitute", "component", "api", "original", file.FilePath, "substitute", stream.URI)
+			// Persist the new working result= back to the media file so the next
+			// play does not repeat the stale-fallback dance.
+			if h.VirtualFileUpdater != nil && stream.URI != file.FilePath {
+				if updateErr := h.VirtualFileUpdater(ctx, file.ID, stream.URI); updateErr != nil {
+					slog.ErrorContext(ctx, "virtual stale fallback: persist update failed", "component", "api", "file_id", file.ID, "new_path", stream.URI, "error", updateErr)
+				}
+			}
 			return resolved
 		}
 		slog.ErrorContext(ctx, "virtual stale fallback: candidate failed", "component", "api", "candidate", stream.URI, "error", err)

@@ -51,6 +51,7 @@ type relayEntry struct {
 	source    *url.URL
 	baseName  string
 	createdAt time.Time
+	noRanges  bool // set when upstream returns 200 for a Range request
 }
 
 // ProxyError reports whether an upstream failure happened before any response
@@ -308,6 +309,18 @@ func (r *Relay) proxy(w http.ResponseWriter, request *http.Request, source, rela
 		return errors.New("remote stream request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
+	// Detect upstream sources that ignore Range headers: when we ask for a
+	// byte range but get back 200 OK (full file), strip Accept-Ranges from
+	// the response so clients don't assume range support and fail on seek.
+	hadRange := upstream.Header.Get("Range") != ""
+	if hadRange && response.StatusCode == http.StatusOK && relayToken != "" {
+		r.mu.Lock()
+		if entry, ok := r.entries[relayToken]; ok {
+			entry.noRanges = true
+		}
+		r.mu.Unlock()
+		response.Header.Del("Accept-Ranges")
+	}
 	if response.StatusCode >= 400 && response.StatusCode != http.StatusRequestedRangeNotSatisfiable {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("remote stream returned HTTP %d", response.StatusCode)

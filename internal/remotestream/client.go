@@ -56,6 +56,9 @@ func newSafeTransport(resolver ipResolver, dialer contextDialer) *http.Transport
 		return nil, fmt.Errorf("dial validated remote stream host: %w", dialErr)
 	}
 	transport.DialTLSContext = nil
+	transport.ForceAttemptHTTP2 = true
+	transport.MaxIdleConnsPerHost = 10
+	transport.MaxConnsPerHost = 32
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12} //nolint:gosec // secure minimum; ServerName is populated by net/http.
 	return transport
 }
