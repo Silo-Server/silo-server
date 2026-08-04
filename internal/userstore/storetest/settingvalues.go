@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	})
 	t.Run("RevisionIncrements", func(t *testing.T) {
 		testSettingValueRevisions(t, newStore)
+	})
+	t.Run("CompareAndSet", func(t *testing.T) {
+		testSettingValueCompareAndSet(t, newStore)
 	})
 	t.Run("PartialUniqueness", func(t *testing.T) {
 		testSettingValuePartialUniqueness(t, newStore)
@@ -49,9 +53,60 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("MutationIdempotency", func(t *testing.T) {
 		testSettingMutationIdempotency(t, newStore)
 	})
+	t.Run("MutationTransaction", func(t *testing.T) {
+		testSettingMutationTransaction(t, newStore)
+	})
 	t.Run("DeviceExists", func(t *testing.T) {
 		testDeviceExists(t, newStore)
 	})
+}
+
+// testSettingValueCompareAndSet pins the internal primitive used by semantic
+// document mutations. A stale writer must lose without changing the row, and
+// an insert-if-absent race must have exactly one winner.
+func testSettingValueCompareAndSet(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	cas, ok := store.(userstore.SettingValueCompareAndSetter)
+	if !ok {
+		t.Skip("store does not implement SettingValueCompareAndSetter")
+	}
+	seedSettingProfiles(t, ctx, store, "p1")
+	id := profileID(audioKey, "p1")
+
+	first, err := cas.CompareAndSetSettingValue(ctx, id, json.RawMessage(`"en"`), 0)
+	if err != nil {
+		t.Fatalf("insert-if-absent: %v", err)
+	}
+	if first == nil || first.Revision != 1 || !jsonEqual(first.Value, json.RawMessage(`"en"`)) {
+		t.Fatalf("insert-if-absent = %+v, want en at revision 1", first)
+	}
+
+	if _, err := cas.CompareAndSetSettingValue(ctx, id, json.RawMessage(`"fr"`), 0); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("second insert-if-absent error = %v, want ErrSettingValueRevisionConflict", err)
+	}
+	if _, err := cas.CompareAndSetSettingValue(ctx, id, json.RawMessage(`"de"`), first.Revision+1); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("future revision error = %v, want ErrSettingValueRevisionConflict", err)
+	}
+
+	second, err := cas.CompareAndSetSettingValue(ctx, id, json.RawMessage(`"ja"`), first.Revision)
+	if err != nil {
+		t.Fatalf("compare-and-set current revision: %v", err)
+	}
+	if second == nil || second.Revision != 2 || !jsonEqual(second.Value, json.RawMessage(`"ja"`)) {
+		t.Fatalf("compare-and-set = %+v, want ja at revision 2", second)
+	}
+	if _, err := cas.CompareAndSetSettingValue(ctx, id, json.RawMessage(`"it"`), first.Revision); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("stale revision error = %v, want ErrSettingValueRevisionConflict", err)
+	}
+
+	got, err := store.GetSettingValue(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSettingValue: %v", err)
+	}
+	if got == nil || got.Revision != 2 || !jsonEqual(got.Value, json.RawMessage(`"ja"`)) {
+		t.Fatalf("row after stale CAS = %+v, want ja at revision 2", got)
+	}
 }
 
 // testDeviceExists pins the check that authorizes a device named in a request
@@ -204,6 +259,12 @@ func profileID(key, profile string) userstore.SettingIdentity {
 	return userstore.SettingIdentity{Key: key, Scope: settingscontract.ScopeProfile, ProfileID: profile}
 }
 
+func clientID(key, profile string, family settingscontract.ClientFamily) userstore.SettingIdentity {
+	return userstore.SettingIdentity{
+		Key: key, Scope: settingscontract.ScopeProfileClient, ProfileID: profile, ClientFamily: family,
+	}
+}
+
 func deviceID(key, profile, device string) userstore.SettingIdentity {
 	return userstore.SettingIdentity{
 		Key: key, Scope: settingscontract.ScopeProfileDevice, ProfileID: profile, DeviceID: device,
@@ -261,6 +322,7 @@ func testSettingValueScopes(t *testing.T, newStore func(t *testing.T) userstore.
 	}{
 		{"account", accountID(audioKey), `"en"`},
 		{"profile", profileID(audioKey, "p1"), `"fr"`},
+		{"profile_client", clientID(audioKey, "p1", settingscontract.ClientFamilyTV), `"it"`},
 		{"profile_device", deviceID(audioKey, "p1", deviceApple), `"de"`},
 		{"profile_library", libraryID(audioKey, "p1", 42), `"es"`},
 		{"profile_series", seriesID(audioKey, "p1", "series-1"), `"ja"`},
@@ -307,6 +369,7 @@ func testSettingValueScopes(t *testing.T, newStore func(t *testing.T) userstore.
 	seedSettingProfiles(t, ctx, store, "p2")
 	for _, id := range []userstore.SettingIdentity{
 		profileID(audioKey, "p2"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyMobile),
 		deviceID(audioKey, "p1", "iphone"),
 		libraryID(audioKey, "p1", 43),
 		seriesID(audioKey, "p1", "series-2"),
@@ -338,12 +401,13 @@ func testSettingValueListAll(t *testing.T, newStore func(t *testing.T) userstore
 
 	seedSettingProfiles(t, ctx, store, "p1", "p2")
 	seeded := map[userstore.SettingIdentity]string{
-		accountID(audioKey):                   `"en"`,
-		profileID(audioKey, "p1"):             `"fr"`,
-		profileID(subtitleKey, "p2"):          `"always"`,
-		deviceID(audioKey, "p1", deviceApple): `"de"`,
-		libraryID(audioKey, "p1", 42):         `"es"`,
-		seriesID(audioKey, "p1", seriesOne):   `"ja"`,
+		accountID(audioKey):                                       `"en"`,
+		profileID(audioKey, "p1"):                                 `"fr"`,
+		profileID(subtitleKey, "p2"):                              `"always"`,
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV): `"it"`,
+		deviceID(audioKey, "p1", deviceApple):                     `"de"`,
+		libraryID(audioKey, "p1", 42):                             `"es"`,
+		seriesID(audioKey, "p1", seriesOne):                       `"ja"`,
 	}
 	for id, value := range seeded {
 		mustUpsert(t, ctx, store, id, value)
@@ -476,7 +540,7 @@ func testSettingValueRevisions(t *testing.T, newStore func(t *testing.T) usersto
 	}
 }
 
-// testSettingValuePartialUniqueness pins the five partial unique indexes: one
+// testSettingValuePartialUniqueness pins the six partial unique indexes: one
 // explicit value per identity, and identities that differ in any one context
 // column coexist.
 func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
@@ -488,6 +552,9 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
 		profileID(audioKey, "p2"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyMobile),
+		clientID(audioKey, "p2", settingscontract.ClientFamilyTV),
 		deviceID(audioKey, "p1", deviceApple),
 		deviceID(audioKey, "p1", "iphone"),
 		deviceID(audioKey, "p2", deviceApple),
@@ -505,19 +572,22 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 	}
 
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:       []string{audioKey},
-		ProfileIDs: []string{"p1"},
-		DeviceID:   deviceApple,
-		LibraryIDs: []int{1, 2},
-		SeriesIDs:  []string{seriesOne, seriesTwo},
+		Keys:         []string{audioKey},
+		ProfileIDs:   []string{"p1"},
+		ClientFamily: settingscontract.ClientFamilyTV,
+		DeviceID:     deviceApple,
+		LibraryIDs:   []int{1, 2},
+		SeriesIDs:    []string{seriesOne, seriesTwo},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution: %v", err)
 	}
-	// p1's candidates: account, profile, one device, two libraries, two series.
+	// p1's candidates: account, profile, one client family, one device, two
+	// libraries, and two series.
 	want := []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
 		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 1),
 		libraryID(audioKey, "p1", 2),
@@ -555,6 +625,15 @@ func testSettingValueIdentityValidation(t *testing.T, newStore func(t *testing.T
 		{"account scope with profile", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeAccount, ProfileID: "p1",
 		}},
+		{"client scope without family", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfileClient, ProfileID: "p1",
+		}},
+		{"client scope with unknown family", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfileClient, ProfileID: "p1", ClientFamily: "car",
+		}},
+		{"profile scope with family", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfile, ProfileID: "p1", ClientFamily: settingscontract.ClientFamilyTV,
+		}},
 		{"device scope without device", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileDevice, ProfileID: "p1",
 		}},
@@ -581,6 +660,9 @@ func testSettingValueIdentityValidation(t *testing.T, newStore func(t *testing.T
 		}},
 		{"padded device id", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileDevice, ProfileID: "p1", DeviceID: deviceApple + " ",
+		}},
+		{"padded client family", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfileClient, ProfileID: "p1", ClientFamily: " tv ",
 		}},
 		{"padded series id", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1", SeriesID: " " + seriesOne,
@@ -624,6 +706,7 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 
 	mustUpsert(t, ctx, store, accountID(audioKey), `"en"`)
 	mustUpsert(t, ctx, store, profileID(audioKey, "p1"), `"fr"`)
+	mustUpsert(t, ctx, store, clientID(audioKey, "p1", settingscontract.ClientFamilyTV), `"it"`)
 	mustUpsert(t, ctx, store, deviceID(audioKey, "p1", deviceApple), `"de"`)
 	mustUpsert(t, ctx, store, libraryID(audioKey, "p1", 42), `"es"`)
 	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", seriesOne), `"ja"`)
@@ -633,6 +716,8 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// Decoys: another profile, another device, another library, another series,
 	// and a key nobody asked for.
 	mustUpsert(t, ctx, store, profileID(audioKey, "p2"), `"pt"`)
+	mustUpsert(t, ctx, store, clientID(audioKey, "p1", settingscontract.ClientFamilyMobile), `"pl"`)
+	mustUpsert(t, ctx, store, clientID(audioKey, "p2", settingscontract.ClientFamilyTV), `"cs"`)
 	mustUpsert(t, ctx, store, deviceID(audioKey, "p1", "iphone"), `"nl"`)
 	mustUpsert(t, ctx, store, libraryID(audioKey, "p1", 43), `"sv"`)
 	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", "s-3"), `"da"`)
@@ -640,11 +725,12 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 
 	// The batched shape: two content contexts resolved in one call.
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:       []string{audioKey, subtitleKey},
-		ProfileIDs: []string{"p1"},
-		DeviceID:   deviceApple,
-		LibraryIDs: []int{42},
-		SeriesIDs:  []string{seriesOne, seriesTwo},
+		Keys:         []string{audioKey, subtitleKey},
+		ProfileIDs:   []string{"p1"},
+		ClientFamily: settingscontract.ClientFamilyTV,
+		DeviceID:     deviceApple,
+		LibraryIDs:   []int{42},
+		SeriesIDs:    []string{seriesOne, seriesTwo},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution: %v", err)
@@ -652,6 +738,7 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	assertIdentitySet(t, rows, []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
 		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 42),
 		seriesID(audioKey, "p1", seriesOne),
@@ -663,10 +750,11 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// lets a list view make one round trip instead of one per item.
 	for _, series := range []string{seriesOne, seriesTwo} {
 		single, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-			Keys:       []string{audioKey},
-			ProfileIDs: []string{"p1"},
-			DeviceID:   deviceApple,
-			SeriesIDs:  []string{series},
+			Keys:         []string{audioKey},
+			ProfileIDs:   []string{"p1"},
+			ClientFamily: settingscontract.ClientFamilyTV,
+			DeviceID:     deviceApple,
+			SeriesIDs:    []string{series},
 		})
 		if err != nil {
 			t.Fatalf("ListSettingValuesForResolution(%s): %v", series, err)
@@ -674,13 +762,30 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 		assertIdentitySet(t, single, []userstore.SettingIdentity{
 			accountID(audioKey),
 			profileID(audioKey, "p1"),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
 			deviceID(audioKey, "p1", deviceApple),
 			seriesID(audioKey, "p1", series),
 		})
 	}
 
-	// No device identity — an incognito window, or jellycompat's seed — drops
-	// profile_device candidates without touching the roaming ones.
+	// A family without a device still sees the like-client value while dropping
+	// exact-device candidates.
+	familyOnly, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
+		Keys:         []string{audioKey},
+		ProfileIDs:   []string{"p1"},
+		ClientFamily: settingscontract.ClientFamilyTV,
+	})
+	if err != nil {
+		t.Fatalf("ListSettingValuesForResolution(family only): %v", err)
+	}
+	assertIdentitySet(t, familyOnly, []userstore.SettingIdentity{
+		accountID(audioKey),
+		profileID(audioKey, "p1"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
+	})
+
+	// No device or family identity — an incognito window, or jellycompat's seed
+	// — drops both contextual candidates without touching profile roaming.
 	noDevice, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey},
 		ProfileIDs: []string{"p1"},
@@ -722,11 +827,12 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// Blank and duplicate context ids are compacted rather than bound as
 	// literals, so they neither match a '' row nor multiply the result set.
 	dirty, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:       []string{audioKey, "", audioKey, "   "},
-		ProfileIDs: []string{"p1", "p1", "", "  "},
-		DeviceID:   deviceApple,
-		LibraryIDs: []int{42, 42, 0, -1},
-		SeriesIDs:  []string{seriesOne, seriesOne, "", "  "},
+		Keys:         []string{audioKey, "", audioKey, "   "},
+		ProfileIDs:   []string{"p1", "p1", "", "  "},
+		ClientFamily: settingscontract.ClientFamilyTV,
+		DeviceID:     deviceApple,
+		LibraryIDs:   []int{42, 42, 0, -1},
+		SeriesIDs:    []string{seriesOne, seriesOne, "", "  "},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution(dirty): %v", err)
@@ -734,6 +840,7 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	assertIdentitySet(t, dirty, []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
+		clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
 		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 42),
 		seriesID(audioKey, "p1", seriesOne),
@@ -780,6 +887,9 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 			accountID(audioKey),
 			profileID(audioKey, "p1"),
 			profileID(audioKey, "p2"),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyMobile),
+			clientID(audioKey, "p2", settingscontract.ClientFamilyTV),
 			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
 			deviceID(audioKey, "p2", deviceApple),
@@ -887,11 +997,13 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 		if err != nil {
 			t.Fatalf("DeleteSettingValuesForProfile: %v", err)
 		}
-		if removed != 7 {
-			t.Fatalf("DeleteSettingValuesForProfile removed %d rows, want 7", removed)
+		if removed != 9 {
+			t.Fatalf("DeleteSettingValuesForProfile removed %d rows, want 9", removed)
 		}
 		assertRemaining(t, store, all, []userstore.SettingIdentity{
 			profileID(audioKey, "p1"),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyMobile),
 			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
 			libraryID(audioKey, "p1", 1),
@@ -909,6 +1021,8 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 		// Account scope belongs to the account, not to any one household member.
 		assertRemaining(t, store, all, []userstore.SettingIdentity{
 			profileID(audioKey, "p1"),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyTV),
+			clientID(audioKey, "p1", settingscontract.ClientFamilyMobile),
 			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
 			libraryID(audioKey, "p1", 1),
@@ -1029,6 +1143,152 @@ func testSettingMutationIdempotency(t *testing.T, newStore func(t *testing.T) us
 	}
 }
 
+// testSettingMutationTransaction proves the storage primitive that handlers
+// rely on: setting + receipt roll back together, and same-id contenders check
+// the winning receipt before either can apply a second setting write.
+func testSettingMutationTransaction(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+
+	t.Run("RollbackIsAtomic", func(t *testing.T) {
+		store := newStore(t)
+		transactioner, ok := store.(userstore.SettingMutationTransactioner)
+		if !ok {
+			t.Skip("store does not implement SettingMutationTransactioner")
+		}
+		seedSettingProfiles(t, ctx, store, "p1")
+		id := profileID(audioKey, "p1")
+		rollbackErr := errors.New("simulate process failure before commit")
+		err := transactioner.WithSettingMutationTransaction(ctx, "tx-rollback",
+			func(writer userstore.SettingMutationWriter) error {
+				if _, err := writer.UpsertSettingValue(ctx, id, json.RawMessage(`"en"`)); err != nil {
+					return err
+				}
+				if _, _, err := writer.PutSettingMutation(ctx, userstore.SettingMutationRecord{
+					MutationID: "tx-rollback", RequestHash: mutationHash,
+					Result: json.RawMessage(`{"winner":"en"}`), ExpiresAt: time.Now().UTC().Add(time.Hour),
+				}); err != nil {
+					return err
+				}
+				return rollbackErr
+			})
+		if !errors.Is(err, rollbackErr) {
+			t.Fatalf("transaction error = %v, want rollback sentinel", err)
+		}
+		if got, err := store.GetSettingValue(ctx, id); err != nil || got != nil {
+			t.Fatalf("setting after rollback = %+v (%v), want nil", got, err)
+		}
+		if got, err := store.GetSettingMutation(ctx, "tx-rollback"); err != nil || got != nil {
+			t.Fatalf("receipt after rollback = %+v (%v), want nil", got, err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name         string
+		secondHash   string
+		second       json.RawMessage
+		wantReplay   int
+		wantConflict int
+	}{
+		{name: "SameHashReplays", secondHash: "hash-a", second: json.RawMessage(`"en"`), wantReplay: 1},
+		{name: "DifferentHashConflicts", secondHash: "hash-b", second: json.RawMessage(`"fr"`), wantConflict: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newStore(t)
+			transactioner, ok := store.(userstore.SettingMutationTransactioner)
+			if !ok {
+				t.Skip("store does not implement SettingMutationTransactioner")
+			}
+			seedSettingProfiles(t, ctx, store, "p1")
+			id := profileID(audioKey, "p1")
+			type attempt struct {
+				hash  string
+				value json.RawMessage
+			}
+			attempts := []attempt{{hash: "hash-a", value: json.RawMessage(`"en"`)}, {hash: tc.secondHash, value: tc.second}}
+			type result struct {
+				status  string
+				receipt json.RawMessage
+				err     error
+			}
+			results := make(chan result, len(attempts))
+			start := make(chan struct{})
+			var ready sync.WaitGroup
+			ready.Add(len(attempts))
+			for _, candidate := range attempts {
+				candidate := candidate
+				go func() {
+					ready.Done()
+					<-start
+					out := result{}
+					out.err = transactioner.WithSettingMutationTransaction(ctx, "tx-concurrent",
+						func(writer userstore.SettingMutationWriter) error {
+							prior, err := writer.GetSettingMutation(ctx, "tx-concurrent")
+							if err != nil {
+								return err
+							}
+							if prior != nil {
+								out.receipt = prior.Result
+								if prior.RequestHash == candidate.hash {
+									out.status = "replay"
+								} else {
+									out.status = "conflict"
+								}
+								return nil
+							}
+							stored, err := writer.UpsertSettingValue(ctx, id, candidate.value)
+							if err != nil {
+								return err
+							}
+							out.receipt, err = json.Marshal(map[string]any{"revision": stored.Revision, "value": candidate.value})
+							if err != nil {
+								return err
+							}
+							_, inserted, err := writer.PutSettingMutation(ctx, userstore.SettingMutationRecord{
+								MutationID: "tx-concurrent", RequestHash: candidate.hash,
+								Result: out.receipt, ExpiresAt: time.Now().UTC().Add(time.Hour),
+							})
+							if err == nil && !inserted {
+								return errors.New("serialized transaction unexpectedly lost receipt insert")
+							}
+							out.status = "applied"
+							return err
+						})
+					results <- out
+				}()
+			}
+			ready.Wait()
+			close(start)
+
+			counts := map[string]int{}
+			var receipts []json.RawMessage
+			for range attempts {
+				out := <-results
+				if out.err != nil {
+					t.Fatalf("concurrent transaction: %v", out.err)
+				}
+				counts[out.status]++
+				receipts = append(receipts, out.receipt)
+			}
+			if counts["applied"] != 1 || counts["replay"] != tc.wantReplay || counts["conflict"] != tc.wantConflict {
+				t.Fatalf("outcomes = %+v, want one applied, %d replay, %d conflict", counts, tc.wantReplay, tc.wantConflict)
+			}
+			stored, err := store.GetSettingValue(ctx, id)
+			if err != nil || stored == nil || stored.Revision != 1 {
+				t.Fatalf("stored setting = %+v (%v), want exactly one revision", stored, err)
+			}
+			receipt, err := store.GetSettingMutation(ctx, "tx-concurrent")
+			if err != nil || receipt == nil {
+				t.Fatalf("stored receipt = %+v (%v)", receipt, err)
+			}
+			for _, got := range receipts {
+				if !jsonEqual(got, receipt.Result) {
+					t.Fatalf("attempt receipt = %s, want coherent winner %s", got, receipt.Result)
+				}
+			}
+		})
+	}
+}
+
 // assertIdentitySet compares the returned rows to the expected identities as a
 // set. Row order is deliberately not asserted: the two backends sort text under
 // different collations, and ranking is the resolver's job anyway.
@@ -1050,8 +1310,8 @@ func assertIdentitySet(t *testing.T, rows []userstore.SettingValue, want []users
 }
 
 func identityToken(id userstore.SettingIdentity) string {
-	return fmt.Sprintf("%s|%s|%s|%s|%d|%s",
-		id.Key, id.Scope, id.ProfileID, id.DeviceID, id.LibraryID, id.SeriesID)
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s",
+		id.Key, id.Scope, id.ProfileID, id.ClientFamily, id.DeviceID, id.LibraryID, id.SeriesID)
 }
 
 // jsonEqual compares two JSON documents by value. PostgreSQL stores jsonb, which

@@ -43,6 +43,8 @@ import {
   useGroupedCollectionCard,
 } from "@/components/collections/GroupedCollectionsBoard";
 import { slugifyGroupSlug } from "@/lib/collectionGroups";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 import {
   buildUserCollectionCatalogHref,
@@ -255,6 +257,8 @@ function ServerCollectionsSection() {
 // supplies horizontal padding — the row title and cards align to that column.
 function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
   const navigate = useNavigate();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
   const collectionsHref = `/library/${library.library_id}?tab=collections`;
   const hasMore = library.total_count > library.collections.length;
   return (
@@ -265,7 +269,7 @@ function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
       edgePadding={false}
     >
       {library.collections.map((collection) => (
-        <div key={collection.id} className="w-[130px] sm:w-[150px] lg:w-[178px]">
+        <div key={collection.id} className={posterWidthClasses}>
           <CollectionPosterCard
             collection={collection}
             kind="regular"

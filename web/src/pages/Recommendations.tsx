@@ -5,6 +5,8 @@ import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 function buildSectionHref(row: DiscoverRow): string | undefined {
   if (!row.section_kind) return undefined;
@@ -147,6 +149,8 @@ export default function Recommendations() {
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   const rows = data?.rows ?? [];
 
@@ -185,11 +189,7 @@ export default function Recommendations() {
             titleHref={buildSectionHref(row)}
           >
             {row.items.map((item) => (
-              <div
-                key={item.content_id}
-                className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
-                role="listitem"
-              >
+              <div key={item.content_id} className={posterWidthClasses} role="listitem">
                 <SectionItemCard item={item} />
               </div>
             ))}

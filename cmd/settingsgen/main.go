@@ -157,6 +157,7 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	}
 	out.WriteString(" */\n\n")
 
+	fmt.Fprintf(&out, "export const SETTINGS_API_VERSION = %d;\n", contract.APIVersion)
 	fmt.Fprintf(&out, "export const SETTINGS_REVISION = %d;\n\n", contract.Revision)
 
 	out.WriteString("export interface SettingSuggestedOption {\n")

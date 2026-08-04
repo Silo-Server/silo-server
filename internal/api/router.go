@@ -2402,6 +2402,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/values", settingValuesHandler.HandleGetValues)
 								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
 								r.Post("/values/effective", settingValuesHandler.HandlePostEffective)
+								r.Put("/values/nav.shortcuts/item", settingValuesHandler.HandleSetNavigationShortcut)
 								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
 								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)
 								r.Delete("/values/{key}", settingValuesHandler.HandleDeleteValue)

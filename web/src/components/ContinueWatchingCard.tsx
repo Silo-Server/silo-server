@@ -12,6 +12,8 @@ import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPrese
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 type ContinueWatchingCardProps = (
   | {
@@ -33,6 +35,7 @@ type ContinueWatchingCardProps = (
 export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
+  const { cardPresentation } = useUICustomization();
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
@@ -185,8 +188,10 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const variant = props.variant ?? "wide";
   const isPoster = variant === "poster";
   const containerWidth = isPoster
-    ? "w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
+    ? carouselCardWidthClasses(cardPresentation.poster_size)
     : "w-[260px] shrink-0 sm:w-[315px]";
+  const showCaption = cardPresentation.caption !== "artwork";
+  const showMetadata = cardPresentation.caption === "title_metadata";
   // Audiobook covers are square (Audible-style); use 1:1 for the poster
   // variant so they don't get top/bottom-cropped into a 2:3 frame.
   const imageAspect = isPoster
@@ -291,44 +296,47 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
       </div>
 
       {/* Info */}
-      <div className="px-0.5 pt-2.5">
-        <ViewTransitionLink
-          to={headingHref}
-          className="block truncate text-[13px] font-semibold hover:underline"
-        >
-          {heading}
-        </ViewTransitionLink>
-        {episodeMeta && (
+      {showCaption ? (
+        <div className="px-0.5 pt-2.5">
           <ViewTransitionLink
-            to={isMangaChapter ? card.watchHref : card.itemHref}
-            className="text-muted-foreground block truncate text-xs hover:underline"
+            to={headingHref}
+            className="block truncate text-[13px] font-semibold hover:underline"
           >
-            {episodeMeta}
+            {heading}
           </ViewTransitionLink>
-        )}
-        {premiereBadge && (
-          <div className="mt-1">
-            <span
-              className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
-                premiereBadge,
-              )}`}
-            >
-              {upcomingBadgeLabel(premiereBadge)}
-            </span>
-          </div>
-        )}
-        {timeLeftLabel &&
-          (timeLeftLabel === "\u00A0" ? (
-            <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
-          ) : (
+          {showMetadata && episodeMeta && (
             <ViewTransitionLink
               to={isMangaChapter ? card.watchHref : card.itemHref}
-              className="text-muted-foreground block w-fit text-xs hover:underline"
+              className="text-muted-foreground block truncate text-xs hover:underline"
             >
-              {timeLeftLabel}
+              {episodeMeta}
             </ViewTransitionLink>
-          ))}
-      </div>
+          )}
+          {showMetadata && premiereBadge && (
+            <div className="mt-1">
+              <span
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                  premiereBadge,
+                )}`}
+              >
+                {upcomingBadgeLabel(premiereBadge)}
+              </span>
+            </div>
+          )}
+          {showMetadata &&
+            timeLeftLabel &&
+            (timeLeftLabel === "\u00A0" ? (
+              <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
+            ) : (
+              <ViewTransitionLink
+                to={isMangaChapter ? card.watchHref : card.itemHref}
+                className="text-muted-foreground block w-fit text-xs hover:underline"
+              >
+                {timeLeftLabel}
+              </ViewTransitionLink>
+            ))}
+        </div>
+      ) : null}
     </div>
   );
 }

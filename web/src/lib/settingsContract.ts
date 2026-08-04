@@ -8,7 +8,8 @@
  * is a manifest change plus a regeneration, never a hand-written key.
  */
 
-export const SETTINGS_REVISION = 4;
+export const SETTINGS_API_VERSION = 1;
+export const SETTINGS_REVISION = 5;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -162,6 +163,10 @@ export const SETTING_KEYS = {
   DOWNLOADS_KEEP_WATCHED: "downloads.keep_watched",
   /** Download over Wi-Fi only */
   DOWNLOADS_WIFI_ONLY: "downloads.wifi_only",
+  /** Primary menu */
+  NAV_PRIMARY_MENU: "nav.primary_menu",
+  /** Navigation shortcuts */
+  NAV_SHORTCUTS: "nav.shortcuts",
   /** Show audiobooks */
   NAV_SHOW_AUDIOBOOKS: "nav.show_audiobooks",
   /** Preferred audio language */
@@ -224,6 +229,8 @@ export const SETTING_KEYS = {
   SUBTITLE_MATCHES_DEVICE: "subtitle.matches_device",
   /** Poster badges */
   UI_CARD_OVERLAYS: "ui.card_overlays",
+  /** Media cards */
+  UI_CARD_PRESENTATION: "ui.card_presentation",
   /** Custom CSS */
   UI_CUSTOM_CSS: "ui.custom_css",
   /** Custom theme variables */
@@ -389,6 +396,36 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "downloads",
     control: "switch",
     platforms: ["ios", "android"],
+  },
+  "nav.primary_menu": {
+    key: "nav.primary_menu",
+    type: "object",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile_client", "profile_device"],
+    scopeIntroducedIn: [5, 5],
+    resolutionOrder: ["profile_device", "profile_client", "default"],
+    defaultValue: null,
+    label: "Primary menu",
+    description: "The ordered visible destinations shared by like clients.",
+    category: "navigation",
+    control: "panel",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "nav.shortcuts": {
+    key: "nav.shortcuts",
+    type: "object",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile"],
+    scopeIntroducedIn: [5],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: { items: [] },
+    label: "Navigation shortcuts",
+    description: "Libraries, sections, and collections pinned for use across navigation surfaces.",
+    category: "navigation",
   },
   "nav.show_audiobooks": {
     key: "nav.show_audiobooks",
@@ -934,6 +971,22 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Poster badges",
     description: "Which badges appear on poster cards, and where.",
     category: "appearance",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "ui.card_presentation": {
+    key: "ui.card_presentation",
+    type: "object",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile", "profile_client", "profile_device"],
+    scopeIntroducedIn: [5, 5, 5],
+    resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
+    defaultValue: { poster_size: "standard", caption: "title_metadata" },
+    label: "Media cards",
+    description: "Poster size and caption detail used by media cards.",
+    category: "appearance",
+    control: "panel",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.custom_css": {

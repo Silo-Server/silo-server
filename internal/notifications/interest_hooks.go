@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -64,6 +65,11 @@ type interestTrackingStoreWithDevices struct {
 	userstore.DeviceRegistry
 }
 
+var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStore)(nil)
+var _ userstore.SettingMutationTransactioner = (*interestTrackingStore)(nil)
+var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevices)(nil)
+
 // WithPreferenceSettingsTransaction preserves the optional atomic-settings
 // capability of the wrapped store. Preference writes do not affect interest
 // signals, so the transaction can pass through unchanged; keeping the method
@@ -78,6 +84,37 @@ func (s *interestTrackingStore) WithPreferenceSettingsTransaction(
 		return fmt.Errorf("wrapped user store does not support atomic preference settings synchronization")
 	}
 	return transactioner.WithPreferenceSettingsTransaction(ctx, fn)
+}
+
+// CompareAndSetSettingValue preserves the semantic-document CAS capability of
+// the wrapped store. Settings writes do not affect notification interests, so
+// this decorator must not intercept or downgrade the backend primitive.
+func (s *interestTrackingStore) CompareAndSetSettingValue(
+	ctx context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	cas, ok := s.UserStore.(userstore.SettingValueCompareAndSetter)
+	if !ok {
+		return nil, fmt.Errorf("wrapped user store does not support atomic setting updates")
+	}
+	return cas.CompareAndSetSettingValue(ctx, id, value, expectedRevision)
+}
+
+// WithSettingMutationTransaction preserves the durable setting+receipt
+// transaction used by mutation IDs. Passing the transaction-scoped writer
+// through unchanged keeps both operations on the concrete backend transaction.
+func (s *interestTrackingStore) WithSettingMutationTransaction(
+	ctx context.Context,
+	mutationID string,
+	fn func(userstore.SettingMutationWriter) error,
+) error {
+	transactioner, ok := s.UserStore.(userstore.SettingMutationTransactioner)
+	if !ok {
+		return fmt.Errorf("wrapped user store does not support atomic idempotent setting mutations")
+	}
+	return transactioner.WithSettingMutationTransaction(ctx, mutationID, fn)
 }
 
 // progressState is the transition-relevant projection of a progress row.

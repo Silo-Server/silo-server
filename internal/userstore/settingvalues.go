@@ -1,6 +1,7 @@
 package userstore
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,13 @@ var ErrInvalidSettingIdentity = errors.New("invalid setting identity")
 // validation path.
 var ErrInvalidSettingValue = errors.New("invalid setting value")
 
+// ErrSettingValueRevisionConflict reports that a compare-and-set write did
+// not observe the revision it expected. It is deliberately a storage-level
+// primitive rather than a public settings precondition: semantic mutation
+// endpoints use it to merge concurrent edits without making every client
+// implement a read/rebase/retry loop.
+var ErrSettingValueRevisionConflict = errors.New("setting value revision conflict")
+
 // SettingIdentity addresses exactly one canonical setting row: the key plus the
 // context columns its scope requires.
 //
@@ -33,10 +41,11 @@ type SettingIdentity struct {
 	Key   string
 	Scope settingscontract.Scope
 
-	ProfileID string
-	DeviceID  string
-	LibraryID int
-	SeriesID  string
+	ProfileID    string
+	ClientFamily settingscontract.ClientFamily
+	DeviceID     string
+	LibraryID    int
+	SeriesID     string
 }
 
 // Validate reports whether the identity is addressable. It mirrors the scope
@@ -51,10 +60,11 @@ type SettingIdentity struct {
 // p1 — a silently orphaned row.
 func (id SettingIdentity) Validate() error {
 	for field, value := range map[string]string{
-		"key":        id.Key,
-		"profile id": id.ProfileID,
-		"device id":  id.DeviceID,
-		"series id":  id.SeriesID,
+		"key":           id.Key,
+		"profile id":    id.ProfileID,
+		"client family": string(id.ClientFamily),
+		"device id":     id.DeviceID,
+		"series id":     id.SeriesID,
 	} {
 		if value != strings.TrimSpace(value) {
 			return fmt.Errorf("%w: %s %q has surrounding whitespace",
@@ -74,6 +84,15 @@ func (id SettingIdentity) Validate() error {
 	}
 	if !needProfile && id.ProfileID != "" {
 		return fmt.Errorf("%w: scope %q must not carry a profile id", ErrInvalidSettingIdentity, id.Scope)
+	}
+
+	wantClientFamily := id.Scope == settingscontract.ScopeProfileClient
+	if wantClientFamily && !id.ClientFamily.Valid() {
+		return fmt.Errorf("%w: scope %q requires client family tv, mobile, tablet, desktop or web",
+			ErrInvalidSettingIdentity, id.Scope)
+	}
+	if !wantClientFamily && id.ClientFamily != "" {
+		return fmt.Errorf("%w: scope %q must not carry a client family", ErrInvalidSettingIdentity, id.Scope)
 	}
 
 	wantDevice := id.Scope == settingscontract.ScopeProfileDevice
@@ -117,6 +136,55 @@ type SettingValue struct {
 	UpdatedAt string
 }
 
+// SettingValueCompareAndSetter is the optional atomic-write capability used
+// by settings whose public API mutates one member of a shared document. An
+// expected revision of zero means the row must not exist; a positive revision
+// means that exact row revision must still be current.
+//
+// UserStore intentionally does not embed this interface. Transaction-scoped
+// and test-only stores that never serve semantic mutation endpoints need not
+// expose an operation they cannot perform, while both production backends do.
+type SettingValueCompareAndSetter interface {
+	CompareAndSetSettingValue(
+		ctx context.Context,
+		id SettingIdentity,
+		value json.RawMessage,
+		expectedRevision int64,
+	) (*SettingValue, error)
+}
+
+// SettingMutationWriter is the transaction-scoped settings surface used by an
+// idempotent mutation. Implementations must keep every call made by one
+// WithSettingMutationTransaction callback on the same database transaction.
+// That makes the setting write and its replay receipt one durable unit.
+type SettingMutationWriter interface {
+	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
+	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	CompareAndSetSettingValue(
+		ctx context.Context,
+		id SettingIdentity,
+		value json.RawMessage,
+		expectedRevision int64,
+	) (*SettingValue, error)
+	GetSettingMutation(ctx context.Context, mutationID string) (*SettingMutationRecord, error)
+	PutSettingMutation(ctx context.Context, record SettingMutationRecord) (SettingMutationRecord, bool, error)
+}
+
+// SettingMutationTransactioner atomically serializes one mutation id, applies
+// its setting write, and records its receipt. The callback commits only when it
+// returns nil. A crash or callback error therefore leaves neither half applied.
+// Concurrent callbacks for the same mutationID must execute one at a time.
+//
+// This is optional rather than embedded in UserStore because only production
+// stores serving idempotent mutation routes need to expose transaction state.
+type SettingMutationTransactioner interface {
+	WithSettingMutationTransaction(
+		ctx context.Context,
+		mutationID string,
+		fn func(SettingMutationWriter) error,
+	) error
+}
+
 // SettingResolutionQuery describes one resolution request: the keys to resolve
 // and every identity they may resolve against.
 //
@@ -138,6 +206,10 @@ type SettingResolutionQuery struct {
 	// DeviceID drops profile_device candidates when empty, which is what an
 	// unidentified client (jellycompat's DisplayPreferences seed) needs.
 	DeviceID string
+	// ClientFamily drops profile_client candidates when empty. Unlike the
+	// device registry's platform metadata, this is a closed canonical enum and
+	// is supplied explicitly by first-party clients.
+	ClientFamily settingscontract.ClientFamily
 	// LibraryIDs and SeriesIDs carry the content contexts of a batch. Empty
 	// slices drop their scope from the candidate set.
 	LibraryIDs []int
@@ -150,11 +222,12 @@ type SettingResolutionQuery struct {
 // the same predicate for the same request.
 func (q SettingResolutionQuery) Normalized() SettingResolutionQuery {
 	return SettingResolutionQuery{
-		Keys:       compactStrings(q.Keys),
-		ProfileIDs: compactStrings(q.ProfileIDs),
-		DeviceID:   strings.TrimSpace(q.DeviceID),
-		LibraryIDs: compactPositiveInts(q.LibraryIDs),
-		SeriesIDs:  compactStrings(q.SeriesIDs),
+		Keys:         compactStrings(q.Keys),
+		ProfileIDs:   compactStrings(q.ProfileIDs),
+		ClientFamily: settingscontract.ClientFamily(strings.TrimSpace(string(q.ClientFamily))),
+		DeviceID:     strings.TrimSpace(q.DeviceID),
+		LibraryIDs:   compactPositiveInts(q.LibraryIDs),
+		SeriesIDs:    compactStrings(q.SeriesIDs),
 	}
 }
 

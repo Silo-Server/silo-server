@@ -76,6 +76,7 @@
       "enum": [
         "account",
         "profile",
+        "profile_client",
         "profile_device",
         "profile_library",
         "profile_series",
@@ -291,6 +292,7 @@
             "enum": [
               "account",
               "profile",
+              "profile_client",
               "profile_device",
               "profile_library",
               "profile_series",

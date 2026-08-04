@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/card-presentation.json",
+  "title": "Media card presentation",
+  "description": "Semantic density and caption presets that each client family maps to platform-appropriate card dimensions.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["poster_size", "caption"],
+  "properties": {
+    "poster_size": {
+      "type": "string",
+      "enum": ["compact", "standard", "large"]
+    },
+    "caption": {
+      "type": "string",
+      "enum": ["title_metadata", "title", "artwork"]
+    }
+  }
+}

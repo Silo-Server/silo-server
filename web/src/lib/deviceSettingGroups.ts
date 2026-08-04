@@ -76,6 +76,8 @@ const HIDDEN_KEYS = new Set<string>([
   "ui.high_contrast",
   "ui.library_page_state",
   "ui.remember_library_page_state",
+  "nav.primary_menu",
+  "ui.card_presentation",
 ]);
 
 /**

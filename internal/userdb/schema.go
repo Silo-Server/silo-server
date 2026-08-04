@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS user_setting_values (
     key         TEXT NOT NULL,
     scope       TEXT NOT NULL,
     profile_id  TEXT,
+    client_family TEXT,
     device_id   TEXT,
     library_id  INTEGER,
     series_id   TEXT,
@@ -308,13 +309,15 @@ CREATE TABLE IF NOT EXISTS user_setting_values (
     revision    INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    CHECK (scope IN ('account', 'profile', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (scope IN ('account', 'profile', 'profile_client', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (client_family IS NULL OR client_family IN ('tv', 'mobile', 'tablet', 'desktop', 'web')),
     CHECK (
-      (scope = 'account' AND profile_id IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_device' AND profile_id IS NOT NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_library' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
-      (scope = 'profile_series' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+      (scope = 'account' AND profile_id IS NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_client' AND profile_id IS NOT NULL AND client_family IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
     )
 );
 
@@ -367,6 +370,9 @@ func InitSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureSettingValuesClientFamily(db); err != nil {
+		return err
+	}
 	if err := ensureProfileSectionOverridesRemovedColumn(db); err != nil {
 		return err
 	}
@@ -398,6 +404,95 @@ func InitSchema(db *sql.DB) error {
 		return err
 	}
 	return backfillUserDevices(db)
+}
+
+// ensureSettingValuesClientFamily upgrades the canonical settings table before
+// runMigrations reads it. InitSchema runs first on every open, and SQLite
+// cannot widen a table CHECK constraint with ALTER TABLE, so an existing table
+// must be rebuilt here rather than merely gaining a nullable column. The
+// rebuild is transactional and preserves ids, revisions, values, and
+// timestamps verbatim.
+func ensureSettingValuesClientFamily(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+		"user_setting_values", "client_family",
+	).Scan(&count); err != nil {
+		return fmt.Errorf("checking user_setting_values.client_family column: %w", err)
+	}
+	if count > 0 {
+		_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_client_uq
+			ON user_setting_values (profile_id, client_family, key) WHERE scope = 'profile_client'`)
+		if err != nil {
+			return fmt.Errorf("creating profile_client setting index: %w", err)
+		}
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning profile_client settings migration: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`
+CREATE TABLE user_setting_values_profile_client_new (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    key           TEXT NOT NULL,
+    scope         TEXT NOT NULL,
+    profile_id    TEXT,
+    client_family TEXT,
+    device_id     TEXT,
+    library_id    INTEGER,
+    series_id     TEXT,
+    value         TEXT NOT NULL CHECK (json_valid(value)),
+    revision      INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    CHECK (scope IN ('account', 'profile', 'profile_client', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (client_family IS NULL OR client_family IN ('tv', 'mobile', 'tablet', 'desktop', 'web')),
+    CHECK (
+      (scope = 'account' AND profile_id IS NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_client' AND profile_id IS NOT NULL AND client_family IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+    )
+);
+INSERT INTO user_setting_values_profile_client_new
+    (id, key, scope, profile_id, client_family, device_id, library_id, series_id,
+     value, revision, created_at, updated_at)
+SELECT id, key, scope, profile_id, NULL, device_id, library_id, series_id,
+       value, revision, created_at, updated_at
+  FROM user_setting_values;
+DROP TABLE user_setting_values;
+ALTER TABLE user_setting_values_profile_client_new RENAME TO user_setting_values;
+CREATE UNIQUE INDEX user_setting_values_account_uq
+    ON user_setting_values (key) WHERE scope = 'account';
+CREATE UNIQUE INDEX user_setting_values_profile_uq
+    ON user_setting_values (profile_id, key) WHERE scope = 'profile';
+CREATE UNIQUE INDEX user_setting_values_profile_client_uq
+    ON user_setting_values (profile_id, client_family, key) WHERE scope = 'profile_client';
+CREATE UNIQUE INDEX user_setting_values_profile_device_uq
+    ON user_setting_values (profile_id, device_id, key) WHERE scope = 'profile_device';
+CREATE UNIQUE INDEX user_setting_values_profile_library_uq
+    ON user_setting_values (profile_id, library_id, key) WHERE scope = 'profile_library';
+CREATE UNIQUE INDEX user_setting_values_profile_series_uq
+    ON user_setting_values (profile_id, series_id, key) WHERE scope = 'profile_series';
+CREATE INDEX user_setting_values_resolution_idx
+    ON user_setting_values (profile_id, key, scope);
+CREATE INDEX user_setting_values_series_idx
+    ON user_setting_values (profile_id, series_id);
+CREATE INDEX user_setting_values_library_idx
+    ON user_setting_values (profile_id, library_id);
+`); err != nil {
+		return fmt.Errorf("rebuilding user_setting_values for profile_client: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing profile_client settings migration: %w", err)
+	}
+	return nil
 }
 
 // watchProgressSyncTriggers stamps the server-owned cursor (synced_seq) on every

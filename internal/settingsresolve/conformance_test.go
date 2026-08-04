@@ -47,20 +47,22 @@ type conformanceCase struct {
 }
 
 type conformanceContext struct {
-	ProfileID  string   `json:"profile_id"`
-	DeviceID   string   `json:"device_id"`
-	LibraryIDs []int    `json:"library_ids"`
-	SeriesIDs  []string `json:"series_ids"`
+	ProfileID    string   `json:"profile_id"`
+	ClientFamily string   `json:"client_family"`
+	DeviceID     string   `json:"device_id"`
+	LibraryIDs   []int    `json:"library_ids"`
+	SeriesIDs    []string `json:"series_ids"`
 }
 
 type conformanceRow struct {
-	Key       string          `json:"key"`
-	Scope     string          `json:"scope"`
-	ProfileID string          `json:"profile_id"`
-	DeviceID  string          `json:"device_id"`
-	LibraryID int             `json:"library_id"`
-	SeriesID  string          `json:"series_id"`
-	Value     json.RawMessage `json:"value"`
+	Key          string          `json:"key"`
+	Scope        string          `json:"scope"`
+	ProfileID    string          `json:"profile_id"`
+	ClientFamily string          `json:"client_family"`
+	DeviceID     string          `json:"device_id"`
+	LibraryID    int             `json:"library_id"`
+	SeriesID     string          `json:"series_id"`
+	Value        json.RawMessage `json:"value"`
 }
 
 type conformanceBinding struct {
@@ -146,10 +148,11 @@ func runConformanceCase(t *testing.T, manifest *settingscontract.Manifest, tc co
 	rc := Context{}
 	if tc.Context != nil {
 		rc = Context{
-			ProfileID:  tc.Context.ProfileID,
-			DeviceID:   tc.Context.DeviceID,
-			LibraryIDs: tc.Context.LibraryIDs,
-			SeriesIDs:  tc.Context.SeriesIDs,
+			ProfileID:    tc.Context.ProfileID,
+			ClientFamily: settingscontract.ClientFamily(tc.Context.ClientFamily),
+			DeviceID:     tc.Context.DeviceID,
+			LibraryIDs:   tc.Context.LibraryIDs,
+			SeriesIDs:    tc.Context.SeriesIDs,
 		}
 	}
 
@@ -160,12 +163,13 @@ func runConformanceCase(t *testing.T, manifest *settingscontract.Manifest, tc co
 		}
 		rows = append(rows, userstore.SettingValue{
 			SettingIdentity: userstore.SettingIdentity{
-				Key:       stored.Key,
-				Scope:     settingscontract.Scope(stored.Scope),
-				ProfileID: stored.ProfileID,
-				DeviceID:  stored.DeviceID,
-				LibraryID: stored.LibraryID,
-				SeriesID:  stored.SeriesID,
+				Key:          stored.Key,
+				Scope:        settingscontract.Scope(stored.Scope),
+				ProfileID:    stored.ProfileID,
+				ClientFamily: settingscontract.ClientFamily(stored.ClientFamily),
+				DeviceID:     stored.DeviceID,
+				LibraryID:    stored.LibraryID,
+				SeriesID:     stored.SeriesID,
 			},
 			Value: stored.Value,
 		})

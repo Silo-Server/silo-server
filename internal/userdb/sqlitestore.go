@@ -466,6 +466,10 @@ func (s *SQLiteUserStore) UpsertSettingValue(_ context.Context, id userstore.Set
 	return UpsertSettingValue(s.db, id, value)
 }
 
+func (s *SQLiteUserStore) CompareAndSetSettingValue(ctx context.Context, id userstore.SettingIdentity, value json.RawMessage, expectedRevision int64) (*userstore.SettingValue, error) {
+	return CompareAndSetSettingValue(ctx, s.db, id, value, expectedRevision)
+}
+
 func (s *SQLiteUserStore) DeleteSettingValue(_ context.Context, id userstore.SettingIdentity) (bool, error) {
 	return DeleteSettingValue(s.db, id)
 }

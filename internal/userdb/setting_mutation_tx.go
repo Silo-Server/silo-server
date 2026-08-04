@@ -1,0 +1,126 @@
+package userdb
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
+)
+
+// settingMutationConnExecutor pins every statement to one database/sql
+// connection. SQLite cannot request BEGIN IMMEDIATE through sql.Tx without a
+// DSN-wide policy, so this adapter lets the mutation transaction acquire its
+// write reservation before it reads the receipt.
+type settingMutationConnExecutor struct {
+	ctx  context.Context
+	conn *sql.Conn
+}
+
+func (e settingMutationConnExecutor) Exec(query string, args ...any) (sql.Result, error) {
+	return e.conn.ExecContext(e.ctx, query, args...)
+}
+
+func (e settingMutationConnExecutor) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return e.conn.ExecContext(ctx, query, args...)
+}
+
+func (e settingMutationConnExecutor) Query(query string, args ...any) (*sql.Rows, error) {
+	return e.conn.QueryContext(e.ctx, query, args...)
+}
+
+func (e settingMutationConnExecutor) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return e.conn.QueryContext(ctx, query, args...)
+}
+
+func (e settingMutationConnExecutor) QueryRow(query string, args ...any) *sql.Row {
+	return e.conn.QueryRowContext(e.ctx, query, args...)
+}
+
+func (e settingMutationConnExecutor) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return e.conn.QueryRowContext(ctx, query, args...)
+}
+
+type sqliteSettingMutationWriter struct {
+	exec preferenceSettingsExecutor
+}
+
+var _ userstore.SettingMutationTransactioner = (*SQLiteUserStore)(nil)
+var _ userstore.SettingMutationWriter = (*sqliteSettingMutationWriter)(nil)
+
+// WithSettingMutationTransaction uses BEGIN IMMEDIATE so same-database
+// contenders serialize before checking mutation_id. The setting row and its
+// receipt then commit together; rollback covers callback errors and crashes.
+func (s *SQLiteUserStore) WithSettingMutationTransaction(
+	ctx context.Context,
+	mutationID string,
+	fn func(userstore.SettingMutationWriter) error,
+) (err error) {
+	if mutationID == "" {
+		return fmt.Errorf("setting mutation transaction requires a mutation id")
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("opening setting mutation connection: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	exec := settingMutationConnExecutor{ctx: ctx, conn: conn}
+	if _, err := exec.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("beginning setting mutation transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = exec.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
+
+	if err := fn(&sqliteSettingMutationWriter{exec: exec}); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("committing setting mutation transaction: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (w *sqliteSettingMutationWriter) GetSettingValue(
+	_ context.Context,
+	id userstore.SettingIdentity,
+) (*userstore.SettingValue, error) {
+	return getSettingValue(w.exec, id)
+}
+
+func (w *sqliteSettingMutationWriter) UpsertSettingValue(
+	_ context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+) (*userstore.SettingValue, error) {
+	return upsertSettingValue(w.exec, id, value)
+}
+
+func (w *sqliteSettingMutationWriter) CompareAndSetSettingValue(
+	ctx context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	return compareAndSetSettingValue(ctx, w.exec, id, value, expectedRevision)
+}
+
+func (w *sqliteSettingMutationWriter) GetSettingMutation(
+	_ context.Context,
+	mutationID string,
+) (*userstore.SettingMutationRecord, error) {
+	return getSettingMutation(w.exec, mutationID)
+}
+
+func (w *sqliteSettingMutationWriter) PutSettingMutation(
+	_ context.Context,
+	record userstore.SettingMutationRecord,
+) (userstore.SettingMutationRecord, bool, error) {
+	return putSettingMutation(w.exec, record)
+}

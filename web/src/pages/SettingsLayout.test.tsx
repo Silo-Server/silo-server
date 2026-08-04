@@ -143,12 +143,14 @@ describe("SettingsLayout", () => {
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "pin");
 
-    // "pin" hits Profiles (where PINs are set) and Connect Apps (where the
-    // password#PIN format is explained).
+    // "pin" hits Profiles (where PINs are set), Connect Apps (where the
+    // password#PIN format is explained), and Navigation & Cards (where
+    // libraries are pinned to the primary menu).
     expect(screen.getAllByRole("link", { name: /Profiles/ })).toHaveLength(1);
     expect(screen.getAllByRole("link", { name: /Connect Apps/ })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: /Navigation & Cards/ })).toHaveLength(1);
     expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
-    expect(screen.getByText("2 matches")).toBeInTheDocument();
+    expect(screen.getByText("3 matches")).toBeInTheDocument();
   });
 
   it("matches individual personal setting labels", async () => {

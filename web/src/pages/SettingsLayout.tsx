@@ -19,6 +19,7 @@ import {
   Sparkles,
   Bell,
   MonitorSmartphone,
+  PanelTop,
 } from "lucide-react";
 // Sparkles is used by the Personalization nav entry below.
 import type { LucideIcon } from "lucide-react";
@@ -152,6 +153,35 @@ const NAV_SECTIONS: NavSection[] = [
           "Time format",
           "Current selection",
           "Reset to Cinema Dark",
+        ),
+      },
+      {
+        path: "interface",
+        label: "Navigation & Cards",
+        icon: PanelTop,
+        description: "Menus, poster size, and captions",
+        keywords: [
+          "navigation",
+          "menu",
+          "pin library",
+          "poster size",
+          "card size",
+          "hide title",
+          "hide year",
+          "artwork only",
+          "preset",
+        ],
+        settings: settingIndex(
+          "Card preset",
+          "Poster size",
+          "Caption",
+          "Title & metadata",
+          "Title only",
+          "Artwork only",
+          "Primary menu",
+          "Choose destination or shortcut",
+          "Add to menu",
+          "Reset to default",
         ),
       },
       {

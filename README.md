@@ -212,6 +212,10 @@ If you prefer running Silo without Docker:
 
 ## Reporting Issues
 
+Client implementers can use the [Canonical Settings API guide](docs/settings-api.md)
+for contract discovery, contextual headers, remote scopes, effective reads, and
+the admin projection.
+
 If you are reporting a bug, install problem, or performance issue, start with the admin workflow and reproduction steps, not Claude/Codex analysis.
 
 Please include:

@@ -3,14 +3,19 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -36,6 +42,7 @@ func newValuesTestHandler(t *testing.T) (*SettingValuesHandler, userstore.UserSt
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := userdb.InitSchema(db); err != nil {
 		t.Fatalf("init schema: %v", err)
@@ -65,6 +72,7 @@ func valuesRequest(method, target string, body []byte) *http.Request {
 		req = httptest.NewRequest(method, target, bytes.NewReader(body))
 	}
 	req.Header.Set(deviceIDHeader, "device-1")
+	req.Header.Set(clientFamilyHeader, "web")
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1})
 	return req.WithContext(apimw.SetProfileID(ctx, "profile-1"))
 }
@@ -92,6 +100,499 @@ func routeValues(t *testing.T, h *SettingValuesHandler, method, key, query strin
 		h.HandleDeleteValue(rec, req)
 	}
 	return rec
+}
+
+func routeNavigationShortcutMutation(
+	t *testing.T,
+	h *SettingValuesHandler,
+	body string,
+	mutationID string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	req := valuesRequest(http.MethodPut, "/settings/values/nav.shortcuts/item", []byte(body))
+	if mutationID != "" {
+		req.Header.Set(mutationIDHeader, mutationID)
+	}
+	rec := httptest.NewRecorder()
+	h.HandleSetNavigationShortcut(rec, req)
+	return rec
+}
+
+func decodeShortcutResponse(t *testing.T, rec *httptest.ResponseRecorder) (settingValueResponse, navigationShortcutDocument) {
+	t.Helper()
+	var response settingValueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode shortcut response: %v; body=%s", err, rec.Body.String())
+	}
+	var document navigationShortcutDocument
+	if err := json.Unmarshal(response.Value, &document); err != nil {
+		t.Fatalf("decode shortcut document: %v; value=%s", err, response.Value)
+	}
+	return response, document
+}
+
+func TestNavigationShortcutMutationLifecycle(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	addLibrary := `{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`
+	rec := routeNavigationShortcutMutation(t, handler, addLibrary, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add library = %d: %s", rec.Code, rec.Body.String())
+	}
+	response, document := decodeShortcutResponse(t, rec)
+	if response.Key != settingskeys.NavShortcuts || response.Scope != "profile" || response.Revision != 1 {
+		t.Fatalf("add response = %+v, want profile nav.shortcuts revision 1", response)
+	}
+	if len(document.Items) != 1 || document.Items[0].Label != "Movies" {
+		t.Fatalf("add document = %+v, want Movies", document)
+	}
+
+	addSection := `{"item":{"type":"section","library_id":42,"section_id":"recent","label":"Recent"},"present":true}`
+	rec = routeNavigationShortcutMutation(t, handler, addSection, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add section = %d: %s", rec.Code, rec.Body.String())
+	}
+	response, document = decodeShortcutResponse(t, rec)
+	if response.Revision != 2 || len(document.Items) != 2 || document.Items[1].SectionID != "recent" {
+		t.Fatalf("add section = revision %d document %+v, want both items at revision 2", response.Revision, document)
+	}
+
+	refreshLibrary := `{"item":{"type":"library","library_id":42,"label":"Films"},"present":true}`
+	rec = routeNavigationShortcutMutation(t, handler, refreshLibrary, "")
+	response, document = decodeShortcutResponse(t, rec)
+	if response.Revision != 3 || len(document.Items) != 2 || document.Items[0].Label != "Films" || document.Items[1].SectionID != "recent" {
+		t.Fatalf("label refresh reordered or dropped items: revision %d document %+v", response.Revision, document)
+	}
+
+	// Exact desired state is a no-op: no revision churn and no duplicate.
+	rec = routeNavigationShortcutMutation(t, handler, refreshLibrary, "")
+	response, document = decodeShortcutResponse(t, rec)
+	if response.Revision != 3 || len(document.Items) != 2 {
+		t.Fatalf("repeat add = revision %d document %+v, want unchanged revision 3", response.Revision, document)
+	}
+
+	// Removal matches semantic identity only; a stale label cannot stop it.
+	removeLibrary := `{"item":{"type":"library","library_id":42,"label":"Old label"},"present":false}`
+	rec = routeNavigationShortcutMutation(t, handler, removeLibrary, "")
+	response, document = decodeShortcutResponse(t, rec)
+	if response.Revision != 4 || len(document.Items) != 1 || document.Items[0].SectionID != "recent" {
+		t.Fatalf("remove library = revision %d document %+v, want section preserved", response.Revision, document)
+	}
+
+	rec = routeNavigationShortcutMutation(t, handler, removeLibrary, "")
+	response, _ = decodeShortcutResponse(t, rec)
+	if response.Revision != 4 {
+		t.Fatalf("repeat remove revision = %d, want unchanged 4", response.Revision)
+	}
+}
+
+func TestNavigationShortcutCollectionIdentityIncludesOptionalLibrary(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
+	withinLibrary := `{"item":{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"},"present":true}`
+	for _, body := range []string{global, withinLibrary} {
+		if rec := routeNavigationShortcutMutation(t, handler, body, ""); rec.Code != http.StatusOK {
+			t.Fatalf("add collection = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
+	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
+	response, document := decodeShortcutResponse(t, rec)
+	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
+		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
+	}
+}
+
+func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTargets(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
+	withinLibrary := `{"item":{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"},"present":true}`
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"omitted library id is global", global},
+		{"positive library id", withinLibrary},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := routeNavigationShortcutMutation(t, handler, tc.body, "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("valid collection = %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	invalidLibraryIDs := map[string]string{
+		"explicit null": `null`,
+		"string":        `"42"`,
+		"zero":          `0`,
+	}
+	for name, libraryID := range invalidLibraryIDs {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(
+				`{"item":{"type":"collection","library_id":%s,"collection_id":"favorites","label":"Ignored"},"present":false}`,
+				libraryID,
+			)
+			rec := routeNavigationShortcutMutation(t, handler, body, "")
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_value") {
+				t.Fatalf("invalid collection library_id = %d: %s", rec.Code, rec.Body.String())
+			}
+
+			stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+				Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+			})
+			if err != nil || stored == nil {
+				t.Fatalf("read catalog after rejected remove: value=%+v err=%v", stored, err)
+			}
+			var document navigationShortcutDocument
+			if err := json.Unmarshal(stored.Value, &document); err != nil {
+				t.Fatalf("decode catalog after rejected remove: %v", err)
+			}
+			if stored.Revision != 2 || len(document.Items) != 2 {
+				t.Fatalf("rejected remove mutated catalog: revision %d items %+v", stored.Revision, document.Items)
+			}
+			if document.Items[0].LibraryID != nil {
+				t.Fatalf("global collection gained library identity: %+v", document.Items[0])
+			}
+			if document.Items[1].LibraryID == nil || *document.Items[1].LibraryID != 42 {
+				t.Fatalf("library-specific collection changed identity: %+v", document.Items[1])
+			}
+		})
+	}
+}
+
+func TestNavigationShortcutMutationIdempotency(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	const mutationID = "d615e91d-988f-4928-bb32-8956a26c7608"
+	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
+	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first mutation = %d: %s", first.Code, first.Body.String())
+	}
+	replay := routeNavigationShortcutMutation(t, handler, body, mutationID)
+	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
+		t.Fatalf("replay = %d header %q: %s", replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
+	}
+	if strings.TrimSpace(replay.Body.String()) != strings.TrimSpace(first.Body.String()) {
+		t.Fatalf("replay body = %s, want exact %s", replay.Body.String(), first.Body.String())
+	}
+
+	conflict := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"collection","collection_id":"watchlist","label":"Renamed"},"present":true}`,
+		mutationID)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "mutation_id_conflict") {
+		t.Fatalf("mutation id reuse = %d: %s", conflict.Code, conflict.Body.String())
+	}
+
+	// A remove's label is not part of its semantics or request fingerprint.
+	const removeID = "f2f65f5e-918a-46bf-bee0-65a84491d298"
+	removed := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"collection","collection_id":"watchlist","label":"First"},"present":false}`,
+		removeID)
+	removeReplay := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"collection","collection_id":"watchlist","label":"Second"},"present":false}`,
+		removeID)
+	if removed.Code != http.StatusOK || removeReplay.Code != http.StatusOK || removeReplay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
+		t.Fatalf("semantic remove replay = %d/%d header %q", removed.Code, removeReplay.Code, removeReplay.Header().Get("X-Silo-Idempotent-Replay"))
+	}
+}
+
+func TestNavigationShortcutMutationThroughNotificationWrappedProvider(t *testing.T) {
+	baseHandler, store := newValuesTestHandler(t)
+	provider := notifications.WrapUserStoreProvider(
+		testUserStoreProvider{store: store},
+		&notifications.System{},
+	)
+	handler := NewSettingValuesHandler(provider, baseHandler.contract)
+	const mutationID = "wrapped-provider-mutation"
+	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
+
+	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
+	if first.Code != http.StatusOK {
+		t.Fatalf("wrapped first mutation = %d: %s", first.Code, first.Body.String())
+	}
+	replay := routeNavigationShortcutMutation(t, handler, body, mutationID)
+	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
+		t.Fatalf("wrapped replay = %d header %q: %s",
+			replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
+	}
+	if !bytes.Equal(bytes.TrimSpace(first.Body.Bytes()), bytes.TrimSpace(replay.Body.Bytes())) {
+		t.Fatalf("wrapped replay body = %s, want %s", replay.Body.String(), first.Body.String())
+	}
+}
+
+func TestNavigationShortcutConcurrentSameMutationID(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		bodies        []string
+		wantConflicts int
+	}{
+		{
+			name: "same hash replays one receipt",
+			bodies: []string{
+				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
+				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
+			},
+		},
+		{
+			name: "different hash conflicts before CAS",
+			bodies: []string{
+				`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
+				`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`,
+			},
+			wantConflicts: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, store := newValuesTestHandler(t)
+			const mutationID = "concurrent-same-id"
+			start := make(chan struct{})
+			responses := make(chan *httptest.ResponseRecorder, len(tc.bodies))
+			var ready sync.WaitGroup
+			ready.Add(len(tc.bodies))
+			for _, body := range tc.bodies {
+				body := body
+				go func() {
+					ready.Done()
+					<-start
+					responses <- routeNavigationShortcutMutation(t, handler, body, mutationID)
+				}()
+			}
+			ready.Wait()
+			close(start)
+
+			conflicts := 0
+			replays := 0
+			var successes [][]byte
+			for range tc.bodies {
+				rec := <-responses
+				switch rec.Code {
+				case http.StatusOK:
+					successes = append(successes, bytes.TrimSpace(rec.Body.Bytes()))
+					if rec.Header().Get("X-Silo-Idempotent-Replay") == "true" {
+						replays++
+					}
+				case http.StatusConflict:
+					if !strings.Contains(rec.Body.String(), "mutation_id_conflict") {
+						t.Fatalf("conflict = %s, want mutation_id_conflict", rec.Body.String())
+					}
+					conflicts++
+				default:
+					t.Fatalf("concurrent mutation = %d: %s", rec.Code, rec.Body.String())
+				}
+			}
+			if conflicts != tc.wantConflicts {
+				t.Fatalf("conflicts = %d, want %d", conflicts, tc.wantConflicts)
+			}
+			if tc.wantConflicts == 0 {
+				if len(successes) != 2 || replays != 1 || !bytes.Equal(successes[0], successes[1]) {
+					t.Fatalf("same-hash outcomes: successes=%d replays=%d bodies=%q", len(successes), replays, successes)
+				}
+			} else if len(successes) != 1 || replays != 0 {
+				t.Fatalf("different-hash outcomes: successes=%d replays=%d", len(successes), replays)
+			}
+
+			stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+				Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+			})
+			if err != nil || stored == nil || stored.Revision != 1 {
+				t.Fatalf("stored shortcut = %+v (%v), want exactly one CAS revision", stored, err)
+			}
+			receipt, err := store.GetSettingMutation(context.Background(), mutationID)
+			if err != nil || receipt == nil {
+				t.Fatalf("stored receipt = %+v (%v)", receipt, err)
+			}
+			if len(successes) > 0 && !bytes.Equal(successes[0], bytes.TrimSpace(receipt.Result)) {
+				t.Fatalf("success = %s, receipt = %s", successes[0], receipt.Result)
+			}
+		})
+	}
+}
+
+func TestNavigationShortcutMutationValidationAndWholeDocumentGuard(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	wholeDocument := routeValues(t, handler, http.MethodPut, settingskeys.NavShortcuts,
+		"scope=profile", []byte(`{"value":{"items":[]}}`))
+	if wholeDocument.Code != http.StatusBadRequest || !strings.Contains(wholeDocument.Body.String(), "atomic_update_required") {
+		t.Fatalf("whole-document PUT = %d: %s", wholeDocument.Code, wholeDocument.Body.String())
+	}
+	if value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}); err != nil || value != nil {
+		t.Fatalf("guarded PUT stored %+v, err=%v", value, err)
+	}
+
+	invalidBodies := []string{
+		`{"item":{"type":"builtin","destination":"home","label":"Home"},"present":true}`,
+		`{"item":{"type":"library","library_id":42,"label":"Movies","extra":true},"present":true}`,
+		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true,"extra":true}`,
+		`{"item":{"type":"section","library_id":42,"section_id":"","label":"Recent"},"present":true}`,
+		`{"item":{"type":"collection","collection_id":"favorites","label":"   "},"present":true}`,
+		`{"item":{"type":"library","library_id":0,"label":"Movies"},"present":true}`,
+		`{"item":{"type":"library","library_id":42,"label":"Movies"}}`,
+	}
+	for _, body := range invalidBodies {
+		rec := routeNavigationShortcutMutation(t, handler, body, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("invalid body %s = %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestNavigationShortcutWholeDocumentDeleteCannotCreateRevisionABA(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	first := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`, "")
+	firstResponse, _ := decodeShortcutResponse(t, first)
+	if first.Code != http.StatusOK || firstResponse.Revision != 1 {
+		t.Fatalf("seed shortcut = %d revision %d: %s", first.Code, firstResponse.Revision, first.Body.String())
+	}
+
+	identity := userstore.SettingIdentity{
+		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}
+	beforeDelete, err := store.GetSettingValue(context.Background(), identity)
+	if err != nil || beforeDelete == nil {
+		t.Fatalf("read shortcut before guarded delete: value=%+v err=%v", beforeDelete, err)
+	}
+	deleteRec := routeValues(t, handler, http.MethodDelete, settingskeys.NavShortcuts,
+		"scope=profile", nil)
+	if deleteRec.Code != http.StatusBadRequest || !strings.Contains(deleteRec.Body.String(), "atomic_update_required") {
+		t.Fatalf("whole-document DELETE = %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	second := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`, "")
+	secondResponse, secondDocument := decodeShortcutResponse(t, second)
+	if second.Code != http.StatusOK || secondResponse.Revision != 2 || len(secondDocument.Items) != 2 {
+		t.Fatalf("second shortcut = %d revision %d document %+v", second.Code, secondResponse.Revision, secondDocument)
+	}
+
+	// If session DELETE had removed and recreated the row, its revision would
+	// return to one and this stale writer could pass an ABA-shaped precondition.
+	// Keeping the row alive makes the stale revision conflict instead.
+	cas := store.(userstore.SettingValueCompareAndSetter)
+	if _, err := cas.CompareAndSetSettingValue(context.Background(), identity,
+		beforeDelete.Value, beforeDelete.Revision); !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("stale CAS after guarded DELETE error = %v, want revision conflict", err)
+	}
+	final, err := store.GetSettingValue(context.Background(), identity)
+	if err != nil || final == nil || final.Revision != 2 {
+		t.Fatalf("final shortcut row = %+v err=%v, want revision 2", final, err)
+	}
+}
+
+func TestNavigationShortcutMutationEnforcesDocumentCap(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	items := make([]navigationShortcutItem, 0, 256)
+	for id := 1; id <= 256; id++ {
+		libraryID := id
+		items = append(items, navigationShortcutItem{Type: "library", LibraryID: &libraryID, Label: fmt.Sprintf("Library %d", id)})
+	}
+	raw, err := json.Marshal(navigationShortcutDocument{Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, _ := handler.contract.Lookup(settingskeys.NavShortcuts)
+	normalized, err := def.ValueSchema.NormalizeValue(raw, settingscontract.ObjectSchemas())
+	if err != nil {
+		t.Fatalf("normalize seed: %v", err)
+	}
+	identity := userstore.SettingIdentity{
+		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}
+	seed, err := store.UpsertSettingValue(context.Background(), identity, normalized)
+	if err != nil {
+		t.Fatalf("seed full catalog: %v", err)
+	}
+
+	rec := routeNavigationShortcutMutation(t, handler,
+		`{"item":{"type":"library","library_id":257,"label":"Too Many"},"present":true}`, "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_value") {
+		t.Fatalf("257th shortcut = %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := store.GetSettingValue(context.Background(), identity)
+	if err != nil || got == nil || got.Revision != seed.Revision {
+		t.Fatalf("catalog after rejected add = %+v, err=%v; want unchanged revision %d", got, err, seed.Revision)
+	}
+}
+
+type synchronizedShortcutStore struct {
+	userstore.UserStore
+	cas   userstore.SettingValueCompareAndSetter
+	reads atomic.Int32
+	ready chan struct{}
+	once  sync.Once
+	casMu sync.Mutex
+}
+
+func (s *synchronizedShortcutStore) GetSettingValue(ctx context.Context, id userstore.SettingIdentity) (*userstore.SettingValue, error) {
+	value, err := s.UserStore.GetSettingValue(ctx, id)
+	if err == nil && id.Key == settingskeys.NavShortcuts {
+		read := s.reads.Add(1)
+		if read <= 2 {
+			if read == 2 {
+				s.once.Do(func() { close(s.ready) })
+			}
+			<-s.ready
+		}
+	}
+	return value, err
+}
+
+func (s *synchronizedShortcutStore) CompareAndSetSettingValue(
+	ctx context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	s.casMu.Lock()
+	defer s.casMu.Unlock()
+	return s.cas.CompareAndSetSettingValue(ctx, id, value, expectedRevision)
+}
+
+func TestNavigationShortcutConcurrentAddsMerge(t *testing.T) {
+	baseHandler, baseStore := newValuesTestHandler(t)
+	wrapped := &synchronizedShortcutStore{
+		UserStore: baseStore,
+		cas:       baseStore.(userstore.SettingValueCompareAndSetter),
+		ready:     make(chan struct{}),
+	}
+	handler := NewSettingValuesHandler(testUserStoreProvider{store: wrapped}, baseHandler.contract)
+	bodies := []string{
+		`{"item":{"type":"library","library_id":42,"label":"Movies"},"present":true}`,
+		`{"item":{"type":"library","library_id":99,"label":"Shows"},"present":true}`,
+	}
+
+	responses := make(chan *httptest.ResponseRecorder, len(bodies))
+	for _, body := range bodies {
+		body := body
+		go func() {
+			responses <- routeNavigationShortcutMutation(t, handler, body, "")
+		}()
+	}
+	for range bodies {
+		rec := <-responses
+		if rec.Code != http.StatusOK {
+			t.Fatalf("concurrent add = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	got, err := baseStore.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	})
+	if err != nil || got == nil {
+		t.Fatalf("read merged catalog: value=%+v err=%v", got, err)
+	}
+	var document navigationShortcutDocument
+	if err := json.Unmarshal(got.Value, &document); err != nil {
+		t.Fatalf("decode merged catalog: %v", err)
+	}
+	if got.Revision != 2 || len(document.Items) != 2 {
+		t.Fatalf("merged catalog = revision %d items %+v, want both adds at revision 2", got.Revision, document.Items)
+	}
 }
 
 func TestSettingValuesRoundTrip(t *testing.T) {
@@ -129,6 +630,161 @@ func TestSettingValuesRoundTrip(t *testing.T) {
 		"playback.subtitle_language", "scope=profile", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("GET after delete = %d, want 404", rec.Code)
 	}
+}
+
+func TestProfileClientValueUsesExplicitFamilyHeader(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	key := settingskeys.NavPrimaryMenu
+	body := []byte(`{"value":{"items":[{"type":"builtin","destination":"home"},` +
+		`{"type":"library","library_id":42,"label":"Movies"}]}}`)
+
+	rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT profile_client = %d: %s", rec.Code, rec.Body.String())
+	}
+	var stored settingValueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &stored); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if stored.Scope != "profile_client" || stored.ClientFamily != "web" {
+		t.Fatalf("stored scope/family = %q/%q, want profile_client/web", stored.Scope, stored.ClientFamily)
+	}
+	var menu navigationShortcutDocument
+	if err := json.Unmarshal(stored.Value, &menu); err != nil {
+		t.Fatalf("decoding stored primary menu: %v", err)
+	}
+	if len(menu.Items) != 2 || menu.Items[1].Label != "Movies" {
+		t.Fatalf("stored non-builtin menu item = %+v, want labeled Movies library", menu.Items)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		header string
+	}{
+		{"missing", ""},
+		{"not canonical", "TV"},
+		{"unknown", "car"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := valuesRequest(http.MethodPut,
+				"/settings/values/"+key+"?scope=profile_client", body)
+			if tc.header == "" {
+				req.Header.Del(clientFamilyHeader)
+			} else {
+				req.Header.Set(clientFamilyHeader, tc.header)
+			}
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("key", key)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+			rec := httptest.NewRecorder()
+			handler.HandleSetValue(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("PUT with family %q = %d, want 400: %s", tc.header, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestMutationHashPreservesExistingScopesAndSeparatesClientFamilies(t *testing.T) {
+	identity := userstore.SettingIdentity{
+		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "device-1",
+	}
+	value := json.RawMessage(`"always"`)
+	legacyPayload := append([]byte(
+		"playback.subtitle_mode\x00profile_device\x00profile-1\x00device-1\x000\x00\x00",
+	), value...)
+	want := sha256.Sum256(legacyPayload)
+	if got := hashMutationRequest(identity, value); got != hex.EncodeToString(want[:]) {
+		t.Fatalf("existing-scope mutation hash changed across the profile_client rollout: %s", got)
+	}
+
+	client := userstore.SettingIdentity{
+		Key: settingskeys.NavPrimaryMenu, Scope: settingscontract.ScopeProfileClient,
+		ProfileID: "profile-1", ClientFamily: settingscontract.ClientFamilyTV,
+	}
+	tv := hashMutationRequest(client, json.RawMessage(`null`))
+	client.ClientFamily = settingscontract.ClientFamilyMobile
+	if mobile := hashMutationRequest(client, json.RawMessage(`null`)); mobile == tv {
+		t.Fatal("profile_client mutation hashes do not distinguish client families")
+	}
+}
+
+func TestEffectiveClientFamilyIsOptionalButValidated(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+	key := settingskeys.UiCardPresentation
+	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile",
+		[]byte(`{"value":{"poster_size":"compact","caption":"title"}}`)); rec.Code != http.StatusOK {
+		t.Fatalf("seed profile fallback = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := routeValues(t, handler, http.MethodPut, key, "scope=profile_client",
+		[]byte(`{"value":{"poster_size":"large","caption":"artwork"}}`)); rec.Code != http.StatusOK {
+		t.Fatalf("seed family value = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	effective := func(t *testing.T, family *string) (int, effectiveSettingValueResponse, string) {
+		t.Helper()
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?keys="+key, nil)
+		if family == nil {
+			req.Header.Del(clientFamilyHeader)
+		} else {
+			req.Header.Set(clientFamilyHeader, *family)
+		}
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			return rec.Code, effectiveSettingValueResponse{}, rec.Body.String()
+		}
+		var body struct {
+			Settings []effectiveSettingValueResponse `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode effective response: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("settings = %d, want 1", len(body.Settings))
+		}
+		return rec.Code, body.Settings[0], rec.Body.String()
+	}
+
+	t.Run("absent skips profile client layer", func(t *testing.T) {
+		code, got, body := effective(t, nil)
+		if code != http.StatusOK {
+			t.Fatalf("effective without client family = %d: %s", code, body)
+		}
+		if got.Source != string(settingscontract.ScopeProfile) || string(got.Value) != `{"poster_size":"compact","caption":"title"}` {
+			t.Fatalf("effective without family = %s from %s, want profile fallback", got.Value, got.Source)
+		}
+	})
+
+	t.Run("absent remains compatible with resolve all", func(t *testing.T) {
+		req := valuesRequest(http.MethodGet, "/settings/values/effective", nil)
+		req.Header.Del(clientFamilyHeader)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("resolve all without client family = %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("valid selects profile client layer", func(t *testing.T) {
+		family := "web"
+		code, got, body := effective(t, &family)
+		if code != http.StatusOK {
+			t.Fatalf("effective with client family = %d: %s", code, body)
+		}
+		if got.Source != string(settingscontract.ScopeProfileClient) || got.ClientFamily != family {
+			t.Fatalf("effective with family = %s/%s, want profile_client/web", got.Source, got.ClientFamily)
+		}
+	})
+
+	t.Run("nonempty invalid is rejected", func(t *testing.T) {
+		family := "TV"
+		code, _, _ := effective(t, &family)
+		if code != http.StatusBadRequest {
+			t.Fatalf("effective with invalid client family = %d, want 400", code)
+		}
+	})
 }
 
 func TestGetSettingValuesReportsSetAndUnsetAtOneScope(t *testing.T) {
@@ -697,7 +1353,29 @@ type failingUpsertStore struct {
 	userstore.UserStore
 }
 
+type failingUpsertMutationWriter struct {
+	userstore.SettingMutationWriter
+}
+
 func (failingUpsertStore) UpsertSettingValue(
+	context.Context, userstore.SettingIdentity, json.RawMessage,
+) (*userstore.SettingValue, error) {
+	return nil, errors.New("simulated write failure")
+}
+
+func (s failingUpsertStore) WithSettingMutationTransaction(
+	ctx context.Context,
+	mutationID string,
+	fn func(userstore.SettingMutationWriter) error,
+) error {
+	transactioner := s.UserStore.(userstore.SettingMutationTransactioner)
+	return transactioner.WithSettingMutationTransaction(ctx, mutationID,
+		func(writer userstore.SettingMutationWriter) error {
+			return fn(failingUpsertMutationWriter{SettingMutationWriter: writer})
+		})
+}
+
+func (failingUpsertMutationWriter) UpsertSettingValue(
 	context.Context, userstore.SettingIdentity, json.RawMessage,
 ) (*userstore.SettingValue, error) {
 	return nil, errors.New("simulated write failure")
@@ -815,9 +1493,10 @@ func TestCapabilitiesReportTheContractRevision(t *testing.T) {
 	}
 
 	var body struct {
-		APIVersion int      `json:"api_version"`
-		Revision   int      `json:"revision"`
-		Scopes     []string `json:"scopes"`
+		APIVersion     int      `json:"api_version"`
+		Revision       int      `json:"revision"`
+		Scopes         []string `json:"scopes"`
+		ClientFamilies []string `json:"client_families"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decoding: %v", err)
@@ -827,8 +1506,15 @@ func TestCapabilitiesReportTheContractRevision(t *testing.T) {
 		t.Errorf("reported %d/%d, want %d/%d",
 			body.APIVersion, body.Revision, contract.APIVersion, contract.Revision)
 	}
-	if len(body.Scopes) != 5 {
-		t.Errorf("reported %d scopes, want 5", len(body.Scopes))
+	wantScopes := []string{
+		"account", "profile", "profile_client", "profile_device", "profile_library", "profile_series",
+	}
+	if !slices.Equal(body.Scopes, wantScopes) {
+		t.Errorf("reported scopes %v, want %v", body.Scopes, wantScopes)
+	}
+	wantFamilies := []string{"tv", "mobile", "tablet", "desktop", "web"}
+	if !slices.Equal(body.ClientFamilies, wantFamilies) {
+		t.Errorf("reported client families %v, want %v", body.ClientFamilies, wantFamilies)
 	}
 }
 

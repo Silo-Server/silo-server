@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -129,6 +130,10 @@ func TestAdminListShowsAnotherUsersValuesAcrossScopes(t *testing.T) {
 		settingscontract.ScopeProfile: {
 			Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
 		},
+		settingscontract.ScopeProfileClient: {
+			Key: "nav.primary_menu", Scope: settingscontract.ScopeProfileClient,
+			ProfileID: "profile-1", ClientFamily: settingscontract.ClientFamilyTV,
+		},
 		settingscontract.ScopeProfileDevice: {
 			Key: "playback.subtitle_language", Scope: settingscontract.ScopeProfileDevice,
 			ProfileID: "profile-1", DeviceID: "tv-1",
@@ -145,6 +150,7 @@ func TestAdminListShowsAnotherUsersValuesAcrossScopes(t *testing.T) {
 	values := map[settingscontract.Scope]string{
 		settingscontract.ScopeAccount:        `"de"`,
 		settingscontract.ScopeProfile:        `"always"`,
+		settingscontract.ScopeProfileClient:  `{"items":[{"type":"builtin","destination":"home"}]}`,
 		settingscontract.ScopeProfileDevice:  `"en"`,
 		settingscontract.ScopeProfileLibrary: `"fr"`,
 		settingscontract.ScopeProfileSeries:  `"ja"`,
@@ -186,6 +192,7 @@ func TestAdminListShowsAnotherUsersValuesAcrossScopes(t *testing.T) {
 			continue
 		}
 		if got.Key != want.Key || got.ProfileID != want.ProfileID ||
+			got.ClientFamily != string(want.ClientFamily) ||
 			got.DeviceID != want.DeviceID || got.LibraryID != want.LibraryID ||
 			got.SeriesID != want.SeriesID {
 			t.Errorf("listed identity at %s = %+v, want %+v", got.Scope, got, want)
@@ -240,6 +247,83 @@ func TestAdminSetAndDeleteAtExplicitScopeRoundTrip(t *testing.T) {
 	}
 	if rec := env.do(t, "admin", http.MethodDelete, target, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("second DELETE = %d, want 404", rec.Code)
+	}
+}
+
+func TestAdminNavigationShortcutRepairPreservesRevisionHistory(t *testing.T) {
+	env := newAdminValuesEnv(t)
+	ctx := context.Background()
+	identity := userstore.SettingIdentity{
+		Key: "nav.shortcuts", Scope: settingscontract.ScopeProfile, ProfileID: "profile-1",
+	}
+	seeded, err := env.targetStore.UpsertSettingValue(ctx, identity,
+		json.RawMessage(`{"items":[{"type":"library","library_id":42,"label":"Movies"}]}`))
+	if err != nil {
+		t.Fatalf("seed shortcuts: %v", err)
+	}
+	if seeded.Revision != 1 {
+		t.Fatalf("seed revision = %d, want 1", seeded.Revision)
+	}
+
+	target := "/admin/users/7/settings/values/nav.shortcuts?scope=profile&profile_id=profile-1"
+	if rec := env.do(t, "admin", http.MethodDelete, target, nil); rec.Code != http.StatusBadRequest {
+		t.Fatalf("admin repair DELETE = %d, want 400: %s", rec.Code, rec.Body.String())
+	} else if !bytes.Contains(rec.Body.Bytes(), []byte(`"error":"atomic_update_required"`)) {
+		t.Fatalf("admin repair DELETE body = %s, want atomic_update_required", rec.Body.String())
+	}
+	if got, err := env.targetStore.GetSettingValue(ctx, identity); err != nil || got == nil || got.Revision != 1 {
+		t.Fatalf("shortcut after rejected DELETE = %+v err=%v, want revision 1 intact", got, err)
+	}
+
+	rec := env.do(t, "admin", http.MethodPut, target, []byte(`{"value":{"items":[]}}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin repair PUT empty = %d: %s", rec.Code, rec.Body.String())
+	}
+	var repaired settingValueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &repaired); err != nil {
+		t.Fatalf("decode repair response: %v", err)
+	}
+	if repaired.Revision != 2 || string(repaired.Value) != `{"items":[]}` {
+		t.Fatalf("repair response = revision %d value %s, want empty revision 2",
+			repaired.Revision, repaired.Value)
+	}
+
+	cas, ok := env.targetStore.(userstore.SettingValueCompareAndSetter)
+	if !ok {
+		t.Fatal("target store does not support compare-and-set")
+	}
+	_, err = cas.CompareAndSetSettingValue(ctx, identity,
+		json.RawMessage(`{"items":[{"type":"library","library_id":99,"label":"Shows"}]}`),
+		seeded.Revision)
+	if !errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+		t.Fatalf("stale CAS after admin repair = %v, want revision conflict", err)
+	}
+	if got, err := env.targetStore.GetSettingValue(ctx, identity); err != nil || got == nil ||
+		got.Revision != 2 || string(got.Value) != `{"items":[]}` {
+		t.Fatalf("shortcut after stale CAS = %+v err=%v, want empty revision 2", got, err)
+	}
+}
+
+func TestAdminProfileClientUsesExplicitQueryIdentity(t *testing.T) {
+	env := newAdminValuesEnv(t)
+	target := "/admin/users/7/settings/values/nav.primary_menu" +
+		"?scope=profile_client&profile_id=profile-1&client_family=tv"
+	body := []byte(`{"value":{"items":[{"type":"builtin","destination":"home"}]}}`)
+	rec := env.do(t, "admin", http.MethodPut, target, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	var stored settingValueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &stored); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if stored.Scope != "profile_client" || stored.ProfileID != "profile-1" || stored.ClientFamily != "tv" {
+		t.Fatalf("stored identity = %+v, want profile-1/tv", stored)
+	}
+
+	missing := "/admin/users/7/settings/values/nav.primary_menu?scope=profile_client&profile_id=profile-1"
+	if rec := env.do(t, "admin", http.MethodPut, missing, body); rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT without family = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 

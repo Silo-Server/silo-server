@@ -416,12 +416,17 @@ The remote scopes are:
 |---|---|---|
 | `account` | `(user_id)` | Same for every profile and signed-in client on the account. |
 | `profile` | `(user_id, profile_id)` | Roams with one profile. |
+| `profile_client` | `(user_id, profile_id, client_family)` | Roams between like clients: `tv`, `mobile`, `tablet`, `desktop`, or `web`. |
 | `profile_device` | `(user_id, profile_id, device_id)` | Override for one profile on one device identity. |
 | `profile_library` | `(user_id, profile_id, library_id)` | Content preference for one library. |
 | `profile_series` | `(user_id, profile_id, series_id)` | Content preference for one series. |
 
 `client_local` definitions use a single logical `client_local` scope and are never addressed by the
 server values API.
+
+Clients send the family explicitly as `X-Silo-Client-Family`; the server never infers it from the
+free-form `X-Silo-Device-Platform` registry label. tvOS and Android TV use `tv`, phones use
+`mobile`, tablets use `tablet`, native desktop clients use `desktop`, and browsers use `web`.
 
 All remote mutations carry their complete identity explicitly. The server authorizes that the
 profile, library, series, and device belong to the authenticated user. A queued operation must not
@@ -448,6 +453,8 @@ Examples:
 |---|---|
 | Audio/subtitle selection | series → library → device → profile → default |
 | Playback behavior with device override | device → profile → default |
+| Family-synchronized presentation | device → client family → profile → default |
+| Family-synchronized navigation | device → client family → default |
 | Device playback capability | device → default |
 | Account UI preference | account → default |
 | Client-local OS behavior | local value → default |
@@ -625,8 +632,10 @@ to check compatibility without transferring the manifest body.
 
 - Returns the explicit value and revision at exactly one requested scope; it does not resolve
   fallbacks.
-- Context parameters are required by scope: `profile_id`, `device_id`, `library_id`, or `series_id`
-  as defined by the identity table above.
+- Context parameters are required by scope: `profile_id`, `client_family`, `device_id`,
+  `library_id`, or `series_id` as defined by the identity table above. Self-service
+  `profile_client` requests take client family from `X-Silo-Client-Family`; admin explicit-value
+  routes name it with the `client_family` query parameter.
 - An unset value is represented as `is_set: false` with no `value` member, never as an empty string
   or JSON `null`.
 - Settings screens use this endpoint to show profile defaults and device overrides independently.
@@ -637,7 +646,8 @@ to check compatibility without transferring the manifest body.
 `GET /api/v1/settings/values/effective?keys=<comma-separated-keys>`
 
 - Requires the active profile and device identity headers for definitions that can resolve those
-  scopes.
+  scopes. `X-Silo-Client-Family` is optional for effective reads so older callers remain compatible:
+  absence skips `profile_client`, a valid value includes it, and a non-empty invalid value is rejected.
 - Rejects unknown keys rather than fabricating defaults.
 - Returns native typed values, resolution source, source context, definition revision,
   `updated_at`, and any policy constraint.
@@ -789,6 +799,7 @@ CREATE TABLE user_setting_values (
     key         text NOT NULL,
     scope       text NOT NULL,
     profile_id  text,
+    client_family text,
     device_id   text,
     library_id  integer,
     series_id   text,
@@ -796,13 +807,15 @@ CREATE TABLE user_setting_values (
     revision    bigint NOT NULL DEFAULT 1,
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now(),
-    CHECK (scope IN ('account', 'profile', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (scope IN ('account', 'profile', 'profile_client', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (client_family IS NULL OR client_family IN ('tv', 'mobile', 'tablet', 'desktop', 'web')),
     CHECK (
-      (scope = 'account' AND profile_id IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_device' AND profile_id IS NOT NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_library' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
-      (scope = 'profile_series' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+      (scope = 'account' AND profile_id IS NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_client' AND profile_id IS NOT NULL AND client_family IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
     )
 );
 ```
@@ -819,6 +832,8 @@ CREATE UNIQUE INDEX user_setting_values_account_uq
   ON user_setting_values (user_id, key) WHERE scope = 'account';
 CREATE UNIQUE INDEX user_setting_values_profile_uq
   ON user_setting_values (user_id, profile_id, key) WHERE scope = 'profile';
+CREATE UNIQUE INDEX user_setting_values_profile_client_uq
+  ON user_setting_values (user_id, profile_id, client_family, key) WHERE scope = 'profile_client';
 CREATE UNIQUE INDEX user_setting_values_profile_device_uq
   ON user_setting_values (user_id, profile_id, device_id, key) WHERE scope = 'profile_device';
 CREATE UNIQUE INDEX user_setting_values_profile_library_uq
@@ -949,7 +964,18 @@ client. The following decisions resolve today's duplicate semantics:
 | Date/time format | remote: **profile** | Existing account rows are copied to every profile. |
 | Search media scope | remote: profile | Preserve strict enums. |
 | `ui.library_page_state` | remote: profile_device | Keep navigation state tied to one profile/device. |
+| `nav.primary_menu` | remote: profile_client, profile_device | Family menu ordering/visibility with an optional exact-device escape hatch; null means use the family-native baseline. |
+| `nav.shortcuts` | remote: profile | Profile-wide catalog of library, section, and collection pins; seed convertible legacy `ui.sidebar_pins` without deleting the old row. |
+| `ui.card_presentation` | remote: profile, profile_client, profile_device | Semantic size/caption presets; device → family → profile → default. |
 | OS caption mirroring, platform decoder diagnostics, temporary sleep timers | client_local or private `local.*` | Production caption-mirroring UI is contract-known local; diagnostics/timers remain private local. |
+
+Navigation destinations are unique by semantic identity, not by the complete JSON object: built-ins
+use `destination`, libraries use `library_id`, sections use `(library_id, section_id)`, and collections
+use `(optional library_id, collection_id)`. Changing a label therefore cannot create a duplicate menu
+entry. Labels and string target ids must contain a non-whitespace character; labels are bounded to
+256 characters and target ids to 128. The JSON schemas document these rules and the canonical
+validator enforces the cross-item identity check that JSON Schema `uniqueItems` cannot express by
+itself.
 
 ### Appearance belongs to the profile, not the account
 

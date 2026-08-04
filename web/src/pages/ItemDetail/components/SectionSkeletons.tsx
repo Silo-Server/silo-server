@@ -1,4 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { cardGridClasses } from "@/lib/uiCustomization";
 
 /** Skeleton for a horizontal cast carousel (portrait cards + name/role text) */
 export function CastSkeleton({ count = 8 }: { count?: number }) {
@@ -64,14 +66,17 @@ export function SeasonCarouselSkeleton({ count = 6 }: { count?: number }) {
 
 /** Skeleton for a poster grid (e.g. "More Like This" recommendations) */
 export function RecommendationGridSkeleton({ count = 6 }: { count?: number }) {
+  const { cardPresentation } = useUICustomization();
   return (
     <div>
       <Skeleton className="mb-5 h-6 w-36" />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+      <div className={cardGridClasses(cardPresentation.poster_size)}>
         {Array.from({ length: count }, (_, i) => (
           <div key={i}>
             <Skeleton className="aspect-[2/3] w-full rounded-lg" />
-            <Skeleton className="mt-1.5 h-4 w-3/4" />
+            {cardPresentation.caption !== "artwork" ? (
+              <Skeleton className="mt-1.5 h-4 w-3/4" />
+            ) : null}
           </div>
         ))}
       </div>
