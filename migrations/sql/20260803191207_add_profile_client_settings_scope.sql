@@ -3,7 +3,6 @@
 -- therefore safe to use as part of resolution and uniqueness.
 
 -- +goose Up
--- +goose StatementBegin
 ALTER TABLE public.user_setting_values
     ADD COLUMN client_family text;
 
@@ -30,6 +29,7 @@ CREATE UNIQUE INDEX user_setting_values_profile_client_uq
 -- Decode either the canonical object or the one-layer JSON-string encoding
 -- written by legacy web clients. Invalid string contents return NULL instead
 -- of aborting the whole migration.
+-- +goose StatementBegin
 CREATE FUNCTION pg_temp.decode_legacy_sidebar_pins(candidate jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -56,6 +56,7 @@ BEGIN
   RETURN NULL;
 END;
 $$;
+-- +goose StatementEnd
 
 -- Seed the new profile-wide shortcut catalog from convertible legacy web
 -- sidebar pins. ui.sidebar_pins remains untouched, rows with non-numeric
@@ -174,10 +175,8 @@ SELECT user_id, 'nav.shortcuts', 'profile', profile_id, NULL, NULL, NULL, NULL,
 ON CONFLICT (user_id, profile_id, key) WHERE scope = 'profile' DO NOTHING;
 
 DROP FUNCTION pg_temp.decode_legacy_sidebar_pins(jsonb);
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DELETE FROM public.user_setting_values WHERE scope = 'profile_client';
 
 DROP INDEX IF EXISTS public.user_setting_values_profile_client_uq;
@@ -197,4 +196,3 @@ ALTER TABLE public.user_setting_values
     );
 
 ALTER TABLE public.user_setting_values DROP COLUMN client_family;
--- +goose StatementEnd

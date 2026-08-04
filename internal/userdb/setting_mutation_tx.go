@@ -3,8 +3,10 @@ package userdb
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -73,7 +75,15 @@ func (s *SQLiteUserStore) WithSettingMutationTransaction(
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = exec.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+			rollbackCtx := context.WithoutCancel(ctx)
+			if _, rollbackErr := exec.ExecContext(rollbackCtx, "ROLLBACK"); rollbackErr != nil {
+				slog.ErrorContext(rollbackCtx, "rolling back setting mutation transaction failed",
+					"component", "userdb.settings", "error", rollbackErr)
+				// A failed rollback can leave SQLite's write reservation attached to
+				// the pooled driver connection. Mark it bad so database/sql discards
+				// it instead of returning a poisoned connection to the pool.
+				_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+			}
 		}
 	}()
 

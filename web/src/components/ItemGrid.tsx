@@ -80,6 +80,12 @@ export default function ItemGrid(props: ItemGridProps) {
     scrollMargin,
   });
 
+  // The estimate function closes over rowHeight. Explicitly invalidate the
+  // cached measurements when a poster/caption preset changes that height.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
+
   const virtualRows = virtualizer.getVirtualItems();
 
   // Report visible item range to parent for page fetching

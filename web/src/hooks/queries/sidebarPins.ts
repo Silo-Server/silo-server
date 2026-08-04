@@ -22,6 +22,7 @@ import {
 } from "@/lib/uiCustomization";
 
 const PINS_KEYS = [SETTING_KEYS.NAV_SHORTCUTS] as const;
+const LEGACY_PINS_KEYS = [SETTING_KEYS.UI_SIDEBAR_PINS] as const;
 
 let nextSidebarPinsRevision = 0;
 
@@ -287,13 +288,22 @@ function useHasActiveProfile() {
 export function useSidebarPins() {
   const hasActiveProfile = useHasActiveProfile();
   const capabilities = useSettingsCapabilities();
-  const enabled =
-    hasActiveProfile &&
-    settingsCapabilitiesSupportKey(capabilities.data, SETTING_KEYS.NAV_SHORTCUTS);
-  const { data, isLoading } = useEffectiveSettings({ keys: PINS_KEYS, enabled });
+  const supportsShortcuts = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.NAV_SHORTCUTS,
+  );
+  const supportsLegacyPins = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.UI_SIDEBAR_PINS,
+  );
+  const enabled = hasActiveProfile && (supportsShortcuts || supportsLegacyPins);
+  const keys = supportsShortcuts ? PINS_KEYS : LEGACY_PINS_KEYS;
+  const { data, isLoading } = useEffectiveSettings({ keys, enabled });
   const { data: optimisticDocument } = useSidebarPinsOverlay();
   const value = enabled
-    ? (optimisticDocument ?? data?.[SETTING_KEYS.NAV_SHORTCUTS]?.value)
+    ? supportsShortcuts
+      ? (optimisticDocument ?? data?.[SETTING_KEYS.NAV_SHORTCUTS]?.value)
+      : data?.[SETTING_KEYS.UI_SIDEBAR_PINS]?.value
     : undefined;
   const pins = useMemo(() => parseSidebarPins(value), [value]);
   return { pins, isLoading: capabilities.isLoading || (enabled && isLoading) };

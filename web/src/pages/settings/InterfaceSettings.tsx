@@ -109,16 +109,21 @@ export default function InterfaceSettings() {
   const baselineKey = useMemo(() => JSON.stringify(baselineMenu.items), [baselineMenu.items]);
   const [menuDraft, setMenuDraft] = useState<{
     baselineKey: string;
+    /** The just-saved baseline expected from the asynchronous query refresh. */
+    pendingBaselineKey?: string;
     items: PrimaryMenuItem[];
     dirty: boolean;
   } | null>(null);
   const [addItemKey, setAddItemKey] = useState("");
-  const menuItems = menuDraft?.baselineKey === baselineKey ? menuDraft.items : baselineMenu.items;
-  const menuDirty = menuDraft?.baselineKey === baselineKey && menuDraft.dirty;
+  const menuDraftMatchesBaseline =
+    menuDraft?.baselineKey === baselineKey || menuDraft?.pendingBaselineKey === baselineKey;
+  const menuItems = menuDraftMatchesBaseline ? menuDraft.items : baselineMenu.items;
+  const menuDirty = menuDraftMatchesBaseline === true && menuDraft.dirty;
   const cardPresentation = customization.cardPresentation;
   const cardDeviceOverride = customization.cardPresentationSource === "profile_device";
   const cardClientOverride = customization.cardPresentationSource === "profile_client";
   const menuDeviceOverride = customization.primaryMenuSource === "profile_device";
+  const menuClientOverride = customization.primaryMenuSource === "profile_client";
   const menuMutationPending = setValue.isPending || clearValue.isPending;
   const cardMutationPending = menuMutationPending || cardDeviceOverride;
   const menuAtLimit = menuItems.length >= 64;
@@ -187,17 +192,38 @@ export default function InterfaceSettings() {
   }
 
   function updateMenu(next: PrimaryMenuItem[]) {
-    setMenuDraft({ baselineKey, items: next, dirty: true });
+    setMenuDraft((current) => {
+      if (current?.pendingBaselineKey === baselineKey) {
+        return { baselineKey, items: next, dirty: true };
+      }
+      if (current?.baselineKey === baselineKey) {
+        return { ...current, items: next, dirty: true };
+      }
+      return { baselineKey, items: next, dirty: true };
+    });
   }
 
   async function saveMenu() {
+    const savedItems = menuItems;
+    const savedBaselineKey = JSON.stringify(savedItems);
     try {
       await setValue.mutateAsync({
         key: SETTING_KEYS.NAV_PRIMARY_MENU,
-        value: { items: menuItems },
+        value: { items: savedItems },
         identity: CLIENT_SCOPE,
       });
-      setMenuDraft({ baselineKey, items: menuItems, dirty: false });
+      setMenuDraft((current) => {
+        const currentItemsKey = current ? JSON.stringify(current.items) : null;
+        if (current?.dirty && currentItemsKey !== savedBaselineKey) {
+          return { ...current, pendingBaselineKey: savedBaselineKey };
+        }
+        return {
+          baselineKey,
+          pendingBaselineKey: savedBaselineKey,
+          items: savedItems,
+          dirty: false,
+        };
+      });
       toast.success("Web navigation saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save navigation");
@@ -205,6 +231,12 @@ export default function InterfaceSettings() {
   }
 
   async function resetMenu() {
+    const pendingClientOverride = menuDraft?.pendingBaselineKey !== undefined;
+    if (!menuClientOverride && !pendingClientOverride) {
+      setMenuDraft(null);
+      toast.success("Web navigation reset");
+      return;
+    }
     try {
       await clearValue.mutateAsync({
         key: SETTING_KEYS.NAV_PRIMARY_MENU,

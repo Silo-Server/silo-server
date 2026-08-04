@@ -9,6 +9,7 @@ import { useSidebarPins, useToggleSidebarPin } from "./sidebarPins";
 const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   remoteValue: { items: [] } as { items: Array<Record<string, unknown>> },
+  remoteLegacyValue: {} as Record<string, Array<Record<string, unknown>>>,
   profileId: "profile-1",
   profileToken: "fake",
   accessToken: "fake",
@@ -67,14 +68,22 @@ vi.mock("./settingValues", () => ({
     "profile-1",
     keys?.join(",") ?? "*",
   ],
-  useEffectiveSettings: () => ({
-    data: {
-      [SETTING_KEYS.NAV_SHORTCUTS]: {
-        key: SETTING_KEYS.NAV_SHORTCUTS,
-        value: mocks.remoteValue,
-        source: "profile",
-      },
-    },
+  useEffectiveSettings: ({ keys }: { keys?: readonly string[] } = {}) => ({
+    data: keys?.includes(SETTING_KEYS.UI_SIDEBAR_PINS)
+      ? {
+          [SETTING_KEYS.UI_SIDEBAR_PINS]: {
+            key: SETTING_KEYS.UI_SIDEBAR_PINS,
+            value: mocks.remoteLegacyValue,
+            source: "profile",
+          },
+        }
+      : {
+          [SETTING_KEYS.NAV_SHORTCUTS]: {
+            key: SETTING_KEYS.NAV_SHORTCUTS,
+            value: mocks.remoteValue,
+            source: "profile",
+          },
+        },
     isLoading: false,
   }),
   useSettingsCapabilities: () => ({ data: mocks.capabilities, isLoading: false }),
@@ -87,9 +96,10 @@ vi.mock("./settingValues", () => ({
           supports_idempotent_writes?: boolean;
         }
       | undefined,
+    key: string,
   ) =>
     capabilities?.api_version === 1 &&
-    capabilities.revision >= 5 &&
+    capabilities.revision >= (key === SETTING_KEYS.NAV_SHORTCUTS ? 5 : 1) &&
     capabilities.supports_batched_effective === true &&
     capabilities.supports_idempotent_writes === true,
   settingsCapabilitiesSupportAtomicShortcuts: (
@@ -131,6 +141,7 @@ describe("serialized sidebar pin writes", () => {
   beforeEach(() => {
     mocks.mutateAsync.mockReset();
     mocks.remoteValue = { items: [] };
+    mocks.remoteLegacyValue = {};
     mocks.profileId = "profile-1";
     mocks.profileToken = "fake";
     mocks.accessToken = "fake";
@@ -358,5 +369,45 @@ describe("serialized sidebar pin writes", () => {
       result.current.togglePin(42, { type: "collection", id: "a", label: "A" });
     });
     expect(mocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("continues reading legacy sidebar pins from revision-four servers", () => {
+    mocks.capabilities = {
+      api_version: 1,
+      revision: 4,
+      contract_etag: "revision-four",
+      supports_batched_effective: true,
+      supports_idempotent_writes: true,
+    };
+    mocks.remoteLegacyValue = {
+      "42": [{ type: "collection", id: "legacy", label: "Legacy pin" }],
+    };
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    const { result } = renderHook(() => useSidebarPins(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    expect(result.current.pins["42"]).toEqual([
+      { type: "collection", id: "legacy", label: "Legacy pin" },
+    ]);
+  });
+
+  it("hides cached shortcut data when no profile is active", () => {
+    mocks.remoteValue = {
+      items: [{ type: "collection", library_id: 42, collection_id: "stale", label: "Stale" }],
+    };
+    mocks.profileId = "";
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    const { result } = renderHook(() => useSidebarPins(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    expect(result.current.pins).toEqual({});
   });
 });

@@ -199,6 +199,8 @@ function CollectionList() {
 // that library's full Collections tab.
 function ServerCollectionsSection() {
   const { data, isLoading } = useServerCollections();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
   const libraries = data ?? [];
 
   if (isLoading) {
@@ -218,7 +220,7 @@ function ServerCollectionsSection() {
               <Skeleton className="h-7 w-40" />
               <div className="flex gap-4 overflow-hidden lg:gap-5">
                 {Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="w-[130px] shrink-0 sm:w-[150px] lg:w-[178px]">
+                  <div key={i} className={posterWidthClasses}>
                     <Skeleton className="aspect-[2/3] rounded-xl" />
                     <Skeleton className="mt-2.5 h-4 w-3/4" />
                   </div>

@@ -121,7 +121,7 @@ function DiscoverErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function DiscoverSkeletons() {
+function DiscoverSkeletons({ posterWidthClasses }: { posterWidthClasses: string }) {
   return (
     <div className="space-y-10 pt-2">
       {Array.from({ length: 4 }).map((_, i) => (
@@ -131,7 +131,7 @@ function DiscoverSkeletons() {
           </div>
           <div className="flex gap-4 overflow-hidden px-4 sm:px-6 lg:gap-5 lg:px-10 xl:px-12">
             {Array.from({ length: 12 }).map((_, j) => (
-              <div key={j} className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]">
+              <div key={j} className={posterWidthClasses}>
                 <Skeleton className="aspect-[2/3] w-full rounded-xl" />
                 <Skeleton className="mt-3 h-4 w-3/4 rounded" />
                 <Skeleton className="mt-1.5 h-3 w-1/2 rounded" />
@@ -176,7 +176,7 @@ export default function Recommendations() {
 
       {/* Content */}
       {isLoading ? (
-        <DiscoverSkeletons />
+        <DiscoverSkeletons posterWidthClasses={posterWidthClasses} />
       ) : isError ? (
         <DiscoverErrorState onRetry={() => refetch()} />
       ) : rows.length === 0 ? (

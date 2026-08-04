@@ -593,10 +593,13 @@ describe("api", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await api("/test", { headers: { "X-Silo-Client-Family": "tv" } });
+    await api("/test", { headers: { "x-silo-client-family": "tv" } });
 
     const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
     expect(headers["X-Silo-Client-Family"]).toBe("web");
+    expect(
+      Object.keys(headers).filter((key) => key.toLowerCase() === "x-silo-client-family"),
+    ).toEqual(["X-Silo-Client-Family"]);
   });
 
   it("forwards AbortSignal from options to fetch", async () => {

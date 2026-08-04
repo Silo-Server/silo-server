@@ -562,7 +562,9 @@ function buildApiHeaders(options: RequestInit = {}): Record<string, string> {
   if (profToken && !hasHeader(headers, "X-Profile-Token")) {
     headers["X-Profile-Token"] = profToken;
   }
-  Object.assign(headers, getDeviceHeaders());
+  for (const [name, value] of Object.entries(getDeviceHeaders())) {
+    setHeader(headers, name, value);
+  }
   return headers;
 }
 
