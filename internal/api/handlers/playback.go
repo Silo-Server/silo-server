@@ -235,9 +235,9 @@ type PlaybackHandler struct {
 	SubtitleRepo                subtitles.Repository  // optional; enables downloaded subtitles in playback
 	VirtualSubtitleSearcher     SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
 	BestResultCache             *VirtualBestResultCache
-	SubtitleSearchInFlight      sync.Map              // fileID -> struct{}; dedupes background subtitle searches
-	VirtualFileUpdater          VirtualFileUpdateFunc     // optional; updates media_file path after stale fallback
-	VirtualFileMetadataSaver    VirtualFileMetadataSaver  // optional; persists probed tracks after virtual probe
+	SubtitleSearchInFlight      sync.Map                 // fileID -> struct{}; dedupes background subtitle searches
+	VirtualFileUpdater          VirtualFileUpdateFunc    // optional; updates media_file path after stale fallback
+	VirtualFileMetadataSaver    VirtualFileMetadataSaver // optional; persists probed tracks after virtual probe
 	RealtimeHub                 *playback.RealtimeHub
 	CommandTracker              *playback.CommandTracker
 	CommandDispatcher           *playback.CommandDispatcher

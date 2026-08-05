@@ -247,7 +247,7 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 			SeasonNumber: int(episode.GetSeasonNumber()), EpisodeNumber: int(episode.GetEpisodeNumber()),
 			Title: episode.GetTitle(), Overview: episode.GetOverview(), AirDate: airDate,
 			RuntimeMinutes: int(episode.GetRuntimeMinutes()), StillPath: episode.GetStillPath(), VirtualURI: episode.GetVirtualUri(),
-			Variants: epVariants,
+			Variants:   epVariants,
 			Resolution: epResolution, CodecVideo: epCodecVideo, CodecAudio: epCodecAudio,
 			HDR: epHDR, Bitrate: epBitrate, FileSize: epFileSize,
 			Container: epContainer, SourceType: epSourceType,
