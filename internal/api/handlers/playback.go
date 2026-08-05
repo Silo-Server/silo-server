@@ -462,7 +462,7 @@ type changeAudioResponse struct {
 	PlaybackInfo          *playbackInfoResult `json:"playback_info,omitempty"`
 }
 
-func (resp *changeAudioResponse) setCopyTimeline(position, origin float64) {
+func (resp *changeAudioResponse) setWindowedTimeline(position, origin float64) {
 	playerStart := max(0, position-origin)
 	canSeekAnywhere := false
 	resp.PlayerStartSeconds = &playerStart
@@ -2379,8 +2379,16 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	restartStartSegment := computeStartSegment(restartSeekSeconds, restartSegmentDuration)
 	restartStreamOriginSeconds := 0.0
 	restartCopyAnchorResolved := false
-	legacyCopyRestart := session.PlayMethod == playback.PlayTranscode &&
-		strings.EqualFold(targetVideoCodec, "copy") && isLegacyTransportSession(session)
+	restartManifestRequest := transcodeStartRequest{
+		TargetCodecVideo: targetVideoCodec,
+		SegmentDuration:  restartSegmentDuration,
+	}
+	legacyWindowedRestart := session.PlayMethod == playback.PlayTranscode &&
+		isLegacyTransportSession(session) && usesRealTranscodeManifest(restartManifestRequest, file)
+	if legacyWindowedRestart {
+		restartStreamOriginSeconds = restartSeekSeconds
+	}
+	legacyCopyRestart := legacyWindowedRestart && strings.EqualFold(targetVideoCodec, "copy")
 	if legacyCopyRestart {
 		restartCopyAnchorResolved = true
 		if req.Position > 0 {
@@ -2789,8 +2797,8 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		}
 		h.persistAudioPreference(r.Context(), userID, session.ProfileID, file, req.AudioTrackIndex)
 	}
-	if legacyCopyRestart {
-		resp.setCopyTimeline(req.Position, restartStreamOriginSeconds)
+	if legacyWindowedRestart {
+		resp.setWindowedTimeline(req.Position, restartStreamOriginSeconds)
 	}
 
 	h.syncSessionsNow(r.Context(), "audio_change")
