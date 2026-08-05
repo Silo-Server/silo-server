@@ -296,8 +296,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err := s.repo.UpsertListItemStates(ctx, states); err != nil {
 		return result, err
 	}
-	if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemoteKeys, &result); err != nil {
-		return result, err
+	if !batch.Incremental {
+		if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemoteKeys, &result); err != nil {
+			return result, err
+		}
 	}
 	if b.applyOrder != nil && b.orderEnabled != nil && b.capOrder != nil &&
 		b.orderEnabled(conn) && b.capOrder(provider.Capabilities()) {

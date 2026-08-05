@@ -2,39 +2,46 @@
 
 ## Status
 
-Local design for review against the released `silo-plugin-sdk` v0.12.0
-`watch_sync_provider.v1` contract. This specification does not introduce a
-second watch synchronization pipeline. Plugin-backed providers adapt the public
-plugin RPC contract to Silo's existing `watchsync` service, connection
-repository, history exports, scrobble sessions, rate-limit handling, and
-scheduled reconciliation.
+Implemented design for the expanded `silo-plugin-sdk` v0.13
+`watch_sync_provider.v1` contract. The server uses the immutable SDK commit
+associated with the v0.13 pull request until that version is released. This
+specification does not introduce a second watch synchronization pipeline.
+Plugin-backed providers adapt the public plugin RPC contract to Silo's existing
+`watchsync` service, connection repository, history exports, scrobble sessions,
+rate-limit handling, list reconciliation, and scheduled reconciliation.
 
 ## Goals
 
 - Allow an enabled plugin capability to appear as a profile-scoped watch
   provider.
 - Reuse Silo's encrypted watch-provider connections for personal credentials.
-- Deliver explicit mark-watched operations and normal playback completion.
+- Support API-key and device-code connection flows.
+- Import and export watched state, progress, favorites, and watchlists according
+  to each plugin's advertised capabilities.
+- Deliver explicit watched/unwatched and list operations plus live playback
+  start, pause, and stop events.
 - Preserve the existing durable history-export reconciliation path.
+- Preserve complete provider credential shapes, including token type, scopes,
+  expiry, and opaque secret attributes.
+- Supply declared installation configuration to provider calls without mixing
+  it with profile credentials.
 - Keep provider plugins stateless and prevent credentials from entering generic
   plugin configuration.
 - Avoid behavior changes for built-in Trakt, Simkl, and MDBList providers.
 
-## Non-goals for the first slice
+## Non-goals
 
 - Authorization-code OAuth UI and callback routes.
-- Importing remote watched state or progress.
-- Exporting manual unwatch operations.
-- Favorites and watchlist synchronization.
 - A second outbox or worker implementation.
-- Provider-specific configuration stored in generic plugin runtime settings.
-- Migrating built-in Trakt, Simkl, or MDBList providers into plugins; they can
-  adopt the same capability in a separate change.
+- Allowing plugins to persist or own personal provider credentials.
+- Removing built-in Trakt, Simkl, or MDBList providers in the same change. They
+  remain available while equivalent plugins are built and connections are
+  migrated deliberately.
 
-The initial connection flow accepts a manually-issued provider token through
-the existing API-key watch-provider endpoint. Silo validates it through the
-plugin, then stores only the returned credential in the encrypted watch
-connection record.
+Plugins may implement any subset of the state families and operations. A
+provider such as Floppy can advertise watched import/export, progress import,
+and live scrobbling without claiming favorites, watchlists, or unwatch support.
+Silo exposes only executable capabilities from the descriptor.
 
 ## SDK boundary
 
@@ -45,19 +52,25 @@ Plugins advertise `watch_sync_provider.v1` with a typed descriptor containing:
 - supported media types and external-ID namespaces;
 - maximum apply batch size.
 
-The first server slice uses:
+The host supports:
 
+- `StartDeviceAuthorization` and `PollDeviceAuthorization`;
 - `ExchangeAPIKey`;
 - `RefreshCredentials`;
 - `GetAccount`;
-- `ApplyEvents`.
+- `ApplyEvents` for watched, unwatched, favorite, watchlist, and live scrobble
+  operations;
+- `ListRemoteState` for watched, progress, favorite, and watchlist state.
 
-Other contract methods may return `Unimplemented` until corresponding host
-features are added.
+Authorization-code descriptors remain valid SDK contracts, but the host does
+not register a plugin that offers only authorization-code authentication until
+the public watch-provider callback flow exists.
 
-Every provider RPC receives credentials only for that call. Plugins must not
-persist or log credentials. Generic `Runtime.Configure` data is not a secret
-store and must not contain personal watch-provider tokens.
+Every provider RPC receives the complete current credentials and relevant
+installation configuration only for that call. Plugins must not persist or log
+credentials. Generic `Runtime.Configure` data is not a personal credential
+store. Returned credentials are an authoritative replacement, and the host
+persists them before interpreting results, pages, or faults from the same RPC.
 
 ## Discovery and lifecycle
 
@@ -83,14 +96,15 @@ registered because another installation could not be decoded.
 
 ## Existing watchsync interfaces
 
-The initial adapter admits only descriptors that support API-key auth and
-watched export, and that do not advertise import or unwatch operations. It
-implements:
+The adapter implements the existing interfaces corresponding to the
+descriptor's advertised capabilities:
 
 - `Provider`;
-- `AuthProvider` and `APIKeyAuthProvider`;
-- `WatchedExporter`;
-- `Scrobbler` and `OrderedScrobbler` for low-latency completed playback.
+- `AuthProvider`, `APIKeyAuthProvider`, and device authorization;
+- watched import/export and unwatch export;
+- progress import;
+- favorite and watchlist import/export/removal, including ordered watchlists;
+- `Scrobbler` and `OrderedScrobbler` for start, pause, and stop delivery.
 
 `LocalPlay` and `ScrobbleEvent` values become rich desired-state plugin events.
 The host supplies movie and series external IDs, season and episode numbers,
@@ -100,19 +114,16 @@ The plugin never needs a Silo API key or a callback into catalog HTTP routes.
 ## Authentication and credentials
 
 The existing watch-provider API-key connection route passes the entered token
-to `ExchangeAPIKey`. The plugin validates the token and returns normalized
-credentials plus provider account identity. Silo stores credentials in the
-existing encrypted connection columns scoped by user and profile.
+to `ExchangeAPIKey`. Device-code providers use the existing start and poll
+routes. The plugin validates or exchanges the credential and returns normalized
+credentials plus provider account identity.
 
 Credential refresh remains host-initiated and serialized by the existing
-watchsync service. The initial adapter accepts only access token, refresh token,
-expiry, and the standard Bearer token type that fit the existing encrypted
-connection behavior; it rejects
-opaque secret attributes and event-time credential rotation rather than
-silently discarding them. A later schema change is required before those SDK
-credential shapes can be supported. Invalid-credential faults are persisted
-using only the plugin's safe message; a dedicated reconnect-required connection
-state remains follow-up work.
+watchsync service. The host encrypts an authoritative credential bundle
+containing access token, refresh token, expiry, token type, scopes, and opaque
+secret attributes. Legacy access/refresh columns remain readable during the
+migration. Device codes are also encrypted at rest. Invalid-credential faults
+are persisted using only the plugin's safe message.
 
 Authorization-code OAuth can be added separately to the existing watch-
 provider service after its client-secret storage and callback-state design are
@@ -144,7 +155,43 @@ convergent, so an uncertain duplicate cannot lower progress or increment a play
 counter.
 
 Start, pause, and incomplete stop calls are no-ops for providers that only
-advertise watched export.
+advertise watched export. Providers advertising live scrobbling receive all
+three operations with playback position and duration.
+
+If the remote stop succeeds but the local history-export transition fails, the
+stop is not dispatched again. The scrobble session records a durable pending
+history-reconciliation marker, and the sweeper retries only the local database
+transition.
+
+## Remote state import and lists
+
+The scheduled sync path requests one state family at a time. Each request
+contains the stable cursor for that family and an opaque page token. The host:
+
+1. persists any credentials returned by the page;
+2. discards the page and retains its cursor on a top-level fault;
+3. applies valid items idempotently through existing watch-state and list
+   services;
+4. advances the page token until the plugin reports no next page;
+5. commits the family cursor only after the traversal succeeds.
+
+Incremental list pages do not imply deletion of absent items. Complete snapshots
+may reconcile removals. Ordered watchlists preserve the plugin's list position.
+Progress items without a valid provider timestamp are rejected rather than
+being stamped with host time.
+
+Imported history is tagged with the stable plugin provider key, not a generic
+import source. Echo suppression therefore filters only export back to the
+originating plugin; the same local event remains eligible for other connected
+providers.
+
+## Provider configuration
+
+Manifest-declared global configuration is resolved per installation before each
+provider call. Public fields are sent in `values`; secret and undeclared fields
+are sent in `secret_values`. Nested manifest fields use the stable
+`<config-key>.<field>` key form, such as `floppy.base_url`. Profile credentials
+remain separate and encrypted in watch-provider connection storage.
 
 ## Apply result handling
 
@@ -215,20 +262,30 @@ together rather than introduced only for plugins.
 
 The change is additive to `/api/v1`. Existing provider summaries and connection
 routes continue to work. A plugin provider appears through the same provider
-summary model and uses the existing API-key connection route. No mobile client
-changes are required for the first slice because no existing fields or status
-codes change.
+summary model and uses the existing API-key or device-code connection routes.
+No client changes are required because no existing fields or status codes
+change. SDK v0.12 plugins remain wire-compatible; descriptors only expose the
+capabilities the older contract can execute.
 
 ## Validation plan
 
 - capability enforcement in the plugin host client;
 - atomic registry replacement and built-in collision tests;
-- token validation and account identity conversion;
+- API-key and device-code authentication, full credential replacement, and
+  account identity conversion;
+- provider configuration routing and secret/public field classification;
 - rich movie and episode identity conversion;
+- watched, progress, favorite, and watchlist import pagination and cursor
+  behavior;
+- unwatch, favorite, watchlist, and ordered-list event conversion;
+- provider-specific import source keys and cross-provider export behavior;
 - completed playback persistence before plugin I/O;
 - `satisfied_by_scrobble` transition after success;
+- durable retry of a failed local post-stop history transition without another
+  remote stop;
 - immediate failure followed by scheduled history reconciliation;
 - typed rate-limit and invalid-credential handling;
+- complete credential encryption/decryption and legacy fallback;
 - plugin disable/re-enable lifecycle reload;
 - no regression in existing watchsync, pluginhost, and plugin service tests;
 - `go test`, targeted race tests, `go vet`, lint, formatting checks, and local

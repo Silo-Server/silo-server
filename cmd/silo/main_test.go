@@ -220,7 +220,7 @@ func TestReloadWatchSyncPluginProvidersDropsStaleProvidersOnCapabilityReadFailur
 	}
 
 	if err := reloadWatchSyncPluginProviders(
-		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{},
+		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{}, nil,
 	); err != nil {
 		t.Fatal(err)
 	}

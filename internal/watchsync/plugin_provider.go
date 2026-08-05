@@ -2,6 +2,7 @@ package watchsync
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,17 +11,26 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type WatchSyncPluginClient interface {
 	ExchangeAPIKey(context.Context, *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error)
+	StartDeviceAuthorization(context.Context, *pluginv1.WatchSyncStartDeviceAuthorizationRequest) (*pluginv1.WatchSyncStartDeviceAuthorizationResponse, error)
+	PollDeviceAuthorization(context.Context, *pluginv1.WatchSyncPollDeviceAuthorizationRequest) (*pluginv1.WatchSyncPollDeviceAuthorizationResponse, error)
 	RefreshCredentials(context.Context, *pluginv1.WatchSyncRefreshCredentialsRequest) (*pluginv1.WatchSyncCredentialResponse, error)
 	GetAccount(context.Context, *pluginv1.WatchSyncGetAccountRequest) (*pluginv1.WatchSyncGetAccountResponse, error)
 	ApplyEvents(context.Context, *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error)
+	ListRemoteState(context.Context, *pluginv1.WatchSyncListRemoteStateRequest) (*pluginv1.WatchSyncListRemoteStateResponse, error)
 }
 
 type WatchSyncPluginClientResolver func(context.Context, int, string) (WatchSyncPluginClient, error)
+type WatchSyncPluginConfigResolver func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error)
+
+type PluginCredentialRepository interface {
+	UpsertConnection(context.Context, Connection) (Connection, error)
+}
 
 type PluginProviderOptions struct {
 	InstallationID int
@@ -29,6 +39,8 @@ type PluginProviderOptions struct {
 	DisplayName    string
 	Descriptor     *pluginv1.WatchSyncProviderDescriptor
 	ResolveClient  WatchSyncPluginClientResolver
+	ResolveConfig  WatchSyncPluginConfigResolver
+	Repository     PluginCredentialRepository
 }
 
 type PluginProvider struct {
@@ -37,8 +49,11 @@ type PluginProvider struct {
 	capabilityID   string
 	displayName    string
 	descriptor     *pluginv1.WatchSyncProviderDescriptor
+	authMethod     string
 	supportedMedia map[pluginv1.WatchSyncMediaType]struct{}
 	resolveClient  WatchSyncPluginClientResolver
+	resolveConfig  WatchSyncPluginConfigResolver
+	repository     PluginCredentialRepository
 }
 
 const (
@@ -57,14 +72,9 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 	if options.Descriptor == nil {
 		return nil, fmt.Errorf("watch sync plugin descriptor is required")
 	}
-	if !supportsWatchSyncAPIKey(options.Descriptor) {
-		return nil, fmt.Errorf("watch sync plugin %q does not support API-key authentication", options.ProviderKey)
-	}
-	if !options.Descriptor.GetExportWatched() {
-		return nil, fmt.Errorf("watch sync plugin %q does not export watched state", options.ProviderKey)
-	}
-	if options.Descriptor.GetExportUnwatched() || options.Descriptor.GetImportWatched() || options.Descriptor.GetImportProgress() {
-		return nil, fmt.Errorf("watch sync plugin %q advertises operations unsupported by the initial server adapter", options.ProviderKey)
+	authMethod, err := supportedWatchSyncAuthMethod(options.Descriptor)
+	if err != nil {
+		return nil, fmt.Errorf("watch sync plugin %q %w", options.ProviderKey, err)
 	}
 	supportedMedia, err := supportedWatchSyncMediaTypes(options.Descriptor)
 	if err != nil {
@@ -79,8 +89,11 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		capabilityID:   options.CapabilityID,
 		displayName:    options.DisplayName,
 		descriptor:     options.Descriptor,
+		authMethod:     authMethod,
 		supportedMedia: supportedMedia,
 		resolveClient:  options.ResolveClient,
+		resolveConfig:  options.ResolveConfig,
+		repository:     options.Repository,
 	}, nil
 }
 
@@ -95,6 +108,17 @@ func (p *PluginProvider) DisplayName() string {
 
 func (p *PluginProvider) ProviderSource() string { return providerSourcePlugin }
 
+// HistorySource is provider-specific so importing from one plugin suppresses
+// only the echo back to that same connection. A shared generic source would
+// also suppress legitimate Floppy-to-Trakt (or other cross-provider) sync.
+func (p *PluginProvider) HistorySource() userstore.WatchHistorySource {
+	return userstore.WatchHistorySource(p.providerKey)
+}
+
+func (p *PluginProvider) AuthMethod() string { return p.authMethod }
+
+func (p *PluginProvider) usesHostPluginConfig() {}
+
 func (p *PluginProvider) authoritativeRefreshProvider() {}
 
 func (p *PluginProvider) ExportBatchSize() int {
@@ -106,19 +130,37 @@ func (p *PluginProvider) ExportBatchSize() int {
 
 func (p *PluginProvider) Capabilities() Capabilities {
 	return Capabilities{
-		ExportWatched:    true,
-		ScrobblePlayback: true,
+		ImportWatched:          p.descriptor.GetImportWatched(),
+		ImportProgress:         p.descriptor.GetImportProgress(),
+		ExportWatched:          p.descriptor.GetExportWatched(),
+		ExportUnwatched:        p.descriptor.GetExportUnwatched(),
+		ImportFavorites:        p.descriptor.GetImportFavorites(),
+		ExportFavorites:        p.descriptor.GetExportFavorites(),
+		RemoveFavorites:        p.descriptor.GetRemoveFavorites(),
+		ImportWatchlist:        p.descriptor.GetImportWatchlist(),
+		ExportWatchlist:        p.descriptor.GetExportWatchlist(),
+		RemoveWatchlist:        p.descriptor.GetRemoveWatchlist(),
+		ProvidesWatchlistOrder: p.descriptor.GetProvidesWatchlistOrder(),
+		ScrobblePlayback:       p.descriptor.GetScrobblePlayback(),
 	}
 }
 
 func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (TokenSet, ProviderAccount, error) {
+	if p.authMethod != AuthMethodAPIKey {
+		return TokenSet{}, ProviderAccount{}, errors.New("watch sync plugin does not support API-key authentication")
+	}
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return TokenSet{}, ProviderAccount{}, err
+	}
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, watchSyncUnavailableError()
 	}
 	response, err := client.ExchangeAPIKey(ctx, &pluginv1.WatchSyncExchangeAPIKeyRequest{
-		CapabilityId: p.capabilityID,
-		ApiKey:       apiKey,
+		CapabilityId:   p.capabilityID,
+		ProviderConfig: config,
+		ApiKey:         apiKey,
 	})
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, watchSyncRPCError()
@@ -137,21 +179,98 @@ func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (
 	return tokens, account, nil
 }
 
-func (p *PluginProvider) StartDeviceAuth(context.Context, ServerConfig) (DeviceAuthSession, error) {
-	return DeviceAuthSession{}, errors.New("watch sync plugin does not support device authorization")
+func (p *PluginProvider) StartDeviceAuth(ctx context.Context, _ ServerConfig) (DeviceAuthSession, error) {
+	if p.authMethod != AuthMethodDeviceCode {
+		return DeviceAuthSession{}, errors.New("watch sync plugin does not support device authorization")
+	}
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return DeviceAuthSession{}, err
+	}
+	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
+	if err != nil {
+		return DeviceAuthSession{}, watchSyncUnavailableError()
+	}
+	response, err := client.StartDeviceAuthorization(ctx, &pluginv1.WatchSyncStartDeviceAuthorizationRequest{
+		CapabilityId:   p.capabilityID,
+		ProviderConfig: config,
+	})
+	if err != nil {
+		return DeviceAuthSession{}, watchSyncRPCError()
+	}
+	if err := watchSyncFaultError(p.Key(), response.GetFault()); err != nil {
+		return DeviceAuthSession{}, err
+	}
+	if strings.TrimSpace(response.GetUserCode()) == "" || strings.TrimSpace(response.GetVerificationUrl()) == "" ||
+		len(response.GetProviderState()) == 0 || response.GetExpiresAt() == nil {
+		return DeviceAuthSession{}, errors.New("watch sync plugin returned an incomplete device authorization")
+	}
+	interval := 5
+	if response.GetPollingInterval() != nil && response.GetPollingInterval().AsDuration() > 0 {
+		interval = max(1, int(response.GetPollingInterval().AsDuration().Seconds()))
+	}
+	verificationURL := response.GetVerificationUrl()
+	if complete := strings.TrimSpace(response.GetVerificationUrlComplete()); complete != "" {
+		verificationURL = complete
+	}
+	return DeviceAuthSession{
+		DeviceCode:      base64.RawURLEncoding.EncodeToString(response.GetProviderState()),
+		UserCode:        response.GetUserCode(),
+		VerificationURL: verificationURL,
+		IntervalSeconds: interval,
+		ExpiresAt:       response.GetExpiresAt().AsTime(),
+	}, nil
 }
 
-func (p *PluginProvider) PollDeviceAuth(context.Context, ServerConfig, DeviceAuthSession) (TokenSet, error) {
-	return TokenSet{}, errors.New("watch sync plugin does not support device authorization")
+func (p *PluginProvider) PollDeviceAuth(ctx context.Context, _ ServerConfig, session DeviceAuthSession) (TokenSet, error) {
+	state, err := base64.RawURLEncoding.DecodeString(session.DeviceCode)
+	if err != nil {
+		return TokenSet{}, errors.New("watch sync plugin device authorization state is invalid")
+	}
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return TokenSet{}, err
+	}
+	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
+	if err != nil {
+		return TokenSet{}, watchSyncUnavailableError()
+	}
+	response, err := client.PollDeviceAuthorization(ctx, &pluginv1.WatchSyncPollDeviceAuthorizationRequest{
+		CapabilityId:   p.capabilityID,
+		ProviderConfig: config,
+		ProviderState:  state,
+	})
+	if err != nil {
+		return TokenSet{}, watchSyncRPCError()
+	}
+	if err := watchSyncFaultError(p.Key(), response.GetFault()); err != nil {
+		return TokenSet{}, err
+	}
+	switch response.GetStatus() {
+	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_PENDING:
+		return TokenSet{}, errors.New("watch sync plugin device authorization is pending")
+	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_DENIED:
+		return TokenSet{}, errors.New("watch sync plugin device authorization was denied")
+	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_EXPIRED:
+		return TokenSet{}, errors.New("watch sync plugin device authorization expired")
+	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_AUTHORIZED:
+		return tokenSetFromProto(response.GetCredentials())
+	default:
+		return TokenSet{}, errors.New("watch sync plugin returned an invalid device authorization status")
+	}
 }
 
 func (p *PluginProvider) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
+	authContext, err := p.authenticatedContext(ctx, conn)
+	if err != nil {
+		return TokenSet{}, err
+	}
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return TokenSet{}, watchSyncUnavailableError()
 	}
 	response, err := client.RefreshCredentials(ctx, &pluginv1.WatchSyncRefreshCredentialsRequest{
-		Context: p.authenticatedContext(conn),
+		Context: authContext,
 	})
 	if err != nil {
 		return TokenSet{}, watchSyncRPCError()
@@ -173,12 +292,16 @@ func (p *PluginProvider) RefreshToken(ctx context.Context, _ ServerConfig, conn 
 }
 
 func (p *PluginProvider) LookupAccount(ctx context.Context, _ ServerConfig, conn Connection) (ProviderAccount, error) {
+	authContext, err := p.authenticatedContext(ctx, conn)
+	if err != nil {
+		return ProviderAccount{}, err
+	}
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return ProviderAccount{}, watchSyncUnavailableError()
 	}
 	response, err := client.GetAccount(ctx, &pluginv1.WatchSyncGetAccountRequest{
-		Context: p.authenticatedContext(conn),
+		Context: authContext,
 	})
 	if err != nil {
 		return ProviderAccount{}, watchSyncRPCError()
@@ -226,15 +349,22 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	if len(events) == 0 {
 		return result, nil
 	}
+	authContext, err := p.authenticatedContext(ctx, conn)
+	if err != nil {
+		return result, err
+	}
 	response, err := client.ApplyEvents(ctx, &pluginv1.WatchSyncApplyEventsRequest{
-		Context: p.authenticatedContext(conn),
+		Context: authContext,
 		Events:  events,
 	})
 	if err != nil {
 		return result, watchSyncRPCError()
 	}
 	if response.GetUpdatedCredentials() != nil {
-		return result, retryableProviderError{message: "watch sync plugin credential rotation during event application is not supported"}
+		conn, err = p.persistUpdatedCredentials(ctx, conn, response.GetUpdatedCredentials())
+		if err != nil {
+			return result, err
+		}
 	}
 	if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
 		// Batch-level faults apply to the whole request; no per-event results
@@ -279,59 +409,42 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 	return result, rateLimited
 }
 
-func (p *PluginProvider) Start(context.Context, ServerConfig, Connection, ScrobbleEvent) error {
-	return nil
+func (p *PluginProvider) Start(ctx context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
+	return p.applyScrobble(ctx, conn, event, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START)
 }
 
-func (p *PluginProvider) Pause(context.Context, ServerConfig, Connection, ScrobbleEvent) error {
-	return nil
+func (p *PluginProvider) Pause(ctx context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
+	return p.applyScrobble(ctx, conn, event, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_PAUSE)
 }
 
 func (p *PluginProvider) Stop(ctx context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
-	if !event.Completed {
-		return nil
-	}
-	watchEvent := watchEventFromScrobble(event)
+	return p.applyScrobble(ctx, conn, event, pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_STOP)
+}
+
+func (p *PluginProvider) applyScrobble(
+	ctx context.Context,
+	conn Connection,
+	event ScrobbleEvent,
+	operation pluginv1.WatchSyncOperation,
+) error {
+	watchEvent := watchEventFromScrobble(event, operation)
 	if !p.supportsMedia(watchEvent.GetMedia().GetMediaType()) {
 		return watchSyncProviderFaultError{message: unsupportedWatchSyncMediaMessage(watchEvent.GetMedia().GetMediaType())}
 	}
-	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
+	result, err := p.applyPluginEvents(ctx, conn, []*pluginv1.WatchSyncEvent{watchEvent}, []string{watchEvent.GetEventId()})
 	if err != nil {
-		return watchSyncUnavailableError()
-	}
-	response, err := client.ApplyEvents(ctx, &pluginv1.WatchSyncApplyEventsRequest{
-		Context: p.authenticatedContext(conn),
-		Events:  []*pluginv1.WatchSyncEvent{watchEvent},
-	})
-	if err != nil {
-		return watchSyncRPCError()
-	}
-	if response.GetUpdatedCredentials() != nil {
-		return retryableProviderError{message: "watch sync plugin credential rotation during event application is not supported"}
-	}
-	if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
 		return err
 	}
-	result := resultForEvent(response.GetResults(), watchEvent.GetEventId())
-	switch result.GetStatus() {
-	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
-		pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE:
+	if len(result.Sent) == 1 {
 		return nil
-	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_REJECTED:
-		return errors.New(safeApplyMessage(result, conn.AccessToken, conn.RefreshToken))
-	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_RETRY:
-		if fault := result.GetFault(); fault != nil &&
-			fault.GetCode() == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_RATE_LIMITED {
-			retry := time.Duration(0)
-			if fault.GetRetryAfter() != nil {
-				retry = fault.GetRetryAfter().AsDuration()
-			}
-			return RateLimitedError{Provider: p.Key(), RetryAfter: retry}
-		}
-		return fmt.Errorf("%s watch sync event needs retry: %s", p.Key(), safeApplyMessage(result, conn.AccessToken, conn.RefreshToken))
-	default:
-		return fmt.Errorf("%s watch sync plugin omitted a valid result for event %s", p.Key(), watchEvent.GetEventId())
 	}
+	if len(result.NotFound) > 0 {
+		return errors.New("watch sync plugin rejected the playback event")
+	}
+	if message := result.Failed[watchEvent.GetEventId()]; message != "" {
+		return errors.New(message)
+	}
+	return errors.New("watch sync plugin did not confirm the playback event")
 }
 
 func (p *PluginProvider) ScrobbleOrderingKey(conn Connection, event ScrobbleEvent) string {
@@ -339,11 +452,50 @@ func (p *PluginProvider) ScrobbleOrderingKey(conn Connection, event ScrobbleEven
 	return "plugin-watch-sync:" + conn.ID + ":" + seriesID
 }
 
-func (p *PluginProvider) authenticatedContext(conn Connection) *pluginv1.WatchSyncAuthenticatedContext {
-	return &pluginv1.WatchSyncAuthenticatedContext{
-		CapabilityId: p.capabilityID,
-		Credentials:  credentialsFromConnection(conn),
+func (p *PluginProvider) authenticatedContext(ctx context.Context, conn Connection) (*pluginv1.WatchSyncAuthenticatedContext, error) {
+	config, err := p.providerConfig(ctx)
+	if err != nil {
+		return nil, err
 	}
+	return &pluginv1.WatchSyncAuthenticatedContext{
+		CapabilityId:   p.capabilityID,
+		ProviderConfig: config,
+		Credentials:    credentialsFromConnection(conn),
+	}, nil
+}
+
+func (p *PluginProvider) providerConfig(ctx context.Context) (*pluginv1.WatchSyncProviderConfig, error) {
+	if p.resolveConfig == nil {
+		return &pluginv1.WatchSyncProviderConfig{}, nil
+	}
+	config, err := p.resolveConfig(ctx, p.installationID)
+	if err != nil {
+		return nil, retryableProviderError{message: "watch sync plugin configuration is unavailable"}
+	}
+	if config == nil {
+		config = &pluginv1.WatchSyncProviderConfig{}
+	}
+	return config, nil
+}
+
+func (p *PluginProvider) persistUpdatedCredentials(
+	ctx context.Context,
+	conn Connection,
+	credentials *pluginv1.WatchSyncCredentials,
+) (Connection, error) {
+	if p.repository == nil {
+		return Connection{}, retryableProviderError{message: "watch sync plugin credential storage is unavailable"}
+	}
+	tokens, err := tokenSetFromProto(credentials)
+	if err != nil {
+		return Connection{}, err
+	}
+	conn = connectionWithTokens(conn, tokens)
+	persisted, err := p.repository.UpsertConnection(ctx, conn)
+	if err != nil {
+		return Connection{}, retryableProviderError{message: "watch sync plugin credential update could not be persisted"}
+	}
+	return persisted, nil
 }
 
 func watchEventFromLocalPlay(play LocalPlay, origin pluginv1.WatchSyncOrigin) *pluginv1.WatchSyncEvent {
@@ -354,16 +506,17 @@ func watchEventFromLocalPlay(play LocalPlay, origin pluginv1.WatchSyncOrigin) *p
 		OccurredAt:      timestamppb.New(play.WatchedAt),
 		WatchHistoryId:  play.HistoryID,
 		DurationSeconds: play.DurationSeconds,
+		ProviderItemKey: play.ProviderItemKey,
 		Media: mediaFromIdentity(play.MediaItemID, play.Kind, play.Title, play.Year,
 			play.IMDbID, play.TMDBID, play.TVDBID, play.SeriesTitle, play.SeriesYear,
 			play.SeriesIMDbID, play.SeriesTMDBID, play.SeriesTVDBID, play.SeasonNumber, play.EpisodeNumber),
 	}
 }
 
-func watchEventFromScrobble(event ScrobbleEvent) *pluginv1.WatchSyncEvent {
-	eventID := event.HistoryID
-	if eventID == "" {
-		eventID = "scrobble:" + event.PlaybackSessionID
+func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOperation) *pluginv1.WatchSyncEvent {
+	eventID := "scrobble:" + operation.String() + ":" + event.PlaybackSessionID
+	if operation == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_PAUSE {
+		eventID += fmt.Sprintf(":%.3f", event.PositionSeconds)
 	}
 	completion := 0.0
 	if event.DurationSeconds > 0 {
@@ -371,7 +524,7 @@ func watchEventFromScrobble(event ScrobbleEvent) *pluginv1.WatchSyncEvent {
 	}
 	return &pluginv1.WatchSyncEvent{
 		EventId:           eventID,
-		Operation:         pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_WATCHED,
+		Operation:         operation,
 		Origin:            pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_PLAYBACK_COMPLETION,
 		OccurredAt:        timestamppb.New(event.OccurredAt),
 		WatchHistoryId:    event.HistoryID,
@@ -379,6 +532,7 @@ func watchEventFromScrobble(event ScrobbleEvent) *pluginv1.WatchSyncEvent {
 		PositionSeconds:   event.PositionSeconds,
 		DurationSeconds:   event.DurationSeconds,
 		CompletionPercent: completion,
+		ProviderItemKey:   event.ProviderItemKey,
 		Media: mediaFromIdentity(event.MediaItemID, event.Kind, "", 0,
 			event.IMDbID, event.TMDBID, event.TVDBID, "", 0,
 			event.SeriesIMDbID, event.SeriesTMDBID, event.SeriesTVDBID, event.SeasonNumber, event.EpisodeNumber),
@@ -426,7 +580,13 @@ func watchIDs(imdbID, tmdbID, tvdbID string) map[string]string {
 }
 
 func credentialsFromConnection(conn Connection) *pluginv1.WatchSyncCredentials {
-	credentials := &pluginv1.WatchSyncCredentials{AccessToken: conn.AccessToken, RefreshToken: conn.RefreshToken}
+	credentials := &pluginv1.WatchSyncCredentials{
+		AccessToken:      conn.AccessToken,
+		RefreshToken:     conn.RefreshToken,
+		TokenType:        conn.TokenType,
+		Scopes:           append([]string(nil), conn.Scopes...),
+		SecretAttributes: cloneStringMap(conn.SecretAttributes),
+	}
 	if conn.TokenExpiresAt != nil {
 		credentials.ExpiresAt = timestamppb.New(*conn.TokenExpiresAt)
 	}
@@ -437,16 +597,22 @@ func tokenSetFromProto(credentials *pluginv1.WatchSyncCredentials) (TokenSet, er
 	if credentials == nil || strings.TrimSpace(credentials.GetAccessToken()) == "" {
 		return TokenSet{}, errors.New("watch sync plugin returned no access token")
 	}
-	tokenType := strings.TrimSpace(credentials.GetTokenType())
-	if (tokenType != "" && !strings.EqualFold(tokenType, "Bearer")) || len(credentials.GetScopes()) > 0 || len(credentials.GetSecretAttributes()) > 0 {
-		return TokenSet{}, errors.New("watch sync plugin returned a credential shape unsupported by the initial server adapter")
-	}
 	var expiresAt *time.Time
 	if credentials.GetExpiresAt() != nil {
+		if err := credentials.GetExpiresAt().CheckValid(); err != nil {
+			return TokenSet{}, errors.New("watch sync plugin returned an invalid credential expiry")
+		}
 		value := credentials.GetExpiresAt().AsTime()
 		expiresAt = &value
 	}
-	return TokenSet{AccessToken: credentials.GetAccessToken(), RefreshToken: credentials.GetRefreshToken(), TokenExpiresAt: expiresAt}, nil
+	return TokenSet{
+		AccessToken:      credentials.GetAccessToken(),
+		RefreshToken:     credentials.GetRefreshToken(),
+		TokenExpiresAt:   expiresAt,
+		TokenType:        strings.TrimSpace(credentials.GetTokenType()),
+		Scopes:           append([]string(nil), credentials.GetScopes()...),
+		SecretAttributes: cloneStringMap(credentials.GetSecretAttributes()),
+	}, nil
 }
 
 func accountFromProto(account *pluginv1.WatchSyncAccount) (ProviderAccount, error) {
@@ -465,13 +631,20 @@ func resultForEvent(results []*pluginv1.WatchSyncApplyResult, eventID string) *p
 	return nil
 }
 
-func supportsWatchSyncAPIKey(descriptor *pluginv1.WatchSyncProviderDescriptor) bool {
+func supportedWatchSyncAuthMethod(descriptor *pluginv1.WatchSyncProviderDescriptor) (string, error) {
+	var deviceCode bool
 	for _, method := range descriptor.GetAuthMethods() {
-		if method == pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY {
-			return true
+		switch method {
+		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY:
+			return AuthMethodAPIKey, nil
+		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE:
+			deviceCode = true
 		}
 	}
-	return false
+	if deviceCode {
+		return AuthMethodDeviceCode, nil
+	}
+	return "", errors.New("does not advertise an authentication method supported by the host")
 }
 
 func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescriptor) (map[pluginv1.WatchSyncMediaType]struct{}, error) {

@@ -10,6 +10,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -22,14 +23,37 @@ const (
 )
 
 type fakeWatchSyncPluginClient struct {
-	exchangeResponse *pluginv1.WatchSyncCredentialResponse
-	refreshResponse  *pluginv1.WatchSyncCredentialResponse
-	accountResponse  *pluginv1.WatchSyncGetAccountResponse
-	applyResponse    *pluginv1.WatchSyncApplyEventsResponse
-	applyErr         error
-	applyRequest     *pluginv1.WatchSyncApplyEventsRequest
-	refreshRequest   *pluginv1.WatchSyncRefreshCredentialsRequest
-	accountRequest   *pluginv1.WatchSyncGetAccountRequest
+	exchangeResponse    *pluginv1.WatchSyncCredentialResponse
+	refreshResponse     *pluginv1.WatchSyncCredentialResponse
+	accountResponse     *pluginv1.WatchSyncGetAccountResponse
+	applyResponse       *pluginv1.WatchSyncApplyEventsResponse
+	deviceStartResponse *pluginv1.WatchSyncStartDeviceAuthorizationResponse
+	devicePollResponse  *pluginv1.WatchSyncPollDeviceAuthorizationResponse
+	listResponse        *pluginv1.WatchSyncListRemoteStateResponse
+	listResponses       []*pluginv1.WatchSyncListRemoteStateResponse
+	applyErr            error
+	applyRequest        *pluginv1.WatchSyncApplyEventsRequest
+	refreshRequest      *pluginv1.WatchSyncRefreshCredentialsRequest
+	accountRequest      *pluginv1.WatchSyncGetAccountRequest
+	deviceStartRequest  *pluginv1.WatchSyncStartDeviceAuthorizationRequest
+	devicePollRequest   *pluginv1.WatchSyncPollDeviceAuthorizationRequest
+	listRequests        []*pluginv1.WatchSyncListRemoteStateRequest
+}
+
+func (f *fakeWatchSyncPluginClient) StartDeviceAuthorization(_ context.Context, req *pluginv1.WatchSyncStartDeviceAuthorizationRequest) (*pluginv1.WatchSyncStartDeviceAuthorizationResponse, error) {
+	f.deviceStartRequest = req
+	if f.deviceStartResponse != nil {
+		return f.deviceStartResponse, nil
+	}
+	return &pluginv1.WatchSyncStartDeviceAuthorizationResponse{}, nil
+}
+
+func (f *fakeWatchSyncPluginClient) PollDeviceAuthorization(_ context.Context, req *pluginv1.WatchSyncPollDeviceAuthorizationRequest) (*pluginv1.WatchSyncPollDeviceAuthorizationResponse, error) {
+	f.devicePollRequest = req
+	if f.devicePollResponse != nil {
+		return f.devicePollResponse, nil
+	}
+	return &pluginv1.WatchSyncPollDeviceAuthorizationResponse{}, nil
 }
 
 func (f *fakeWatchSyncPluginClient) ExchangeAPIKey(_ context.Context, _ *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
@@ -52,6 +76,32 @@ func (f *fakeWatchSyncPluginClient) GetAccount(_ context.Context, req *pluginv1.
 func (f *fakeWatchSyncPluginClient) ApplyEvents(_ context.Context, req *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error) {
 	f.applyRequest = req
 	return f.applyResponse, f.applyErr
+}
+
+func (f *fakeWatchSyncPluginClient) ListRemoteState(_ context.Context, req *pluginv1.WatchSyncListRemoteStateRequest) (*pluginv1.WatchSyncListRemoteStateResponse, error) {
+	f.listRequests = append(f.listRequests, req)
+	if len(f.listResponses) > 0 {
+		response := f.listResponses[0]
+		f.listResponses = f.listResponses[1:]
+		return response, nil
+	}
+	if f.listResponse != nil {
+		return f.listResponse, nil
+	}
+	return &pluginv1.WatchSyncListRemoteStateResponse{}, nil
+}
+
+type fakePluginCredentialRepository struct {
+	saved Connection
+	err   error
+}
+
+func (r *fakePluginCredentialRepository) UpsertConnection(_ context.Context, conn Connection) (Connection, error) {
+	if r.err != nil {
+		return Connection{}, r.err
+	}
+	r.saved = conn
+	return conn, nil
 }
 
 func testPluginProvider(t *testing.T, client WatchSyncPluginClient) *PluginProvider {
@@ -79,6 +129,13 @@ func testPluginProviderWithDescriptor(t *testing.T, client WatchSyncPluginClient
 		t.Fatal(err)
 	}
 	return provider
+}
+
+func TestPluginProviderUsesConnectionSpecificHistorySource(t *testing.T) {
+	provider := testPluginProvider(t, &fakeWatchSyncPluginClient{})
+	if got := provider.HistorySource(); got != testPluginProviderKey {
+		t.Fatalf("HistorySource() = %q, want %q", got, testPluginProviderKey)
+	}
 }
 
 func TestPluginProviderRejectsUnsupportedInitialDescriptor(t *testing.T) {
@@ -114,8 +171,8 @@ func TestPluginProviderRejectsUnsupportedInitialDescriptor(t *testing.T) {
 
 func TestPluginProviderConnectsAPIKeyWithoutPersistingInPluginConfig(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "validated-token", TokenType: "Bearer"},
-		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "7", Username: "alice"},
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testValidatedToken, TokenType: testBearerTokenType},
+		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "7", Username: testPluginUsername},
 	}}
 	provider := testPluginProvider(t, client)
 	if provider.Key() != testPluginProviderKey {
@@ -125,7 +182,7 @@ func TestPluginProviderConnectsAPIKeyWithoutPersistingInPluginConfig(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tokens.AccessToken != "validated-token" || account.ID != "7" || account.Username != "alice" {
+	if tokens.AccessToken != testValidatedToken || account.ID != "7" || account.Username != testPluginUsername {
 		t.Fatalf("tokens=%#v account=%#v", tokens, account)
 	}
 }
@@ -133,8 +190,8 @@ func TestPluginProviderConnectsAPIKeyWithoutPersistingInPluginConfig(t *testing.
 func TestPluginProviderRejectsMissingAccountIdentity(t *testing.T) {
 	for _, subject := range []string{"", " \t\n "} {
 		client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
-			Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "validated-token", TokenType: "Bearer"},
-			Account:     &pluginv1.WatchSyncAccount{ExternalSubject: subject, Username: "alice"},
+			Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testValidatedToken, TokenType: testBearerTokenType},
+			Account:     &pluginv1.WatchSyncAccount{ExternalSubject: subject, Username: testPluginUsername},
 		}}
 		provider := testPluginProvider(t, client)
 		if _, _, err := provider.ConnectWithAPIKey(context.Background(), "input-token"); err == nil || !strings.Contains(err.Error(), "account identity") {
@@ -145,7 +202,7 @@ func TestPluginProviderRejectsMissingAccountIdentity(t *testing.T) {
 
 func TestPluginProviderRefreshReturnsCredentialsAlongsideFault(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{refreshResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "rotated-access", TokenType: "Bearer"},
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testRotatedAccessToken, TokenType: testBearerTokenType},
 		Fault: &pluginv1.WatchSyncFault{
 			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
 			SafeMessage: "credential rotated-access rejected; reconnect required",
@@ -153,16 +210,16 @@ func TestPluginProviderRefreshReturnsCredentialsAlongsideFault(t *testing.T) {
 	}}
 	provider := testPluginProvider(t, client)
 	tokens, err := provider.RefreshToken(context.Background(), ServerConfig{}, Connection{
-		AccessToken:  "old-access",
-		RefreshToken: "old-refresh",
+		AccessToken:  testOldAccessToken,
+		RefreshToken: testOldRefreshToken,
 	})
-	if tokens.AccessToken != "rotated-access" || tokens.RefreshToken != "" || tokens.TokenExpiresAt != nil {
+	if tokens.AccessToken != testRotatedAccessToken || tokens.RefreshToken != "" || tokens.TokenExpiresAt != nil {
 		t.Fatalf("tokens = %#v", tokens)
 	}
 	if !isWatchSyncInvalidCredentialError(err) {
 		t.Fatalf("error = %#v", err)
 	}
-	if strings.Contains(err.Error(), "rotated-access") || !strings.Contains(err.Error(), "[REDACTED]") {
+	if strings.Contains(err.Error(), testRotatedAccessToken) || !strings.Contains(err.Error(), "[REDACTED]") {
 		t.Fatalf("returned credentials were not redacted: %q", err)
 	}
 }
@@ -173,7 +230,7 @@ func TestPluginProviderExportsRichEpisodeIdentity(t *testing.T) {
 		EventId: testWatchHistoryID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
 	}}}
 	provider := testPluginProvider(t, client)
-	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{AccessToken: "secret"}, []LocalPlay{{
+	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{AccessToken: testSecretValue}, []LocalPlay{{
 		HistoryID:       testWatchHistoryID,
 		MediaItemID:     testEpisodeMediaID,
 		Kind:            historyimport.KindEpisode,
@@ -191,7 +248,7 @@ func TestPluginProviderExportsRichEpisodeIdentity(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	event := client.applyRequest.GetEvents()[0]
-	if client.applyRequest.GetContext().GetCredentials().GetAccessToken() != "secret" ||
+	if client.applyRequest.GetContext().GetCredentials().GetAccessToken() != testSecretValue ||
 		event.GetMedia().GetSeriesExternalIds()["tvdb"] != "123" ||
 		event.GetMedia().GetEpisodeNumber() != 7 ||
 		event.GetMedia().GetMediaType() != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE {
@@ -289,7 +346,7 @@ func TestPluginProviderTransportFailureIsRetryableAndSanitized(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{applyErr: errors.New("rpc failed with access_token=secret")}
 	provider := testPluginProvider(t, client)
 	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie}})
-	if !isRetryableProviderError(err) || strings.Contains(err.Error(), "secret") {
+	if !isRetryableProviderError(err) || strings.Contains(err.Error(), testSecretValue) {
 		t.Fatalf("error = %#v", err)
 	}
 }
@@ -378,4 +435,160 @@ func TestPluginProviderAuthenticatedContextUsesCapabilityAndCredentials(t *testi
 		t.Fatalf("account request = %#v", client.accountRequest)
 	}
 	_ = testPlaybackSessionID
+}
+
+func TestPluginProviderSupportsDeviceAuthorizationAndFullCredentials(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	client := &fakeWatchSyncPluginClient{
+		deviceStartResponse: &pluginv1.WatchSyncStartDeviceAuthorizationResponse{
+			UserCode:        "ABCD",
+			VerificationUrl: "https://provider.example/activate",
+			ProviderState:   []byte("opaque-device-state"),
+			PollingInterval: durationpb.New(7 * time.Second),
+			ExpiresAt:       timestamppb.New(expiresAt),
+		},
+		devicePollResponse: &pluginv1.WatchSyncPollDeviceAuthorizationResponse{
+			Status: pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_AUTHORIZED,
+			Credentials: &pluginv1.WatchSyncCredentials{
+				AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenType: testDPoPTokenType,
+				Scopes: []string{testHistoryScope, "watchlist"}, SecretAttributes: map[string]string{"instance": testOneValue},
+				ExpiresAt: timestamppb.New(expiresAt),
+			},
+		},
+	}
+	provider, err := NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE},
+			ImportWatched: true, MaxBatchSize: 25,
+		},
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) { return client, nil },
+		ResolveConfig: func(context.Context, int) (*pluginv1.WatchSyncProviderConfig, error) {
+			return &pluginv1.WatchSyncProviderConfig{SecretValues: map[string]string{"provider.client_secret": testSecretValue}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := provider.StartDeviceAuth(context.Background(), ServerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.UserCode != "ABCD" || session.IntervalSeconds != 7 ||
+		client.deviceStartRequest.GetProviderConfig().GetSecretValues()["provider.client_secret"] != testSecretValue {
+		t.Fatalf("session=%#v request=%#v", session, client.deviceStartRequest)
+	}
+	tokens, err := provider.PollDeviceAuth(context.Background(), ServerConfig{}, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(client.devicePollRequest.GetProviderState()) != "opaque-device-state" ||
+		tokens.TokenType != testDPoPTokenType || len(tokens.Scopes) != 2 || tokens.SecretAttributes["instance"] != testOneValue {
+		t.Fatalf("tokens=%#v request=%#v", tokens, client.devicePollRequest)
+	}
+}
+
+func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *testing.T) {
+	now := time.Now().UTC()
+	remote := func(key, imdb string) *pluginv1.WatchSyncRemoteState {
+		return &pluginv1.WatchSyncRemoteState{
+			ProviderItemKey: key,
+			Media: &pluginv1.WatchSyncMedia{
+				MediaType: pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
+				Title:     "Movie", ExternalIds: map[string]string{"imdb": imdb},
+			},
+			Watched: &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1, LastWatchedAt: timestamppb.New(now)},
+		}
+	}
+	client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{
+		{
+			Items: []*pluginv1.WatchSyncRemoteState{remote(testOneValue, "tt1")}, NextPageToken: "page-2", CompleteSnapshot: true,
+			UpdatedCredentials: &pluginv1.WatchSyncCredentials{
+				AccessToken: "rotated", TokenType: testBearerTokenType, Scopes: []string{testHistoryScope},
+			},
+		},
+		{Items: []*pluginv1.WatchSyncRemoteState{remote("two", "tt2")}, NextCursor: "cursor-2", CompleteSnapshot: true},
+	}}
+	repository := &fakePluginCredentialRepository{}
+	provider, err := NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+			ImportWatched: true, MaxBatchSize: 25,
+		},
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) { return client, nil },
+		Repository:    repository,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, Connection{
+		ID: "connection", Provider: testPluginProviderKey, UserID: 1, ProfileID: "profile",
+		AccessToken: "old", SyncCursors: map[string]string{pluginWatchedCursorKey: testCursorOne},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Rows) != 2 || batch.UpdatedCursors[pluginWatchedCursorKey] != "cursor-2" ||
+		len(client.listRequests) != 2 || client.listRequests[0].GetCursor() != testCursorOne ||
+		client.listRequests[1].GetCursor() != testCursorOne || client.listRequests[1].GetPageToken() != "page-2" {
+		t.Fatalf("batch=%#v requests=%#v", batch, client.listRequests)
+	}
+	if repository.saved.AccessToken != "rotated" || repository.saved.Scopes[0] != testHistoryScope {
+		t.Fatalf("persisted credentials = %#v", repository.saved)
+	}
+}
+
+func TestPluginProviderMapsAllCapabilitiesAndListOperations(t *testing.T) {
+	descriptor := &pluginv1.WatchSyncProviderDescriptor{
+		AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+		ImportWatched: true, ImportProgress: true, ExportWatched: true, ExportUnwatched: true,
+		ImportFavorites: true, ExportFavorites: true, RemoveFavorites: true,
+		ImportWatchlist: true, ExportWatchlist: true, RemoveWatchlist: true,
+		ProvidesWatchlistOrder: true, ScrobblePlayback: true, MaxBatchSize: 25,
+	}
+	client := &fakeWatchSyncPluginClient{}
+	provider := testPluginProviderWithDescriptor(t, client, descriptor)
+	if provider.Capabilities() != (Capabilities{
+		ImportWatched: true, ImportProgress: true, ExportWatched: true, ExportUnwatched: true,
+		ImportFavorites: true, ExportFavorites: true, RemoveFavorites: true,
+		ImportWatchlist: true, ExportWatchlist: true, RemoveWatchlist: true,
+		ProvidesWatchlistOrder: true, ScrobblePlayback: true,
+	}) {
+		t.Fatalf("capabilities = %#v", provider.Capabilities())
+	}
+
+	item := LocalFavorite{MediaItemID: testMovieMediaID, ProviderItemKey: "remote-1", Kind: historyimport.KindMovie, IMDbID: "tt1"}
+	eventID := pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_ADD_TO_WATCHLIST.String() + ":movie-1"
+	client.applyResponse = &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{{
+		EventId: eventID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+	}}}
+	result, err := provider.ExportWatchlist(context.Background(), ServerConfig{}, Connection{}, []LocalFavorite{item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := client.applyRequest.GetEvents()[0]
+	if len(result.Sent) != 1 || event.GetOperation() != pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_ADD_TO_WATCHLIST ||
+		event.GetProviderItemKey() != "remote-1" {
+		t.Fatalf("result=%#v event=%#v", result, event)
+	}
+}
+
+func TestPluginProviderForwardsLiveScrobbleLifecycle(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{}
+	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+		AuthMethods:      []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+		ScrobblePlayback: true, MaxBatchSize: 25,
+	})
+	event := ScrobbleEvent{PlaybackSessionID: testPlaybackSessionID, MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie, PositionSeconds: 12.5}
+	eventID := "scrobble:" + pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START.String() + ":" + testPlaybackSessionID
+	client.applyResponse = &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{{
+		EventId: eventID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+	}}}
+	if err := provider.Start(context.Background(), ServerConfig{}, Connection{}, event); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.applyRequest.GetEvents()[0]; got.GetOperation() != pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_START || got.GetPositionSeconds() != 12.5 {
+		t.Fatalf("scrobble event = %#v", got)
+	}
 }

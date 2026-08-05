@@ -17,25 +17,47 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-const testProviderAccountID = "account-1"
+const (
+	testProviderAccountID    = "account-1"
+	testAccessToken          = "access"
+	testBearerTokenType      = "Bearer"
+	testCursorOne            = "cursor-1"
+	testDPoPTokenType        = "DPoP"
+	testHistoryExportID      = "export-1"
+	testHistoryScope         = "history"
+	testMovieMediaID         = "movie-1"
+	testMovieProviderItemKey = "movie:tmdb:603"
+	testOldAccessToken       = "old-access"
+	testOldRefreshToken      = "old-refresh"
+	testOneValue             = "one"
+	testPluginUsername       = "alice"
+	testRefreshToken         = "refresh"
+	testReconnectRequired    = "reconnect required"
+	testRotatedAccessToken   = "rotated-access"
+	testSecretValue          = "secret"
+	testValidatedToken       = "validated-token"
+)
 
 type serviceFakeRepo struct {
-	connections          map[string]Connection
-	dueConnections       []Connection
-	sessions             map[string]DeviceAuthSession
-	settings             map[string]string
-	syncRuns             []SyncRun
-	historyExports       []HistoryExport
-	listItemStates       []ListItemState
-	scrobbleConnections  []Connection
-	scrobbleSessions     []ScrobbleSession
-	scrobbleUpdates      []scrobbleUpdate
-	reopenedScrobbles    []scrobbleUpdate
-	confirmedScrobbles   map[string]bool
-	confirmingScrobbles  map[string]time.Time
-	markSatisfiedErr     error
-	markHistoryStatusErr error
-	scrobbleMu           sync.Mutex
+	connections            map[string]Connection
+	dueConnections         []Connection
+	sessions               map[string]DeviceAuthSession
+	settings               map[string]string
+	syncRuns               []SyncRun
+	historyExports         []HistoryExport
+	listItemStates         []ListItemState
+	scrobbleConnections    []Connection
+	scrobbleSessions       []ScrobbleSession
+	pendingReconciliations []ScrobbleSession
+	reconciledScrobbles    map[string]time.Time
+	scrobbleUpdates        []scrobbleUpdate
+	reopenedScrobbles      []scrobbleUpdate
+	confirmedScrobbles     map[string]bool
+	confirmingScrobbles    map[string]time.Time
+	markSatisfiedErr       error
+	markHistoryStatusErr   error
+	syncRunMu              sync.Mutex
+	scrobbleMu             sync.Mutex
 }
 
 type scrobbleUpdate struct {
@@ -54,6 +76,7 @@ func newServiceFakeRepo() *serviceFakeRepo {
 		sessions:            make(map[string]DeviceAuthSession),
 		confirmedScrobbles:  make(map[string]bool),
 		confirmingScrobbles: make(map[string]time.Time),
+		reconciledScrobbles: make(map[string]time.Time),
 		settings: map[string]string{
 			"watchsync.trakt.client_id":     "client-id",
 			"watchsync.trakt.client_secret": "client-secret",
@@ -168,6 +191,8 @@ func (r *serviceFakeRepo) ListConnectionsDueForSync(
 }
 
 func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
 	if run.ID == "" {
 		run.ID = "run-" + strconv.Itoa(len(r.syncRuns)+1)
 	}
@@ -185,6 +210,8 @@ func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun
 }
 
 func (r *serviceFakeRepo) CompleteSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
 	for i := range r.syncRuns {
 		if r.syncRuns[i].ID == run.ID {
 			if run.CreatedAt.IsZero() {
@@ -201,6 +228,8 @@ func (r *serviceFakeRepo) CompleteSyncRun(_ context.Context, run SyncRun) (SyncR
 }
 
 func (r *serviceFakeRepo) GetLatestSyncRun(_ context.Context, connectionID string) (SyncRun, bool, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
 	for i := len(r.syncRuns) - 1; i >= 0; i-- {
 		if r.syncRuns[i].ConnectionID == connectionID {
 			return r.syncRuns[i], true, nil
@@ -210,6 +239,8 @@ func (r *serviceFakeRepo) GetLatestSyncRun(_ context.Context, connectionID strin
 }
 
 func (r *serviceFakeRepo) GetActiveSyncRun(_ context.Context, connectionID string) (SyncRun, bool, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
 	for i := len(r.syncRuns) - 1; i >= 0; i-- {
 		run := r.syncRuns[i]
 		if run.ConnectionID == connectionID &&
@@ -221,6 +252,8 @@ func (r *serviceFakeRepo) GetActiveSyncRun(_ context.Context, connectionID strin
 }
 
 func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, limit int) ([]SyncRun, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
@@ -509,6 +542,11 @@ func (r *serviceFakeRepo) CompleteConfirmedScrobbleStop(_ context.Context, playb
 		historyID:         historyID,
 		stopSentAt:        &stopSentAt,
 	})
+	if historyID != "" {
+		r.pendingReconciliations = append(r.pendingReconciliations, ScrobbleSession{
+			PlaybackSessionID: playbackSessionID, ConnectionID: connectionID, HistoryID: historyID,
+		})
+	}
 	return nil
 }
 
@@ -532,6 +570,8 @@ func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackS
 }
 
 func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
 	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
 		playbackSessionID: playbackSessionID,
 		connectionID:      connectionID,
@@ -541,11 +581,50 @@ func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessi
 		lastError:         lastError,
 		stopSentAt:        stopSentAt,
 	})
+	if stopSentAt != nil && historyID != "" {
+		r.pendingReconciliations = append(r.pendingReconciliations, ScrobbleSession{
+			PlaybackSessionID: playbackSessionID, ConnectionID: connectionID, HistoryID: historyID,
+		})
+	}
 	return nil
 }
 
 func (r *serviceFakeRepo) ListOpenScrobbleSessions(_ context.Context) ([]ScrobbleSession, error) {
 	return r.scrobbleSessions, nil
+}
+
+func (r *serviceFakeRepo) ListPendingScrobbleReconciliations(_ context.Context) ([]ScrobbleSession, error) {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	return append([]ScrobbleSession(nil), r.pendingReconciliations...), nil
+}
+
+func (r *serviceFakeRepo) MarkScrobbleHistoryReconciled(_ context.Context, playbackSessionID, connectionID string, reconciledAt time.Time) error {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	key := playbackSessionID + "|" + connectionID
+	r.reconciledScrobbles[key] = reconciledAt
+	remaining := r.pendingReconciliations[:0]
+	for _, session := range r.pendingReconciliations {
+		if session.PlaybackSessionID == playbackSessionID && session.ConnectionID == connectionID {
+			continue
+		}
+		remaining = append(remaining, session)
+	}
+	r.pendingReconciliations = remaining
+	return nil
+}
+
+func (r *serviceFakeRepo) syncRunsSnapshot() []SyncRun {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
+	return append([]SyncRun(nil), r.syncRuns...)
+}
+
+func (r *serviceFakeRepo) scrobbleUpdatesSnapshot() []scrobbleUpdate {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	return append([]scrobbleUpdate(nil), r.scrobbleUpdates...)
 }
 
 func connectionKey(provider string, userID int, profileID string) string {
@@ -610,7 +689,7 @@ func (p *authProviderStub) PollDeviceAuth(
 ) (TokenSet, error) {
 	p.polled = true
 	expires := time.Now().Add(time.Hour)
-	return TokenSet{AccessToken: "access", RefreshToken: "refresh", TokenExpiresAt: &expires}, nil
+	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
 
 func (p *authProviderStub) RefreshToken(context.Context, ServerConfig, Connection) (TokenSet, error) {
@@ -1072,7 +1151,7 @@ func TestServiceStartsAndPollsDeviceAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollDeviceAuth: %v", err)
 	}
-	if conn.ProviderUsername != "alex" || conn.AccessToken != "access" {
+	if conn.ProviderUsername != "alex" || conn.AccessToken != testAccessToken {
 		t.Fatalf("connection = %+v", conn)
 	}
 	if !conn.ImportWatchedEnabled || !conn.ImportProgressEnabled ||
@@ -1208,7 +1287,7 @@ func TestServicePollDeviceAuthPreservesExistingConnectionToggles(t *testing.T) {
 		!conn.ExportWatchedEnabled || !conn.ScrobbleEnabled {
 		t.Fatalf("connection toggles were not preserved: %+v", conn)
 	}
-	if conn.AccessToken != "access" || conn.ProviderUsername != "alex" {
+	if conn.AccessToken != testAccessToken || conn.ProviderUsername != "alex" {
 		t.Fatalf("connection credentials/account were not refreshed: %+v", conn)
 	}
 }
@@ -1251,7 +1330,7 @@ func TestServiceRequestManualSyncCreatesAsyncRun(t *testing.T) {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("sync run did not complete: %+v", repo.syncRuns)
+			t.Fatalf("sync run did not complete: %+v", repo.syncRunsSnapshot())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -1411,8 +1490,8 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 		Provider:       "trakt",
 		UserID:         7,
 		ProfileID:      "profile-1",
-		AccessToken:    "old-access",
-		RefreshToken:   "old-refresh",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
 		TokenExpiresAt: &expiresAt,
 	}
 	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
@@ -1437,10 +1516,10 @@ func TestServicePluginRefreshPersistsAuthoritativeCredentialsBeforeFault(t *test
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	expiresAt := now.Add(-time.Minute)
 	client := &fakeWatchSyncPluginClient{refreshResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "rotated-access", TokenType: "Bearer"},
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: testRotatedAccessToken, TokenType: testBearerTokenType},
 		Fault: &pluginv1.WatchSyncFault{
 			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
-			SafeMessage: "reconnect required",
+			SafeMessage: testReconnectRequired,
 		},
 	}}
 	provider := testPluginProvider(t, client)
@@ -1451,8 +1530,8 @@ func TestServicePluginRefreshPersistsAuthoritativeCredentialsBeforeFault(t *test
 		Provider:       provider.Key(),
 		UserID:         7,
 		ProfileID:      "profile-1",
-		AccessToken:    "old-access",
-		RefreshToken:   "old-refresh",
+		AccessToken:    testOldAccessToken,
+		RefreshToken:   testOldRefreshToken,
 		TokenExpiresAt: &expiresAt,
 	}
 	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
@@ -1461,10 +1540,10 @@ func TestServicePluginRefreshPersistsAuthoritativeCredentialsBeforeFault(t *test
 		t.Fatalf("error = %#v", err)
 	}
 	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
-	if updated.AccessToken != "rotated-access" || updated.RefreshToken != "" || updated.TokenExpiresAt != nil {
+	if updated.AccessToken != testRotatedAccessToken || updated.RefreshToken != "" || updated.TokenExpiresAt != nil {
 		t.Fatalf("connection credentials = %#v", updated)
 	}
-	if updated.LastError != "reconnect required" {
+	if updated.LastError != testReconnectRequired {
 		t.Fatalf("LastError = %q", updated.LastError)
 	}
 }
@@ -1491,7 +1570,7 @@ func TestServiceSyncConnectionTreatsMatcherWarningsAsSuccess(t *testing.T) {
 		Provider:             "trakt",
 		UserID:               7,
 		ProfileID:            "profile-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ImportWatchedEnabled: true,
 	}
 
@@ -1526,7 +1605,7 @@ func TestServiceImportWatchedUsesProviderHistorySource(t *testing.T) {
 	}
 	watchState := &recordingWatchState{}
 	service := NewService(repo, NewRegistry()).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 		WithWatchState(watchState)
 
 	result, err := service.ImportWatched(context.Background(), Connection{
@@ -1544,7 +1623,7 @@ func TestServiceImportWatchedUsesProviderHistorySource(t *testing.T) {
 	if len(watchState.sources) != 1 || watchState.sources[0] != userstore.WatchHistorySourceSimkl {
 		t.Fatalf("recorded sources = %+v, want simkl", watchState.sources)
 	}
-	if len(watchState.targetIDs) != 1 || watchState.targetIDs[0] != "movie-1" {
+	if len(watchState.targetIDs) != 1 || watchState.targetIDs[0] != testMovieMediaID {
 		t.Fatalf("recorded target ids = %+v, want movie-1", watchState.targetIDs)
 	}
 	if len(watchState.completed) != 1 || !watchState.completed[0] {
@@ -1573,7 +1652,7 @@ func TestServiceImportWatchedSkipsRowsWithoutLastWatchedAt(t *testing.T) {
 	}
 	watchState := &recordingWatchState{}
 	service := NewService(repo, NewRegistry()).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 		WithWatchState(watchState)
 
 	result, err := service.ImportWatched(context.Background(), Connection{
@@ -1706,7 +1785,7 @@ func TestServiceSyncConnectionPreservesConnectionUpdatesAcrossFlows(t *testing.T
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
 		ID:              "history-1",
 		ProfileID:       "profile-1",
-		MediaItemID:     "movie-1",
+		MediaItemID:     testMovieMediaID,
 		WatchedAt:       "2026-05-04T12:00:00Z",
 		DurationSeconds: 7200,
 		Completed:       true,
@@ -1737,7 +1816,7 @@ func TestServiceSyncConnectionPreservesConnectionUpdatesAcrossFlows(t *testing.T
 	}
 	repo := newServiceFakeRepo()
 	service := NewService(repo, reg).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 		WithWatchState(&recordingWatchState{}).
 		WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	now := time.Date(2026, 5, 4, 14, 0, 0, 0, time.UTC)
@@ -1747,7 +1826,7 @@ func TestServiceSyncConnectionPreservesConnectionUpdatesAcrossFlows(t *testing.T
 		Provider:             "simkl",
 		UserID:               7,
 		ProfileID:            "profile-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ImportWatchedEnabled: true,
 		ExportWatchedEnabled: true,
 	}
@@ -1828,7 +1907,7 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
 		ID:              "history-1",
 		ProfileID:       "profile-1",
-		MediaItemID:     "movie-1",
+		MediaItemID:     testMovieMediaID,
 		WatchedAt:       "2026-05-04T12:00:00Z",
 		DurationSeconds: 7200,
 		Completed:       true,
@@ -1855,7 +1934,7 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 		Provider:             "trakt",
 		UserID:               7,
 		ProfileID:            "profile-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ExportWatchedEnabled: true,
 	}
 
@@ -1894,7 +1973,7 @@ func TestServiceExportWatchedReturnsStatusPersistenceFailure(t *testing.T) {
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
 		ID:              "history-1",
 		ProfileID:       "profile-1",
-		MediaItemID:     "movie-1",
+		MediaItemID:     testMovieMediaID,
 		WatchedAt:       "2026-05-04T12:00:00Z",
 		DurationSeconds: 7200,
 		Completed:       true,
@@ -1964,7 +2043,7 @@ func TestServiceCompletedScrobblePersistsAndSatisfiesHistoryExport(t *testing.T)
 	}
 }
 
-func TestServiceCompletedScrobbleClosesSessionWhenSatisfiedPersistenceFails(t *testing.T) {
+func TestServiceCompletedScrobbleDurablyRetriesSatisfiedPersistenceWithoutResendingStop(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.markSatisfiedErr = errors.New("database unavailable")
 	service := NewService(repo, NewRegistry())
@@ -1974,15 +2053,29 @@ func TestServiceCompletedScrobbleClosesSessionWhenSatisfiedPersistenceFails(t *t
 		HistoryID:         testWatchHistoryID,
 		Completed:         true,
 	}
-	repo.historyExports = []HistoryExport{{ID: "export-1", ConnectionID: conn.ID, HistoryID: event.HistoryID, Status: historyExportStatusPending}}
-	if err := service.dispatchScrobble(context.Background(), watchedScrobblerStub{}, ServerConfig{}, conn, event, "stop", nil); err != nil {
-		t.Fatal(err)
+	repo.historyExports = []HistoryExport{{ID: testHistoryExportID, ConnectionID: conn.ID, HistoryID: event.HistoryID, Status: historyExportStatusPending}}
+	if err := service.dispatchScrobble(context.Background(), watchedScrobblerStub{}, ServerConfig{}, conn, event, "stop", nil); err == nil {
+		t.Fatal("expected reconciliation persistence failure")
 	}
 	if repo.historyExports[0].Status != historyExportStatusPending {
 		t.Fatalf("history export status = %q", repo.historyExports[0].Status)
 	}
-	if len(repo.scrobbleUpdates) != 1 || repo.scrobbleUpdates[0].stopSentAt == nil {
-		t.Fatalf("scrobble updates = %#v", repo.scrobbleUpdates)
+	updates := repo.scrobbleUpdatesSnapshot()
+	if len(updates) != 1 || updates[0].stopSentAt == nil {
+		t.Fatalf("scrobble updates = %#v", updates)
+	}
+	if len(repo.pendingReconciliations) != 1 {
+		t.Fatalf("pending reconciliations = %#v", repo.pendingReconciliations)
+	}
+	repo.markSatisfiedErr = nil
+	if err := service.SweepOpenScrobbles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyExports[0].Status != historyExportStatusSatisfiedByScrobble || len(repo.pendingReconciliations) != 0 {
+		t.Fatalf("history exports=%#v pending=%#v", repo.historyExports, repo.pendingReconciliations)
+	}
+	if updates = repo.scrobbleUpdatesSnapshot(); len(updates) != 1 {
+		t.Fatalf("sweeper redispatched remote stop: %#v", updates)
 	}
 }
 
@@ -2006,7 +2099,7 @@ func TestServiceOrderedScrobblerDispatchesInQueueOrder(t *testing.T) {
 		UserID:            7,
 		ProfileID:         "profile-1",
 		Kind:              historyimport.KindMovie,
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		PositionSeconds:   10,
 		DurationSeconds:   100,
 	}
@@ -2064,7 +2157,7 @@ func TestServiceScrobbleStopKeepsSessionOpenWhenProviderStopFails(t *testing.T) 
 		PlaybackSessionID: "playback-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		HistoryID:         "history-1",
 		PositionSeconds:   120,
 	})
@@ -2074,18 +2167,19 @@ func TestServiceScrobbleStopKeepsSessionOpenWhenProviderStopFails(t *testing.T) 
 
 	deadline := time.Now().Add(time.Second)
 	for {
-		for _, update := range repo.scrobbleUpdates {
+		updates := repo.scrobbleUpdatesSnapshot()
+		for _, update := range updates {
 			if update.lastError == "stop failed" {
-				for _, seen := range repo.scrobbleUpdates {
+				for _, seen := range updates {
 					if seen.stopSentAt != nil {
-						t.Fatalf("stop_sent_at was set despite provider failure: %+v", repo.scrobbleUpdates)
+						t.Fatalf("stop_sent_at was set despite provider failure: %+v", updates)
 					}
 				}
 				return
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for failed stop update: %+v", repo.scrobbleUpdates)
+			t.Fatalf("timed out waiting for failed stop update: %+v", updates)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -2111,7 +2205,7 @@ func TestServiceConfirmedStopWaitsForProviderAndReopensFailedReplacement(t *test
 		PlaybackSessionID: "playback-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		HistoryID:         "history-1",
 		PositionSeconds:   120,
 	})
@@ -2125,9 +2219,10 @@ func TestServiceConfirmedStopWaitsForProviderAndReopensFailedReplacement(t *test
 	if reopened.positionSeconds != 120 || reopened.historyID != "history-1" {
 		t.Fatalf("reopened scrobble = %+v, want authoritative progress", reopened)
 	}
-	for _, update := range repo.scrobbleUpdates {
+	updates := repo.scrobbleUpdatesSnapshot()
+	for _, update := range updates {
 		if update.stopSentAt != nil {
-			t.Fatalf("failed confirmed stop marked session closed: %+v", repo.scrobbleUpdates)
+			t.Fatalf("failed confirmed stop marked session closed: %+v", updates)
 		}
 	}
 }
@@ -2156,7 +2251,7 @@ func TestServiceConfirmedStopRetriesImmediatelyAfterProviderFailure(t *testing.T
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	if err := service.ScrobbleStopConfirmed(context.Background(), event); err == nil {
@@ -2189,7 +2284,7 @@ func TestServiceConfirmedStopWaitsInProviderOrder(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 	if err := service.ScrobbleStart(context.Background(), event); err != nil {
 		t.Fatalf("ScrobbleStart: %v", err)
@@ -2270,7 +2365,7 @@ func TestServiceConfirmedStopDispatchesProvidersIndependently(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	result := make(chan error, 1)
@@ -2315,7 +2410,7 @@ func TestServiceConfirmedStopWaitsBehindFallbackWithoutProviderOrdering(t *testi
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	if err := service.ScrobbleStop(context.Background(), event); err != nil {
@@ -2368,7 +2463,7 @@ func TestServiceConfirmedStopDoesNotResendSuccessfulProvider(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	if err := service.ScrobbleStopConfirmed(context.Background(), event); err != nil {
@@ -2414,7 +2509,7 @@ func TestServiceConfirmedStopSerializesConcurrentConfirmation(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	firstResult := make(chan error, 1)
@@ -2472,7 +2567,7 @@ func TestServiceConfirmedStopCannotCompleteReclaimedLease(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	}
 
 	result := make(chan error, 1)
@@ -2511,7 +2606,7 @@ func TestServiceConfirmedStopRejectsUnregisteredProvider(t *testing.T) {
 		PlaybackSessionID: "session-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 	})
 	if err == nil || !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("ScrobbleStopConfirmed error = %v, want unregistered provider", err)
@@ -2528,8 +2623,8 @@ func TestServiceScrobbleRefreshesExpiredTokenBeforeDispatch(t *testing.T) {
 		Provider:        "trakt",
 		UserID:          7,
 		ProfileID:       "profile-1",
-		AccessToken:     "old-access",
-		RefreshToken:    "old-refresh",
+		AccessToken:     testOldAccessToken,
+		RefreshToken:    testOldRefreshToken,
 		TokenExpiresAt:  &expiresAt,
 		ScrobbleEnabled: true,
 	}}
@@ -2552,7 +2647,7 @@ func TestServiceScrobbleRefreshesExpiredTokenBeforeDispatch(t *testing.T) {
 		PlaybackSessionID: "playback-1",
 		UserID:            7,
 		ProfileID:         "profile-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		HistoryID:         "history-1",
 		PositionSeconds:   120,
 	})
@@ -2584,13 +2679,13 @@ func TestServiceSweepOpenScrobblesRetriesProviderStop(t *testing.T) {
 		Provider:        "trakt",
 		UserID:          7,
 		ProfileID:       "profile-1",
-		AccessToken:     "access",
+		AccessToken:     testAccessToken,
 		ScrobbleEnabled: true,
 	}
 	repo.scrobbleSessions = []ScrobbleSession{{
 		PlaybackSessionID: "playback-1",
 		ConnectionID:      "conn-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		Kind:              "movie",
 		TMDBID:            "603",
 		HistoryID:         "history-1",
@@ -2623,13 +2718,14 @@ func TestServiceSweepOpenScrobblesRetriesProviderStop(t *testing.T) {
 		t.Fatal("timed out waiting for provider stop retry")
 	}
 	foundClosed := false
-	for _, update := range repo.scrobbleUpdates {
+	updates := repo.scrobbleUpdatesSnapshot()
+	for _, update := range updates {
 		if update.action == "stop" && update.stopSentAt != nil {
 			foundClosed = true
 		}
 	}
 	if !foundClosed {
-		t.Fatalf("scrobble updates = %+v, want successful stop to mark session closed", repo.scrobbleUpdates)
+		t.Fatalf("scrobble updates = %+v, want successful stop to mark session closed", updates)
 	}
 }
 
@@ -2640,13 +2736,13 @@ func TestServiceSweepOpenScrobblesKeepsFailedStopOpen(t *testing.T) {
 		Provider:        "trakt",
 		UserID:          7,
 		ProfileID:       "profile-1",
-		AccessToken:     "access",
+		AccessToken:     testAccessToken,
 		ScrobbleEnabled: true,
 	}
 	repo.scrobbleSessions = []ScrobbleSession{{
 		PlaybackSessionID: "playback-1",
 		ConnectionID:      "conn-1",
-		MediaItemID:       "movie-1",
+		MediaItemID:       testMovieMediaID,
 		Kind:              "movie",
 		TMDBID:            "603",
 		HistoryID:         "history-1",
@@ -2663,15 +2759,16 @@ func TestServiceSweepOpenScrobblesKeepsFailedStopOpen(t *testing.T) {
 	if err := service.SweepOpenScrobbles(context.Background()); err != nil {
 		t.Fatalf("SweepOpenScrobbles: %v", err)
 	}
-	for _, update := range repo.scrobbleUpdates {
+	updates := repo.scrobbleUpdatesSnapshot()
+	for _, update := range updates {
 		if update.stopSentAt != nil {
-			t.Fatalf("stop_sent_at was set despite provider failure: %+v", repo.scrobbleUpdates)
+			t.Fatalf("stop_sent_at was set despite provider failure: %+v", updates)
 		}
 		if update.lastError == "provider offline" {
 			return
 		}
 	}
-	t.Fatalf("scrobble updates = %+v, want provider error recorded", repo.scrobbleUpdates)
+	t.Fatalf("scrobble updates = %+v, want provider error recorded", updates)
 }
 
 func TestAppendWarningSummarizesDuplicateReasons(t *testing.T) {
@@ -2714,20 +2811,20 @@ func TestHasVisibleCompletedHistoryAtOrAfterScopesTargetAndPaginates(t *testing.
 	for i := 0; i < 500; i++ {
 		rows[i] = userstore.WatchHistoryEntry{
 			ProfileID:   "profile-1",
-			MediaItemID: "movie-1",
+			MediaItemID: testMovieMediaID,
 			WatchedAt:   at.Add(-time.Duration(500-i) * time.Hour).Format(time.RFC3339),
 			Completed:   true,
 		}
 	}
 	rows[500] = userstore.WatchHistoryEntry{
 		ProfileID:   "profile-1",
-		MediaItemID: "movie-1",
+		MediaItemID: testMovieMediaID,
 		WatchedAt:   at.Add(time.Minute).Format(time.RFC3339),
 		Completed:   true,
 	}
 	store := &completedHistoryListerStub{rows: rows}
 
-	found, err := hasVisibleCompletedHistoryAtOrAfter(context.Background(), store, "profile-1", "movie-1", at)
+	found, err := hasVisibleCompletedHistoryAtOrAfter(context.Background(), store, "profile-1", testMovieMediaID, at)
 	if err != nil {
 		t.Fatalf("hasVisibleCompletedHistoryAtOrAfter: %v", err)
 	}
@@ -2738,7 +2835,7 @@ func TestHasVisibleCompletedHistoryAtOrAfterScopesTargetAndPaginates(t *testing.
 		t.Fatalf("query count = %d, want 2", len(store.queries))
 	}
 	for _, query := range store.queries {
-		if query.ProfileID != "profile-1" || len(query.MediaItemIDs) != 1 || query.MediaItemIDs[0] != "movie-1" {
+		if query.ProfileID != "profile-1" || len(query.MediaItemIDs) != 1 || query.MediaItemIDs[0] != testMovieMediaID {
 			t.Fatalf("query was not scoped to target media item: %+v", query)
 		}
 	}
@@ -2840,8 +2937,8 @@ func TestServicePluginAPIKeyConnectRejectsEmptyReturnedCredential(t *testing.T) 
 func TestServicePluginAPIKeyReconnectClearsConnectionError(t *testing.T) {
 	repo := newServiceFakeRepo()
 	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
-		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "new-access", TokenType: "Bearer"},
-		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "account-1", Username: "alice"},
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "new-access", TokenType: testBearerTokenType},
+		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "account-1", Username: testPluginUsername},
 	}}
 	provider := testPluginProvider(t, client)
 	registry := NewRegistry()
@@ -2853,7 +2950,7 @@ func TestServicePluginAPIKeyReconnectClearsConnectionError(t *testing.T) {
 		Provider:  provider.Key(),
 		UserID:    7,
 		ProfileID: "profile-1",
-		LastError: "reconnect required",
+		LastError: testReconnectRequired,
 	}
 	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
 
@@ -2885,7 +2982,7 @@ func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
 	}
 	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 	service := NewService(repo, reg).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 		WithWatchState(noOpWatchState{}).
 		WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	service.now = func() time.Time { return now }
@@ -2894,7 +2991,7 @@ func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
 		Provider:              "trakt",
 		UserID:                7,
 		ProfileID:             "profile-1",
-		AccessToken:           "access",
+		AccessToken:           testAccessToken,
 		ImportWatchedEnabled:  true,
 		ImportProgressEnabled: true,
 	}
@@ -2956,8 +3053,8 @@ func TestServiceLocalWatchEventCommitsPartialResultAndDefersRateLimit(t *testing
 		ProfileID: conn.ProfileID,
 		Plays: []LocalPlay{{
 			HistoryID:       "history-1",
-			MediaItemID:     "movie-1",
-			ProviderItemKey: "movie:tmdb:603",
+			MediaItemID:     testMovieMediaID,
+			ProviderItemKey: testMovieProviderItemKey,
 		}},
 	}); err != nil {
 		t.Fatal(err)
@@ -2980,8 +3077,8 @@ func TestServicePluginTransportFailureLeavesExportPending(t *testing.T) {
 		exportErr: retryableProviderError{message: "watch sync plugin is unavailable"},
 	}, []LocalPlay{{
 		HistoryID:       "history-1",
-		MediaItemID:     "movie-1",
-		ProviderItemKey: "movie:tmdb:603",
+		MediaItemID:     testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey,
 	}})
 	if !isRetryableProviderError(err) {
 		t.Fatalf("error = %#v", err)
@@ -3010,7 +3107,7 @@ func TestServicePluginInvalidCredentialLeavesExportPendingAndRecordsConnectionEr
 		Provider:             provider.Key(),
 		UserID:               7,
 		ProfileID:            "profile-1",
-		AccessToken:          "secret",
+		AccessToken:          testSecretValue,
 		ExportWatchedEnabled: true,
 	}
 	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
@@ -3020,8 +3117,8 @@ func TestServicePluginInvalidCredentialLeavesExportPendingAndRecordsConnectionEr
 		ProfileID: conn.ProfileID,
 		Plays: []LocalPlay{{
 			HistoryID:       "history-1",
-			MediaItemID:     "movie-1",
-			ProviderItemKey: "movie:tmdb:603",
+			MediaItemID:     testMovieMediaID,
+			ProviderItemKey: testMovieProviderItemKey,
 			Kind:            historyimport.KindMovie,
 		}},
 	})
@@ -3046,8 +3143,8 @@ func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
 		exportErr: errors.New("provider offline"),
 	}, []LocalPlay{{
 		HistoryID:       "history-1",
-		MediaItemID:     "movie-1",
-		ProviderItemKey: "movie:tmdb:603",
+		MediaItemID:     testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey,
 	}})
 	if err == nil {
 		t.Fatal("exportLocalPlays error = nil, want combined export and persistence failure")
@@ -3063,7 +3160,7 @@ func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
 func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.historyExports = []HistoryExport{{
-		ID:           "export-1",
+		ID:           testHistoryExportID,
 		ConnectionID: "conn-1",
 		HistoryID:    "history-1",
 		Status:       historyExportStatusSent,
@@ -3079,7 +3176,7 @@ func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing
 func TestServiceFakeRepoPreservesNotFoundHistoryExport(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.historyExports = []HistoryExport{{
-		ID:           "export-1",
+		ID:           testHistoryExportID,
 		ConnectionID: "conn-1",
 		HistoryID:    "history-1",
 		Status:       historyExportStatusNotFound,
@@ -3091,7 +3188,7 @@ func TestServiceFakeRepoPreservesNotFoundHistoryExport(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.MarkHistoryExportStatus(context.Background(), "export-1", historyExportStatusFailed, "retry"); err != nil {
+	if err := repo.MarkHistoryExportStatus(context.Background(), testHistoryExportID, historyExportStatusFailed, "retry"); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
@@ -3145,7 +3242,7 @@ func TestServiceScrobbleInvalidCredentialRecordsConnectionError(t *testing.T) {
 	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
 	fault := watchSyncProviderFaultError{
 		code:    pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
-		message: "reconnect required",
+		message: testReconnectRequired,
 	}
 	err := service.dispatchScrobble(
 		context.Background(), scrobblerStub{stopErr: fault}, ServerConfig{}, conn,
@@ -3172,7 +3269,7 @@ func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
 		ID:              "history-1",
 		ProfileID:       "profile-1",
-		MediaItemID:     "movie-1",
+		MediaItemID:     testMovieMediaID,
 		WatchedAt:       "2026-05-04T12:00:00Z",
 		DurationSeconds: 7200,
 		Completed:       true,
@@ -3199,7 +3296,7 @@ func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
 		Provider:             "trakt",
 		UserID:               7,
 		ProfileID:            "profile-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ExportWatchedEnabled: true,
 	}
 	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
@@ -3236,7 +3333,7 @@ func TestSyncDueConnectionsSkipsSiblingsOfRateLimitedAccount(t *testing.T) {
 	}
 	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
 	service := NewService(repo, reg).
-		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 		WithWatchState(noOpWatchState{}).
 		WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
 	service.now = func() time.Time { return now }
@@ -3249,7 +3346,7 @@ func TestSyncDueConnectionsSkipsSiblingsOfRateLimitedAccount(t *testing.T) {
 		UserID:               7,
 		ProfileID:            "profile-1",
 		ProviderAccountID:    "acct-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ImportWatchedEnabled: true,
 	}
 	second := Connection{
@@ -3258,7 +3355,7 @@ func TestSyncDueConnectionsSkipsSiblingsOfRateLimitedAccount(t *testing.T) {
 		UserID:               7,
 		ProfileID:            "profile-2",
 		ProviderAccountID:    "acct-1",
-		AccessToken:          "access",
+		AccessToken:          testAccessToken,
 		ImportWatchedEnabled: true,
 	}
 	repo.connections[connectionKey("trakt", 7, "profile-1")] = first

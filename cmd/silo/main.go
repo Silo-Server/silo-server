@@ -849,6 +849,7 @@ func main() {
 	}
 	var watchProviderService *watchsync.Service
 	var watchProviderRegistry *watchsync.Registry
+	var watchProviderRepo *watchsync.PostgresRepository
 	if deps.DB != nil {
 		watchProviderRegistry = watchsync.NewRegistry()
 		if err := watchProviderRegistry.Register(trakt.NewProvider(nil, "")); err != nil {
@@ -860,10 +861,8 @@ func main() {
 		if err := watchProviderRegistry.Register(watchmdblist.NewProvider(nil, "")); err != nil {
 			log.Fatalf("register watch provider: %v", err)
 		}
-		watchProviderService = watchsync.NewService(
-			watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher),
-			watchProviderRegistry,
-		)
+		watchProviderRepo = watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher)
+		watchProviderService = watchsync.NewService(watchProviderRepo, watchProviderRegistry)
 		deps.WatchProviderService = watchProviderService
 	}
 
@@ -1077,7 +1076,7 @@ func main() {
 		)
 		if watchProviderRegistry != nil {
 			reloadWatchProviders := func(ctx context.Context) {
-				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService); err != nil {
+				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo); err != nil {
 					slog.WarnContext(ctx, "failed to reload watch sync plugin providers", "component", "app", "error", err)
 				}
 			}
@@ -3059,6 +3058,7 @@ func reloadWatchSyncPluginProviders(
 	registry *watchsync.Registry,
 	store markerPluginCapabilityStore,
 	service *plugins.Service,
+	repository watchsync.PluginCredentialRepository,
 ) error {
 	if registry == nil {
 		return nil
@@ -3119,6 +3119,10 @@ func reloadWatchSyncPluginProviders(
 				ResolveClient: func(callCtx context.Context, installationID int, capabilityID string) (watchsync.WatchSyncPluginClient, error) {
 					return service.WatchSyncProviderClient(callCtx, installationID, capabilityID)
 				},
+				ResolveConfig: func(callCtx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error) {
+					return service.WatchSyncProviderConfig(callCtx, installationID)
+				},
+				Repository: repository,
 			})
 			if err != nil {
 				slog.WarnContext(ctx, "skip unsupported watch sync plugin capability",

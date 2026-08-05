@@ -102,6 +102,9 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	}
 	authMethod := authMethodOf(provider)
 	credentialsConfigured := authMethod == AuthMethodAPIKey
+	if _, pluginConfig := provider.(interface{ usesHostPluginConfig() }); pluginConfig {
+		credentialsConfigured = true
+	}
 	if !credentialsConfigured {
 		cfg, _ := s.serverConfig(ctx, providerKey)
 		credentialsConfigured = cfg.Configured()
@@ -499,7 +502,7 @@ func (s *Service) PollDeviceAuth(
 		return Connection{}, err
 	}
 
-	account, err := authProvider.LookupAccount(ctx, cfg, Connection{AccessToken: tokens.AccessToken})
+	account, err := authProvider.LookupAccount(ctx, cfg, connectionWithTokens(Connection{}, tokens))
 	if err != nil {
 		return Connection{}, err
 	}
@@ -587,9 +590,7 @@ func (s *Service) persistConnection(
 	conn.Provider = providerKey
 	conn.UserID = userID
 	conn.ProfileID = profileID
-	conn.AccessToken = tokens.AccessToken
-	conn.RefreshToken = tokens.RefreshToken
-	conn.TokenExpiresAt = tokens.TokenExpiresAt
+	conn = connectionWithTokens(conn, tokens)
 	conn.ProviderAccountID = account.ID
 	conn.ProviderUsername = account.Username
 	conn.LastError = ""
@@ -1264,9 +1265,7 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provid
 	tokens, err := authProvider.RefreshToken(ctx, cfg, conn)
 	_, authoritative := provider.(authoritativeRefreshProvider)
 	if authoritative && strings.TrimSpace(tokens.AccessToken) != "" {
-		conn.AccessToken = tokens.AccessToken
-		conn.RefreshToken = tokens.RefreshToken
-		conn.TokenExpiresAt = tokens.TokenExpiresAt
+		conn = connectionWithTokens(conn, tokens)
 	} else if err == nil {
 		if tokens.AccessToken != "" {
 			conn.AccessToken = tokens.AccessToken
@@ -1295,6 +1294,16 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provid
 		return Connection{}, fmt.Errorf("refresh %s token: %w", conn.Provider, err)
 	}
 	return conn, nil
+}
+
+func connectionWithTokens(conn Connection, tokens TokenSet) Connection {
+	conn.AccessToken = tokens.AccessToken
+	conn.RefreshToken = tokens.RefreshToken
+	conn.TokenExpiresAt = tokens.TokenExpiresAt
+	conn.TokenType = tokens.TokenType
+	conn.Scopes = append([]string(nil), tokens.Scopes...)
+	conn.SecretAttributes = cloneStringMap(tokens.SecretAttributes)
+	return conn
 }
 
 type ExportWatchedResult struct {
@@ -2042,34 +2051,42 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 	}
 	if action == scrobbleActionStop {
 		stopSentAt := s.now()
-		if event.Completed && event.HistoryID != "" {
-			if err := s.repo.MarkHistoryExportSatisfiedByScrobble(ctx, conn.ID, event.HistoryID); err != nil {
-				slog.WarnContext(ctx, "failed to mark history export satisfied by scrobble",
-					"component", "watchsync",
-					"provider", conn.Provider,
-					"connection_id", conn.ID,
-					"history_id", event.HistoryID,
-					"error", err,
-				)
-			}
-		}
 		if confirmedClaim != nil {
-			return s.repo.CompleteConfirmedScrobbleStop(
+			if err := s.repo.CompleteConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,
 				event.PositionSeconds, event.HistoryID, *confirmedClaim, stopSentAt,
-			)
-		}
-		if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, "", &stopSentAt); err != nil {
+			); err != nil {
+				return err
+			}
+		} else if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, "", &stopSentAt); err != nil {
 			return err
+		}
+		if event.Completed && event.HistoryID != "" {
+			return s.reconcileScrobbleHistory(ctx, ScrobbleSession{
+				PlaybackSessionID: event.PlaybackSessionID,
+				ConnectionID:      conn.ID,
+				HistoryID:         event.HistoryID,
+			})
 		}
 	}
 	return nil
 }
 
 func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
+	var reconciliationErr error
+	pending, err := s.repo.ListPendingScrobbleReconciliations(ctx)
+	if err != nil {
+		reconciliationErr = err
+	} else {
+		for _, session := range pending {
+			if err := s.reconcileScrobbleHistory(ctx, session); err != nil {
+				reconciliationErr = errors.Join(reconciliationErr, err)
+			}
+		}
+	}
 	sessions, err := s.repo.ListOpenScrobbleSessions(ctx)
 	if err != nil {
-		return err
+		return errors.Join(reconciliationErr, err)
 	}
 	for _, session := range sessions {
 		conn, ok, err := s.repo.GetConnectionByID(ctx, session.ConnectionID)
@@ -2099,6 +2116,19 @@ func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
 		}
 		_ = s.dispatchScrobble(ctx, scrobbler, cfg, conn, scrobbleEventFromSession(session, conn, s.now()), "stop", nil)
 	}
+	return reconciliationErr
+}
+
+func (s *Service) reconcileScrobbleHistory(ctx context.Context, session ScrobbleSession) error {
+	if session.PlaybackSessionID == "" || session.ConnectionID == "" || session.HistoryID == "" {
+		return errors.New("scrobble history reconciliation identity is incomplete")
+	}
+	if err := s.repo.MarkHistoryExportSatisfiedByScrobble(ctx, session.ConnectionID, session.HistoryID); err != nil {
+		return fmt.Errorf("mark history export satisfied by scrobble: %w", err)
+	}
+	if err := s.repo.MarkScrobbleHistoryReconciled(ctx, session.PlaybackSessionID, session.ConnectionID, s.now()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2127,6 +2157,9 @@ func scrobbleEventFromSession(session ScrobbleSession, conn Connection, occurred
 }
 
 func authMethodOf(provider Provider) string {
+	if provider, ok := provider.(interface{ AuthMethod() string }); ok {
+		return provider.AuthMethod()
+	}
 	if _, ok := provider.(APIKeyAuthProvider); ok {
 		return AuthMethodAPIKey
 	}
@@ -2134,6 +2167,11 @@ func authMethodOf(provider Provider) string {
 }
 
 func (s *Service) serverConfig(ctx context.Context, providerKey string) (ServerConfig, error) {
+	if provider, ok := s.registry.Get(providerKey); ok {
+		if _, pluginConfig := provider.(interface{ usesHostPluginConfig() }); pluginConfig {
+			return ServerConfig{}, nil
+		}
+	}
 	if provider, ok := s.registry.Get(providerKey); ok && authMethodOf(provider) == AuthMethodAPIKey {
 		// API-key providers carry their credential on the connection itself
 		// and don't consult server settings. Return a zero config so sync

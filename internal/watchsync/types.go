@@ -125,6 +125,9 @@ type FavoriteImportBatch struct {
 	Rows           []RemoteFavorite
 	UpdatedCursors map[string]string
 	Warnings       []string
+	// Incremental means absent remote items are not deletions. The zero value is
+	// an authoritative snapshot, preserving existing built-in provider behavior.
+	Incremental bool
 }
 
 type FavoriteBatchImporter interface {
@@ -188,6 +191,9 @@ type Connection struct {
 	AccessToken                  string
 	RefreshToken                 string
 	TokenExpiresAt               *time.Time
+	TokenType                    string
+	Scopes                       []string
+	SecretAttributes             map[string]string
 	ImportWatchedEnabled         bool
 	ImportProgressEnabled        bool
 	ExportWatchedEnabled         bool
@@ -318,9 +324,12 @@ type DeviceAuthSession struct {
 }
 
 type TokenSet struct {
-	AccessToken    string
-	RefreshToken   string
-	TokenExpiresAt *time.Time
+	AccessToken      string
+	RefreshToken     string
+	TokenExpiresAt   *time.Time
+	TokenType        string
+	Scopes           []string
+	SecretAttributes map[string]string
 }
 
 type ProviderAccount struct {
@@ -525,27 +534,28 @@ type ListItemState struct {
 }
 
 type ScrobbleSession struct {
-	PlaybackSessionID string
-	ConnectionID      string
-	MediaItemID       string
-	ProviderItemKey   string
-	Kind              string
-	IMDbID            string
-	TMDBID            string
-	TVDBID            string
-	SeriesIMDbID      string
-	SeriesTMDBID      string
-	SeriesTVDBID      string
-	SeasonNumber      int
-	EpisodeNumber     int
-	HistoryID         string
-	StartedAt         time.Time
-	LastProgress      float64
-	DurationSeconds   float64
-	Completed         bool
-	LastAction        string
-	StopSentAt        *time.Time
-	LastError         string
+	PlaybackSessionID   string
+	ConnectionID        string
+	MediaItemID         string
+	ProviderItemKey     string
+	Kind                string
+	IMDbID              string
+	TMDBID              string
+	TVDBID              string
+	SeriesIMDbID        string
+	SeriesTMDBID        string
+	SeriesTVDBID        string
+	SeasonNumber        int
+	EpisodeNumber       int
+	HistoryID           string
+	StartedAt           time.Time
+	LastProgress        float64
+	DurationSeconds     float64
+	Completed           bool
+	LastAction          string
+	StopSentAt          *time.Time
+	HistoryReconciledAt *time.Time
+	LastError           string
 }
 
 type ExportResult struct {
