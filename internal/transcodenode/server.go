@@ -846,7 +846,13 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		s.touchSession(sessionID)
 	}
 
-	manifest, err := session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
+	var manifest []byte
+	var err error
+	if r.URL.Query().Get(playback.SourceTimelineQueryParam) == "1" {
+		manifest, err = session.BuildSourceAlignedPlaybackManifest("segment/", r.URL.RawQuery)
+	} else {
+		manifest, err = session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "get manifest", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)

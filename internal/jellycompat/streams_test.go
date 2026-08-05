@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -94,7 +95,7 @@ func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
 	}
 }
 
-func TestCompatInitialTranscodePositionKeepsRealManifestSourceAligned(t *testing.T) {
+func TestCompatInitialTranscodePositionKeepsResumeNearRequestedSegment(t *testing.T) {
 	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
 	seek, segment := compatInitialTranscodePosition(short, 2, 17.3)
 	if seek != 17.3 || segment != 8 {
@@ -103,8 +104,28 @@ func TestCompatInitialTranscodePositionKeepsRealManifestSourceAligned(t *testing
 
 	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
 	seek, segment = compatInitialTranscodePosition(long, 2, 17.3)
-	if seek != 0 || segment != 0 {
-		t.Fatalf("real manifest position = (%v, %d), want source-aligned (0, 0)", seek, segment)
+	if seek != 17.3 || segment != 8 {
+		t.Fatalf("real manifest position = (%v, %d), want (17.3, 8)", seek, segment)
+	}
+}
+
+func TestBuildProxyRedirectURLRequestsSourceAlignedCompatManifest(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	redirectURL, err := h.buildProxyRedirectURL(
+		"play-1",
+		"upstream-1",
+		string(playback.PlayTranscode),
+		&models.MediaFile{FilePath: "/media/movie.mkv"},
+		PlaybackMediaSource{},
+		"http://transcode-1",
+		0,
+		&nodepool.Node{URL: "http://proxy-1"},
+	)
+	if err != nil {
+		t.Fatalf("buildProxyRedirectURL: %v", err)
+	}
+	if !strings.HasSuffix(redirectURL, "/master.m3u8?"+playback.SourceTimelineQueryParam+"=1") {
+		t.Fatalf("redirect URL = %q, want source-timeline opt-in", redirectURL)
 	}
 }
 

@@ -388,7 +388,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		}
 		return redirectURL, nil
 	case string(playback.PlayTranscode):
-		return proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8", nil
+		return proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8?" + playback.SourceTimelineQueryParam + "=1", nil
 	default:
 		return "", fmt.Errorf("unsupported proxy method %q", method)
 	}

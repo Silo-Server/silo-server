@@ -1585,7 +1585,7 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 	for {
 		manifest, err := transcodeSession.GetManifest()
 		if err == nil {
-			return manifest, nil
+			return playback.AlignRealManifestToSourceTimeline(manifest, transcodeSession.Opts(), "")
 		}
 		if !errors.Is(err, playback.ErrManifestNotReady) {
 			return nil, err
@@ -1700,14 +1700,11 @@ func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuratio
 	return playback.CanGenerateSyntheticManifest(float64(source.Version.Duration), segmentDuration)
 }
 
-// compatInitialTranscodePosition keeps the FFmpeg timeline consistent with the
-// manifest exposed to Jellyfin clients. Bounded synthetic manifests retain the
-// full source timeline and can start FFmpeg at the requested segment. Real
-// growing manifests must start at source time zero because clients also apply
-// their negotiated resume position; starting the playlist at that offset would
-// make them seek twice.
+// compatInitialTranscodePosition keeps FFmpeg close to the requested resume
+// position. Bounded synthetic manifests list the omitted source segments;
+// seeked real manifests receive an EXT-X-GAP timeline anchor before serving.
 func compatInitialTranscodePosition(source PlaybackMediaSource, segmentDuration int, requested float64) (float64, int) {
-	if requested <= 0 || !shouldGenerateCompatFullManifest(source, segmentDuration) {
+	if requested <= 0 {
 		return 0, 0
 	}
 	if duration := float64(source.Version.Duration); duration > 0 && requested > duration {
