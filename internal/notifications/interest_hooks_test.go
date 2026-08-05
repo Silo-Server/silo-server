@@ -3,8 +3,11 @@ package notifications
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -19,7 +22,7 @@ func (p preferenceTransactionTestProvider) ForUser(context.Context, int) (userst
 
 func (preferenceTransactionTestProvider) Close() error { return nil }
 
-func TestInterestTrackingStorePreservesPreferenceSettingsTransactions(t *testing.T) {
+func TestInterestTrackingStorePreservesSettingCapabilities(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -52,5 +55,48 @@ func TestInterestTrackingStorePreservesPreferenceSettingsTransactions(t *testing
 	}
 	if !called {
 		t.Fatal("transaction callback was not invoked")
+	}
+
+	cas, ok := wrapped.(userstore.SettingValueCompareAndSetter)
+	if !ok {
+		t.Fatal("interest-tracking wrapper dropped SettingValueCompareAndSetter")
+	}
+	identity := userstore.SettingIdentity{Key: "ui.test", Scope: settingscontract.ScopeAccount}
+	first, err := cas.CompareAndSetSettingValue(
+		context.Background(), identity, json.RawMessage(`"first"`), 0)
+	if err != nil {
+		t.Fatalf("CompareAndSetSettingValue: %v", err)
+	}
+
+	mutationTx, ok := wrapped.(userstore.SettingMutationTransactioner)
+	if !ok {
+		t.Fatal("interest-tracking wrapper dropped SettingMutationTransactioner")
+	}
+	called = false
+	if err := mutationTx.WithSettingMutationTransaction(context.Background(), "wrapped-mutation",
+		func(writer userstore.SettingMutationWriter) error {
+			called = true
+			if _, err := writer.CompareAndSetSettingValue(
+				context.Background(), identity, json.RawMessage(`"second"`), first.Revision); err != nil {
+				return err
+			}
+			_, _, err := writer.PutSettingMutation(context.Background(), userstore.SettingMutationRecord{
+				MutationID: "wrapped-mutation", RequestHash: "hash",
+				Result: json.RawMessage(`{"ok":true}`), ExpiresAt: time.Now().UTC().Add(time.Hour),
+			})
+			return err
+		}); err != nil {
+		t.Fatalf("WithSettingMutationTransaction: %v", err)
+	}
+	if !called {
+		t.Fatal("mutation transaction callback was not invoked")
+	}
+	stored, err := wrapped.GetSettingValue(context.Background(), identity)
+	if err != nil || stored == nil || stored.Revision != 2 {
+		t.Fatalf("wrapped setting after transaction = %+v (%v), want revision 2", stored, err)
+	}
+	receipt, err := wrapped.GetSettingMutation(context.Background(), "wrapped-mutation")
+	if err != nil || receipt == nil || receipt.RequestHash != "hash" {
+		t.Fatalf("wrapped receipt = %+v (%v)", receipt, err)
 	}
 }

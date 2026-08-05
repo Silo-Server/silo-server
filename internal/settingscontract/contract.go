@@ -22,6 +22,7 @@ type Scope string
 const (
 	ScopeAccount        Scope = "account"
 	ScopeProfile        Scope = "profile"
+	ScopeProfileClient  Scope = "profile_client"
 	ScopeProfileDevice  Scope = "profile_device"
 	ScopeProfileLibrary Scope = "profile_library"
 	ScopeProfileSeries  Scope = "profile_series"
@@ -37,6 +38,7 @@ const (
 var remoteScopes = map[Scope]struct{}{
 	ScopeAccount:        {},
 	ScopeProfile:        {},
+	ScopeProfileClient:  {},
 	ScopeProfileDevice:  {},
 	ScopeProfileLibrary: {},
 	ScopeProfileSeries:  {},
@@ -46,6 +48,31 @@ var remoteScopes = map[Scope]struct{}{
 func (s Scope) IsRemote() bool {
 	_, ok := remoteScopes[s]
 	return ok
+}
+
+// ClientFamily identifies a class of like clients whose presentation and
+// navigation preferences should roam together. It is explicit request
+// metadata rather than an inference from the device platform string: platform
+// names are free-form registry metadata, while this value participates in a
+// canonical storage identity.
+type ClientFamily string
+
+const (
+	ClientFamilyTV      ClientFamily = "tv"
+	ClientFamilyMobile  ClientFamily = "mobile"
+	ClientFamilyTablet  ClientFamily = "tablet"
+	ClientFamilyDesktop ClientFamily = "desktop"
+	ClientFamilyWeb     ClientFamily = "web"
+)
+
+// Valid reports whether f is one of the canonical lower-case wire values.
+func (f ClientFamily) Valid() bool {
+	switch f {
+	case ClientFamilyTV, ClientFamilyMobile, ClientFamilyTablet, ClientFamilyDesktop, ClientFamilyWeb:
+		return true
+	default:
+		return false
+	}
 }
 
 // Persistence declares who stores a setting's value.

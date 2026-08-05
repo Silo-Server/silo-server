@@ -67,6 +67,14 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	// any stale partial first so a failed prior attempt can't be mistaken for output.
 	_ = os.Remove(partPath)
 
+	// Resolve a multi-device hw_device list to one concrete GPU for this
+	// encode. Run blocks until ffmpeg exits, so the deferred release fires at
+	// exactly the process-exit boundary.
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
+	opts.HWDevice = hwDevice
+	defer releaseHWDevice()
+
 	args := buildPrepareFileArgs(opts, partPath)
 	bin := opts.FFmpegPath
 	if bin == "" {

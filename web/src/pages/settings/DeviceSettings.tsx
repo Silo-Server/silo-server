@@ -15,13 +15,15 @@ import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
 import { useClearDeviceSettings, useForgetDevice, useMyDevices } from "@/hooks/queries/devices";
 import {
+  settingsCapabilitiesSupportKey,
+  useSettingsCapabilities,
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
+import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
@@ -237,11 +239,26 @@ function DeviceDetail({
   const ownerLabel = forSomeoneElse ? `${device.profile_name}'s` : "your";
   const targetProfileId = forSomeoneElse ? device.profile_id : undefined;
 
-  const { data: settings = {}, isLoading } = useEffectiveSettings({
-    keys: ALL_DEVICE_SETTING_KEYS,
+  const capabilities = useSettingsCapabilities();
+  const supportedKeys = useMemo(
+    () =>
+      deviceSettingKeysForRevision(capabilities.data?.revision).filter((key) =>
+        settingsCapabilitiesSupportKey(capabilities.data, key),
+      ),
+    [capabilities.data],
+  );
+  const canUseDeviceSettings = supportedKeys.length > 0;
+
+  const { data: settings = {}, isLoading: settingsLoading } = useEffectiveSettings({
+    keys: supportedKeys,
     deviceId: device.device_id,
     profileId: targetProfileId,
+    // An empty key list means "all keys" to the API, so wait until the
+    // connected server confirms the complete settings capability contract.
+    enabled: canUseDeviceSettings,
   });
+  const isLoading = capabilities.isLoading || settingsLoading;
+  const capabilitiesUnavailable = !capabilities.isLoading && !canUseDeviceSettings;
 
   const setValue = useSetSettingValue();
   const clearValue = useClearSettingValue();
@@ -384,7 +401,28 @@ function DeviceDetail({
         </span>
       </Callout>
 
-      {isLoading ? (
+      {capabilitiesUnavailable ? (
+        <div
+          role="alert"
+          className="border-border/70 bg-surface space-y-3 rounded-[1.7rem] border p-5"
+        >
+          <div>
+            <p className="text-sm font-semibold">Couldn&apos;t check settings compatibility</p>
+            <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
+              Device controls stay unavailable until Silo confirms which settings this server
+              supports.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={capabilities.isFetching}
+            onClick={() => void capabilities.refetch()}
+          >
+            {capabilities.isFetching ? "Checking…" : "Retry compatibility check"}
+          </Button>
+        </div>
+      ) : isLoading ? (
         <Skeleton className="h-96 rounded-[1.7rem]" />
       ) : (
         <DeviceSettingGroups

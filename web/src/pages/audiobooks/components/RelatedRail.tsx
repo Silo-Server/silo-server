@@ -1,4 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 interface RelatedRailItem {
   content_id: string;
@@ -21,8 +23,11 @@ export function RelatedRail({
   items,
   coverAspect = "square",
 }: RelatedRailProps) {
+  const { cardPresentation } = useUICustomization();
   if (items.length === 0) return null;
   const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
+  const showCaption = cardPresentation.caption !== "artwork";
+  const showMetadata = cardPresentation.caption === "title_metadata";
   return (
     <section>
       <div className="mb-4">
@@ -34,7 +39,7 @@ export function RelatedRail({
           <ViewTransitionLink
             key={item.content_id}
             to={`/item/${encodeURIComponent(item.content_id)}`}
-            className="block w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
+            className={`block ${carouselCardWidthClasses(cardPresentation.poster_size)}`}
           >
             <div
               className={`bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg ${
@@ -50,10 +55,12 @@ export function RelatedRail({
                 />
               ) : null}
             </div>
-            <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
-            {item.subtitle && (
+            {showCaption ? (
+              <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
+            ) : null}
+            {showMetadata && item.subtitle ? (
               <div className="text-muted-foreground truncate text-xs">{item.subtitle}</div>
-            )}
+            ) : null}
           </ViewTransitionLink>
         ))}
       </div>

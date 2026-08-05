@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { QueryDefinition } from "@/api/types";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -9,7 +9,10 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import LibraryRecommended from "./LibraryRecommended";
 import LibraryBrowse from "./LibraryBrowse";
 import LibraryCollections from "./LibraryCollections";
-import { useLibraryPageStatePreference } from "@/hooks/queries/libraryPageState";
+import {
+  libraryPageStateWriteRetryDelay,
+  useLibraryPageStatePreference,
+} from "@/hooks/queries/libraryPageState";
 import {
   applySavedLibraryPageSearchParams,
   hasLibraryPageSearchParams,
@@ -19,47 +22,86 @@ import {
   type LibraryBrowseType,
 } from "./libraryPageSearchParams";
 
+const LIBRARY_SAVE_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+
+interface LibrarySaveRetry {
+  key: string;
+  failures: number;
+  ready: boolean;
+  timeout?: ReturnType<typeof setTimeout>;
+}
+
+interface HydratedLibrarySearch {
+  ownerKey: string | null;
+  libraryId: number;
+  search: string;
+}
+
 export default function LibraryPage() {
   const { libraryId } = useParams<{ libraryId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: libraries, isLoading } = useUserLibraries();
   const {
+    ownerKey: libraryPageStateOwnerKey,
     isLoading: libraryPageStateLoading,
     preference: libraryPageStatePreference,
     rememberEnabled: rememberLibraryPageState,
     saveLibrarySearch,
   } = useLibraryPageStatePreference();
-  const savedStateHydratedLibraryIdRef = useRef<number | null>(null);
+  const [savedStateHydratedKey, setSavedStateHydratedKey] = useState<string | null>(null);
+  const [hydratedLibrarySearch, setHydratedLibrarySearch] = useState<HydratedLibrarySearch | null>(
+    null,
+  );
   const applyingSavedSearchParamsRef = useRef<string | null>(null);
-  const applyingSavedSearchParamsLibraryIdRef = useRef<number | null>(null);
+  const applyingSavedSearchParamsKeyRef = useRef<string | null>(null);
+  const submittedLibrarySearchRef = useRef<{ key: string } | null>(null);
+  const librarySaveRetryRef = useRef<LibrarySaveRetry | null>(null);
+  const [librarySaveRetryNonce, setLibrarySaveRetryNonce] = useState(0);
+
+  useEffect(() => {
+    return () => {
+      const retry = librarySaveRetryRef.current;
+      if (retry?.timeout !== undefined) {
+        clearTimeout(retry.timeout);
+      }
+    };
+  }, []);
 
   const id = Number(libraryId);
+  const libraryPageStateKey = `${libraryPageStateOwnerKey ?? "none"}:${id}`;
   const library = libraries?.find((l) => l.id === id);
   const libraryType = library?.type ?? "";
   const savedLibrarySearch =
     Number.isFinite(id) && id > 0
       ? libraryPageStatePreference.libraries[String(id)]?.search
       : undefined;
+  const currentLibrarySearch = serializeLibraryPageSearchParams(searchParams);
+  const hasInheritedHydratedSearch =
+    hydratedLibrarySearch !== null &&
+    hydratedLibrarySearch.ownerKey !== libraryPageStateOwnerKey &&
+    hydratedLibrarySearch.libraryId === id &&
+    hydratedLibrarySearch.search === currentLibrarySearch;
+  const hasUnhydratedLibraryState =
+    Boolean(libraryType) &&
+    Number.isFinite(id) &&
+    id > 0 &&
+    savedStateHydratedKey !== libraryPageStateKey;
   const shouldApplySavedLibrarySearch =
-    Boolean(libraryType) &&
-    Number.isFinite(id) &&
-    id > 0 &&
+    hasUnhydratedLibraryState &&
     !libraryPageStateLoading &&
-    rememberLibraryPageState &&
-    savedStateHydratedLibraryIdRef.current !== id &&
-    savedLibrarySearch != null &&
-    !hasLibraryPageSearchParams(searchParams) &&
-    savedLibrarySearch !== serializeLibraryPageSearchParams(searchParams);
+    ((hasInheritedHydratedSearch && !rememberLibraryPageState) ||
+      (rememberLibraryPageState &&
+        (!hasLibraryPageSearchParams(searchParams) || hasInheritedHydratedSearch) &&
+        ((savedLibrarySearch != null && savedLibrarySearch !== currentLibrarySearch) ||
+          hasInheritedHydratedSearch)));
   const shouldWaitForSavedLibrarySearch =
-    Boolean(libraryType) &&
-    Number.isFinite(id) &&
-    id > 0 &&
+    hasUnhydratedLibraryState &&
     libraryPageStateLoading &&
-    savedStateHydratedLibraryIdRef.current !== id &&
-    !hasLibraryPageSearchParams(searchParams);
-  const { activeTab, browseType, queryDefinition } = parseLibraryPageState(
-    searchParams,
-    libraryType,
+    (!hasLibraryPageSearchParams(searchParams) || hasInheritedHydratedSearch);
+  const searchParamsKey = searchParams.toString();
+  const { activeTab, browseType, queryDefinition } = useMemo(
+    () => parseLibraryPageState(new URLSearchParams(searchParamsKey), libraryType),
+    [libraryType, searchParamsKey],
   );
 
   // Tracks whether LibraryRecommended is currently rendering a hero banner.
@@ -74,45 +116,71 @@ export default function LibraryPage() {
 
   useDocumentTitle(library?.name ?? "Library");
 
+  /* eslint-disable react-hooks/set-state-in-effect -- hydration provenance is synchronized with router state */
+  useEffect(() => {
+    if (
+      applyingSavedSearchParamsRef.current === null &&
+      hydratedLibrarySearch?.ownerKey === libraryPageStateOwnerKey &&
+      hydratedLibrarySearch.libraryId === id &&
+      hydratedLibrarySearch.search !== currentLibrarySearch
+    ) {
+      // The URL no longer matches what this profile hydrated, so a later
+      // profile switch must treat it as an explicit user choice.
+      setHydratedLibrarySearch(null);
+    }
+  }, [currentLibrarySearch, hydratedLibrarySearch, id, libraryPageStateOwnerKey]);
+
   useEffect(() => {
     if (
       !libraryType ||
       !Number.isFinite(id) ||
       id <= 0 ||
       libraryPageStateLoading ||
-      !rememberLibraryPageState ||
-      savedStateHydratedLibraryIdRef.current === id ||
+      savedStateHydratedKey === libraryPageStateKey ||
       !shouldApplySavedLibrarySearch
     ) {
       return;
     }
 
-    savedStateHydratedLibraryIdRef.current = id;
-    const nextSearchParams = applySavedLibraryPageSearchParams(searchParams, savedLibrarySearch);
+    setSavedStateHydratedKey(libraryPageStateKey);
+    const nextSearchParams = applySavedLibraryPageSearchParams(
+      searchParams,
+      rememberLibraryPageState ? (savedLibrarySearch ?? "") : "",
+    );
+    const hydratedSearch = serializeLibraryPageSearchParams(nextSearchParams);
+    setHydratedLibrarySearch({
+      ownerKey: libraryPageStateOwnerKey,
+      libraryId: id,
+      search: hydratedSearch,
+    });
     if (nextSearchParams.toString() !== searchParams.toString()) {
-      applyingSavedSearchParamsRef.current = serializeLibraryPageSearchParams(nextSearchParams);
-      applyingSavedSearchParamsLibraryIdRef.current = id;
+      applyingSavedSearchParamsRef.current = hydratedSearch;
+      applyingSavedSearchParamsKeyRef.current = libraryPageStateKey;
       setSearchParams(nextSearchParams, { replace: true });
     }
   }, [
     id,
+    libraryPageStateKey,
     libraryPageStateLoading,
+    libraryPageStateOwnerKey,
     libraryType,
     rememberLibraryPageState,
+    savedStateHydratedKey,
     savedLibrarySearch,
     searchParams,
     setSearchParams,
     shouldApplySavedLibrarySearch,
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!libraryType || shouldApplySavedLibrarySearch) {
       return;
     }
 
-    if (applyingSavedSearchParamsLibraryIdRef.current !== id) {
+    if (applyingSavedSearchParamsKeyRef.current !== libraryPageStateKey) {
       applyingSavedSearchParamsRef.current = null;
-      applyingSavedSearchParamsLibraryIdRef.current = id;
+      applyingSavedSearchParamsKeyRef.current = libraryPageStateKey;
     }
 
     const normalizedSearchParams = updateLibraryPageSearchParams(
@@ -127,6 +195,8 @@ export default function LibraryPage() {
   }, [
     activeTab,
     browseType,
+    id,
+    libraryPageStateKey,
     queryDefinition,
     libraryType,
     searchParams,
@@ -156,20 +226,112 @@ export default function LibraryPage() {
     }
 
     const canonicalSearch = serializeLibraryPageSearchParams(normalizedSearchParams);
+    const retryKey = `${libraryPageStateKey}:${canonicalSearch}`;
+    const pendingRetry = librarySaveRetryRef.current;
+    if (pendingRetry !== null && pendingRetry.key !== retryKey) {
+      if (pendingRetry.timeout !== undefined) {
+        clearTimeout(pendingRetry.timeout);
+      }
+      librarySaveRetryRef.current = null;
+    }
     if (applyingSavedSearchParamsRef.current != null) {
       if (applyingSavedSearchParamsRef.current === canonicalSearch) {
         applyingSavedSearchParamsRef.current = null;
       }
       return;
     }
-    if (savedLibrarySearch !== canonicalSearch) {
-      saveLibrarySearch(id, canonicalSearch);
+    // Mutation state and cache invalidation can rerender before the effective
+    // read catches up. Treat one canonical URL as one logical submission.
+    const submitted = submittedLibrarySearchRef.current;
+    if (savedLibrarySearch === canonicalSearch) {
+      const retry = librarySaveRetryRef.current;
+      if (retry?.key === retryKey) {
+        if (retry.timeout !== undefined) {
+          clearTimeout(retry.timeout);
+        }
+        librarySaveRetryRef.current = null;
+      }
+      if (submitted?.key === retryKey) {
+        submittedLibrarySearchRef.current = null;
+      }
+      return;
     }
+    if (submitted?.key === retryKey) {
+      return;
+    }
+    const retry = librarySaveRetryRef.current;
+    if (retry?.key === retryKey) {
+      if (!retry.ready) {
+        return;
+      }
+      retry.ready = false;
+    }
+
+    const nextSubmission = { key: retryKey };
+    submittedLibrarySearchRef.current = nextSubmission;
+    void saveLibrarySearch(id, canonicalSearch).then(
+      () => {
+        const completedRetry = librarySaveRetryRef.current;
+        if (completedRetry?.key === retryKey) {
+          if (completedRetry.timeout !== undefined) {
+            clearTimeout(completedRetry.timeout);
+          }
+          librarySaveRetryRef.current = null;
+        }
+      },
+      (error: unknown) => {
+        if (submittedLibrarySearchRef.current !== nextSubmission) {
+          return;
+        }
+        submittedLibrarySearchRef.current = null;
+
+        const previousRetry = librarySaveRetryRef.current;
+        const failures = previousRetry?.key === retryKey ? previousRetry.failures : 0;
+        if (failures >= LIBRARY_SAVE_RETRY_DELAYS_MS.length) {
+          librarySaveRetryRef.current = {
+            key: retryKey,
+            failures,
+            ready: false,
+          };
+          return;
+        }
+
+        const fallbackRetryDelay = LIBRARY_SAVE_RETRY_DELAYS_MS[failures];
+        if (fallbackRetryDelay === undefined) {
+          return;
+        }
+        const retryDelay = libraryPageStateWriteRetryDelay(error, fallbackRetryDelay);
+        if (retryDelay === null) {
+          librarySaveRetryRef.current = {
+            key: retryKey,
+            failures: LIBRARY_SAVE_RETRY_DELAYS_MS.length,
+            ready: false,
+          };
+          return;
+        }
+        const nextRetry: LibrarySaveRetry = {
+          key: retryKey,
+          failures: failures + 1,
+          ready: false,
+        };
+        nextRetry.timeout = setTimeout(() => {
+          if (librarySaveRetryRef.current !== nextRetry) {
+            return;
+          }
+          nextRetry.timeout = undefined;
+          nextRetry.ready = true;
+          setLibrarySaveRetryNonce((nonce) => nonce + 1);
+        }, retryDelay);
+        librarySaveRetryRef.current = nextRetry;
+      },
+    );
   }, [
     activeTab,
     browseType,
     id,
     libraryPageStateLoading,
+    libraryPageStateKey,
+    librarySaveRetryNonce,
     libraryType,
     queryDefinition,
     rememberLibraryPageState,

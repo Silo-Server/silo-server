@@ -1,6 +1,9 @@
 package playback
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,5 +83,47 @@ func TestResolvePrepareTarget(t *testing.T) {
 	rt = ResolvePrepareTarget(file, "transcode", ClientCapabilities{MaxResolution: "1080p"}, settings)
 	if rt.Resolution != "" {
 		t.Fatalf("transcode resolution = %q, want empty (source)", rt.Resolution)
+	}
+}
+
+func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
+	resetDeviceLoad(t)
+	devA, devB := "/dev/dri/renderD888", "/dev/dri/renderD889"
+	fakeDeviceStat(t, devA, devB)
+
+	// Fake ffmpeg: record argv, create the output (last arg) so finalize works.
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	script := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argsFile+"\neval \"touch \\${$#}\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath := filepath.Join(dir, "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:        "/nonexistent/input.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		FFmpegPath:       script,
+		HWAccel:          "vaapi",
+		HWDevice:         devA + "," + devB,
+	}, outputPath)
+	if err != nil {
+		t.Fatalf("PrepareFile: %v", err)
+	}
+
+	argv, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(argv)
+	if !strings.Contains(got, devA) {
+		t.Fatalf("ffmpeg args missing resolved device %s:\n%s", devA, got)
+	}
+	if strings.Contains(got, devA+","+devB) {
+		t.Fatalf("ffmpeg args contain the raw device list:\n%s", got)
+	}
+	if count := hwDeviceActiveCount(devA); count != 0 {
+		t.Fatalf("active count after PrepareFile returned = %d, want 0", count)
 	}
 }

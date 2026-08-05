@@ -19,7 +19,7 @@ import (
 // The planner's rules are unit-tested in internal/settingsmigrate. What this
 // covers is everything only a live database can show: that the Go migration is
 // registered and actually runs, that the rows satisfy the scope CHECK, the
-// composite profile foreign key and the five partial unique indexes, and that
+// composite profile foreign key and the six partial unique indexes, and that
 // jsonb accepts the values the planner encodes.
 func TestPostgresSettingsBackfill(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

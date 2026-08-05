@@ -674,3 +674,33 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 		t.Fatalf("reserveRemoteNode() node = %#v, want node-2", node)
 	}
 }
+
+func TestExtractFrameResolvesMultiDeviceListToOneDevice(t *testing.T) {
+	service := &Service{
+		hwAccel:  "vaapi",
+		hwDevice: "/dev/dri/renderD888,/dev/dri/renderD889",
+	}
+	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
+
+	var hwArgs []string
+	service.runFFmpegFrameExtractFunc = func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if hwArgs == nil {
+			hwArgs = append([]string(nil), args...)
+		}
+		return []byte("frame"), nil
+	}
+
+	if _, _, err := service.extractFrame(context.Background(), file, 5, chapterThumbnailHDRPolicyBestEffort); err != nil {
+		t.Fatalf("extractFrame() error = %v", err)
+	}
+
+	joined := strings.Join(hwArgs, " ")
+	// Neither test device exists, so the balancer deterministically falls back
+	// to the first entry — but never passes the raw list to ffmpeg.
+	if strings.Contains(joined, "/dev/dri/renderD888,/dev/dri/renderD889") {
+		t.Fatalf("ffmpeg args contain the raw device list:\n%s", joined)
+	}
+	if !strings.Contains(joined, "/dev/dri/renderD888") {
+		t.Fatalf("ffmpeg args missing a resolved device:\n%s", joined)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -118,35 +119,99 @@ const fieldValues = "values"
 // the request boundary keeps a crafted batch from failing resolution outright.
 const maxEffectiveContentIDs = 200
 
+// maxShortcutMutationRetries bounds contention retries while still making a
+// normal burst of edits effectively wait-free for clients. Each failed CAS
+// means another writer made progress; exhausting this limit is therefore a
+// retryable conflict, never permission to overwrite the newer document.
+const maxShortcutMutationRetries = 32
+
 const jsonNullLiteral = "null"
+
+const navigationShortcutAtomicUpdateMessage = "Use PUT /settings/values/nav.shortcuts/item to change navigation shortcuts"
+
+var (
+	errMutationIDConflict           = errors.New("setting mutation id conflict")
+	errMutationReplayRollback       = errors.New("setting mutation replay requires rollback")
+	errMutationTransactionRequired  = errors.New("settings store does not support atomic idempotent mutations")
+	errShortcutMutationContention   = errors.New("navigation shortcuts changed too quickly")
+	errShortcutMutationInvalidValue = errors.New("invalid navigation shortcut value")
+)
+
+type idempotentSettingMutationOutcome struct {
+	result  json.RawMessage
+	stored  *userstore.SettingValue
+	replay  bool
+	changed bool
+}
+
+type shortcutMutationStore interface {
+	GetSettingValue(context.Context, userstore.SettingIdentity) (*userstore.SettingValue, error)
+	CompareAndSetSettingValue(
+		context.Context,
+		userstore.SettingIdentity,
+		json.RawMessage,
+		int64,
+	) (*userstore.SettingValue, error)
+}
 
 // settingValueResponse is one explicit stored value.
 type settingValueResponse struct {
-	Key       string          `json:"key"`
-	Scope     string          `json:"scope"`
-	ProfileID string          `json:"profile_id,omitempty"`
-	DeviceID  string          `json:"device_id,omitempty"`
-	LibraryID int             `json:"library_id,omitempty"`
-	SeriesID  string          `json:"series_id,omitempty"`
-	Value     json.RawMessage `json:"value"`
-	Revision  int64           `json:"revision"`
-	UpdatedAt string          `json:"updated_at,omitempty"`
+	Key          string          `json:"key"`
+	Scope        string          `json:"scope"`
+	ProfileID    string          `json:"profile_id,omitempty"`
+	ClientFamily string          `json:"client_family,omitempty"`
+	DeviceID     string          `json:"device_id,omitempty"`
+	LibraryID    int             `json:"library_id,omitempty"`
+	SeriesID     string          `json:"series_id,omitempty"`
+	Value        json.RawMessage `json:"value"`
+	Revision     int64           `json:"revision"`
+	UpdatedAt    string          `json:"updated_at,omitempty"`
+}
+
+type navigationShortcutMutationRequest struct {
+	Item    json.RawMessage `json:"item"`
+	Present *bool           `json:"present"`
+}
+
+type navigationShortcutDocument struct {
+	Items []navigationShortcutItem `json:"items"`
+}
+
+// navigationShortcutItem mirrors navigation-shortcuts.json. LibraryID is a
+// pointer because its presence is part of collection identity: a global
+// collection and a library-specific collection with the same collection_id
+// are different destinations.
+type navigationShortcutItem struct {
+	Type         string `json:"type"`
+	LibraryID    *int   `json:"library_id,omitempty"`
+	SectionID    string `json:"section_id,omitempty"`
+	CollectionID string `json:"collection_id,omitempty"`
+	Label        string `json:"label"`
+}
+
+type navigationShortcutIdentity struct {
+	Type         string
+	LibraryID    int
+	HasLibraryID bool
+	SectionID    string
+	CollectionID string
 }
 
 // explicitSettingValueResponse is one entry from the collection GET. Unset is
 // represented explicitly rather than as a 404 so a settings screen can fetch
 // several profile defaults or device overrides in one request.
 type explicitSettingValueResponse struct {
-	Key       string          `json:"key"`
-	Scope     string          `json:"scope"`
-	ProfileID string          `json:"profile_id,omitempty"`
-	DeviceID  string          `json:"device_id,omitempty"`
-	LibraryID int             `json:"library_id,omitempty"`
-	SeriesID  string          `json:"series_id,omitempty"`
-	IsSet     bool            `json:"is_set"`
-	Value     json.RawMessage `json:"value,omitempty"`
-	Revision  int64           `json:"revision,omitempty"`
-	UpdatedAt string          `json:"updated_at,omitempty"`
+	Key          string          `json:"key"`
+	Scope        string          `json:"scope"`
+	ProfileID    string          `json:"profile_id,omitempty"`
+	ClientFamily string          `json:"client_family,omitempty"`
+	DeviceID     string          `json:"device_id,omitempty"`
+	LibraryID    int             `json:"library_id,omitempty"`
+	SeriesID     string          `json:"series_id,omitempty"`
+	IsSet        bool            `json:"is_set"`
+	Value        json.RawMessage `json:"value,omitempty"`
+	Revision     int64           `json:"revision,omitempty"`
+	UpdatedAt    string          `json:"updated_at,omitempty"`
 }
 
 // effectiveSettingValueResponse is one resolved value plus where it came from.
@@ -176,18 +241,20 @@ type effectiveSettingValueResponse struct {
 
 	// Scope locates the row the value came from, so a client can offer a reset
 	// against exactly that scope. Empty for a contract default.
-	Scope     string `json:"scope,omitempty"`
-	ProfileID string `json:"profile_id,omitempty"`
-	DeviceID  string `json:"device_id,omitempty"`
-	LibraryID int    `json:"library_id,omitempty"`
-	SeriesID  string `json:"series_id,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+	ProfileID    string `json:"profile_id,omitempty"`
+	ClientFamily string `json:"client_family,omitempty"`
+	DeviceID     string `json:"device_id,omitempty"`
+	LibraryID    int    `json:"library_id,omitempty"`
+	SeriesID     string `json:"series_id,omitempty"`
 }
 
 type effectiveSourceContextResponse struct {
-	ProfileID string `json:"profile_id,omitempty"`
-	DeviceID  string `json:"device_id,omitempty"`
-	LibraryID int    `json:"library_id,omitempty"`
-	SeriesID  string `json:"series_id,omitempty"`
+	ProfileID    string `json:"profile_id,omitempty"`
+	ClientFamily string `json:"client_family,omitempty"`
+	DeviceID     string `json:"device_id,omitempty"`
+	LibraryID    int    `json:"library_id,omitempty"`
+	SeriesID     string `json:"series_id,omitempty"`
 }
 
 // HandleGetContract serves the public manifest.
@@ -235,12 +302,21 @@ func (h *SettingValuesHandler) HandleGetCapabilities(w http.ResponseWriter, r *h
 		"scopes": []string{
 			string(settingscontract.ScopeAccount),
 			string(settingscontract.ScopeProfile),
+			string(settingscontract.ScopeProfileClient),
 			string(settingscontract.ScopeProfileDevice),
 			string(settingscontract.ScopeProfileLibrary),
 			string(settingscontract.ScopeProfileSeries),
 		},
+		"client_families": []string{
+			string(settingscontract.ClientFamilyTV),
+			string(settingscontract.ClientFamilyMobile),
+			string(settingscontract.ClientFamilyTablet),
+			string(settingscontract.ClientFamilyDesktop),
+			string(settingscontract.ClientFamilyWeb),
+		},
 		"supports_batched_effective": true,
 		"supports_idempotent_writes": true,
+		"supports_atomic_shortcuts":  true,
 	})
 }
 
@@ -306,6 +382,9 @@ func (h *SettingValuesHandler) HandleGetValues(w http.ResponseWriter, r *http.Re
 	switch identity.Scope {
 	case settingscontract.ScopeProfile:
 		query.ProfileIDs = []string{identity.ProfileID}
+	case settingscontract.ScopeProfileClient:
+		query.ProfileIDs = []string{identity.ProfileID}
+		query.ClientFamily = identity.ClientFamily
 	case settingscontract.ScopeProfileDevice:
 		query.ProfileIDs = []string{identity.ProfileID}
 		query.DeviceID = identity.DeviceID
@@ -332,7 +411,8 @@ func (h *SettingValuesHandler) HandleGetValues(w http.ResponseWriter, r *http.Re
 	for _, key := range keys {
 		entry := explicitSettingValueResponse{
 			Key: key, Scope: string(identity.Scope), ProfileID: identity.ProfileID,
-			DeviceID: identity.DeviceID, LibraryID: identity.LibraryID, SeriesID: identity.SeriesID,
+			ClientFamily: string(identity.ClientFamily), DeviceID: identity.DeviceID,
+			LibraryID: identity.LibraryID, SeriesID: identity.SeriesID,
 		}
 		if value, exists := byKey[key]; exists {
 			entry.IsSet = true
@@ -363,7 +443,331 @@ func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	if identity.Key == settingskeys.NavShortcuts {
+		writeError(w, http.StatusBadRequest, "atomic_update_required",
+			navigationShortcutAtomicUpdateMessage)
+		return
+	}
 	h.setValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
+}
+
+// HandleSetNavigationShortcut applies one desired-state edit to the shared
+// profile shortcut catalog. Unlike the generic whole-document PUT, two clients
+// adding different destinations cannot overwrite one another: the handler
+// rebases after an internal compare-and-set conflict until its semantic edit
+// lands on the newest document.
+func (h *SettingValuesHandler) HandleSetNavigationShortcut(w http.ResponseWriter, r *http.Request) {
+	store, ok := h.storeFor(w, r)
+	if !ok {
+		return
+	}
+	shortcutStore, ok := store.(shortcutMutationStore)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal_error",
+			"This settings store does not support atomic shortcut updates")
+		return
+	}
+
+	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
+	identity := userstore.SettingIdentity{
+		Key: settingskeys.NavShortcuts, Scope: settingscontract.ScopeProfile, ProfileID: profileID,
+	}
+	if err := identity.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "X-Profile-Id header is required")
+		return
+	}
+	def, ok := h.definitionFor(w, identity.Key)
+	if !ok {
+		return
+	}
+
+	var body navigationShortcutMutationRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"Body must be {\"item\": {…}, \"present\": true|false}")
+		return
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
+		return
+	}
+	if body.Present == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "present is required")
+		return
+	}
+
+	item, err := normalizeNavigationShortcutItem(def, body.Item)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_value", err.Error())
+		return
+	}
+	requestHash := hashNavigationShortcutMutation(identity, item, *body.Present)
+	mutationID := strings.TrimSpace(r.Header.Get(mutationIDHeader))
+
+	var stored *userstore.SettingValue
+	var idempotentResult json.RawMessage
+	var changed bool
+	if mutationID == "" {
+		stored, changed, err = mutateNavigationShortcut(
+			r.Context(), shortcutStore, def, identity, item, *body.Present)
+	} else {
+		var outcome idempotentSettingMutationOutcome
+		outcome, err = runIdempotentSettingMutation(
+			r.Context(), store, mutationID, requestHash,
+			func(writer userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error) {
+				return mutateNavigationShortcut(r.Context(), writer, def, identity, item, *body.Present)
+			},
+		)
+		if err == nil && outcome.replay {
+			w.Header().Set("X-Silo-Idempotent-Replay", "true")
+			writeRawJSON(w, http.StatusOK, outcome.result)
+			return
+		}
+		stored, changed = outcome.stored, outcome.changed
+		idempotentResult = outcome.result
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, errMutationIDConflict):
+			writeError(w, http.StatusConflict, "mutation_id_conflict",
+				"This mutation id was used for a different write")
+		case errors.Is(err, errShortcutMutationContention):
+			writeError(w, http.StatusConflict, "setting_update_conflict",
+				"Navigation shortcuts changed too quickly; retry this mutation")
+		case errors.Is(err, errShortcutMutationInvalidValue):
+			writeError(w, http.StatusBadRequest, "invalid_value", err.Error())
+		case errors.Is(err, userstore.ErrInvalidSettingIdentity),
+			errors.Is(err, userstore.ErrInvalidSettingValue):
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store navigation shortcuts")
+		}
+		return
+	}
+
+	response := settingValueToResponse(*stored)
+	if changed {
+		publishUserSettingsEvent(r.Context(), h.EventsHub,
+			apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
+		auditSettingsForOther(r.Context(), settingsAuditRecord{
+			Action:          settingsAuditActionSet,
+			ActorProfileID:  actingProfileID(r.Context()),
+			TargetProfileID: identity.ProfileID,
+			TargetUserID:    apimw.GetUserID(r.Context()),
+			Key:             identity.Key,
+			Scope:           string(identity.Scope),
+		})
+	}
+	if idempotentResult != nil {
+		writeRawJSON(w, http.StatusOK, idempotentResult)
+	} else {
+		writeJSON(w, http.StatusOK, response)
+	}
+}
+
+func normalizeNavigationShortcutItem(
+	def *settingscontract.Definition,
+	item json.RawMessage,
+) (navigationShortcutItem, error) {
+	if len(item) == 0 {
+		return navigationShortcutItem{}, errors.New("item is required")
+	}
+	raw, err := json.Marshal(struct {
+		Items []json.RawMessage `json:"items"`
+	}{Items: []json.RawMessage{item}})
+	if err != nil {
+		return navigationShortcutItem{}, fmt.Errorf("encoding shortcut: %w", err)
+	}
+	normalized, err := def.ValueSchema.NormalizeValue(raw, settingscontract.ObjectSchemas())
+	if err != nil {
+		return navigationShortcutItem{}, err
+	}
+	var document navigationShortcutDocument
+	if err := json.Unmarshal(normalized, &document); err != nil || len(document.Items) != 1 {
+		return navigationShortcutItem{}, errors.New("shortcut did not normalize to one item")
+	}
+	return document.Items[0], nil
+}
+
+func applyNavigationShortcutMutation(
+	def *settingscontract.Definition,
+	current *userstore.SettingValue,
+	item navigationShortcutItem,
+	present bool,
+) (json.RawMessage, bool, error) {
+	document := navigationShortcutDocument{Items: []navigationShortcutItem{}}
+	if current != nil {
+		if err := json.Unmarshal(current.Value, &document); err != nil {
+			return nil, false, fmt.Errorf("decoding stored navigation shortcuts: %w", err)
+		}
+	}
+
+	target := item.identity()
+	match := -1
+	for index, candidate := range document.Items {
+		if candidate.identity() == target {
+			match = index
+			break
+		}
+	}
+
+	if present {
+		if match >= 0 {
+			if document.Items[match].equal(item) {
+				return current.Value, false, nil
+			}
+			document.Items[match] = item
+		} else {
+			document.Items = append(document.Items, item)
+		}
+	} else {
+		if match < 0 {
+			if current == nil {
+				return json.RawMessage(`{"items":[]}`), false, nil
+			}
+			return current.Value, false, nil
+		}
+		document.Items = append(document.Items[:match], document.Items[match+1:]...)
+	}
+
+	raw, err := json.Marshal(document)
+	if err != nil {
+		return nil, false, fmt.Errorf("encoding navigation shortcuts: %w", err)
+	}
+	normalized, err := def.ValueSchema.NormalizeValue(raw, settingscontract.ObjectSchemas())
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: %w", errShortcutMutationInvalidValue, err)
+	}
+	return normalized, true, nil
+}
+
+func (item navigationShortcutItem) identity() navigationShortcutIdentity {
+	identity := navigationShortcutIdentity{
+		Type: item.Type, SectionID: item.SectionID, CollectionID: item.CollectionID,
+	}
+	if item.LibraryID != nil {
+		identity.LibraryID = *item.LibraryID
+		identity.HasLibraryID = true
+	}
+	return identity
+}
+
+func (item navigationShortcutItem) equal(other navigationShortcutItem) bool {
+	return item.identity() == other.identity() && item.Label == other.Label
+}
+
+func mutateNavigationShortcut(
+	ctx context.Context,
+	store shortcutMutationStore,
+	def *settingscontract.Definition,
+	identity userstore.SettingIdentity,
+	item navigationShortcutItem,
+	present bool,
+) (*userstore.SettingValue, bool, error) {
+	for attempt := 0; attempt < maxShortcutMutationRetries; attempt++ {
+		current, err := store.GetSettingValue(ctx, identity)
+		if err != nil {
+			return nil, false, fmt.Errorf("reading navigation shortcuts: %w", err)
+		}
+
+		next, changed, err := applyNavigationShortcutMutation(def, current, item, present)
+		if err != nil {
+			return nil, false, err
+		}
+		if !changed {
+			if current != nil {
+				return current, false, nil
+			}
+			return &userstore.SettingValue{
+				SettingIdentity: identity,
+				Value:           json.RawMessage(`{"items":[]}`),
+			}, false, nil
+		}
+
+		expectedRevision := int64(0)
+		if current != nil {
+			expectedRevision = current.Revision
+		}
+		stored, err := store.CompareAndSetSettingValue(ctx, identity, next, expectedRevision)
+		if errors.Is(err, userstore.ErrSettingValueRevisionConflict) {
+			continue
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return stored, true, nil
+	}
+	return nil, false, errShortcutMutationContention
+}
+
+func runIdempotentSettingMutation(
+	ctx context.Context,
+	store userstore.UserStore,
+	mutationID string,
+	requestHash string,
+	mutate func(userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error),
+) (idempotentSettingMutationOutcome, error) {
+	transactioner, ok := store.(userstore.SettingMutationTransactioner)
+	if !ok {
+		return idempotentSettingMutationOutcome{}, errMutationTransactionRequired
+	}
+
+	var outcome idempotentSettingMutationOutcome
+	err := transactioner.WithSettingMutationTransaction(ctx, mutationID,
+		func(writer userstore.SettingMutationWriter) error {
+			prior, err := writer.GetSettingMutation(ctx, mutationID)
+			if err != nil {
+				return fmt.Errorf("checking setting mutation: %w", err)
+			}
+			if prior != nil {
+				if prior.RequestHash != requestHash {
+					return errMutationIDConflict
+				}
+				outcome.result = slices.Clone(prior.Result)
+				outcome.replay = true
+				return nil
+			}
+
+			stored, changed, err := mutate(writer)
+			if err != nil {
+				return err
+			}
+			response := settingValueToResponse(*stored)
+			result, err := json.Marshal(response)
+			if err != nil {
+				return fmt.Errorf("encoding setting mutation receipt: %w", err)
+			}
+			record, inserted, err := writer.PutSettingMutation(ctx, userstore.SettingMutationRecord{
+				MutationID:  mutationID,
+				RequestHash: requestHash,
+				Result:      result,
+				ExpiresAt:   time.Now().UTC().Add(30 * 24 * time.Hour),
+			})
+			if err != nil {
+				return fmt.Errorf("recording setting mutation: %w", err)
+			}
+			if !inserted {
+				if record.RequestHash != requestHash {
+					return errMutationIDConflict
+				}
+				outcome.result = slices.Clone(record.Result)
+				outcome.replay = true
+				// A legacy writer could have inserted between the initial read and
+				// this insert. Roll back our setting write before serving its receipt.
+				return errMutationReplayRollback
+			}
+
+			outcome.result = slices.Clone(record.Result)
+			outcome.stored = stored
+			outcome.changed = changed
+			return nil
+		})
+	if errors.Is(err, errMutationReplayRollback) {
+		return outcome, nil
+	}
+	return outcome, err
 }
 
 // setValueAt is the write path shared by the session route and the admin
@@ -413,27 +817,34 @@ func (h *SettingValuesHandler) setValueAt(
 	// not double-apply it, and must be able to tell "already done" from "that
 	// id means something else".
 	mutationID := strings.TrimSpace(r.Header.Get(mutationIDHeader))
-	var requestHash string
-	if mutationID != "" {
-		requestHash = hashMutationRequest(identity, normalized)
-		prior, err := store.GetSettingMutation(r.Context(), mutationID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check the mutation id")
+	var stored *userstore.SettingValue
+	var idempotentResult json.RawMessage
+	if mutationID == "" {
+		stored, err = store.UpsertSettingValue(r.Context(), identity, normalized)
+	} else {
+		outcome, mutationErr := runIdempotentSettingMutation(
+			r.Context(), store, mutationID, hashMutationRequest(identity, normalized),
+			func(writer userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error) {
+				value, err := writer.UpsertSettingValue(r.Context(), identity, normalized)
+				return value, true, err
+			},
+		)
+		if errors.Is(mutationErr, errMutationIDConflict) {
+			writeError(w, http.StatusConflict, "mutation_id_conflict",
+				"This mutation id was used for a different write")
 			return
 		}
-		if prior != nil {
-			if prior.RequestHash != requestHash {
-				writeError(w, http.StatusConflict, "mutation_id_conflict",
-					"This mutation id was used for a different write")
-				return
-			}
+		if mutationErr != nil {
+			err = mutationErr
+		} else if outcome.replay {
 			w.Header().Set("X-Silo-Idempotent-Replay", "true")
-			writeRawJSON(w, http.StatusOK, prior.Result)
+			writeRawJSON(w, http.StatusOK, outcome.result)
 			return
+		} else {
+			stored = outcome.stored
+			idempotentResult = outcome.result
 		}
 	}
-
-	stored, err := store.UpsertSettingValue(r.Context(), identity, normalized)
 	if err != nil {
 		if errors.Is(err, userstore.ErrInvalidSettingIdentity) ||
 			errors.Is(err, userstore.ErrInvalidSettingValue) {
@@ -445,14 +856,6 @@ func (h *SettingValuesHandler) setValueAt(
 	}
 
 	response := settingValueToResponse(*stored)
-	if mutationID != "" {
-		// Recorded only now, after the write landed: a receipt written for a
-		// failed upsert would turn the client's retry of a 500 into a silent
-		// 200 replay of a write that never happened. Storing the actual
-		// response also makes the replay byte-identical — revision and
-		// updated_at included — rather than a reconstruction of the input.
-		h.recordMutation(r, store, mutationID, requestHash, response)
-	}
 	acting := actingProfileID(r.Context())
 	if identity.Scope == settingscontract.ScopeProfileDevice {
 		// A device that only ever writes canonically must still appear in
@@ -472,15 +875,20 @@ func (h *SettingValuesHandler) setValueAt(
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
 	auditSettingsForOther(r.Context(), settingsAuditRecord{
-		Action:          "set",
+		Action:          settingsAuditActionSet,
 		ActorProfileID:  acting,
 		TargetProfileID: identity.ProfileID,
 		TargetUserID:    eventUserID,
+		ClientFamily:    string(identity.ClientFamily),
 		DeviceID:        identity.DeviceID,
 		Key:             identity.Key,
 		Scope:           string(identity.Scope),
 	})
-	writeJSON(w, http.StatusOK, response)
+	if idempotentResult != nil {
+		writeRawJSON(w, http.StatusOK, idempotentResult)
+	} else {
+		writeJSON(w, http.StatusOK, response)
+	}
 }
 
 // registerWritingDevice refreshes the device registry from the request's
@@ -531,6 +939,11 @@ func (h *SettingValuesHandler) HandleDeleteValue(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	if identity.Key == settingskeys.NavShortcuts {
+		writeError(w, http.StatusBadRequest, "atomic_update_required",
+			navigationShortcutAtomicUpdateMessage)
+		return
+	}
 	h.deleteValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
 }
 
@@ -557,6 +970,7 @@ func (h *SettingValuesHandler) deleteValueAt(
 		ActorProfileID:  actingProfileID(r.Context()),
 		TargetProfileID: identity.ProfileID,
 		TargetUserID:    eventUserID,
+		ClientFamily:    string(identity.ClientFamily),
 		DeviceID:        identity.DeviceID,
 		Key:             identity.Key,
 		Scope:           string(identity.Scope),
@@ -607,6 +1021,11 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		DeviceID:   deviceMetadataFromRequest(r).DeviceID,
 		LibraryIDs: parseIntCSV(r.URL.Query().Get("library_ids")),
 		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
+	}
+	if family, needed, ok := h.clientFamilyForKeys(w, r, keys); !ok {
+		return
+	} else if needed {
+		rc.ClientFamily = family
 	}
 
 	// A device-settings screen resolves what some *other* device sees, so this
@@ -714,6 +1133,10 @@ func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *htt
 
 	profileID := strings.TrimSpace(apimw.GetProfileID(r.Context()))
 	deviceID := deviceMetadataFromRequest(r).DeviceID
+	clientFamily, familyNeeded, ok := h.clientFamilyForKeys(w, r, keys)
+	if !ok {
+		return
+	}
 	if deviceID == "" {
 		for _, key := range keys {
 			if def, exists := h.contract.Lookup(key); exists && def.AllowsScope(settingscontract.ScopeProfileDevice) {
@@ -749,6 +1172,9 @@ func (h *SettingValuesHandler) HandlePostEffective(w http.ResponseWriter, r *htt
 			return
 		}
 		rc := settingsresolve.Context{ProfileID: profileID, DeviceID: deviceID}
+		if familyNeeded {
+			rc.ClientFamily = clientFamily
+		}
 		if libraryID > 0 {
 			rc.LibraryIDs = []int{libraryID}
 			contentIDs++
@@ -862,28 +1288,6 @@ func (h *SettingValuesHandler) constraintsFor(r *http.Request) settingsresolve.C
 	return settingsresolve.Constraints{policyInputMaxPlaybackQuality: limit}
 }
 
-// recordMutation stores the idempotency receipt after a successful write. The
-// receipt is the response the original request returned, so a replay serves
-// exactly what the client would have received.
-func (h *SettingValuesHandler) recordMutation(
-	r *http.Request,
-	store userstore.UserStore,
-	mutationID, requestHash string,
-	response settingValueResponse,
-) {
-	receipt, _ := json.Marshal(response)
-	// Best effort: the write already succeeded, and failing the request now
-	// would tell the client the opposite of the truth. A missing receipt costs
-	// at most a duplicate write on retry, which upsert makes harmless.
-	_, _, _ = store.PutSettingMutation(r.Context(), userstore.SettingMutationRecord{
-		MutationID:  mutationID,
-		RequestHash: requestHash,
-		Result:      receipt,
-		CreatedAt:   time.Now().UTC(),
-		ExpiresAt:   time.Now().UTC().Add(30 * 24 * time.Hour),
-	})
-}
-
 func (h *SettingValuesHandler) storeFor(w http.ResponseWriter, r *http.Request) (userstore.UserStore, bool) {
 	store, err := h.storeProvider.ForUser(r.Context(), apimw.GetUserID(r.Context()))
 	if err != nil {
@@ -906,6 +1310,37 @@ func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) 
 		return nil, false
 	}
 	return def, true
+}
+
+// clientFamilyForKeys validates an optional family header for effective reads.
+// An absent header deliberately drops the profile_client layer so pre-revision
+// 5 callers keep resolving broader fallbacks; explicit profile_client reads and
+// writes still require the header in identityForSessionKey. The server never
+// guesses this identity from X-Silo-Device-Platform: that header is free-form
+// display metadata, while client_family is a closed storage key shared by like
+// clients.
+func (h *SettingValuesHandler) clientFamilyForKeys(
+	w http.ResponseWriter, r *http.Request, keys []string,
+) (settingscontract.ClientFamily, bool, bool) {
+	eligible := false
+	for _, key := range keys {
+		if def, ok := h.contract.Lookup(key); ok && def.AllowsScope(settingscontract.ScopeProfileClient) {
+			eligible = true
+			break
+		}
+	}
+
+	value := strings.TrimSpace(r.Header.Get(clientFamilyHeader))
+	if value == "" {
+		return "", false, true
+	}
+	family := settingscontract.ClientFamily(value)
+	if !family.Valid() {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"X-Silo-Client-Family header must be one of tv, mobile, tablet, desktop or web")
+		return "", false, false
+	}
+	return family, eligible, true
 }
 
 // identityFromRequest builds and validates the scope identity a request names.
@@ -946,6 +1381,15 @@ func (h *SettingValuesHandler) identityForSessionKey(
 			}
 			identity.ProfileID = named
 		}
+	}
+	if scope == settingscontract.ScopeProfileClient {
+		family := settingscontract.ClientFamily(strings.TrimSpace(r.Header.Get(clientFamilyHeader)))
+		if !family.Valid() {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"X-Silo-Client-Family header must be one of tv, mobile, tablet, desktop or web")
+			return userstore.SettingIdentity{}, false
+		}
+		identity.ClientFamily = family
 	}
 	if scope == settingscontract.ScopeProfileDevice {
 		// A device may be named explicitly so one device can manage another's
@@ -1064,7 +1508,7 @@ func (h *SettingValuesHandler) keyedScope(
 	scope := settingscontract.Scope(strings.TrimSpace(query.Get("scope")))
 	if scope == "" {
 		writeError(w, http.StatusBadRequest, "bad_request",
-			"A scope is required: account, profile, profile_device, profile_library or profile_series")
+			"A scope is required: account, profile, profile_client, profile_device, profile_library or profile_series")
 		return "", "", false
 	}
 	return key, scope, true
@@ -1133,20 +1577,22 @@ func (h *SettingValuesHandler) libraryContextExists(
 
 func sameSettingContext(a, b userstore.SettingIdentity) bool {
 	return a.Scope == b.Scope && a.ProfileID == b.ProfileID &&
-		a.DeviceID == b.DeviceID && a.LibraryID == b.LibraryID && a.SeriesID == b.SeriesID
+		a.ClientFamily == b.ClientFamily && a.DeviceID == b.DeviceID &&
+		a.LibraryID == b.LibraryID && a.SeriesID == b.SeriesID
 }
 
 func settingValueToResponse(value userstore.SettingValue) settingValueResponse {
 	return settingValueResponse{
-		Key:       value.Key,
-		Scope:     string(value.Scope),
-		ProfileID: value.ProfileID,
-		DeviceID:  value.DeviceID,
-		LibraryID: value.LibraryID,
-		SeriesID:  value.SeriesID,
-		Value:     value.Value,
-		Revision:  value.Revision,
-		UpdatedAt: value.UpdatedAt,
+		Key:          value.Key,
+		Scope:        string(value.Scope),
+		ProfileID:    value.ProfileID,
+		ClientFamily: string(value.ClientFamily),
+		DeviceID:     value.DeviceID,
+		LibraryID:    value.LibraryID,
+		SeriesID:     value.SeriesID,
+		Value:        value.Value,
+		Revision:     value.Revision,
+		UpdatedAt:    value.UpdatedAt,
 	}
 }
 
@@ -1169,14 +1615,16 @@ func effectiveToResponse(eff settingsresolve.Effective) effectiveSettingValueRes
 	if eff.Identity != nil {
 		out.Scope = string(eff.Identity.Scope)
 		out.ProfileID = eff.Identity.ProfileID
+		out.ClientFamily = string(eff.Identity.ClientFamily)
 		out.DeviceID = eff.Identity.DeviceID
 		out.LibraryID = eff.Identity.LibraryID
 		out.SeriesID = eff.Identity.SeriesID
 		out.SourceContext = &effectiveSourceContextResponse{
-			ProfileID: eff.Identity.ProfileID,
-			DeviceID:  eff.Identity.DeviceID,
-			LibraryID: eff.Identity.LibraryID,
-			SeriesID:  eff.Identity.SeriesID,
+			ProfileID:    eff.Identity.ProfileID,
+			ClientFamily: string(eff.Identity.ClientFamily),
+			DeviceID:     eff.Identity.DeviceID,
+			LibraryID:    eff.Identity.LibraryID,
+			SeriesID:     eff.Identity.SeriesID,
 		}
 	}
 	return out
@@ -1307,7 +1755,34 @@ func hashMutationRequest(identity userstore.SettingIdentity, value json.RawMessa
 	sum.Write([]byte(identity.SeriesID))
 	sum.Write([]byte{0})
 	sum.Write(value)
+	// Preserve the established fingerprint for the five pre-existing scopes so
+	// an in-flight retry made across this server upgrade still replays. Only the
+	// new profile_client identity appends a family discriminator.
+	if identity.ClientFamily != "" {
+		sum.Write([]byte{0})
+		sum.Write([]byte(identity.ClientFamily))
+	}
 	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func hashNavigationShortcutMutation(
+	identity userstore.SettingIdentity,
+	item navigationShortcutItem,
+	present bool,
+) string {
+	// Removing a destination ignores presentation fields, so the fingerprint
+	// does too. Reusing one mutation id for the same remove with a refreshed
+	// label is the same operation; adding includes the label because it can
+	// update that field in place.
+	if !present {
+		item.Label = ""
+	}
+	canonical, _ := json.Marshal(struct {
+		Operation string                 `json:"operation"`
+		Item      navigationShortcutItem `json:"item"`
+		Present   bool                   `json:"present"`
+	}{Operation: "set_navigation_shortcut_presence", Item: item, Present: present})
+	return hashMutationRequest(identity, canonical)
 }
 
 func writeRawJSON(w http.ResponseWriter, status int, body []byte) {

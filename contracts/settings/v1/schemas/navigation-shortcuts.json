@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/navigation-shortcuts.json",
+  "title": "Navigation shortcuts",
+  "description": "Profile-wide catalog of pinned libraries, sections, and collections that client-family menus may surface.",
+  "$comment": "Contract validation also rejects repeated semantic destination identities even when labels differ: library(library_id), section(library_id, section_id), collection(optional library_id, collection_id).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "description": "Pinned targets. Each semantic destination identity may appear at most once; changing its label does not create a distinct destination.",
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/library" },
+          { "$ref": "#/$defs/section" },
+          { "$ref": "#/$defs/collection" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "label": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+    "libraryId": { "type": "integer", "minimum": 1 },
+    "targetId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "\\S" },
+    "library": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "library_id", "label"],
+      "properties": {
+        "type": { "const": "library" },
+        "library_id": { "$ref": "#/$defs/libraryId" },
+        "label": { "$ref": "#/$defs/label" }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "library_id", "section_id", "label"],
+      "properties": {
+        "type": { "const": "section" },
+        "library_id": { "$ref": "#/$defs/libraryId" },
+        "section_id": { "$ref": "#/$defs/targetId" },
+        "label": { "$ref": "#/$defs/label" }
+      }
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "collection_id", "label"],
+      "properties": {
+        "type": { "const": "collection" },
+        "collection_id": { "$ref": "#/$defs/targetId" },
+        "library_id": { "$ref": "#/$defs/libraryId" },
+        "label": { "$ref": "#/$defs/label" }
+      }
+    }
+  }
+}

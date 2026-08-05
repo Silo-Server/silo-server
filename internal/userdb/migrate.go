@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 17
+const schemaVersion = 18
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -169,7 +169,25 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 18 {
+		if err := migrateToV18(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 18"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 18: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV18 seeds the family-neutral navigation shortcut catalog from the
+// existing web sidebar pins. InitSchema has already rebuilt
+// user_setting_values with the profile_client identity before this versioned
+// migration runs; keeping the data conversion here makes it one-time and
+// transactional with the schema-version bump.
+func migrateToV18(tx *sql.Tx) error {
+	return migrateSidebarPinsToNavigationShortcuts(tx)
 }
 
 // migrateToV17 rehomes the Jellyfin DisplayPreferences blobs from

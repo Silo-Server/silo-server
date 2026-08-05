@@ -15,11 +15,12 @@ import { SETTING_DEFINITIONS, type SettingDefinition, type SettingKey } from "./
  * settingsConformance.test.ts; do not change one without the fixture agreeing.
  */
 
-/** The five storage scopes the server resolves. */
+/** The remote storage scopes the server resolves. */
 export type RemoteSettingScope =
   | "account"
   | "profile"
   | "profile_device"
+  | "profile_client"
   | "profile_library"
   | "profile_series";
 
@@ -34,6 +35,7 @@ export interface StoredSettingRow {
   scope: RemoteSettingScope;
   profileId?: string;
   deviceId?: string;
+  clientFamily?: string;
   libraryId?: number;
   seriesId?: string;
   value: unknown;
@@ -43,6 +45,7 @@ export interface StoredSettingRow {
 export interface SettingResolutionContext {
   profileId?: string;
   deviceId?: string;
+  clientFamily?: string;
   libraryIds?: readonly number[];
   seriesIds?: readonly string[];
 }
@@ -133,6 +136,7 @@ function pickForScope(
 ): StoredSettingRow | undefined {
   const profileId = context.profileId ?? "";
   const deviceId = context.deviceId ?? "";
+  const clientFamily = context.clientFamily ?? "";
   const matches = candidates.filter((row) => {
     if (row.scope !== scope) return false;
     switch (scope) {
@@ -145,6 +149,12 @@ function pickForScope(
           (row.profileId ?? "") === profileId &&
           (row.deviceId ?? "") === deviceId &&
           deviceId !== ""
+        );
+      case "profile_client":
+        return (
+          (row.profileId ?? "") === profileId &&
+          (row.clientFamily ?? "") === clientFamily &&
+          clientFamily !== ""
         );
       case "profile_library":
         return (

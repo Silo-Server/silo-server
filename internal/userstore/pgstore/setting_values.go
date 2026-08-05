@@ -15,7 +15,7 @@ import (
 
 // settingValueColumns is the projection every read shares, in the order
 // scanSettingValue expects.
-const settingValueColumns = `key, scope, profile_id, device_id, library_id, series_id,
+const settingValueColumns = `key, scope, profile_id, client_family, device_id, library_id, series_id,
 	value, revision, created_at, updated_at`
 
 // settingConflictTargets maps a scope to the partial unique index that enforces
@@ -24,6 +24,7 @@ const settingValueColumns = `key, scope, profile_id, device_id, library_id, seri
 var settingConflictTargets = map[settingscontract.Scope]string{
 	settingscontract.ScopeAccount:        "(user_id, key) WHERE scope = 'account'",
 	settingscontract.ScopeProfile:        "(user_id, profile_id, key) WHERE scope = 'profile'",
+	settingscontract.ScopeProfileClient:  "(user_id, profile_id, client_family, key) WHERE scope = 'profile_client'",
 	settingscontract.ScopeProfileDevice:  "(user_id, profile_id, device_id, key) WHERE scope = 'profile_device'",
 	settingscontract.ScopeProfileLibrary: "(user_id, profile_id, library_id, key) WHERE scope = 'profile_library'",
 	settingscontract.ScopeProfileSeries:  "(user_id, profile_id, series_id, key) WHERE scope = 'profile_series'",
@@ -39,6 +40,9 @@ func settingIdentityPredicate(userID int, id userstore.SettingIdentity) (string,
 	case settingscontract.ScopeProfile:
 		args = append(args, id.ProfileID)
 		clause += " AND profile_id = $4"
+	case settingscontract.ScopeProfileClient:
+		args = append(args, id.ProfileID, string(id.ClientFamily))
+		clause += " AND profile_id = $4 AND client_family = $5"
 	case settingscontract.ScopeProfileDevice:
 		args = append(args, id.ProfileID, id.DeviceID)
 		clause += " AND profile_id = $4 AND device_id = $5"
@@ -56,11 +60,20 @@ func (s *PostgresUserStore) GetSettingValue(
 	ctx context.Context,
 	id userstore.SettingIdentity,
 ) (*userstore.SettingValue, error) {
+	return getSettingValue(ctx, s.pool, s.userID, id)
+}
+
+func getSettingValue(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id userstore.SettingIdentity,
+) (*userstore.SettingValue, error) {
 	if err := id.Validate(); err != nil {
 		return nil, err
 	}
-	clause, args := settingIdentityPredicate(s.userID, id)
-	row := s.pool.QueryRow(ctx,
+	clause, args := settingIdentityPredicate(userID, id)
+	row := exec.QueryRow(ctx,
 		"SELECT "+settingValueColumns+" FROM user_setting_values WHERE "+clause,
 		args...,
 	)
@@ -75,9 +88,9 @@ func (s *PostgresUserStore) GetSettingValue(
 }
 
 // ListSettingValuesForResolution collects every candidate row for a resolution
-// request in one query. The predicate covers all five scopes at once: ranking by
-// each definition's resolution order happens in Go, so a four-scope chain still
-// costs one round trip and one index scan rather than four lookups per key.
+// request in one query. The predicate covers all six scopes at once: ranking by
+// each definition's resolution order happens in Go, so a multi-scope chain still
+// costs one round trip and one index scan rather than one lookup per scope and key.
 func (s *PostgresUserStore) ListSettingValuesForResolution(
 	ctx context.Context,
 	query userstore.SettingResolutionQuery,
@@ -96,17 +109,18 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 		        scope = 'account'
 		     OR (
 		          profile_id = ANY($3::text[])
-		          AND (
-		                scope = 'profile'
-		             OR (scope = 'profile_device' AND device_id = $4)
-		             OR (scope = 'profile_library' AND library_id = ANY($5::int[]))
-		             OR (scope = 'profile_series' AND series_id = ANY($6::text[]))
-		          )
-		        )
-		      )
-		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(device_id, ''),
+			          AND (
+			                scope = 'profile'
+			             OR (scope = 'profile_client' AND client_family = $4)
+			             OR (scope = 'profile_device' AND device_id = $5)
+			             OR (scope = 'profile_library' AND library_id = ANY($6::int[]))
+			             OR (scope = 'profile_series' AND series_id = ANY($7::text[]))
+			          )
+			        )
+			      )
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
 		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
-		s.userID, q.Keys, q.ProfileIDs, q.DeviceID, q.LibraryIDs, q.SeriesIDs,
+		s.userID, q.Keys, q.ProfileIDs, string(q.ClientFamily), q.DeviceID, q.LibraryIDs, q.SeriesIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing setting values for resolution: %w", err)
@@ -133,7 +147,7 @@ func (s *PostgresUserStore) ListAllSettingValues(ctx context.Context) ([]usersto
 		SELECT `+settingValueColumns+`
 		FROM user_setting_values
 		WHERE user_id = $1
-		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(device_id, ''),
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(client_family, ''), COALESCE(device_id, ''),
 		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
 		s.userID,
 	)
@@ -181,21 +195,90 @@ func upsertSettingValue(
 
 	row := exec.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO user_setting_values
-			(user_id, key, scope, profile_id, device_id, library_id, series_id, value)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(user_id, key, scope, profile_id, client_family, device_id, library_id, series_id, value)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT %s DO UPDATE SET
 			value = excluded.value,
 			revision = user_setting_values.revision + 1,
 			updated_at = now()
 		RETURNING %s`, target, settingValueColumns),
 		userID, id.Key, string(id.Scope),
-		nullableText(id.ProfileID), nullableText(id.DeviceID),
+		nullableText(id.ProfileID), nullableText(string(id.ClientFamily)), nullableText(id.DeviceID),
 		nullableInt(id.LibraryID), nullableText(id.SeriesID),
 		[]byte(value),
 	)
 	stored, err := scanSettingValue(row)
 	if err != nil {
 		return nil, fmt.Errorf("upserting setting value %q at %s: %w", id.Key, id.Scope, err)
+	}
+	return &stored, nil
+}
+
+// CompareAndSetSettingValue writes only when expectedRevision still names the
+// current row. Revision zero is insert-if-absent. PostgreSQL performs either
+// comparison and write in one statement, so concurrent document mutations can
+// retry without overwriting one another.
+func (s *PostgresUserStore) CompareAndSetSettingValue(
+	ctx context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	return compareAndSetSettingValue(ctx, s.pool, s.userID, id, value, expectedRevision)
+}
+
+func compareAndSetSettingValue(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	if err := id.Validate(); err != nil {
+		return nil, err
+	}
+	if err := userstore.ValidateSettingValueJSON(value); err != nil {
+		return nil, err
+	}
+	if expectedRevision < 0 {
+		return nil, fmt.Errorf("%w: expected revision must be non-negative", userstore.ErrInvalidSettingIdentity)
+	}
+
+	var row pgx.Row
+	if expectedRevision == 0 {
+		target, ok := settingConflictTargets[id.Scope]
+		if !ok {
+			return nil, fmt.Errorf("%w: %q has no storage identity", userstore.ErrInvalidSettingIdentity, id.Scope)
+		}
+		row = exec.QueryRow(ctx, fmt.Sprintf(`
+			INSERT INTO user_setting_values
+				(user_id, key, scope, profile_id, client_family, device_id, library_id, series_id, value)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT %s DO NOTHING
+			RETURNING %s`, target, settingValueColumns),
+			userID, id.Key, string(id.Scope),
+			nullableText(id.ProfileID), nullableText(string(id.ClientFamily)), nullableText(id.DeviceID),
+			nullableInt(id.LibraryID), nullableText(id.SeriesID), []byte(value),
+		)
+	} else {
+		clause, args := settingIdentityPredicate(userID, id)
+		valuePosition := len(args) + 1
+		revisionPosition := valuePosition + 1
+		args = append(args, []byte(value), expectedRevision)
+		row = exec.QueryRow(ctx, fmt.Sprintf(`
+			UPDATE user_setting_values
+			SET value = $%d, revision = revision + 1, updated_at = now()
+			WHERE %s AND revision = $%d
+			RETURNING %s`, valuePosition, clause, revisionPosition, settingValueColumns), args...)
+	}
+
+	stored, err := scanSettingValue(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, userstore.ErrSettingValueRevisionConflict
+	}
+	if err != nil {
+		return nil, fmt.Errorf("compare-and-setting value %q at %s: %w", id.Key, id.Scope, err)
 	}
 	return &stored, nil
 }
@@ -275,11 +358,20 @@ func (s *PostgresUserStore) GetSettingMutation(
 	ctx context.Context,
 	mutationID string,
 ) (*userstore.SettingMutationRecord, error) {
-	row := s.pool.QueryRow(ctx, `
+	return getSettingMutation(ctx, s.pool, s.userID, mutationID)
+}
+
+func getSettingMutation(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	mutationID string,
+) (*userstore.SettingMutationRecord, error) {
+	row := exec.QueryRow(ctx, `
 		SELECT mutation_id, request_hash, result, created_at, expires_at
 		FROM user_setting_mutations
 		WHERE user_id = $1 AND mutation_id = $2`,
-		s.userID, mutationID,
+		userID, mutationID,
 	)
 	record, err := scanSettingMutation(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -299,16 +391,25 @@ func (s *PostgresUserStore) PutSettingMutation(
 	ctx context.Context,
 	record userstore.SettingMutationRecord,
 ) (userstore.SettingMutationRecord, bool, error) {
+	return putSettingMutation(ctx, s.pool, s.userID, record)
+}
+
+func putSettingMutation(
+	ctx context.Context,
+	exec preferenceSettingsExecutor,
+	userID int,
+	record userstore.SettingMutationRecord,
+) (userstore.SettingMutationRecord, bool, error) {
 	if err := record.Validate(); err != nil {
 		return userstore.SettingMutationRecord{}, false, err
 	}
 
-	row := s.pool.QueryRow(ctx, `
+	row := exec.QueryRow(ctx, `
 		INSERT INTO user_setting_mutations (user_id, mutation_id, request_hash, result, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id, mutation_id) DO NOTHING
 		RETURNING mutation_id, request_hash, result, created_at, expires_at`,
-		s.userID, record.MutationID, record.RequestHash, []byte(record.Result), record.ExpiresAt,
+		userID, record.MutationID, record.RequestHash, []byte(record.Result), record.ExpiresAt,
 	)
 	stored, err := scanSettingMutation(row)
 	if err == nil {
@@ -318,7 +419,7 @@ func (s *PostgresUserStore) PutSettingMutation(
 		return userstore.SettingMutationRecord{}, false, fmt.Errorf("recording setting mutation %q: %w", record.MutationID, err)
 	}
 
-	existing, err := s.GetSettingMutation(ctx, record.MutationID)
+	existing, err := getSettingMutation(ctx, exec, userID, record.MutationID)
 	if err != nil {
 		return userstore.SettingMutationRecord{}, false, err
 	}
@@ -349,18 +450,19 @@ type pgxRow interface {
 
 func scanSettingValue(row pgxRow) (userstore.SettingValue, error) {
 	var (
-		value     userstore.SettingValue
-		scope     string
-		profileID *string
-		deviceID  *string
-		libraryID *int
-		seriesID  *string
-		raw       []byte
-		createdAt time.Time
-		updatedAt time.Time
+		value        userstore.SettingValue
+		scope        string
+		profileID    *string
+		clientFamily *string
+		deviceID     *string
+		libraryID    *int
+		seriesID     *string
+		raw          []byte
+		createdAt    time.Time
+		updatedAt    time.Time
 	)
 	if err := row.Scan(
-		&value.Key, &scope, &profileID, &deviceID, &libraryID, &seriesID,
+		&value.Key, &scope, &profileID, &clientFamily, &deviceID, &libraryID, &seriesID,
 		&raw, &value.Revision, &createdAt, &updatedAt,
 	); err != nil {
 		return userstore.SettingValue{}, err
@@ -368,6 +470,9 @@ func scanSettingValue(row pgxRow) (userstore.SettingValue, error) {
 	value.Scope = settingscontract.Scope(scope)
 	if profileID != nil {
 		value.ProfileID = *profileID
+	}
+	if clientFamily != nil {
+		value.ClientFamily = settingscontract.ClientFamily(*clientFamily)
 	}
 	if deviceID != nil {
 		value.DeviceID = *deviceID

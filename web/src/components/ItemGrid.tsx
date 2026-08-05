@@ -5,6 +5,8 @@ import ItemCard from "./ItemCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGridLayout } from "@/hooks/useGridLayout";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { cardGridClasses, cardTextAreaHeight } from "@/lib/uiCustomization";
 
 interface SharedItemGridProps {
   loading?: boolean;
@@ -37,11 +39,6 @@ function hasStaticItems(props: ItemGridProps): props is StaticItemGridProps {
   return Array.isArray((props as StaticItemGridProps).items);
 }
 
-const GRID_GAP = 12;
-const TEXT_AREA_HEIGHT = 44;
-const GRID_CLASSES =
-  "grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-3";
-
 export default function ItemGrid(props: ItemGridProps) {
   const {
     loading,
@@ -52,6 +49,9 @@ export default function ItemGrid(props: ItemGridProps) {
     onToggleSelect,
   } = props;
   const { prefs: overlayPrefs } = useOverlayPrefs();
+  const { cardPresentation } = useUICustomization();
+  const gridGap = cardPresentation.poster_size === "large" ? 16 : 12;
+  const gridClasses = cardGridClasses(cardPresentation.poster_size);
   const totalItems = hasStaticItems(props) ? props.items.length : props.totalItems;
   const pages = hasStaticItems(props)
     ? new Map<number, BrowseItem[]>([[0, props.items]])
@@ -59,8 +59,9 @@ export default function ItemGrid(props: ItemGridProps) {
   const pageSize = hasStaticItems(props) ? Math.max(props.items.length, 1) : props.pageSize;
   const onVisibleRangeChange = hasStaticItems(props) ? () => undefined : props.onVisibleRangeChange;
   const { containerRef, layout } = useGridLayout({
-    gap: GRID_GAP,
-    textAreaHeight: TEXT_AREA_HEIGHT,
+    gap: gridGap,
+    textAreaHeight: cardTextAreaHeight(cardPresentation.caption),
+    layoutKey: cardPresentation.poster_size,
   });
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null);
   const { columnCount, rowHeight } = layout;
@@ -78,6 +79,12 @@ export default function ItemGrid(props: ItemGridProps) {
     overscan: 5,
     scrollMargin,
   });
+
+  // The estimate function closes over rowHeight. Explicitly invalidate the
+  // cached measurements when a poster/caption preset changes that height.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   const virtualRows = virtualizer.getVirtualItems();
 
@@ -103,7 +110,7 @@ export default function ItemGrid(props: ItemGridProps) {
   return (
     <div ref={setAnchorEl}>
       {loading ? (
-        <div ref={containerRef} role="list" className={GRID_CLASSES}>
+        <div ref={containerRef} role="list" className={gridClasses}>
           {Array.from({ length: 24 }).map((_, i) => (
             <div key={i} role="listitem">
               <Skeleton className="aspect-[2/3] rounded-lg" />
@@ -124,7 +131,7 @@ export default function ItemGrid(props: ItemGridProps) {
           <div
             ref={containerRef}
             role="list"
-            className={GRID_CLASSES}
+            className={gridClasses}
             style={{
               position: "absolute",
               top: 0,

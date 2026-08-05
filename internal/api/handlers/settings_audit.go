@@ -23,7 +23,10 @@ import (
 // activitylog is an HTTP request-log middleware whose schema has no profile or
 // body, so it cannot express "actor P changed key K for profile Q". Persisting
 // these needs its own table and migration.
-const settingsAuditMsg = "settings changed for another profile"
+const (
+	settingsAuditMsg       = "settings changed for another profile"
+	settingsAuditActionSet = "set"
+)
 
 // logComponentKey is the structured-log attribute every handler in this package
 // tags itself with.
@@ -37,6 +40,7 @@ type settingsAuditRecord struct {
 	// actor's own account only on the admin routes, where profile ids alone
 	// would not say whose settings moved.
 	TargetUserID int
+	ClientFamily string
 	DeviceID     string
 	Key          string
 	Scope        string
@@ -66,6 +70,9 @@ func auditSettingsForOther(ctx context.Context, record settingsAuditRecord) {
 	}
 	if record.Scope != "" {
 		attrs = append(attrs, "scope", record.Scope)
+	}
+	if record.ClientFamily != "" {
+		attrs = append(attrs, "client_family", record.ClientFamily)
 	}
 	if record.DeviceID != "" {
 		attrs = append(attrs, "device_id", record.DeviceID)

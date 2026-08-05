@@ -36,12 +36,13 @@ var nvencProbeCache = struct {
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
-	Resolved        string             `json:"resolved"`
-	RenderDevices   []string           `json:"render_devices"`
-	IntelDetected   bool               `json:"intel_detected"`
-	Source          string             `json:"source"`
-	NodeURL         string             `json:"node_url,omitempty"`
-	Transformations []TransformationV3 `json:"transformations,omitempty"`
+	Resolved            string             `json:"resolved"`
+	RenderDevices       []string           `json:"render_devices"`
+	RenderDeviceDetails []RenderDeviceInfo `json:"render_device_details"`
+	IntelDetected       bool               `json:"intel_detected"`
+	Source              string             `json:"source"`
+	NodeURL             string             `json:"node_url,omitempty"`
+	Transformations     []TransformationV3 `json:"transformations,omitempty"`
 }
 
 // DetectHWAccel probes this host's GPU hardware and returns structured info.
@@ -60,15 +61,18 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 		}
 	}
 	return HWAccelInfo{
-		Resolved:      ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
-		RenderDevices: devices,
-		IntelDetected: intel,
-		Source:        "local",
+		Resolved:            ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
+		RenderDevices:       devices,
+		RenderDeviceDetails: renderDeviceDetails(devices),
+		IntelDetected:       intel,
+		Source:              "local",
 	}
 }
 
 // PickRenderDevice returns the GPU render device path to use.
-// If explicit is non-empty, it is returned as-is.
+// If explicit is non-empty, it is returned as-is — multi-device lists are
+// resolved to one device by AcquireHWDevice before args are built, so this
+// never sees a list on a live path.
 // Otherwise, it attempts to discover a render device under /dev/dri/.
 // Returns empty string if no device is found (caller should fall back to CPU).
 func PickRenderDevice(explicit string) string {
@@ -311,4 +315,54 @@ func detectRenderDevice(driDir string) string {
 		return devices[0]
 	}
 	return ""
+}
+
+// RenderDeviceInfo describes one render device for operator-facing surfaces.
+type RenderDeviceInfo struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
+// describeRenderDevice builds a short human label for a render device from
+// its sysfs PCI vendor/device ids; best-effort, never fails.
+func describeRenderDevice(renderDevPath string) string {
+	name := filepath.Base(renderDevPath)
+	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
+	label := ""
+	switch vendor {
+	case "0x8086":
+		label = "Intel GPU"
+	case "0x10de":
+		label = "NVIDIA GPU"
+	case "0x1002":
+		label = "AMD GPU"
+	case "":
+		return "GPU"
+	default:
+		label = "GPU (vendor " + vendor + ")"
+	}
+	if device := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "device")); device != "" && vendor != "0x1002" {
+		label += " (" + device + ")"
+	}
+	return label
+}
+
+func readSysfsID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// renderDeviceDetails describes every listed device.
+func renderDeviceDetails(devices []string) []RenderDeviceInfo {
+	details := make([]RenderDeviceInfo, 0, len(devices))
+	for _, device := range devices {
+		details = append(details, RenderDeviceInfo{
+			Path:        device,
+			Description: describeRenderDevice(device),
+		})
+	}
+	return details
 }

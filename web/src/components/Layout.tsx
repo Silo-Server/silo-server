@@ -266,7 +266,7 @@ export default function Layout({ children }: LayoutProps) {
             </ViewTransitionLink>
             {showAdminActivity && <ServerActivity hideWhenEmpty />}
             <Link
-              to="/settings/playback"
+              to="/settings"
               className="bg-primary text-primary-foreground flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]"
             >
               {profile?.name?.charAt(0).toUpperCase() ??

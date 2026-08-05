@@ -5,10 +5,12 @@ import {
   buildCatalogFilterSearchParams,
   buildCatalogQueryUpdateHref,
   buildCatalogHref,
+  buildLibraryCollectionCatalogHref,
   buildPersonCatalogHref,
   buildPersonalCatalogHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
+  sameCatalogDestination,
 } from "./catalogSearchParams";
 
 function params(search: string) {
@@ -116,6 +118,46 @@ describe("parseCatalogSearchParams", () => {
   });
 });
 
+describe("sameCatalogDestination", () => {
+  it("ignores section presentation params but keeps scope identity", () => {
+    const target = parseCatalogSearchParams(
+      params("source=section&scope=library&library_id=7&section_id=recent&title=Recent"),
+    );
+    const filtered = parseCatalogSearchParams(
+      params(
+        "source=section&scope=library&library_id=7&section_id=recent&sort=title&order=asc&genre=Drama",
+      ),
+    );
+    const otherLibrary = parseCatalogSearchParams(
+      params("source=section&scope=library&library_id=8&section_id=recent"),
+    );
+
+    expect(sameCatalogDestination(target, filtered)).toBe(true);
+    expect(sameCatalogDestination(target, otherLibrary)).toBe(false);
+  });
+
+  it("ignores collection filters but keeps source and collection identity", () => {
+    const target = parseCatalogSearchParams(
+      params("source=library_collection&library_id=7&collection_id=favorites"),
+    );
+    const filtered = parseCatalogSearchParams(
+      params(
+        "source=library_collection&library_id=7&collection_id=favorites&type=movie&sort=year&order=desc",
+      ),
+    );
+    const userCollection = parseCatalogSearchParams(
+      params("source=user_collection&collection_id=favorites"),
+    );
+    const filteredUserCollection = parseCatalogSearchParams(
+      params("source=user_collection&collection_id=favorites&library_id=9&sort=title"),
+    );
+
+    expect(sameCatalogDestination(target, filtered)).toBe(true);
+    expect(sameCatalogDestination(target, userCollection)).toBe(false);
+    expect(sameCatalogDestination(userCollection, filteredUserCollection)).toBe(true);
+  });
+});
+
 describe("catalogSourceAllowsOverlay", () => {
   it("returns true only for supported overlay sources", () => {
     expect(catalogSourceAllowsOverlay("query")).toBe(true);
@@ -129,6 +171,15 @@ describe("catalogSourceAllowsOverlay", () => {
 });
 
 describe("buildCatalogHref", () => {
+  it("keeps a library-scoped collection shortcut in its library context", () => {
+    const href = buildLibraryCollectionCatalogHref("collection-7", "Favorites", 42);
+    const built = new URL(`http://example.test${href}`);
+
+    expect(built.searchParams.get("source")).toBe("library_collection");
+    expect(built.searchParams.get("collection_id")).toBe("collection-7");
+    expect(built.searchParams.get("library_id")).toBe("42");
+  });
+
   it("preserves type=all when the query filter selects All Media", () => {
     const state = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
     state.query_definition = {

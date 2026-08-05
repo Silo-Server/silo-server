@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 4,
+  "revision": 5,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -826,6 +826,59 @@
       "description": "Whether upcoming episodes stay with Continue Watching or get their own row.",
       "recommended_control": "select",
       "notes": "Registered from the legacy unprefixed key next_up_mode. The server reads it directly when assembling home sections, so it cannot be client-local; that read moves to the canonical resolver at cutover. The legacy value was untyped and absent meant combined, which is why combined is the default rather than a third \"unset\" member."
+    },
+    {
+      "key": "nav.primary_menu",
+      "introduced_in": 5,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_client", "profile_device"],
+      "resolution_order": ["profile_device", "profile_client", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "primary-menu.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "navigation",
+      "label": "Primary menu",
+      "description": "The ordered visible destinations shared by like clients.",
+      "recommended_control": "panel",
+      "notes": "Search and profile remain fixed client utilities. Home is required by primary-menu.json; omitting any other supported built-in hides it. Semantic destination identities are unique even when labels differ. A null default lets each family keep its native baseline until the user customizes it. Family scope synchronizes like clients while profile_device remains an explicit escape hatch for one screen; clients ignore built-in destinations they do not support."
+    },
+    {
+      "key": "nav.shortcuts",
+      "introduced_in": 5,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "navigation-shortcuts.json"
+      },
+      "default_value": { "items": [] },
+      "category": "navigation",
+      "label": "Navigation shortcuts",
+      "description": "Libraries, sections, and collections pinned for use across navigation surfaces.",
+      "notes": "Profile-wide catalog; individual client families decide which shortcuts to place in their primary menu. Semantic destination identities are unique even when labels differ. The profile_client migration keeps ui.sidebar_pins unchanged and seeds this key from convertible legacy web pins only when this key has no authored row."
+    },
+    {
+      "key": "ui.card_presentation",
+      "introduced_in": 5,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_client", "profile_device"],
+      "resolution_order": ["profile_device", "profile_client", "profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "card-presentation.json"
+      },
+      "default_value": { "poster_size": "standard", "caption": "title_metadata" },
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "appearance",
+      "label": "Media cards",
+      "description": "Poster size and caption detail used by media cards.",
+      "recommended_control": "panel",
+      "notes": "Semantic presets roam between like devices without forcing identical pixel dimensions across platforms. A profile fallback can opt into one presentation everywhere; family and exact-device values remain more specific."
     },
     {
       "key": "ui.sidebar_pins",

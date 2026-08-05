@@ -2,7 +2,7 @@ package userdb
 
 import (
 	"context"
-	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,15 +12,12 @@ import (
 
 func newConformanceStore(t *testing.T) userstore.UserStore {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
 	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+		t.Fatalf("open user database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	return NewSQLiteUserStore(db)
+	return NewSQLiteUserStore(db.DB)
 }
 
 // TestSQLiteProgressSince runs the offline-sync progress-reconciliation

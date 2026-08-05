@@ -32,8 +32,9 @@ import (
 // profile_series. That is what lets one code path serve an identified client,
 // an anonymous jellycompat seed, and a batch spanning many series.
 type Context struct {
-	ProfileID string
-	DeviceID  string
+	ProfileID    string
+	ClientFamily settingscontract.ClientFamily
+	DeviceID     string
 	// LibraryIDs and SeriesIDs are the content contexts in play. A batch
 	// resolving a season passes every id once rather than resolving per item.
 	LibraryIDs []int
@@ -131,11 +132,12 @@ func (r *Resolver) Resolve(
 	}
 
 	stored, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:       known,
-		ProfileIDs: nonEmpty(rc.ProfileID),
-		DeviceID:   rc.DeviceID,
-		LibraryIDs: rc.LibraryIDs,
-		SeriesIDs:  rc.SeriesIDs,
+		Keys:         known,
+		ProfileIDs:   nonEmpty(rc.ProfileID),
+		ClientFamily: rc.ClientFamily,
+		DeviceID:     rc.DeviceID,
+		LibraryIDs:   rc.LibraryIDs,
+		SeriesIDs:    rc.SeriesIDs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
@@ -168,10 +170,14 @@ func (r *Resolver) ResolveContexts(
 	}
 
 	deviceID := contexts[0].DeviceID
-	query := userstore.SettingResolutionQuery{Keys: known, DeviceID: deviceID}
+	clientFamily := contexts[0].ClientFamily
+	query := userstore.SettingResolutionQuery{Keys: known, ClientFamily: clientFamily, DeviceID: deviceID}
 	for _, rc := range contexts {
 		if rc.DeviceID != deviceID {
 			return nil, fmt.Errorf("settingsresolve: batched contexts use different devices")
+		}
+		if rc.ClientFamily != clientFamily {
+			return nil, fmt.Errorf("settingsresolve: batched contexts use different client families")
 		}
 		if rc.ProfileID != "" {
 			query.ProfileIDs = append(query.ProfileIDs, rc.ProfileID)
@@ -350,6 +356,10 @@ func pickForScope(
 			matches = append(matches, row)
 		case settingscontract.ScopeProfile:
 			if row.ProfileID == rc.ProfileID {
+				matches = append(matches, row)
+			}
+		case settingscontract.ScopeProfileClient:
+			if row.ProfileID == rc.ProfileID && row.ClientFamily == rc.ClientFamily && rc.ClientFamily.Valid() {
 				matches = append(matches, row)
 			}
 		case settingscontract.ScopeProfileDevice:

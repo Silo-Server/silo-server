@@ -50,6 +50,7 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
   useToggleSidebarPin: () => ({
     togglePin: mockTogglePin,
     isPinned: mockIsPinned,
+    canToggle: true,
   }),
 }));
 

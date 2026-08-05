@@ -5,6 +5,8 @@ import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 function buildSectionHref(row: DiscoverRow): string | undefined {
   if (!row.section_kind) return undefined;
@@ -119,7 +121,7 @@ function DiscoverErrorState({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-function DiscoverSkeletons() {
+function DiscoverSkeletons({ posterWidthClasses }: { posterWidthClasses: string }) {
   return (
     <div className="space-y-10 pt-2">
       {Array.from({ length: 4 }).map((_, i) => (
@@ -129,7 +131,7 @@ function DiscoverSkeletons() {
           </div>
           <div className="flex gap-4 overflow-hidden px-4 sm:px-6 lg:gap-5 lg:px-10 xl:px-12">
             {Array.from({ length: 12 }).map((_, j) => (
-              <div key={j} className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]">
+              <div key={j} className={posterWidthClasses}>
                 <Skeleton className="aspect-[2/3] w-full rounded-xl" />
                 <Skeleton className="mt-3 h-4 w-3/4 rounded" />
                 <Skeleton className="mt-1.5 h-3 w-1/2 rounded" />
@@ -147,6 +149,8 @@ export default function Recommendations() {
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   const rows = data?.rows ?? [];
 
@@ -172,7 +176,7 @@ export default function Recommendations() {
 
       {/* Content */}
       {isLoading ? (
-        <DiscoverSkeletons />
+        <DiscoverSkeletons posterWidthClasses={posterWidthClasses} />
       ) : isError ? (
         <DiscoverErrorState onRetry={() => refetch()} />
       ) : rows.length === 0 ? (
@@ -185,11 +189,7 @@ export default function Recommendations() {
             titleHref={buildSectionHref(row)}
           >
             {row.items.map((item) => (
-              <div
-                key={item.content_id}
-                className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
-                role="listitem"
-              >
+              <div key={item.content_id} className={posterWidthClasses} role="listitem">
                 <SectionItemCard item={item} />
               </div>
             ))}
