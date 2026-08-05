@@ -471,6 +471,10 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 			  AND remaining.content_id=stale.content_id
 			  AND remaining.media_folder_id=stale.media_folder_id
 			  AND remaining.file_path=stale.file_path
+			  AND NOT EXISTS(
+				SELECT 1 FROM library_collection_items lci
+				WHERE lci.media_item_id=stale.content_id
+			  )
 		  )`)
 	if err != nil {
 		return result, fmt.Errorf("delete unclaimed virtual files: %w", err)
