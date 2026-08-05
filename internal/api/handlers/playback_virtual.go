@@ -290,7 +290,10 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		// stream is a known-safe format: HLS is always remuxed/transcoded, and
 		// mp4/mkv/webm/ts are handled natively by ffmpeg. Candidate metadata
 		// is sufficient for play method selection and playback info.
-		skipProbe := cand.hasReliableCodecs() && (isHLSVirtualStreamURL(streamURL) || canSkipProbeForContainer(cand.Container))
+		// Never skip probe for Dolby Vision streams — the probe discovers the
+		// DV profile, RPU strippability, and other metadata the client needs.
+		dvCandidate := strings.EqualFold(strings.TrimSpace(cand.HDR), "dv")
+		skipProbe := cand.hasReliableCodecs() && !dvCandidate && (isHLSVirtualStreamURL(streamURL) || canSkipProbeForContainer(cand.Container))
 		if skipProbe {
 			mergeVirtualCandidateTracks(&transient, cand)
 			if !transient.HDR && cand.HDR != "" {
