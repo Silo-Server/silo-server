@@ -393,6 +393,10 @@ func syncVirtualFileSourceClaims(ctx context.Context, tx pgx.Tx, installationID 
 		  AND mf.file_path=stale.file_path
 		  AND mf.virtual_owner_installation_id=$1
 		  AND NOT EXISTS(
+			SELECT 1 FROM library_collection_items lci
+			WHERE lci.media_item_id=$3
+		  )
+		  AND NOT EXISTS(
 			SELECT 1 FROM virtual_media_file_source_claims vmfsc
 			WHERE vmfsc.plugin_installation_id=$1
 			  AND vmfsc.content_id=$3
@@ -486,15 +490,15 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 		  AND mf.file_path=stale.file_path
 		  AND mf.virtual_owner_installation_id=stale.plugin_installation_id
 		  AND NOT EXISTS(
+			SELECT 1 FROM library_collection_items lci
+			WHERE lci.media_item_id=stale.content_id
+		  )
+		  AND NOT EXISTS(
 			SELECT 1 FROM virtual_media_file_source_claims remaining
 			WHERE remaining.plugin_installation_id=stale.plugin_installation_id
 			  AND remaining.content_id=stale.content_id
 			  AND remaining.media_folder_id=stale.media_folder_id
 			  AND remaining.file_path=stale.file_path
-			  AND NOT EXISTS(
-				SELECT 1 FROM library_collection_items lci
-				WHERE lci.media_item_id=stale.content_id
-			  )
 		  )`)
 	if err != nil {
 		return result, fmt.Errorf("delete unclaimed virtual files: %w", err)
@@ -1043,11 +1047,19 @@ func upsertVirtualFileWithMeta(ctx context.Context, tx pgx.Tx, contentID, episod
 	if fileSize < 0 {
 		fileSize = 0
 	}
+	audioLangs := in.AudioLanguages
+	if audioLangs == nil {
+		audioLangs = []string{}
+	}
+	subLangs := in.SubtitleLanguages
+	if subLangs == nil {
+		subLangs = []string{}
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO media_files(
 			content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at,
 			resolution,codec_video,codec_audio,hdr,bitrate,audio_tracks,subtitle_tracks,virtual_owner_installation_id
-		) VALUES($1,NULLIF($2,''),$3,$4,$12,$13,NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($14::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($15::text[]) x),'[]'::jsonb),$16)
+		) VALUES($1,NULLIF($2,''),$3,$4,$11,$12,NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($13::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($14::text[]) x),'[]'::jsonb),$15)
 		ON CONFLICT (file_path, virtual_owner_installation_id, media_folder_id) WHERE virtual_owner_installation_id IS NOT NULL DO UPDATE SET
 			content_id=EXCLUDED.content_id,
 			episode_id=EXCLUDED.episode_id,
@@ -1070,7 +1082,7 @@ func upsertVirtualFileWithMeta(ctx context.Context, tx pgx.Tx, contentID, episod
 			audio_tracks=EXCLUDED.audio_tracks,
 			subtitle_tracks=EXCLUDED.subtitle_tracks,
 			virtual_owner_installation_id=EXCLUDED.virtual_owner_installation_id`,
-		contentID, episodeID, folderID, uri, duration, in.Resolution, in.CodecVideo, in.CodecAudio, isHDR, in.Bitrate, in.Container, fileSize, "virtual", in.AudioLanguages, in.SubtitleLanguages, installationID)
+		contentID, episodeID, folderID, uri, duration, in.Resolution, in.CodecVideo, in.CodecAudio, isHDR, in.Bitrate, fileSize, "virtual", audioLangs, subLangs, installationID)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file: %w", err)
 	}
@@ -1085,6 +1097,14 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 	fileSize := v.FileSize
 	if fileSize < 0 {
 		fileSize = 0
+	}
+	audioLangs := v.AudioLanguages
+	if audioLangs == nil {
+		audioLangs = []string{}
+	}
+	subLangs := v.SubtitleLanguages
+	if subLangs == nil {
+		subLangs = []string{}
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO media_files(
@@ -1113,7 +1133,7 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 			edition_raw=EXCLUDED.edition_raw,
 			audio_tracks=EXCLUDED.audio_tracks,
 			subtitle_tracks=EXCLUDED.subtitle_tracks`,
-		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, fileSize, "virtual", v.AudioLanguages, v.SubtitleLanguages, installationID)
+		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, fileSize, "virtual", audioLangs, subLangs, installationID)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file variant: %w", err)
 	}

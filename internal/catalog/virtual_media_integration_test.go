@@ -369,7 +369,7 @@ func TestVirtualMediaSourcesDoNotOverwriteEachOtherAndReconcileIndependently(t *
 		t.Fatalf("multi-provider state claims=%d files=%d, want 2/2", claims, files)
 	}
 
-	reconciled, err := reg.ReconcileVirtualMedia(ctx, 11, "provider-a", nil, []int{996})
+	reconciled, err := reg.ReconcileVirtualMedia(ctx, 11, "provider-a", []string{"movie-tmdb-999"}, []int{996})
 	if err != nil {
 		t.Fatalf("reconcile first provider: %v", err)
 	}
@@ -939,7 +939,7 @@ func TestVirtualMetadataOwnershipPromotesSurvivingSource(t *testing.T) {
 	if _, err := reg.UpsertVirtualMedia(ctx, 22, second); err != nil {
 		t.Fatalf("upsert secondary: %v", err)
 	}
-	if _, err := reg.ReconcileVirtualMedia(ctx, 11, "provider-a", nil, []int{983}); err != nil {
+	if _, err := reg.ReconcileVirtualMedia(ctx, 11, "provider-a", []string{"movie-tmdb-999"}, []int{983}); err != nil {
 		t.Fatalf("remove primary: %v", err)
 	}
 	second.Title = "Promoted Secondary"
