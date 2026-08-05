@@ -335,9 +335,6 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
 		return truncatedDuration(formatDuration), true
 	}
-	if duration, ok := corroboratedLongVideoDuration(raw, formatDuration); ok {
-		return truncatedDuration(duration), true
-	}
 
 	for _, stream := range raw.Streams {
 		if !isMainVideoStream(stream) {
@@ -355,6 +352,9 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 
 	duration := durationAfterStart(formatDuration, parseFloat(raw.Format.StartTime))
 	if duration > 0 && !durationLooksImplausible(raw, duration) {
+		return truncatedDuration(duration), true
+	}
+	if duration, ok := corroboratedLongVideoDuration(raw, formatDuration); ok {
 		return truncatedDuration(duration), true
 	}
 	return 0, false
@@ -516,7 +516,7 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 	}
 	if fps := parseFrameRate(frameRate); fps > 0 && packetCount > 0 {
 		frameDuration := float64(packetCount) / fps
-		if durationIsWithinValidatedLimit(frameDuration) && frameDuration > best {
+		if durationIsReasonable(frameDuration) && frameDuration > best {
 			best = frameDuration
 		}
 	}

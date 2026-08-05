@@ -117,6 +117,28 @@ func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoDuration(t *testing.
 	}
 }
 
+func TestDurationFromProbeMetadataNormalizesOffsetBeforeCorroboratingLongVideo(t *testing.T) {
+	t.Parallel()
+
+	raw := &ffprobeOutput{
+		Format: ffprobeFormat{
+			StartTime: "180000.000000",
+			Duration:  "182930.275000",
+			Size:      "77507139196",
+		},
+		Streams: []ffprobeStream{{
+			CodecType: "video",
+			StartTime: "180000.000000",
+			Duration:  "182930.196000",
+		}},
+	}
+
+	got, ok := durationFromProbeMetadata(raw)
+	if !ok || got != 2930 {
+		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 2930, true", got, ok)
+	}
+}
+
 func TestDurationFromProbeMetadataRejectsUncorroboratedLongVideoDuration(t *testing.T) {
 	t.Parallel()
 
@@ -224,6 +246,20 @@ func TestEstimateVideoPacketDurationRejectsDurationBeyondValidatedLimit(t *testi
 
 	packets := strings.NewReader("0.000000\n1000001.000000\n")
 	got := estimateVideoPacketDuration(packets, "")
+	if got != 0 {
+		t.Fatalf("estimateVideoPacketDuration() = %d, want 0", got)
+	}
+}
+
+func TestEstimateVideoPacketDurationKeepsOrdinaryCapForFrameRateEstimate(t *testing.T) {
+	t.Parallel()
+
+	var packets strings.Builder
+	for range 900 {
+		packets.WriteString("3.022000\n")
+	}
+
+	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "1/1000")
 	if got != 0 {
 		t.Fatalf("estimateVideoPacketDuration() = %d, want 0", got)
 	}
