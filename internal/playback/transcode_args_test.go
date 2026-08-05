@@ -65,6 +65,24 @@ func TestBuildFFmpegArgs_CPUPreservesSuperfastFastStart(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgsBoundsHLSManifestSize(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:        "/media/long.mkv",
+		OutputDir:        "/tmp/out",
+		SessionID:        "session-long",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		TotalDuration:    1_000_000,
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-hls_list_size 50000"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("FFmpeg args missing %q: %s", want, joined)
+	}
+}
+
 func TestBuildFFmpegArgs_CopyVideoFromStartUsesZeroBasedTimestamps(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:        "/media/movie.mkv",

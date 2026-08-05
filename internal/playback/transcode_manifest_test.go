@@ -160,6 +160,63 @@ func TestBuildPlaybackManifest_EncodedTranscodeUsesSyntheticVODManifest(t *testi
 	}
 }
 
+func TestBuildPlaybackManifest_LongEncodedTranscodeUsesRealManifest(t *testing.T) {
+	tempDir := t.TempDir()
+	manifest := strings.Join([]string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:3",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MEDIA-SEQUENCE:0",
+		"#EXTINF:2.000000,",
+		"seg_00000.ts",
+		"#EXTINF:2.000000,",
+		"seg_00001.ts",
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(tempDir, "stream.m3u8"), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	session := &TranscodeSession{
+		outputDir: tempDir,
+		opts: TranscodeOpts{
+			TargetCodecVideo: "h264",
+			TargetCodecAudio: "aac",
+			SegmentDuration:  2,
+			TotalDuration:    1_000_000,
+		},
+	}
+
+	got, err := session.BuildPlaybackManifest("segment/", "token=test")
+	if err != nil {
+		t.Fatalf("BuildPlaybackManifest: %v", err)
+	}
+
+	text := string(got)
+	if strings.Contains(text, "#EXT-X-PLAYLIST-TYPE:VOD") ||
+		strings.Contains(text, "seg_499999.ts") {
+		t.Fatalf("long encoded manifest should not synthesize every segment:\n%s", text)
+	}
+	for _, want := range []string{
+		"#EXT-X-MEDIA-SEQUENCE:0",
+		"segment/seg_00000.ts?token=test",
+		"segment/seg_00001.ts?token=test",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("manifest missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestCanGenerateSyntheticManifestBoundsSegmentCount(t *testing.T) {
+	if !CanGenerateSyntheticManifest(100_000, 2) {
+		t.Fatal("historical 50,000-segment manifest should remain supported")
+	}
+	if CanGenerateSyntheticManifest(100_001, 2) {
+		t.Fatal("manifest above 50,000 segments should use the real playlist")
+	}
+}
+
 func TestBuildPlaybackManifest_UnknownDurationRejectsBrokenManifest(t *testing.T) {
 	tempDir := t.TempDir()
 	manifest := strings.Join([]string{

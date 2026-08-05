@@ -279,7 +279,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 
 	// Ensure the transcode process is running.
-	_, err = h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
+	manifest, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
 		if errors.Is(err, errTranscode4KDisallowed) {
 			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -299,7 +299,9 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 
 	segDuration := h.compatSegmentDuration()
 
-	manifest := generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	if manifest == nil {
+		manifest = generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.WriteHeader(http.StatusOK)
@@ -329,7 +331,7 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Ensure the transcode process is running.
-	_, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
+	manifest, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
 		if errors.Is(err, errTranscode4KDisallowed) {
 			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -349,7 +351,9 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 
 	segDuration := h.compatSegmentDuration()
 
-	manifest := generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	if manifest == nil {
+		manifest = generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(rewriteManifest(manifest, playSession.RouteItemID, playSession.ID, source.ID))
@@ -1564,10 +1568,11 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 		return nil, err
 	}
 
-	// When duration is known, Jellycompat serves its own synthetic VOD manifest.
-	// We only need ffmpeg running; waiting for startup segments here adds
-	// unnecessary latency before the player can request the actual target segment.
-	if source.Version.Duration > 0 {
+	// When the duration fits the shared segment-count bound, Jellycompat serves
+	// its own synthetic VOD manifest. Longer media waits for FFmpeg's bounded
+	// real playlist so one request cannot allocate hundreds of thousands of
+	// segment entries.
+	if shouldGenerateCompatFullManifest(source, h.compatSegmentDuration()) {
 		return nil, nil
 	}
 
@@ -1646,6 +1651,7 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 		FFmpegPath:         h.FFmpegPath,
 		HWAccel:            h.HWAccel,
 		AudioTrackIndex:    compatAudioTrackIndexOrDefault(source),
+		TotalDuration:      float64(source.Version.Duration),
 		FastStart:          true,
 	}
 	if source.TranscodeAudio {
@@ -1687,6 +1693,10 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	}
 
 	return transcodeSession, nil
+}
+
+func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuration int) bool {
+	return playback.CanGenerateSyntheticManifest(float64(source.Version.Duration), segmentDuration)
 }
 
 // audioSelectionChanged reports whether an incoming AudioStreamIndex differs

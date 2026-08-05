@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -78,6 +79,18 @@ func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
 				t.Fatalf("EXT-X-START presence = %v, want %v; manifest:\n%s", hasStart, tc.wantStart, got)
 			}
 		})
+	}
+}
+
+func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
+	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
+	if !shouldGenerateCompatFullManifest(short, 2) {
+		t.Fatal("historical 50,000-segment compatibility manifest should remain supported")
+	}
+
+	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
+	if shouldGenerateCompatFullManifest(long, 2) {
+		t.Fatal("long compatibility playback should use FFmpeg's bounded real manifest")
 	}
 }
 

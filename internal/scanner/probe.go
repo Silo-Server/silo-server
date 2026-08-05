@@ -365,10 +365,7 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 // same value. A small absolute/relative tolerance covers container rounding
 // and stream-boundary differences without trusting a lone malformed timeline.
 func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
-	if raw == nil ||
-		formatDuration <= maxReasonableMediaDurationSeconds ||
-		!durationIsWithinValidatedLimit(formatDuration) ||
-		durationLooksImplausible(raw, formatDuration) {
+	if raw == nil {
 		return 0, false
 	}
 
@@ -377,21 +374,44 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 			continue
 		}
 		streamDuration := parseFloat(stream.Duration)
-		if !durationIsWithinValidatedLimit(streamDuration) {
-			return 0, false
+
+		// Some MPEG-TS/HLS timelines report duration as an absolute end
+		// timestamp. Prefer corroborated spans after subtracting each timeline's
+		// start so a large offset is not persisted as part of the runtime.
+		normalizedFormatDuration := durationAfterStartWithinValidatedLimit(
+			formatDuration,
+			parseFloat(raw.Format.StartTime),
+		)
+		normalizedStreamDuration := durationAfterStartWithinValidatedLimit(
+			streamDuration,
+			parseFloat(stream.StartTime),
+		)
+		if longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration) &&
+			!durationLooksImplausible(raw, normalizedFormatDuration) {
+			return normalizedFormatDuration, true
 		}
 
-		tolerance := max(
-			longVideoDurationAbsoluteToleranceSeconds,
-			max(formatDuration, streamDuration)*longVideoDurationRelativeTolerance,
-		)
-		if math.Abs(formatDuration-streamDuration) <= tolerance {
+		if longVideoDurationsAgree(formatDuration, streamDuration) &&
+			!durationLooksImplausible(raw, formatDuration) {
 			return formatDuration, true
 		}
 		return 0, false
 	}
 
 	return 0, false
+}
+
+func longVideoDurationsAgree(first, second float64) bool {
+	if first <= maxReasonableMediaDurationSeconds ||
+		!durationIsWithinValidatedLimit(first) ||
+		!durationIsWithinValidatedLimit(second) {
+		return false
+	}
+	tolerance := max(
+		longVideoDurationAbsoluteToleranceSeconds,
+		max(first, second)*longVideoDurationRelativeTolerance,
+	)
+	return math.Abs(first-second) <= tolerance
 }
 
 func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
@@ -408,6 +428,17 @@ func durationAfterStart(end, start float64) float64 {
 	}
 	duration := end - start
 	if !durationIsReasonable(duration) {
+		return 0
+	}
+	return duration
+}
+
+func durationAfterStartWithinValidatedLimit(end, start float64) float64 {
+	if start <= 0 || end <= start {
+		return 0
+	}
+	duration := end - start
+	if !durationIsWithinValidatedLimit(duration) {
 		return 0
 	}
 	return duration
@@ -507,18 +538,30 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 		maxTimestamp = max(maxTimestamp, timestamp)
 	}
 
-	best := 0.0
+	packetSpan := 0.0
 	if !math.IsInf(minTimestamp, 1) && !math.IsInf(maxTimestamp, -1) {
 		span := maxTimestamp - minTimestamp
 		if durationIsWithinValidatedLimit(span) {
-			best = span
+			packetSpan = span
 		}
 	}
+
+	frameDuration := 0.0
 	if fps := parseFrameRate(frameRate); fps > 0 && packetCount > 0 {
-		frameDuration := float64(packetCount) / fps
-		if durationIsReasonable(frameDuration) && frameDuration > best {
-			best = frameDuration
-		}
+		frameDuration = float64(packetCount) / fps
+	}
+
+	best := packetSpan
+	if packetSpan > maxReasonableMediaDurationSeconds &&
+		durationIsPositiveFinite(frameDuration) &&
+		!longVideoDurationsAgree(packetSpan, frameDuration) {
+		// A long PTS span is strong evidence only when a usable frame-count
+		// estimate does not contradict it. This rejects isolated timestamp
+		// discontinuities while retaining the ordinary frame estimate below.
+		best = 0
+	}
+	if durationIsReasonable(frameDuration) && frameDuration > best {
+		best = frameDuration
 	}
 	if best <= 0 {
 		return 0

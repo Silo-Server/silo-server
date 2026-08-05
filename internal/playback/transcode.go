@@ -152,6 +152,11 @@ const defaultSegmentDuration = 2
 // embedded length matches what the node actually produces.
 const DefaultSegmentDuration = defaultSegmentDuration
 
+// maxSyntheticManifestSegments preserves the historical worst-case playlist
+// size (100,000 seconds at two-second segments). Longer media uses FFmpeg's
+// real sliding playlist instead of allocating a complete synthetic manifest.
+const maxSyntheticManifestSegments = 50_000
+
 const maxPersistedFFmpegLines = 2000
 const maxPersistedFFmpegBytes = 256 * 1024
 const maxPersistedFFmpegChars = 2000
@@ -383,7 +388,10 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 		"-max_delay", "5000000",
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", opts.SegmentDuration),
-		"-hls_list_size", "0",
+		// Bound real playlists as well as synthetic ones. Segment files remain on
+		// disk because delete_segments is not enabled, while the manifest itself
+		// cannot grow without limit during multi-day sessions.
+		"-hls_list_size", strconv.Itoa(maxSyntheticManifestSegments),
 		"-hls_segment_type", segmentType,
 		// Write segments to temp files first so the player never fetches a
 		// partially-written segment during a quality switch.
@@ -1023,12 +1031,14 @@ func (s *TranscodeSession) WaitForManifest(timeout time.Duration) ([]byte, error
 // Copy-video sessions always expose FFmpeg's real manifest so the playlist
 // timing matches the variable-length fragments FFmpeg actually writes and the
 // seekable window reflects what FFmpeg has produced so far. Encoded transcodes
-// still use the synthetic full VOD manifest when duration is known because
-// forced keyframes make that timeline stable and seek-anywhere friendly.
+// use the synthetic full VOD manifest only while its segment count is bounded;
+// longer media uses FFmpeg's real sliding playlist.
 func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]byte, error) {
 	opts := s.Opts()
-	if strings.EqualFold(opts.TargetCodecVideo, "copy") || opts.TotalDuration <= 0 {
-		// Copy-video or unknown-duration sessions must use FFmpeg's real manifest.
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") ||
+		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
+		// Copy-video, unknown-duration, or oversized sessions must use FFmpeg's
+		// real manifest.
 		manifest, err := s.WaitForManifest(30 * time.Second)
 		if err != nil {
 			return nil, err
@@ -1037,6 +1047,19 @@ func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]
 	}
 
 	return s.GenerateFullManifest(segPrefix, rawQuery), nil
+}
+
+// CanGenerateSyntheticManifest reports whether a complete VOD playlist fits
+// within the shared segment-count bound. Callers outside playback use the same
+// decision so native and compatibility manifests cannot drift.
+func CanGenerateSyntheticManifest(totalDuration float64, segmentDuration int) bool {
+	if totalDuration <= 0 || math.IsNaN(totalDuration) || math.IsInf(totalDuration, 0) {
+		return false
+	}
+	if segmentDuration <= 0 {
+		segmentDuration = defaultSegmentDuration
+	}
+	return totalDuration <= float64(segmentDuration)*maxSyntheticManifestSegments
 }
 
 func firstNonEmptyManifestLine(manifest []byte) []byte {
