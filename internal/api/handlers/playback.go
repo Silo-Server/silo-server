@@ -177,6 +177,11 @@ type copySeekAnchorResolver func(
 // fallback resolution.
 type VirtualFileUpdateFunc func(ctx context.Context, fileID int, newFilePath string) error
 
+// VirtualFileMetadataSaver persists probed audio and subtitle tracks back to
+// the media_files row so the watch detail and player UI show track options
+// on subsequent views without re-probing.
+type VirtualFileMetadataSaver func(ctx context.Context, fileID int, audioTracks, subtitleTracks []byte, resolution, codecVideo, codecAudio string, hdr bool, bitrate int) error
+
 type SubtitleSearchTrigger func(
 	ctx context.Context,
 	contentID string,
@@ -231,7 +236,8 @@ type PlaybackHandler struct {
 	VirtualSubtitleSearcher     SubtitleSearchTrigger // optional; auto-search subtitles for virtual streams
 	BestResultCache             *VirtualBestResultCache
 	SubtitleSearchInFlight      sync.Map              // fileID -> struct{}; dedupes background subtitle searches
-	VirtualFileUpdater          VirtualFileUpdateFunc // optional; updates media_file path after stale fallback
+	VirtualFileUpdater          VirtualFileUpdateFunc     // optional; updates media_file path after stale fallback
+	VirtualFileMetadataSaver    VirtualFileMetadataSaver  // optional; persists probed tracks after virtual probe
 	RealtimeHub                 *playback.RealtimeHub
 	CommandTracker              *playback.CommandTracker
 	CommandDispatcher           *playback.CommandDispatcher

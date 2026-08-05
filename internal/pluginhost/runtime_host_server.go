@@ -225,20 +225,66 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 				AudioLanguages: v.GetAudioLanguages(), SubtitleLanguages: v.GetSubtitleLanguages(), Availability: v.GetAvailability(),
 			})
 		}
+		// Carry first-variant metadata to the episode so non-variant
+		// upsertVirtualFileWithMeta stores audio/subtitle languages.
+		var epResolution, epCodecVideo, epCodecAudio, epHDR, epContainer, epSourceType string
+		var epBitrate int
+		var epFileSize int64
+		var epAudioLangs, epSubLangs []string
+		if len(epVariants) > 0 {
+			epResolution = epVariants[0].Resolution
+			epCodecVideo = epVariants[0].CodecVideo
+			epCodecAudio = epVariants[0].CodecAudio
+			epHDR = epVariants[0].HDR
+			epBitrate = epVariants[0].Bitrate
+			epFileSize = epVariants[0].FileSize
+			epContainer = epVariants[0].Container
+			epSourceType = epVariants[0].SourceType
+			epAudioLangs = epVariants[0].AudioLanguages
+			epSubLangs = epVariants[0].SubtitleLanguages
+		}
 		episodes = append(episodes, catalog.VirtualEpisode{
 			SeasonNumber: int(episode.GetSeasonNumber()), EpisodeNumber: int(episode.GetEpisodeNumber()),
 			Title: episode.GetTitle(), Overview: episode.GetOverview(), AirDate: airDate,
 			RuntimeMinutes: int(episode.GetRuntimeMinutes()), StillPath: episode.GetStillPath(), VirtualURI: episode.GetVirtualUri(),
 			Variants: epVariants,
+			Resolution: epResolution, CodecVideo: epCodecVideo, CodecAudio: epCodecAudio,
+			HDR: epHDR, Bitrate: epBitrate, FileSize: epFileSize,
+			Container: epContainer, SourceType: epSourceType,
+			AudioLanguages: epAudioLangs, SubtitleLanguages: epSubLangs,
 		})
 	}
 
+	// Carry top-level stream metadata from the first variant when the request
+	// carries no dedicated top-level fields — this lets the catalog store
+	// resolution, codecs, audio/subtitle languages so the watch detail and
+	// player UI show track options without waiting for a playback probe.
+	var topResolution, topCodecVideo, topCodecAudio, topHDR, topContainer, topSourceType string
+	var topBitrate int
+	var topFileSize int64
+	var topAudioLangs, topSubLangs []string
+	if len(variants) > 0 {
+		topResolution = variants[0].Resolution
+		topCodecVideo = variants[0].CodecVideo
+		topCodecAudio = variants[0].CodecAudio
+		topHDR = variants[0].HDR
+		topBitrate = variants[0].Bitrate
+		topFileSize = variants[0].FileSize
+		topContainer = variants[0].Container
+		topSourceType = variants[0].SourceType
+		topAudioLangs = variants[0].AudioLanguages
+		topSubLangs = variants[0].SubtitleLanguages
+	}
 	vm := catalog.VirtualMedia{
 		LibraryID: req.GetLibraryId(), MediaType: req.GetMediaType(), Title: req.GetTitle(), Year: int(req.GetYear()),
 		IMDbID: req.GetImdbId(), TMDBID: req.GetTmdbId(), TVDBID: req.GetTvdbId(), Overview: req.GetOverview(),
 		Genres: req.GetGenres(), PosterPath: req.GetPosterPath(), BackdropPath: req.GetBackdropPath(),
 		VirtualURI: req.GetVirtualUri(), RuntimeMinutes: int(req.GetRuntimeMinutes()), Episodes: episodes,
 		Variants: variants, Source: req.GetSourceKey(),
+		Resolution: topResolution, CodecVideo: topCodecVideo, CodecAudio: topCodecAudio,
+		HDR: topHDR, Bitrate: topBitrate, FileSize: topFileSize,
+		Container: topContainer, SourceType: topSourceType,
+		AudioLanguages: topAudioLangs, SubtitleLanguages: topSubLangs,
 	}
 
 	result, err := s.virtualCatalog.UpsertVirtualMedia(ctx, s.installationID, vm)

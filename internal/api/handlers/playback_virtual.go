@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -346,6 +347,16 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		}
 		if result.ProbeSucceeded || h.VirtualPlaybackSourceProber == nil {
 			bgCancel() // cancel background resolves, we're done
+			// Persist probed audio/subtitle tracks back to the DB so
+			// the watch detail and player UI show track options on
+			// subsequent views without re-probing.
+			if h.VirtualFileMetadataSaver != nil && result.File != nil && file.ID > 0 {
+				audioJSON := marshalTracksJSON(result.File.AudioTracks)
+				subJSON := marshalTracksJSON(result.File.SubtitleTracks)
+				if err := h.VirtualFileMetadataSaver(r.Context(), file.ID, audioJSON, subJSON, result.File.Resolution, result.File.CodecVideo, result.File.CodecAudio, result.File.HDR, result.File.Bitrate); err != nil {
+					slog.ErrorContext(r.Context(), "virtual metadata persist failed", "component", "api", "file_id", file.ID, "error", err)
+				}
+			}
 			// Remember the winning candidate for next play.
 			if h.BestResultCache != nil && result.URI != "" && result.URI != file.FilePath {
 				neutralURI := virtualPlaybackNeutralKey(file.FilePath)
@@ -791,4 +802,16 @@ func canSkipProbeForContainer(container string) bool {
 	default:
 		return false
 	}
+}
+
+// marshalTracksJSON safely marshals track slices to JSON bytes for DB storage.
+func marshalTracksJSON(tracks any) []byte {
+	if tracks == nil {
+		return []byte("[]")
+	}
+	data, err := json.Marshal(tracks)
+	if err != nil {
+		return []byte("[]")
+	}
+	return data
 }

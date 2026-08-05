@@ -1069,6 +1069,11 @@ func NewRouter(deps Dependencies) chi.Router {
 				_, err := deps.DB.Exec(ctx, `UPDATE media_files SET file_path=$1, updated_at=now() WHERE id=$2`, newFilePath, fileID)
 				return err
 			}
+			playbackHandler.VirtualFileMetadataSaver = func(ctx context.Context, fileID int, audioTracks, subtitleTracks []byte, resolution, codecVideo, codecAudio string, hdr bool, bitrate int) error {
+				_, err := deps.DB.Exec(ctx, `UPDATE media_files SET audio_tracks=$1, subtitle_tracks=$2, resolution=NULLIF($3,''), codec_video=NULLIF($4,''), codec_audio=NULLIF($5,''), hdr=$6, bitrate=NULLIF($7,0), updated_at=now() WHERE id=$8`,
+					audioTracks, subtitleTracks, resolution, codecVideo, codecAudio, hdr, bitrate, fileID)
+				return err
+			}
 		}
 		if deps.Config != nil {
 			ffprobePath := scanner.FFprobePathFromFFmpeg(deps.Config.Playback.FFmpegPath)
