@@ -616,6 +616,31 @@ func TestBuildTranscodeStartResponse_UnifiedSeekAnywhere(t *testing.T) {
 	if encodedResp.TimelineOffsetSeconds != 0 {
 		t.Fatalf("encoded TimelineOffsetSeconds = %v, want 0", encodedResp.TimelineOffsetSeconds)
 	}
+
+	longEncodedResp := buildTranscodeStartResponse(
+		transcodeStartRequest{
+			SessionID:        "session-long-encoded",
+			SeekSeconds:      18.261,
+			TargetCodecVideo: "h264",
+			SegmentDuration:  2,
+		},
+		&models.MediaFile{Duration: 1_000_000},
+		nil,
+		"/playback/transcode/session-long-encoded/master.m3u8",
+		16,
+	)
+	if longEncodedResp.CanSeekAnywhere {
+		t.Fatal("long encoded response should require explicit restart seeks")
+	}
+	if math.Abs(longEncodedResp.PlayerStartSeconds-2.261) > 0.0001 {
+		t.Fatalf("long encoded PlayerStartSeconds = %v, want 2.261", longEncodedResp.PlayerStartSeconds)
+	}
+	if longEncodedResp.StreamOriginSeconds != 16 {
+		t.Fatalf("long encoded StreamOriginSeconds = %v, want 16", longEncodedResp.StreamOriginSeconds)
+	}
+	if longEncodedResp.TimelineOffsetSeconds != 16 {
+		t.Fatalf("long encoded TimelineOffsetSeconds = %v, want 16", longEncodedResp.TimelineOffsetSeconds)
+	}
 }
 
 func TestHandleStartPlayback_PersistsSeriesPlaybackPreferenceForEpisodes(t *testing.T) {

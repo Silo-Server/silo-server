@@ -533,10 +533,12 @@ func canSeekAnywhere(req transcodeStartRequest, file *models.MediaFile) bool {
 	if file == nil || file.Duration <= 0 {
 		return false
 	}
-	// Copy-video HLS sessions use FFmpeg's real manifest so the player only
-	// seeks within the currently exposed window. Out-of-window seeks should
-	// restart explicitly instead of relying on segment 404s to move FFmpeg.
-	return !strings.EqualFold(req.TargetCodecVideo, "copy")
+	// Copy-video, unknown-duration, and oversized HLS sessions use FFmpeg's
+	// real manifest so the player only seeks within the currently exposed
+	// window. Out-of-window seeks should restart explicitly instead of relying
+	// on segment 404s to move FFmpeg.
+	return !strings.EqualFold(req.TargetCodecVideo, "copy") &&
+		playback.CanGenerateSyntheticManifest(float64(file.Duration), req.SegmentDuration)
 }
 
 func buildTranscodeStartResponse(
