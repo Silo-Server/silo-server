@@ -378,9 +378,10 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 		streamStart := parseFloat(stream.StartTime)
 
 		// Some MPEG-TS/HLS timelines report duration as an absolute end
-		// timestamp. Use normalized spans only to reconcile raw end timestamps
-		// that disagree; matching raw duration fields remain authoritative even
-		// when the timelines have non-zero starts.
+		// timestamp. Use normalized spans to reconcile raw end timestamps that
+		// disagree, or when matching timestamps have a dominant start offset that
+		// strongly indicates the absolute-end shape. Ordinary non-zero starts remain
+		// part of an already corroborated raw duration.
 		normalizedFormatDuration := durationAfterStartWithinValidatedLimit(
 			formatDuration,
 			formatStart,
@@ -391,7 +392,10 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 		)
 		rawDurationsAgree := longVideoDurationsAgree(formatDuration, streamDuration)
 		normalizedDurationsAgree := longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration)
-		if normalizedDurationsAgree && !rawDurationsAgree &&
+		matchingAbsoluteEnds := rawDurationsAgree &&
+			durationHasDominantStartOffset(formatDuration, formatStart) &&
+			durationHasDominantStartOffset(streamDuration, streamStart)
+		if normalizedDurationsAgree && (!rawDurationsAgree || matchingAbsoluteEnds) &&
 			!durationLooksImplausible(raw, normalizedFormatDuration) {
 			return normalizedFormatDuration, true
 		}
@@ -417,6 +421,14 @@ func longVideoDurationsAgree(first, second float64) bool {
 		max(first, second)*longVideoDurationRelativeTolerance,
 	)
 	return math.Abs(first-second) <= tolerance
+}
+
+// durationHasDominantStartOffset identifies the conservative absolute-end
+// shape where the start timestamp occupies at least half of the reported end.
+// Smaller starts are common media offsets and cannot disambiguate a duration
+// field from an absolute end timestamp.
+func durationHasDominantStartOffset(end, start float64) bool {
+	return start > 0 && end > start && start >= end-start
 }
 
 func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
