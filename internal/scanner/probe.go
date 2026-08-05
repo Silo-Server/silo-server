@@ -266,10 +266,18 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 
 const (
 	maxReasonableMediaDurationSeconds = 100_000
+	// Corroborated metadata and packet-derived durations have stronger evidence
+	// than a lone container timestamp, so they may use the same bounded ceiling
+	// as long-form audio. This supports multi-day video without accepting the
+	// multi-year timelines seen in malformed containers.
+	maxValidatedMediaDurationSeconds = 1_000_000
 	// Audio-only files (audiobooks, podcasts) legitimately exceed the video
 	// ceiling, but still need a cap so malformed containers cannot persist
 	// multi-year durations.
-	maxReasonableAudioDurationSeconds = 1_000_000
+	maxReasonableAudioDurationSeconds = maxValidatedMediaDurationSeconds
+
+	longVideoDurationAbsoluteToleranceSeconds = 1
+	longVideoDurationRelativeTolerance        = 0.001
 )
 
 // A video duration is implausible when it is either far too short in absolute
@@ -327,6 +335,9 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
 		return truncatedDuration(formatDuration), true
 	}
+	if duration, ok := corroboratedLongVideoDuration(raw, formatDuration); ok {
+		return truncatedDuration(duration), true
+	}
 
 	for _, stream := range raw.Streams {
 		if !isMainVideoStream(stream) {
@@ -346,6 +357,40 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if duration > 0 && !durationLooksImplausible(raw, duration) {
 		return truncatedDuration(duration), true
 	}
+	return 0, false
+}
+
+// corroboratedLongVideoDuration accepts an extended-range video duration only
+// when the container and the primary video stream independently report nearly the
+// same value. A small absolute/relative tolerance covers container rounding
+// and stream-boundary differences without trusting a lone malformed timeline.
+func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
+	if raw == nil ||
+		formatDuration <= maxReasonableMediaDurationSeconds ||
+		!durationIsWithinValidatedLimit(formatDuration) ||
+		durationLooksImplausible(raw, formatDuration) {
+		return 0, false
+	}
+
+	for _, stream := range raw.Streams {
+		if !isMainVideoStream(stream) {
+			continue
+		}
+		streamDuration := parseFloat(stream.Duration)
+		if !durationIsWithinValidatedLimit(streamDuration) {
+			return 0, false
+		}
+
+		tolerance := max(
+			longVideoDurationAbsoluteToleranceSeconds,
+			max(formatDuration, streamDuration)*longVideoDurationRelativeTolerance,
+		)
+		if math.Abs(formatDuration-streamDuration) <= tolerance {
+			return formatDuration, true
+		}
+		return 0, false
+	}
+
 	return 0, false
 }
 
@@ -370,6 +415,10 @@ func durationAfterStart(end, start float64) float64 {
 
 func durationIsReasonable(duration float64) bool {
 	return durationIsPositiveFinite(duration) && duration <= maxReasonableMediaDurationSeconds
+}
+
+func durationIsWithinValidatedLimit(duration float64) bool {
+	return durationIsPositiveFinite(duration) && duration <= maxValidatedMediaDurationSeconds
 }
 
 func durationIsPositiveFinite(duration float64) bool {
@@ -461,13 +510,13 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 	best := 0.0
 	if !math.IsInf(minTimestamp, 1) && !math.IsInf(maxTimestamp, -1) {
 		span := maxTimestamp - minTimestamp
-		if durationIsReasonable(span) {
+		if durationIsWithinValidatedLimit(span) {
 			best = span
 		}
 	}
 	if fps := parseFrameRate(frameRate); fps > 0 && packetCount > 0 {
 		frameDuration := float64(packetCount) / fps
-		if durationIsReasonable(frameDuration) && frameDuration > best {
+		if durationIsWithinValidatedLimit(frameDuration) && frameDuration > best {
 			best = frameDuration
 		}
 	}

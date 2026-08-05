@@ -102,6 +102,44 @@ func TestNeedsCriticalProbeRepair_ImplausiblyShortLargeVideoRepairs(t *testing.T
 	}
 }
 
+func TestNeedsCriticalProbeRepair_LongVideoConverges(t *testing.T) {
+	now := time.Now().UTC()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		FileSize:       77_507_139_196,
+		Duration:       182930,
+		Container:      "mp4",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Language: "eng"}},
+		CodecVideo:     "h264",
+		Resolution:     "1080p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264", ColorRange: "unknown"}},
+		Chapters:       []models.MediaChapter{},
+	}
+
+	if NeedsCriticalProbeRepair(f) {
+		t.Fatal("an accepted long video must not need request-time probe repair")
+	}
+
+	scanFile := &scanStateFile{
+		ProbeSource:    f.ProbeSource,
+		ProbeUpdatedAt: f.ProbeUpdatedAt,
+		FileSize:       f.FileSize,
+		Duration:       f.Duration,
+		Container:      f.Container,
+		CodecVideo:     f.CodecVideo,
+		CodecAudio:     f.CodecAudio,
+		Resolution:     f.Resolution,
+		HasVideoTracks: true,
+		HasAudioTracks: true,
+		HasChapters:    true,
+	}
+	if needsCriticalProbeRepairScanState(scanFile) {
+		t.Fatal("an accepted long video must not be reprobed on subsequent library scans")
+	}
+}
+
 // A short duration re-derived by the fixed parser (packet scan) is
 // authoritative: re-flagging it would reprobe genuinely short clips on every
 // playback decision forever.
