@@ -117,6 +117,28 @@ func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoDuration(t *testing.
 	}
 }
 
+func TestDurationFromProbeMetadataKeepsCorroboratedLongVideoWithOrdinaryStartTime(t *testing.T) {
+	t.Parallel()
+
+	raw := &ffprobeOutput{
+		Format: ffprobeFormat{
+			StartTime: "30.000000",
+			Duration:  "182930.275000",
+			Size:      "77507139196",
+		},
+		Streams: []ffprobeStream{{
+			CodecType: "video",
+			StartTime: "30.000000",
+			Duration:  "182930.196000",
+		}},
+	}
+
+	got, ok := durationFromProbeMetadata(raw)
+	if !ok || got != 182930 {
+		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 182930, true", got, ok)
+	}
+}
+
 func TestDurationFromProbeMetadataNormalizesOffsetBeforeCorroboratingLongVideo(t *testing.T) {
 	t.Parallel()
 

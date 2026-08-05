@@ -374,24 +374,31 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 			continue
 		}
 		streamDuration := parseFloat(stream.Duration)
+		formatStart := parseFloat(raw.Format.StartTime)
+		streamStart := parseFloat(stream.StartTime)
 
 		// Some MPEG-TS/HLS timelines report duration as an absolute end
-		// timestamp. Prefer corroborated spans after subtracting each timeline's
-		// start so a large offset is not persisted as part of the runtime.
+		// timestamp. Normalize only when the starts are material relative to the
+		// reported ends; ordinary non-zero media starts must not shorten a valid
+		// corroborated duration.
 		normalizedFormatDuration := durationAfterStartWithinValidatedLimit(
 			formatDuration,
-			parseFloat(raw.Format.StartTime),
+			formatStart,
 		)
 		normalizedStreamDuration := durationAfterStartWithinValidatedLimit(
 			streamDuration,
-			parseFloat(stream.StartTime),
+			streamStart,
 		)
-		if longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration) &&
+		rawDurationsAgree := longVideoDurationsAgree(formatDuration, streamDuration)
+		normalizedDurationsAgree := longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration)
+		startsLookLikeAbsoluteOffsets := durationStartOffsetIsMaterial(formatDuration, formatStart) &&
+			durationStartOffsetIsMaterial(streamDuration, streamStart)
+		if normalizedDurationsAgree && (!rawDurationsAgree || startsLookLikeAbsoluteOffsets) &&
 			!durationLooksImplausible(raw, normalizedFormatDuration) {
 			return normalizedFormatDuration, true
 		}
 
-		if longVideoDurationsAgree(formatDuration, streamDuration) &&
+		if rawDurationsAgree &&
 			!durationLooksImplausible(raw, formatDuration) {
 			return formatDuration, true
 		}
@@ -412,6 +419,17 @@ func longVideoDurationsAgree(first, second float64) bool {
 		max(first, second)*longVideoDurationRelativeTolerance,
 	)
 	return math.Abs(first-second) <= tolerance
+}
+
+func durationStartOffsetIsMaterial(duration, start float64) bool {
+	if start <= 0 || duration <= start {
+		return false
+	}
+	tolerance := max(
+		longVideoDurationAbsoluteToleranceSeconds,
+		duration*longVideoDurationRelativeTolerance,
+	)
+	return start > tolerance
 }
 
 func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {

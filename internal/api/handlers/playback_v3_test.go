@@ -1232,10 +1232,23 @@ func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 		encodePlan.Timeline.SeekRestoration != "player_position" {
 		t.Fatalf("encode timeline=%#v seek=%v segment=%d", encodePlan.Timeline, encodeSeek, encodeSegment)
 	}
+
+	longEncodePlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
+	longEncodeSeek, longEncodeSegment := configureHLSTimelineV3(longEncodePlan, "h264", 2, 1_000_000)
+	if longEncodeSeek != 16 || longEncodeSegment != 8 || longEncodePlan.Timeline.StreamOriginSeconds != 16 || longEncodePlan.Timeline.TimelineOffsetSeconds != 16 || longEncodePlan.Timeline.PlayerStartSeconds != 0 || longEncodePlan.Timeline.CanSeekAnywhere ||
+		longEncodePlan.Timeline.SeekWindowStartSeconds == nil || *longEncodePlan.Timeline.SeekWindowStartSeconds != 16 ||
+		longEncodePlan.Timeline.SeekWindowEndSeconds != nil ||
+		longEncodePlan.Timeline.SeekRestoration != "source_position" {
+		t.Fatalf("long encode timeline=%#v seek=%v segment=%d", longEncodePlan.Timeline, longEncodeSeek, longEncodeSegment)
+	}
+
 	unknownDurationPlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
-	configureHLSTimelineV3(unknownDurationPlan, "h264", 2, 0)
-	if unknownDurationPlan.Timeline.CanSeekAnywhere {
-		t.Fatalf("unknown-duration timeline = %#v", unknownDurationPlan.Timeline)
+	unknownDurationSeek, unknownDurationSegment := configureHLSTimelineV3(unknownDurationPlan, "h264", 2, 0)
+	if unknownDurationSeek != 16 || unknownDurationSegment != 8 || unknownDurationPlan.Timeline.StreamOriginSeconds != 16 || unknownDurationPlan.Timeline.TimelineOffsetSeconds != 16 || unknownDurationPlan.Timeline.PlayerStartSeconds != 0 || unknownDurationPlan.Timeline.CanSeekAnywhere ||
+		unknownDurationPlan.Timeline.SeekWindowStartSeconds == nil || *unknownDurationPlan.Timeline.SeekWindowStartSeconds != 16 ||
+		unknownDurationPlan.Timeline.SeekWindowEndSeconds != nil ||
+		unknownDurationPlan.Timeline.SeekRestoration != "source_position" {
+		t.Fatalf("unknown-duration timeline=%#v seek=%v segment=%d", unknownDurationPlan.Timeline, unknownDurationSeek, unknownDurationSegment)
 	}
 }
 
