@@ -286,9 +286,12 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				URL: streamURL, URI: cand.URI, OwnerID: oid, File: &transient,
 			}, nil
 		}
-		// HLS (.m3u8) streams always route through server remux or transcode —
-		// ffprobe is wasted work when the candidate already declares codecs.
-		if isHLSVirtualStreamURL(streamURL) && cand.hasReliableCodecs() {
+		// Skip ffprobe when the candidate already declares codecs and the
+		// stream is a known-safe format: HLS is always remuxed/transcoded, and
+		// mp4/mkv/webm/ts are handled natively by ffmpeg. Candidate metadata
+		// is sufficient for play method selection and playback info.
+		skipProbe := cand.hasReliableCodecs() && (isHLSVirtualStreamURL(streamURL) || canSkipProbeForContainer(cand.Container))
+		if skipProbe {
 			mergeVirtualCandidateTracks(&transient, cand)
 			if !transient.HDR && cand.HDR != "" {
 				transient.HDR = true
@@ -772,5 +775,17 @@ func resolutionHeight(label string) int {
 		return 480
 	default:
 		return 0
+	}
+}
+
+// canSkipProbeForContainer returns true for container formats that ffmpeg
+// handles natively without needing ffprobe metadata. When a candidate
+// already declares codecs, we skip the probe for these formats.
+func canSkipProbeForContainer(container string) bool {
+	switch strings.ToLower(strings.TrimSpace(container)) {
+	case "mp4", "mkv", "webm", "ts", "m2ts", "mov", "avi":
+		return true
+	default:
+		return false
 	}
 }
