@@ -246,7 +246,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to bind transcode node")
 					return
 				}
-				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
+				initialSeekSeconds, _ := compatInitialTranscodePosition(*source, h.compatSegmentDuration(), playSession.InitialSeekSeconds)
+				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL); err != nil {
 					failRemoteStart()
 					if errors.Is(err, errTranscode4KDisallowed) {
 						writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -1633,11 +1634,11 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	initialSeekSeconds := 0.0
 	startSegmentNumber := 0
 	if playSession, ok := h.playbackStore.Get(playSessionID); ok {
-		initialSeekSeconds = playSession.InitialSeekSeconds
-		segDuration := h.compatSegmentDuration()
-		if initialSeekSeconds > 0 && segDuration > 0 {
-			startSegmentNumber = int(initialSeekSeconds / float64(segDuration))
-		}
+		initialSeekSeconds, startSegmentNumber = compatInitialTranscodePosition(
+			source,
+			h.compatSegmentDuration(),
+			playSession.InitialSeekSeconds,
+		)
 	}
 
 	opts := playback.TranscodeOpts{
@@ -1697,6 +1698,25 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 
 func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuration int) bool {
 	return playback.CanGenerateSyntheticManifest(float64(source.Version.Duration), segmentDuration)
+}
+
+// compatInitialTranscodePosition keeps the FFmpeg timeline consistent with the
+// manifest exposed to Jellyfin clients. Bounded synthetic manifests retain the
+// full source timeline and can start FFmpeg at the requested segment. Real
+// growing manifests must start at source time zero because clients also apply
+// their negotiated resume position; starting the playlist at that offset would
+// make them seek twice.
+func compatInitialTranscodePosition(source PlaybackMediaSource, segmentDuration int, requested float64) (float64, int) {
+	if requested <= 0 || !shouldGenerateCompatFullManifest(source, segmentDuration) {
+		return 0, 0
+	}
+	if duration := float64(source.Version.Duration); duration > 0 && requested > duration {
+		requested = duration
+	}
+	if segmentDuration <= 0 {
+		segmentDuration = compatSegmentDuration
+	}
+	return requested, int(requested / float64(segmentDuration))
 }
 
 // audioSelectionChanged reports whether an incoming AudioStreamIndex differs

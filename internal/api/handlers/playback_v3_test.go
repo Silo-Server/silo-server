@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1235,7 +1236,7 @@ func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 
 	longEncodePlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
 	longEncodeSeek, longEncodeSegment := configureHLSTimelineV3(longEncodePlan, "h264", 2, 1_000_000)
-	if longEncodeSeek != 16 || longEncodeSegment != 8 || longEncodePlan.Timeline.StreamOriginSeconds != 16 || longEncodePlan.Timeline.TimelineOffsetSeconds != 16 || longEncodePlan.Timeline.PlayerStartSeconds != 0 || longEncodePlan.Timeline.CanSeekAnywhere ||
+	if longEncodeSeek != 16 || longEncodeSegment != 8 || longEncodePlan.Timeline.StreamOriginSeconds != 16 || longEncodePlan.Timeline.TimelineOffsetSeconds != 16 || math.Abs(longEncodePlan.Timeline.PlayerStartSeconds-1.3) > 0.0001 || longEncodePlan.Timeline.CanSeekAnywhere ||
 		longEncodePlan.Timeline.SeekWindowStartSeconds == nil || *longEncodePlan.Timeline.SeekWindowStartSeconds != 16 ||
 		longEncodePlan.Timeline.SeekWindowEndSeconds != nil ||
 		longEncodePlan.Timeline.SeekRestoration != "source_position" {
@@ -1244,7 +1245,7 @@ func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 
 	unknownDurationPlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
 	unknownDurationSeek, unknownDurationSegment := configureHLSTimelineV3(unknownDurationPlan, "h264", 2, 0)
-	if unknownDurationSeek != 16 || unknownDurationSegment != 8 || unknownDurationPlan.Timeline.StreamOriginSeconds != 16 || unknownDurationPlan.Timeline.TimelineOffsetSeconds != 16 || unknownDurationPlan.Timeline.PlayerStartSeconds != 0 || unknownDurationPlan.Timeline.CanSeekAnywhere ||
+	if unknownDurationSeek != 16 || unknownDurationSegment != 8 || unknownDurationPlan.Timeline.StreamOriginSeconds != 16 || unknownDurationPlan.Timeline.TimelineOffsetSeconds != 16 || math.Abs(unknownDurationPlan.Timeline.PlayerStartSeconds-1.3) > 0.0001 || unknownDurationPlan.Timeline.CanSeekAnywhere ||
 		unknownDurationPlan.Timeline.SeekWindowStartSeconds == nil || *unknownDurationPlan.Timeline.SeekWindowStartSeconds != 16 ||
 		unknownDurationPlan.Timeline.SeekWindowEndSeconds != nil ||
 		unknownDurationPlan.Timeline.SeekRestoration != "source_position" {

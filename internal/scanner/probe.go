@@ -570,11 +570,11 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 
 	best := packetSpan
 	if packetSpan > maxReasonableMediaDurationSeconds &&
-		durationIsPositiveFinite(frameDuration) &&
+		durationIsReasonable(frameDuration) &&
 		!longVideoDurationsAgree(packetSpan, frameDuration) {
-		// A long PTS span is strong evidence only when a usable frame-count
-		// estimate does not contradict it. This rejects isolated timestamp
-		// discontinuities while retaining the ordinary frame estimate below.
+		// A long PTS span is strong evidence only when a sane frame-count
+		// estimate contradicts it. Malformed frame rates can produce finite but
+		// unusable estimates and must not veto an otherwise valid packet span.
 		best = 0
 	}
 	if durationIsReasonable(frameDuration) && frameDuration > best {

@@ -353,6 +353,22 @@ func TestEstimateVideoPacketDurationKeepsOrdinaryCapForFrameRateEstimate(t *test
 	}
 }
 
+func TestEstimateVideoPacketDurationIgnoresUnusableFrameEstimateForLongSpan(t *testing.T) {
+	t.Parallel()
+
+	var packets strings.Builder
+	packets.WriteString("0.000000\n")
+	for range 898 {
+		packets.WriteString("5.000000\n")
+	}
+	packets.WriteString("182930.196000\n")
+
+	got := estimateVideoPacketDuration(strings.NewReader(packets.String()), "1/1000")
+	if got != 182930 {
+		t.Fatalf("estimateVideoPacketDuration() = %d, want 182930", got)
+	}
+}
+
 func TestEstimateVideoPacketDurationRejectsOutlierSpanWhenFrameCountDisagrees(t *testing.T) {
 	t.Parallel()
 

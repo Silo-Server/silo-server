@@ -2024,7 +2024,10 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 	usesGrowingManifest := strings.EqualFold(videoCodec, "copy") ||
 		!playback.CanGenerateSyntheticManifest(durationSeconds, segmentDuration)
 	if usesGrowingManifest {
-		plan.Timeline.PlayerStartSeconds = 0
+		// Encoded streams seek to the preceding segment boundary. Preserve the
+		// requested sub-segment offset so playback still begins at the exact
+		// requested source position. Copy seeks are already exact, making this 0.
+		plan.Timeline.PlayerStartSeconds = max(0, requested-seek)
 		plan.Timeline.StreamOriginSeconds = seek
 		plan.Timeline.TimelineOffsetSeconds = seek
 		windowStart := seek

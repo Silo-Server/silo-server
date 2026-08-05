@@ -94,6 +94,20 @@ func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
 	}
 }
 
+func TestCompatInitialTranscodePositionKeepsRealManifestSourceAligned(t *testing.T) {
+	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
+	seek, segment := compatInitialTranscodePosition(short, 2, 17.3)
+	if seek != 17.3 || segment != 8 {
+		t.Fatalf("bounded manifest position = (%v, %d), want (17.3, 8)", seek, segment)
+	}
+
+	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
+	seek, segment = compatInitialTranscodePosition(long, 2, 17.3)
+	if seek != 0 || segment != 0 {
+		t.Fatalf("real manifest position = (%v, %d), want source-aligned (0, 0)", seek, segment)
+	}
+}
+
 func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 	manifest := strings.Join([]string{
 		"#EXTM3U",
