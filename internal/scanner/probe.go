@@ -399,6 +399,13 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 			!durationLooksImplausible(raw, normalizedFormatDuration) {
 			return normalizedFormatDuration, true
 		}
+		if matchingAbsoluteEnds {
+			// Dominant starts identify the raw values as absolute end
+			// timestamps. If their normalized spans do not corroborate, reject
+			// the metadata for packet repair instead of persisting an inflated
+			// raw end timestamp.
+			return 0, false
+		}
 
 		if rawDurationsAgree &&
 			!durationLooksImplausible(raw, formatDuration) {
