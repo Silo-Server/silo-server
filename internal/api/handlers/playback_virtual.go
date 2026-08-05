@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,18 @@ func (c *VirtualBestResultCache) get(key string, now time.Time) string {
 	return entry.resultURI
 }
 
+// Clear drops every cached result. Called on plugin lifecycle changes when
+// provider configurations may have changed and cached result= URIs are
+// likely stale.
+func (c *VirtualBestResultCache) Clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	clear(c.entries)
+	c.mu.Unlock()
+}
+
 func (c *VirtualBestResultCache) set(key, resultURI string, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -98,10 +111,11 @@ func (c *VirtualBestResultCache) set(key, resultURI string, now time.Time) {
 	}
 }
 
-// bestResultCacheKey builds a deterministic key from the content_id and
-// neutral URI (without result=).
-func bestResultCacheKey(contentID, neutralURI string) string {
-	digest := sha256.Sum256([]byte(contentID + "\x00" + neutralURI))
+// bestResultCacheKey builds a deterministic key from the content_id, neutral
+// URI (without result=), and owner installation ID. The owner keeps provider
+// switches from reusing a result= that belongs to a different installation.
+func bestResultCacheKey(contentID, neutralURI string, ownerInstallationID int) string {
+	digest := sha256.Sum256([]byte(contentID + "\x00" + neutralURI + "\x00" + strconv.Itoa(ownerInstallationID)))
 	return hex.EncodeToString(digest[:16])
 }
 
@@ -178,7 +192,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	// lets us skip the entire list+resolve+probe sequence on replay.
 	if noResult && h.BestResultCache != nil {
 		neutralURI := virtualPlaybackNeutralKey(file.FilePath)
-		cacheKey := bestResultCacheKey(file.ContentID, neutralURI)
+		cacheKey := bestResultCacheKey(file.ContentID, neutralURI, file.VirtualOwnerInstallationID)
 		if cached := h.BestResultCache.get(cacheKey, time.Now()); cached != "" {
 			candidates = []VirtualPlaybackStream{{
 				URI: cached, OwnerInstallationID: file.VirtualOwnerInstallationID,
@@ -329,7 +343,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			// Remember the winning candidate for next play.
 			if h.BestResultCache != nil && result.URI != "" && result.URI != file.FilePath {
 				neutralURI := virtualPlaybackNeutralKey(file.FilePath)
-				cacheKey := bestResultCacheKey(file.ContentID, neutralURI)
+				cacheKey := bestResultCacheKey(file.ContentID, neutralURI, file.VirtualOwnerInstallationID)
 				h.BestResultCache.set(cacheKey, result.URI, time.Now())
 			}
 			return *result, nil
@@ -594,18 +608,25 @@ func (h *PlaybackHandler) maybeTriggerSubtitleSearch(
 	if len(file.SubtitleTracks) > 0 || len(file.ExternalSubtitles) > 0 {
 		return
 	}
-	// Fire background search — don't block playback on subtitle results.
-	go h.VirtualSubtitleSearcher(
-		context.Background(),
-		file.ContentID,
-		"", // IMDb ID resolved from contentID by the caller
-		"", // title resolved by the caller
-		0,  // year resolved by the caller
-		0,  // season
-		0,  // episode
-		file.ID,
-		cand.SubtitleLanguages,
-	)
+	// Dedupe: one in-flight search per file. Rapid replays or multiple
+	// candidates resolving the same file must not hammer subtitle providers.
+	if _, loaded := h.SubtitleSearchInFlight.LoadOrStore(file.ID, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		defer h.SubtitleSearchInFlight.Delete(file.ID)
+		h.VirtualSubtitleSearcher(
+			context.Background(),
+			file.ContentID,
+			"", // IMDb ID resolved from contentID by the caller
+			"", // title resolved by the caller
+			0,  // year resolved by the caller
+			0,  // season
+			0,  // episode
+			file.ID,
+			cand.SubtitleLanguages,
+		)
+	}()
 }
 
 // mergeVirtualCandidateTracks supplements probed virtual file tracks with

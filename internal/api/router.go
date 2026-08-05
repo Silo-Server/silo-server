@@ -1058,6 +1058,11 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 		playbackHandler.BestResultCache = handlers.NewVirtualBestResultCache(30*time.Minute, 512)
+		if deps.PluginService != nil {
+			// Provider config changes (new manifest URL, reconfiguration) make
+			// cached result= URIs stale; drop them so the next play re-lists.
+			deps.PluginService.AddLifecycleHook(func(context.Context) { playbackHandler.BestResultCache.Clear() })
+		}
 		playbackHandler.RemoteStreamRelay = remoteStreamRelay
 		if deps.DB != nil {
 			playbackHandler.VirtualFileUpdater = func(ctx context.Context, fileID int, newFilePath string) error {

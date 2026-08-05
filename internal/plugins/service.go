@@ -102,6 +102,21 @@ type Service struct {
 	virtualProfilesCache map[string]virtualProfilesCacheEntry
 	virtualVariantsMu    sync.Mutex
 	virtualVariantsCache map[string]virtualVariantsCacheEntry
+
+	// resolvedURLsMu guards a very short-lived memo of provider URLs resolved
+	// during playback start. The same virtual URI is resolved once for probing
+	// and again when the transport opens; this memo bridges that gap so the
+	// provider is not contacted twice per playback start. Entries live for
+	// seconds, never longer — provider URLs rotate and must not be cached.
+	resolvedURLsMu sync.Mutex
+	resolvedURLs   map[string]resolvedURLEntry
+}
+
+// resolvedURLEntry is a single memoized provider URL. resolvedAt keeps the
+// entry hot only within a single playback start window.
+type resolvedURLEntry struct {
+	url        string
+	resolvedAt time.Time
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -159,6 +174,7 @@ func NewService(
 		repositories:  repositories,
 		installations: installations,
 		configs:       configs,
+		resolvedURLs:  make(map[string]resolvedURLEntry),
 		catalog:       catalog,
 		installer:     installer,
 		archiveCache:  NewArchiveCache(installations),

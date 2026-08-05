@@ -172,6 +172,14 @@ func (s *Service) resolveVirtualPlaybackWithRouting(
 	routing VirtualPlaybackRouting,
 	forceRefresh bool,
 ) (string, error) {
+	// Short-lived memo: the same virtual URI is resolved once for probing and
+	// again when the transport opens. Skip the provider RPC on the second call
+	// within a few seconds — provider URLs rotate, so this is never long-lived.
+	if !forceRefresh {
+		if memo := s.lookupResolvedURL(virtualPath, userID, profileID, routing.OwnerInstallationID); memo != "" {
+			return memo, nil
+		}
+	}
 	request, selection, err := virtualStreamRequestWithRefresh(virtualPath, userID, profileID, forceRefresh)
 	if err != nil {
 		return "", err
@@ -195,6 +203,7 @@ func (s *Service) resolveVirtualPlaybackWithRouting(
 	if validateErr != nil {
 		return "", fmt.Errorf("virtual playback provider returned an unsafe stream URL: %w", validateErr)
 	}
+	s.storeResolvedURL(virtualPath, userID, profileID, routing.OwnerInstallationID, validated)
 	return validated, nil
 }
 
@@ -1230,4 +1239,55 @@ func (s *Service) InstallationAllowsInsecure(ctx context.Context, installationID
 		}
 	}
 	return false
+}
+
+const resolvedURLMemoTTL = 30 * time.Second
+const resolvedURLMemoMax = 256
+
+func resolvedURLMemoKey(virtualPath string, userID int, profileID string, ownerInstallationID int) string {
+	return fmt.Sprintf("%s\x00%d\x00%s\x00%d", virtualPath, userID, profileID, ownerInstallationID)
+}
+
+func (s *Service) lookupResolvedURL(virtualPath string, userID int, profileID string, ownerInstallationID int) string {
+	if s == nil {
+		return ""
+	}
+	key := resolvedURLMemoKey(virtualPath, userID, profileID, ownerInstallationID)
+	s.resolvedURLsMu.Lock()
+	defer s.resolvedURLsMu.Unlock()
+	entry, ok := s.resolvedURLs[key]
+	if !ok {
+		return ""
+	}
+	if time.Since(entry.resolvedAt) > resolvedURLMemoTTL {
+		delete(s.resolvedURLs, key)
+		return ""
+	}
+	return entry.url
+}
+
+func (s *Service) storeResolvedURL(virtualPath string, userID int, profileID string, ownerInstallationID int, url string) {
+	if s == nil || url == "" {
+		return
+	}
+	key := resolvedURLMemoKey(virtualPath, userID, profileID, ownerInstallationID)
+	s.resolvedURLsMu.Lock()
+	defer s.resolvedURLsMu.Unlock()
+	now := time.Now()
+	for k, entry := range s.resolvedURLs {
+		if now.Sub(entry.resolvedAt) > resolvedURLMemoTTL {
+			delete(s.resolvedURLs, k)
+		}
+	}
+	if len(s.resolvedURLs) >= resolvedURLMemoMax {
+		var oldestKey string
+		var oldest time.Time
+		for k, entry := range s.resolvedURLs {
+			if oldestKey == "" || entry.resolvedAt.Before(oldest) {
+				oldestKey, oldest = k, entry.resolvedAt
+			}
+		}
+		delete(s.resolvedURLs, oldestKey)
+	}
+	s.resolvedURLs[key] = resolvedURLEntry{url: url, resolvedAt: now}
 }
