@@ -25,9 +25,9 @@ const maxVirtualPlaybackStreams = 50
 
 const (
 	maxVirtualFailoverAttempts = 5
-	virtualProbeBudgetKnown    = 8 * time.Second
-	virtualStartupBudget       = 45 * time.Second
-	virtualProbeBudget         = 30 * time.Second
+	virtualProbeBudgetKnown    = 5 * time.Second
+	virtualStartupBudget       = 35 * time.Second
+	virtualProbeBudget         = 15 * time.Second
 )
 
 const (
@@ -607,7 +607,14 @@ func isHLSVirtualStreamURL(streamURL string) bool {
 // metadata (parsed from provider information, not just a filename guess).
 // HLS streams with known codecs can skip ffprobe entirely.
 func (s VirtualPlaybackStream) hasReliableCodecs() bool {
-	return s.CodecVideo != "" && s.Resolution != ""
+	if s.CodecVideo != "" && s.Resolution != "" {
+		return true
+	}
+	// Audio-only streams with a declared codec can also skip probing.
+	if s.CodecAudio != "" && s.Resolution == "" {
+		return true
+	}
+	return false
 }
 
 // maybeTriggerSubtitleSearch kicks off a background subtitle search when a
@@ -797,7 +804,7 @@ func resolutionHeight(label string) int {
 // already declares codecs, we skip the probe for these formats.
 func canSkipProbeForContainer(container string) bool {
 	switch strings.ToLower(strings.TrimSpace(container)) {
-	case "mp4", "mkv", "webm", "ts", "m2ts", "mov", "avi":
+	case "mp4", "mkv", "webm", "ts", "m2ts", "mov", "avi", "flv", "wmv", "m4v", "mpeg", "mpg", "ogv", "3gp":
 		return true
 	default:
 		return false
