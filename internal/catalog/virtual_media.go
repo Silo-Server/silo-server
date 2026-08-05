@@ -412,6 +412,21 @@ func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, insta
 	if err := lockVirtualMediaSource(ctx, tx, installationID, source); err != nil {
 		return result, err
 	}
+	// Safety guard: an empty keep list with existing claims means the plugin
+	// lost its monitored state (restart, file corruption, provider outage).
+	// Wiping everything would remove all virtual URIs for users, so refuse.
+	if len(keepIDs) == 0 {
+		var existingCount int
+		if err := tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM virtual_media_source_claims
+			WHERE plugin_installation_id=$1 AND source_key=$2`,
+			installationID, source).Scan(&existingCount); err != nil {
+			return result, fmt.Errorf("virtual reconciliation guard check: %w", err)
+		}
+		if existingCount > 0 {
+			return result, fmt.Errorf("virtual reconciliation refused: plugin sent empty keep list but %d existing claims exist for source %q — the plugin may have lost its monitored state", existingCount, source)
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		CREATE TEMP TABLE stale_virtual_source_claims ON COMMIT DROP AS
 		SELECT plugin_installation_id,source_key,content_id,media_folder_id
