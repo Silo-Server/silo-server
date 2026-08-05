@@ -533,12 +533,20 @@ func canSeekAnywhere(req transcodeStartRequest, file *models.MediaFile) bool {
 	if file == nil || file.Duration <= 0 {
 		return false
 	}
+	return !usesRealTranscodeManifest(req, file)
+}
+
+func usesRealTranscodeManifest(req transcodeStartRequest, file *models.MediaFile) bool {
+	durationSeconds := 0.0
+	if file != nil {
+		durationSeconds = float64(file.Duration)
+	}
 	// Copy-video, unknown-duration, and oversized HLS sessions use FFmpeg's
 	// real manifest so the player only seeks within the currently exposed
 	// window. Out-of-window seeks should restart explicitly instead of relying
 	// on segment 404s to move FFmpeg.
-	return !strings.EqualFold(req.TargetCodecVideo, "copy") &&
-		playback.CanGenerateSyntheticManifest(float64(file.Duration), req.SegmentDuration)
+	return strings.EqualFold(req.TargetCodecVideo, "copy") ||
+		!playback.CanGenerateSyntheticManifest(durationSeconds, req.SegmentDuration)
 }
 
 func buildTranscodeStartResponse(
@@ -3233,6 +3241,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	transportSeekSeconds := alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo)
 	startSegmentNumber := computeStartSegment(transportSeekSeconds, req.SegmentDuration)
 	streamOriginSeconds := 0.0
+	if usesRealTranscodeManifest(req, file) {
+		streamOriginSeconds = transportSeekSeconds
+	}
 	if videoCopy {
 		streamOriginSeconds = req.SeekSeconds
 		if req.SeekSeconds > 0 {

@@ -378,9 +378,9 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 		streamStart := parseFloat(stream.StartTime)
 
 		// Some MPEG-TS/HLS timelines report duration as an absolute end
-		// timestamp. Normalize only when the starts are material relative to the
-		// reported ends; ordinary non-zero media starts must not shorten a valid
-		// corroborated duration.
+		// timestamp. Use normalized spans only to reconcile raw end timestamps
+		// that disagree; matching raw duration fields remain authoritative even
+		// when the timelines have non-zero starts.
 		normalizedFormatDuration := durationAfterStartWithinValidatedLimit(
 			formatDuration,
 			formatStart,
@@ -391,9 +391,7 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 		)
 		rawDurationsAgree := longVideoDurationsAgree(formatDuration, streamDuration)
 		normalizedDurationsAgree := longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration)
-		startsLookLikeAbsoluteOffsets := durationStartOffsetIsMaterial(formatDuration, formatStart) &&
-			durationStartOffsetIsMaterial(streamDuration, streamStart)
-		if normalizedDurationsAgree && (!rawDurationsAgree || startsLookLikeAbsoluteOffsets) &&
+		if normalizedDurationsAgree && !rawDurationsAgree &&
 			!durationLooksImplausible(raw, normalizedFormatDuration) {
 			return normalizedFormatDuration, true
 		}
@@ -419,17 +417,6 @@ func longVideoDurationsAgree(first, second float64) bool {
 		max(first, second)*longVideoDurationRelativeTolerance,
 	)
 	return math.Abs(first-second) <= tolerance
-}
-
-func durationStartOffsetIsMaterial(duration, start float64) bool {
-	if start <= 0 || duration <= start {
-		return false
-	}
-	tolerance := max(
-		longVideoDurationAbsoluteToleranceSeconds,
-		duration*longVideoDurationRelativeTolerance,
-	)
-	return start > tolerance
 }
 
 func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
