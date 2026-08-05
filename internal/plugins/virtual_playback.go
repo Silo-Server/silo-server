@@ -1273,6 +1273,9 @@ func (s *Service) storeResolvedURL(virtualPath string, userID int, profileID str
 	key := resolvedURLMemoKey(virtualPath, userID, profileID, ownerInstallationID)
 	s.resolvedURLsMu.Lock()
 	defer s.resolvedURLsMu.Unlock()
+	if s.resolvedURLs == nil {
+		s.resolvedURLs = make(map[string]resolvedURLEntry)
+	}
 	now := time.Now()
 	for k, entry := range s.resolvedURLs {
 		if now.Sub(entry.resolvedAt) > resolvedURLMemoTTL {
