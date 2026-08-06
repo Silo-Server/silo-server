@@ -323,6 +323,17 @@ type DeviceAuthSession struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
+// deviceAuthorizationPendingError carries an authoritative replacement for a
+// device challenge that must be persisted before the next poll. It remains an
+// error so the existing HTTP contract continues to report an incomplete flow.
+type deviceAuthorizationPendingError struct {
+	session DeviceAuthSession
+}
+
+func (deviceAuthorizationPendingError) Error() string {
+	return "watch sync plugin device authorization is pending"
+}
+
 type TokenSet struct {
 	AccessToken      string
 	RefreshToken     string
@@ -380,20 +391,23 @@ type RemoteProgress struct {
 type RemoteFavorite struct {
 	Provider        string
 	ProviderItemKey string
-	Kind            string
-	Title           string
-	Year            int
-	IMDbID          string
-	TMDBID          string
-	TVDBID          string
-	SeriesTitle     string
-	SeriesYear      int
-	SeriesIMDbID    string
-	SeriesTMDBID    string
-	SeriesTVDBID    string
-	SeasonNumber    int
-	EpisodeNumber   int
-	FavoritedAt     time.Time
+	// Removed is an explicit provider tombstone used by incremental list syncs.
+	// Tombstones are resolved through ProviderItemKey and do not require media.
+	Removed       bool
+	Kind          string
+	Title         string
+	Year          int
+	IMDbID        string
+	TMDBID        string
+	TVDBID        string
+	SeriesTitle   string
+	SeriesYear    int
+	SeriesIMDbID  string
+	SeriesTMDBID  string
+	SeriesTVDBID  string
+	SeasonNumber  int
+	EpisodeNumber int
+	FavoritedAt   time.Time
 }
 
 type RemotePlay struct {

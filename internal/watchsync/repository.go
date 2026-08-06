@@ -215,7 +215,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
 	}
-	pluginCredentials, err := r.encodePluginCredentials(conn)
+	pluginCredentials, err := r.pluginCredentialsForConnection(conn)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -1198,6 +1198,7 @@ func (r *PostgresRepository) ListPendingScrobbleReconciliations(ctx context.Cont
 		WHERE stop_sent_at IS NOT NULL AND completed = true AND history_id <> ''
 			AND history_reconciled_at IS NULL
 		ORDER BY stop_sent_at ASC
+		LIMIT 100
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list pending scrobble reconciliations: %w", err)
@@ -1370,6 +1371,16 @@ type storedPluginCredentials struct {
 	TokenType        string            `json:"token_type,omitempty"`
 	Scopes           []string          `json:"scopes,omitempty"`
 	SecretAttributes map[string]string `json:"secret_attributes,omitempty"`
+}
+
+func (r *PostgresRepository) pluginCredentialsForConnection(conn Connection) (string, error) {
+	if !strings.HasPrefix(conn.Provider, providerSourcePlugin+":") {
+		// Built-in providers have legacy token writers that update the dedicated
+		// token columns directly. Keeping a second authoritative bundle for them
+		// would let that bundle become stale and overwrite freshly rotated tokens.
+		return "", nil
+	}
+	return r.encodePluginCredentials(conn)
 }
 
 func (r *PostgresRepository) encodePluginCredentials(conn Connection) (string, error) {

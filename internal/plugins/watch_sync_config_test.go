@@ -14,12 +14,18 @@ func TestWatchSyncProviderConfigClassifiesManifestFields(t *testing.T) {
 			{Key: "client_secret", Control: pluginv1.AdminFormControl_ADMIN_FORM_CONTROL_PASSWORD, Secret: true},
 		}},
 	}}}
-	config, err := watchSyncProviderConfig(manifest, []*RuntimeConfig{{
-		Key: "provider",
+	config, err := watchSyncProviderConfig(manifest, []*RuntimeConfig{nil, {
+		Key: " provider ",
 		Value: map[string]any{
-			"base_url":      "https://floppy.example",
+			" base_url ":    "https://floppy.example",
 			"client_secret": "secret",
 			"undeclared":    map[string]any{"token": "also-secret"},
+			"   ":           "ignored-empty-field",
+		},
+	}, {
+		Key: "   ",
+		Value: map[string]any{
+			"base_url": "ignored-empty-key",
 		},
 	}})
 	if err != nil {
@@ -32,5 +38,8 @@ func TestWatchSyncProviderConfigClassifiesManifestFields(t *testing.T) {
 	}
 	if _, exposed := config.GetValues()["provider.undeclared"]; exposed {
 		t.Fatal("undeclared plugin config was exposed as public")
+	}
+	if _, present := config.GetSecretValues()["."]; present {
+		t.Fatal("empty plugin config key or field was emitted")
 	}
 }

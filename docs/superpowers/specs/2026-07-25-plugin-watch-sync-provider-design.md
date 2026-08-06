@@ -52,9 +52,12 @@ Plugins advertise `watch_sync_provider.v1` with a typed descriptor containing:
 - supported media types and external-ID namespaces;
 - maximum apply batch size.
 
-The host supports:
+The host uses `WatchSyncProvider` for the stable provider operations and a
+separate `WatchSyncDeviceAuthorizationService` for device-code start and poll.
+The split keeps direct Go implementations of the released v0.12 provider
+interface source-compatible. Together the services support:
 
-- `StartDeviceAuthorization` and `PollDeviceAuthorization`;
+- device authorization `Start` and `Poll`;
 - `ExchangeAPIKey`;
 - `RefreshCredentials`;
 - `GetAccount`;
@@ -122,8 +125,10 @@ Credential refresh remains host-initiated and serialized by the existing
 watchsync service. The host encrypts an authoritative credential bundle
 containing access token, refresh token, expiry, token type, scopes, and opaque
 secret attributes. Legacy access/refresh columns remain readable during the
-migration. Device codes are also encrypted at rest. Invalid-credential faults
-are persisted using only the plugin's safe message.
+migration. Device codes are also encrypted at rest. A pending device poll may
+rotate its opaque provider state, interval, or expiry; the host validates and
+persists the replacement before another poll. Invalid-credential faults are
+persisted using only the plugin's safe message.
 
 Authorization-code OAuth can be added separately to the existing watch-
 provider service after its client-secret storage and callback-state design are
@@ -175,8 +180,12 @@ contains the stable cursor for that family and an opaque page token. The host:
 4. advances the page token until the plugin reports no next page;
 5. commits the family cursor only after the traversal succeeds.
 
-Incremental list pages do not imply deletion of absent items. Complete snapshots
-may reconcile removals. Ordered watchlists preserve the plugin's list position.
+Incremental list pages do not imply deletion of absent items; they use explicit
+provider-key tombstones for removals. Complete snapshots may reconcile removals.
+Ordered watchlists preserve the plugin's list position and require complete
+snapshots because an incremental subset cannot define positions relative to
+omitted items. Traversals are bounded by both page and item count before their
+durable cursor advances.
 Progress items without a valid provider timestamp are rejected rather than
 being stamped with host time.
 

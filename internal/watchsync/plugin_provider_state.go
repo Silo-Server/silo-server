@@ -18,6 +18,7 @@ const (
 	pluginFavoritesCursorKey = "plugin.remote.favorites"
 	pluginWatchlistCursorKey = "plugin.remote.watchlist"
 	maxRemoteStatePages      = 10_000
+	maxRemoteStateItems      = 100_000
 )
 
 type pluginRemoteTraversal struct {
@@ -211,12 +212,20 @@ func (p *PluginProvider) listRemoteState(
 		if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
 			return pluginRemoteTraversal{}, err
 		}
+		if kind == pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_WATCHLIST &&
+			p.descriptor.GetProvidesWatchlistOrder() && !response.GetCompleteSnapshot() {
+			return pluginRemoteTraversal{}, errors.New("watch sync plugin returned an incremental traversal for an ordered watchlist")
+		}
 		if snapshotSet && result.completeSnapshot != response.GetCompleteSnapshot() {
 			return pluginRemoteTraversal{}, errors.New("watch sync plugin changed snapshot mode during pagination")
 		}
 		result.completeSnapshot = response.GetCompleteSnapshot()
 		snapshotSet = true
-		result.items = append(result.items, response.GetItems()...)
+		items := response.GetItems()
+		if len(items) > maxRemoteStateItems-len(result.items) {
+			return pluginRemoteTraversal{}, errors.New("watch sync plugin exceeded the remote-state item limit")
+		}
+		result.items = append(result.items, items...)
 
 		nextPage := strings.TrimSpace(response.GetNextPageToken())
 		if nextPage == "" {
@@ -241,6 +250,7 @@ func (p *PluginProvider) RemoveHistory(
 	conn Connection,
 	plays []LocalPlay,
 ) (ExportResult, error) {
+	result := ExportResult{Failed: make(map[string]string)}
 	events := make([]*pluginv1.WatchSyncEvent, 0, len(plays))
 	keys := make([]string, 0, len(plays))
 	for _, play := range plays {
@@ -249,12 +259,14 @@ func (p *PluginProvider) RemoveHistory(
 		event.Operation = pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_UNWATCHED
 		event.ProviderItemKey = play.ProviderItemKey
 		if !p.supportsMedia(event.GetMedia().GetMediaType()) {
+			result.Failed[play.HistoryID] = unsupportedWatchSyncMediaMessage(event.GetMedia().GetMediaType())
 			continue
 		}
 		events = append(events, event)
 		keys = append(keys, play.HistoryID)
 	}
-	return p.applyPluginEvents(ctx, conn, events, keys)
+	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
+	return mergeExportFailures(applied, result.Failed), err
 }
 
 func (p *PluginProvider) ExportFavorites(ctx context.Context, _ ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error) {
@@ -279,27 +291,34 @@ func (p *PluginProvider) applyListEvents(
 	items []LocalFavorite,
 	operation pluginv1.WatchSyncOperation,
 ) (ExportResult, error) {
+	result := ExportResult{Failed: make(map[string]string)}
 	events := make([]*pluginv1.WatchSyncEvent, 0, len(items))
 	keys := make([]string, 0, len(items))
-	for index, item := range items {
+	for _, item := range items {
 		media := mediaFromIdentity(item.MediaItemID, item.Kind, item.Title, item.Year,
 			item.IMDbID, item.TMDBID, item.TVDBID, "", 0,
 			item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID, 0, 0)
 		if !p.supportsMedia(media.GetMediaType()) {
+			result.Failed[item.MediaItemID] = unsupportedWatchSyncMediaMessage(media.GetMediaType())
 			continue
 		}
-		events = append(events, &pluginv1.WatchSyncEvent{
+		event := &pluginv1.WatchSyncEvent{
 			EventId:         fmt.Sprintf("%s:%s", operation.String(), item.MediaItemID),
 			Operation:       operation,
 			Origin:          pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_MANUAL,
 			OccurredAt:      timestampOrNil(item.FavoritedAt),
 			Media:           media,
-			ListPosition:    int32(index),
 			ProviderItemKey: item.ProviderItemKey,
-		})
+		}
+		if operation == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_ADD_TO_WATCHLIST {
+			position := int32(len(events))
+			event.ListPosition = &position
+		}
+		events = append(events, event)
 		keys = append(keys, item.MediaItemID)
 	}
-	return p.applyPluginEvents(ctx, conn, events, keys)
+	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
+	return mergeExportFailures(applied, result.Failed), err
 }
 
 func (p *PluginProvider) applyPluginEvents(
@@ -308,39 +327,51 @@ func (p *PluginProvider) applyPluginEvents(
 	events []*pluginv1.WatchSyncEvent,
 	keys []string,
 ) (ExportResult, error) {
+	result, _, err := p.applyPluginEventsDetailed(ctx, conn, events, keys)
+	return result, err
+}
+
+func (p *PluginProvider) applyPluginEventsDetailed(
+	ctx context.Context,
+	conn Connection,
+	events []*pluginv1.WatchSyncEvent,
+	keys []string,
+) (ExportResult, map[string]pluginv1.WatchSyncApplyStatus, error) {
 	result := ExportResult{Failed: make(map[string]string)}
+	statuses := make(map[string]pluginv1.WatchSyncApplyStatus, len(events))
 	if len(events) == 0 {
-		return result, nil
+		return result, statuses, nil
 	}
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
-		return result, watchSyncUnavailableError()
+		return result, statuses, watchSyncUnavailableError()
 	}
 	for offset := 0; offset < len(events); offset += max(1, p.ExportBatchSize()) {
 		end := min(len(events), offset+max(1, p.ExportBatchSize()))
 		authContext, err := p.authenticatedContext(ctx, conn)
 		if err != nil {
-			return result, err
+			return result, statuses, err
 		}
 		response, err := client.ApplyEvents(ctx, &pluginv1.WatchSyncApplyEventsRequest{
 			Context: authContext,
 			Events:  events[offset:end],
 		})
 		if err != nil {
-			return result, watchSyncRPCError()
+			return result, statuses, watchSyncRPCError()
 		}
 		if response.GetUpdatedCredentials() != nil {
 			conn, err = p.persistUpdatedCredentials(ctx, conn, response.GetUpdatedCredentials())
 			if err != nil {
-				return result, err
+				return result, statuses, err
 			}
 		}
 		if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
-			return result, err
+			return result, statuses, err
 		}
 		for index, event := range events[offset:end] {
 			key := keys[offset+index]
 			apply := resultForEvent(response.GetResults(), event.GetEventId())
+			statuses[key] = apply.GetStatus()
 			switch apply.GetStatus() {
 			case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
 				pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE:
@@ -354,7 +385,7 @@ func (p *PluginProvider) applyPluginEvents(
 					if fault.GetRetryAfter() != nil {
 						retry = fault.GetRetryAfter().AsDuration()
 					}
-					return result, RateLimitedError{Provider: p.Key(), RetryAfter: retry}
+					return result, statuses, RateLimitedError{Provider: p.Key(), RetryAfter: retry}
 				}
 				result.Failed[key] = safeApplyMessage(apply, conn.AccessToken, conn.RefreshToken)
 			default:
@@ -362,7 +393,17 @@ func (p *PluginProvider) applyPluginEvents(
 			}
 		}
 	}
-	return result, nil
+	return result, statuses, nil
+}
+
+func mergeExportFailures(result ExportResult, failures map[string]string) ExportResult {
+	if result.Failed == nil {
+		result.Failed = make(map[string]string, len(failures))
+	}
+	for key, message := range failures {
+		result.Failed[key] = message
+	}
+	return result
 }
 
 func remoteWatchFromProto(provider string, state *pluginv1.WatchSyncRemoteState) (RemoteWatch, error) {
@@ -410,6 +451,20 @@ func remoteProgressFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 }
 
 func remoteFavoriteFromProto(provider string, state *pluginv1.WatchSyncRemoteState, listed *pluginv1.WatchSyncRemoteListState) (RemoteFavorite, error) {
+	if state == nil || listed == nil {
+		return RemoteFavorite{}, errors.New("watch sync plugin returned list state without identity")
+	}
+	providerItemKey := strings.TrimSpace(state.GetProviderItemKey())
+	if listed.GetRemoved() {
+		if providerItemKey == "" {
+			return RemoteFavorite{}, errors.New("watch sync plugin returned a list tombstone without provider identity")
+		}
+		return RemoteFavorite{
+			Provider:        provider,
+			ProviderItemKey: providerItemKey,
+			Removed:         true,
+		}, nil
+	}
 	identity, err := remoteIdentityFromProto(state)
 	if err != nil {
 		return RemoteFavorite{}, err
@@ -419,7 +474,7 @@ func remoteFavoriteFromProto(provider string, state *pluginv1.WatchSyncRemoteSta
 		listedAt = *value
 	}
 	return RemoteFavorite{
-		Provider: provider, ProviderItemKey: state.GetProviderItemKey(),
+		Provider: provider, ProviderItemKey: providerItemKey,
 		Kind: identity.kind, Title: identity.title, Year: identity.year,
 		IMDbID: identity.imdbID, TMDBID: identity.tmdbID, TVDBID: identity.tvdbID,
 		SeriesTitle: identity.seriesTitle, SeriesYear: identity.seriesYear,

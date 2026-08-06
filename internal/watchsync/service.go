@@ -499,6 +499,22 @@ func (s *Service) PollDeviceAuth(
 	}
 	tokens, err := authProvider.PollDeviceAuth(ctx, cfg, session)
 	if err != nil {
+		var pending deviceAuthorizationPendingError
+		if errors.As(err, &pending) {
+			updated := pending.session
+			// Keep host-owned scope and identity authoritative even if a provider
+			// accidentally copied or zeroed those fields in its pending state.
+			updated.ID = session.ID
+			updated.Provider = session.Provider
+			updated.UserID = session.UserID
+			updated.ProfileID = session.ProfileID
+			updated.UserCode = session.UserCode
+			updated.VerificationURL = session.VerificationURL
+			updated.CompletedAt = session.CompletedAt
+			if _, persistErr := s.repo.UpsertAuthSession(ctx, updated); persistErr != nil {
+				return Connection{}, errors.Join(err, fmt.Errorf("persist pending auth session: %w", persistErr))
+			}
+		}
 		return Connection{}, err
 	}
 
@@ -1520,7 +1536,7 @@ func (s *Service) exportLocalPlays(
 	_, limited := AsRateLimited(err)
 	retryable := isRetryableProviderError(err)
 	if err != nil && isWatchSyncInvalidCredentialError(err) {
-		return err
+		return errors.Join(err, s.persistConnectionError(ctx, conn, err.Error()))
 	}
 	if err != nil && !limited && !retryable {
 		var markErr error

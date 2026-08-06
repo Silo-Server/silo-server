@@ -590,7 +590,9 @@ func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessi
 }
 
 func (r *serviceFakeRepo) ListOpenScrobbleSessions(_ context.Context) ([]ScrobbleSession, error) {
-	return r.scrobbleSessions, nil
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	return append([]ScrobbleSession(nil), r.scrobbleSessions...), nil
 }
 
 func (r *serviceFakeRepo) ListPendingScrobbleReconciliations(_ context.Context) ([]ScrobbleSession, error) {
@@ -650,6 +652,7 @@ func cloneStringMapForTest(values map[string]string) map[string]string {
 type authProviderStub struct {
 	started       bool
 	polled        bool
+	pollErr       error
 	refreshed     bool
 	refreshTokens TokenSet
 	refreshErr    error
@@ -688,6 +691,9 @@ func (p *authProviderStub) PollDeviceAuth(
 	DeviceAuthSession,
 ) (TokenSet, error) {
 	p.polled = true
+	if p.pollErr != nil {
+		return TokenSet{}, p.pollErr
+	}
 	expires := time.Now().Add(time.Hour)
 	return TokenSet{AccessToken: testAccessToken, RefreshToken: testRefreshToken, TokenExpiresAt: &expires}, nil
 }
@@ -1161,6 +1167,42 @@ func TestServiceStartsAndPollsDeviceAuth(t *testing.T) {
 	storedSession := repo.sessions[session.ID]
 	if storedSession.CompletedAt == nil {
 		t.Fatalf("auth session was not marked completed: %+v", storedSession)
+	}
+}
+
+func TestServicePersistsRotatedPendingDeviceAuthorizationState(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	original := DeviceAuthSession{
+		ID: "auth-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1",
+		DeviceCode: "original", UserCode: "CODE", VerificationURL: "https://trakt.tv/activate",
+		IntervalSeconds: 5, ExpiresAt: now.Add(10 * time.Minute),
+	}
+	repo.sessions[original.ID] = original
+	provider := &authProviderStub{pollErr: deviceAuthorizationPendingError{session: DeviceAuthSession{
+		// These host-owned fields are intentionally wrong; only the rotated
+		// challenge state, interval, and expiry may be accepted from the provider.
+		ID: "wrong", Provider: "wrong", UserID: 99, ProfileID: "wrong",
+		DeviceCode: "rotated", UserCode: "WRONG", VerificationURL: "https://evil.example",
+		IntervalSeconds: 11, ExpiresAt: now.Add(20 * time.Minute),
+	}}}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, reg)
+	service.now = func() time.Time { return now }
+	_, err := service.PollDeviceAuth(context.Background(), 7, "profile-1", "trakt", original.ID)
+	var pending deviceAuthorizationPendingError
+	if !errors.As(err, &pending) {
+		t.Fatalf("error = %#v, want pending", err)
+	}
+	stored := repo.sessions[original.ID]
+	if stored.ID != original.ID || stored.Provider != original.Provider || stored.UserID != original.UserID ||
+		stored.ProfileID != original.ProfileID || stored.UserCode != original.UserCode ||
+		stored.VerificationURL != original.VerificationURL || stored.DeviceCode != "rotated" ||
+		stored.IntervalSeconds != 11 || !stored.ExpiresAt.Equal(now.Add(20*time.Minute)) {
+		t.Fatalf("stored session = %#v", stored)
 	}
 }
 
@@ -3372,5 +3414,112 @@ func TestSyncDueConnectionsSkipsSiblingsOfRateLimitedAccount(t *testing.T) {
 	wantUntil := now.Add(30 * time.Minute)
 	if sibling.RateLimitedUntil == nil || !sibling.RateLimitedUntil.Equal(wantUntil) {
 		t.Fatalf("sibling RateLimitedUntil = %v, want %v", sibling.RateLimitedUntil, wantUntil)
+	}
+}
+
+type favoriteBatchProviderStub struct {
+	batch FavoriteImportBatch
+}
+
+func (favoriteBatchProviderStub) Key() string         { return "plugin:4:list" }
+func (favoriteBatchProviderStub) DisplayName() string { return "List" }
+func (favoriteBatchProviderStub) Capabilities() Capabilities {
+	return Capabilities{ImportFavorites: true}
+}
+func (p favoriteBatchProviderStub) FetchFavorites(context.Context, ServerConfig, Connection) ([]RemoteFavorite, error) {
+	return p.batch.Rows, nil
+}
+func (p favoriteBatchProviderStub) FetchFavoritesBatch(context.Context, ServerConfig, Connection) (FavoriteImportBatch, error) {
+	return p.batch, nil
+}
+
+func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	if _, err := store.AddFavoriteAt(ctx, "profile-1", testMovieMediaID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	conn := Connection{
+		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+	}
+	repo.listItemStates = []ListItemState{{
+		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey, RemotePresent: true, LocalPresent: true,
+	}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{
+		Rows:           []RemoteFavorite{{ProviderItemKey: testMovieProviderItemKey, Removed: true}},
+		UpdatedCursors: map[string]string{pluginFavoritesCursorKey: "cursor-2"},
+		Incremental:    true,
+	}}
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(favorites) != 0 || repo.listItemStates[0].RemotePresent || repo.listItemStates[0].LocalPresent {
+		t.Fatalf("favorites=%#v state=%#v", favorites, repo.listItemStates[0])
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	if updated.SyncCursors[pluginFavoritesCursorKey] != "cursor-2" {
+		t.Fatalf("connection cursors = %#v", updated.SyncCursors)
+	}
+}
+
+func TestServiceIncrementalFavoriteAbsenceIsNotRemoval(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	if _, err := store.AddFavoriteAt(ctx, "profile-1", testMovieMediaID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	conn := Connection{
+		ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1",
+		ImportFavoritesEnabled: true, SyncFavoriteRemovalsEnabled: true,
+	}
+	repo.listItemStates = []ListItemState{{
+		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey, RemotePresent: true, LocalPresent: true,
+	}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{Incremental: true}}
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 0 || len(favorites) != 1 || !repo.listItemStates[0].RemotePresent || !repo.listItemStates[0].LocalPresent {
+		t.Fatalf("result=%#v favorites=%#v state=%#v", result, favorites, repo.listItemStates[0])
 	}
 }

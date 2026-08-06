@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -17,8 +18,8 @@ import (
 
 type WatchSyncPluginClient interface {
 	ExchangeAPIKey(context.Context, *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error)
-	StartDeviceAuthorization(context.Context, *pluginv1.WatchSyncStartDeviceAuthorizationRequest) (*pluginv1.WatchSyncStartDeviceAuthorizationResponse, error)
-	PollDeviceAuthorization(context.Context, *pluginv1.WatchSyncPollDeviceAuthorizationRequest) (*pluginv1.WatchSyncPollDeviceAuthorizationResponse, error)
+	StartDeviceAuthorization(context.Context, *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest) (*pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse, error)
+	PollDeviceAuthorization(context.Context, *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest) (*pluginv1.WatchSyncDeviceAuthorizationServicePollResponse, error)
 	RefreshCredentials(context.Context, *pluginv1.WatchSyncRefreshCredentialsRequest) (*pluginv1.WatchSyncCredentialResponse, error)
 	GetAccount(context.Context, *pluginv1.WatchSyncGetAccountRequest) (*pluginv1.WatchSyncGetAccountResponse, error)
 	ApplyEvents(context.Context, *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error)
@@ -191,7 +192,7 @@ func (p *PluginProvider) StartDeviceAuth(ctx context.Context, _ ServerConfig) (D
 	if err != nil {
 		return DeviceAuthSession{}, watchSyncUnavailableError()
 	}
-	response, err := client.StartDeviceAuthorization(ctx, &pluginv1.WatchSyncStartDeviceAuthorizationRequest{
+	response, err := client.StartDeviceAuthorization(ctx, &pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest{
 		CapabilityId:   p.capabilityID,
 		ProviderConfig: config,
 	})
@@ -201,21 +202,32 @@ func (p *PluginProvider) StartDeviceAuth(ctx context.Context, _ ServerConfig) (D
 	if err := watchSyncFaultError(p.Key(), response.GetFault()); err != nil {
 		return DeviceAuthSession{}, err
 	}
-	if strings.TrimSpace(response.GetUserCode()) == "" || strings.TrimSpace(response.GetVerificationUrl()) == "" ||
-		len(response.GetProviderState()) == 0 || response.GetExpiresAt() == nil {
+	if strings.TrimSpace(response.GetUserCode()) == "" || len(response.GetProviderState()) == 0 || response.GetExpiresAt() == nil {
 		return DeviceAuthSession{}, errors.New("watch sync plugin returned an incomplete device authorization")
 	}
-	interval := 5
-	if response.GetPollingInterval() != nil && response.GetPollingInterval().AsDuration() > 0 {
-		interval = max(1, int(response.GetPollingInterval().AsDuration().Seconds()))
+	if err := response.GetExpiresAt().CheckValid(); err != nil || !response.GetExpiresAt().AsTime().After(time.Now()) {
+		return DeviceAuthSession{}, errors.New("watch sync plugin returned an invalid device authorization expiry")
 	}
-	verificationURL := response.GetVerificationUrl()
+	interval := 5
+	if pollingInterval := response.GetPollingInterval(); pollingInterval != nil {
+		if err := pollingInterval.CheckValid(); err != nil || pollingInterval.AsDuration() <= 0 {
+			return DeviceAuthSession{}, errors.New("watch sync plugin returned an invalid device authorization polling interval")
+		}
+		interval = max(1, int(pollingInterval.AsDuration().Seconds()))
+	}
+	verificationURL, err := validDeviceVerificationURL(response.GetVerificationUrl())
+	if err != nil {
+		return DeviceAuthSession{}, err
+	}
 	if complete := strings.TrimSpace(response.GetVerificationUrlComplete()); complete != "" {
-		verificationURL = complete
+		verificationURL, err = validDeviceVerificationURL(complete)
+		if err != nil {
+			return DeviceAuthSession{}, err
+		}
 	}
 	return DeviceAuthSession{
 		DeviceCode:      base64.RawURLEncoding.EncodeToString(response.GetProviderState()),
-		UserCode:        response.GetUserCode(),
+		UserCode:        strings.TrimSpace(response.GetUserCode()),
 		VerificationURL: verificationURL,
 		IntervalSeconds: interval,
 		ExpiresAt:       response.GetExpiresAt().AsTime(),
@@ -235,7 +247,7 @@ func (p *PluginProvider) PollDeviceAuth(ctx context.Context, _ ServerConfig, ses
 	if err != nil {
 		return TokenSet{}, watchSyncUnavailableError()
 	}
-	response, err := client.PollDeviceAuthorization(ctx, &pluginv1.WatchSyncPollDeviceAuthorizationRequest{
+	response, err := client.PollDeviceAuthorization(ctx, &pluginv1.WatchSyncDeviceAuthorizationServicePollRequest{
 		CapabilityId:   p.capabilityID,
 		ProviderConfig: config,
 		ProviderState:  state,
@@ -248,7 +260,11 @@ func (p *PluginProvider) PollDeviceAuth(ctx context.Context, _ ServerConfig, ses
 	}
 	switch response.GetStatus() {
 	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_PENDING:
-		return TokenSet{}, errors.New("watch sync plugin device authorization is pending")
+		updated, err := updatedPendingDeviceAuthSession(session, response)
+		if err != nil {
+			return TokenSet{}, err
+		}
+		return TokenSet{}, deviceAuthorizationPendingError{session: updated}
 	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_DENIED:
 		return TokenSet{}, errors.New("watch sync plugin device authorization was denied")
 	case pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_EXPIRED:
@@ -258,6 +274,38 @@ func (p *PluginProvider) PollDeviceAuth(ctx context.Context, _ ServerConfig, ses
 	default:
 		return TokenSet{}, errors.New("watch sync plugin returned an invalid device authorization status")
 	}
+}
+
+func validDeviceVerificationURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || !parsed.IsAbs() || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("watch sync plugin returned an invalid device authorization verification URL")
+	}
+	return parsed.String(), nil
+}
+
+func updatedPendingDeviceAuthSession(
+	session DeviceAuthSession,
+	response *pluginv1.WatchSyncDeviceAuthorizationServicePollResponse,
+) (DeviceAuthSession, error) {
+	if len(response.GetProviderState()) > 0 {
+		session.DeviceCode = base64.RawURLEncoding.EncodeToString(response.GetProviderState())
+	}
+	if pollingInterval := response.GetPollingInterval(); pollingInterval != nil {
+		if err := pollingInterval.CheckValid(); err != nil || pollingInterval.AsDuration() <= 0 {
+			return DeviceAuthSession{}, errors.New("watch sync plugin returned an invalid device authorization polling interval")
+		}
+		session.IntervalSeconds = max(1, int(pollingInterval.AsDuration().Seconds()))
+	}
+	if expiresAt := response.GetExpiresAt(); expiresAt != nil {
+		if err := expiresAt.CheckValid(); err != nil || !expiresAt.AsTime().After(time.Now()) {
+			return DeviceAuthSession{}, errors.New("watch sync plugin returned an invalid device authorization expiry")
+		}
+		session.ExpiresAt = expiresAt.AsTime()
+	}
+	return session, nil
 }
 
 func (p *PluginProvider) RefreshToken(ctx context.Context, _ ServerConfig, conn Connection) (TokenSet, error) {
@@ -431,20 +479,27 @@ func (p *PluginProvider) applyScrobble(
 	if !p.supportsMedia(watchEvent.GetMedia().GetMediaType()) {
 		return watchSyncProviderFaultError{message: unsupportedWatchSyncMediaMessage(watchEvent.GetMedia().GetMediaType())}
 	}
-	result, err := p.applyPluginEvents(ctx, conn, []*pluginv1.WatchSyncEvent{watchEvent}, []string{watchEvent.GetEventId()})
+	result, statuses, err := p.applyPluginEventsDetailed(ctx, conn, []*pluginv1.WatchSyncEvent{watchEvent}, []string{watchEvent.GetEventId()})
 	if err != nil {
 		return err
 	}
-	if len(result.Sent) == 1 {
+	switch statuses[watchEvent.GetEventId()] {
+	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
+		pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_NO_CHANGE:
 		return nil
+	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_RETRY:
+		return retryableProviderError{message: result.Failed[watchEvent.GetEventId()]}
+	case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_REJECTED:
+		return watchSyncProviderFaultError{
+			code:    pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT,
+			message: "watch sync plugin rejected the playback event",
+		}
+	default:
+		return watchSyncProviderFaultError{
+			code:    pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_PERMANENT,
+			message: "watch sync plugin did not confirm the playback event",
+		}
 	}
-	if len(result.NotFound) > 0 {
-		return errors.New("watch sync plugin rejected the playback event")
-	}
-	if message := result.Failed[watchEvent.GetEventId()]; message != "" {
-		return errors.New(message)
-	}
-	return errors.New("watch sync plugin did not confirm the playback event")
 }
 
 func (p *PluginProvider) ScrobbleOrderingKey(conn Connection, event ScrobbleEvent) string {
@@ -632,16 +687,22 @@ func resultForEvent(results []*pluginv1.WatchSyncApplyResult, eventID string) *p
 }
 
 func supportedWatchSyncAuthMethod(descriptor *pluginv1.WatchSyncProviderDescriptor) (string, error) {
-	var deviceCode bool
+	supported := make(map[string]struct{}, 2)
 	for _, method := range descriptor.GetAuthMethods() {
 		switch method {
 		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY:
-			return AuthMethodAPIKey, nil
+			supported[AuthMethodAPIKey] = struct{}{}
 		case pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE:
-			deviceCode = true
+			supported[AuthMethodDeviceCode] = struct{}{}
 		}
 	}
-	if deviceCode {
+	if len(supported) > 1 {
+		return "", errors.New("advertises multiple host authentication methods; exactly one is required")
+	}
+	if _, ok := supported[AuthMethodAPIKey]; ok {
+		return AuthMethodAPIKey, nil
+	}
+	if _, ok := supported[AuthMethodDeviceCode]; ok {
 		return AuthMethodDeviceCode, nil
 	}
 	return "", errors.New("does not advertise an authentication method supported by the host")

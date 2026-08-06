@@ -52,17 +52,22 @@ func watchSyncProviderConfig(
 		if config == nil {
 			continue
 		}
-		publicFields, _ := GlobalConfigFieldSets(manifest, config.Key)
+		configKey := strings.TrimSpace(config.Key)
+		if configKey == "" {
+			continue
+		}
+		publicFields, _ := GlobalConfigFieldSets(manifest, configKey)
 		public := stringSet(publicFields)
 		for field, raw := range config.Value {
-			value, err := watchSyncConfigString(raw)
-			if err != nil {
-				return nil, fmt.Errorf("encode watch sync plugin config %q.%s: %w", config.Key, field, err)
-			}
-			key := strings.TrimSpace(config.Key) + "." + strings.TrimSpace(field)
-			if key == "." {
+			field = strings.TrimSpace(field)
+			if field == "" {
 				continue
 			}
+			value, err := watchSyncConfigString(raw)
+			if err != nil {
+				return nil, fmt.Errorf("encode watch sync plugin config %q.%s: %w", configKey, field, err)
+			}
+			key := configKey + "." + field
 			if _, isPublic := public[field]; isPublic {
 				result.Values[key] = value
 				continue
@@ -77,7 +82,9 @@ func watchSyncProviderConfig(
 func stringSet(values []string) map[string]struct{} {
 	result := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		result[value] = struct{}{}
+		if value = strings.TrimSpace(value); value != "" {
+			result[value] = struct{}{}
+		}
 	}
 	return result
 }
