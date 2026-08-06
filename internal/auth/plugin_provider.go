@@ -17,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
+const pluginRoleClaimKey = "silo_role"
+
 type pluginAuthClient interface {
 	Authenticate(ctx context.Context, req *pluginv1.AuthenticateRequest) (*pluginv1.AuthenticateResponse, error)
 	InitAuthorize(ctx context.Context, req *pluginv1.InitAuthorizeRequest) (*pluginv1.InitAuthorizeResponse, error)
@@ -103,7 +105,7 @@ func (p *PluginProvider) Authenticate(ctx context.Context, creds Credentials) (*
 		if !user.Enabled {
 			return nil, ErrUserDisabled
 		}
-		return user, nil
+		return p.synchronizeClaimedRole(ctx, user, response)
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -137,7 +139,7 @@ func (p *PluginProvider) CompleteOAuth(ctx context.Context, response *pluginv1.A
 		if !user.Enabled {
 			return nil, ErrUserDisabled
 		}
-		return user, nil
+		return p.synchronizeClaimedRole(ctx, user, response)
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
@@ -250,6 +252,15 @@ func (p *PluginProvider) autoProvisionUser(
 		email = fmt.Sprintf("%s@plugin-%d.local", usernameBase, p.config.InstallationID)
 	}
 
+	role := "user"
+	claimedRole, hasClaimedRole, err := pluginRoleFromResponse(response)
+	if err != nil {
+		return nil, err
+	}
+	if hasClaimedRole {
+		role = claimedRole
+	}
+
 	localPasswordLoginEnabled := false
 	password, err := randomPluginOnlyPassword()
 	if err != nil {
@@ -264,7 +275,7 @@ func (p *PluginProvider) autoProvisionUser(
 				Username:                  username,
 				Password:                  password,
 				LocalPasswordLoginEnabled: &localPasswordLoginEnabled,
-				Role:                      "user",
+				Role:                      role,
 			},
 		})
 		if err == nil {
@@ -276,6 +287,108 @@ func (p *PluginProvider) autoProvisionUser(
 		username = fmt.Sprintf("%s_%d", usernameBase, i+2)
 	}
 	return nil, fmt.Errorf("auto-provision plugin user: exhausted username attempts")
+}
+
+func (p *PluginProvider) synchronizeClaimedRole(
+	ctx context.Context,
+	user *models.User,
+	response *pluginv1.AuthenticateResponse,
+) (*models.User, error) {
+	desiredRole, present, err := pluginRoleFromResponse(response)
+	if err != nil {
+		return nil, err
+	}
+	if !present || user == nil || user.Role == desiredRole {
+		return user, nil
+	}
+
+	var defaultGroupID *int64
+	if desiredRole == "user" {
+		defaultGroupID, err = p.defaultAccessGroupID(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	input, changed := roleSyncUpdateInput(user, desiredRole, defaultGroupID)
+	if !changed {
+		return user, nil
+	}
+	if err := p.users.Update(ctx, user.ID, input); err != nil {
+		return nil, fmt.Errorf("synchronize plugin-authenticated user role: %w", err)
+	}
+	updated, err := p.users.GetByID(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("reload plugin-authenticated user after role synchronization: %w", err)
+	}
+	return updated, nil
+}
+
+func pluginRoleFromResponse(response *pluginv1.AuthenticateResponse) (string, bool, error) {
+	if response == nil || response.GetClaims() == nil {
+		return "", false, nil
+	}
+	raw, exists := response.GetClaims().AsMap()[pluginRoleClaimKey]
+	if !exists || raw == nil {
+		return "", false, nil
+	}
+	text, ok := raw.(string)
+	if !ok {
+		return "", false, fmt.Errorf("plugin auth claim %q must be a string", pluginRoleClaimKey)
+	}
+	role := strings.ToLower(strings.TrimSpace(text))
+	if role == "" {
+		return "", false, nil
+	}
+	if role != "user" && role != "admin" {
+		return "", false, fmt.Errorf("plugin auth claim %q contains unsupported role %q", pluginRoleClaimKey, text)
+	}
+	return role, true, nil
+}
+
+func roleSyncUpdateInput(
+	user *models.User,
+	desiredRole string,
+	defaultGroupID *int64,
+) (models.UpdateUserInput, bool) {
+	if user == nil || user.Role == desiredRole {
+		return models.UpdateUserInput{}, false
+	}
+
+	role := desiredRole
+	input := models.UpdateUserInput{Role: &role}
+	if desiredRole == "admin" {
+		input.AccessGroupIDSet = true
+		input.AccessGroupID = nil
+		return input, true
+	}
+
+	permissions := DefaultUserPermissions()
+	input.Permissions = &permissions
+	input.AccessGroupIDSet = true
+	input.AccessGroupID = defaultGroupID
+	return input, true
+}
+
+func (p *PluginProvider) defaultAccessGroupID(ctx context.Context) (*int64, error) {
+	if p.identityPool == nil {
+		return nil, nil
+	}
+	var id int64
+	err := p.identityPool.QueryRow(ctx, `
+		SELECT id
+		FROM access_groups
+		WHERE is_default
+		ORDER BY id
+		LIMIT 1
+	`).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load default access group for role synchronization: %w", err)
+	}
+	return &id, nil
 }
 
 func randomPluginOnlyPassword() (string, error) {
