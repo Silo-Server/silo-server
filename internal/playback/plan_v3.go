@@ -202,6 +202,12 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(input.Request.StartPosition), PlayerStartSeconds: floatOrZeroV3(input.Request.StartPosition), CanSeekAnywhere: true, SeekRestoration: "player_position"},
 	}
 	base.Claims.Audio.Passthrough = passthrough
+	if subtitle.Degraded {
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
+			Code:    "subtitle_track_unavailable",
+			Message: "The selected subtitle track is not on this file; starting without it.",
+		})
+	}
 	if source.DynamicRange == "hdr_unknown" && rangeOK {
 		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
 			Code:    "hdr_range_assumed_hdr10",
