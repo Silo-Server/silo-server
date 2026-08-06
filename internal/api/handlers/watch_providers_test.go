@@ -159,6 +159,11 @@ func TestWatchProviderHandlerStartsDeviceAuthWithFrontendJSONShape(t *testing.T)
 			t.Fatalf("response contains Go-style key %q: %#v", key, resp)
 		}
 	}
+	for _, key := range []string{"device_code", "user_id", "profile_id", "completed_at"} {
+		if _, ok := resp[key]; ok {
+			t.Fatalf("response exposes host-private field %q: %#v", key, resp)
+		}
+	}
 	if resp["id"] != "auth-1" {
 		t.Fatalf("id = %#v, want auth-1", resp["id"])
 	}

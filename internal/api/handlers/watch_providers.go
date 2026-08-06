@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -25,6 +26,15 @@ type WatchProviderService interface {
 
 type WatchProviderHandler struct {
 	service WatchProviderService
+}
+
+type watchProviderDeviceAuthResponse struct {
+	ID              string    `json:"id"`
+	Provider        string    `json:"provider"`
+	UserCode        string    `json:"user_code"`
+	VerificationURL string    `json:"verification_url"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	ExpiresAt       time.Time `json:"expires_at"`
 }
 
 func NewWatchProviderHandler(service WatchProviderService) *WatchProviderHandler {
@@ -97,7 +107,14 @@ func (h *WatchProviderHandler) HandleStartDeviceAuth(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, session)
+	writeJSON(w, http.StatusOK, watchProviderDeviceAuthResponse{
+		ID:              session.ID,
+		Provider:        session.Provider,
+		UserCode:        session.UserCode,
+		VerificationURL: session.VerificationURL,
+		IntervalSeconds: session.IntervalSeconds,
+		ExpiresAt:       session.ExpiresAt,
+	})
 }
 
 func (h *WatchProviderHandler) HandlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
