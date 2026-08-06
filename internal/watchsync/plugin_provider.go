@@ -290,7 +290,7 @@ func updatedPendingDeviceAuthSession(
 	session DeviceAuthSession,
 	response *pluginv1.WatchSyncDeviceAuthorizationServicePollResponse,
 ) (DeviceAuthSession, error) {
-	if len(response.GetProviderState()) > 0 {
+	if response.ProviderState != nil {
 		session.DeviceCode = base64.RawURLEncoding.EncodeToString(response.GetProviderState())
 	}
 	if pollingInterval := response.GetPollingInterval(); pollingInterval != nil {

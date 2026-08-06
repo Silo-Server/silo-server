@@ -613,6 +613,46 @@ func TestPluginProviderPendingDeviceAuthorizationCarriesRotatedState(t *testing.
 	}
 }
 
+func TestPluginProviderPendingDeviceAuthorizationPreservesStatePresence(t *testing.T) {
+	originalState := base64.RawURLEncoding.EncodeToString([]byte("original-state"))
+	tests := map[string]struct {
+		providerState []byte
+		wantState     string
+	}{
+		"omitted retains state": {providerState: nil, wantState: originalState},
+		"explicit empty clears state": {
+			providerState: []byte{},
+			wantState:     "",
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			client := &fakeWatchSyncPluginClient{devicePollResponse: &pluginv1.WatchSyncDeviceAuthorizationServicePollResponse{
+				Status:        pluginv1.WatchSyncDeviceAuthorizationStatus_WATCH_SYNC_DEVICE_AUTHORIZATION_STATUS_PENDING,
+				ProviderState: test.providerState,
+			}}
+			provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods: []pluginv1.WatchSyncAuthMethod{
+					pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_DEVICE_CODE,
+				},
+			})
+			original := DeviceAuthSession{
+				ID: "auth-1", Provider: testPluginProviderKey, UserID: 7, ProfileID: "profile-1",
+				DeviceCode: originalState, UserCode: "ABCD", VerificationURL: "https://provider.example/activate",
+				IntervalSeconds: 5, ExpiresAt: time.Now().UTC().Add(10 * time.Minute),
+			}
+			_, err := provider.PollDeviceAuth(context.Background(), ServerConfig{}, original)
+			var pending deviceAuthorizationPendingError
+			if !errors.As(err, &pending) {
+				t.Fatalf("error = %#v, want deviceAuthorizationPendingError", err)
+			}
+			if pending.session.DeviceCode != test.wantState {
+				t.Fatalf("device state = %q, want %q", pending.session.DeviceCode, test.wantState)
+			}
+		})
+	}
+}
+
 func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *testing.T) {
 	now := time.Now().UTC()
 	remote := func(key, imdb string) *pluginv1.WatchSyncRemoteState {
