@@ -36,15 +36,45 @@ func (e *ConnectionTestError) Unwrap() error {
 	return e.Cause
 }
 
+type pluginConnectionCheckCapability struct {
+	kind string
+	id   string
+}
+
+const (
+	connectionCheckKindMetadata = "metadata_provider"
+	connectionCheckKindAuth     = "auth_provider"
+)
+
 var runPluginConnectionCheck = func(
 	ctx context.Context,
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,
 ) error {
-	capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest)
+	capability, err := pluginConnectionCheckCapabilityForManifest(manifest)
 	if err != nil {
 		return err
 	}
+
+	switch capability.kind {
+	case connectionCheckKindMetadata:
+		return runMetadataProviderConnectionCheck(ctx, client, manifest, capability.id)
+	case connectionCheckKindAuth:
+		return runAuthProviderConnectionCheck(ctx, client, capability.id)
+	default:
+		return &ConnectionTestError{
+			Message: "Connection checks are not supported for this plugin yet.",
+			Cause:   ErrConnectionTestUnsupported,
+		}
+	}
+}
+
+func runMetadataProviderConnectionCheck(
+	ctx context.Context,
+	client pluginClient,
+	manifest *pluginv1.PluginManifest,
+	capabilityID string,
+) error {
 	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
 	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
 		slog.DebugContext(ctx,
@@ -79,6 +109,41 @@ var runPluginConnectionCheck = func(
 		}
 	}
 
+	return nil
+}
+
+func runAuthProviderConnectionCheck(
+	ctx context.Context,
+	client pluginClient,
+	capabilityID string,
+) error {
+	authClient, err := client.AuthProvider(capabilityID)
+	if err != nil {
+		return &ConnectionTestError{
+			Message: fmt.Sprintf("Failed to initialize the authentication provider: %v", err),
+			Cause:   err,
+		}
+	}
+
+	metadata, err := structpb.NewStruct(map[string]any{"connection_test": true})
+	if err != nil {
+		return &ConnectionTestError{
+			Message: "Failed to prepare the authentication-provider connection check.",
+			Cause:   err,
+		}
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	if _, err := authClient.Authenticate(probeCtx, &pluginv1.AuthenticateRequest{
+		Metadata: metadata,
+	}); err != nil {
+		return &ConnectionTestError{
+			Message: fmt.Sprintf("Connection check failed: %v", err),
+			Cause:   err,
+		}
+	}
 	return nil
 }
 
@@ -143,7 +208,7 @@ func (s *Service) TestGlobalConfigWithClears(
 			Cause:   err,
 		}
 	}
-	if _, err := metadataProviderConnectionCheckCapabilityID(manifest); err != nil {
+	if _, err := pluginConnectionCheckCapabilityForManifest(manifest); err != nil {
 		return err
 	}
 
@@ -254,6 +319,42 @@ func cloneConfigMap(value map[string]any) map[string]any {
 		cloned[key] = entry
 	}
 	return cloned
+}
+
+func pluginConnectionCheckCapabilityForManifest(
+	manifest *pluginv1.PluginManifest,
+) (pluginConnectionCheckCapability, error) {
+	if capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest); err == nil {
+		return pluginConnectionCheckCapability{
+			kind: connectionCheckKindMetadata,
+			id:   capabilityID,
+		}, nil
+	}
+	if capabilityID, ok := authProviderConnectionCheckCapabilityID(manifest); ok {
+		return pluginConnectionCheckCapability{
+			kind: connectionCheckKindAuth,
+			id:   capabilityID,
+		}, nil
+	}
+	return pluginConnectionCheckCapability{}, &ConnectionTestError{
+		Message: "Connection checks are not supported for this plugin yet.",
+		Cause:   ErrConnectionTestUnsupported,
+	}
+}
+
+func authProviderConnectionCheckCapabilityID(
+	manifest *pluginv1.PluginManifest,
+) (string, bool) {
+	for _, capability := range manifest.GetCapabilities() {
+		if capability.GetType() != "auth_provider.v1" || capability.GetMetadata() == nil {
+			continue
+		}
+		enabled, ok := capability.GetMetadata().AsMap()["connection_test"].(bool)
+		if ok && enabled {
+			return capability.GetId(), true
+		}
+	}
+	return "", false
 }
 
 func metadataProviderConnectionCheckCapabilityID(manifest *pluginv1.PluginManifest) (string, error) {
