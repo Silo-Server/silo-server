@@ -144,6 +144,75 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// StreamTokenAuthenticator verifies a request's scoped ?st= stream token
+// against the session named in the request path and returns the auth claims it
+// authorizes, plus the active profile encoded in the token. ok is false when no
+// valid ?st= token is present (absent, bad signature, expired, or bound to a
+// different session than the path). It is supplied by the stream handlers,
+// which hold the signing secret; the middleware stays free of playback imports.
+type StreamTokenAuthenticator func(r *http.Request) (claims *auth.Claims, profileID string, ok bool)
+
+// RequireStreamAuth authenticates the Cast-reachable stream delivery routes
+// (HLS manifest/segment, progressive stream, and stream subtitles). It is a
+// deliberately narrower widening of auth than RequireAuth, scoped to these
+// routes only:
+//
+//   - A bearer/?token= credential (session JWT or API key), when present, is
+//     ALWAYS authoritative: the request is validated exactly as RequireAuth,
+//     and an invalid credential 401s — it never falls through to the ?st= path.
+//   - Only when NO bearer credential is present does it fall back to the scoped
+//     ?st= stream token. That token is signed with the same secret and carries
+//     a single session's RecipeCard (UserID/ProfileID/SessionID/MediaFileID);
+//     a valid one authenticates the request AS that user for streaming the one
+//     session it encodes. It grants no role and no broader access — downstream
+//     ownership checks still compare the session's UserID to these claims.
+//
+// The global RequireAuth is intentionally left untouched so ?st= remains
+// unaccepted everywhere else.
+func (am *AuthMiddleware) RequireStreamAuth(streamAuth StreamTokenAuthenticator) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		// Precompute the bearer path so a credentialed request is handled
+		// byte-for-byte like RequireAuth (session/API-key validation included).
+		bearerHandler := am.RequireAuth(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := extractBearerToken(r); ok {
+				bearerHandler.ServeHTTP(w, r)
+				return
+			}
+
+			if streamAuth != nil {
+				if claims, profileID, ok := streamAuth(r); ok && claims != nil {
+					// A signed ?st= URL outlives login state (its TTL is the
+					// only time bound), so disabling an account must also kill
+					// its outstanding stream URLs. Same per-request user check
+					// the API-key path performs; the loader is nil only in
+					// deployments without user storage (then TTL still bounds).
+					if am.apiKeyUserLoader != nil {
+						user, err := am.apiKeyUserLoader.GetByID(r.Context(), claims.UserID)
+						if err != nil || user == nil || !user.Enabled {
+							writeUnauthorized(w, "User account is disabled")
+							return
+						}
+					}
+					if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+						uid := claims.UserID
+						lc.UserID = &uid
+						lc.SessionID = claims.SessionID
+					}
+					ctx := context.WithValue(r.Context(), claimsKey, claims)
+					if profileID != "" {
+						ctx = context.WithValue(ctx, profileKey, profileID)
+					}
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+
+			writeUnauthorized(w, "Missing or malformed authorization header")
+		})
+	}
+}
+
 // RequireAdmin is a standalone HTTP middleware that checks if the authenticated
 // user has the "admin" role. It expects RequireAuth to have already placed
 // claims in the request context.

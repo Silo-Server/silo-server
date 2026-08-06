@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -398,6 +399,12 @@ type startPlaybackRequest struct {
 	HdrDetails                   *hdrDetails                   `json:"hdr_details,omitempty"`
 	AudioPassthrough             *audioPassthroughCapabilities `json:"audio_passthrough,omitempty"`
 	SupportsBitmapSubtitleBurnIn bool                          `json:"supports_bitmap_subtitle_burn_in,omitempty"`
+	// SeekableStreamsOnly is set by clients that hand the stream URL to a
+	// device that can only seek via HTTP Range on a real file or an HLS VOD
+	// manifest (e.g. a Cast receiver). The progressive remux pipe is the one
+	// route seekable by neither, so a resolved remux is upgraded to a
+	// transcode session when transcoding is available.
+	SeekableStreamsOnly bool `json:"seekable_streams_only,omitempty"`
 }
 
 // progressRequest represents the JSON body for POST /playback/{session_id}/progress.
@@ -687,6 +694,39 @@ func streamCardFromToken(tokenStr, sessionID, secret string) *playback.RecipeCar
 	}
 	card := playback.RecipeCardFromClaims(claims)
 	return &card
+}
+
+// NewStreamTokenAuthenticator builds the ?st= fallback authenticator for the
+// Cast-reachable stream delivery routes, wired into apimw.RequireStreamAuth.
+// It verifies the request's ?st= token against the {session_id} path parameter
+// using the given signing secret and, on success, authenticates the request as
+// the token's user for streaming that one session. It returns ok=false when the
+// token is absent, invalid/expired, or bound to a different session than the
+// path (streamCardFromToken enforces the session-id match) — the middleware
+// then falls through to 401.
+//
+// The synthesized claims carry only the streaming identity: the card's UserID,
+// its SessionID, and TokenTypeAccess. No role is set, so a ?st= token can never
+// confer admin or any privilege beyond streaming the encoded session. The
+// card's ProfileID is returned separately so the middleware can seed profile
+// context for logging/scope.
+func NewStreamTokenAuthenticator(secret string) apimw.StreamTokenAuthenticator {
+	return func(r *http.Request) (*auth.Claims, string, bool) {
+		sessionID := chi.URLParam(r, "session_id")
+		if sessionID == "" {
+			return nil, "", false
+		}
+		card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, secret)
+		if card == nil {
+			return nil, "", false
+		}
+		claims := &auth.Claims{
+			UserID:    card.UserID,
+			SessionID: card.SessionID,
+			TokenType: auth.TokenTypeAccess,
+		}
+		return claims, card.ProfileID, true
+	}
 }
 
 // appendStreamToken adds the ?st=<token> parameter to a native serve URL.
@@ -1818,6 +1858,17 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		audioTrackIndex,
 		preserveDirectAudioSelection,
 	)
+	// The remux pipe streams chunked from a live ffmpeg process — no
+	// Content-Length, no Range — so a seekable-streams-only client gets a
+	// transcode session instead (its HLS manifest seeks anywhere). An explicit
+	// remux request keeps precedence, and disabled transcoding keeps the
+	// best-effort remux rather than refusing playback.
+	seekableRemuxUpgraded := req.SeekableStreamsOnly && method == playback.PlayRemux &&
+		!strings.EqualFold(req.PlayMethod, string(playback.PlayRemux)) &&
+		h.playbackConfig().TranscodeEnabled
+	if seekableRemuxUpgraded {
+		method = playback.PlayTranscode
+	}
 	if requestedFile != nil && effectiveFile != nil && requestedFile.ID != effectiveFile.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
 			slog.WarnContext(r.Context(), "requested playback file preflight failed; continuing with alternate file", "component", "api",
@@ -1834,26 +1885,34 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 
 	clientInfo := playbackClientInfoFromRequest(r)
 	sessionCtx := playback.WithClientInfo(r.Context(), clientInfo)
-	var session *playback.Session
-	if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
-		session, err = starter.StartSessionWithFilesContext(
-			sessionCtx,
+	startSession := func(playMethod playback.PlayMethod) (*playback.Session, error) {
+		if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
+			return starter.StartSessionWithFilesContext(
+				sessionCtx,
+				userID,
+				profileID,
+				effectiveFile.ID,
+				req.FileID,
+				playMethod,
+				transcodeAudio,
+			)
+		}
+		return h.sessionMgr.StartSessionWithFiles(
 			userID,
 			profileID,
 			effectiveFile.ID,
 			req.FileID,
-			method,
+			playMethod,
 			transcodeAudio,
 		)
-	} else {
-		session, err = h.sessionMgr.StartSessionWithFiles(
-			userID,
-			profileID,
-			effectiveFile.ID,
-			req.FileID,
-			method,
-			transcodeAudio,
-		)
+	}
+	session, err := startSession(method)
+	if seekableRemuxUpgraded && errors.Is(err, playback.ErrTranscodingDisabled) {
+		// The seekability preference is best-effort. If account policy rejects
+		// the video transcode, preserve the resolver's playable remux instead of
+		// turning an otherwise valid playback request into a 403.
+		method = playback.PlayRemux
+		session, err = startSession(method)
 	}
 	if err != nil {
 		if errors.Is(err, playback.ErrTooManyStreams) {

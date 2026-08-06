@@ -3669,6 +3669,164 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 	}
 }
 
+// TestHandleStartPlayback_SeekableStreamsOnly covers the seekable_streams_only
+// start flag used by clients that hand the stream URL to a device which can
+// only seek via HTTP Range or an HLS VOD manifest (e.g. a Cast receiver). The
+// progressive remux pipe is the one non-seekable route, so the flag upgrades a
+// resolved remux to a transcode session; direct play and explicit method
+// requests are untouched, and the upgrade never overrides disabled transcoding.
+func TestHandleStartPlayback_SeekableStreamsOnly(t *testing.T) {
+	const (
+		seekableStreamsOnlyBody = `{"file_id":42,"profile_id":"profile-1","seekable_streams_only":true,"codecs_video":["h264"],"codecs_audio":["aac","mp3"],"containers":["mp4"],"max_resolution":"1080p"}`
+		progressiveStreamPrefix = "/stream/"
+	)
+	mkvFile := func(t *testing.T, audioCodec string) *models.MediaFile {
+		return &models.MediaFile{
+			ID:         42,
+			ContentID:  "movie-1",
+			FilePath:   writePlaybackTestMediaFile(t, "movie-1080p.mkv"),
+			Resolution: "1080p",
+			CodecVideo: "h264",
+			CodecAudio: audioCodec,
+			Container:  "mkv",
+			Bitrate:    8000,
+			Duration:   3600,
+			AudioTracks: []models.AudioTrack{
+				{Codec: audioCodec, Default: true},
+			},
+		}
+	}
+	mp4File := func(t *testing.T) *models.MediaFile {
+		return &models.MediaFile{
+			ID:         42,
+			ContentID:  "movie-1",
+			FilePath:   writePlaybackTestMediaFile(t, "movie-1080p.mp4"),
+			Resolution: "1080p",
+			CodecVideo: "h264",
+			CodecAudio: "aac",
+			Container:  "mp4",
+			Bitrate:    8000,
+			Duration:   3600,
+			AudioTracks: []models.AudioTrack{
+				{Codec: "aac", Default: true},
+			},
+		}
+	}
+
+	tests := []struct {
+		name             string
+		file             func(*testing.T) *models.MediaFile
+		body             string
+		transcodeEnabled bool
+		userTranscodeOff bool
+		wantMethod       playback.PlayMethod
+		wantStreamPrefix string
+	}{
+		{
+			name:             "upgrades resolved remux to transcode",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             seekableStreamsOnlyBody,
+			transcodeEnabled: true,
+			wantMethod:       playback.PlayTranscode,
+			wantStreamPrefix: "/playback/transcode/",
+		},
+		{
+			name:             "upgrades audio-adaptation remux to transcode",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "eac3") },
+			body:             seekableStreamsOnlyBody,
+			transcodeEnabled: true,
+			wantMethod:       playback.PlayTranscode,
+			wantStreamPrefix: "/playback/transcode/",
+		},
+		{
+			name:             "keeps direct play for a compatible file",
+			file:             mp4File,
+			body:             seekableStreamsOnlyBody,
+			transcodeEnabled: true,
+			wantMethod:       playback.PlayDirect,
+			wantStreamPrefix: progressiveStreamPrefix,
+		},
+		{
+			name:             "without the flag remux is unchanged",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             `{"file_id":42,"profile_id":"profile-1","codecs_video":["h264"],"codecs_audio":["aac","mp3"],"containers":["mp4"],"max_resolution":"1080p"}`,
+			transcodeEnabled: true,
+			wantMethod:       playback.PlayRemux,
+			wantStreamPrefix: progressiveStreamPrefix,
+		},
+		{
+			name:             "disabled transcoding keeps best-effort remux",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             seekableStreamsOnlyBody,
+			transcodeEnabled: false,
+			wantMethod:       playback.PlayRemux,
+			wantStreamPrefix: progressiveStreamPrefix,
+		},
+		{
+			name:             "user-disabled transcoding keeps best-effort remux",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             seekableStreamsOnlyBody,
+			transcodeEnabled: true,
+			userTranscodeOff: true,
+			wantMethod:       playback.PlayRemux,
+			wantStreamPrefix: progressiveStreamPrefix,
+		},
+		{
+			name:             "explicit remux request wins over the flag",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             `{"file_id":42,"profile_id":"profile-1","play_method":"remux","seekable_streams_only":true,"codecs_video":["h264"],"codecs_audio":["aac","mp3"],"containers":["mp4"],"max_resolution":"1080p"}`,
+			transcodeEnabled: true,
+			wantMethod:       playback.PlayRemux,
+			wantStreamPrefix: progressiveStreamPrefix,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionMgr := playback.NewSessionManager(0, 0)
+			if tt.userTranscodeOff {
+				sessionMgr.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+					return playback.SessionLimits{TranscodingDisabled: true}, nil
+				})
+			}
+			file := tt.file(t)
+			handler := NewPlaybackHandler(sessionMgr, mapPlaybackFileResolver{
+				files: map[int]*models.MediaFile{42: file},
+			})
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			handler.PlaybackConfig = func() config.PlaybackConfig {
+				return config.PlaybackConfig{TranscodeEnabled: tt.transcodeEnabled}
+			}
+
+			req := httptest.NewRequest("POST", "/api/v1/playback/start", strings.NewReader(tt.body))
+			req = req.WithContext(newAuthorizedPlaybackContext())
+			rr := httptest.NewRecorder()
+			handler.HandleStartPlayback(rr, req)
+
+			if rr.Code != 201 {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			var resp playbackSessionResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.PlayMethod != string(tt.wantMethod) {
+				t.Fatalf("PlayMethod = %q, want %q", resp.PlayMethod, tt.wantMethod)
+			}
+			if !strings.HasPrefix(resp.StreamURL, tt.wantStreamPrefix) {
+				t.Fatalf("StreamURL = %q, want prefix %q", resp.StreamURL, tt.wantStreamPrefix)
+			}
+			session, err := sessionMgr.GetSession(resp.SessionID)
+			if err != nil {
+				t.Fatalf("GetSession: %v", err)
+			}
+			if session.PlayMethod != tt.wantMethod {
+				t.Fatalf("session.PlayMethod = %q, want %q", session.PlayMethod, tt.wantMethod)
+			}
+		})
+	}
+}
+
 func TestClampEncodedTargetResolution(t *testing.T) {
 	tests := []struct {
 		name      string
