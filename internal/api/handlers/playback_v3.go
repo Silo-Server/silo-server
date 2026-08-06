@@ -431,10 +431,16 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
-	audioIndex, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
+	audioIndex, audioDegraded, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
+	}
+	if audioDegraded {
+		warnings = append(warnings, playback.DegradationWarningV3{
+			Code:    "audio_track_unavailable",
+			Message: "The selected audio track is not on this file; playing its default instead.",
+		})
 	}
 	effectiveFile := requestedFile
 	settings := h.plannerSettingsV3(r.Context())
@@ -452,9 +458,16 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
-			if err := h.remapSubtitleSelectionV3(r.Context(), requestedFile, effectiveFile, &req); err != nil {
-				writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("subtitle_unavailable_in_version", err.Error(), false))
+			subtitleDropped, subtitleErr := h.remapSubtitleSelectionV3(r.Context(), requestedFile, effectiveFile, &req)
+			if subtitleErr != nil {
+				writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("subtitle_unavailable_in_version", subtitleErr.Error(), false))
 				return
+			}
+			if subtitleDropped {
+				warnings = append(warnings, playback.DegradationWarningV3{
+					Code:    "subtitle_track_unavailable",
+					Message: "The selected subtitle track is not in this version; starting without it.",
+				})
 			}
 			if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 				writePlaybackFilePreflightError(w, err)
@@ -1227,7 +1240,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 			}
 			if start.SubtitleTrackIndex != nil || start.SubtitleTrackID != "" {
-				if err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
+				if _, err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
 					return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 				}
 			}
@@ -1256,7 +1269,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	audioIndex := 0
 	if !seekReanchor {
-		audioIndex, err = resolveV3AudioIndex(effectiveFile, start.AudioTrackID, start.AudioTrackIndex)
+		audioIndex, _, err = resolveV3AudioIndex(effectiveFile, start.AudioTrackID, start.AudioTrackIndex)
 		if err != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 		}
@@ -1299,7 +1312,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
-			if err := h.remapSubtitleSelectionV3(r.Context(), effectiveFile, alternate, &start); err == nil {
+			if _, err := h.remapSubtitleSelectionV3(r.Context(), effectiveFile, alternate, &start); err == nil {
 				start.FileID = alternate.ID
 				if err := preflightPlaybackFile(r.Context(), alternate, h.MissingMarker, h.EventsHub); err == nil {
 					effectiveFile = alternate
@@ -1944,27 +1957,33 @@ func (h *PlaybackHandler) plannerSettingsV3(ctx context.Context) playback.Planne
 	return settings
 }
 
-func resolveV3AudioIndex(file *models.MediaFile, trackID string, fallback *int) (int, error) {
+// resolveV3AudioIndex returns the audio index to play, whether the requested
+// selection had to be degraded to get there, and an error only when the request
+// itself is malformed.
+func resolveV3AudioIndex(file *models.MediaFile, trackID string, fallback *int) (int, bool, error) {
 	index := 0
 	if trackID != "" {
 		fileID, kind, ordinal, ok := playback.ParseTrackIDV3(trackID)
 		if !ok || kind != "audio" || file == nil || fileID != file.ID {
-			return 0, errors.New("selected audio track identity is invalid")
+			// A malformed identity is a client bug, not a content mismatch.
+			return 0, false, errors.New("selected audio track identity is invalid")
 		}
 		index = ordinal
 	} else if fallback != nil {
 		index = *fallback
 	}
 	if file == nil || len(file.AudioTracks) == 0 {
-		if index == 0 {
-			return 0, nil
-		}
-		return 0, errors.New("selected audio track is unavailable")
+		return 0, index != 0, nil
 	}
 	if index < 0 || index >= len(file.AudioTracks) {
-		return 0, errors.New("selected audio track is unavailable")
+		// A carried-over selection that does not exist on this file is not a
+		// reason to refuse playback. The commonest source is the next episode
+		// in a series having a different track layout to the one the viewer
+		// chose on, and failing there means a dead screen and a manual replay.
+		// Fall back to the file's own default and say so in the plan.
+		return normalizeAudioTrackIndex(file, index), true, nil
 	}
-	return index, nil
+	return index, false, nil
 }
 
 func remapAudioIndexV3(source, target *models.MediaFile, index int) int {
@@ -2004,26 +2023,29 @@ func remapAudioSelectionV3(source, target *models.MediaFile, request *playback.S
 	return nil
 }
 
-func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, target *models.MediaFile, request *playback.StartRequestV3) error {
+// remapSubtitleSelectionV3 rebases a subtitle selection onto the file that will
+// actually be played. It reports whether the selection had to be dropped, and
+// errors only when the request itself is malformed.
+func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, target *models.MediaFile, request *playback.StartRequestV3) (bool, error) {
 	if request == nil || source == nil || target == nil || source.ID == target.ID {
-		return nil
+		return false, nil
 	}
 	if request.SubtitleTrackIndex == nil {
 		// ID-only selections are equally file-bound: the stale ID would be
 		// parsed against the alternate file's track list downstream, so
 		// derive the source index from it and remap like any other.
 		if request.SubtitleTrackID == "" {
-			return nil
+			return false, nil
 		}
 		fileID, kind, ordinal, ok := playback.ParseTrackIDV3(request.SubtitleTrackID)
 		if !ok || kind != "subtitle" || fileID != source.ID {
-			return errors.New("The selected subtitle track identity is invalid for the source file.")
+			return false, errors.New("The selected subtitle track identity is invalid for the source file.")
 		}
 		request.SubtitleTrackIndex = &ordinal
 	}
 	index := *request.SubtitleTrackIndex
 	if index < 0 {
-		return errors.New("The selected subtitle track index is invalid.")
+		return false, errors.New("The selected subtitle track index is invalid.")
 	}
 	targetIndex := -1
 	switch {
@@ -2060,11 +2082,18 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		}
 	}
 	if targetIndex < 0 {
-		return errors.New("The selected subtitle track is unavailable in the effective file version.")
+		// No equivalent on the file we are actually going to play. Subtitles
+		// are an enhancement; refusing the start over one is disproportionate,
+		// and it is what made a missing track on the next episode surface as a
+		// dead screen the viewer had to replay out of. Clear the selection so
+		// the planner applies the profile default, and report the degradation.
+		request.SubtitleTrackIndex = nil
+		request.SubtitleTrackID = ""
+		return true, nil
 	}
 	request.SubtitleTrackIndex = &targetIndex
 	request.SubtitleTrackID = playback.TrackIDV3(target.ID, "subtitle", targetIndex)
-	return nil
+	return false, nil
 }
 
 func sessionStartErrorV3(err error) *transportErrorV3 {

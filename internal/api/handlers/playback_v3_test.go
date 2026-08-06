@@ -1923,8 +1923,68 @@ func TestRemapSubtitleSelectionV3RejectsNegativeIndex(t *testing.T) {
 	source := &models.MediaFile{ID: 1, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
 	target := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	if err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request); err == nil {
+	if _, err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request); err == nil {
 		t.Fatal("negative subtitle index was accepted")
+	}
+}
+
+// A track the viewer chose on one file need not exist on the file actually
+// played — the next episode in a series routinely differs. Refusing the start
+// there gave the viewer a dead screen to replay out of.
+func TestRemapSubtitleSelectionV3DropsSelectionWhenAbsentFromTarget(t *testing.T) {
+	index := 0
+	request := playback.StartRequestV3{SubtitleTrackIndex: &index}
+	source := &models.MediaFile{ID: 1, ExternalSubtitles: []models.ExternalSubtitle{{Language: "swe", Format: "srt"}}}
+	target := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+
+	degraded, err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request)
+	if err != nil {
+		t.Fatalf("a missing subtitle must not fail the start: %v", err)
+	}
+	if !degraded {
+		t.Fatal("dropping the selection was not reported as a degradation")
+	}
+	if request.SubtitleTrackIndex != nil || request.SubtitleTrackID != "" {
+		t.Fatalf("stale selection survived: index=%v id=%q", request.SubtitleTrackIndex, request.SubtitleTrackID)
+	}
+}
+
+// The equivalent track on the target file is still preferred over dropping it.
+func TestRemapSubtitleSelectionV3RebasesWhenTargetHasTheTrack(t *testing.T) {
+	index := 0
+	request := playback.StartRequestV3{SubtitleTrackIndex: &index}
+	source := &models.MediaFile{ID: 1, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
+	target := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{
+		{Language: "swe", Format: "srt"},
+		{Language: "eng", Format: "srt"},
+	}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+
+	degraded, err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request)
+	if err != nil || degraded {
+		t.Fatalf("a track present on the target must rebase, not drop: degraded=%v err=%v", degraded, err)
+	}
+	if request.SubtitleTrackIndex == nil || *request.SubtitleTrackIndex != 1 {
+		t.Fatalf("rebased to the wrong index: %v", request.SubtitleTrackIndex)
+	}
+}
+
+// Audio cannot simply be dropped the way subtitles can, so it falls back to the
+// file's own default rather than refusing to play.
+func TestResolveV3AudioIndexFallsBackWhenSelectionIsOutOfRange(t *testing.T) {
+	out := 7
+	file := &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Language: "eng"}, {Language: "swe"}}}
+
+	index, degraded, err := resolveV3AudioIndex(file, "", &out)
+	if err != nil {
+		t.Fatalf("an out-of-range audio selection must not fail the start: %v", err)
+	}
+	if !degraded {
+		t.Fatal("falling back was not reported as a degradation")
+	}
+	if index < 0 || index >= len(file.AudioTracks) {
+		t.Fatalf("fell back to an invalid index: %d", index)
 	}
 }
 
