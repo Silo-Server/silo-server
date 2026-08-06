@@ -186,7 +186,7 @@ func TestSubtitleURLExtV3(t *testing.T) {
 // The combined ordinal a plan advertises must be the one the selection path
 // resolves, or a client echoing an inventory entry addresses a different track
 // than the one it picked.
-func TestSubtitleCodecAtCombinedIndexV3_AgreesWithPublishedInventory(t *testing.T) {
+func TestSubtitleEntryAtCombinedIndexV3_AgreesWithPublishedInventory(t *testing.T) {
 	file := &models.MediaFile{
 		ID: 11,
 		ExternalSubtitles: []models.ExternalSubtitle{
@@ -202,15 +202,15 @@ func TestSubtitleCodecAtCombinedIndexV3_AgreesWithPublishedInventory(t *testing.
 	}
 
 	for _, item := range BuildSubtitleInventoryV3(file, additional) {
-		codec, source, ok := subtitleCodecAtCombinedIndexV3(file, item.CombinedIndex, additional)
+		entry, ok := subtitleEntryAtCombinedIndexV3(file, item.CombinedIndex, additional)
 		if !ok {
 			t.Fatalf("ordinal %d is published but does not resolve", item.CombinedIndex)
 		}
-		if source != item.Source {
-			t.Errorf("ordinal %d resolves to source %q, inventory says %q", item.CombinedIndex, source, item.Source)
+		if entry.Source != item.Source {
+			t.Errorf("ordinal %d resolves to source %q, inventory says %q", item.CombinedIndex, entry.Source, item.Source)
 		}
-		if codec != normalizeCodecV3(item.Codec) {
-			t.Errorf("ordinal %d resolves to codec %q, inventory says %q", item.CombinedIndex, codec, item.Codec)
+		if entry.Codec != normalizeCodecV3(item.Codec) {
+			t.Errorf("ordinal %d resolves to codec %q, inventory says %q", item.CombinedIndex, entry.Codec, item.Codec)
 		}
 	}
 }

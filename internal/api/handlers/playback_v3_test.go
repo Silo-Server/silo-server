@@ -663,12 +663,12 @@ func TestHandleReplanPlaybackV3SeekReanchorIgnoresRefreshedProbeMetadata(t *test
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	selectedAudio := 1
 	startRequest.AudioTrackIndex = &selectedAudio
-	startRequest.ClientPlaybackContext.Engines[string(playback.EngineMedia3ProgressiveRemuxV3)] = playback.EngineCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.EngineSubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
@@ -688,14 +688,13 @@ func TestHandleReplanPlaybackV3SeekReanchorIgnoresRefreshedProbeMetadata(t *test
 	// was durably accepted. A seek is not authority to consume that drift.
 	file.Container = "mkv"
 	file.AudioTracks = file.AudioTracks[:1]
-	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	reanchor := playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
 		PlaybackAttemptID: startRequest.PlaybackAttemptID,
 		ReplanRequestID:   "seek-reanchor-probe-drift-0001", FailedPlanID: started.PlaybackPlan.PlanID,
 		PlanAttemptID: "plan-attempt-seek-probe-0001", PlanAttemptKey: currentKey,
 		AttemptCount: 1, QualityPreference: startRequest.QualityPreference, PositionSeconds: 321,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
 		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
 		Capabilities:          startRequest.Capabilities,
 		ClientPlaybackContext: startRequest.ClientPlaybackContext,
@@ -732,7 +731,7 @@ func TestStartPlaybackV3FreezesDownloadedSubtitleFromPlanningSnapshot(t *testing
 	repo.subtitles[reordered.ID] = &reordered
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SubtitleRepo = repo
 	request := v3HandlerStartRequest()
@@ -776,11 +775,11 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 		{Name: "video_to_h264", RecipeVersion: "1", Available: true},
 		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
 	}))
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
-	startRequest.ClientPlaybackContext.Engines[string(playback.EngineMedia3ProgressiveRemuxV3)] = playback.EngineCapabilityV3{Enabled: true, SupportedOnDevice: true}
-	startRequest.ClientPlaybackContext.Engines[string(playback.EngineMedia3HLSV3)] = playback.EngineCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
@@ -799,7 +798,7 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 	attempted := []string{}
 	wantFallbacks := []playback.DeliveryV3{playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3}
 	for index, classification := range []string{"playback_error", "decoder_error"} {
-		currentKey := playback.PlanAttemptKeyV3(*active.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+		currentKey := playback.PlanAttemptKeyV3(*active.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 		attempted = append(attempted, currentKey)
 		response := postPlaybackReplanV3(t, handler, active.SessionID, playback.ReplanRequestV3{
 			ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationFailureRecoveryV3,
@@ -809,7 +808,6 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 			PlanAttemptID:     fmt.Sprintf("fallback-plan-attempt-%04d", index+1),
 			PlanAttemptKey:    currentKey, AttemptedPlanKeys: append([]string(nil), attempted...),
 			AttemptCount: index + 1, QualityPreference: startRequest.QualityPreference,
-			OutputRouteGeneration: startRequest.OutputRouteGeneration,
 			SelectedTracks:        active.PlaybackPlan.SelectedTracks,
 			Failure:               playback.FailureV3{Classification: classification},
 			Capabilities:          startRequest.Capabilities,
@@ -827,20 +825,19 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 		t.Fatalf("fallback route = %#v", active.PlaybackPlan)
 	}
 	frozen := *active.PlaybackPlan
-	currentKey := playback.PlanAttemptKeyV3(frozen, startRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(frozen, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	reanchored := postPlaybackReplanV3(t, handler, active.SessionID, playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
 		PlaybackAttemptID: startRequest.PlaybackAttemptID,
 		ReplanRequestID:   "fallback-seek-reanchor-0001", FailedPlanID: frozen.PlanID,
 		PlanAttemptID: "fallback-seek-plan-0001", PlanAttemptKey: currentKey,
 		AttemptCount: 3, QualityPreference: startRequest.QualityPreference, PositionSeconds: 819.185,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
 		SelectedTracks:        frozen.SelectedTracks,
 		Capabilities:          startRequest.Capabilities,
 		ClientPlaybackContext: startRequest.ClientPlaybackContext,
 	})
 	if reanchored.PlaybackPlan == nil || reanchored.PlaybackPlan.PlanID != frozen.PlanID ||
-		reanchored.PlaybackPlan.Delivery != frozen.Delivery || reanchored.PlaybackPlan.Engine != frozen.Engine ||
+		reanchored.PlaybackPlan.Delivery != frozen.Delivery ||
 		reanchored.PlaybackPlan.Timeline.SourceStartSeconds != 819.185 {
 		t.Fatalf("reanchored fallback = %#v, terminal = %#v", reanchored.PlaybackPlan, reanchored.Terminal)
 	}
@@ -855,10 +852,10 @@ func TestHandleReplanPlaybackV3SeekReanchorWithoutFrozenRecipeFailsRetryably(t *
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true"}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
-	startRequest.ClientPlaybackContext.Engines[string(playback.EngineMedia3ProgressiveRemuxV3)] = playback.EngineCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.EngineSubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}
 
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
@@ -883,14 +880,13 @@ func TestHandleReplanPlaybackV3SeekReanchorWithoutFrozenRecipeFailsRetryably(t *
 	record.FrozenRecipe = playback.ExecutableRecipeV3{}
 	handler.PlanStoreV3.(*playback.MemoryPlanStoreV3).ReplaceAttempt(context.Background(), *record)
 
-	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	currentKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	seekResponse := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
 		PlaybackAttemptID: startRequest.PlaybackAttemptID,
 		ReplanRequestID:   "legacy-seek-reanchor-0001", FailedPlanID: started.PlaybackPlan.PlanID,
 		PlanAttemptID: "legacy-seek-plan-0001", PlanAttemptKey: currentKey,
 		AttemptCount: 1, QualityPreference: startRequest.QualityPreference, PositionSeconds: 456,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
 		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
 		Capabilities:          startRequest.Capabilities,
 		ClientPlaybackContext: startRequest.ClientPlaybackContext,
@@ -915,7 +911,6 @@ func TestHandleReplanPlaybackV3SeekReanchorWithoutFrozenRecipeFailsRetryably(t *
 		PlanAttemptID: "legacy-recovery-plan-0001", PlanAttemptKey: currentKey,
 		AttemptedPlanKeys: []string{currentKey},
 		AttemptCount:      2, QualityPreference: startRequest.QualityPreference, PositionSeconds: 456,
-		OutputRouteGeneration: startRequest.OutputRouteGeneration,
 		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
 		Failure:               playback.FailureV3{Classification: "playback_error"},
 		Capabilities:          startRequest.Capabilities,
@@ -1407,7 +1402,7 @@ func TestFrozenSeekReanchorResultV3PreservesRouteMatrix(t *testing.T) {
 	basePlan := func(name string) playback.PlanV3 {
 		return playback.PlanV3{
 			ProtocolVersion: playback.ProtocolV3, PlanID: "plan:" + name,
-			Delivery: playback.DeliveryOriginalHTTPV3, Engine: playback.EngineMedia3DirectV3,
+			Delivery:        playback.DeliveryOriginalHTTPV3,
 			Stream:          playback.StreamV3{Protocol: playback.StreamHTTPProgressiveV3, Container: "mp4", MIMEType: "video/mp4", HeaderRefresh: playback.HeaderRefreshSessionV3},
 			SelectedTracks:  playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(42, "audio", audioIndex), Index: &audioIndex}},
 			EffectiveRecipe: playback.EffectiveRecipeV3{VideoCodec: "h264", AudioCodec: "aac", DynamicRange: "sdr"},
@@ -1423,12 +1418,10 @@ func TestFrozenSeekReanchorResultV3PreservesRouteMatrix(t *testing.T) {
 		{name: "direct"},
 		{name: "progressive remux", mutate: func(plan *playback.PlanV3, result *playback.PlannerResultV3) {
 			plan.Delivery = playback.DeliveryRemuxProgressiveV3
-			plan.Engine = playback.EngineMedia3ProgressiveRemuxV3
 			result.PlayMethod = playback.PlayRemux
 		}},
 		{name: "HLS remux", mutate: func(plan *playback.PlanV3, result *playback.PlannerResultV3) {
 			plan.Delivery = playback.DeliveryRemuxHLSV3
-			plan.Engine = playback.EngineMedia3HLSV3
 			plan.Stream = playback.StreamV3{Protocol: playback.StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", HeaderRefresh: playback.HeaderRefreshSessionV3}
 			result.PlayMethod = playback.PlayRemux
 			result.TargetVideoCodec = "copy"
@@ -1436,7 +1429,6 @@ func TestFrozenSeekReanchorResultV3PreservesRouteMatrix(t *testing.T) {
 		}},
 		{name: "audio converting remux", mutate: func(plan *playback.PlanV3, result *playback.PlannerResultV3) {
 			plan.Delivery = playback.DeliveryRemuxProgressiveV3
-			plan.Engine = playback.EngineMedia3ProgressiveRemuxV3
 			plan.Transformations = []playback.TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}}
 			result.PlayMethod = playback.PlayRemux
 			result.TranscodeAudio = true
@@ -1458,7 +1450,6 @@ func TestFrozenSeekReanchorResultV3PreservesRouteMatrix(t *testing.T) {
 		}},
 		{name: "pooled node only transformation", mutate: func(plan *playback.PlanV3, result *playback.PlannerResultV3) {
 			plan.Delivery = playback.DeliveryTranscodeHLSV3
-			plan.Engine = playback.EngineMedia3HLSV3
 			plan.Stream = playback.StreamV3{Protocol: playback.StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", HeaderRefresh: playback.HeaderRefreshSessionV3}
 			plan.Transformations = []playback.TransformationV3{{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"}}
 			result.PlayMethod = playback.PlayTranscode
@@ -1817,7 +1808,6 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 		t.Fatalf("remote start consumed refreshed probe metadata: %#v", startRequest)
 	}
 }
-
 func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 	// A copy remux streams FFmpeg's growing playlist, so its seek window must
 	// stay open-ended even though the runtime is known. A bounded window reads

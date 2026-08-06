@@ -72,7 +72,7 @@ func TestResolveSubtitlePolicyV3BurnsFFmpegBitmapAliases(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3TranscodeUsesHLSEngineSubtitleCapabilities(t *testing.T) {
+func TestPlanPlaybackV3TranscodeUsesHLSDeliverySubtitleCapabilities(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
@@ -80,7 +80,7 @@ func TestPlanPlaybackV3TranscodeUsesHLSEngineSubtitleCapabilities(t *testing.T) 
 	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "srt"}}
 	req := validStartRequestV3()
 	// A fixed rung forces the HLS transcode route; the fixture's direct
-	// engine renders embedded text while the HLS engine cannot.
+	// original HTTP renders embedded text while the HLS delivery cannot.
 	req.QualityPreference = "1080p"
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	index := 0

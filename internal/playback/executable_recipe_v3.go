@@ -36,12 +36,6 @@ type ExecutableRecipeV3 struct {
 
 const executableRecipeVersionV3 = 1
 
-const (
-	SubtitleSourceExternalV3   = "external"
-	SubtitleSourceEmbeddedV3   = "embedded"
-	SubtitleSourceDownloadedV3 = "downloaded"
-)
-
 func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 	planID := ""
 	if result.Plan != nil {

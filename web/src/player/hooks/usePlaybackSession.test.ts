@@ -73,6 +73,16 @@ describe("buildStartRequestV3", () => {
     );
   });
 
+  it("sends the user bandwidth ceiling separately from the network estimate", () => {
+    expect(
+      buildStartRequestV3({
+        ...startBase,
+        bandwidthEstimateKbps: 25_000,
+        bandwidthCapKbps: 6_000,
+      }),
+    ).toMatchObject({ bandwidth_estimate_kbps: 25_000, bandwidth_cap_kbps: 6_000 });
+  });
+
   it("sends the quality preference verbatim for the server to normalize", () => {
     expect(buildStartRequestV3({ ...startBase, qualityPreference: "original" })).toMatchObject({
       quality_preference: "original",
@@ -196,5 +206,16 @@ describe("buildReplanRequestV3", () => {
     });
 
     expect(body.quality_preference).toBe("original");
+  });
+
+  it("preserves the user bandwidth ceiling across replans", () => {
+    const body = buildReplanRequestV3({
+      ...replanBase,
+      operation: "failure_recovery",
+      bandwidthCapKbps: 4_000,
+      failure: { classification: "playback_error" },
+    });
+
+    expect(body.bandwidth_cap_kbps).toBe(4_000);
   });
 });

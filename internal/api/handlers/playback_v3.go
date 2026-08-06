@@ -985,6 +985,9 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		frozenDownloaded = selected
 	}
 	inventory := playback.ScopeSubtitleInventoryV3(sessionID, file, plan.Subtitle.Inventory)
+	// A plan restored from JSON no longer carries the server-only downloaded
+	// row IDs. Rebuild only in that case; a fresh plan stays on the exact
+	// planning snapshot instead of listing a mutable repository twice.
 	if playback.SubtitleInventoryNeedsDownloadedIdentityV3(plan.Subtitle.Inventory) {
 		if h == nil || h.SubtitleRepo == nil {
 			return errors.New("the downloaded subtitle inventory is unavailable")
@@ -1013,6 +1016,8 @@ func (h *PlaybackHandler) attachSubtitleArtifactV3(ctx context.Context, sessionI
 		format = strings.ToLower(string(frozenDownloaded.Format))
 		mime = subtitleMIMEV3(format)
 		url = playback.DownloadedSubtitleStreamURLV3(sessionID, selectedIndex, string(frozenDownloaded.Format), file.ID, frozenDownloaded.ID)
+		// The plan's selected ordinal must advertise the same opaque URL as the
+		// artifact even if another downloaded row was inserted before a seek.
 		for index := range plan.Subtitle.Inventory {
 			if plan.Subtitle.Inventory[index].CombinedIndex == selectedIndex {
 				plan.Subtitle.Inventory[index].URL = url
@@ -1741,7 +1746,6 @@ func seekReanchorIdentityChangesV3(record *playback.AttemptRecordV3, candidate *
 	add("requested_file_id", candidate.RequestedMediaFileID != record.RequestedMediaFileID)
 	add("effective_file_id", candidate.EffectiveMediaFileID != record.EffectiveMediaFileID)
 	add("delivery", candidate.Delivery != current.Delivery)
-	add("engine", candidate.Engine != current.Engine)
 	add("protocol", candidate.Stream.Protocol != current.Stream.Protocol)
 	add("container", candidate.Stream.Container != current.Stream.Container)
 	add("mime_type", candidate.Stream.MIMEType != current.Stream.MIMEType)

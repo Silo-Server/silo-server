@@ -5,9 +5,9 @@ import type { SettingDefinition } from "@/lib/settingsContract";
  * that edits it — the profile Defaults screen and the per-device screen — so
  * the same stored value always reads back as the same choice.
  *
- * The low end matches the in-player quality switcher
- * (web/src/player/hooks/useTranscodeQuality.ts) so a cap chosen here lines up
- * with what the player offers mid-playback. Above 20 Mbps the rungs widen —
+ * The low end matches the server-owned playback ladder, and the player sends
+ * the stored value as `bandwidth_cap_kbps` on start and replan so the same cap
+ * governs every route. Above 20 Mbps the rungs widen —
  * nobody is fine-tuning between 30 and 40 Mbps, they are picking a rough
  * ceiling for a remote box — up to the definition's own ceiling of 200 Mbps,
  * which is what remuxed 4K HDR and untouched Blu-ray rips actually need. The

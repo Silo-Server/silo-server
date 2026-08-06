@@ -257,6 +257,7 @@ export interface StartRequestInput {
   explicitAudioTrackIndex?: number | null;
   metered: boolean;
   bandwidthEstimateKbps?: number | null;
+  bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
   clientPlaybackContext: ClientPlaybackContextV3;
 }
@@ -265,7 +266,8 @@ export interface StartRequestInput {
  * Builds a v3 start body.
  *
  * The client states what it *is* and what the viewer *asked for*; it does not
- * pick a file variant, cap a resolution, or name a delivery. `start_position`
+ * pick a file variant, encode recipe, or delivery. A user-configured bandwidth
+ * ceiling remains declarative input for the server-owned ladder. `start_position`
  * is omitted rather than sent as zero when playback should simply resume, which
  * is what lets the server apply its own resume policy.
  */
@@ -292,6 +294,7 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
       : {}),
+    ...(input.bandwidthCapKbps != null ? { bandwidth_cap_kbps: input.bandwidthCapKbps } : {}),
   };
 }
 
@@ -305,6 +308,7 @@ export interface ReplanRequestInput extends ReplanOptions {
   attemptCount: number;
   metered: boolean;
   bandwidthEstimateKbps?: number | null;
+  bandwidthCapKbps?: number | null;
   clientCapabilities: ClientCodecCapabilitiesV3;
   clientPlaybackContext: ClientPlaybackContextV3;
 }
@@ -351,6 +355,7 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
       : {}),
+    ...(input.bandwidthCapKbps != null ? { bandwidth_cap_kbps: input.bandwidthCapKbps } : {}),
   };
 }
 
@@ -372,6 +377,7 @@ export function usePlaybackSession(
   initialPosition = 0,
   forceInitialPosition = false,
   qualityPreference?: string | null,
+  maxBitrateKbps?: number | null,
   resumeHints?: ResumeHints,
   explicitAudioTrackIndex?: number | null,
 ): UsePlaybackSessionResult {
@@ -511,6 +517,7 @@ export function usePlaybackSession(
         explicitAudioTrackIndex,
         metered: detectMeteredV3(),
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthCapKbps: maxBitrateKbps,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -520,7 +527,7 @@ export function usePlaybackSession(
         body: JSON.stringify(body),
       });
     },
-    [clientCapabilities, clientPlaybackContext, config, explicitAudioTrackIndex],
+    [clientCapabilities, clientPlaybackContext, config, explicitAudioTrackIndex, maxBitrateKbps],
   );
 
   const stopSession = useCallback(
@@ -725,6 +732,7 @@ export function usePlaybackSession(
         attemptCount,
         metered: detectMeteredV3(),
         bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthCapKbps: maxBitrateKbps,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -767,7 +775,7 @@ export function usePlaybackSession(
         setState((current) => (current.replanning ? { ...current, replanning: false } : current));
       }
     },
-    [adoptDecision, clientCapabilities, clientPlaybackContext, config],
+    [adoptDecision, clientCapabilities, clientPlaybackContext, config, maxBitrateKbps],
   );
 
   const switchAudioTrack = useCallback(

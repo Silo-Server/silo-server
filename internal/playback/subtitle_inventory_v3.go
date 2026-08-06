@@ -3,6 +3,7 @@ package playback
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -22,6 +23,9 @@ const (
 	SubtitleExtASSV3 = ".ass"
 	SubtitleExtPGSV3 = ".sup"
 	SubtitleExtVTTV3 = ".vtt"
+	// DownloadedSubtitleIDParamV3 pins a generated/downloaded sidecar URL to
+	// its stable database row instead of resolving a mutable inventory ordinal.
+	DownloadedSubtitleIDParamV3 = "downloaded_subtitle_id"
 )
 
 // WebVTT is the format every convert-mode subtitle lands in, so its format
@@ -67,6 +71,10 @@ type SubtitleInventoryItemV3 struct {
 	// FontBundleURL is the attachment bundle needed to render an embedded
 	// ASS/SSA track with its authored typesetting.
 	FontBundleURL string `json:"font_bundle_url,omitempty"`
+	// downloadedSubtitleID is deliberately not serialized: clients address the
+	// opaque session URL, while the server uses the row ID to make that URL
+	// stable across inventory reordering and seek reanchors.
+	downloadedSubtitleID int
 }
 
 // BuildSubtitleInventoryV3 is the single normative implementation of the
@@ -115,9 +123,11 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 		if source == "" {
 			source = SubtitleSourceDownloadedV3
 		}
-		items = append(items, subtitleInventoryItemV3(file.ID, len(items), source, entry.Codec,
+		item := subtitleInventoryItemV3(file.ID, len(items), source, entry.Codec,
 			entry.Language, firstNonEmptySubtitleLabelV3(entry.Label, entry.Language),
-			entry.Forced, false, entry.HearingImpaired))
+			entry.Forced, false, entry.HearingImpaired)
+		item.downloadedSubtitleID = entry.DownloadedSubtitleID
+		items = append(items, item)
 	}
 	return items
 }
@@ -125,7 +135,15 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 // SubtitleInventoryV3 returns the combined-ordinal inventory with
 // session-scoped stream URLs attached to every sidecar-deliverable track.
 func SubtitleInventoryV3(sessionID string, file *models.MediaFile, additional []SubtitleInventoryEntryV3) []SubtitleInventoryItemV3 {
-	items := BuildSubtitleInventoryV3(file, additional)
+	return ScopeSubtitleInventoryV3(sessionID, file, BuildSubtitleInventoryV3(file, additional))
+}
+
+// ScopeSubtitleInventoryV3 attaches session URLs to an already planned
+// inventory without resolving it again against mutable subtitle repositories.
+// This keeps the advertised menu and the planner's selected ordinal on the
+// same snapshot.
+func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventory []SubtitleInventoryItemV3) []SubtitleInventoryItemV3 {
+	items := append([]SubtitleInventoryItemV3(nil), inventory...)
 	if sessionID == "" || file == nil {
 		return items
 	}
@@ -134,11 +152,33 @@ func SubtitleInventoryV3(sessionID string, file *models.MediaFile, additional []
 			continue
 		}
 		items[i].URL = SubtitleStreamURLV3(sessionID, items[i].CombinedIndex, items[i].Codec, file.ID)
+		if items[i].Source == SubtitleSourceDownloadedV3 && items[i].downloadedSubtitleID > 0 {
+			items[i].URL = DownloadedSubtitleStreamURLV3(
+				sessionID,
+				items[i].CombinedIndex,
+				items[i].Codec,
+				file.ID,
+				items[i].downloadedSubtitleID,
+			)
+		}
 		if items[i].Source == SubtitleSourceEmbeddedV3 {
 			items[i].FontBundleURL = SubtitleFontBundleURLV3(sessionID, items[i].CombinedIndex, items[i].Codec, file.ID)
 		}
 	}
 	return items
+}
+
+// SubtitleInventoryNeedsDownloadedIdentityV3 reports whether an inventory was
+// decoded from its wire form and therefore lost the server-only row IDs needed
+// to mint stable downloaded-subtitle URLs. Freshly planned inventories retain
+// the IDs in memory; durable JSON plans are rebuilt from the repository.
+func SubtitleInventoryNeedsDownloadedIdentityV3(items []SubtitleInventoryItemV3) bool {
+	for _, item := range items {
+		if item.Source == SubtitleSourceDownloadedV3 && item.downloadedSubtitleID <= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // SubtitleInventoryItemAtV3 finds the inventory entry at a combined ordinal.
@@ -169,6 +209,13 @@ func SubtitleURLExtV3(codec string) string {
 // BuildSubtitleInventoryV3 assigns.
 func SubtitleStreamURLV3(sessionID string, combinedIndex int, codec string, fileID int) string {
 	return fmt.Sprintf("/stream/%s/subtitles/%d%s?file_id=%d", sessionID, combinedIndex, SubtitleURLExtV3(codec), fileID)
+}
+
+// DownloadedSubtitleStreamURLV3 binds the public combined ordinal to the
+// stable downloaded-subtitle row selected when the plan was accepted.
+func DownloadedSubtitleStreamURLV3(sessionID string, combinedIndex int, codec string, fileID, downloadedSubtitleID int) string {
+	return SubtitleStreamURLV3(sessionID, combinedIndex, codec, fileID) +
+		"&" + DownloadedSubtitleIDParamV3 + "=" + strconv.Itoa(downloadedSubtitleID)
 }
 
 // SubtitleFontBundleURLV3 builds the attachment-bundle URL for an embedded

@@ -1167,8 +1167,6 @@ func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testi
 	file.Bitrate = 8_000
 	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
 	request := validStartRequestV3()
-	request.ClientFeatures = append(request.ClientFeatures, FeatureDetailedDecodeV3)
-	request.ClientPlaybackContext.Features = append(request.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	request.Capabilities.CodecsVideo = []string{"h264"}
 	request.Capabilities.CodecsVideoHardware = []string{"h264"}
 	request.Capabilities.Containers = []string{"mp4"}
@@ -1182,12 +1180,12 @@ func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testi
 	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 {
 		t.Fatalf("direct plan = %#v", direct)
 	}
-	input.AttemptedKeys = []string{PlanAttemptKeyV3(*direct.Plan, request.OutputRouteGeneration, nil)}
+	input.AttemptedKeys = []string{PlanAttemptKeyV3(*direct.Plan, request.ClientPlaybackContext.Output.OutputContextID, nil)}
 	progressive := PlanPlaybackV3(input)
 	if progressive.Plan == nil || progressive.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("progressive fallback = %#v", progressive)
 	}
-	input.AttemptedKeys = append(input.AttemptedKeys, PlanAttemptKeyV3(*progressive.Plan, request.OutputRouteGeneration, nil))
+	input.AttemptedKeys = append(input.AttemptedKeys, PlanAttemptKeyV3(*progressive.Plan, request.ClientPlaybackContext.Output.OutputContextID, nil))
 	hls := PlanPlaybackV3(input)
 	if hls.Plan == nil || hls.Plan.Delivery != DeliveryRemuxHLSV3 {
 		t.Fatalf("HLS fallback = %#v", hls)
@@ -1200,7 +1198,7 @@ func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testi
 	if replanned.Plan == nil || replanned.Plan.PlanID != direct.Plan.PlanID || replanned.Plan.PlanID == hls.Plan.PlanID {
 		t.Fatalf("dropped fallback history did not reproduce identity drift: direct=%#v hls=%#v replanned=%#v", direct.Plan, hls.Plan, replanned.Plan)
 	}
-	if replanned.Plan.Delivery != DeliveryOriginalHTTPV3 || replanned.Plan.Engine != EngineMedia3DirectV3 ||
+	if replanned.Plan.Delivery != DeliveryOriginalHTTPV3 ||
 		replanned.Plan.Stream.Protocol != StreamHTTPProgressiveV3 || replanned.Plan.Stream.Container != "mp4" {
 		t.Fatalf("reintroduced route = %#v", replanned.Plan)
 	}
