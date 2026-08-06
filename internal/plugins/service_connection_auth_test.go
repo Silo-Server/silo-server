@@ -44,6 +44,25 @@ func TestPluginConnectionCheckCapabilityRejectsUnadvertisedAuthProvider(t *testi
 	}
 }
 
+func TestPluginConnectionCheckCapabilityRejectsDisabledAuthProbe(t *testing.T) {
+	metadata, err := structpb.NewStruct(map[string]any{"connection_test": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := &pluginv1.PluginManifest{Capabilities: []*pluginv1.CapabilityDescriptor{
+		{
+			Type:     "auth_provider.v1",
+			Id:       "disabled-auth",
+			Metadata: metadata,
+		},
+	}}
+
+	_, err = pluginConnectionCheckCapabilityForManifest(manifest)
+	if !errors.Is(err, ErrConnectionTestUnsupported) {
+		t.Fatalf("error = %v, want ErrConnectionTestUnsupported", err)
+	}
+}
+
 func TestPluginConnectionCheckCapabilityPreservesMetadataProviderPriority(t *testing.T) {
 	authMetadata, err := structpb.NewStruct(map[string]any{"connection_test": true})
 	if err != nil {
