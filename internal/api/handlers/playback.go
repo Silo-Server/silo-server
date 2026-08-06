@@ -30,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/remotestream"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -238,6 +239,7 @@ type PlaybackHandler struct {
 	SubtitleSearchInFlight      sync.Map                 // fileID -> struct{}; dedupes background subtitle searches
 	VirtualFileUpdater          VirtualFileUpdateFunc    // optional; updates media_file path after stale fallback
 	VirtualFileMetadataSaver    VirtualFileMetadataSaver // optional; persists probed tracks after virtual probe
+	PrewarmService              *plugins.PrewarmService  // optional; background pre-warming of virtual streams
 	RealtimeHub                 *playback.RealtimeHub
 	CommandTracker              *playback.CommandTracker
 	CommandDispatcher           *playback.CommandDispatcher

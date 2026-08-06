@@ -1099,6 +1099,29 @@ func NewRouter(deps Dependencies) chi.Router {
 				streamHandler.VirtualSourceProber = virtualSourceProber
 			}
 		}
+		// Virtual playback pre-warm (opt-in via server setting). Wired after
+		// the source prober so pre-warm jobs probe exactly like real playback.
+		if deps.DB != nil && deps.PluginService != nil {
+			prewarmCache := plugins.NewPrewarmCache(256, 30*time.Minute)
+			prewarmEnabled := func() bool {
+				var val string
+				if err := deps.DB.QueryRow(context.Background(),
+					"SELECT value FROM server_settings WHERE key = 'virtual_playback_prewarm_enabled'").
+					Scan(&val); err != nil {
+					return false
+				}
+				return val == "true" || val == "1"
+			}
+			prewarmSvc := plugins.NewPrewarmService(
+				deps.PluginService,
+				prewarmCache,
+				playbackHandler.VirtualPlaybackSourceProber,
+				prewarmEnabled,
+			)
+			playbackHandler.PrewarmService = prewarmSvc
+			itemsHandler.PrewarmService = prewarmSvc
+			deps.PluginService.AddLifecycleHook(func(context.Context) { prewarmCache.Clear() })
+		}
 		if streamHandler != nil {
 			streamHandler.VirtualMediaResolver = playbackHandler.VirtualMediaResolver
 			streamHandler.VirtualMediaRefreshResolver = playbackHandler.VirtualMediaRefreshResolver

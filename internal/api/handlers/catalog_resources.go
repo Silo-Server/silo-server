@@ -45,6 +45,7 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 			}
 			h.enrichItemDetail(r, syntheticDetail)
 			h.items.maybeRequestStaleDetailMetadataRefresh(r.Context(), syntheticDetail)
+			h.items.triggerPrewarm(r, syntheticDetail) // non-blocking; skips non-virtual content
 			writeJSON(w, http.StatusOK, syntheticDetail)
 			return
 		}
@@ -53,6 +54,7 @@ func (h *CatalogResourceHandler) HandleGetItemDetail(w http.ResponseWriter, r *h
 	}
 	h.enrichItemDetail(r, detail)
 	h.items.maybeRequestStaleDetailMetadataRefresh(r.Context(), detail)
+	h.items.triggerPrewarm(r, detail) // non-blocking; background virtual stream pre-warm
 	writeJSON(w, http.StatusOK, detail)
 }
 

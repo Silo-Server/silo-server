@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 const virtualPlaybackPrefix = "virtual://"
@@ -199,6 +201,16 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				URI: cached, OwnerInstallationID: file.VirtualOwnerInstallationID,
 			}}
 			noResult = false // treated as if file already had a result=
+		} else if pw := h.prewarmService().Get(file.ContentID, profileID); pw != nil && pw.StreamURI != "" && pw.StreamURI != file.FilePath {
+			// Reuse a completed background pre-warm (detail-page view) instead
+			// of listing candidates again. The pre-warmed winner still flows
+			// through the normal candidate path so it is re-resolved with a
+			// fresh token and re-validated before playback.
+			h.BestResultCache.set(cacheKey, pw.StreamURI, time.Now())
+			candidates = []VirtualPlaybackStream{{
+				URI: pw.StreamURI, OwnerInstallationID: file.VirtualOwnerInstallationID,
+			}}
+			noResult = false
 		}
 	}
 	if noResult && h.VirtualPlaybackStreamLister != nil {
@@ -342,6 +354,9 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	for i, candidate := range candidates {
 		result, err := resolveAndProbe(i, candidate)
 		if err != nil {
+			slog.ErrorContext(r.Context(), "virtual playback candidate failed",
+				"component", "api", "candidate_uri", candidate.URI, "candidate_index", i,
+				"file_id", file.ID, "content_id", file.ContentID, "error", err)
 			attemptErr = errors.Join(attemptErr, err)
 			continue
 		}
@@ -351,8 +366,8 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			// the watch detail and player UI show track options on
 			// subsequent views without re-probing.
 			if h.VirtualFileMetadataSaver != nil && result.File != nil && file.ID > 0 {
-				audioJSON := marshalTracksJSON(result.File.AudioTracks)
-				subJSON := marshalTracksJSON(result.File.SubtitleTracks)
+				audioJSON := marshalTracksJSON(sanitizeTrackSlice(result.File.AudioTracks))
+				subJSON := marshalTracksJSON(sanitizeTrackSlice(result.File.SubtitleTracks))
 				if err := h.VirtualFileMetadataSaver(r.Context(), file.ID, audioJSON, subJSON, result.File.Resolution, result.File.CodecVideo, result.File.CodecAudio, result.File.HDR, result.File.Bitrate); err != nil {
 					slog.ErrorContext(r.Context(), "virtual metadata persist failed", "component", "api", "file_id", file.ID, "error", err)
 				}
@@ -575,6 +590,15 @@ func filterVirtualPlaybackStreams(file *models.MediaFile, streams []VirtualPlayb
 
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
+}
+
+// prewarmService returns the configured virtual pre-warm service, or nil when
+// the feature is not wired (DB-less mode, tests, pre-warm disabled).
+func (h *PlaybackHandler) prewarmService() *plugins.PrewarmService {
+	if h == nil {
+		return nil
+	}
+	return h.PrewarmService
 }
 
 // virtualPlaybackNeutralKey returns the virtual URI with any concrete "result="
@@ -821,4 +845,19 @@ func marshalTracksJSON(tracks any) []byte {
 		return []byte("[]")
 	}
 	return data
+}
+
+// sanitizeTrackSlice ensures the value is a slice/array, not a scalar.
+// PostgreSQL jsonb array operations (like in triggers) fail with
+// "cannot extract elements from a scalar" when given non-array jsonb.
+func sanitizeTrackSlice(v any) any {
+	if v == nil {
+		return []any{}
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		return v
+	}
+	// Wrap scalar in a slice
+	return []any{v}
 }

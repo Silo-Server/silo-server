@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -109,6 +110,7 @@ type ItemsHandler struct {
 	ebookReadStateStore      EbookReadStateStore
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
+	PrewarmService           *plugins.PrewarmService
 }
 
 // NewItemsHandler creates a new ItemsHandler.
@@ -2361,4 +2363,50 @@ func (h *ItemsHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 		"images_cleaned": len(images),
 		"message":        "Media item deleted successfully",
 	})
+}
+
+// triggerPrewarm starts background pre-warming for virtual content on detail page view.
+func (h *ItemsHandler) triggerPrewarm(r *http.Request, detail *catalog.ItemDetail) {
+	if h.PrewarmService == nil || detail == nil || len(detail.Versions) == 0 {
+		return
+	}
+	profileID := apimw.GetProfileID(r.Context())
+	userID := apimw.GetUserID(r.Context())
+	if profileID == "" || userID == 0 {
+		return
+	}
+	device := plugins.DeviceCapabilities{
+		CodecsVideo:   parseDeviceHeaderList(r.Header.Get("X-Device-Codecs-Video")),
+		CodecsAudio:   parseDeviceHeaderList(r.Header.Get("X-Device-Codecs-Audio")),
+		Containers:    parseDeviceHeaderList(r.Header.Get("X-Device-Containers")),
+		MaxResolution: strings.TrimSpace(r.Header.Get("X-Device-Max-Resolution")),
+		HDR:           strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Device-HDR")), "true"),
+	}
+	for _, v := range detail.Versions {
+		if strings.HasPrefix(v.FilePath, "virtual://") {
+			h.PrewarmService.TriggerPrewarm(plugins.PrewarmRequest{
+				ContentID: detail.ContentID,
+				FileID:    v.FileID,
+				FilePath:  v.FilePath,
+				ProfileID: profileID,
+				UserID:    userID,
+				Device:    device,
+			})
+			break
+		}
+	}
+}
+
+func parseDeviceHeaderList(h string) []string {
+	if h == "" {
+		return nil
+	}
+	parts := strings.Split(h, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
