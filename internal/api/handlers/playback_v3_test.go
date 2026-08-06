@@ -1983,8 +1983,8 @@ func TestResolveV3AudioIndexFallsBackWhenSelectionIsOutOfRange(t *testing.T) {
 	if !degraded {
 		t.Fatal("falling back was not reported as a degradation")
 	}
-	if index < 0 || index >= len(file.AudioTracks) {
-		t.Fatalf("fell back to an invalid index: %d", index)
+	if want := normalizeAudioTrackIndex(file, out); index != want {
+		t.Fatalf("fell back to %d, want the file default %d", index, want)
 	}
 }
 
