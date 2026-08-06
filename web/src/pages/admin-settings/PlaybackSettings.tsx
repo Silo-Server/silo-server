@@ -21,6 +21,7 @@ const KEYS = [
   "playback.transcode_enabled",
   "playback.local_transcode_fallback",
   "playback.virtual_provider_failover",
+  "virtual_playback_prewarm_enabled",
   "allow_4k_transcode",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
@@ -179,6 +180,13 @@ export default function PlaybackSettings() {
             hint="When the provider that created a virtual item is unavailable or returns no playable streams, try another enabled virtual-stream provider. Disable to keep each item strictly bound to its owner."
             value={form.getValue("playback.virtual_provider_failover") || "true"}
             onChange={(v) => form.setValue("playback.virtual_provider_failover", v)}
+          />
+          <SettingField
+            label="Virtual Playback Pre-warm"
+            type="toggle"
+            hint="When enabled, opening an item detail page starts resolving and probing its best virtual stream in the background so the first play starts faster. Only applies to virtual content."
+            value={form.getValue("virtual_playback_prewarm_enabled") || "false"}
+            onChange={(v) => form.setValue("virtual_playback_prewarm_enabled", v)}
           />
           <SettingField
             label="Allow 4K Transcoding"
