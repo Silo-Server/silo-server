@@ -2456,7 +2456,7 @@ INSERT INTO public.server_settings (key, value) VALUES
   ('matcher.batch_size', '500'),
   ('jellyfin_compat.public_url', 'http://127.0.0.1:8096'),
   ('jellyfin_compat.emulated_server_version', '10.12.0'),
-  ('jellyfin_compat.server_name', 'StreamApp'),
+  ('jellyfin_compat.server_name', 'Silo'),
   ('jellyfin_compat.session_ttl', '87600h'),
   ('jellyfin_compat.playback_session_ttl', '6h'),
   ('userdb.backend', 'postgres'),
