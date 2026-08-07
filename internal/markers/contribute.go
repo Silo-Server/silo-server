@@ -18,6 +18,8 @@ const (
 	OutcomeStatusError       = "error"
 	OutcomeStatusRateLimited = "rate_limited"
 	OutcomeStatusSkipped     = "skipped"
+	contributionStatusClaim  = "submitting"
+	contributionRecordLimit  = 5 * time.Second
 )
 
 // ContributeOptions scopes a contribution run.
@@ -36,7 +38,7 @@ type ContributeOptions struct {
 type ContributionOutcome struct {
 	Provider     string
 	Segment      MarkerKind
-	Status       string // pending | accepted | rejected | error | rate_limited | skipped
+	Status       string // pending | accepted | rejected | conflict | error | rate_limited | skipped
 	SubmissionID string
 	Reason       string // skip reason or error message
 	RetryAfter   time.Duration
@@ -51,7 +53,7 @@ type providerConfigReader interface {
 // contributionRecorder is the audit surface ContributionService needs
 // (satisfied by *ContributionStore).
 type contributionRecorder interface {
-	AlreadySubmitted(ctx context.Context, provider, segmentKind, contentHash string) (bool, error)
+	Claim(ctx context.Context, row ContributionRow) (bool, error)
 	Record(ctx context.Context, row ContributionRow) error
 }
 
@@ -203,11 +205,22 @@ func (s *ContributionService) contributeSegment(
 	durMs := int64(file.Duration) * 1000
 	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, contributionTargetParts(ids)...)
 
-	already, err := s.store.AlreadySubmitted(ctx, providerID, seg.name, hash)
+	row := ContributionRow{
+		MediaFileID:      file.ID,
+		Provider:         providerID,
+		SegmentKind:      seg.name,
+		Source:           source,
+		SubmittedStartMs: &startMs,
+		SubmittedEndMs:   &endMs,
+		VideoDurationMs:  &durMs,
+		ContentHash:      hash,
+		Status:           contributionStatusClaim,
+	}
+	claimed, err := s.store.Claim(ctx, row)
 	if err != nil {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
-	if already {
+	if !claimed {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted"}, true
 	}
 
@@ -224,17 +237,6 @@ func (s *ContributionService) contributeSegment(
 		Duration:      time.Duration(file.Duration) * time.Second,
 	}
 
-	row := ContributionRow{
-		MediaFileID:      file.ID,
-		Provider:         providerID,
-		SegmentKind:      seg.name,
-		Source:           source,
-		SubmittedStartMs: &startMs,
-		SubmittedEndMs:   &endMs,
-		VideoDurationMs:  &durMs,
-		ContentHash:      hash,
-	}
-
 	result, err := sub.SubmitMarker(ctx, req)
 	if err != nil {
 		msg := err.Error()
@@ -249,9 +251,7 @@ func (s *ContributionService) contributeSegment(
 		} else {
 			row.Status = OutcomeStatusError
 		}
-		if recErr := s.store.Record(ctx, row); recErr != nil {
-			s.logger.WarnContext(ctx, "record contribution error failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", recErr)
-		}
+		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict {
 			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusConflict, Reason: msg}, true
 		}
@@ -269,10 +269,16 @@ func (s *ContributionService) contributeSegment(
 		id := result.ID
 		row.SubmissionID = &id
 	}
-	if err := s.store.Record(ctx, row); err != nil {
-		s.logger.WarnContext(ctx, "record contribution failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", err)
-	}
+	s.recordContribution(ctx, row)
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
+}
+
+func (s *ContributionService) recordContribution(ctx context.Context, row ContributionRow) {
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), contributionRecordLimit)
+	defer cancel()
+	if err := s.store.Record(recordCtx, row); err != nil {
+		s.logger.WarnContext(recordCtx, "record contribution failed", "file_id", row.MediaFileID, "provider", row.Provider, "segment", row.SegmentKind, "status", row.Status, "error", err)
+	}
 }
 
 func contributionTargetParts(ids ExternalIDs) []string {

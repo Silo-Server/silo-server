@@ -4,13 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const contributionClaimIndex = "marker_contributions_provider_hash_active_uidx"
 
 // ContributionRow is one submission audit record from marker_contributions.
 type ContributionRow struct {
@@ -61,53 +66,85 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
-// AlreadySubmitted reports whether a non-error contribution with this
-// provider-target value hash already exists. The hash includes the resolved
-// external identity and video duration, so identical local copies share the
-// submission while different releases and corrected markers remain eligible.
-// Errors are excluded so transient failures can be retried.
-func (s *ContributionStore) AlreadySubmitted(ctx context.Context, provider, segmentKind, contentHash string) (bool, error) {
+// Claim atomically reserves a provider-target payload before the network call.
+// A terminal or in-flight row keeps the claim active; recording a retryable
+// error releases it. The database's partial unique index serializes identical
+// payloads across different local media files and server workers.
+func (s *ContributionStore) Claim(ctx context.Context, row ContributionRow) (bool, error) {
 	if s == nil || s.pool == nil {
-		return false, nil
+		return false, fmt.Errorf("contribution store unavailable")
 	}
-	var exists bool
-	if err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM marker_contributions
-			WHERE provider = $1 AND segment_kind = $2
-			  AND content_hash = $3 AND status <> 'error'
-		)`, provider, segmentKind, contentHash).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check marker contribution: %w", err)
-	}
-	return exists, nil
-}
-
-// Record upserts a contribution row keyed by (file, provider, segment, hash).
-func (s *ContributionStore) Record(ctx context.Context, row ContributionRow) error {
-	if s == nil || s.pool == nil {
-		return fmt.Errorf("contribution store unavailable")
-	}
-	if _, err := s.pool.Exec(ctx, `
+	var claimed bool
+	err := s.pool.QueryRow(ctx, `
 		INSERT INTO marker_contributions (
 			media_file_id, provider, segment_kind, source,
 			submitted_start_ms, submitted_end_ms, video_duration_ms,
-			content_hash, submission_id, status, http_status, error, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+			content_hash, status, claim_active, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,now())
 		ON CONFLICT (media_file_id, provider, segment_kind, content_hash) DO UPDATE SET
 			source = EXCLUDED.source,
 			submitted_start_ms = EXCLUDED.submitted_start_ms,
 			submitted_end_ms = EXCLUDED.submitted_end_ms,
 			video_duration_ms = EXCLUDED.video_duration_ms,
-			submission_id = EXCLUDED.submission_id,
+			submission_id = NULL,
 			status = EXCLUDED.status,
-			http_status = EXCLUDED.http_status,
-			error = EXCLUDED.error,
-			updated_at = now()`,
+			http_status = NULL,
+			error = NULL,
+			claim_active = true,
+			updated_at = now()
+		WHERE NOT marker_contributions.claim_active
+		RETURNING true`,
+		row.MediaFileID, row.Provider, row.SegmentKind, row.Source,
+		row.SubmittedStartMs, row.SubmittedEndMs, row.VideoDurationMs,
+		row.ContentHash, contributionStatusClaim,
+	).Scan(&claimed)
+	if errors.Is(err, pgx.ErrNoRows) || isContributionClaimConflict(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim marker contribution: %w", err)
+	}
+	return claimed, nil
+}
+
+func isContributionClaimConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" &&
+		pgErr.ConstraintName == contributionClaimIndex
+}
+
+// Record completes a claimed contribution. Retryable errors release the
+// provider-target claim; every other result preserves it for deduplication.
+func (s *ContributionStore) Record(ctx context.Context, row ContributionRow) error {
+	if s == nil || s.pool == nil {
+		return fmt.Errorf("contribution store unavailable")
+	}
+	claimActive := row.Status != OutcomeStatusError
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE marker_contributions SET
+			source = $4,
+			submitted_start_ms = $5,
+			submitted_end_ms = $6,
+			video_duration_ms = $7,
+			submission_id = $9,
+			status = $10,
+			http_status = $11,
+			error = $12,
+			claim_active = $13,
+			updated_at = now()
+		WHERE media_file_id = $1 AND provider = $2 AND segment_kind = $3
+		  AND content_hash = $8`,
 		row.MediaFileID, row.Provider, row.SegmentKind, row.Source,
 		row.SubmittedStartMs, row.SubmittedEndMs, row.VideoDurationMs,
 		row.ContentHash, row.SubmissionID, row.Status, row.HTTPStatus, row.Error,
-	); err != nil {
+		claimActive,
+	)
+	if err != nil {
 		return fmt.Errorf("record marker contribution: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("record marker contribution: claim not found")
 	}
 	return nil
 }
