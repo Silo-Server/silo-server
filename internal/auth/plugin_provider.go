@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
-const pluginRoleClaimKey = "silo_role"
+const (
+	pluginRoleClaimKey        = "silo_role"
+	pluginRoleManagedClaimKey = "silo_role_managed"
+)
 
 type pluginAuthClient interface {
 	Authenticate(ctx context.Context, req *pluginv1.AuthenticateRequest) (*pluginv1.AuthenticateResponse, error)
@@ -304,7 +308,7 @@ func (p *PluginProvider) synchronizeClaimedRole(
 
 	var defaultGroupID *int64
 	if desiredRole == "user" {
-		defaultGroupID, err = p.defaultAccessGroupID(ctx)
+		defaultGroupID, err = p.users.DefaultAccessGroupID(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -314,9 +318,18 @@ func (p *PluginProvider) synchronizeClaimedRole(
 	if !changed {
 		return user, nil
 	}
+	previousRole := user.Role
 	if err := p.users.Update(ctx, user.ID, input); err != nil {
 		return nil, fmt.Errorf("synchronize plugin-authenticated user role: %w", err)
 	}
+	slog.InfoContext(ctx, "synchronized plugin-authenticated user role",
+		"component", "auth",
+		"plugin_installation_id", p.config.InstallationID,
+		"plugin_capability_id", p.config.CapabilityID,
+		"user_id", user.ID,
+		"previous_role", previousRole,
+		"new_role", desiredRole,
+	)
 	updated, err := p.users.GetByID(ctx, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("reload plugin-authenticated user after role synchronization: %w", err)
@@ -328,9 +341,22 @@ func pluginRoleFromResponse(response *pluginv1.AuthenticateResponse) (string, bo
 	if response == nil || response.GetClaims() == nil {
 		return "", false, nil
 	}
-	raw, exists := response.GetClaims().AsMap()[pluginRoleClaimKey]
-	if !exists || raw == nil {
+	claims := response.GetClaims().AsMap()
+	managedRaw, exists := claims[pluginRoleManagedClaimKey]
+	if !exists || managedRaw == nil {
 		return "", false, nil
+	}
+	managed, ok := managedRaw.(bool)
+	if !ok {
+		return "", false, fmt.Errorf("plugin auth claim %q must be a boolean", pluginRoleManagedClaimKey)
+	}
+	if !managed {
+		return "", false, nil
+	}
+
+	raw, exists := claims[pluginRoleClaimKey]
+	if !exists || raw == nil {
+		return "", false, fmt.Errorf("plugin auth claim %q is required when %q is true", pluginRoleClaimKey, pluginRoleManagedClaimKey)
 	}
 	text, ok := raw.(string)
 	if !ok {
@@ -338,7 +364,7 @@ func pluginRoleFromResponse(response *pluginv1.AuthenticateResponse) (string, bo
 	}
 	role := strings.ToLower(strings.TrimSpace(text))
 	if role == "" {
-		return "", false, nil
+		return "", false, fmt.Errorf("plugin auth claim %q must not be empty when %q is true", pluginRoleClaimKey, pluginRoleManagedClaimKey)
 	}
 	if role != "user" && role != "admin" {
 		return "", false, fmt.Errorf("plugin auth claim %q contains unsupported role %q", pluginRoleClaimKey, text)
@@ -368,27 +394,6 @@ func roleSyncUpdateInput(
 	input.AccessGroupIDSet = true
 	input.AccessGroupID = defaultGroupID
 	return input, true
-}
-
-func (p *PluginProvider) defaultAccessGroupID(ctx context.Context) (*int64, error) {
-	if p.identityPool == nil {
-		return nil, nil
-	}
-	var id int64
-	err := p.identityPool.QueryRow(ctx, `
-		SELECT id
-		FROM access_groups
-		WHERE is_default
-		ORDER BY id
-		LIMIT 1
-	`).Scan(&id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("load default access group for role synchronization: %w", err)
-	}
-	return &id, nil
 }
 
 func randomPluginOnlyPassword() (string, error) {
