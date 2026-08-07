@@ -24,25 +24,92 @@ func TestRandomPluginOnlyPasswordFitsBcryptLimit(t *testing.T) {
 	}
 }
 
-func TestPluginRoleFromResponse(t *testing.T) {
-	claims, err := structpb.NewStruct(map[string]any{pluginRoleClaimKey: "ADMIN"})
+func authResponseWithClaims(t *testing.T, values map[string]any) *pluginv1.AuthenticateResponse {
+	t.Helper()
+	claims, err := structpb.NewStruct(values)
 	if err != nil {
 		t.Fatal(err)
 	}
-	role, present, err := pluginRoleFromResponse(&pluginv1.AuthenticateResponse{Claims: claims})
+	return &pluginv1.AuthenticateResponse{Claims: claims}
+}
+
+func TestPluginRoleFromResponseRequiresManagedMarker(t *testing.T) {
+	response := authResponseWithClaims(t, map[string]any{pluginRoleClaimKey: "admin"})
+	role, present, err := pluginRoleFromResponse(response)
+	if err != nil {
+		t.Fatalf("pluginRoleFromResponse() error = %v", err)
+	}
+	if present || role != "" {
+		t.Fatalf("role = %q, present = %v; unmanaged role claim must be ignored", role, present)
+	}
+
+	response = authResponseWithClaims(t, map[string]any{
+		pluginRoleManagedClaimKey: false,
+		pluginRoleClaimKey:        "admin",
+	})
+	role, present, err = pluginRoleFromResponse(response)
+	if err != nil {
+		t.Fatalf("pluginRoleFromResponse() error = %v", err)
+	}
+	if present || role != "" {
+		t.Fatalf("role = %q, present = %v; disabled managed role claim must be ignored", role, present)
+	}
+}
+
+func TestPluginRoleFromResponseAcceptsManagedAdmin(t *testing.T) {
+	response := authResponseWithClaims(t, map[string]any{
+		pluginRoleManagedClaimKey: true,
+		pluginRoleClaimKey:        "ADMIN",
+	})
+	role, present, err := pluginRoleFromResponse(response)
 	if err != nil {
 		t.Fatalf("pluginRoleFromResponse() error = %v", err)
 	}
 	if !present || role != "admin" {
 		t.Fatalf("role = %q, present = %v; want admin, true", role, present)
 	}
+}
 
-	claims, err = structpb.NewStruct(map[string]any{pluginRoleClaimKey: "owner"})
-	if err != nil {
-		t.Fatal(err)
+func TestPluginRoleFromResponseRejectsMalformedManagedClaims(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims map[string]any
+	}{
+		{
+			name: "managed marker is not boolean",
+			claims: map[string]any{
+				pluginRoleManagedClaimKey: "true",
+				pluginRoleClaimKey:        "admin",
+			},
+		},
+		{
+			name: "managed role is missing",
+			claims: map[string]any{
+				pluginRoleManagedClaimKey: true,
+			},
+		},
+		{
+			name: "managed role is empty",
+			claims: map[string]any{
+				pluginRoleManagedClaimKey: true,
+				pluginRoleClaimKey:        " ",
+			},
+		},
+		{
+			name: "managed role is unsupported",
+			claims: map[string]any{
+				pluginRoleManagedClaimKey: true,
+				pluginRoleClaimKey:        "owner",
+			},
+		},
 	}
-	if _, _, err := pluginRoleFromResponse(&pluginv1.AuthenticateResponse{Claims: claims}); err == nil {
-		t.Fatal("expected unsupported plugin role to be rejected")
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, err := pluginRoleFromResponse(authResponseWithClaims(t, test.claims)); err == nil {
+				t.Fatal("expected malformed managed role claim to be rejected")
+			}
+		})
 	}
 }
 
