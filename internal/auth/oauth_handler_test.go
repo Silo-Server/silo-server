@@ -113,6 +113,93 @@ func TestOAuthInit_Redirects302WithAuthorizeURL(t *testing.T) {
 	}
 }
 
+// The SPA cannot follow HandleInit's redirect: the frontend is served with
+// `form-action 'self'`, and browsers enforce that across redirects, so the
+// cross-origin hop to the IdP is blocked silently — a clean 302 in the server
+// log and no request at the IdP. HandleStart must therefore hand the URL back
+// as a body the SPA can navigate to itself, never as a Location header.
+func TestOAuthStart_ReturnsAuthorizeURLAsJSONNotARedirect(t *testing.T) {
+	authorizeURL := "https://billing.example/oauth/authorize.php?client_id=x"
+	pState, _ := structpb.NewStruct(map[string]any{"pkce_verifier": "abc"})
+	fc := &fakeOAuthClient{initResp: &pluginv1.InitAuthorizeResponse{AuthorizeUrl: authorizeURL, ProviderState: pState}}
+	h, store := newOAuthHandlerForTest(t, fc, &fakeCompleter{})
+
+	r := withInstallID(httptest.NewRequest("POST", "/api/v1/auth/oauth/42/start?next=/me", nil), "42")
+	w := httptest.NewRecorder()
+	h.HandleStart(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d body = %s", w.Code, w.Body.String())
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Errorf("Location = %q, want none — a redirect is what form-action blocks", loc)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var body struct {
+		AuthorizeURL string `json:"authorize_url"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v (%s)", err, w.Body.String())
+	}
+	if body.AuthorizeURL != authorizeURL {
+		t.Errorf("authorize_url = %q, want %q", body.AuthorizeURL, authorizeURL)
+	}
+
+	// Same session bookkeeping as /init — one row, next_url kept, PKCE stored.
+	if got := len(store.rows); got != 1 {
+		t.Fatalf("rows = %d, want 1", got)
+	}
+	for _, row := range store.rows {
+		if row.InstallID != "42" {
+			t.Errorf("InstallID = %q", row.InstallID)
+		}
+		if row.NextURL != "/me" {
+			t.Errorf("NextURL = %q", row.NextURL)
+		}
+		if !strings.Contains(string(row.ProviderState), "pkce_verifier") {
+			t.Errorf("ProviderState missing PKCE: %s", row.ProviderState)
+		}
+	}
+}
+
+// The two entry points must not drift: /start is additive and /init keeps its
+// 302 for existing non-browser callers.
+func TestOAuthStart_ShareSessionSetupWithInit(t *testing.T) {
+	authorizeURL := "https://billing.example/oauth/authorize.php?client_id=x"
+	newHandler := func() (*OAuthHandler, *InMemoryOAuthStore) {
+		fc := &fakeOAuthClient{initResp: &pluginv1.InitAuthorizeResponse{AuthorizeUrl: authorizeURL}}
+		return newOAuthHandlerForTest(t, fc, &fakeCompleter{})
+	}
+
+	hInit, storeInit := newHandler()
+	wInit := httptest.NewRecorder()
+	hInit.HandleInit(wInit, withInstallID(httptest.NewRequest("POST", "/api/v1/auth/oauth/42/init?next=//evil.example/x", nil), "42"))
+
+	hStart, storeStart := newHandler()
+	wStart := httptest.NewRecorder()
+	hStart.HandleStart(wStart, withInstallID(httptest.NewRequest("POST", "/api/v1/auth/oauth/42/start?next=//evil.example/x", nil), "42"))
+
+	if wInit.Code != http.StatusFound {
+		t.Errorf("init code = %d, want 302", wInit.Code)
+	}
+	if wStart.Code != http.StatusOK {
+		t.Errorf("start code = %d, want 200", wStart.Code)
+	}
+	// Both normalise the open-redirect attempt identically.
+	for name, store := range map[string]*InMemoryOAuthStore{"init": storeInit, "start": storeStart} {
+		if len(store.rows) != 1 {
+			t.Fatalf("%s: rows = %d, want 1", name, len(store.rows))
+		}
+		for _, row := range store.rows {
+			if row.NextURL != "/" {
+				t.Errorf("%s: NextURL = %q, want /", name, row.NextURL)
+			}
+		}
+	}
+}
+
 func TestOAuthInit_NormalizesUnsafeNextURL(t *testing.T) {
 	authorizeURL := "https://billing.example/oauth/authorize.php?client_id=x"
 	fc := &fakeOAuthClient{initResp: &pluginv1.InitAuthorizeResponse{AuthorizeUrl: authorizeURL}}
