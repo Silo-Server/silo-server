@@ -61,10 +61,12 @@ func ptrIntStr(v *int64) string {
 	return strconv.FormatInt(*v, 10)
 }
 
-// AlreadySubmitted reports whether a non-error contribution with this value-hash
-// already exists for the file+provider+segment. Errors are excluded so failed
-// attempts can be retried.
-func (s *ContributionStore) AlreadySubmitted(ctx context.Context, fileID int, provider, segmentKind, contentHash string) (bool, error) {
+// AlreadySubmitted reports whether a non-error contribution with this
+// provider-target value hash already exists. The hash includes the resolved
+// external identity and video duration, so identical local copies share the
+// submission while different releases and corrected markers remain eligible.
+// Errors are excluded so transient failures can be retried.
+func (s *ContributionStore) AlreadySubmitted(ctx context.Context, provider, segmentKind, contentHash string) (bool, error) {
 	if s == nil || s.pool == nil {
 		return false, nil
 	}
@@ -72,9 +74,9 @@ func (s *ContributionStore) AlreadySubmitted(ctx context.Context, fileID int, pr
 	if err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM marker_contributions
-			WHERE media_file_id = $1 AND provider = $2 AND segment_kind = $3
-			  AND content_hash = $4 AND status <> 'error'
-		)`, fileID, provider, segmentKind, contentHash).Scan(&exists); err != nil {
+			WHERE provider = $1 AND segment_kind = $2
+			  AND content_hash = $3 AND status <> 'error'
+		)`, provider, segmentKind, contentHash).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check marker contribution: %w", err)
 	}
 	return exists, nil

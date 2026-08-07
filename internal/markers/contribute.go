@@ -2,6 +2,7 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 // OutcomeStatus values for a contribution attempt, in addition to the provider
 // SubmissionStatus* values.
 const (
+	OutcomeStatusConflict    = "conflict"
 	OutcomeStatusError       = "error"
 	OutcomeStatusRateLimited = "rate_limited"
 	OutcomeStatusSkipped     = "skipped"
@@ -49,7 +51,7 @@ type providerConfigReader interface {
 // contributionRecorder is the audit surface ContributionService needs
 // (satisfied by *ContributionStore).
 type contributionRecorder interface {
-	AlreadySubmitted(ctx context.Context, fileID int, provider, segmentKind, contentHash string) (bool, error)
+	AlreadySubmitted(ctx context.Context, provider, segmentKind, contentHash string) (bool, error)
 	Record(ctx context.Context, row ContributionRow) error
 }
 
@@ -201,7 +203,7 @@ func (s *ContributionService) contributeSegment(
 	durMs := int64(file.Duration) * 1000
 	hash := ContentHash(seg.name, &startMs, &endMs, &durMs, contributionTargetParts(ids)...)
 
-	already, err := s.store.AlreadySubmitted(ctx, file.ID, providerID, seg.name, hash)
+	already, err := s.store.AlreadySubmitted(ctx, providerID, seg.name, hash)
 	if err != nil {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
@@ -236,10 +238,22 @@ func (s *ContributionService) contributeSegment(
 	result, err := sub.SubmitMarker(ctx, req)
 	if err != nil {
 		msg := err.Error()
-		row.Status = OutcomeStatusError
 		row.Error = &msg
+		var conflict *SubmissionConflictError
+		if errors.As(err, &conflict) && conflict != nil {
+			row.Status = OutcomeStatusConflict
+			if conflict.HTTPStatus > 0 {
+				status := conflict.HTTPStatus
+				row.HTTPStatus = &status
+			}
+		} else {
+			row.Status = OutcomeStatusError
+		}
 		if recErr := s.store.Record(ctx, row); recErr != nil {
 			s.logger.WarnContext(ctx, "record contribution error failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", recErr)
+		}
+		if row.Status == OutcomeStatusConflict {
+			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusConflict, Reason: msg}, true
 		}
 		if after, ok := RetryAfter(err); ok {
 			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusRateLimited, Reason: msg, RetryAfter: after}, true

@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -367,6 +368,18 @@ func pluginProviderError(providerID string, err error) error {
 		return nil
 	}
 	st, ok := status.FromError(err)
+	message := err.Error()
+	if ok {
+		message = st.Message()
+	}
+	upstreamStatus, legacyHTTPConflict := pluginSubmissionHTTPStatus(message)
+	if (ok && st.Code() == codes.AlreadyExists) || (legacyHTTPConflict && upstreamStatus == http.StatusConflict) {
+		return &SubmissionConflictError{
+			Provider:   providerID,
+			HTTPStatus: http.StatusConflict,
+			Message:    err.Error(),
+		}
+	}
 	if !ok || st.Code() != codes.ResourceExhausted {
 		return err
 	}
@@ -378,6 +391,26 @@ func pluginProviderError(providerID string, err error) error {
 		}
 	}
 	return &RetryAfterError{Provider: providerID, RetryAfter: retryAfter, Message: err.Error()}
+}
+
+// pluginSubmissionHTTPStatus recognizes the legacy marker-provider error text
+// used before plugins could expose an AlreadyExists gRPC status. Keep this
+// narrow to submit errors so unrelated provider failures are not reclassified.
+func pluginSubmissionHTTPStatus(message string) (int, bool) {
+	const marker = "submit HTTP "
+	start := strings.Index(message, marker)
+	if start < 0 {
+		return 0, false
+	}
+	tail := strings.TrimSpace(message[start+len(marker):])
+	if end := strings.IndexAny(tail, ": "); end >= 0 {
+		tail = tail[:end]
+	}
+	code, err := strconv.Atoi(tail)
+	if err != nil || code < 100 || code > 599 {
+		return 0, false
+	}
+	return code, true
 }
 
 func PluginRequiredExternalIDsFromMetadata(metadata map[string]any) []string {

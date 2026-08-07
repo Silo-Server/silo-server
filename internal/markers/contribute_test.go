@@ -2,6 +2,7 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -46,13 +47,20 @@ func (f fakeConfig) Get(p string) (ProviderConfig, bool) { c, ok := f[p]; return
 type fakeRecorder struct {
 	already  bool
 	recorded []ContributionRow
+	terminal map[string]bool
 }
 
-func (f *fakeRecorder) AlreadySubmitted(context.Context, int, string, string, string) (bool, error) {
-	return f.already, nil
+func (f *fakeRecorder) AlreadySubmitted(_ context.Context, provider, segmentKind, contentHash string) (bool, error) {
+	return f.already || f.terminal[provider+"|"+segmentKind+"|"+contentHash], nil
 }
 func (f *fakeRecorder) Record(_ context.Context, row ContributionRow) error {
 	f.recorded = append(f.recorded, row)
+	if row.Status != OutcomeStatusError {
+		if f.terminal == nil {
+			f.terminal = make(map[string]bool)
+		}
+		f.terminal[row.Provider+"|"+row.SegmentKind+"|"+row.ContentHash] = true
+	}
 	return nil
 }
 
@@ -153,6 +161,86 @@ func TestContributeSkipsDuplicate(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
 		t.Errorf("expected skipped outcome, got %+v", outcomes)
+	}
+}
+
+func TestContributeSettlesConflictAndSkipsRetry(t *testing.T) {
+	sub := &fakeSubmitter{
+		id: "introdb",
+		err: &SubmissionConflictError{
+			Provider:   "introdb",
+			HTTPStatus: 409,
+			Message:    "already submitted",
+		},
+	}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	first, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("first ContributeFile: %v", err)
+	}
+	second, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("provider submissions = %d, want one", len(sub.submitted))
+	}
+	if len(first) != 1 || first[0].Status != OutcomeStatusConflict {
+		t.Fatalf("first outcomes = %+v, want conflict", first)
+	}
+	if len(second) != 1 || second[0].Status != OutcomeStatusSkipped {
+		t.Fatalf("second outcomes = %+v, want skipped", second)
+	}
+	if len(rec.recorded) != 1 || rec.recorded[0].Status != OutcomeStatusConflict || rec.recorded[0].HTTPStatus == nil || *rec.recorded[0].HTTPStatus != 409 {
+		t.Fatalf("recorded = %+v, want terminal HTTP 409 conflict", rec.recorded)
+	}
+}
+
+func TestContributeDeduplicatesSameTargetAcrossFiles(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb"}
+	firstFile := newContribFile()
+	firstFile.IntroStart, firstFile.IntroEnd = floatPtr(0), floatPtr(60)
+	firstFile.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	secondFile := *firstFile
+	secondFile.ID++
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	if _, err := svc.ContributeFile(context.Background(), firstFile, ContributeOptions{}); err != nil {
+		t.Fatalf("first ContributeFile: %v", err)
+	}
+	outcomes, err := svc.ContributeFile(context.Background(), &secondFile, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("provider submissions = %d, want one for identical provider payloads", len(sub.submitted))
+	}
+	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
+		t.Fatalf("second outcomes = %+v, want skipped", outcomes)
+	}
+}
+
+func TestContributeRetriesTransientErrors(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb", err: errors.New("temporary provider failure")}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	for range 2 {
+		if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+			t.Fatalf("ContributeFile: %v", err)
+		}
+	}
+	if len(sub.submitted) != 2 {
+		t.Fatalf("provider submissions = %d, want retry after transient failure", len(sub.submitted))
 	}
 }
 

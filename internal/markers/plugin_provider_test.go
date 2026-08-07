@@ -2,17 +2,21 @@ package markers
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type fakePluginMarkerClient struct {
 	fetchResp *pluginv1.FetchMarkersResponse
 	fetchReq  *pluginv1.FetchMarkersRequest
 	submitReq *pluginv1.SubmitMarkerRequest
+	submitErr error
 }
 
 func (f *fakePluginMarkerClient) FetchMarkers(_ context.Context, req *pluginv1.FetchMarkersRequest) (*pluginv1.FetchMarkersResponse, error) {
@@ -22,6 +26,9 @@ func (f *fakePluginMarkerClient) FetchMarkers(_ context.Context, req *pluginv1.F
 
 func (f *fakePluginMarkerClient) SubmitMarker(_ context.Context, req *pluginv1.SubmitMarkerRequest) (*pluginv1.SubmitMarkerResponse, error) {
 	f.submitReq = req
+	if f.submitErr != nil {
+		return nil, f.submitErr
+	}
 	return &pluginv1.SubmitMarkerResponse{SubmissionId: "sub1", Status: SubmissionStatusPending, Weight: 2}, nil
 }
 
@@ -157,5 +164,73 @@ func TestPluginProviderSubmitMapsRequest(t *testing.T) {
 	}
 	if client.submitReq.GetSegment() != "intro" || client.submitReq.GetStartSeconds() != 5 || client.submitReq.GetEndSeconds() != 30 {
 		t.Fatalf("submit request segment = %+v", client.submitReq)
+	}
+}
+
+func TestPluginProviderSubmitMapsConflicts(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "structured already exists",
+			err:  status.Error(codes.AlreadyExists, "submission already exists"),
+		},
+		{
+			name: "legacy HTTP 409",
+			err:  status.Error(codes.Unknown, `introdb: submit HTTP 409: {"error":"already submitted"}`),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakePluginMarkerClient{submitErr: tt.err}
+			provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
+				InstallationID: 12,
+				CapabilityID:   "markers",
+			}, func(context.Context, int, string) (pluginMarkerClient, error) {
+				return client, nil
+			})
+			if err != nil {
+				t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+			}
+
+			_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
+				Kind:        ItemKindMovie,
+				ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
+				Segment:     MarkerKindIntro,
+			})
+			var conflict *SubmissionConflictError
+			if !errors.As(err, &conflict) {
+				t.Fatalf("error = %T %v, want SubmissionConflictError", err, err)
+			}
+			if conflict.Provider != "plugin:12:markers" || conflict.HTTPStatus != 409 {
+				t.Fatalf("conflict = %+v", conflict)
+			}
+		})
+	}
+}
+
+func TestPluginProviderSubmitKeepsOtherErrorsRetryable(t *testing.T) {
+	wantErr := status.Error(codes.Unknown, "introdb: submit HTTP 500: unavailable")
+	client := &fakePluginMarkerClient{submitErr: wantErr}
+	provider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
+		InstallationID: 12,
+		CapabilityID:   "markers",
+	}, func(context.Context, int, string) (pluginMarkerClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+	}
+
+	_, err = provider.SubmitMarker(context.Background(), SubmissionRequest{
+		Kind:        ItemKindMovie,
+		ExternalIDs: map[string]string{ExternalIDKeyTMDB: "123"},
+		Segment:     MarkerKindIntro,
+	})
+	var conflict *SubmissionConflictError
+	if errors.As(err, &conflict) {
+		t.Fatalf("error = %+v, want retryable provider error", conflict)
 	}
 }
