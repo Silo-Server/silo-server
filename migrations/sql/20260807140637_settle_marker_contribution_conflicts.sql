@@ -2,7 +2,8 @@
 
 -- +goose Up
 ALTER TABLE public.marker_contributions
-    ADD COLUMN IF NOT EXISTS claim_active boolean NOT NULL DEFAULT false;
+    ADD COLUMN IF NOT EXISTS claim_active boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS claim_token uuid;
 
 -- Legacy marker-provider plugins reported upstream HTTP conflicts as generic
 -- errors. These conflicts are terminal for an unchanged contribution payload,
@@ -82,6 +83,7 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS marker_contributions_provider_has
 -- +goose Down
 DROP INDEX CONCURRENTLY IF EXISTS public.marker_contributions_provider_hash_active_uidx;
 ALTER TABLE public.marker_contributions
+    DROP COLUMN IF EXISTS claim_token,
     DROP COLUMN IF EXISTS claim_active;
 -- Settled conflict rows are intentionally retained: reverting them to generic
 -- errors would make the server resubmit them on the next scheduled run.

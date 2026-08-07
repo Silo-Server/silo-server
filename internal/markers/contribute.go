@@ -19,6 +19,8 @@ const (
 	OutcomeStatusRateLimited = "rate_limited"
 	OutcomeStatusSkipped     = "skipped"
 	contributionStatusClaim  = "submitting"
+	contributionSubmitLimit  = 2 * time.Minute
+	contributionClaimLease   = 15 * time.Minute
 	contributionRecordLimit  = 5 * time.Second
 )
 
@@ -53,7 +55,7 @@ type providerConfigReader interface {
 // contributionRecorder is the audit surface ContributionService needs
 // (satisfied by *ContributionStore).
 type contributionRecorder interface {
-	Claim(ctx context.Context, row ContributionRow) (bool, error)
+	Claim(ctx context.Context, row ContributionRow, staleAfter time.Duration) (ContributionClaim, bool, error)
 	Record(ctx context.Context, row ContributionRow) error
 }
 
@@ -216,13 +218,15 @@ func (s *ContributionService) contributeSegment(
 		ContentHash:      hash,
 		Status:           contributionStatusClaim,
 	}
-	claimed, err := s.store.Claim(ctx, row)
+	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 	if err != nil {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
 	}
 	if !claimed {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted"}, true
 	}
+	row.ID = claim.ID
+	row.ClaimToken = claim.Token
 
 	startDur := time.Duration(*seg.start * float64(time.Second))
 	endDur := time.Duration(*seg.end * float64(time.Second))
@@ -237,7 +241,9 @@ func (s *ContributionService) contributeSegment(
 		Duration:      time.Duration(file.Duration) * time.Second,
 	}
 
-	result, err := sub.SubmitMarker(ctx, req)
+	submitCtx, cancel := context.WithTimeout(ctx, contributionSubmitLimit)
+	result, err := sub.SubmitMarker(submitCtx, req)
+	cancel()
 	if err != nil {
 		msg := err.Error()
 		row.Error = &msg

@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -21,12 +22,13 @@ type fakeSubmitter struct {
 	started   chan struct{}
 	release   chan struct{}
 	onSubmit  func()
+	deadline  chan time.Time
 	startOnce sync.Once
 }
 
 func (f *fakeSubmitter) ID() string                                            { return f.id }
 func (f *fakeSubmitter) FetchMarkers(context.Context, Request) (Result, error) { return Result{}, nil }
-func (f *fakeSubmitter) SubmitMarker(_ context.Context, req SubmissionRequest) (SubmissionResult, error) {
+func (f *fakeSubmitter) SubmitMarker(ctx context.Context, req SubmissionRequest) (SubmissionResult, error) {
 	f.mu.Lock()
 	f.submitted = append(f.submitted, req)
 	err := f.err
@@ -34,7 +36,12 @@ func (f *fakeSubmitter) SubmitMarker(_ context.Context, req SubmissionRequest) (
 	started := f.started
 	release := f.release
 	onSubmit := f.onSubmit
+	deadline := f.deadline
 	f.mu.Unlock()
+	if deadline != nil {
+		observed, _ := ctx.Deadline()
+		deadline <- observed
+	}
 	if started != nil {
 		f.startOnce.Do(func() { close(started) })
 	}
@@ -71,21 +78,24 @@ type fakeRecorder struct {
 	mu       sync.Mutex
 	already  bool
 	recorded []ContributionRow
-	claims   map[string]bool
+	claims   map[string]string
+	next     int
 }
 
-func (f *fakeRecorder) Claim(_ context.Context, row ContributionRow) (bool, error) {
+func (f *fakeRecorder) Claim(_ context.Context, row ContributionRow, _ time.Duration) (ContributionClaim, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	key := row.Provider + "|" + row.SegmentKind + "|" + row.ContentHash
-	if f.already || f.claims[key] {
-		return false, nil
+	if _, exists := f.claims[key]; f.already || exists {
+		return ContributionClaim{}, false, nil
 	}
 	if f.claims == nil {
-		f.claims = make(map[string]bool)
+		f.claims = make(map[string]string)
 	}
-	f.claims[key] = true
-	return true, nil
+	f.next++
+	token := fmt.Sprintf("claim-%d", f.next)
+	f.claims[key] = token
+	return ContributionClaim{ID: key, Token: token}, true, nil
 }
 func (f *fakeRecorder) Record(ctx context.Context, row ContributionRow) error {
 	if err := ctx.Err(); err != nil {
@@ -93,9 +103,13 @@ func (f *fakeRecorder) Record(ctx context.Context, row ContributionRow) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	key := row.Provider + "|" + row.SegmentKind + "|" + row.ContentHash
+	if f.claims[key] != row.ClaimToken {
+		return errors.New("claim not found")
+	}
 	f.recorded = append(f.recorded, row)
 	if row.Status == OutcomeStatusError {
-		delete(f.claims, row.Provider+"|"+row.SegmentKind+"|"+row.ContentHash)
+		delete(f.claims, key)
 	}
 	return nil
 }
@@ -310,6 +324,30 @@ func TestContributeClaimsSameTargetBeforeConcurrentSubmit(t *testing.T) {
 	}
 	if len(sub.submitted) != 1 {
 		t.Fatalf("provider submissions = %d, want one concurrent submission", len(sub.submitted))
+	}
+}
+
+func TestContributeBoundsProviderSubmissionBelowClaimLease(t *testing.T) {
+	deadlines := make(chan time.Time, 1)
+	sub := &fakeSubmitter{id: "introdb", deadline: deadlines}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, &fakeRecorder{})
+
+	startedAt := time.Now()
+	if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	deadline := <-deadlines
+	if deadline.IsZero() {
+		t.Fatal("provider submission context has no deadline")
+	}
+	if got := deadline.Sub(startedAt); got < contributionSubmitLimit-time.Second || got > contributionSubmitLimit+time.Second {
+		t.Fatalf("provider deadline = %v, want approximately %v", got, contributionSubmitLimit)
+	}
+	if contributionSubmitLimit >= contributionClaimLease {
+		t.Fatalf("provider timeout %v must stay below claim lease %v", contributionSubmitLimit, contributionClaimLease)
 	}
 }
 
