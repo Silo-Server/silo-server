@@ -16,6 +16,9 @@ type SubtitlePolicyResultV3 struct {
 	Source               string
 	DownloadedSubtitleID int
 	Terminal             *TerminalV3
+	// Degraded reports that a positive selection could not be honoured and
+	// the policy fell back to subtitles-off instead of refusing playback.
+	Degraded bool
 }
 
 type SubtitleInventoryEntryV3 struct {
@@ -48,7 +51,18 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 	}
 	entry, ok := subtitleEntryAtCombinedIndexV3(file, index, additional)
 	if !ok {
-		return subtitleTerminalV3("subtitle_track_unavailable", "The selected subtitle track is unavailable.")
+		// A selection carried over from another file — the next episode in a
+		// series routinely has a different track layout — is not a reason to
+		// refuse playback. Nothing is broken: the file plays, one preference
+		// cannot be honoured. Degrade to subtitles-off and report it, exactly
+		// as the version-switch remap path does. A malformed identity or a
+		// negative index still errors above: those are client bugs.
+		return SubtitlePolicyResultV3{
+			Decision:       SubtitleDecisionV3{Mode: SubtitleOffV3},
+			SelectedIndex:  -1,
+			TransportIndex: -1,
+			Degraded:       true,
+		}
 	}
 	codec, source := entry.Codec, entry.Source
 	trackID := TrackIDV3(file.ID, "subtitle", index)

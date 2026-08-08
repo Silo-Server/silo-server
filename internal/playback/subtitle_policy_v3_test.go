@@ -116,3 +116,42 @@ func TestClientRenderableBitmapSubtitleV3UsesExactCodecFamilies(t *testing.T) {
 		}
 	}
 }
+
+// A selection carried over from another file — the next episode routinely has
+// a different track layout — must degrade to subtitles-off, not refuse
+// playback. This is the direct-start path; the version-switch remap in the
+// handlers degrades the same way.
+func TestResolveSubtitlePolicyV3DegradesOutOfRangeSelectionToOff(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.ExternalSubtitles = nil
+	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "subrip"}}
+	req := validStartRequestV3()
+	index := 7
+	req.SubtitleTrackIndex = &index
+
+	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+
+	if result.Terminal != nil {
+		t.Fatalf("an out-of-range subtitle selection must not refuse playback: %#v", result.Terminal)
+	}
+	if result.Decision.Mode != SubtitleOffV3 || result.SelectedIndex != -1 {
+		t.Fatalf("expected subtitles-off fallback: %#v", result)
+	}
+	if !result.Degraded {
+		t.Fatal("the fallback was not reported as a degradation")
+	}
+}
+
+// Malformed selections stay terminal: a bad identity is a client bug, and
+// swallowing it would make that bug harder to find.
+func TestResolveSubtitlePolicyV3StillRejectsInvalidIdentity(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.SubtitleTrackID = "not-a-track-id"
+
+	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+
+	if result.Terminal == nil || result.Terminal.Reason != "subtitle_track_invalid" {
+		t.Fatalf("a malformed identity must stay terminal: %#v", result)
+	}
+}
