@@ -150,8 +150,15 @@ verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-
 # against these bodies, so they are only trustworthy while the code that emits
 # them is the code that serves traffic. Editing one by hand instead of running
 # this would let the contract and the implementation drift apart in silence.
+PLAYBACK_FIXTURE_DIR := internal/playback/testdata/protocol_v3
+PLAYBACK_SCHEMA_FIXTURE_DIR := docs/design/schemas/playback-v3/v3/fixtures/valid
+PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json capability_response.json error_response.json route_event.json
+
 playback-fixtures:
-	go run ./cmd/playbackfixtures -out internal/playback/testdata/protocol_v3
+	go run ./cmd/playbackfixtures -out $(PLAYBACK_FIXTURE_DIR)
+	@set -e; for fixture in $(PLAYBACK_WIRE_FIXTURES); do \
+		cp "$(PLAYBACK_FIXTURE_DIR)/$$fixture" "$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture"; \
+	done
 
 # Fail when the committed fixtures disagree with the contract types. A change
 # that does not regenerate leaves every client testing against a body the server
@@ -159,8 +166,12 @@ playback-fixtures:
 verify-playback-fixtures:
 	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
 	go run ./cmd/playbackfixtures -out "$$CHECK_DIR" && \
-	diff -ur internal/playback/testdata/protocol_v3 "$$CHECK_DIR" \
-		|| { echo "::error::internal/playback/testdata/protocol_v3 is stale; run make playback-fixtures"; exit 1; }
+	diff -ur $(PLAYBACK_FIXTURE_DIR) "$$CHECK_DIR" \
+		|| { echo "::error::$(PLAYBACK_FIXTURE_DIR) is stale; run make playback-fixtures"; exit 1; }; \
+	for fixture in $(PLAYBACK_WIRE_FIXTURES); do \
+		cmp -s "$$CHECK_DIR/$$fixture" "$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture" \
+			|| { echo "::error::$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture is stale; run make playback-fixtures"; exit 1; }; \
+	done
 	@echo "playback fixtures are current"
 
 # Check committed content for local machine path leaks.
