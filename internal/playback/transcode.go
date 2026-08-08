@@ -945,7 +945,15 @@ func qsvScaleFilter(res string) string {
 }
 
 func qsvSoftwareDecodeFilter(res string) string {
-	return "format=nv12,hwupload," + qsvScaleFilter(res)
+	cpuFilters := ""
+	if scale := resolutionToScale(res); scale != "" {
+		cpuFilters = scale + ","
+	}
+	// High 10 AVC is decoded on the CPU. Scale those software frames before
+	// upload, matching the proven text-subtitle path; uploading first and then
+	// invoking scale_vaapi can leave the VAAPI/QSV graph alive without ever
+	// producing its initial HLS window.
+	return cpuFilters + "format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
 }
 
 // vaapiScaleFilter keeps VAAPI frames in hardware and converts them to a
@@ -971,7 +979,11 @@ func vaapiScaleFilter(res string) string {
 }
 
 func vaapiSoftwareDecodeFilter(res string) string {
-	return "format=nv12,hwupload," + vaapiScaleFilter(res)
+	cpuFilters := ""
+	if scale := resolutionToScale(res); scale != "" {
+		cpuFilters = scale + ","
+	}
+	return cpuFilters + "format=nv12,hwupload"
 }
 
 func nvencScaleFilter(res string) string {

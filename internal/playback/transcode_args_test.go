@@ -310,11 +310,14 @@ func TestBuildFFmpegArgs_H264High10QSVUsesSoftwareDecodeUpload(t *testing.T) {
 		"-init_hw_device vaapi=va:",
 		"-init_hw_device qsv=qs@va",
 		"-c:v h264_qsv",
-		"-vf format=nv12,hwupload,scale_vaapi=w=-2:h=720:format=nv12,hwmap=derive_device=qsv,format=qsv",
+		"-vf scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv",
 	} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("High 10 QSV recipe missing %q: %s", required, joined)
 		}
+	}
+	if strings.Contains(joined, "scale_vaapi") {
+		t.Fatalf("High 10 sidecar route must scale software frames before upload: %s", joined)
 	}
 }
 
