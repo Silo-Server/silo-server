@@ -1037,8 +1037,8 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if envelope.ProtocolVersion == nil || *envelope.ProtocolVersion != playback.ProtocolV3 {
-		writeError(w, http.StatusUpgradeRequired, "client_upgrade_required",
-			"This server requires playback protocol v3. Update the app to continue.")
+		upgrade := playback.LegacyUpgradeErrorV3()
+		writeError(w, http.StatusUpgradeRequired, upgrade.Error, upgrade.Message)
 		return
 	}
 	h.handleStartPlaybackV3(w, r, body)

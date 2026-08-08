@@ -218,21 +218,7 @@ func TestPlanAttemptKeyV3Fixture(t *testing.T) {
 }
 
 func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
-	type scenario struct {
-		Name     string `json:"name"`
-		Category string `json:"category"`
-		Expected struct {
-			Outcome            DecisionOutcomeV3    `json:"outcome"`
-			Delivery           DeliveryV3           `json:"delivery"`
-			AvailableQualities []AvailableQualityV3 `json:"available_qualities"`
-		} `json:"expected"`
-	}
-	var matrix struct {
-		SchemaVersion int        `json:"schema_version"`
-		Planner       []scenario `json:"planner_scenarios"`
-		Replans       []scenario `json:"replan_scenarios"`
-		Protocol      []scenario `json:"protocol_scenarios"`
-	}
+	var matrix ConformanceMatrixV3
 	body, err := os.ReadFile("testdata/protocol_v3/conformance_matrix.json")
 	if err != nil {
 		t.Fatal(err)
@@ -245,21 +231,32 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 	}
 	categories := make(map[string]bool)
 	names := make(map[string]bool)
-	plannerByName := make(map[string]scenario)
+	plannerByName := make(map[string]PlannerScenarioV3)
 	for _, value := range matrix.Planner {
 		plannerByName[value.Name] = value
 	}
-	for _, group := range [][]scenario{matrix.Planner, matrix.Replans, matrix.Protocol} {
-		for _, value := range group {
-			if value.Name == "" || value.Category == "" {
-				t.Fatalf("unnamed scenario: %#v", value)
-			}
-			if names[value.Name] {
-				t.Fatalf("duplicate scenario name %q", value.Name)
-			}
-			names[value.Name] = true
-			categories[value.Category] = true
+	recordScenario := func(name, category string) {
+		t.Helper()
+		if name == "" || category == "" {
+			t.Fatalf("unnamed scenario: %q/%q", name, category)
 		}
+		if names[name] {
+			t.Fatalf("duplicate scenario name %q", name)
+		}
+		names[name] = true
+		categories[category] = true
+	}
+	for _, value := range matrix.Planner {
+		recordScenario(value.Name, value.Category)
+	}
+	for _, value := range matrix.Replans {
+		recordScenario(value.Name, value.Category)
+		if err := value.Request.Validate(); err != nil {
+			t.Errorf("replan scenario %q is invalid: %v", value.Name, err)
+		}
+	}
+	for _, value := range matrix.Protocol {
+		recordScenario(value.Name, value.Category)
 	}
 	for _, required := range []string{
 		"evidence_tier_gating", "deliveries_negotiation", "attempt_key_echo_and_loop",
@@ -288,6 +285,56 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 	}
 	if value := plannerByName["available_qualities"]; len(value.Expected.AvailableQualities) < 2 || value.Expected.AvailableQualities[0].Label != QualityOriginalV3 {
 		t.Errorf("available quality fixture = %#v", value.Expected.AvailableQualities)
+	}
+
+	replansByName := make(map[string]ReplanScenarioV3, len(matrix.Replans))
+	for _, value := range matrix.Replans {
+		replansByName[value.Name] = value
+	}
+	for _, operation := range []struct {
+		prefix string
+		value  ReplanOperationV3
+	}{
+		{prefix: "track_change", value: ReplanOperationTrackChangeV3},
+		{prefix: "quality_change", value: ReplanOperationQualityChangeV3},
+	} {
+		base := replansByName[operation.prefix]
+		if base.Request.EffectiveOperation() != operation.value || base.Expected.HTTPStatus != 200 {
+			t.Errorf("%s base scenario = %#v", operation.prefix, base)
+		}
+		duplicate := replansByName[operation.prefix+"_idempotent_duplicate"]
+		if duplicate.Request.EffectiveOperation() != operation.value || duplicate.Expected.SameRequestAndBodyStatus != 200 ||
+			!duplicate.Expected.ResponseReplayedVerbatim || duplicate.Expected.ChangedBodyStatus != 409 || duplicate.Expected.ChangedBodyError != "idempotency_key_reused" {
+			t.Errorf("%s duplicate scenario = %#v", operation.prefix, duplicate)
+		}
+		concurrent := replansByName[operation.prefix+"_concurrent_duplicate"]
+		if concurrent.Request.EffectiveOperation() != operation.value || concurrent.Expected.WhileFirstLeaseActiveStatus != 409 ||
+			concurrent.Expected.ConcurrentError != "replan_in_progress" || concurrent.Expected.AfterCompletionStatus != 200 || !concurrent.Expected.ResponseReplayedVerbatim {
+			t.Errorf("%s concurrent scenario = %#v", operation.prefix, concurrent)
+		}
+		midSeek := replansByName[operation.prefix+"_mid_seek"]
+		if midSeek.Request.EffectiveOperation() != operation.value || midSeek.Request.PositionSeconds != 321.25 ||
+			midSeek.Expected.PositionSeconds != midSeek.Request.PositionSeconds || !midSeek.Expected.PositionPreserved {
+			t.Errorf("%s mid-seek scenario = %#v", operation.prefix, midSeek)
+		}
+	}
+
+	protocolByName := make(map[string]ProtocolScenarioV3, len(matrix.Protocol))
+	for _, value := range matrix.Protocol {
+		protocolByName[value.Name] = value
+	}
+	legacy := protocolByName["legacy_start_requires_upgrade"]
+	if legacy.Input.LegacyStartBody == nil || legacy.Input.LegacyStartBody.FileID <= 0 || legacy.Expected.HTTPStatus != 426 || legacy.Expected.Error != "client_upgrade_required" {
+		t.Errorf("legacy protocol scenario = %#v", legacy)
+	}
+	output := protocolByName["output_context_change_invalidates_attempt"]
+	if output.Input.FirstOutputContextID == output.Input.SecondOutputContextID || !output.Expected.PlanIDUnchanged || !output.Expected.PlanAttemptKeyChanged {
+		t.Errorf("output-context scenario = %#v", output)
+	}
+	loop := protocolByName["opaque_attempt_key_loop"]
+	if loop.Input.ServerPlanAttemptKey == "" || loop.Input.ReplanEcho != loop.Input.ServerPlanAttemptKey ||
+		len(loop.Input.AttemptedPlanKeys) != 1 || loop.Input.AttemptedPlanKeys[0] != loop.Input.ServerPlanAttemptKey || loop.Expected.Action != "reject_already_attempted_plan" {
+		t.Errorf("opaque loop scenario = %#v", loop)
 	}
 }
 

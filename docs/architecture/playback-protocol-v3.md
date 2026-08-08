@@ -129,11 +129,10 @@ startup — a server without a `dovi_rpu` bitstream filter does not list
 `server_dv7_to_hdr10`. A client must not assume a transformation exists because
 this document names it.
 
-`enabled` and `reason` survive from the rollout period, when a server could
-answer `"enabled": false` with `"reason": "disabled"`. No server does now — v3 is
-the only protocol, so "disabled" would mean "no playback at all". The fields stay
-because clients already read them; `reason` is populated only for a non-rollout
-condition a future server might report.
+`enabled` survives from the rollout period and is now constant `true`; the
+negative shape was deliberately removed before v1 lock because v3 is the only
+playback protocol. `reason` remains an optional diagnostic for a future
+non-rollout condition, but it never changes the meaning of `enabled`.
 
 ### 2.2 `POST /playback/start`
 

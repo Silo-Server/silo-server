@@ -14,22 +14,19 @@ import { reportRouteEventV3 } from "../route-events-v3";
 import { buildPlayerStreamUrl } from "../stream-url";
 import { randomUUID } from "@/lib/uuid";
 import {
-  FEATURE_PLAYBACK_PLAN_V3,
-  PROTOCOL_V3,
   QUALITY_ORIGINAL_V3,
-  type ClientCodecCapabilitiesV3,
-  type ClientPlaybackContextV3,
   type DecisionResponseV3,
   type FailureV3,
   type PlanV3,
-  type ReplanOperationV3,
-  type ReplanRequestV3,
   type RouteEventNameV3,
-  type SelectedTracksV3,
-  type StartRequestV3,
   type SubtitleInventoryItemV3,
-  type TrackIdentityV3,
 } from "../protocol-v3";
+import {
+  buildReplanRequestV3,
+  buildStartRequestV3,
+  routeEventPlanIdentityV3,
+  type ReplanOptions,
+} from "../playback-session-wire-v3";
 import type {
   PlayerFileVersion,
   PlayerPlaybackVariant,
@@ -37,8 +34,6 @@ import type {
   ResumeHints,
 } from "../types";
 
-/** Contract bound on `position_seconds` and `start_position`. */
-const MAX_POSITION_SECONDS = 31_536_000;
 /** Contract bound on the replan loop guard. */
 const MAX_ATTEMPTED_PLAN_KEYS = 16;
 /** Contract bound on the recovery chain length. */
@@ -108,11 +103,6 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
     },
   ) => void;
-}
-
-function clampPosition(seconds: number): number {
-  if (!Number.isFinite(seconds) || seconds < 0) return 0;
-  return Math.min(seconds, MAX_POSITION_SECONDS);
 }
 
 function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
@@ -201,9 +191,9 @@ function planToSessionState(
 /**
  * Turns a v3 decision into an error state.
  *
- * A decision has exactly three shapes: a plan, a terminal, or — when the
- * protocol is disabled server-side — neither. The third one is not an error the
- * server describes, so the client has to say something itself.
+ * A conforming decision has exactly two shapes: a plan or a terminal. The
+ * fallback below is defensive handling for a malformed or future response; it
+ * is not a third protocol outcome.
  */
 function describeDecisionWithoutPlan(decision: DecisionResponseV3): PlaybackSessionErrorState {
   if (decision.terminal) {
@@ -234,148 +224,6 @@ function describePlaybackSessionError(
   return {
     title: "Playback unavailable",
     message: fallbackMessage,
-  };
-}
-
-interface ReplanOptions {
-  operation: ReplanOperationV3;
-  positionSeconds: number;
-  /** Present only on `track_change`; `null` clears the subtitle selection. */
-  audio?: TrackIdentityV3;
-  subtitle?: TrackIdentityV3 | null;
-  failure?: FailureV3;
-}
-
-export interface StartRequestInput {
-  fileId: number;
-  profileId: string;
-  playbackAttemptId: string;
-  qualityPreference: string;
-  position: number;
-  /** Forces `start_position: 0` to be sent, which means "start over". */
-  forceStartPosition: boolean;
-  explicitAudioTrackIndex?: number | null;
-  metered: boolean;
-  bandwidthEstimateKbps?: number | null;
-  bandwidthCapKbps?: number | null;
-  clientCapabilities: ClientCodecCapabilitiesV3;
-  clientPlaybackContext: ClientPlaybackContextV3;
-}
-
-/**
- * Builds a v3 start body.
- *
- * The client states what it *is* and what the viewer *asked for*; it does not
- * pick a file variant, encode recipe, or delivery. A user-configured bandwidth
- * ceiling remains declarative input for the server-owned ladder. `start_position`
- * is omitted rather than sent as zero when playback should simply resume, which
- * is what lets the server apply its own resume policy.
- */
-export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
-  return {
-    protocol_version: PROTOCOL_V3,
-    client_features: [FEATURE_PLAYBACK_PLAN_V3],
-    file_id: input.fileId,
-    profile_id: input.profileId,
-    playback_attempt_id: input.playbackAttemptId,
-    quality_preference: input.qualityPreference,
-    // The web player renders ASS with its own typesetting engine, so it asks
-    // the server to keep authored fidelity rather than flatten it.
-    subtitle_fidelity_preference: "preserve",
-    metered: input.metered,
-    client_capabilities: input.clientCapabilities,
-    client_playback_context: input.clientPlaybackContext,
-    ...(input.forceStartPosition || input.position > 0
-      ? { start_position: clampPosition(input.position) }
-      : {}),
-    ...(input.explicitAudioTrackIndex != null && input.explicitAudioTrackIndex >= 0
-      ? { audio_track_index: input.explicitAudioTrackIndex }
-      : {}),
-    ...(input.bandwidthEstimateKbps != null
-      ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
-      : {}),
-    ...(input.bandwidthCapKbps != null ? { bandwidth_cap_kbps: input.bandwidthCapKbps } : {}),
-  };
-}
-
-export interface ReplanRequestInput extends ReplanOptions {
-  plan: PlanV3;
-  playbackAttemptId: string;
-  replanRequestId: string;
-  planAttemptId: string;
-  qualityPreference: string;
-  attemptedPlanKeys: string[];
-  attemptCount: number;
-  metered: boolean;
-  bandwidthEstimateKbps?: number | null;
-  bandwidthCapKbps?: number | null;
-  clientCapabilities: ClientCodecCapabilitiesV3;
-  clientPlaybackContext: ClientPlaybackContextV3;
-}
-
-/**
- * Builds a v3 replan body.
- *
- * The selection echoes the plan's own `selected_tracks` and overrides only the
- * side that changed. That matters twice over: an absent subtitle identity means
- * "subtitles off", so an audio-only change has to resend the subtitle it is not
- * touching; and the seek operations are validated against the current plan's
- * tracks byte-for-byte, so they must never be rewritten into shorthand.
- */
-export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3 {
-  const selectedTracks: SelectedTracksV3 = {};
-  const nextAudio = input.audio ?? input.plan.selected_tracks.audio;
-  if (nextAudio) {
-    selectedTracks.audio = nextAudio;
-  }
-  const nextSubtitle =
-    input.subtitle === undefined ? input.plan.selected_tracks.subtitle : input.subtitle;
-  if (nextSubtitle) {
-    selectedTracks.subtitle = nextSubtitle;
-  }
-
-  return {
-    protocol_version: PROTOCOL_V3,
-    client_features: [FEATURE_PLAYBACK_PLAN_V3],
-    operation: input.operation,
-    playback_attempt_id: input.playbackAttemptId,
-    replan_request_id: input.replanRequestId,
-    failed_plan_id: input.plan.plan_id,
-    plan_attempt_id: input.planAttemptId,
-    plan_attempt_key: input.plan.plan_attempt_key,
-    attempted_plan_keys: input.attemptedPlanKeys,
-    attempt_count: input.attemptCount,
-    quality_preference: input.qualityPreference,
-    position_seconds: clampPosition(input.positionSeconds),
-    metered: input.metered,
-    selected_tracks: selectedTracks,
-    failure: input.failure ?? { classification: "" },
-    client_capabilities: input.clientCapabilities,
-    client_playback_context: input.clientPlaybackContext,
-    ...(input.bandwidthEstimateKbps != null
-      ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
-      : {}),
-    ...(input.bandwidthCapKbps != null ? { bandwidth_cap_kbps: input.bandwidthCapKbps } : {}),
-  };
-}
-
-/**
- * Route events for a terminal start carry only the playback-attempt identity.
- * Plan-scoped fields become valid only after the server returned a plan; a
- * client-generated plan-attempt id on a plan-less terminal is intentionally
- * omitted so the server can authorize it against the persisted start attempt.
- */
-export function routeEventPlanIdentityV3(
-  plan: PlanV3 | null,
-  sessionId: string | null,
-  planAttemptId: string,
-) {
-  if (!plan) return {};
-  return {
-    sessionId,
-    planId: plan.plan_id,
-    planAttemptId,
-    planAttemptKey: plan.plan_attempt_key,
   };
 }
 

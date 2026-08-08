@@ -41,6 +41,7 @@ var fixtureSchemasV3 = map[string]string{
 	"replan_request.json":      "replan-request.schema.json",
 	"decision_response.json":   "decision-response.schema.json",
 	"capability_response.json": "capability-response.schema.json",
+	"error_response.json":      "error-response.schema.json",
 	"route_event.json":         "route-event.schema.json",
 }
 
@@ -48,7 +49,7 @@ var fixtureSchemasV3 = map[string]string{
 // behavior rather than a single request or response body: opaque attempt-key
 // echo scenarios and the combined-ordinal subtitle inventory. They travel with
 // the wire fixtures because clients consume them, but no endpoint carries the
-// have no schema. Listing them explicitly keeps the golden sweep exhaustive: a
+// has no schema. Listing them explicitly keeps the golden sweep exhaustive: a
 // new wire body added to the generator without a schema fails rather than being
 // skipped.
 var nonWireGoldenFixturesV3 = []string{
@@ -320,6 +321,7 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 		{"decision-response.schema.json", []string{"$defs", "source_descriptor"}, playback.SourceDescriptorV3{}},
 		{"capability-response.schema.json", nil, playback.CapabilityResponseV3{}},
 		{"capability-response.schema.json", []string{"$defs", "transformation"}, playback.TransformationV3{}},
+		{"error-response.schema.json", nil, playback.ErrorResponseV3{}},
 	}
 
 	for _, tc := range cases {
@@ -331,6 +333,43 @@ func TestResponseSchemaRequiredFieldsMatchGoTags(t *testing.T) {
 			node := schemaValue(t, mustReadObject(t, filepath.Join(schemaRootV3, "v3", tc.schema)), tc.path...)
 			assertStringsEqual(t, label+".required", optionalSchemaStrings(t, node, "required"), alwaysSerializedFields(t, tc.value))
 		})
+	}
+}
+
+func TestResponseSchemasEnforcePublishedInvariants(t *testing.T) {
+	schemas := compileSchemasV3(t)
+
+	capability := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
+	capability["protocol_versions"] = []any{}
+	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
+		t.Fatal("capability schema accepted a response that omitted protocol v3")
+	}
+
+	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
+	features := capability["features"].([]any)
+	capability["features"] = features[:len(features)-1]
+	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
+		t.Fatal("capability schema accepted a response that omitted a baseline feature")
+	}
+
+	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
+	capability["deliveries"] = []any{"original_http"}
+	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
+		t.Fatal("capability schema accepted a partial delivery registry")
+	}
+
+	decision := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
+	plan := decision["playback_plan"].(map[string]any)
+	plan["plan_id"] = "plan:opaque-but-not-the-server-shape"
+	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
+		t.Fatal("decision schema accepted a malformed server plan identity")
+	}
+
+	decision = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
+	plan = decision["playback_plan"].(map[string]any)
+	plan["available_qualities"] = []any{}
+	if err := schemas["decision-response.schema.json"].Validate(decision); err == nil {
+		t.Fatal("decision schema accepted a playable plan with no source quality rung")
 	}
 }
 
@@ -467,6 +506,15 @@ func mustReadFile(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return data
+}
+
+func decodeJSONValue(t *testing.T, body []byte) any {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func mustReadObject(t *testing.T, path string) map[string]any {

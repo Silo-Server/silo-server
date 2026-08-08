@@ -512,16 +512,16 @@ export interface TerminalV3 {
 }
 
 export interface DecisionResponseV3 {
-  protocol_version?: number;
+  protocol_version: number;
   server_features: string[];
-  outcome?: DecisionOutcomeV3;
+  outcome: DecisionOutcomeV3;
   session_id?: string;
   playback_plan?: PlanV3;
   terminal?: TerminalV3;
 }
 
 export interface CapabilityResponseV3 {
-  enabled: boolean;
+  enabled: true;
   protocol_versions: number[];
   features: string[];
   deliveries: DeliveryV3[];

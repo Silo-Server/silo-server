@@ -243,6 +243,10 @@ func withPlaybackRouteParam(req *http.Request, key, value string) *http.Request 
 }
 
 func writePlaybackTestFFmpeg(t *testing.T) string {
+	return writePlaybackTestFFmpegSleep(t, "30")
+}
+
+func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "fake-ffmpeg.sh")
@@ -258,7 +262,7 @@ func writePlaybackTestFFmpeg(t *testing.T) string {
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
-		"sleep 30\n"
+		"sleep " + sleepSeconds + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}

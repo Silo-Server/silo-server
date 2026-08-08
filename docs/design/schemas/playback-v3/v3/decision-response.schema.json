@@ -189,7 +189,7 @@
         "plan_id": {
           "type": "string",
           "description": "Deterministic server-computed plan identity, `plan:` followed by 32 hex characters. Opaque to clients: echo it, never parse or recompute it.",
-          "minLength": 8
+          "pattern": "^plan:[0-9a-f]{32}$"
         },
         "plan_attempt_key": {
           "type": "string",
@@ -263,6 +263,15 @@
         "available_qualities": {
           "type": "array",
           "description": "Server ladder rungs valid for this source and client, so a client renders a quality menu without owning a bitrate table. The entry with preserves_source true pins the source rung.",
+          "minItems": 1,
+          "contains": {
+            "type": "object",
+            "required": ["label", "preserves_source"],
+            "properties": {
+              "label": { "const": "original" },
+              "preserves_source": { "const": true }
+            }
+          },
           "items": {
             "$ref": "#/$defs/available_quality"
           }
@@ -278,10 +287,12 @@
           "minLength": 1
         },
         "requested_media_file_id": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1
         },
         "effective_media_file_id": {
           "type": "integer",
+          "minimum": 1,
           "description": "Differs from requested_media_file_id when the server routed to an alternate edition of the same title. Track identities in this plan belong to the effective file."
         },
         "source": {
@@ -703,7 +714,8 @@
       ],
       "properties": {
         "media_file_id": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1
         },
         "duration_seconds": {
           "type": "number",

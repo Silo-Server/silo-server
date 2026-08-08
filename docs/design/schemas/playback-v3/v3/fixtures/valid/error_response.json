@@ -1,0 +1,4 @@
+{
+  "error": "client_upgrade_required",
+  "message": "This server requires playback protocol v3. Update the app to continue."
+}

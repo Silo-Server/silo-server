@@ -114,11 +114,11 @@ func TestHandleStartPlaybackRejectsRequestsThatDoNotDeclareV3(t *testing.T) {
 			if rr.Code != http.StatusUpgradeRequired {
 				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 			}
-			var response errorResponse
+			var response playback.ErrorResponseV3
 			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
-			if response.Error != "client_upgrade_required" {
+			if response != playback.LegacyUpgradeErrorV3() {
 				t.Fatalf("error = %q, body = %s", response.Error, rr.Body.String())
 			}
 			if got := len(manager.AllSessions()); got != 0 {
@@ -981,21 +981,9 @@ func TestHandleReplanPlaybackV3SeekReanchorWithoutFrozenRecipeFailsRetryably(t *
 }
 
 func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *testing.T) {
-	// This test has never passed. It fails at 854d07cf, the commit that
-	// introduced it, so it describes behavior that was specified and not
-	// implemented rather than behavior that regressed.
-	//
-	// What it asks for: when a seek fails and the client's replan capabilities
-	// have narrowed to 1080p, recovery must stay on the pinned 4K media version
-	// and must not video-transcode it. Today the planner takes the narrowed
-	// per-request capabilities at face value, finds the 4K source unplayable
-	// with allow_4k_transcode disabled, and answers adaptation_unavailable.
-	//
-	// Making it pass means deciding whether replan capabilities may narrow
-	// media-version selection at all, which is a protocol v3 planner change and
-	// does not belong to whichever change happens to notice the failure. Skipped
-	// rather than excluded in the Makefile so the reason travels with the test.
-	t.Skip("specifies unimplemented v3 planner behavior; see the comment above")
+	// A seek is not a capability-authority boundary. Even if the replan body
+	// carries narrower request-only evidence, recovery stays on the mounted
+	// edition and plans from the durable start evidence.
 
 	source := v3HandlerFixtureFile(t)
 	source.Resolution = "2160p"
@@ -1027,6 +1015,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 	}}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "5"), t.TempDir())
 
 	startRequest := v3HandlerStartRequest()
 	startRequest.QualityPreference = "auto"
@@ -1098,7 +1087,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 	}
 	if response.PlaybackPlan == nil || response.Terminal != nil ||
 		response.PlaybackPlan.RequestedMediaFileID != source.ID || response.PlaybackPlan.EffectiveMediaFileID != source.ID {
-		t.Fatalf("failed seek did not recover on the pinned media version: %#v", response)
+		t.Fatalf("failed seek did not recover on the pinned media version: response=%#v terminal=%#v", response, response.Terminal)
 	}
 	if response.PlaybackPlan.Delivery == playback.DeliveryTranscodeHLSV3 ||
 		response.PlaybackPlan.EffectiveRecipe.Width == nil || *response.PlaybackPlan.EffectiveRecipe.Width != 3840 ||

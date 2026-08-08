@@ -19,6 +19,11 @@
     "protocol_versions": {
       "type": "array",
       "description": "Protocol versions this server speaks. A client picks the highest it supports rather than assuming a single value, which is what keeps a future v4 from breaking v3 clients.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": {
+        "const": 3
+      },
       "items": {
         "type": "integer"
       }
@@ -26,6 +31,17 @@
     "features": {
       "type": "array",
       "description": "Server feature flags. The list grows additively within v3, so an unrecognized entry is expected and must be ignored, not treated as an error.",
+      "minItems": 7,
+      "uniqueItems": true,
+      "allOf": [
+        { "contains": { "const": "playback_plan_v3" } },
+        { "contains": { "const": "layout_aware_passthrough" } },
+        { "contains": { "const": "playback_route_diagnostics" } },
+        { "contains": { "const": "device_quirks_v1" } },
+        { "contains": { "const": "seek_reanchor_v1" } },
+        { "contains": { "const": "direct_stream_resume_v1" } },
+        { "contains": { "const": "plan_source_duration_v1" } }
+      ],
       "items": {
         "type": "string"
       }
@@ -33,6 +49,14 @@
     "deliveries": {
       "type": "array",
       "description": "Serving routes the planner may return. The list contains the server's currently executable delivery classes and grows additively.",
+      "minItems": 4,
+      "uniqueItems": true,
+      "allOf": [
+        { "contains": { "const": "original_http" } },
+        { "contains": { "const": "server_remux_progressive" } },
+        { "contains": { "const": "server_remux_hls" } },
+        { "contains": { "const": "server_transcode_hls" } }
+      ],
       "items": {
         "type": "string",
         "enum": [

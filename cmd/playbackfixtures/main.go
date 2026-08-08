@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -71,10 +72,15 @@ func main() {
 	write(*out, "replan_request.json", goldenReplanRequest())
 	write(*out, "decision_response.json", goldenDecisionResponse())
 	write(*out, "capability_response.json", goldenCapabilityResponse())
+	write(*out, "error_response.json", goldenErrorResponse())
 	write(*out, "route_event.json", goldenRouteEvent())
 	write(*out, "subtitle_inventory.json", goldenSubtitleInventory())
 	write(*out, "attempt_keys.json", goldenAttemptKeys())
 	write(*out, "conformance_matrix.json", goldenConformanceMatrix())
+}
+
+func goldenErrorResponse() playback.ErrorResponseV3 {
+	return playback.LegacyUpgradeErrorV3()
 }
 
 func write(dir, name string, value any) {
@@ -540,53 +546,13 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 	return fixtures
 }
 
-type conformanceMatrix struct {
-	SchemaVersion int                `json:"schema_version"`
-	Planner       []plannerScenario  `json:"planner_scenarios"`
-	Replans       []replanScenario   `json:"replan_scenarios"`
-	Protocol      []protocolScenario `json:"protocol_scenarios"`
-}
-
-type plannerScenario struct {
-	Name          string                      `json:"name"`
-	Category      string                      `json:"category"`
-	Request       playback.StartRequestV3     `json:"request"`
-	Source        playback.SourceDescriptorV3 `json:"source"`
-	AttemptedKeys []string                    `json:"attempted_plan_keys,omitempty"`
-	Expected      plannerExpectation          `json:"expected"`
-}
-
-type plannerExpectation struct {
-	Outcome            playback.DecisionOutcomeV3    `json:"outcome"`
-	Delivery           playback.DeliveryV3           `json:"delivery,omitempty"`
-	DecisionReason     string                        `json:"decision_reason,omitempty"`
-	PlanID             string                        `json:"plan_id,omitempty"`
-	PlanAttemptKey     string                        `json:"plan_attempt_key,omitempty"`
-	AvailableQualities []playback.AvailableQualityV3 `json:"available_qualities,omitempty"`
-	TerminalReason     string                        `json:"terminal_reason,omitempty"`
-}
-
-type replanScenario struct {
-	Name     string                   `json:"name"`
-	Category string                   `json:"category"`
-	Request  playback.ReplanRequestV3 `json:"request"`
-	Expected map[string]any           `json:"expected"`
-}
-
-type protocolScenario struct {
-	Name     string         `json:"name"`
-	Category string         `json:"category"`
-	Input    map[string]any `json:"input"`
-	Expected map[string]any `json:"expected"`
-}
-
-func goldenConformanceMatrix() conformanceMatrix {
+func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	videoFile := conformanceVideoFile()
 	base := conformanceStartRequest()
 	registry := conformanceRegistry()
 	settings := playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 
-	planner := make([]plannerScenario, 0, 10)
+	planner := make([]playback.PlannerScenarioV3, 0, 10)
 	for _, tier := range []playback.CapabilityEvidenceV3{
 		playback.EvidenceExactV3,
 		playback.EvidencePlatformAttestedV3,
@@ -657,33 +623,51 @@ func goldenConformanceMatrix() conformanceMatrix {
 	seekReanchor.Failure = playback.FailureV3{}
 	seekReanchor.PositionSeconds = 321.25
 
-	replans := []replanScenario{
-		{Name: "track_change", Category: "track_change_replan", Request: trackChange, Expected: map[string]any{"preserve_unmodified_tracks": true, "idempotent_duplicate_status": 200}},
-		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: map[string]any{"selected_quality": resolutionHD, "idempotent_duplicate_status": 200}},
-		{Name: "idempotent_duplicate", Category: "idempotent_replan", Request: qualityChange, Expected: map[string]any{"same_request_id_and_body_status": 200, "response_replayed_verbatim": true, "changed_body_status": 409, "changed_body_error": "idempotency_key_reused"}},
-		{Name: "mid_seek_reanchor", Category: "mid_seek_replan", Request: seekReanchor, Expected: map[string]any{"position_seconds": 321.25, "route_identity_stable_when_recipe_unchanged": true}},
-		{Name: "concurrent_duplicate", Category: "concurrent_replan", Request: seekReanchor, Expected: map[string]any{"while_first_lease_active_status": 409, "error": "replan_in_progress", "after_completion_status": 200, "response_replayed_verbatim": true}},
+	trackChange.PositionSeconds = 321.25
+	qualityChange.PositionSeconds = 321.25
+	trackDuplicate := trackChange
+	trackDuplicate.ReplanRequestID = "replan-track-duplicate-0001"
+	qualityDuplicate := qualityChange
+	qualityDuplicate.ReplanRequestID = "replan-quality-duplicate-0001"
+	trackConcurrent := trackChange
+	trackConcurrent.ReplanRequestID = "replan-track-concurrent-0001"
+	qualityConcurrent := qualityChange
+	qualityConcurrent.ReplanRequestID = "replan-quality-concurrent-0001"
+	trackMidSeek := trackChange
+	trackMidSeek.ReplanRequestID = "replan-track-mid-seek-0001"
+	qualityMidSeek := qualityChange
+	qualityMidSeek.ReplanRequestID = "replan-quality-mid-seek-0001"
+	replans := []playback.ReplanScenarioV3{
+		{Name: "track_change", Category: "track_change_replan", Request: trackChange, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PreserveUnmodifiedTracks: true}},
+		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, SelectedQuality: resolutionHD}},
+		{Name: "track_change_idempotent_duplicate", Category: "idempotent_replan", Request: trackDuplicate, Expected: playback.ReplanExpectationV3{SameRequestAndBodyStatus: http.StatusOK, ResponseReplayedVerbatim: true, ChangedBodyStatus: http.StatusConflict, ChangedBodyError: "idempotency_key_reused"}},
+		{Name: "quality_change_idempotent_duplicate", Category: "idempotent_replan", Request: qualityDuplicate, Expected: playback.ReplanExpectationV3{SameRequestAndBodyStatus: http.StatusOK, ResponseReplayedVerbatim: true, ChangedBodyStatus: http.StatusConflict, ChangedBodyError: "idempotency_key_reused"}},
+		{Name: "track_change_concurrent_duplicate", Category: "concurrent_replan", Request: trackConcurrent, Expected: playback.ReplanExpectationV3{WhileFirstLeaseActiveStatus: http.StatusConflict, ConcurrentError: "replan_in_progress", AfterCompletionStatus: http.StatusOK, ResponseReplayedVerbatim: true}},
+		{Name: "quality_change_concurrent_duplicate", Category: "concurrent_replan", Request: qualityConcurrent, Expected: playback.ReplanExpectationV3{WhileFirstLeaseActiveStatus: http.StatusConflict, ConcurrentError: "replan_in_progress", AfterCompletionStatus: http.StatusOK, ResponseReplayedVerbatim: true}},
+		{Name: "track_change_mid_seek", Category: "mid_seek_replan", Request: trackMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: trackMidSeek.PositionSeconds, PositionPreserved: true}},
+		{Name: "quality_change_mid_seek", Category: "mid_seek_replan", Request: qualityMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: qualityMidSeek.PositionSeconds, PositionPreserved: true}},
+		{Name: "mid_seek_reanchor", Category: "mid_seek_replan", Request: seekReanchor, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: seekReanchor.PositionSeconds, PositionPreserved: true}},
 	}
 
 	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
 	outputB := playback.PlanAttemptKeyV3(*plan, "output-b", nil)
-	protocol := []protocolScenario{
-		{Name: "legacy_start_requires_upgrade", Category: "legacy_426", Input: map[string]any{"body": map[string]any{"file_id": goldenMediaFileID}}, Expected: map[string]any{"http_status": 426, "error": "client_upgrade_required"}},
-		{Name: "output_context_change_invalidates_attempt", Category: "output_context_invalidation", Input: map[string]any{"plan_id": plan.PlanID, "first_output_context_id": "output-a", "second_output_context_id": "output-b", "first_plan_attempt_key": outputA, "second_plan_attempt_key": outputB}, Expected: map[string]any{"plan_id_unchanged": true, "plan_attempt_key_changed": outputA != outputB}},
-		{Name: "opaque_attempt_key_loop", Category: "attempt_key_echo_and_loop", Input: map[string]any{"server_plan_attempt_key": plan.PlanAttemptKey, "replan_echo": plan.PlanAttemptKey, "attempted_plan_keys": []string{plan.PlanAttemptKey}}, Expected: map[string]any{"action": "reject_already_attempted_plan"}},
+	protocol := []playback.ProtocolScenarioV3{
+		{Name: "legacy_start_requires_upgrade", Category: "legacy_426", Input: playback.ProtocolScenarioInputV3{LegacyStartBody: &playback.LegacyStartBodyV3{FileID: goldenMediaFileID}}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusUpgradeRequired, Error: "client_upgrade_required"}},
+		{Name: "output_context_change_invalidates_attempt", Category: "output_context_invalidation", Input: playback.ProtocolScenarioInputV3{PlanID: plan.PlanID, FirstOutputContextID: "output-a", SecondOutputContextID: "output-b", FirstPlanAttemptKey: outputA, SecondPlanAttemptKey: outputB}, Expected: playback.ProtocolExpectationV3{PlanIDUnchanged: true, PlanAttemptKeyChanged: outputA != outputB}},
+		{Name: "opaque_attempt_key_loop", Category: "attempt_key_echo_and_loop", Input: playback.ProtocolScenarioInputV3{ServerPlanAttemptKey: plan.PlanAttemptKey, ReplanEcho: plan.PlanAttemptKey, AttemptedPlanKeys: []string{plan.PlanAttemptKey}}, Expected: playback.ProtocolExpectationV3{Action: "reject_already_attempted_plan"}},
 	}
 
-	return conformanceMatrix{SchemaVersion: 1, Planner: planner, Replans: replans, Protocol: protocol}
+	return playback.ConformanceMatrixV3{SchemaVersion: 1, Planner: planner, Replans: replans, Protocol: protocol}
 }
 
-func makePlannerScenario(name, category string, request playback.StartRequestV3, file *models.MediaFile, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3) plannerScenario {
+func makePlannerScenario(name, category string, request playback.StartRequestV3, file *models.MediaFile, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3) playback.PlannerScenarioV3 {
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: settings, Registry: registry, AttemptedKeys: attempted,
 	})
-	expected := plannerExpectation{Outcome: playback.OutcomeAdaptationUnavailableV3}
+	expected := playback.PlannerExpectationV3{Outcome: playback.OutcomeAdaptationUnavailableV3}
 	if result.Plan != nil {
-		expected = plannerExpectation{
+		expected = playback.PlannerExpectationV3{
 			Outcome:            playback.OutcomePlayableV3,
 			Delivery:           result.Plan.Delivery,
 			DecisionReason:     result.Plan.DecisionReason,
@@ -694,7 +678,7 @@ func makePlannerScenario(name, category string, request playback.StartRequestV3,
 	} else if result.Terminal != nil {
 		expected.TerminalReason = result.Terminal.Reason
 	}
-	return plannerScenario{
+	return playback.PlannerScenarioV3{
 		Name: name, Category: category, Request: request,
 		Source:        playback.SourceDescriptorFromFileV3(file, 0),
 		AttemptedKeys: append([]string(nil), attempted...), Expected: expected,

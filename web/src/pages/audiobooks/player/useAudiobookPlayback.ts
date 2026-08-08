@@ -20,7 +20,7 @@ import { buildPlayerStreamUrl } from "@/player/stream-url";
 import type { PlayerChapter } from "@/player/types";
 import { useCodecDetection } from "@/player/hooks/useCodecDetection";
 import { usePlaybackRealtime } from "@/player/hooks/usePlaybackRealtime";
-import { buildStartRequestV3 } from "@/player/hooks/usePlaybackSession";
+import { buildStartRequestV3 } from "@/player/playback-session-wire-v3";
 import type { SleepSetting } from "@/player/components/SleepTimerMenu";
 import { smartRewindSeconds } from "./smartRewind";
 import { clampAudiobookRate, getBookRate, setBookRate } from "./useAudiobookPrefs";

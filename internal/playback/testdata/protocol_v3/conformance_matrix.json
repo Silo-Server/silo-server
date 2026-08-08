@@ -1668,7 +1668,7 @@
         ],
         "attempt_count": 1,
         "quality_preference": "auto",
-        "position_seconds": 42.5,
+        "position_seconds": 321.25,
         "metered": true,
         "bandwidth_estimate_kbps": 3500,
         "bandwidth_cap_kbps": 4000,
@@ -1766,7 +1766,7 @@
         }
       },
       "expected": {
-        "idempotent_duplicate_status": 200,
+        "http_status": 200,
         "preserve_unmodified_tracks": true
       }
     },
@@ -1789,7 +1789,7 @@
         ],
         "attempt_count": 1,
         "quality_preference": "720p",
-        "position_seconds": 42.5,
+        "position_seconds": 321.25,
         "metered": true,
         "bandwidth_estimate_kbps": 3500,
         "bandwidth_cap_kbps": 4000,
@@ -1887,12 +1887,135 @@
         }
       },
       "expected": {
-        "idempotent_duplicate_status": 200,
+        "http_status": 200,
         "selected_quality": "720p"
       }
     },
     {
-      "name": "idempotent_duplicate",
+      "name": "track_change_idempotent_duplicate",
+      "category": "idempotent_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "track_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-track-duplicate-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "",
+            "index": 1
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "same_request_and_body_status": 200,
+        "response_replayed_verbatim": true,
+        "changed_body_status": 409,
+        "changed_body_error": "idempotency_key_reused"
+      }
+    },
+    {
+      "name": "quality_change_idempotent_duplicate",
       "category": "idempotent_replan",
       "request": {
         "protocol_version": 3,
@@ -1901,7 +2024,7 @@
         ],
         "operation": "quality_change",
         "playback_attempt_id": "attempt-golden-0001",
-        "replan_request_id": "replan-quality-change-0001",
+        "replan_request_id": "replan-quality-duplicate-0001",
         "failed_plan_id": "plan:golden-0001",
         "plan_attempt_id": "plan-attempt-golden-0001",
         "plan_attempt_key": "v3:0000000000000001",
@@ -1910,7 +2033,7 @@
         ],
         "attempt_count": 1,
         "quality_preference": "720p",
-        "position_seconds": 42.5,
+        "position_seconds": 321.25,
         "metered": true,
         "bandwidth_estimate_kbps": 3500,
         "bandwidth_cap_kbps": 4000,
@@ -2008,10 +2131,500 @@
         }
       },
       "expected": {
-        "changed_body_error": "idempotency_key_reused",
-        "changed_body_status": 409,
+        "same_request_and_body_status": 200,
         "response_replayed_verbatim": true,
-        "same_request_id_and_body_status": 200
+        "changed_body_status": 409,
+        "changed_body_error": "idempotency_key_reused"
+      }
+    },
+    {
+      "name": "track_change_concurrent_duplicate",
+      "category": "concurrent_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "track_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-track-concurrent-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "",
+            "index": 1
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "response_replayed_verbatim": true,
+        "while_first_lease_active_status": 409,
+        "concurrent_error": "replan_in_progress",
+        "after_completion_status": 200
+      }
+    },
+    {
+      "name": "quality_change_concurrent_duplicate",
+      "category": "concurrent_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "quality_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-quality-concurrent-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "720p",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "response_replayed_verbatim": true,
+        "while_first_lease_active_status": 409,
+        "concurrent_error": "replan_in_progress",
+        "after_completion_status": 200
+      }
+    },
+    {
+      "name": "track_change_mid_seek",
+      "category": "mid_seek_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "track_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-track-mid-seek-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "",
+            "index": 1
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "http_status": 200,
+        "position_seconds": 321.25,
+        "position_preserved": true
+      }
+    },
+    {
+      "name": "quality_change_mid_seek",
+      "category": "mid_seek_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "quality_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-quality-mid-seek-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "720p",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "http_status": 200,
+        "position_seconds": 321.25,
+        "position_preserved": true
       }
     },
     {
@@ -2131,131 +2744,9 @@
         }
       },
       "expected": {
+        "http_status": 200,
         "position_seconds": 321.25,
-        "route_identity_stable_when_recipe_unchanged": true
-      }
-    },
-    {
-      "name": "concurrent_duplicate",
-      "category": "concurrent_replan",
-      "request": {
-        "protocol_version": 3,
-        "client_features": [
-          "playback_plan_v3"
-        ],
-        "operation": "seek_reanchor",
-        "playback_attempt_id": "attempt-golden-0001",
-        "replan_request_id": "replan-seek-reanchor-0001",
-        "failed_plan_id": "plan:golden-0001",
-        "plan_attempt_id": "plan-attempt-golden-0001",
-        "plan_attempt_key": "v3:0000000000000001",
-        "attempted_plan_keys": [
-          "v3:0000000000000001"
-        ],
-        "attempt_count": 1,
-        "quality_preference": "auto",
-        "position_seconds": 321.25,
-        "metered": true,
-        "bandwidth_estimate_kbps": 3500,
-        "bandwidth_cap_kbps": 4000,
-        "selected_tracks": {
-          "audio": {
-            "id": "file:42:audio:0",
-            "index": 0
-          }
-        },
-        "failure": {
-          "classification": ""
-        },
-        "client_capabilities": {
-          "video_evidence": "exact",
-          "audio_evidence": "exact",
-          "codecs_video": [
-            "h264"
-          ],
-          "codecs_video_hardware": [
-            "h264"
-          ],
-          "codecs_audio": [
-            "aac"
-          ],
-          "containers": [
-            "mp4"
-          ],
-          "max_resolution": "1080p",
-          "hdr": false,
-          "video_decode": [
-            {
-              "codec": "h264",
-              "profiles": [
-                "high"
-              ],
-              "levels": [
-                41
-              ],
-              "bit_depths": [
-                8
-              ],
-              "max_width": 1920,
-              "max_height": 1080,
-              "max_frame_rate": 60,
-              "max_bitrate_kbps": 20000,
-              "hardware": true
-            }
-          ]
-        },
-        "client_playback_context": {
-          "protocol_version": 3,
-          "form_factor": "tv",
-          "app_version": "3.0-test",
-          "device": {
-            "platform": "android",
-            "os_version": "15",
-            "manufacturer": "NVIDIA",
-            "model": "SHIELD Android TV",
-            "platform_details": {
-              "abis": "arm64-v8a",
-              "sdk_int": "35"
-            }
-          },
-          "output": {
-            "output_context_id": "7"
-          },
-          "deliveries": {
-            "original_http": {
-              "enabled": true,
-              "supported_on_device": true,
-              "containers": [
-                "mp4"
-              ],
-              "video_codecs": [
-                "h264"
-              ],
-              "audio_decode_codecs": [
-                "aac"
-              ],
-              "audio_passthrough_codecs": [],
-              "subtitles": {
-                "embedded_text": true,
-                "sidecar_text": true,
-                "ass_styling": false,
-                "embedded_bitmap": false,
-                "sidecar_bitmap": false,
-                "font_attachments": false
-              },
-              "features": [],
-              "auth_header_refresh": true,
-              "validated_claims": [],
-              "transformations": []
-            }
-          }
-        }
-      },
-      "expected": {
-        "after_completion_status": 200,
-        "error": "replan_in_progress",
-        "response_replayed_verbatim": true,
-        "while_first_lease_active_status": 409
+        "position_preserved": true
       }
     }
   ],
@@ -2269,34 +2760,34 @@
         }
       },
       "expected": {
-        "error": "client_upgrade_required",
-        "http_status": 426
+        "http_status": 426,
+        "error": "client_upgrade_required"
       }
     },
     {
       "name": "output_context_change_invalidates_attempt",
       "category": "output_context_invalidation",
       "input": {
-        "first_output_context_id": "output-a",
-        "first_plan_attempt_key": "v3:28cb8a408ea7f446",
         "plan_id": "plan:478677870860e5e5108c18bff749b34b",
+        "first_output_context_id": "output-a",
         "second_output_context_id": "output-b",
+        "first_plan_attempt_key": "v3:28cb8a408ea7f446",
         "second_plan_attempt_key": "v3:28c88c408ea5c1d5"
       },
       "expected": {
-        "plan_attempt_key_changed": true,
-        "plan_id_unchanged": true
+        "plan_id_unchanged": true,
+        "plan_attempt_key_changed": true
       }
     },
     {
       "name": "opaque_attempt_key_loop",
       "category": "attempt_key_echo_and_loop",
       "input": {
+        "server_plan_attempt_key": "v3:f0144c47fa349e3e",
+        "replan_echo": "v3:f0144c47fa349e3e",
         "attempted_plan_keys": [
           "v3:f0144c47fa349e3e"
-        ],
-        "replan_echo": "v3:f0144c47fa349e3e",
-        "server_plan_attempt_key": "v3:f0144c47fa349e3e"
+        ]
       },
       "expected": {
         "action": "reject_already_attempted_plan"

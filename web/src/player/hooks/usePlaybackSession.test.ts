@@ -9,7 +9,7 @@ import {
   buildReplanRequestV3,
   buildStartRequestV3,
   routeEventPlanIdentityV3,
-} from "./usePlaybackSession";
+} from "../playback-session-wire-v3";
 
 const startBase = {
   fileId: 42,
