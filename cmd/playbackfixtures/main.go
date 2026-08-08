@@ -56,6 +56,7 @@ const (
 	qualityOriginal   = "original"
 	audioLayoutStereo = "stereo"
 	videoRangeSDR     = "SDR"
+	categoryMidSeek   = "mid_seek_replan"
 )
 
 func main() {
@@ -644,9 +645,9 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 		{Name: "quality_change_idempotent_duplicate", Category: "idempotent_replan", Request: qualityDuplicate, Expected: playback.ReplanExpectationV3{SameRequestAndBodyStatus: http.StatusOK, ResponseReplayedVerbatim: true, ChangedBodyStatus: http.StatusConflict, ChangedBodyError: "idempotency_key_reused"}},
 		{Name: "track_change_concurrent_duplicate", Category: "concurrent_replan", Request: trackConcurrent, Expected: playback.ReplanExpectationV3{WhileFirstLeaseActiveStatus: http.StatusConflict, ConcurrentError: "replan_in_progress", AfterCompletionStatus: http.StatusOK, ResponseReplayedVerbatim: true}},
 		{Name: "quality_change_concurrent_duplicate", Category: "concurrent_replan", Request: qualityConcurrent, Expected: playback.ReplanExpectationV3{WhileFirstLeaseActiveStatus: http.StatusConflict, ConcurrentError: "replan_in_progress", AfterCompletionStatus: http.StatusOK, ResponseReplayedVerbatim: true}},
-		{Name: "track_change_mid_seek", Category: "mid_seek_replan", Request: trackMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: trackMidSeek.PositionSeconds, PositionPreserved: true}},
-		{Name: "quality_change_mid_seek", Category: "mid_seek_replan", Request: qualityMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: qualityMidSeek.PositionSeconds, PositionPreserved: true}},
-		{Name: "mid_seek_reanchor", Category: "mid_seek_replan", Request: seekReanchor, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: seekReanchor.PositionSeconds, PositionPreserved: true}},
+		{Name: "track_change_mid_seek", Category: categoryMidSeek, Request: trackMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: trackMidSeek.PositionSeconds, PositionPreserved: true}},
+		{Name: "quality_change_mid_seek", Category: categoryMidSeek, Request: qualityMidSeek, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: qualityMidSeek.PositionSeconds, PositionPreserved: true}},
+		{Name: "mid_seek_reanchor", Category: categoryMidSeek, Request: seekReanchor, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PositionSeconds: seekReanchor.PositionSeconds, PositionPreserved: true}},
 	}
 
 	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
