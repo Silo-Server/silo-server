@@ -217,6 +217,33 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 	})
 
+	t.Run("RecordTerminalStartEventWithoutSession", func(t *testing.T) {
+		attemptID := "att-terminal-" + uuid.NewString()
+		err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
+			RouteEventV3: playback.RouteEventV3{
+				ProtocolVersion:   playback.ProtocolV3,
+				PlaybackAttemptID: attemptID,
+				Event:             playback.RouteEventTerminalV3,
+				FallbackReason:    "no_alternate_version",
+				OutputContextID:   "route-terminal",
+				Diagnostics:       map[string]string{"reason": "hlg_output_unsupported"},
+			},
+			UserID:    f.userID,
+			ProfileID: "profile-1",
+		})
+		if err != nil {
+			t.Fatalf("RecordRouteEvent without session: %v", err)
+		}
+		var sessionID *string
+		if err := f.pool.QueryRow(ctx, `
+			SELECT session_id::text FROM playback_route_events WHERE playback_attempt_id = $1`, attemptID).Scan(&sessionID); err != nil {
+			t.Fatalf("load terminal route event: %v", err)
+		}
+		if sessionID != nil {
+			t.Fatalf("terminal start session_id = %q, want NULL", *sessionID)
+		}
+	})
+
 	t.Run("SaveAttemptIdempotency", func(t *testing.T) {
 		sessionID := uuid.NewString()
 		attemptID := "att-save-" + sessionID

@@ -247,7 +247,7 @@ cap: **32 KiB**. Body: a single `RouteEventV3`, not a batch
 | `202` | — | Accepted. **No response body.** |
 | `400` | `bad_request` | Malformed or failed validation |
 | `401` | `unauthorized` | No authenticated user or no profile |
-| `403` | `forbidden` | The session belongs to another profile — **or does not exist** |
+| `403` | `forbidden` | The session belongs to another profile — or the referenced session/attempt does not exist (except the sessionless terminal-start event below) |
 | `429` | `event_rate_limited` | 120 events/attempt/minute or 600/user/minute exceeded |
 | `500` | `internal_error` | Store outage |
 
@@ -262,6 +262,14 @@ the events are diagnostics and losing one costs nothing. And an unknown session
 is `403`, not `404` — the handler does not distinguish "not yours" from "not
 there." A store outage during that lookup is `500`, so a `403` genuinely means
 the event will never be accepted and should be dropped rather than retried.
+
+There is one narrow ownership-lookup exception. A terminal decision returned by
+`POST /playback/start` allocates no session or durable attempt row. The client
+may still report that outcome with `event: "terminal"`, the start request's
+`playback_attempt_id`, and no `session_id`, `plan_id`, `plan_attempt_id`, or
+`plan_attempt_key`; the server attributes that diagnostic to the authenticated
+user/profile and returns `202`. No other event or partially session-scoped event
+may use this exception.
 
 Event names are the eleven in §7.4. `diagnostics` is a string→string map, capped
 at 32 entries, and the server keeps only the keys on its allowlist (§7.5),
@@ -512,6 +520,14 @@ the server will not hand back a plan whose key is in that list. `attempt_count`
 (1–8) bounds the whole recovery chain. Together they mean a device that fails
 every route reaches a terminal instead of cycling forever.
 
+Failure, seek, and quality replans may omit unchanged track identities. The
+server overlays only identities present in those requests and preserves the
+durable selected subtitle otherwise. Only `operation: "track_change"` gives an
+omitted `selected_tracks.subtitle` the explicit meaning "subtitles off". A
+fallback to another media version must remap the selected subtitle; if no
+equivalent exists, it returns terminal reason `subtitle_unavailable_in_version`
+instead of silently continuing with subtitles off.
+
 `local_mutations` (up to 8 entries, 64 chars each) reports client-side
 adjustments — a transport reopen, a PCM decode fallback — that change the
 effective route without changing the plan. They feed the attempt key, so a plan
@@ -645,6 +661,14 @@ without first asking for a plan it does not want.
 transcodes it to a client-renderable format first — always to WebVTT, served as
 `text/vtt` at a `.vtt` URL), or `burn_in` (rendered into the video, which forces
 a transcode).
+
+The sidecar URL suffix is part of the representation contract, not decoration.
+An embedded `hdmv_pgs_subtitle`/PGS sidecar is lossless binary PGS at a `.sup`
+URL with `application/octet-stream`; cached full-track responses support `HEAD`
+and byte ranges. Text conversion is always WebVTT at `.vtt`, while lossless
+ASS/SSA uses `.ass`. A suffix that does not match the selected track or a valid
+conversion is rejected with `415` rather than returning bytes of a different
+type under the requested extension.
 
 ---
 

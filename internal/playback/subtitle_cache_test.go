@@ -376,6 +376,29 @@ func TestServeSUPExtractCacheFlow(t *testing.T) {
 	if rec.Code != http.StatusPartialContent || rec.Body.String() != "PAYLOAD" {
 		t.Fatalf("range: code=%d body=%q", rec.Code, rec.Body.String())
 	}
+
+	// HEAD uses the same cached binary representation and metadata without
+	// invoking a fresh extract or returning a body.
+	rec = httptest.NewRecorder()
+	headReq := httptest.NewRequest(http.MethodHead, "/sub.sup", nil)
+	if err := c.ServeSUPExtract(rec, headReq, supExtractOpts(source, 0), extract); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+		t.Fatalf("head: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if extractCalls != 1 {
+		t.Fatal("cached HEAD must not invoke extract")
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("head Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("Content-Length"); got != "11" {
+		t.Fatalf("head Content-Length = %q", got)
+	}
+	if got := rec.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Fatalf("head Accept-Ranges = %q", got)
+	}
 }
 
 // A windowed request against a cached track must run its extract with the

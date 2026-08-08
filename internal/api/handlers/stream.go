@@ -270,6 +270,11 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	externalCount := len(file.ExternalSubtitles)
 	if trackIndex < externalCount {
 		sub := file.ExternalSubtitles[trackIndex]
+		if !subtitleSidecarFormatSupported(sub.Format, requestedFormat, false) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Requested subtitle extension does not match the selected track")
+			return
+		}
 
 		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
@@ -304,6 +309,11 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"Bitmap subtitle tracks cannot be extracted as text")
+			return
+		}
+		if !subtitleSidecarFormatSupported(track.Codec, requestedFormat, true) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Requested subtitle extension does not match the selected track")
 			return
 		}
 
@@ -344,6 +354,11 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.Request, subtitle subtitles.DownloadedSubtitle, requestedFormat string) {
+	if !subtitleSidecarFormatSupported(string(subtitle.Format), requestedFormat, false) {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+			"Requested subtitle extension does not match the selected track")
+		return
+	}
 	data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, subtitle.S3Key)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
@@ -369,6 +384,27 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		return
 	}
 	playback.ServeSubtitle(w, vttData, "vtt")
+}
+
+// subtitleSidecarFormatSupported keeps the path extension, source codec, and
+// response representation in agreement. Text tracks may be converted to the
+// contract's .vtt representation, ASS/SSA may also be served losslessly, and
+// only an embedded PGS track has a binary .sup representation.
+func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS bool) bool {
+	requestedFormat = strings.ToLower(strings.TrimSpace(requestedFormat))
+	if requestedFormat == "" {
+		return true
+	}
+	if playback.IsPGS(codec) {
+		return embeddedPGS && requestedFormat == "sup"
+	}
+	if playback.NeedsBurnIn(codec) {
+		return false
+	}
+	if playback.IsASS(codec) {
+		return requestedFormat == "ass" || requestedFormat == "ssa" || requestedFormat == "vtt"
+	}
+	return requestedFormat == "vtt"
 }
 
 // subtitleSourceFileID pins a subtitle URL to the file whose track list was

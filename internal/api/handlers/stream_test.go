@@ -435,6 +435,96 @@ func TestHandleSubtitle_BitmapTrackVTTRequestReturns415(t *testing.T) {
 	}
 }
 
+func TestHandleSubtitle_ExternalTextTrackSUPRequestReturns415(t *testing.T) {
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "movie-1",
+		FilePath:  "/tmp/movie.mkv",
+		Duration:  3600,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/tmp/movie.en.srt", Language: "eng", Format: "srt"},
+		},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.sup", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.sup")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+	if rr.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, content-type = %q, body = %s; want 415", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); strings.HasPrefix(got, "text/vtt") {
+		t.Fatalf("mismatched .sup request unexpectedly emitted WebVTT: %q", got)
+	}
+}
+
+func TestHandleSubtitle_EmbeddedPGSSupportsCachedHEADAndRange(t *testing.T) {
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "movie-1",
+		FilePath:  writePlaybackTestMediaFile(t, "movie.mkv"),
+		Duration:  3600,
+		// The external track deliberately occupies combined ordinal 0. The PGS
+		// container track is therefore addressed as ordinal 1, even though its
+		// embedded subtitle-stream index is 0.
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/tmp/movie.en.srt", Format: "srt"}},
+		SubtitleTracks:    []models.SubtitleTrack{{Index: 2, Language: "eng", Codec: "hdmv_pgs_subtitle"}},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	cacheRoot := t.TempDir()
+	cache := playback.NewSubtitleCache(func() string { return cacheRoot })
+	warmReq := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
+	warmRR := httptest.NewRecorder()
+	if err := cache.ServeSUPExtract(warmRR, warmReq, playback.StreamExtractOpts{
+		InputPath: file.FilePath, TrackIndex: 0, SourceCodec: "hdmv_pgs_subtitle",
+	}, func(_ context.Context, opts playback.StreamExtractOpts) error {
+		_, err := opts.Writer.Write([]byte("SUP PAYLOAD"))
+		return err
+	}); err != nil {
+		t.Fatalf("warm PGS cache: %v", err)
+	}
+
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.SubtitleCache = cache
+	request := func(method, rangeHeader string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "/api/v1/stream/"+session.ID+"/subtitles/1.sup?file_id=42", nil)
+		req = req.WithContext(newAuthorizedPlaybackContext())
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("session_id", session.ID)
+		routeCtx.URLParams.Add("track", "1.sup")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+		rr := httptest.NewRecorder()
+		handler.HandleSubtitle(rr, req)
+		return rr
+	}
+
+	head := request(http.MethodHead, "")
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("Content-Type") != "application/octet-stream" || head.Header().Get("Content-Length") != "11" {
+		t.Fatalf("HEAD status=%d type=%q length=%q body=%q", head.Code, head.Header().Get("Content-Type"), head.Header().Get("Content-Length"), head.Body.String())
+	}
+	ranged := request(http.MethodGet, "bytes=4-10")
+	if ranged.Code != http.StatusPartialContent || ranged.Body.String() != "PAYLOAD" || ranged.Header().Get("Content-Type") != "application/octet-stream" {
+		t.Fatalf("Range status=%d type=%q body=%q", ranged.Code, ranged.Header().Get("Content-Type"), ranged.Body.String())
+	}
+}
+
 func TestSubtitleSourceFileIDPinsURLAcrossEffectiveFileSwitch(t *testing.T) {
 	session := &playback.Session{MediaFileID: 200, RequestedMediaFileID: 100}
 

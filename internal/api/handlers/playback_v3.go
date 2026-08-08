@@ -1325,7 +1325,14 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			// capability payloads. Omission keeps the start-time features.
 			start.ClientFeatures = req.ClientFeatures
 		}
-		applySelectedTracksToStartV3(&start, req.SelectedTracks)
+		if trackChange {
+			// A track_change is the only operation where an omitted subtitle
+			// means "subtitles off". Failure, seek, and quality replans may omit
+			// unchanged identities and must not erase the durable selection.
+			applySelectedTracksToStartV3(&start, req.SelectedTracks)
+		} else {
+			applySelectedTrackOverridesToStartV3(&start, req.SelectedTracks)
+		}
 	}
 	requestedFallbackID := record.EffectiveMediaFileID
 	effectiveFallbackID := record.RequestedMediaFileID
@@ -1464,6 +1471,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 					audioIndex = remappedAudio
 					result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 				}
+			} else if start.SubtitleTrackIndex != nil || start.SubtitleTrackID != "" {
+				result = playback.PlannerResultV3{Terminal: &playback.TerminalV3{
+					Reason:    "subtitle_unavailable_in_version",
+					Message:   "The selected subtitle track is unavailable in the fallback media version.",
+					Retryable: false,
+				}}
 			}
 		}
 	}
@@ -1875,6 +1888,25 @@ func applySelectedTracksToStartV3(start *playback.StartRequestV3, selected playb
 	}
 }
 
+// applySelectedTrackOverridesToStartV3 overlays only identities the caller
+// actually sent. Replan bodies are intentionally sparse for every operation
+// except track_change, so an omitted subtitle here means "unchanged", not
+// "off". The exact-replacement helper above remains the authority for an
+// explicit track_change and for reconstructing a durable plan selection.
+func applySelectedTrackOverridesToStartV3(start *playback.StartRequestV3, selected playback.SelectedTracksV3) {
+	if start == nil {
+		return
+	}
+	if selected.Audio != nil {
+		start.AudioTrackID = selected.Audio.ID
+		start.AudioTrackIndex = copyOptionalIntV3(selected.Audio.Index)
+	}
+	if selected.Subtitle != nil {
+		start.SubtitleTrackID = selected.Subtitle.ID
+		start.SubtitleTrackIndex = copyOptionalIntV3(selected.Subtitle.Index)
+	}
+}
+
 // audioSelectionDiffersFromStartV3 reports whether the replan's audio
 // selection names a track other than the start request's. An omitted audio
 // identity means "unchanged" — clients may not resend the current track.
@@ -2025,6 +2057,18 @@ func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *h
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize the route event")
 			return
 		}
+		// A terminal start decision deliberately allocates no playback session
+		// or durable attempt row. Its client-side terminal diagnostic is still
+		// valid and can be safely attributed to the authenticated user/profile
+		// when it carries no session- or plan-scoped identity. All other unknown
+		// attempts retain the indistinguishable 403 response below.
+		if terminalStartRouteEventV3(event) {
+			event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
+			client := playbackClientInfoFromRequest(r)
+			h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, UserID: userID, ProfileID: profileID, ClientName: client.Name, ClientVersion: client.Version, ClientModel: event.Diagnostics["device_model"]})
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 		return
 	}
@@ -2037,6 +2081,12 @@ func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *h
 	client := playbackClientInfoFromRequest(r)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, UserID: userID, ProfileID: profileID, ClientName: client.Name, ClientVersion: client.Version, ClientModel: event.Diagnostics["device_model"]})
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func terminalStartRouteEventV3(event playback.RouteEventV3) bool {
+	return event.Event == playback.RouteEventTerminalV3 &&
+		event.SessionID == "" && event.PlanID == "" &&
+		event.PlanAttemptID == "" && event.PlanAttemptKey == ""
 }
 
 // StartV3Maintenance expires cached signed responses and old telemetry on the
