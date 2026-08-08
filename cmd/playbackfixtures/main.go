@@ -43,10 +43,18 @@ const (
 	// Codec and container tokens the fixtures are built from. Named so the
 	// capability lists, the plan recipe, and the source descriptor cannot drift
 	// into describing different media by a one-character typo.
-	codecH264    = "h264"
-	codecHEVC    = "hevc"
-	codecAAC     = "aac"
-	containerMP4 = "mp4"
+	codecH264         = "h264"
+	codecHEVC         = "hevc"
+	codecAAC          = "aac"
+	containerMP4      = "mp4"
+	containerMKV      = "mkv"
+	containerHLS      = "hls"
+	profileHigh       = "high"
+	resolutionHD      = "720p"
+	resolutionFHD     = "1080p"
+	qualityOriginal   = "original"
+	audioLayoutStereo = "stereo"
+	videoRangeSDR     = "SDR"
 )
 
 func main() {
@@ -98,10 +106,10 @@ func goldenCapabilities() playback.ClientCodecCapabilitiesV3 {
 		CodecsVideoHardware: []string{codecH264},
 		CodecsAudio:         []string{codecAAC},
 		Containers:          []string{containerMP4},
-		MaxResolution:       "1080p",
+		MaxResolution:       resolutionFHD,
 		VideoDecode: []playback.VideoDecodeCapabilityV3{{
 			Codec:          codecH264,
-			Profiles:       []string{"high"},
+			Profiles:       []string{profileHigh},
 			Levels:         []int{41},
 			BitDepths:      []int{8},
 			MaxWidth:       1920,
@@ -298,7 +306,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 			BitrateKbps:   &bitrate,
 			DynamicRange:  playback.DynamicRangeSDRV3,
 			AudioChannels: &channels,
-			AudioLayout:   "stereo",
+			AudioLayout:   audioLayoutStereo,
 		},
 		Claims: playback.ValidationClaimsV3{
 			Audio: playback.AudioClaimsV3{Codec: codecAAC, Reason: "client_decode_supported"},
@@ -314,7 +322,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 		RuntimeCorrections: []string{},
 		AvailableQualities: []playback.AvailableQualityV3{
 			{Label: playback.QualityOriginalV3, Height: 1080, BitrateKbps: 8_000, PreservesSource: true},
-			{Label: "720p", Height: 720, BitrateKbps: 2_000},
+			{Label: resolutionHD, Height: 720, BitrateKbps: 2_000},
 			{Label: "480p", Height: 480, BitrateKbps: 1_500},
 		},
 		DegradationWarnings:  []playback.DegradationWarningV3{},
@@ -326,7 +334,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 			DurationSeconds:    &duration,
 			Container:          containerMP4,
 			VideoCodec:         codecH264,
-			VideoProfile:       "high",
+			VideoProfile:       profileHigh,
 			VideoLevel:         41,
 			BitDepth:           8,
 			Width:              1920,
@@ -337,7 +345,7 @@ func goldenDecisionResponse() playback.DecisionResponseV3 {
 			DVEnhancementLayer: playback.EnhancementNoneV3,
 			AudioCodec:         codecAAC,
 			AudioChannels:      2,
-			AudioLayout:        "stereo",
+			AudioLayout:        audioLayoutStereo,
 		},
 		SubtitleFidelityPolicy: "allow_simplified_rendering",
 	}
@@ -454,7 +462,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 			PlanID:         "plan:fixture",
 			Delivery:       playback.DeliveryRemuxHLSV3,
 			StreamProtocol: playback.StreamHLSV3,
-			Container:      "hls",
+			Container:      containerHLS,
 			VideoCodec:     codecHEVC,
 			AudioCodec:     codecAAC,
 			Width:          3840,
@@ -478,7 +486,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 			PlanID:         "plan:dv81-fixture",
 			Delivery:       playback.DeliveryOriginalHTTPV3,
 			StreamProtocol: playback.StreamHTTPProgressiveV3,
-			Container:      "mkv",
+			Container:      containerMKV,
 			VideoCodec:     codecHEVC,
 			AudioCodec:     "truehd",
 			Width:          3840,
@@ -497,7 +505,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 			PlanID:          "plan:quirk",
 			Delivery:        playback.DeliveryOriginalHTTPV3,
 			StreamProtocol:  playback.StreamHTTPProgressiveV3,
-			Container:       "mkv",
+			Container:       containerMKV,
 			VideoCodec:      codecHEVC,
 			AudioCodec:      "eac3",
 			Width:           3840,
@@ -603,7 +611,7 @@ func goldenConformanceMatrix() conformanceMatrix {
 	fallbackRequest.Capabilities.Containers = []string{containerMP4}
 	fallbackFile := conformanceFallbackFile()
 	var attempted []string
-	for _, name := range []string{"original", "progressive", "hls"} {
+	for _, name := range []string{qualityOriginal, "progressive", containerHLS} {
 		request := fallbackRequest
 		request.PlaybackAttemptID = "attempt-delivery-chain"
 		scenario := makePlannerScenario("delivery_"+name, "deliveries_negotiation", request, fallbackFile, attempted, settings, registry)
@@ -612,10 +620,10 @@ func goldenConformanceMatrix() conformanceMatrix {
 	}
 	transcodeRequest := fallbackRequest
 	transcodeRequest.PlaybackAttemptID = "attempt-delivery-transcode"
-	transcodeRequest.QualityPreference = "720p"
+	transcodeRequest.QualityPreference = resolutionHD
 	planner = append(planner, makePlannerScenario("delivery_transcode", "deliveries_negotiation", transcodeRequest, fallbackFile, nil, settings, registry))
 
-	audioFile := &models.MediaFile{ID: 77, Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+	audioFile := &models.MediaFile{ID: 77, Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 	audioRequest := conformanceStartRequest()
 	audioRequest.FileID = audioFile.ID
 	audioRequest.PlaybackAttemptID = "attempt-audio-only"
@@ -624,7 +632,7 @@ func goldenConformanceMatrix() conformanceMatrix {
 
 	qualityRequest := fallbackRequest
 	qualityRequest.PlaybackAttemptID = "attempt-available-qualities"
-	qualityRequest.QualityPreference = "original"
+	qualityRequest.QualityPreference = qualityOriginal
 	planner = append(planner, makePlannerScenario("available_qualities", "available_qualities", qualityRequest, fallbackFile, nil, settings, registry))
 
 	decision := goldenDecisionResponse()
@@ -642,7 +650,7 @@ func goldenConformanceMatrix() conformanceMatrix {
 	qualityChange.Operation = playback.ReplanOperationQualityChangeV3
 	qualityChange.ReplanRequestID = "replan-quality-change-0001"
 	qualityChange.Failure = playback.FailureV3{}
-	qualityChange.QualityPreference = "720p"
+	qualityChange.QualityPreference = resolutionHD
 	seekReanchor := goldenReplanRequest()
 	seekReanchor.Operation = playback.ReplanOperationSeekReanchorV3
 	seekReanchor.ReplanRequestID = "replan-seek-reanchor-0001"
@@ -651,7 +659,7 @@ func goldenConformanceMatrix() conformanceMatrix {
 
 	replans := []replanScenario{
 		{Name: "track_change", Category: "track_change_replan", Request: trackChange, Expected: map[string]any{"preserve_unmodified_tracks": true, "idempotent_duplicate_status": 200}},
-		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: map[string]any{"selected_quality": "720p", "idempotent_duplicate_status": 200}},
+		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: map[string]any{"selected_quality": resolutionHD, "idempotent_duplicate_status": 200}},
 		{Name: "idempotent_duplicate", Category: "idempotent_replan", Request: qualityChange, Expected: map[string]any{"same_request_id_and_body_status": 200, "response_replayed_verbatim": true, "changed_body_status": 409, "changed_body_error": "idempotency_key_reused"}},
 		{Name: "mid_seek_reanchor", Category: "mid_seek_replan", Request: seekReanchor, Expected: map[string]any{"position_seconds": 321.25, "route_identity_stable_when_recipe_unchanged": true}},
 		{Name: "concurrent_duplicate", Category: "concurrent_replan", Request: seekReanchor, Expected: map[string]any{"while_first_lease_active_status": 409, "error": "replan_in_progress", "after_completion_status": 200, "response_replayed_verbatim": true}},
@@ -695,30 +703,30 @@ func makePlannerScenario(name, category string, request playback.StartRequestV3,
 
 func conformanceStartRequest() playback.StartRequestV3 {
 	request := goldenStartRequest()
-	request.QualityPreference = "original"
+	request.QualityPreference = qualityOriginal
 	request.Capabilities = playback.ClientCodecCapabilitiesV3{
 		VideoEvidence: playback.EvidenceExactV3, AudioEvidence: playback.EvidenceExactV3,
-		CodecsVideo: []string{codecHEVC}, CodecsVideoHardware: []string{codecHEVC}, CodecsAudio: []string{codecAAC}, Containers: []string{"mkv"}, MaxResolution: "1080p",
+		CodecsVideo: []string{codecHEVC}, CodecsVideoHardware: []string{codecHEVC}, CodecsAudio: []string{codecAAC}, Containers: []string{containerMKV}, MaxResolution: resolutionFHD,
 		VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: codecHEVC, Profiles: []string{"main 10"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}},
 	}
 	request.ClientPlaybackContext = playback.ClientPlaybackContextV3{
 		ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "3.0-test",
 		Device: playback.DeviceContextV3{Platform: "fixture"}, Output: playback.OutputContextV3{OutputContextID: "output-a"},
 		Deliveries: map[string]playback.DeliveryCapabilityV3{
-			playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv", containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+			playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{containerMKV, containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
 			playback.DeliveryClassProgressiveV3:  {Enabled: true, SupportedOnDevice: true, Containers: []string{containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
-			playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+			playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{containerHLS}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
 		},
 	}
 	return request
 }
 
 func conformanceVideoFile() *models.MediaFile {
-	return &models.MediaFile{ID: goldenMediaFileID, Container: "mkv", CodecVideo: codecHEVC, CodecAudio: codecAAC, Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecHEVC, Profile: "Main", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMKV, CodecVideo: codecHEVC, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecHEVC, Profile: "Main", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 }
 
 func conformanceFallbackFile() *models.MediaFile {
-	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMP4, CodecVideo: codecH264, CodecAudio: codecAAC, Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecH264, Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMP4, CodecVideo: codecH264, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecH264, Profile: profileHigh, Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 }
 
 func conformanceRegistry() *playback.TransformationRegistryV3 {

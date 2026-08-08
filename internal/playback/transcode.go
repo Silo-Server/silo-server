@@ -86,6 +86,8 @@ const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
 
 const (
 	transcodeCodecH264 = "h264"
+	transcodeHWQSV     = "qsv"
+	transcodeHWVAAPI   = "vaapi"
 	transcodeHWNVENC   = "nvenc"
 )
 
@@ -541,7 +543,7 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 	// boundaries always start with an IDR frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
-	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" || opts.HWAccel == transcodeHWNVENC {
+	if opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI || opts.HWAccel == transcodeHWNVENC {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
 	}
