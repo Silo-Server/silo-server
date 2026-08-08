@@ -383,7 +383,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		// node-offloadable delivery instead.
 		progressiveExecutable := (!transcodeAudio || localAudioConvertOK) && (!dvStrip || dvStripEligibleLocal)
 		if remuxSubtitleOK && progressiveExecutable {
-			plan.Subtitle = remuxSubtitle.Decision
+			applySubtitleDecisionV3(&plan, remuxSubtitle.Decision)
 			plan.Claims.Subtitles = remuxSubtitle.Claims
 			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 			if deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
@@ -442,7 +442,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			} else {
 				plan.DecisionReason = "hls_packaging_required"
 			}
-			plan.Subtitle = hlsSubtitle.Decision
+			applySubtitleDecisionV3(&plan, hlsSubtitle.Decision)
 			plan.Claims.Subtitles = hlsSubtitle.Claims
 			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 			if !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
@@ -626,7 +626,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimAudioDecodeV3}},
 	)
 	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Passthrough: false, AtmosPreserved: false, Reason: "server_audio_adaptation"}
-	plan.Subtitle = subtitle.Decision
+	applySubtitleDecisionV3(&plan, subtitle.Decision)
 	plan.Claims.Subtitles = subtitle.Claims
 	plan.DecisionReason = quality.Reason
 	if reasonOverride != "" {
@@ -643,6 +643,19 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
+}
+
+// applySubtitleDecisionV3 changes the delivery-specific subtitle policy without
+// discarding the source inventory already frozen onto the base plan. Adapted
+// routes still address the same combined ordinal space as original_http; only
+// the rendering decision and claims vary by delivery capability.
+func applySubtitleDecisionV3(plan *PlanV3, decision SubtitleDecisionV3) {
+	if plan == nil {
+		return
+	}
+	inventory := plan.Subtitle.Inventory
+	plan.Subtitle = decision
+	plan.Subtitle.Inventory = inventory
 }
 
 func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartRequestV3, registry *TransformationRegistryV3) bool {

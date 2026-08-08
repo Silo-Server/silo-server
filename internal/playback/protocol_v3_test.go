@@ -792,6 +792,73 @@ func TestPlanPlaybackV3PublishesTheCompleteSubtitleInventory(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3AdaptedRoutesPreservePGSCombinedInventory(t *testing.T) {
+	file := detailedFixtureFileV3()
+	for range 8 {
+		file.ExternalSubtitles = append(file.ExternalSubtitles, models.ExternalSubtitle{Format: "srt"})
+	}
+	// The scanner index is the absolute probed stream index. The client-facing
+	// combined ordinal is 8, while ffmpeg addresses this first embedded
+	// subtitle as 0:s:0 (transport index 0).
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Codec: "hdmv_pgs_subtitle"}}
+
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	for _, deliveryClass := range []string{DeliveryClassOriginalHTTPV3, DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
+		delivery := req.ClientPlaybackContext.Deliveries[deliveryClass]
+		delivery.Subtitles.EmbeddedBitmap = true
+		req.ClientPlaybackContext.Deliveries[deliveryClass] = delivery
+	}
+	selectedIndex := 8
+	req.SubtitleTrackIndex = &selectedIndex
+	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", selectedIndex)
+
+	input := PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	}
+	direct := PlanPlaybackV3(input)
+	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("direct plan = %#v", direct)
+	}
+	input.AttemptedKeys = []string{PlanAttemptKeyV3(*direct.Plan, req.ClientPlaybackContext.Output.OutputContextID, nil)}
+	progressive := PlanPlaybackV3(input)
+	if progressive.Plan == nil || progressive.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("progressive fallback = %#v", progressive)
+	}
+	input.AttemptedKeys = append(input.AttemptedKeys, PlanAttemptKeyV3(*progressive.Plan, req.ClientPlaybackContext.Output.OutputContextID, nil))
+	hls := PlanPlaybackV3(input)
+	if hls.Plan == nil || hls.Plan.Delivery != DeliveryRemuxHLSV3 {
+		t.Fatalf("HLS fallback = %#v", hls)
+	}
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	input.Request.QualityPreference = "1080p"
+	input.AttemptedKeys = nil
+	transcode := PlanPlaybackV3(input)
+	if transcode.Plan == nil || transcode.Plan.Delivery != DeliveryTranscodeHLSV3 {
+		t.Fatalf("transcode route = %#v", transcode)
+	}
+
+	for name, result := range map[string]PlannerResultV3{"progressive": progressive, "HLS": hls, "transcode": transcode} {
+		if result.SubtitleTrackIndex != selectedIndex || result.SubtitleTransportTrackIndex != 0 {
+			t.Errorf("%s subtitle selection = combined %d / transport %d, want 8 / 0", name, result.SubtitleTrackIndex, result.SubtitleTransportTrackIndex)
+		}
+		inventory := result.Plan.Subtitle.Inventory
+		if len(inventory) != 9 {
+			t.Errorf("%s inventory = %+v, want all 9 combined ordinals", name, inventory)
+			continue
+		}
+		selected := inventory[selectedIndex]
+		if selected.CombinedIndex != selectedIndex || selected.TrackID != req.SubtitleTrackID || selected.Source != SubtitleSourceEmbeddedV3 || selected.Codec != "hdmv_pgs_subtitle" || selected.Delivery != SubtitleDeliverySidecarV3 {
+			t.Errorf("%s selected inventory entry = %+v", name, selected)
+		}
+	}
+}
+
 // Adding the inventory to the plan must not perturb plan identity: replans
 // would otherwise miss the cache and clients would see spurious new attempts.
 func TestPlanAttemptKeyV3IgnoresTheSubtitleInventory(t *testing.T) {
