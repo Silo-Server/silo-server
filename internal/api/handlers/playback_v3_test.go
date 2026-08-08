@@ -1791,14 +1791,16 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 	defer remote.Close()
 
 	file := v3HandlerFixtureFile(t)
-	file.CodecVideo = "hevc"
+	file.CodecVideo = "h264"
+	file.VideoTracks[0].Profile = "High 10"
+	file.VideoTracks[0].BitDepth = 10
 	file.Duration = 7_201
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
 	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
-	plan := &playback.PlanV3{PlanID: "plan:frozen-source", Delivery: playback.DeliveryRemuxHLSV3}
+	plan := &playback.PlanV3{PlanID: "plan:frozen-source", Delivery: playback.DeliveryTranscodeHLSV3}
 	initial := playback.PlannerResultV3{
-		Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", TargetAudioCodec: "copy",
+		Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac",
 		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
 	}
 	recipe, err := handler.freezeExecutableRecipeV3(context.Background(), file, initial)
@@ -1806,6 +1808,8 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 		t.Fatalf("freeze executable recipe: %v", err)
 	}
 	file.CodecVideo = "mpeg2video"
+	file.VideoTracks[0].Profile = "main"
+	file.VideoTracks[0].BitDepth = 8
 	file.Duration = 99
 	result := recipe.PlannerResult(plan)
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -1814,10 +1818,66 @@ func TestPrepareTransportV3UsesFrozenSourceMetadataAfterProbeDrift(t *testing.T)
 		t.Fatalf("prepare remote transport: %v", transportErr)
 	}
 	defer transport.rollback()
-	if startRequest.SourceVideoCodec != "hevc" || startRequest.TotalDuration != 7_201 {
+	if startRequest.SourceVideoCodec != "h264" || !startRequest.SoftwareVideoDecode || startRequest.TotalDuration != 7_201 {
 		t.Fatalf("remote start consumed refreshed probe metadata: %#v", startRequest)
 	}
 }
+
+func TestSourceExecutionMetadataV3FreezesH264High10SoftwareDecode(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.VideoTracks[0].Profile = "High 10"
+	file.VideoTracks[0].BitDepth = 10
+
+	metadata := sourceExecutionMetadataV3(file, playback.PlannerResultV3{})
+	if !metadata.SoftwareVideoDecode {
+		t.Fatalf("High 10 AVC source metadata = %#v, want software decode", metadata)
+	}
+	file.CodecVideo = ""
+	metadata = sourceExecutionMetadataV3(file, playback.PlannerResultV3{})
+	if metadata.VideoCodec != "h264" || !metadata.SoftwareVideoDecode {
+		t.Fatalf("track-backed High 10 AVC source metadata = %#v, want h264 software decode", metadata)
+	}
+	plan := &playback.PlanV3{PlanID: "plan:high10", Delivery: playback.DeliveryTranscodeHLSV3}
+	recipe, err := NewPlaybackHandler(playback.NewSessionManager(0, 0)).freezeExecutableRecipeV3(context.Background(), file, playback.PlannerResultV3{
+		Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac",
+		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+	})
+	if err != nil {
+		t.Fatalf("freeze High 10 recipe: %v", err)
+	}
+	if !recipe.SoftwareVideoDecode {
+		t.Fatalf("frozen recipe = %#v, want software decode", recipe)
+	}
+	thawed := recipe.PlannerResult(plan)
+	if thawed.FrozenSourceMetadata == nil || !thawed.FrozenSourceMetadata.SoftwareVideoDecode {
+		t.Fatalf("thawed source metadata = %#v, want software decode", thawed.FrozenSourceMetadata)
+	}
+}
+
+func TestPrepareLocalTransportV3ReturnsStableTerminalWhenFFmpegExitsBeforeReady(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager)
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegAlwaysFailing(t), t.TempDir())
+	file := v3HandlerFixtureFile(t)
+	plan := &playback.PlanV3{PlanID: "plan:startup-failure", Delivery: playback.DeliveryTranscodeHLSV3}
+	result := playback.PlannerResultV3{
+		Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: "720p",
+		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: "session-startup-failure", UserID: 7, ProfileID: "profile-1"}, file, result)
+	if transportErr == nil {
+		transport.rollback()
+		t.Fatal("failed ffmpeg startup returned a playable transport")
+	}
+	if transportErr.reason != "transcode_start_failed" || transportErr.retryable {
+		t.Fatalf("transport error = %#v, want stable non-retryable startup terminal", transportErr)
+	}
+	if transportErr.cause == nil || !strings.Contains(transportErr.cause.Error(), "intentional startup failure") {
+		t.Fatalf("startup error lost ffmpeg cause: %#v", transportErr)
+	}
+}
+
 func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 	// A copy remux streams FFmpeg's growing playlist, so its seek window must
 	// stay open-ended even though the runtime is known. A bounded window reads

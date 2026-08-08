@@ -54,8 +54,14 @@ type TranscodeOpts struct {
 	FFmpegPath             string // optional explicit ffmpeg binary path
 	HWAccel                string // auto, qsv, vaapi, nvenc, none
 	HWDevice               string // e.g., /dev/dri/renderD128 (default if empty)
-	SubtitleTrackIndex     int    // -1 = no subtitles
-	SubtitleBurnIn         bool
+	// SoftwareVideoDecode keeps a hardware encoder while decoding the source
+	// on the CPU. Intel's VAAPI/QSV decoders cannot accept 10-bit AVC, but the
+	// decoded frames can still be converted to NV12, uploaded, and encoded by
+	// QSV/VAAPI. The flag is frozen into recipe cards so restarts do not put the
+	// unsupported hardware decoder back.
+	SoftwareVideoDecode bool
+	SubtitleTrackIndex  int // -1 = no subtitles
+	SubtitleBurnIn      bool
 	// SubtitleCodec is the probed codec of the burn-in track (e.g. "subrip",
 	// "hdmv_pgs_subtitle"). Bitmap codecs (PGS/DVD/DVB) select the overlay
 	// filter_complex pipeline; text codecs use the libass subtitles filter.
@@ -292,6 +298,18 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 	}
 }
 
+// RequiresSoftwareVideoDecode reports sources that the installed hardware
+// execution recipes must not feed to their video decoders. AVC High 10 is not
+// supported by Intel VAAPI/QSV decode; scanner rows are not perfectly uniform,
+// so either the probed bit depth or the normalized profile is sufficient.
+func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
+	if normalizeCodecV3(codec) != "h264" {
+		return false
+	}
+	normalizedProfile := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(profile)))
+	return bitDepth > 8 || normalizedProfile == "high10" || normalizedProfile == "high10intra" || normalizedProfile == "hi10p"
+}
+
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Resolve "auto" into a concrete accel method once so all downstream
@@ -425,6 +443,13 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 	if IsMPEG4Part2VideoCodec(opts.SourceVideoCodec) {
 		return "none"
 	}
+	// The bundled CUDA software-decode upload path has not been validated.
+	// Prefer the established libx264 fallback over selecting a decoder known
+	// not to accept this source. Intel QSV/VAAPI have the explicit upload paths
+	// below and retain hardware encoding.
+	if opts.SoftwareVideoDecode && hwAccel == "nvenc" {
+		return "none"
+	}
 	return hwAccel
 }
 
@@ -534,10 +559,11 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			"-init_hw_device", fmt.Sprintf("vaapi=va:%s,driver=iHD,kernel_driver=i915,vendor_id=0x8086", hwDevice),
 			"-init_hw_device", "qsv=qs@va",
 			"-filter_hw_device", "va",
-			"-hwaccel", "vaapi",
-			"-hwaccel_output_format", "vaapi",
-			"-noautorotate",
 		)
+		if !opts.SoftwareVideoDecode {
+			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
+		}
+		args = append(args, "-noautorotate")
 	case "vaapi":
 		vaapiDevice := PickRenderDevice(opts.HWDevice)
 		if vaapiDevice == "" {
@@ -546,9 +572,10 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args,
 			"-init_hw_device", fmt.Sprintf("vaapi=hw:%s", vaapiDevice),
 			"-filter_hw_device", "hw",
-			"-hwaccel", "vaapi",
-			"-hwaccel_output_format", "vaapi",
 		)
+		if !opts.SoftwareVideoDecode {
+			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
+		}
 	case "nvenc":
 		args = append(args,
 			"-hwaccel", "cuda",
@@ -675,6 +702,10 @@ func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 		return appendBitmapSubtitleBurnInArgs(args, opts)
 	case opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0:
 		return appendSubtitleBurnInArgs(args, opts)
+	case opts.HWAccel == "qsv" && opts.SoftwareVideoDecode:
+		return append(args, "-vf", qsvSoftwareDecodeFilter(opts.TargetResolution))
+	case opts.HWAccel == "vaapi" && opts.SoftwareVideoDecode:
+		return append(args, "-vf", vaapiSoftwareDecodeFilter(opts.TargetResolution))
 	case opts.HWAccel == "qsv":
 		return append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
 	case opts.HWAccel == "vaapi":
@@ -768,12 +799,20 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 	var graph string
 	switch opts.HWAccel {
 	case "qsv":
+		if opts.SoftwareVideoDecode {
+			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, true)
+			break
+		}
 		// GPU composite: upload only the subtitle bitmap, overlay it onto the
 		// VAAPI video surface, scale, then map to QSV for the encoder. The scale
 		// helper already appends the hwmap=derive_device=qsv tail.
 		graph = subInput + "format=bgra,hwupload[sub];" +
 			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + qsvScaleFilter(opts.TargetResolution) + "[vout]"
 	case "vaapi":
+		if opts.SoftwareVideoDecode {
+			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, false)
+			break
+		}
 		// GPU composite: same as QSV but the frames stay on VAAPI through the
 		// encoder, so no cross-device map is needed.
 		graph = subInput + "format=bgra,hwupload[sub];" +
@@ -799,6 +838,21 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 	return append(args, "-filter_complex", graph)
 }
 
+// softwareDecodedBitmapBurnInGraph composites decoded CPU frames and uploads
+// the finished NV12 frames for the hardware encoder. It is the Hi10 AVC
+// counterpart of the all-hardware overlay_vaapi graph above.
+func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv bool) string {
+	filters := subInput + "overlay=eof_action=pass"
+	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
+		filters += "," + scale
+	}
+	filters += ",format=nv12,hwupload"
+	if qsv {
+		filters += ",hwmap=derive_device=qsv,format=qsv"
+	}
+	return "[0:v:0]format=yuv420p[vmain];[vmain]" + filters + "[vout]"
+}
+
 // appendSubtitleBurnInArgs adds subtitle burn-in filter arguments for TEXT
 // subtitle codecs (SRT/ASS/…) via the libass-based subtitles= filter; bitmap
 // codecs take the overlay path in appendBitmapSubtitleBurnInArgs.
@@ -821,12 +875,20 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 
 	switch opts.HWAccel {
 	case "qsv":
+		if opts.SoftwareVideoDecode {
+			vf := "format=yuv420p," + cpuFilters + ",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
+			return append(args, "-vf", vf)
+		}
 		// VAAPI→QSV pipeline: download from VAAPI surface to CPU, apply subtitle
 		// and scale filters, convert to nv12 (required by hwupload for VAAPI
 		// surfaces), upload back to VAAPI, then map to QSV for the encoder.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
 		args = append(args, "-vf", vf)
 	case "vaapi":
+		if opts.SoftwareVideoDecode {
+			vf := "format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
+			return append(args, "-vf", vf)
+		}
 		// VAAPI-only: download, apply CPU filters, convert to nv12, upload back.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
@@ -882,6 +944,10 @@ func qsvScaleFilter(res string) string {
 	}
 }
 
+func qsvSoftwareDecodeFilter(res string) string {
+	return "format=nv12,hwupload," + qsvScaleFilter(res)
+}
+
 // vaapiScaleFilter keeps VAAPI frames in hardware and converts them to a
 // browser-compatible encoder format. Using the CPU scale filter on VAAPI frames
 // causes FFmpeg auto_scale format-negotiation failures.
@@ -902,6 +968,10 @@ func vaapiScaleFilter(res string) string {
 	default:
 		return "scale_vaapi=format=nv12"
 	}
+}
+
+func vaapiSoftwareDecodeFilter(res string) string {
+	return "format=nv12,hwupload," + vaapiScaleFilter(res)
 }
 
 func nvencScaleFilter(res string) string {

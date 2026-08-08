@@ -30,6 +30,7 @@ type TranscodeStartRequest struct {
 	SessionID              string  `json:"session_id"`
 	InputPath              string  `json:"input_path"`
 	SourceVideoCodec       string  `json:"source_video_codec"`
+	SoftwareVideoDecode    bool    `json:"software_video_decode,omitempty"`
 	VideoBitstreamFilter   string  `json:"video_bitstream_filter,omitempty"`
 	SeekSeconds            float64 `json:"seek_seconds"`
 	StreamOriginSeconds    float64 `json:"stream_origin_seconds,omitempty"`
@@ -480,6 +481,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		OutputDir:              outputDir,
 		SessionID:              req.SessionID,
 		SourceVideoCodec:       req.SourceVideoCodec,
+		SoftwareVideoDecode:    req.SoftwareVideoDecode,
 		VideoBitstreamFilter:   req.VideoBitstreamFilter,
 		SeekSeconds:            req.SeekSeconds,
 		StreamOriginSeconds:    req.StreamOriginSeconds,

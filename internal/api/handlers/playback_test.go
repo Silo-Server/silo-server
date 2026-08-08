@@ -290,6 +290,16 @@ func writePlaybackTestFFmpegFailingAfterFirstStart(t *testing.T) string {
 	return path
 }
 
+func writePlaybackTestFFmpegAlwaysFailing(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'intentional startup failure' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write failing fake ffmpeg: %v", err)
+	}
+	return path
+}
+
 func playbackTestConfig(ffmpegPath, transcodeDir string) func() config.PlaybackConfig {
 	return func() config.PlaybackConfig {
 		return config.PlaybackConfig{

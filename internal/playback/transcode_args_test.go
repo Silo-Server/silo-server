@@ -264,6 +264,114 @@ func TestBuildFFmpegArgs_MPEG4Part2DisablesHardwareDecode(t *testing.T) {
 	}
 }
 
+func TestRequiresSoftwareVideoDecodeForH264High10(t *testing.T) {
+	tests := []struct {
+		codec    string
+		profile  string
+		bitDepth int
+		want     bool
+	}{
+		{codec: "h264", profile: "High 10", bitDepth: 10, want: true},
+		{codec: "avc", profile: "Hi10P", bitDepth: 0, want: true},
+		{codec: "h264", profile: "High", bitDepth: 10, want: true},
+		{codec: "h264", profile: "High", bitDepth: 8, want: false},
+		{codec: "hevc", profile: "Main 10", bitDepth: 10, want: false},
+	}
+	for _, test := range tests {
+		if got := RequiresSoftwareVideoDecode(test.codec, test.profile, test.bitDepth); got != test.want {
+			t.Errorf("RequiresSoftwareVideoDecode(%q, %q, %d) = %v, want %v", test.codec, test.profile, test.bitDepth, got, test.want)
+		}
+	}
+}
+
+func TestBuildFFmpegArgs_H264High10QSVUsesSoftwareDecodeUpload(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/high10.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-high10-pgs-sidecar",
+		SourceVideoCodec:    "h264",
+		SoftwareVideoDecode: true,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "qsv",
+		TargetResolution:    "720p",
+		SubtitleTrackIndex:  2,
+		SubtitleCodec:       "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	for _, forbidden := range []string{"-hwaccel vaapi", "-hwaccel_output_format vaapi", "hwdownload"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("High 10 AVC must software-decode, found %q: %s", forbidden, joined)
+		}
+	}
+	for _, required := range []string{
+		"-init_hw_device vaapi=va:",
+		"-init_hw_device qsv=qs@va",
+		"-c:v h264_qsv",
+		"-vf format=nv12,hwupload,scale_vaapi=w=-2:h=720:format=nv12,hwmap=derive_device=qsv,format=qsv",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("High 10 QSV recipe missing %q: %s", required, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgs_H264High10QSVASSBurnInUsesSoftwareFrames(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/high10.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-high10-ass",
+		SourceVideoCodec:    "h264",
+		SoftwareVideoDecode: true,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "qsv",
+		TargetResolution:    "720p",
+		SubtitleTrackIndex:  0,
+		SubtitleBurnIn:      true,
+		SubtitleCodec:       "ass",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-vf format=yuv420p,scale=-2:720,subtitles='/media/high10.mkv':si=0,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("High 10 ASS burn-in should render on software frames then upload %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "-hwaccel vaapi") {
+		t.Fatalf("High 10 ASS burn-in must not assume hardware-decoded input: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_H264High10QSVBitmapBurnInUsesSoftwareFrames(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/high10.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-high10-pgs-burn",
+		SourceVideoCodec:    "h264",
+		SoftwareVideoDecode: true,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "qsv",
+		TargetResolution:    "720p",
+		SubtitleTrackIndex:  2,
+		SubtitleBurnIn:      true,
+		SubtitleCodec:       "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-filter_complex [0:v:0]format=yuv420p[vmain];[vmain][0:s:2]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("High 10 PGS burn-in should composite on software frames then upload %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "overlay_vaapi") || strings.Contains(joined, "hwdownload") || strings.Contains(joined, "-hwaccel vaapi") {
+		t.Fatalf("High 10 PGS burn-in must not assume hardware-decoded input: %s", joined)
+	}
+}
+
 func TestBuildFFmpegArgs_BitmapBurnInCPUUsesOverlayFilterComplex(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:          "/media/movie.mkv",
@@ -533,6 +641,16 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 			name: "nvenc passthrough",
 			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", TargetCodecVideo: "h264"},
 			want: "nvenc",
+		},
+		{
+			name: "qsv keeps hardware encode with software decode",
+			opts: TranscodeOpts{HWAccel: "qsv", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264"},
+			want: "qsv",
+		},
+		{
+			name: "unvalidated nvenc upload falls back to software encode",
+			opts: TranscodeOpts{HWAccel: "nvenc", SourceVideoCodec: "h264", SoftwareVideoDecode: true, TargetCodecVideo: "h264"},
+			want: "none",
 		},
 	}
 

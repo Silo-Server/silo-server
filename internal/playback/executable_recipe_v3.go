@@ -17,6 +17,7 @@ type ExecutableRecipeV3 struct {
 	TargetResolution            string     `json:"target_resolution,omitempty"`
 	TargetBitrateKbps           int        `json:"target_bitrate_kbps,omitempty"`
 	SourceVideoCodec            string     `json:"source_video_codec,omitempty"`
+	SoftwareVideoDecode         bool       `json:"software_video_decode,omitempty"`
 	SourceDurationSeconds       float64    `json:"source_duration_seconds,omitempty"`
 	SubtitleTrackIndex          int        `json:"subtitle_track_index"`
 	SubtitleTransportTrackIndex int        `json:"subtitle_transport_track_index"`
@@ -56,6 +57,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		TargetResolution:            result.TargetResolution,
 		TargetBitrateKbps:           result.TargetBitrateKbps,
 		SourceVideoCodec:            sourceMetadata.VideoCodec,
+		SoftwareVideoDecode:         sourceMetadata.SoftwareVideoDecode,
 		SourceDurationSeconds:       sourceMetadata.DurationSeconds,
 		SubtitleTrackIndex:          result.SubtitleTrackIndex,
 		SubtitleTransportTrackIndex: result.SubtitleTransportTrackIndex,
@@ -92,8 +94,9 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		TargetResolution:    r.TargetResolution,
 		TargetBitrateKbps:   r.TargetBitrateKbps,
 		FrozenSourceMetadata: &SourceExecutionMetadataV3{
-			VideoCodec:      r.SourceVideoCodec,
-			DurationSeconds: r.SourceDurationSeconds,
+			VideoCodec:          r.SourceVideoCodec,
+			SoftwareVideoDecode: r.SoftwareVideoDecode,
+			DurationSeconds:     r.SourceDurationSeconds,
 		},
 		SubtitleTrackIndex:          r.SubtitleTrackIndex,
 		SubtitleTransportTrackIndex: r.SubtitleTransportTrackIndex,

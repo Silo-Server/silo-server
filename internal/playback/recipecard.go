@@ -48,6 +48,7 @@ type RecipeCard struct {
 	InputPath              string  `json:"input_path"`
 	OutputSubdir           string  `json:"output_subdir,omitempty"`
 	SourceVideoCodec       string  `json:"source_video_codec,omitempty"`
+	SoftwareVideoDecode    bool    `json:"software_video_decode,omitempty"`
 	VideoBitstreamFilter   string  `json:"video_bitstream_filter,omitempty"`
 	SeekSeconds            float64 `json:"seek_seconds"`
 	StreamOriginSeconds    float64 `json:"stream_origin_seconds,omitempty"`
@@ -86,6 +87,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		InputPath:              opts.InputPath,
 		OutputSubdir:           opts.OutputSubdir,
 		SourceVideoCodec:       opts.SourceVideoCodec,
+		SoftwareVideoDecode:    opts.SoftwareVideoDecode,
 		VideoBitstreamFilter:   opts.VideoBitstreamFilter,
 		SeekSeconds:            opts.SeekSeconds,
 		StreamOriginSeconds:    opts.StreamOriginSeconds,
@@ -152,6 +154,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SessionID:              c.SessionID,
 		TranscodeTransportID:   c.TranscodeTransportID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,
@@ -207,6 +210,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ProfileID:              c.ProfileID,
 		MediaFileID:            c.MediaFileID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,
@@ -248,6 +252,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		InputPath:              c.MediaPath,
 		OutputSubdir:           c.OutputSubdir,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,

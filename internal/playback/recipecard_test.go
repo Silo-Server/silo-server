@@ -13,6 +13,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		OutputDir:              "/tmp/silo-transcode/abc",
 		SessionID:              "abc",
 		SourceVideoCodec:       "hevc",
+		SoftwareVideoDecode:    true,
 		VideoBitstreamFilter:   "dovi_rpu=strip=1",
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -63,6 +64,9 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
+	}
+	if !got.SoftwareVideoDecode {
+		t.Error("SoftwareVideoDecode lost in round trip")
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
@@ -204,6 +208,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		InputPath:              "/media/movie.mkv",
 		SessionID:              "abc",
 		SourceVideoCodec:       "hevc",
+		SoftwareVideoDecode:    true,
 		VideoBitstreamFilter:   "dovi_rpu=strip=1",
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -233,6 +238,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	}
 	// Byte-affecting encode parameters.
 	if got.InputPath != card.InputPath || got.SourceVideoCodec != card.SourceVideoCodec ||
+		got.SoftwareVideoDecode != card.SoftwareVideoDecode ||
 		got.VideoBitstreamFilter != card.VideoBitstreamFilter ||
 		got.SeekSeconds != card.SeekSeconds || got.StreamOriginSeconds != card.StreamOriginSeconds ||
 		got.CopySeekAnchorResolved != card.CopySeekAnchorResolved || got.TargetResolution != card.TargetResolution ||

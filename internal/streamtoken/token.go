@@ -47,6 +47,7 @@ type Claims struct {
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct
 	// from identity alone plus the client-supplied position.
 	SourceVideoCodec       string  `json:"svc,omitempty"`
+	SoftwareVideoDecode    bool    `json:"svd,omitempty"`
 	VideoBitstreamFilter   string  `json:"vbsf,omitempty"`
 	OutputSubdir           string  `json:"osd,omitempty"`
 	SeekSeconds            float64 `json:"seek,omitempty"`

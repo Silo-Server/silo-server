@@ -52,8 +52,9 @@ type PlannerInputV3 struct {
 // SourceExecutionMetadataV3 is the immutable source probe snapshot used to
 // reopen a frozen playback recipe without consuming later catalog drift.
 type SourceExecutionMetadataV3 struct {
-	VideoCodec      string
-	DurationSeconds float64
+	VideoCodec          string
+	SoftwareVideoDecode bool
+	DurationSeconds     float64
 }
 
 // dvRPUStrippable resolves the per-source strip verdict, defaulting to true
