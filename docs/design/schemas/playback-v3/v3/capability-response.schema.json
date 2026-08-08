@@ -96,10 +96,8 @@
         },
         "executor": {
           "type": "string",
-          "enum": [
-            "client",
-            "server"
-          ]
+          "description": "Capability responses advertise transformations installed on the server. Client-executed transformations are declared in requests instead.",
+          "const": "server"
         },
         "recipe_version": {
           "type": "string",

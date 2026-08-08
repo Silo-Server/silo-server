@@ -42,6 +42,10 @@ type PlannerExpectationV3 struct {
 	DecisionReason     string               `json:"decision_reason,omitempty"`
 	PlanID             string               `json:"plan_id,omitempty"`
 	PlanAttemptKey     string               `json:"plan_attempt_key,omitempty"`
+	SelectedTracks     *SelectedTracksV3    `json:"selected_tracks,omitempty"`
+	Subtitle           *SubtitleDecisionV3  `json:"subtitle,omitempty"`
+	Claims             *ValidationClaimsV3  `json:"claims,omitempty"`
+	Transformations    []TransformationV3   `json:"transformations,omitempty"`
 	AvailableQualities []AvailableQualityV3 `json:"available_qualities,omitempty"`
 	TerminalReason     string               `json:"terminal_reason,omitempty"`
 }
@@ -80,21 +84,34 @@ type LegacyStartBodyV3 struct {
 }
 
 type ProtocolScenarioInputV3 struct {
-	LegacyStartBody       *LegacyStartBodyV3 `json:"body,omitempty"`
-	PlanID                string             `json:"plan_id,omitempty"`
-	FirstOutputContextID  string             `json:"first_output_context_id,omitempty"`
-	SecondOutputContextID string             `json:"second_output_context_id,omitempty"`
-	FirstPlanAttemptKey   string             `json:"first_plan_attempt_key,omitempty"`
-	SecondPlanAttemptKey  string             `json:"second_plan_attempt_key,omitempty"`
-	ServerPlanAttemptKey  string             `json:"server_plan_attempt_key,omitempty"`
-	ReplanEcho            string             `json:"replan_echo,omitempty"`
-	AttemptedPlanKeys     []string           `json:"attempted_plan_keys,omitempty"`
+	StartRequest          *StartRequestV3     `json:"start_request,omitempty"`
+	ReplanRequest         *ReplanRequestV3    `json:"replan_request,omitempty"`
+	RouteEvent            *RouteEventV3       `json:"route_event,omitempty"`
+	PersistedDecision     *DecisionResponseV3 `json:"persisted_decision,omitempty"`
+	LegacyStartBody       *LegacyStartBodyV3  `json:"body,omitempty"`
+	PlanID                string              `json:"plan_id,omitempty"`
+	FirstOutputContextID  string              `json:"first_output_context_id,omitempty"`
+	SecondOutputContextID string              `json:"second_output_context_id,omitempty"`
+	FirstPlanAttemptKey   string              `json:"first_plan_attempt_key,omitempty"`
+	SecondPlanAttemptKey  string              `json:"second_plan_attempt_key,omitempty"`
+	ServerPlanAttemptKey  string              `json:"server_plan_attempt_key,omitempty"`
+	ReplanEcho            string              `json:"replan_echo,omitempty"`
+	AttemptedPlanKeys     []string            `json:"attempted_plan_keys,omitempty"`
+	Restarted             bool                `json:"restarted,omitempty"`
+	CapacityAvailable     *bool               `json:"capacity_available,omitempty"`
 }
 
 type ProtocolExpectationV3 struct {
-	HTTPStatus            int    `json:"http_status,omitempty"`
-	Error                 string `json:"error,omitempty"`
-	PlanIDUnchanged       bool   `json:"plan_id_unchanged,omitempty"`
-	PlanAttemptKeyChanged bool   `json:"plan_attempt_key_changed,omitempty"`
-	Action                string `json:"action,omitempty"`
+	HTTPStatus               int               `json:"http_status,omitempty"`
+	Error                    string            `json:"error,omitempty"`
+	Outcome                  DecisionOutcomeV3 `json:"outcome,omitempty"`
+	TerminalReason           string            `json:"terminal_reason,omitempty"`
+	PlanIDUnchanged          bool              `json:"plan_id_unchanged,omitempty"`
+	PlanAttemptKeyChanged    bool              `json:"plan_attempt_key_changed,omitempty"`
+	SelectionPreserved       bool              `json:"selection_preserved,omitempty"`
+	PositionPreserved        bool              `json:"position_preserved,omitempty"`
+	ResponseReplayedVerbatim bool              `json:"response_replayed_verbatim,omitempty"`
+	CapacityDelta            *int              `json:"capacity_delta,omitempty"`
+	CleanupComplete          bool              `json:"cleanup_complete,omitempty"`
+	Action                   string            `json:"action,omitempty"`
 }

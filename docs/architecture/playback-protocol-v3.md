@@ -789,8 +789,11 @@ Three artifacts, in decreasing order of authority:
    protocol started: the server defines the contract and clients prove
    conformance, not the reverse. `conformance_matrix.json` covers the release
    train's evidence tiers, delivery fallback chain, replan operations and
-   idempotency, quality ladder, audio-only route, output change, opaque loop
-   guard, and legacy-upgrade response in one generated cross-client corpus.
+   idempotency, quality ladder, audio-only route, HDR/Dolby Vision decisions,
+   audio adaptation and exact-layout passthrough, text/bitmap subtitle policy,
+   failure recovery, restart replay, capacity cleanup, output change, route
+   event limits, opaque loop guard, and legacy-upgrade response in one
+   generated cross-client corpus.
 2. **`docs/design/schemas/playback-v3/`** — JSON Schemas for every wire body,
    with valid and invalid fixtures. Every bound mirrors a server validator, so a
    body these schemas reject is a body the server rejects.

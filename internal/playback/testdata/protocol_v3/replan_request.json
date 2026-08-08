@@ -6,11 +6,11 @@
   "operation": "failure_recovery",
   "playback_attempt_id": "attempt-golden-0001",
   "replan_request_id": "replan-golden-0001",
-  "failed_plan_id": "plan:golden-0001",
+  "failed_plan_id": "plan:478677870860e5e5108c18bff749b34b",
   "plan_attempt_id": "plan-attempt-golden-0001",
-  "plan_attempt_key": "v3:0000000000000001",
+  "plan_attempt_key": "v3:f0144c47fa349e3e",
   "attempted_plan_keys": [
-    "v3:0000000000000001"
+    "v3:f0144c47fa349e3e"
   ],
   "attempt_count": 1,
   "quality_preference": "auto",

@@ -257,26 +257,47 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 	}
 	for _, value := range matrix.Protocol {
 		recordScenario(value.Name, value.Category)
+		if value.Input.StartRequest != nil {
+			request := *value.Input.StartRequest
+			if _, err := request.NormalizeAndValidate(); err != nil {
+				t.Errorf("protocol scenario %q has invalid start request: %v", value.Name, err)
+			}
+		}
+		if value.Input.ReplanRequest != nil {
+			if err := value.Input.ReplanRequest.Validate(); err != nil {
+				t.Errorf("protocol scenario %q has invalid replan request: %v", value.Name, err)
+			}
+		}
 	}
 	for _, required := range []string{
 		"evidence_tier_gating", "deliveries_negotiation", "attempt_key_echo_and_loop",
 		"track_change_replan", "quality_change_replan", "idempotent_replan",
 		"concurrent_replan", "mid_seek_replan", "available_qualities",
 		"audio_only_planning", "output_context_invalidation", "legacy_426",
+		"hdr_dv_matrix", "audio_matrix", "subtitle_matrix", "recovery_matrix",
+		"restart_matrix", "capacity_matrix", "route_event_limits",
 	} {
 		if !categories[required] {
 			t.Errorf("conformance matrix omits %q", required)
 		}
 	}
 	for name, delivery := range map[string]DeliveryV3{
-		"evidence_exact":             DeliveryTranscodeHLSV3,
-		"evidence_platform_attested": DeliveryOriginalHTTPV3,
-		"evidence_declared":          DeliveryOriginalHTTPV3,
-		"delivery_original":          DeliveryOriginalHTTPV3,
-		"delivery_progressive":       DeliveryRemuxProgressiveV3,
-		"delivery_hls":               DeliveryRemuxHLSV3,
-		"delivery_transcode":         DeliveryTranscodeHLSV3,
-		"audio_only_original":        DeliveryOriginalHTTPV3,
+		"evidence_exact":                  DeliveryTranscodeHLSV3,
+		"evidence_platform_attested":      DeliveryOriginalHTTPV3,
+		"evidence_declared":               DeliveryOriginalHTTPV3,
+		"delivery_original":               DeliveryOriginalHTTPV3,
+		"delivery_progressive":            DeliveryRemuxProgressiveV3,
+		"delivery_hls":                    DeliveryRemuxHLSV3,
+		"delivery_transcode":              DeliveryTranscodeHLSV3,
+		"audio_only_original":             DeliveryOriginalHTTPV3,
+		"hdr10_exact_direct":              DeliveryOriginalHTTPV3,
+		"dolby_vision_8_exact_direct":     DeliveryOriginalHTTPV3,
+		"dolby_vision_7_hdr10_fallback":   DeliveryRemuxProgressiveV3,
+		"truehd_audio_conversion":         DeliveryRemuxProgressiveV3,
+		"truehd_exact_layout_passthrough": DeliveryOriginalHTTPV3,
+		"embedded_pgs_sidecar":            DeliveryOriginalHTTPV3,
+		"embedded_ass_authored_render":    DeliveryOriginalHTTPV3,
+		"embedded_dvd_burn_in":            DeliveryTranscodeHLSV3,
 	} {
 		value, ok := plannerByName[name]
 		if !ok || value.Expected.Outcome != OutcomePlayableV3 || value.Expected.Delivery != delivery {
@@ -285,6 +306,42 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 	}
 	if value := plannerByName["available_qualities"]; len(value.Expected.AvailableQualities) < 2 || value.Expected.AvailableQualities[0].Label != QualityOriginalV3 {
 		t.Errorf("available quality fixture = %#v", value.Expected.AvailableQualities)
+	}
+	transformationNamed := func(value PlannerScenarioV3, name string) bool {
+		t.Helper()
+		for _, transformation := range value.Expected.Transformations {
+			if transformation.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	if value := plannerByName["hdr10_exact_direct"]; value.Source.DynamicRange != DynamicRangeHDR10V3 || value.Source.BitDepth != 10 {
+		t.Errorf("HDR10 scenario source = %#v", value.Source)
+	}
+	if value := plannerByName["dolby_vision_8_exact_direct"]; value.Source.DynamicRange != DynamicRangeDolbyVisionV3 || value.Source.DVProfile != 8 || len(value.Expected.Transformations) != 0 {
+		t.Errorf("Dolby Vision 8 scenario = %#v", value)
+	}
+	if value := plannerByName["dolby_vision_7_hdr10_fallback"]; value.Source.DVProfile != 7 || !transformationNamed(value, TransformationServerDV7HDR10V3) {
+		t.Errorf("Dolby Vision 7 fallback scenario = %#v", value)
+	}
+	if value := plannerByName["truehd_audio_conversion"]; value.Source.AudioCodec != "truehd" || !transformationNamed(value, TransformationAudioToAACV3) {
+		t.Errorf("TrueHD conversion scenario = %#v", value)
+	}
+	if value := plannerByName["truehd_exact_layout_passthrough"]; value.Source.AudioCodec != "truehd" || value.Expected.Claims == nil || !value.Expected.Claims.Audio.Passthrough {
+		t.Errorf("TrueHD passthrough scenario = %#v", value)
+	}
+	for name, mode := range map[string]SubtitleModeV3{
+		"embedded_pgs_sidecar":         SubtitleRenderV3,
+		"embedded_ass_authored_render": SubtitleRenderV3,
+		"embedded_dvd_burn_in":         SubtitleBurnInV3,
+	} {
+		value := plannerByName[name]
+		if value.Request.SubtitleTrackID == "" || value.Expected.SelectedTracks == nil || value.Expected.SelectedTracks.Subtitle == nil ||
+			value.Expected.SelectedTracks.Subtitle.ID != value.Request.SubtitleTrackID || value.Expected.Subtitle == nil ||
+			value.Expected.Subtitle.Mode != mode || value.Expected.Subtitle.TrackID != value.Request.SubtitleTrackID {
+			t.Errorf("subtitle scenario %q = %#v", name, value)
+		}
 	}
 
 	replansByName := make(map[string]ReplanScenarioV3, len(matrix.Replans))
@@ -336,6 +393,29 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 		len(loop.Input.AttemptedPlanKeys) != 1 || loop.Input.AttemptedPlanKeys[0] != loop.Input.ServerPlanAttemptKey || loop.Expected.Action != "reject_already_attempted_plan" {
 		t.Errorf("opaque loop scenario = %#v", loop)
 	}
+	recovery := protocolByName["failure_recovery_preserves_intent"]
+	if recovery.Input.ReplanRequest == nil || recovery.Input.ReplanRequest.SelectedTracks.Subtitle == nil ||
+		!recovery.Expected.SelectionPreserved || !recovery.Expected.PositionPreserved || recovery.Expected.HTTPStatus != 200 {
+		t.Errorf("failure-recovery scenario = %#v", recovery)
+	}
+	restart := protocolByName["restart_replays_terminal_attempt"]
+	if restart.Input.StartRequest == nil || restart.Input.PersistedDecision == nil || !restart.Input.Restarted ||
+		restart.Expected.HTTPStatus != 201 || restart.Expected.Outcome != OutcomeAdaptationUnavailableV3 ||
+		restart.Expected.TerminalReason != "transcode_start_failed" || !restart.Expected.ResponseReplayedVerbatim ||
+		restart.Expected.CapacityDelta == nil || *restart.Expected.CapacityDelta != 0 {
+		t.Errorf("restart replay scenario = %#v", restart)
+	}
+	capacity := protocolByName["capacity_unavailable_cleans_up"]
+	if capacity.Input.StartRequest == nil || capacity.Input.CapacityAvailable == nil || *capacity.Input.CapacityAvailable ||
+		capacity.Expected.HTTPStatus != 201 || capacity.Expected.TerminalReason != "capacity_unavailable" ||
+		capacity.Expected.CapacityDelta == nil || *capacity.Expected.CapacityDelta != 0 || !capacity.Expected.CleanupComplete {
+		t.Errorf("capacity scenario = %#v", capacity)
+	}
+	limit := protocolByName["route_event_diagnostic_limit"]
+	if limit.Input.RouteEvent == nil || len(limit.Input.RouteEvent.Diagnostics) != 33 || limit.Expected.HTTPStatus != 400 ||
+		limit.Expected.Error != "bad_request" || limit.Expected.Action != "reject_without_persisting" {
+		t.Errorf("route-event limit scenario = %#v", limit)
+	}
 }
 
 func TestProtocolV3GoldenWireFixtures(t *testing.T) {
@@ -378,6 +458,10 @@ func TestProtocolV3GoldenWireFixtures(t *testing.T) {
 	}
 	if !strings.HasPrefix(response.PlaybackPlan.PlanAttemptKey, "v3:") {
 		t.Fatalf("golden plan attempt key = %q, want an opaque server-owned v3: token", response.PlaybackPlan.PlanAttemptKey)
+	}
+	if replan.FailedPlanID != response.PlaybackPlan.PlanID || replan.PlanAttemptKey != response.PlaybackPlan.PlanAttemptKey ||
+		len(replan.AttemptedPlanKeys) != 1 || replan.AttemptedPlanKeys[0] != response.PlaybackPlan.PlanAttemptKey {
+		t.Fatalf("golden replan does not echo the golden decision identity: replan=%#v plan=%#v", replan, response.PlaybackPlan)
 	}
 }
 

@@ -37,16 +37,13 @@ const (
 	goldenAttemptID   = "attempt-golden-0001"
 	goldenExpiresAt   = "2030-01-01T00:00:00Z"
 	goldenMediaFileID = 42
-	// The fixed key the request fixtures echo. Requests carry a key the server
-	// minted on an earlier response, so its value is arbitrary; what matters is
-	// that it satisfies the "v3:" prefix the replan validator enforces.
-	goldenPriorAttemptKey = "v3:0000000000000001"
 	// Codec and container tokens the fixtures are built from. Named so the
 	// capability lists, the plan recipe, and the source descriptor cannot drift
 	// into describing different media by a one-character typo.
 	codecH264         = "h264"
 	codecHEVC         = "hevc"
 	codecAAC          = "aac"
+	codecTrueHD       = "truehd"
 	containerMP4      = "mp4"
 	containerMKV      = "mkv"
 	containerHLS      = "hls"
@@ -55,6 +52,9 @@ const (
 	resolutionFHD     = "1080p"
 	qualityOriginal   = "original"
 	audioLayoutStereo = "stereo"
+	audioLayout71     = "7.1"
+	filmFrameRate     = "24000/1001"
+	languageEnglish   = "eng"
 	videoRangeSDR     = "SDR"
 	categoryMidSeek   = "mid_seek_replan"
 )
@@ -187,18 +187,23 @@ func goldenReplanRequest() playback.ReplanRequestV3 {
 	estimate := 3_500
 	cap := 4_000
 	audioIndex := 0
+	decision := goldenDecisionResponse()
+	if decision.PlaybackPlan == nil {
+		fail("golden decision has no plan")
+	}
+	plan := decision.PlaybackPlan
 	return playback.ReplanRequestV3{
 		ProtocolVersion:   playback.ProtocolV3,
 		ClientFeatures:    []string{playback.FeaturePlaybackPlanV3},
 		Operation:         playback.ReplanOperationFailureRecoveryV3,
 		PlaybackAttemptID: goldenAttemptID,
 		ReplanRequestID:   "replan-golden-0001",
-		FailedPlanID:      "plan:golden-0001",
+		FailedPlanID:      plan.PlanID,
 		PlanAttemptID:     "plan-attempt-golden-0001",
 		// Attempt keys are server-owned opaque tokens. A client echoes the
 		// values it was handed; it never computes one.
-		PlanAttemptKey:        goldenPriorAttemptKey,
-		AttemptedPlanKeys:     []string{goldenPriorAttemptKey},
+		PlanAttemptKey:        plan.PlanAttemptKey,
+		AttemptedPlanKeys:     []string{plan.PlanAttemptKey},
 		AttemptCount:          1,
 		QualityPreference:     "auto",
 		PositionSeconds:       42.5,
@@ -222,10 +227,10 @@ func goldenMediaFile() *models.MediaFile {
 	return &models.MediaFile{
 		ID: goldenMediaFileID,
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/library/movie.en.srt", Language: "eng", Format: "srt", Title: "English"},
+			{Path: "/library/movie.en.srt", Language: languageEnglish, Format: "srt", Title: "English"},
 		},
 		SubtitleTracks: []models.SubtitleTrack{
-			{Index: 0, Language: "eng", Codec: "ass", Title: "English (Signs)", Forced: true},
+			{Index: 0, Language: languageEnglish, Codec: "ass", Title: "English (Signs)", Forced: true},
 			{Index: 1, Language: "jpn", Codec: "pgs", Title: "Japanese"},
 			{Index: 2, Language: "fre", Codec: "dvd_subtitle", Title: "French"},
 		},
@@ -393,13 +398,18 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 }
 
 func goldenRouteEvent() playback.RouteEventV3 {
+	decision := goldenDecisionResponse()
+	if decision.PlaybackPlan == nil {
+		fail("golden decision has no plan")
+	}
+	plan := decision.PlaybackPlan
 	return playback.RouteEventV3{
 		ProtocolVersion:   playback.ProtocolV3,
 		PlaybackAttemptID: goldenAttemptID,
 		SessionID:         goldenSessionID,
-		PlanID:            "plan:golden-0001",
+		PlanID:            plan.PlanID,
 		PlanAttemptID:     "plan-attempt-golden-0001",
-		PlanAttemptKey:    goldenPriorAttemptKey,
+		PlanAttemptKey:    plan.PlanAttemptKey,
 		Event:             playback.RouteEventFirstFrameV3,
 		OutputContextID:   "7",
 		Diagnostics: map[string]string{
@@ -495,7 +505,7 @@ func goldenAttemptKeys() []opaqueAttemptKeyFixture {
 			StreamProtocol: playback.StreamHTTPProgressiveV3,
 			Container:      containerMKV,
 			VideoCodec:     codecHEVC,
-			AudioCodec:     "truehd",
+			AudioCodec:     codecTrueHD,
 			Width:          3840,
 			Height:         2160,
 			BitrateKbps:    65_000,
@@ -553,7 +563,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	registry := conformanceRegistry()
 	settings := playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 
-	planner := make([]playback.PlannerScenarioV3, 0, 10)
+	planner := make([]playback.PlannerScenarioV3, 0, 18)
 	for _, tier := range []playback.CapabilityEvidenceV3{
 		playback.EvidenceExactV3,
 		playback.EvidencePlatformAttestedV3,
@@ -596,6 +606,93 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	audioRequest.PlaybackAttemptID = "attempt-audio-only"
 	audioRequest.Capabilities.Containers = []string{containerMP4}
 	planner = append(planner, makePlannerScenario("audio_only_original", "audio_only_planning", audioRequest, audioFile, nil, settings, registry))
+
+	hdr10Request := conformanceHDRRequest()
+	hdr10Request.PlaybackAttemptID = "attempt-hdr10-direct"
+	planner = append(planner, makePlannerScenario("hdr10_exact_direct", "hdr_dv_matrix", hdr10Request, conformanceHDRFile(), nil, settings, registry))
+
+	dv8File := conformanceHDRFile()
+	dv8File.VideoTracks[0].DVProfile = 8
+	dv8File.VideoTracks[0].DVBLCompatID = 1
+	dv8File.VideoTracks[0].VideoRange = "DolbyVision"
+	dv8File.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+	dv8Request := conformanceHDRRequest()
+	dv8Request.PlaybackAttemptID = "attempt-dv8-direct"
+	dv8Request.Capabilities.HDRDetails.DolbyVisionProfiles = []int{8}
+	dv8Request.ClientPlaybackContext.Output.HDRDetails.DolbyVisionProfiles = []int{8}
+	planner = append(planner, makePlannerScenario("dolby_vision_8_exact_direct", "hdr_dv_matrix", dv8Request, dv8File, nil, settings, registry))
+
+	dv7File := conformanceHDRFile()
+	dv7File.VideoTracks[0].DVProfile = 7
+	dv7File.VideoTracks[0].DVBLCompatID = 6
+	dv7File.VideoTracks[0].VideoRange = "DolbyVision"
+	dv7File.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	dv7Request := conformanceHDRRequest()
+	dv7Request.PlaybackAttemptID = "attempt-dv7-hdr10"
+	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true}})
+	planner = append(planner, makePlannerScenario("dolby_vision_7_hdr10_fallback", "hdr_dv_matrix", dv7Request, dv7File, nil, settings, dv7Registry))
+
+	audioAdaptFile := conformanceHDRFile()
+	audioAdaptFile.CodecAudio = codecTrueHD
+	audioAdaptFile.AudioChannels = 8
+	audioAdaptFile.AudioTracks[0] = models.AudioTrack{Codec: codecTrueHD, Channels: 8, Layout: audioLayout71}
+	audioAdaptRequest := conformanceHDRRequest()
+	audioAdaptRequest.PlaybackAttemptID = "attempt-truehd-aac"
+	planner = append(planner, makePlannerScenario("truehd_audio_conversion", "audio_matrix", audioAdaptRequest, audioAdaptFile, nil, settings, registry))
+
+	audioPassthroughFile := conformanceHDRFile()
+	audioPassthroughFile.CodecAudio = codecTrueHD
+	audioPassthroughFile.AudioChannels = 8
+	audioPassthroughFile.AudioTracks[0] = models.AudioTrack{Codec: codecTrueHD, Channels: 8, Layout: audioLayout71}
+	audioPassthroughRequest := conformanceHDRRequest()
+	audioPassthroughRequest.PlaybackAttemptID = "attempt-truehd-passthrough"
+	audioPassthroughRequest.ClientFeatures = append(audioPassthroughRequest.ClientFeatures, playback.FeatureLayoutPassthrough)
+	audioPassthroughRequest.Capabilities.CodecsAudio = []string{codecTrueHD}
+	audioPassthroughRequest.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{
+		PassthroughCodecs: []string{codecTrueHD}, MaxChannels: 8,
+		Entries: []playback.AudioPassthroughEntryV3{{Codec: codecTrueHD, ChannelCounts: []int{8}, Layouts: []string{audioLayout71}}},
+	}
+	planner = append(planner, makePlannerScenario("truehd_exact_layout_passthrough", "audio_matrix", audioPassthroughRequest, audioPassthroughFile, nil, settings, registry))
+
+	pgsFile := conformanceHDRFile()
+	pgsFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: "jpn", Codec: "hdmv_pgs_subtitle", Title: "Japanese"}}
+	pgsRequest := conformanceHDRRequest()
+	pgsRequest.PlaybackAttemptID = "attempt-pgs-sidecar"
+	pgsIndex := 0
+	pgsRequest.SubtitleTrackIndex = &pgsIndex
+	pgsRequest.SubtitleTrackID = playback.TrackIDV3(pgsFile.ID, "subtitle", pgsIndex)
+	for _, deliveryClass := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassProgressiveV3, playback.DeliveryClassHLSV3} {
+		delivery := pgsRequest.ClientPlaybackContext.Deliveries[deliveryClass]
+		delivery.Subtitles.EmbeddedBitmap = true
+		pgsRequest.ClientPlaybackContext.Deliveries[deliveryClass] = delivery
+	}
+	planner = append(planner, makePlannerScenario("embedded_pgs_sidecar", "subtitle_matrix", pgsRequest, pgsFile, nil, settings, registry))
+
+	assFile := conformanceHDRFile()
+	assFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "ass", Title: "English Signs"}}
+	assRequest := conformanceHDRRequest()
+	assRequest.PlaybackAttemptID = "attempt-ass-authored"
+	assRequest.SubtitleFidelityPreference = playback.SubtitleFidelityPreserveV3
+	assIndex := 0
+	assRequest.SubtitleTrackIndex = &assIndex
+	assRequest.SubtitleTrackID = playback.TrackIDV3(assFile.ID, "subtitle", assIndex)
+	for _, deliveryClass := range []string{playback.DeliveryClassOriginalHTTPV3, playback.DeliveryClassProgressiveV3, playback.DeliveryClassHLSV3} {
+		delivery := assRequest.ClientPlaybackContext.Deliveries[deliveryClass]
+		delivery.Subtitles.EmbeddedText = true
+		delivery.Subtitles.ASSStyling = true
+		delivery.Subtitles.FontAttachments = true
+		assRequest.ClientPlaybackContext.Deliveries[deliveryClass] = delivery
+	}
+	planner = append(planner, makePlannerScenario("embedded_ass_authored_render", "subtitle_matrix", assRequest, assFile, nil, settings, registry))
+
+	dvdFile := conformanceVideoFile()
+	dvdFile.SubtitleTracks = []models.SubtitleTrack{{Index: 4, Language: languageEnglish, Codec: "dvd_subtitle", Title: "English"}}
+	dvdRequest := conformanceStartRequest()
+	dvdRequest.PlaybackAttemptID = "attempt-dvd-burn-in"
+	dvdIndex := 0
+	dvdRequest.SubtitleTrackIndex = &dvdIndex
+	dvdRequest.SubtitleTrackID = playback.TrackIDV3(dvdFile.ID, "subtitle", dvdIndex)
+	planner = append(planner, makePlannerScenario("embedded_dvd_burn_in", "subtitle_matrix", dvdRequest, dvdFile, nil, settings, registry))
 
 	qualityRequest := fallbackRequest
 	qualityRequest.PlaybackAttemptID = "attempt-available-qualities"
@@ -652,10 +749,39 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 
 	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
 	outputB := playback.PlanAttemptKeyV3(*plan, "output-b", nil)
+	recovery := goldenReplanRequest()
+	recovery.ReplanRequestID = "replan-failure-matrix-0001"
+	recovery.PositionSeconds = 321.25
+	subtitleIndex := 2
+	recovery.SelectedTracks.Subtitle = &playback.TrackIdentityV3{
+		ID:    playback.TrackIDV3(goldenMediaFileID, "subtitle", subtitleIndex),
+		Index: &subtitleIndex,
+	}
+	restartStart := goldenStartRequest()
+	restartStart.PlaybackAttemptID = "attempt-restart-terminal"
+	restartTerminal := playback.NewTerminalResponseV3(
+		"transcode_start_failed",
+		"The playback transport did not become ready in time.",
+		true,
+	)
+	capacityStart := goldenStartRequest()
+	capacityStart.PlaybackAttemptID = "attempt-capacity-unavailable"
+	capacityAvailable := false
+	zeroCapacityDelta := 0
+	limitEvent := goldenRouteEvent()
+	limitEvent.PlaybackAttemptID = "attempt-route-limit"
+	limitEvent.Diagnostics = make(map[string]string, 33)
+	for index := range 33 {
+		limitEvent.Diagnostics[fmt.Sprintf("diagnostic_%02d", index)] = "value"
+	}
 	protocol := []playback.ProtocolScenarioV3{
 		{Name: "legacy_start_requires_upgrade", Category: "legacy_426", Input: playback.ProtocolScenarioInputV3{LegacyStartBody: &playback.LegacyStartBodyV3{FileID: goldenMediaFileID}}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusUpgradeRequired, Error: "client_upgrade_required"}},
 		{Name: "output_context_change_invalidates_attempt", Category: "output_context_invalidation", Input: playback.ProtocolScenarioInputV3{PlanID: plan.PlanID, FirstOutputContextID: "output-a", SecondOutputContextID: "output-b", FirstPlanAttemptKey: outputA, SecondPlanAttemptKey: outputB}, Expected: playback.ProtocolExpectationV3{PlanIDUnchanged: true, PlanAttemptKeyChanged: outputA != outputB}},
 		{Name: "opaque_attempt_key_loop", Category: "attempt_key_echo_and_loop", Input: playback.ProtocolScenarioInputV3{ServerPlanAttemptKey: plan.PlanAttemptKey, ReplanEcho: plan.PlanAttemptKey, AttemptedPlanKeys: []string{plan.PlanAttemptKey}}, Expected: playback.ProtocolExpectationV3{Action: "reject_already_attempted_plan"}},
+		{Name: "failure_recovery_preserves_intent", Category: "recovery_matrix", Input: playback.ProtocolScenarioInputV3{ReplanRequest: &recovery}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusOK, SelectionPreserved: true, PositionPreserved: true, Action: "preserve_selected_tracks_and_position"}},
+		{Name: "restart_replays_terminal_attempt", Category: "restart_matrix", Input: playback.ProtocolScenarioInputV3{StartRequest: &restartStart, PersistedDecision: &restartTerminal, Restarted: true}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusCreated, Outcome: playback.OutcomeAdaptationUnavailableV3, TerminalReason: "transcode_start_failed", ResponseReplayedVerbatim: true, CapacityDelta: &zeroCapacityDelta}},
+		{Name: "capacity_unavailable_cleans_up", Category: "capacity_matrix", Input: playback.ProtocolScenarioInputV3{StartRequest: &capacityStart, CapacityAvailable: &capacityAvailable}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusCreated, Outcome: playback.OutcomeAdaptationUnavailableV3, TerminalReason: "capacity_unavailable", CapacityDelta: &zeroCapacityDelta, CleanupComplete: true}},
+		{Name: "route_event_diagnostic_limit", Category: "route_event_limits", Input: playback.ProtocolScenarioInputV3{RouteEvent: &limitEvent}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusBadRequest, Error: "bad_request", Action: "reject_without_persisting"}},
 	}
 
 	return playback.ConformanceMatrixV3{SchemaVersion: 1, Planner: planner, Replans: replans, Protocol: protocol}
@@ -668,12 +794,19 @@ func makePlannerScenario(name, category string, request playback.StartRequestV3,
 	})
 	expected := playback.PlannerExpectationV3{Outcome: playback.OutcomeAdaptationUnavailableV3}
 	if result.Plan != nil {
+		selectedTracks := result.Plan.SelectedTracks
+		subtitle := result.Plan.Subtitle
+		claims := result.Plan.Claims
 		expected = playback.PlannerExpectationV3{
 			Outcome:            playback.OutcomePlayableV3,
 			Delivery:           result.Plan.Delivery,
 			DecisionReason:     result.Plan.DecisionReason,
 			PlanID:             result.Plan.PlanID,
 			PlanAttemptKey:     result.Plan.PlanAttemptKey,
+			SelectedTracks:     &selectedTracks,
+			Subtitle:           &subtitle,
+			Claims:             &claims,
+			Transformations:    append([]playback.TransformationV3(nil), result.Plan.Transformations...),
 			AvailableQualities: result.Plan.AvailableQualities,
 		}
 	} else if result.Terminal != nil {
@@ -707,11 +840,47 @@ func conformanceStartRequest() playback.StartRequestV3 {
 }
 
 func conformanceVideoFile() *models.MediaFile {
-	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMKV, CodecVideo: codecHEVC, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecHEVC, Profile: "Main", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
+	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMKV, CodecVideo: codecHEVC, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecHEVC, Profile: "Main", Level: 41, Width: 1920, Height: 1080, FrameRate: filmFrameRate, Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
+}
+
+func conformanceHDRFile() *models.MediaFile {
+	return &models.MediaFile{
+		ID:            goldenMediaFileID,
+		Container:     containerMKV,
+		CodecVideo:    codecHEVC,
+		CodecAudio:    codecAAC,
+		Resolution:    "2160p",
+		Bitrate:       60_000,
+		AudioChannels: 2,
+		Duration:      7_200,
+		VideoTracks: []models.VideoTrack{{
+			Codec: codecHEVC, Profile: "Main 10", Level: 153,
+			Width: 3840, Height: 2160, FrameRate: filmFrameRate, Bitrate: 60_000, BitDepth: 10,
+			VideoRange: "HDR", VideoRangeType: "HDR10", ColorRange: "tv",
+		}},
+		AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}},
+	}
+}
+
+func conformanceHDRRequest() playback.StartRequestV3 {
+	request := conformanceStartRequest()
+	request.Capabilities.CodecsVideo = []string{codecHEVC}
+	request.Capabilities.CodecsVideoHardware = []string{codecHEVC}
+	request.Capabilities.CodecsAudio = []string{codecAAC}
+	request.Capabilities.Containers = []string{containerMKV}
+	request.Capabilities.MaxResolution = "2160p"
+	request.Capabilities.HDR = true
+	request.Capabilities.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true}
+	request.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{{
+		Codec: codecHEVC, Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
+		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+	}}
+	request.ClientPlaybackContext.Output.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true}
+	return request
 }
 
 func conformanceFallbackFile() *models.MediaFile {
-	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMP4, CodecVideo: codecH264, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecH264, Profile: profileHigh, Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
+	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMP4, CodecVideo: codecH264, CodecAudio: codecAAC, Resolution: resolutionFHD, Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecH264, Profile: profileHigh, Level: 41, Width: 1920, Height: 1080, FrameRate: filmFrameRate, Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: audioLayoutStereo}}}
 }
 
 func conformanceRegistry() *playback.TransformationRegistryV3 {

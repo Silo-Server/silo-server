@@ -255,7 +255,9 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 		t.Fatalf("capability enabled.const = %v, want true", got)
 	}
 	assertStringsEqual(t, "capability.deliveries.enum", schemaStrings(t, capability, "properties", "deliveries", "items", "enum"), deliveriesV3)
-	assertStringsEqual(t, "capability.transformation.executor.enum", schemaStrings(t, capability, "$defs", "transformation", "properties", "executor", "enum"), executorsV3)
+	if got := schemaValue(t, capability, "$defs", "transformation", "properties", "executor", "const"); got != playback.ExecutorServerV3 {
+		t.Fatalf("capability transformation executor.const = %v, want %q", got, playback.ExecutorServerV3)
+	}
 
 	routeEvent := mustReadObject(t, filepath.Join(schemaRootV3, "v3", "route-event.schema.json"))
 	assertConstInt(t, "route_event.protocol_version.const", schemaValue(t, routeEvent, "properties", "protocol_version", "const"), playback.ProtocolV3)
@@ -356,6 +358,13 @@ func TestResponseSchemasEnforcePublishedInvariants(t *testing.T) {
 	capability["deliveries"] = []any{"original_http"}
 	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
 		t.Fatal("capability schema accepted a partial delivery registry")
+	}
+
+	capability = decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "capability_response.json"))).(map[string]any)
+	transformations := capability["transformations"].([]any)
+	transformations[0].(map[string]any)["executor"] = "client"
+	if err := schemas["capability-response.schema.json"].Validate(capability); err == nil {
+		t.Fatal("capability schema accepted a client-executed server transformation")
 	}
 
 	decision := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "decision_response.json"))).(map[string]any)
