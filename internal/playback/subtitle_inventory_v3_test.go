@@ -1,6 +1,8 @@
 package playback
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -136,6 +138,21 @@ func TestSubtitleInventoryV3_OmitsURLsWithoutASession(t *testing.T) {
 	}
 	if items[0].URL != "" {
 		t.Errorf("expected no URL without a session, got %q", items[0].URL)
+	}
+}
+
+func TestScopeSubtitleInventoryV3_EncodesEmptyInventoryAsArray(t *testing.T) {
+	items := ScopeSubtitleInventoryV3("sess-empty", &models.MediaFile{ID: 4}, []SubtitleInventoryItemV3{})
+	if items == nil {
+		t.Fatal("expected a non-nil empty inventory")
+	}
+
+	payload, err := json.Marshal(SubtitleDecisionV3{Mode: SubtitleOffV3, Inventory: items})
+	if err != nil {
+		t.Fatalf("marshal subtitle decision: %v", err)
+	}
+	if got := string(payload); !strings.Contains(got, `"inventory":[]`) {
+		t.Fatalf("empty inventory encoded as %s, want inventory:[]", got)
 	}
 }
 

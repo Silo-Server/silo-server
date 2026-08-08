@@ -143,7 +143,10 @@ func SubtitleInventoryV3(sessionID string, file *models.MediaFile, additional []
 // This keeps the advertised menu and the planner's selected ordinal on the
 // same snapshot.
 func ScopeSubtitleInventoryV3(sessionID string, file *models.MediaFile, inventory []SubtitleInventoryItemV3) []SubtitleInventoryItemV3 {
-	items := append([]SubtitleInventoryItemV3(nil), inventory...)
+	// Inventory is required by the v3 wire contract and must always encode as
+	// an array. Copy into a non-nil slice so an empty inventory remains []
+	// instead of becoming JSON null while session URLs are attached.
+	items := append([]SubtitleInventoryItemV3{}, inventory...)
 	if sessionID == "" || file == nil {
 		return items
 	}
