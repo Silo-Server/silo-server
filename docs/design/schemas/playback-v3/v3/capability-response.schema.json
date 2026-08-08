@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/schemas/playback-v3/v3/capability-response.schema.json",
   "title": "Silo Playback Protocol v3 Capability Response",
-  "description": "Response body of GET /api/v1/playback/capabilities, mirroring CapabilityResponseV3 in internal/playback/protocol_v3.go. A client reads this before its first start request so it negotiates against what the server actually advertises instead of a compiled-in assumption. When the protocol is disabled the server still answers with the same shape — enabled false, empty lists, and a reason — so a client can tell a disabled server apart from an unreachable one.",
+  "description": "Response body of GET /api/v1/playback/capability, mirroring CapabilityResponseV3 in internal/playback/protocol_v3.go. A client reads this before its first start request so it plans against what the server actually advertises instead of a compiled-in assumption. Protocol v3 is the server's only playback protocol, so enabled is always true; there is no disabled response shape.",
   "type": "object",
   "required": [
     "enabled",
@@ -13,7 +13,8 @@
   ],
   "properties": {
     "enabled": {
-      "type": "boolean"
+      "type": "boolean",
+      "const": true
     },
     "protocol_versions": {
       "type": "array",
@@ -31,7 +32,7 @@
     },
     "deliveries": {
       "type": "array",
-      "description": "Serving routes the planner may return. Empty when the protocol is disabled.",
+      "description": "Serving routes the planner may return. The list contains the server's currently executable delivery classes and grows additively.",
       "items": {
         "type": "string",
         "enum": [
@@ -51,7 +52,7 @@
     },
     "reason": {
       "type": "string",
-      "description": "Why the protocol is unavailable. Present only when enabled is false."
+      "description": "Reserved optional diagnostic for a future non-rollout condition. It does not disable protocol v3; enabled remains true."
     }
   },
   "$defs": {

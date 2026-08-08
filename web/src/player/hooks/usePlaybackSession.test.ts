@@ -5,7 +5,11 @@ import {
   fixtureClientPlaybackContextV3,
   fixturePlanV3,
 } from "../protocol-v3.fixtures";
-import { buildReplanRequestV3, buildStartRequestV3 } from "./usePlaybackSession";
+import {
+  buildReplanRequestV3,
+  buildStartRequestV3,
+  routeEventPlanIdentityV3,
+} from "./usePlaybackSession";
 
 const startBase = {
   fileId: 42,
@@ -217,5 +221,21 @@ describe("buildReplanRequestV3", () => {
     });
 
     expect(body.bandwidth_cap_kbps).toBe(4_000);
+  });
+});
+
+describe("routeEventPlanIdentityV3", () => {
+  it("omits every plan-scoped field for a terminal start", () => {
+    expect(routeEventPlanIdentityV3(null, null, "plan-attempt-client-only")).toEqual({});
+  });
+
+  it("includes the complete identity after a plan is adopted", () => {
+    const plan = fixturePlanV3();
+    expect(routeEventPlanIdentityV3(plan, "session-1", "plan-attempt-1")).toEqual({
+      sessionId: "session-1",
+      planId: plan.plan_id,
+      planAttemptId: "plan-attempt-1",
+      planAttemptKey: plan.plan_attempt_key,
+    });
   });
 });

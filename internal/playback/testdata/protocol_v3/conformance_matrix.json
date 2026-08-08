@@ -1,0 +1,2306 @@
+{
+  "schema_version": 1,
+  "planner_scenarios": [
+    {
+      "name": "evidence_exact",
+      "category": "evidence_tier_gating",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-evidence-exact",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_transcode_hls",
+        "decision_reason": "quality_original",
+        "plan_id": "plan:a7f5c7091b7a5ce1cd4fc43b2a6b327c",
+        "plan_attempt_key": "v3:8da9bae216075de8",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "evidence_platform_attested",
+      "category": "evidence_tier_gating",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-evidence-platform_attested",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "platform_attested",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:af10638f68c79ddc3e228cb93259e4cc",
+        "plan_attempt_key": "v3:0c345038da67f548",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "evidence_declared",
+      "category": "evidence_tier_gating",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-evidence-declared",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:112292a396dba70825480f538c5e1ab3",
+        "plan_attempt_key": "v3:407f095ab06f0d06",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "delivery_original",
+      "category": "deliveries_negotiation",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-delivery-chain",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:11cf586f0837878a8bd7fb56aad2b114",
+        "plan_attempt_key": "v3:aea14da7eb994836",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "delivery_progressive",
+      "category": "deliveries_negotiation",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-delivery-chain",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "attempted_plan_keys": [
+        "v3:aea14da7eb994836"
+      ],
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_remux_progressive",
+        "decision_reason": "container_normalization",
+        "plan_id": "plan:56abab9075fd926b4a2901fdeac7f7bb",
+        "plan_attempt_key": "v3:e02a401930e003f8",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "delivery_hls",
+      "category": "deliveries_negotiation",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-delivery-chain",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "attempted_plan_keys": [
+        "v3:aea14da7eb994836",
+        "v3:e02a401930e003f8"
+      ],
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_remux_hls",
+        "decision_reason": "hls_packaging_required",
+        "plan_id": "plan:2dc0d6fc38a49b49d17ac9a60d8beba2",
+        "plan_attempt_key": "v3:464f01a4d6ecc0e8",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "delivery_transcode",
+      "category": "deliveries_negotiation",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-delivery-transcode",
+        "quality_preference": "720p",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_transcode_hls",
+        "decision_reason": "quality_fixed_rung",
+        "plan_id": "plan:85ff00dd716863e27555e38202a9cefb",
+        "plan_attempt_key": "v3:cc8428ba187f6470",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "audio_only_original",
+      "category": "audio_only_planning",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 77,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-audio-only",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 77,
+        "duration_seconds": 39600,
+        "container": "mp4",
+        "bitrate_kbps": 128,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:603b26dbc39763a3f935467f56e6902a",
+        "plan_attempt_key": "v3:e6a9fa3fb77cea40",
+        "available_qualities": [
+          {
+            "label": "original",
+            "bitrate_kbps": 128,
+            "preserves_source": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "available_qualities",
+      "category": "available_qualities",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-available-qualities",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "declared",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": null,
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": null,
+              "auth_header_refresh": false,
+              "validated_claims": null,
+              "transformations": null
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mp4",
+        "video_codec": "h264",
+        "video_profile": "high",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:4da88570903f3211bf0b1cfd5c4b534b",
+        "plan_attempt_key": "v3:b469cbb1ebe407fa",
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
+          },
+          {
+            "label": "720p",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    }
+  ],
+  "replan_scenarios": [
+    {
+      "name": "track_change",
+      "category": "track_change_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "track_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-track-change-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 42.5,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "",
+            "index": 1
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "idempotent_duplicate_status": 200,
+        "preserve_unmodified_tracks": true
+      }
+    },
+    {
+      "name": "quality_change",
+      "category": "quality_change_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "quality_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-quality-change-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "720p",
+        "position_seconds": 42.5,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "idempotent_duplicate_status": 200,
+        "selected_quality": "720p"
+      }
+    },
+    {
+      "name": "idempotent_duplicate",
+      "category": "idempotent_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "quality_change",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-quality-change-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "720p",
+        "position_seconds": 42.5,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "changed_body_error": "idempotency_key_reused",
+        "changed_body_status": 409,
+        "response_replayed_verbatim": true,
+        "same_request_id_and_body_status": 200
+      }
+    },
+    {
+      "name": "mid_seek_reanchor",
+      "category": "mid_seek_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "seek_reanchor",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-seek-reanchor-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "position_seconds": 321.25,
+        "route_identity_stable_when_recipe_unchanged": true
+      }
+    },
+    {
+      "name": "concurrent_duplicate",
+      "category": "concurrent_replan",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "operation": "seek_reanchor",
+        "playback_attempt_id": "attempt-golden-0001",
+        "replan_request_id": "replan-seek-reanchor-0001",
+        "failed_plan_id": "plan:golden-0001",
+        "plan_attempt_id": "plan-attempt-golden-0001",
+        "plan_attempt_key": "v3:0000000000000001",
+        "attempted_plan_keys": [
+          "v3:0000000000000001"
+        ],
+        "attempt_count": 1,
+        "quality_preference": "auto",
+        "position_seconds": 321.25,
+        "metered": true,
+        "bandwidth_estimate_kbps": 3500,
+        "bandwidth_cap_kbps": 4000,
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "failure": {
+          "classification": ""
+        },
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mp4"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "high"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "android",
+            "os_version": "15",
+            "manufacturer": "NVIDIA",
+            "model": "SHIELD Android TV",
+            "platform_details": {
+              "abis": "arm64-v8a",
+              "sdk_int": "35"
+            }
+          },
+          "output": {
+            "output_context_id": "7"
+          },
+          "deliveries": {
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": true,
+                "sidecar_text": true,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": true,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "expected": {
+        "after_completion_status": 200,
+        "error": "replan_in_progress",
+        "response_replayed_verbatim": true,
+        "while_first_lease_active_status": 409
+      }
+    }
+  ],
+  "protocol_scenarios": [
+    {
+      "name": "legacy_start_requires_upgrade",
+      "category": "legacy_426",
+      "input": {
+        "body": {
+          "file_id": 42
+        }
+      },
+      "expected": {
+        "error": "client_upgrade_required",
+        "http_status": 426
+      }
+    },
+    {
+      "name": "output_context_change_invalidates_attempt",
+      "category": "output_context_invalidation",
+      "input": {
+        "first_output_context_id": "output-a",
+        "first_plan_attempt_key": "v3:28cb8a408ea7f446",
+        "plan_id": "plan:478677870860e5e5108c18bff749b34b",
+        "second_output_context_id": "output-b",
+        "second_plan_attempt_key": "v3:28c88c408ea5c1d5"
+      },
+      "expected": {
+        "plan_attempt_key_changed": true,
+        "plan_id_unchanged": true
+      }
+    },
+    {
+      "name": "opaque_attempt_key_loop",
+      "category": "attempt_key_echo_and_loop",
+      "input": {
+        "attempted_plan_keys": [
+          "v3:f0144c47fa349e3e"
+        ],
+        "replan_echo": "v3:f0144c47fa349e3e",
+        "server_plan_attempt_key": "v3:f0144c47fa349e3e"
+      },
+      "expected": {
+        "action": "reject_already_attempted_plan"
+      }
+    }
+  ]
+}

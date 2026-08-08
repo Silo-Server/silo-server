@@ -274,6 +274,55 @@ func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.
 	}
 }
 
+func TestHandleStartPlaybackV3PersistsAndReplaysTerminalDecision(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	request := v3HandlerStartRequest()
+	request.Capabilities.CodecsVideo = nil
+	request.Capabilities.CodecsVideoHardware = nil
+	request.Capabilities.VideoDecode = nil
+	request.Capabilities.Containers = nil
+	body := marshalV3StartRequest(t, request)
+
+	start := func(payload string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(payload)).WithContext(newAuthorizedPlaybackContext())
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, req)
+		return rr
+	}
+	first := start(body)
+	second := start(body)
+	if first.Code != http.StatusCreated || second.Code != http.StatusCreated {
+		t.Fatalf("terminal statuses = %d, %d; first=%s second=%s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	if first.Body.String() != second.Body.String() {
+		t.Fatalf("terminal replay changed body:\nfirst %s\nsecond %s", first.Body.String(), second.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Terminal == nil || response.PlaybackPlan != nil {
+		t.Fatalf("response = %#v, want terminal", response)
+	}
+	record, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), request.PlaybackAttemptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.SessionID != "" || record.StartResponse.Terminal == nil || record.RequestDigest == "" {
+		t.Fatalf("terminal attempt = %#v", record)
+	}
+
+	changed := request
+	changed.QualityPreference = "auto"
+	conflict := start(marshalV3StartRequest(t, changed))
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("changed request status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+}
+
 func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
@@ -1945,13 +1994,25 @@ func TestHandlePlaybackRouteEventV3RejectsMalformedEvents(t *testing.T) {
 	}
 }
 
-func TestHandlePlaybackRouteEventV3AcceptsTerminalStartWithoutAttemptRow(t *testing.T) {
+func TestHandlePlaybackRouteEventV3AuthorizesPersistedTerminalStart(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	store := &recordingRouteEventPlanStoreV3{
 		PlanStoreV3: handler.PlanStoreV3,
 		events:      make(chan playback.RouteEventRecordV3, 1),
 	}
 	handler.PlanStoreV3 = store
+	if err := handler.PlanStoreV3.SaveAttempt(context.Background(), playback.AttemptRecordV3{
+		PlaybackAttemptID:    "attempt-terminal-0001",
+		UserID:               1,
+		ProfileID:            "profile-1",
+		RequestedMediaFileID: 42,
+		EffectiveMediaFileID: 42,
+		StartResponse:        playback.NewTerminalResponseV3("no_alternate_version", "No compatible version is available.", false),
+		RequestDigest:        "digest-terminal",
+		ExpiresAt:            time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	event := playback.RouteEventV3{
 		ProtocolVersion:   playback.ProtocolV3,
 		PlaybackAttemptID: "attempt-terminal-0001",
@@ -1979,8 +2040,8 @@ func TestHandlePlaybackRouteEventV3AcceptsTerminalStartWithoutAttemptRow(t *test
 		t.Fatal("terminal route event was not persisted")
 	}
 
-	// The exception is deliberately narrow: an unknown failure event still
-	// cannot be attributed to the authenticated profile.
+	// A terminal attempt has no plan, so it cannot authorize a plan-scoped
+	// diagnostic even when the attempt ownership matches.
 	event.Event = playback.RouteEventPlanFailedV3
 	body, err = json.Marshal(event)
 	if err != nil {
@@ -1990,7 +2051,22 @@ func TestHandlePlaybackRouteEventV3AcceptsTerminalStartWithoutAttemptRow(t *test
 	rr = httptest.NewRecorder()
 	handler.HandlePlaybackRouteEventV3(rr, req)
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("unknown non-terminal status = %d, body = %s", rr.Code, rr.Body.String())
+		t.Fatalf("plan event for terminal attempt status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Unknown attempts cannot be attributed to the authenticated profile, even
+	// when they claim to describe a terminal start.
+	event.Event = playback.RouteEventTerminalV3
+	event.PlaybackAttemptID = "attempt-terminal-unknown"
+	body, err = json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/playback/route-events", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+	rr = httptest.NewRecorder()
+	handler.HandlePlaybackRouteEventV3(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("unknown terminal status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
 

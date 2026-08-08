@@ -71,6 +71,17 @@ func newPlanstoreFixture(t *testing.T) *planstoreFixture {
 	if !hasFrozenRecipe {
 		t.Skip("test database has not applied the playback v3 frozen recipe migration")
 	}
+	var hasStartResponse bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'playback_v3_attempts' AND column_name = 'start_response'
+		)`).Scan(&hasStartResponse); err != nil {
+		t.Fatalf("check start_response column: %v", err)
+	}
+	if !hasStartResponse {
+		t.Skip("test database has not applied the terminal playback v3 attempt migration")
+	}
 
 	f := &planstoreFixture{pool: pool}
 	unique := fmt.Sprintf("planstore-test-%d", time.Now().UnixNano())
@@ -110,7 +121,7 @@ func newPlanstoreFixture(t *testing.T) *planstoreFixture {
 }
 
 func (f *planstoreFixture) attemptRecord(sessionID, attemptID, digest string) playback.AttemptRecordV3 {
-	return playback.AttemptRecordV3{
+	record := playback.AttemptRecordV3{
 		PlaybackAttemptID:      attemptID,
 		SessionID:              sessionID,
 		UserID:                 f.userID,
@@ -141,6 +152,14 @@ func (f *planstoreFixture) attemptRecord(sessionID, attemptID, digest string) pl
 		RequestDigest: digest,
 		ExpiresAt:     time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
 	}
+	record.StartResponse = playback.DecisionResponseV3{
+		ProtocolVersion: playback.ProtocolV3,
+		ServerFeatures:  playback.ServerFeaturesV3(),
+		Outcome:         playback.OutcomePlayableV3,
+		SessionID:       sessionID,
+		PlaybackPlan:    &record.CurrentPlan,
+	}
+	return record
 }
 
 func (f *planstoreFixture) expireAttempt(t *testing.T, attemptID string) {
@@ -273,6 +292,31 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 	})
 
+	t.Run("SaveTerminalAttemptWithoutSession", func(t *testing.T) {
+		attemptID := "att-terminal-record-" + uuid.NewString()
+		response := playback.NewTerminalResponseV3("adaptation_unavailable", "No validated route is available.", false)
+		record := f.attemptRecord("", attemptID, "digest-terminal")
+		record.CurrentPlanID = ""
+		record.CurrentPlan = playback.PlanV3{}
+		record.FrozenRecipe = playback.ExecutableRecipeV3{}
+		record.StartResponse = response
+
+		if err := store.SaveAttempt(ctx, record); err != nil {
+			t.Fatalf("SaveAttempt terminal: %v", err)
+		}
+		got, err := store.GetAttemptByPlaybackAttemptID(ctx, attemptID)
+		if err != nil {
+			t.Fatalf("GetAttemptByPlaybackAttemptID terminal: %v", err)
+		}
+		if got.SessionID != "" || !bytes.Equal(mustJSON(t, got.StartResponse), mustJSON(t, response)) {
+			t.Fatalf("terminal attempt did not round-trip: %#v", got)
+		}
+		identity, err := store.GetAttemptIdentityByPlaybackAttemptID(ctx, attemptID)
+		if err != nil || identity.SessionID != "" || identity.UserID != f.userID {
+			t.Fatalf("terminal identity = %#v, err=%v", identity, err)
+		}
+	})
+
 	t.Run("GetAttemptRoundTrip", func(t *testing.T) {
 		sessionID := uuid.NewString()
 		attemptID := "att-get-" + sessionID
@@ -312,6 +356,9 @@ func TestPostgresPlanStore(t *testing.T) {
 			}
 			if !bytes.Equal(mustJSON(t, got.NormalizedRequest), mustJSON(t, record.NormalizedRequest)) {
 				t.Fatalf("%s normalized request JSON did not round-trip", name)
+			}
+			if !bytes.Equal(mustJSON(t, got.StartResponse), mustJSON(t, record.StartResponse)) {
+				t.Fatalf("%s start response JSON did not round-trip", name)
 			}
 			if diff := got.ExpiresAt.Sub(record.ExpiresAt); diff < -time.Millisecond || diff > time.Millisecond {
 				t.Fatalf("%s expires_at drifted by %v", name, diff)

@@ -1,10 +1,10 @@
-// Command playbackfixtures writes the protocol-v3 golden wire fixtures from
-// the live Go contract types.
+// Command playbackfixtures writes the protocol-v3 golden contract fixtures
+// from the live Go types and planner.
 //
 // The direction of authority is inverted from where it started: the server
 // defines the playback protocol, and clients prove conformance against these
 // files. Android and Apple CI vendor them and compare their own decoders and
-// hashes against the values here as opaque expected output, so a fixture is
+// opaque-token echo behavior against the values here, so a fixture is
 // only trustworthy if it was produced by the same code that serves real
 // traffic — hand-editing one would let the contract and the implementation
 // drift apart silently.
@@ -66,6 +66,7 @@ func main() {
 	write(*out, "route_event.json", goldenRouteEvent())
 	write(*out, "subtitle_inventory.json", goldenSubtitleInventory())
 	write(*out, "attempt_keys.json", goldenAttemptKeys())
+	write(*out, "conformance_matrix.json", goldenConformanceMatrix())
 }
 
 func write(dir, name string, value any) {
@@ -394,10 +395,10 @@ func goldenRouteEvent() playback.RouteEventV3 {
 	}
 }
 
-// attemptKeyFixture pins the opaque loop-prevention token for a plan shape.
-// Clients treat the key as opaque, but their CI reproduces these values to
-// prove they carry the server's key through a replan unchanged.
-type attemptKeyFixture struct {
+// attemptKeyInput exists only inside the Go fixture generator. The inputs to
+// the server's identity function are deliberately absent from the generated
+// JSON: clients receive a token and prove only that they echo it unchanged.
+type attemptKeyInput struct {
 	Name               string                      `json:"name"`
 	PlanID             string                      `json:"plan_id"`
 	Delivery           playback.DeliveryV3         `json:"delivery"`
@@ -415,10 +416,9 @@ type attemptKeyFixture struct {
 	RuntimeCorrections []string                    `json:"runtime_corrections,omitempty"`
 	OutputContextID    string                      `json:"output_context_id"`
 	LocalMutations     []string                    `json:"local_mutations"`
-	Expected           string                      `json:"expected"`
 }
 
-func (f attemptKeyFixture) plan() playback.PlanV3 {
+func (f attemptKeyInput) plan() playback.PlanV3 {
 	width, height, bitrate := f.Width, f.Height, f.BitrateKbps
 	return playback.PlanV3{
 		PlanID:   f.PlanID,
@@ -439,8 +439,16 @@ func (f attemptKeyFixture) plan() playback.PlanV3 {
 	}
 }
 
-func goldenAttemptKeys() []attemptKeyFixture {
-	fixtures := []attemptKeyFixture{
+type opaqueAttemptKeyFixture struct {
+	Name                 string   `json:"name"`
+	ServerPlanAttemptKey string   `json:"server_plan_attempt_key"`
+	ReplanEcho           string   `json:"replan_echo"`
+	AttemptedPlanKeys    []string `json:"attempted_plan_keys"`
+	ExpectedServerAction string   `json:"expected_server_action"`
+}
+
+func goldenAttemptKeys() []opaqueAttemptKeyFixture {
+	inputs := []attemptKeyInput{
 		{
 			Name:           "hls_burn_in_sorted_transformations_and_pcm_mutations",
 			PlanID:         "plan:fixture",
@@ -498,9 +506,8 @@ func goldenAttemptKeys() []attemptKeyFixture {
 			DynamicRange:    playback.DynamicRangeDolbyVisionV3,
 			SubtitleMode:    playback.SubtitleOffV3,
 			Transformations: []playback.TransformationV3{},
-			// The quirk identity is appended to the preimage only when quirks
-			// or runtime corrections apply; both arities are pinned so a client
-			// reproduces the omission exactly.
+			// The private server implementation includes quirk and runtime
+			// correction identity; clients see only its opaque result.
 			AppliedQuirks: []playback.AppliedQuirkV3{{
 				ID:               playback.QuirkFireTVDV8HDR10PlusV3,
 				RegistryRevision: playback.DeviceQuirkRegistryRevisionV3,
@@ -511,8 +518,213 @@ func goldenAttemptKeys() []attemptKeyFixture {
 			LocalMutations:     []string{},
 		},
 	}
-	for i := range fixtures {
-		fixtures[i].Expected = playback.PlanAttemptKeyV3(fixtures[i].plan(), fixtures[i].OutputContextID, fixtures[i].LocalMutations)
+	fixtures := make([]opaqueAttemptKeyFixture, 0, len(inputs))
+	for _, input := range inputs {
+		key := playback.PlanAttemptKeyV3(input.plan(), input.OutputContextID, input.LocalMutations)
+		fixtures = append(fixtures, opaqueAttemptKeyFixture{
+			Name:                 input.Name,
+			ServerPlanAttemptKey: key,
+			ReplanEcho:           key,
+			AttemptedPlanKeys:    []string{key},
+			ExpectedServerAction: "reject_already_attempted_plan",
+		})
 	}
 	return fixtures
+}
+
+type conformanceMatrix struct {
+	SchemaVersion int                `json:"schema_version"`
+	Planner       []plannerScenario  `json:"planner_scenarios"`
+	Replans       []replanScenario   `json:"replan_scenarios"`
+	Protocol      []protocolScenario `json:"protocol_scenarios"`
+}
+
+type plannerScenario struct {
+	Name          string                      `json:"name"`
+	Category      string                      `json:"category"`
+	Request       playback.StartRequestV3     `json:"request"`
+	Source        playback.SourceDescriptorV3 `json:"source"`
+	AttemptedKeys []string                    `json:"attempted_plan_keys,omitempty"`
+	Expected      plannerExpectation          `json:"expected"`
+}
+
+type plannerExpectation struct {
+	Outcome            playback.DecisionOutcomeV3    `json:"outcome"`
+	Delivery           playback.DeliveryV3           `json:"delivery,omitempty"`
+	DecisionReason     string                        `json:"decision_reason,omitempty"`
+	PlanID             string                        `json:"plan_id,omitempty"`
+	PlanAttemptKey     string                        `json:"plan_attempt_key,omitempty"`
+	AvailableQualities []playback.AvailableQualityV3 `json:"available_qualities,omitempty"`
+	TerminalReason     string                        `json:"terminal_reason,omitempty"`
+}
+
+type replanScenario struct {
+	Name     string                   `json:"name"`
+	Category string                   `json:"category"`
+	Request  playback.ReplanRequestV3 `json:"request"`
+	Expected map[string]any           `json:"expected"`
+}
+
+type protocolScenario struct {
+	Name     string         `json:"name"`
+	Category string         `json:"category"`
+	Input    map[string]any `json:"input"`
+	Expected map[string]any `json:"expected"`
+}
+
+func goldenConformanceMatrix() conformanceMatrix {
+	videoFile := conformanceVideoFile()
+	base := conformanceStartRequest()
+	registry := conformanceRegistry()
+	settings := playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
+
+	planner := make([]plannerScenario, 0, 10)
+	for _, tier := range []playback.CapabilityEvidenceV3{
+		playback.EvidenceExactV3,
+		playback.EvidencePlatformAttestedV3,
+		playback.EvidenceDeclaredV3,
+	} {
+		request := base
+		request.PlaybackAttemptID = "attempt-evidence-" + string(tier)
+		request.Capabilities.VideoEvidence = tier
+		if tier == playback.EvidenceDeclaredV3 {
+			request.Capabilities.VideoDecode = nil
+		}
+		planner = append(planner, makePlannerScenario(
+			"evidence_"+string(tier), "evidence_tier_gating", request, videoFile, nil, settings, registry,
+		))
+	}
+
+	fallbackRequest := conformanceStartRequest()
+	fallbackRequest.Capabilities.VideoEvidence = playback.EvidenceDeclaredV3
+	fallbackRequest.Capabilities.VideoDecode = nil
+	fallbackRequest.Capabilities.CodecsVideo = []string{codecH264}
+	fallbackRequest.Capabilities.CodecsVideoHardware = []string{codecH264}
+	fallbackRequest.Capabilities.Containers = []string{containerMP4}
+	fallbackFile := conformanceFallbackFile()
+	var attempted []string
+	for _, name := range []string{"original", "progressive", "hls"} {
+		request := fallbackRequest
+		request.PlaybackAttemptID = "attempt-delivery-chain"
+		scenario := makePlannerScenario("delivery_"+name, "deliveries_negotiation", request, fallbackFile, attempted, settings, registry)
+		planner = append(planner, scenario)
+		attempted = append(attempted, scenario.Expected.PlanAttemptKey)
+	}
+	transcodeRequest := fallbackRequest
+	transcodeRequest.PlaybackAttemptID = "attempt-delivery-transcode"
+	transcodeRequest.QualityPreference = "720p"
+	planner = append(planner, makePlannerScenario("delivery_transcode", "deliveries_negotiation", transcodeRequest, fallbackFile, nil, settings, registry))
+
+	audioFile := &models.MediaFile{ID: 77, Container: containerMP4, CodecAudio: codecAAC, Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+	audioRequest := conformanceStartRequest()
+	audioRequest.FileID = audioFile.ID
+	audioRequest.PlaybackAttemptID = "attempt-audio-only"
+	audioRequest.Capabilities.Containers = []string{containerMP4}
+	planner = append(planner, makePlannerScenario("audio_only_original", "audio_only_planning", audioRequest, audioFile, nil, settings, registry))
+
+	qualityRequest := fallbackRequest
+	qualityRequest.PlaybackAttemptID = "attempt-available-qualities"
+	qualityRequest.QualityPreference = "original"
+	planner = append(planner, makePlannerScenario("available_qualities", "available_qualities", qualityRequest, fallbackFile, nil, settings, registry))
+
+	decision := goldenDecisionResponse()
+	plan := decision.PlaybackPlan
+	if plan == nil {
+		fail("golden decision has no plan")
+	}
+	trackIndex := 1
+	trackChange := goldenReplanRequest()
+	trackChange.Operation = playback.ReplanOperationTrackChangeV3
+	trackChange.ReplanRequestID = "replan-track-change-0001"
+	trackChange.Failure = playback.FailureV3{}
+	trackChange.SelectedTracks.Audio = &playback.TrackIdentityV3{ID: "", Index: &trackIndex}
+	qualityChange := goldenReplanRequest()
+	qualityChange.Operation = playback.ReplanOperationQualityChangeV3
+	qualityChange.ReplanRequestID = "replan-quality-change-0001"
+	qualityChange.Failure = playback.FailureV3{}
+	qualityChange.QualityPreference = "720p"
+	seekReanchor := goldenReplanRequest()
+	seekReanchor.Operation = playback.ReplanOperationSeekReanchorV3
+	seekReanchor.ReplanRequestID = "replan-seek-reanchor-0001"
+	seekReanchor.Failure = playback.FailureV3{}
+	seekReanchor.PositionSeconds = 321.25
+
+	replans := []replanScenario{
+		{Name: "track_change", Category: "track_change_replan", Request: trackChange, Expected: map[string]any{"preserve_unmodified_tracks": true, "idempotent_duplicate_status": 200}},
+		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: map[string]any{"selected_quality": "720p", "idempotent_duplicate_status": 200}},
+		{Name: "idempotent_duplicate", Category: "idempotent_replan", Request: qualityChange, Expected: map[string]any{"same_request_id_and_body_status": 200, "response_replayed_verbatim": true, "changed_body_status": 409, "changed_body_error": "idempotency_key_reused"}},
+		{Name: "mid_seek_reanchor", Category: "mid_seek_replan", Request: seekReanchor, Expected: map[string]any{"position_seconds": 321.25, "route_identity_stable_when_recipe_unchanged": true}},
+		{Name: "concurrent_duplicate", Category: "concurrent_replan", Request: seekReanchor, Expected: map[string]any{"while_first_lease_active_status": 409, "error": "replan_in_progress", "after_completion_status": 200, "response_replayed_verbatim": true}},
+	}
+
+	outputA := playback.PlanAttemptKeyV3(*plan, "output-a", nil)
+	outputB := playback.PlanAttemptKeyV3(*plan, "output-b", nil)
+	protocol := []protocolScenario{
+		{Name: "legacy_start_requires_upgrade", Category: "legacy_426", Input: map[string]any{"body": map[string]any{"file_id": goldenMediaFileID}}, Expected: map[string]any{"http_status": 426, "error": "client_upgrade_required"}},
+		{Name: "output_context_change_invalidates_attempt", Category: "output_context_invalidation", Input: map[string]any{"plan_id": plan.PlanID, "first_output_context_id": "output-a", "second_output_context_id": "output-b", "first_plan_attempt_key": outputA, "second_plan_attempt_key": outputB}, Expected: map[string]any{"plan_id_unchanged": true, "plan_attempt_key_changed": outputA != outputB}},
+		{Name: "opaque_attempt_key_loop", Category: "attempt_key_echo_and_loop", Input: map[string]any{"server_plan_attempt_key": plan.PlanAttemptKey, "replan_echo": plan.PlanAttemptKey, "attempted_plan_keys": []string{plan.PlanAttemptKey}}, Expected: map[string]any{"action": "reject_already_attempted_plan"}},
+	}
+
+	return conformanceMatrix{SchemaVersion: 1, Planner: planner, Replans: replans, Protocol: protocol}
+}
+
+func makePlannerScenario(name, category string, request playback.StartRequestV3, file *models.MediaFile, attempted []string, settings playback.PlannerSettingsV3, registry *playback.TransformationRegistryV3) plannerScenario {
+	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: settings, Registry: registry, AttemptedKeys: attempted,
+	})
+	expected := plannerExpectation{Outcome: playback.OutcomeAdaptationUnavailableV3}
+	if result.Plan != nil {
+		expected = plannerExpectation{
+			Outcome:            playback.OutcomePlayableV3,
+			Delivery:           result.Plan.Delivery,
+			DecisionReason:     result.Plan.DecisionReason,
+			PlanID:             result.Plan.PlanID,
+			PlanAttemptKey:     result.Plan.PlanAttemptKey,
+			AvailableQualities: result.Plan.AvailableQualities,
+		}
+	} else if result.Terminal != nil {
+		expected.TerminalReason = result.Terminal.Reason
+	}
+	return plannerScenario{
+		Name: name, Category: category, Request: request,
+		Source:        playback.SourceDescriptorFromFileV3(file, 0),
+		AttemptedKeys: append([]string(nil), attempted...), Expected: expected,
+	}
+}
+
+func conformanceStartRequest() playback.StartRequestV3 {
+	request := goldenStartRequest()
+	request.QualityPreference = "original"
+	request.Capabilities = playback.ClientCodecCapabilitiesV3{
+		VideoEvidence: playback.EvidenceExactV3, AudioEvidence: playback.EvidenceExactV3,
+		CodecsVideo: []string{codecHEVC}, CodecsVideoHardware: []string{codecHEVC}, CodecsAudio: []string{codecAAC}, Containers: []string{"mkv"}, MaxResolution: "1080p",
+		VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: codecHEVC, Profiles: []string{"main 10"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}},
+	}
+	request.ClientPlaybackContext = playback.ClientPlaybackContextV3{
+		ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "3.0-test",
+		Device: playback.DeviceContextV3{Platform: "fixture"}, Output: playback.OutputContextV3{OutputContextID: "output-a"},
+		Deliveries: map[string]playback.DeliveryCapabilityV3{
+			playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv", containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+			playback.DeliveryClassProgressiveV3:  {Enabled: true, SupportedOnDevice: true, Containers: []string{containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+			playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+		},
+	}
+	return request
+}
+
+func conformanceVideoFile() *models.MediaFile {
+	return &models.MediaFile{ID: goldenMediaFileID, Container: "mkv", CodecVideo: codecHEVC, CodecAudio: codecAAC, Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecHEVC, Profile: "Main", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+}
+
+func conformanceFallbackFile() *models.MediaFile {
+	return &models.MediaFile{ID: goldenMediaFileID, Container: containerMP4, CodecVideo: codecH264, CodecAudio: codecAAC, Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 7_200, VideoTracks: []models.VideoTrack{{Codec: codecH264, Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: codecAAC, Channels: 2, Layout: "stereo"}}}
+}
+
+func conformanceRegistry() *playback.TransformationRegistryV3 {
+	return playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "1", Available: true},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+	})
 }

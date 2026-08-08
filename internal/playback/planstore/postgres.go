@@ -83,6 +83,10 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 	if err != nil {
 		return err
 	}
+	responseJSON, err := json.Marshal(record.StartResponse)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -94,7 +98,7 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 	// never resolve.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM playback_v3_attempts
-		WHERE (playback_attempt_id = $1 OR session_id = $2::uuid) AND expires_at <= NOW()`,
+		WHERE (playback_attempt_id = $1 OR session_id = NULLIF($2, '')::uuid) AND expires_at <= NOW()`,
 		record.PlaybackAttemptID, record.SessionID); err != nil {
 		return err
 	}
@@ -102,12 +106,14 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 		INSERT INTO playback_v3_attempts (
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
-			current_plan_id, current_replan_request_id, current_plan, frozen_recipe, normalized_request, request_digest, expires_at
-		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
+			normalized_request, start_response, request_digest, expires_at
+		) VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
-		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, record.RequestDigest, record.ExpiresAt)
+		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON,
+		requestJSON, responseJSON, record.RequestDigest, record.ExpiresAt)
 	if err != nil {
 		return err
 	}
@@ -147,7 +153,7 @@ func (s *Postgres) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, at
 func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, value any) (*playback.AttemptIdentityV3, error) {
 	var identity playback.AttemptIdentityV3
 	err := s.db.QueryRow(ctx, `
-		SELECT playback_attempt_id, session_id::text, user_id, profile_id
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID,
@@ -163,16 +169,18 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
-	var planJSON, recipeJSON, requestJSON []byte
+	var planJSON, recipeJSON, requestJSON, responseJSON []byte
 	err := s.db.QueryRow(ctx, `
-		SELECT playback_attempt_id, session_id::text, user_id, profile_id,
+		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
-		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe, normalized_request, request_digest, expires_at
+		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
+		       normalized_request, start_response, request_digest, expires_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
-		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON, &requestJSON, &record.RequestDigest, &record.ExpiresAt,
+		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
+		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -187,6 +195,9 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		return nil, err
 	}
 	if err := json.Unmarshal(requestJSON, &record.NormalizedRequest); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(responseJSON, &record.StartResponse); err != nil {
 		return nil, err
 	}
 	return &record, nil

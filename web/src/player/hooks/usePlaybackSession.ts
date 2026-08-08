@@ -360,6 +360,26 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
 }
 
 /**
+ * Route events for a terminal start carry only the playback-attempt identity.
+ * Plan-scoped fields become valid only after the server returned a plan; a
+ * client-generated plan-attempt id on a plan-less terminal is intentionally
+ * omitted so the server can authorize it against the persisted start attempt.
+ */
+export function routeEventPlanIdentityV3(
+  plan: PlanV3 | null,
+  sessionId: string | null,
+  planAttemptId: string,
+) {
+  if (!plan) return {};
+  return {
+    sessionId,
+    planId: plan.plan_id,
+    planAttemptId,
+    planAttemptKey: plan.plan_attempt_key,
+  };
+}
+
+/**
  * Owns the v3 playback session: the start decision, the plan it produced, and
  * every replan that supersedes it.
  *
@@ -439,13 +459,11 @@ export function usePlaybackSession(
     ) => {
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
+      const plan = planRef.current;
       void reportRouteEventV3(config, {
         event,
         playbackAttemptId: attemptId,
-        sessionId: sessionIdRef.current,
-        planId: planRef.current?.plan_id,
-        planAttemptId: planAttemptIdRef.current,
-        planAttemptKey: planRef.current?.plan_attempt_key,
+        ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
         ...extra,
       });
     },

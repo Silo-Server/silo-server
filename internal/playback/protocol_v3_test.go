@@ -188,24 +188,11 @@ func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
 
 func TestPlanAttemptKeyV3Fixture(t *testing.T) {
 	type fixture struct {
-		Name               string             `json:"name"`
-		PlanID             string             `json:"plan_id"`
-		Delivery           DeliveryV3         `json:"delivery"`
-		StreamProtocol     StreamProtocolV3   `json:"stream_protocol"`
-		Container          string             `json:"container"`
-		VideoCodec         string             `json:"video_codec"`
-		AudioCodec         string             `json:"audio_codec"`
-		Width              int                `json:"width"`
-		Height             int                `json:"height"`
-		BitrateKbps        int                `json:"bitrate_kbps"`
-		DynamicRange       string             `json:"dynamic_range"`
-		SubtitleMode       SubtitleModeV3     `json:"subtitle_mode"`
-		Transformations    []TransformationV3 `json:"transformations"`
-		AppliedQuirks      []AppliedQuirkV3   `json:"applied_quirks"`
-		RuntimeCorrections []string           `json:"runtime_corrections"`
-		OutputContextID    string             `json:"output_context_id"`
-		LocalMutations     []string           `json:"local_mutations"`
-		Expected           string             `json:"expected"`
+		Name                 string   `json:"name"`
+		ServerPlanAttemptKey string   `json:"server_plan_attempt_key"`
+		ReplanEcho           string   `json:"replan_echo"`
+		AttemptedPlanKeys    []string `json:"attempted_plan_keys"`
+		ExpectedServerAction string   `json:"expected_server_action"`
 	}
 	body, err := os.ReadFile("testdata/protocol_v3/attempt_keys.json")
 	if err != nil {
@@ -217,23 +204,90 @@ func TestPlanAttemptKeyV3Fixture(t *testing.T) {
 	}
 	for _, value := range fixtures {
 		t.Run(value.Name, func(t *testing.T) {
-			plan := PlanV3{
-				PlanID:          value.PlanID,
-				Delivery:        value.Delivery,
-				Stream:          StreamV3{Protocol: value.StreamProtocol, Container: value.Container},
-				EffectiveRecipe: EffectiveRecipeV3{VideoCodec: value.VideoCodec, AudioCodec: value.AudioCodec, Width: &value.Width, Height: &value.Height, BitrateKbps: &value.BitrateKbps, DynamicRange: value.DynamicRange},
-				Subtitle:        SubtitleDecisionV3{Mode: value.SubtitleMode},
+			if value.ServerPlanAttemptKey == "" || value.ReplanEcho != value.ServerPlanAttemptKey {
+				t.Fatalf("opaque echo drifted: %#v", value)
 			}
-			plan.Transformations = append(plan.Transformations, value.Transformations...)
-			// The quirk identity is conditionally omitted from the preimage
-			// when no quirks or runtime corrections apply; fixtures pin both
-			// arities so the Kotlin client reproduces the omission exactly.
-			plan.AppliedQuirks = append(plan.AppliedQuirks, value.AppliedQuirks...)
-			plan.RuntimeCorrections = append(plan.RuntimeCorrections, value.RuntimeCorrections...)
-			if got := PlanAttemptKeyV3(plan, value.OutputContextID, value.LocalMutations); got != value.Expected {
-				t.Fatalf("key = %q, want %q", got, value.Expected)
+			if len(value.AttemptedPlanKeys) != 1 || value.AttemptedPlanKeys[0] != value.ServerPlanAttemptKey {
+				t.Fatalf("attempted plan keys do not echo the server token: %#v", value)
+			}
+			if value.ExpectedServerAction != "reject_already_attempted_plan" {
+				t.Fatalf("server action = %q", value.ExpectedServerAction)
 			}
 		})
+	}
+}
+
+func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
+	type scenario struct {
+		Name     string `json:"name"`
+		Category string `json:"category"`
+		Expected struct {
+			Outcome            DecisionOutcomeV3    `json:"outcome"`
+			Delivery           DeliveryV3           `json:"delivery"`
+			AvailableQualities []AvailableQualityV3 `json:"available_qualities"`
+		} `json:"expected"`
+	}
+	var matrix struct {
+		SchemaVersion int        `json:"schema_version"`
+		Planner       []scenario `json:"planner_scenarios"`
+		Replans       []scenario `json:"replan_scenarios"`
+		Protocol      []scenario `json:"protocol_scenarios"`
+	}
+	body, err := os.ReadFile("testdata/protocol_v3/conformance_matrix.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &matrix); err != nil {
+		t.Fatal(err)
+	}
+	if matrix.SchemaVersion != 1 {
+		t.Fatalf("schema version = %d", matrix.SchemaVersion)
+	}
+	categories := make(map[string]bool)
+	names := make(map[string]bool)
+	plannerByName := make(map[string]scenario)
+	for _, value := range matrix.Planner {
+		plannerByName[value.Name] = value
+	}
+	for _, group := range [][]scenario{matrix.Planner, matrix.Replans, matrix.Protocol} {
+		for _, value := range group {
+			if value.Name == "" || value.Category == "" {
+				t.Fatalf("unnamed scenario: %#v", value)
+			}
+			if names[value.Name] {
+				t.Fatalf("duplicate scenario name %q", value.Name)
+			}
+			names[value.Name] = true
+			categories[value.Category] = true
+		}
+	}
+	for _, required := range []string{
+		"evidence_tier_gating", "deliveries_negotiation", "attempt_key_echo_and_loop",
+		"track_change_replan", "quality_change_replan", "idempotent_replan",
+		"concurrent_replan", "mid_seek_replan", "available_qualities",
+		"audio_only_planning", "output_context_invalidation", "legacy_426",
+	} {
+		if !categories[required] {
+			t.Errorf("conformance matrix omits %q", required)
+		}
+	}
+	for name, delivery := range map[string]DeliveryV3{
+		"evidence_exact":             DeliveryTranscodeHLSV3,
+		"evidence_platform_attested": DeliveryOriginalHTTPV3,
+		"evidence_declared":          DeliveryOriginalHTTPV3,
+		"delivery_original":          DeliveryOriginalHTTPV3,
+		"delivery_progressive":       DeliveryRemuxProgressiveV3,
+		"delivery_hls":               DeliveryRemuxHLSV3,
+		"delivery_transcode":         DeliveryTranscodeHLSV3,
+		"audio_only_original":        DeliveryOriginalHTTPV3,
+	} {
+		value, ok := plannerByName[name]
+		if !ok || value.Expected.Outcome != OutcomePlayableV3 || value.Expected.Delivery != delivery {
+			t.Errorf("scenario %q = %#v, want playable %q", name, value.Expected, delivery)
+		}
+	}
+	if value := plannerByName["available_qualities"]; len(value.Expected.AvailableQualities) < 2 || value.Expected.AvailableQualities[0].Label != QualityOriginalV3 {
+		t.Errorf("available quality fixture = %#v", value.Expected.AvailableQualities)
 	}
 }
 

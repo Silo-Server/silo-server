@@ -144,7 +144,7 @@ verify-settings-bindings-web:
 
 verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-web
 
-# Regenerate the protocol-v3 golden wire fixtures from the live contract types.
+# Regenerate the protocol-v3 golden contract fixtures from the live types and planner.
 #
 # The server owns the playback contract and the clients prove conformance
 # against these bodies, so they are only trustworthy while the code that emits

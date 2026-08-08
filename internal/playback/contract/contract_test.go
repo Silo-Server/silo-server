@@ -44,15 +44,16 @@ var fixtureSchemasV3 = map[string]string{
 	"route_event.json":         "route-event.schema.json",
 }
 
-// nonWireGoldenFixturesV3 are generator outputs that pin server-side identity
-// rather than a request or response body: attempt-key preimages and the
-// combined-ordinal subtitle inventory. They travel with the wire fixtures
-// because clients reproduce them, but no endpoint ever carries them, so they
+// nonWireGoldenFixturesV3 are generator outputs that pin cross-message
+// behavior rather than a single request or response body: opaque attempt-key
+// echo scenarios and the combined-ordinal subtitle inventory. They travel with
+// the wire fixtures because clients consume them, but no endpoint carries the
 // have no schema. Listing them explicitly keeps the golden sweep exhaustive: a
 // new wire body added to the generator without a schema fails rather than being
 // skipped.
 var nonWireGoldenFixturesV3 = []string{
 	"attempt_keys.json",
+	"conformance_matrix.json",
 	"subtitle_inventory.json",
 }
 
@@ -249,6 +250,9 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertStringsEqual(t, "decision.source_descriptor.dv_enhancement_layer.enum", schemaStrings(t, decision, "$defs", "source_descriptor", "properties", "dv_enhancement_layer", "enum"), enhancementLayersV3)
 
 	capability := mustReadObject(t, filepath.Join(schemaRootV3, "v3", "capability-response.schema.json"))
+	if got := schemaValue(t, capability, "properties", "enabled", "const"); got != true {
+		t.Fatalf("capability enabled.const = %v, want true", got)
+	}
 	assertStringsEqual(t, "capability.deliveries.enum", schemaStrings(t, capability, "properties", "deliveries", "items", "enum"), deliveriesV3)
 	assertStringsEqual(t, "capability.transformation.executor.enum", schemaStrings(t, capability, "$defs", "transformation", "properties", "executor", "enum"), executorsV3)
 

@@ -654,9 +654,9 @@ type TerminalV3 struct {
 }
 
 type DecisionResponseV3 struct {
-	ProtocolVersion int               `json:"protocol_version,omitempty"`
+	ProtocolVersion int               `json:"protocol_version"`
 	ServerFeatures  []string          `json:"server_features"`
-	Outcome         DecisionOutcomeV3 `json:"outcome,omitempty"`
+	Outcome         DecisionOutcomeV3 `json:"outcome"`
 	SessionID       string            `json:"session_id,omitempty"`
 	PlaybackPlan    *PlanV3           `json:"playback_plan,omitempty"`
 	Terminal        *TerminalV3       `json:"terminal,omitempty"`

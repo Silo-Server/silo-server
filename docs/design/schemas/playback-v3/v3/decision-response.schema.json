@@ -5,7 +5,9 @@
   "description": "Response body of POST /api/v1/playback/start and POST /api/v1/playback/{session_id}/replan. Shapes mirror DecisionResponseV3 and PlanV3 in internal/playback/protocol_v3.go. A playable outcome carries playback_plan; adaptation_unavailable carries terminal. Enum lists are the values the server emits today and grow additively within v3, so a client must tolerate an unrecognized member of a described-but-open list rather than treating the plan as unusable.",
   "type": "object",
   "required": [
-    "server_features"
+    "protocol_version",
+    "server_features",
+    "outcome"
   ],
   "properties": {
     "protocol_version": {
@@ -14,7 +16,7 @@
     },
     "server_features": {
       "type": "array",
-      "description": "Empty when protocol v3 is disabled for this server, which is how a client tells a disabled server apart from one that simply produced no plan.",
+      "description": "Additive feature tokens supported by this server. Unknown entries must be ignored.",
       "items": {
         "type": "string"
       }
@@ -36,6 +38,50 @@
       "$ref": "#/$defs/terminal"
     }
   },
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "const": "playable"
+        }
+      },
+      "required": [
+        "session_id",
+        "playback_plan"
+      ],
+      "not": {
+        "required": [
+          "terminal"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "const": "adaptation_unavailable"
+        }
+      },
+      "required": [
+        "terminal"
+      ],
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "session_id"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "playback_plan"
+            ]
+          }
+        }
+      ]
+    }
+  ],
   "$defs": {
     "terminal": {
       "type": "object",

@@ -20,6 +20,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
+const (
+	subtitleFormatASS = "ass"
+	subtitleFormatSUP = "sup"
+)
+
 // FilePathResolver looks up a media file by its ID.
 type FilePathResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
@@ -284,7 +289,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 					"Failed to load external subtitle")
 				return
 			}
-			playback.ServeSubtitle(w, data, "ass")
+			playback.ServeSubtitle(w, data, subtitleFormatASS)
 			return
 		}
 
@@ -367,7 +372,7 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 
 	// Serve ASS/SSA downloaded subtitles as raw data.
 	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
-		playback.ServeSubtitle(w, data, "ass")
+		playback.ServeSubtitle(w, data, subtitleFormatASS)
 		return
 	}
 
@@ -396,13 +401,13 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 		return true
 	}
 	if playback.IsPGS(codec) {
-		return embeddedPGS && requestedFormat == "sup"
+		return embeddedPGS && requestedFormat == subtitleFormatSUP
 	}
 	if playback.NeedsBurnIn(codec) {
 		return false
 	}
 	if playback.IsASS(codec) {
-		return requestedFormat == "ass" || requestedFormat == "ssa" || requestedFormat == "vtt"
+		return requestedFormat == subtitleFormatASS || requestedFormat == "ssa" || requestedFormat == "vtt"
 	}
 	return requestedFormat == "vtt"
 }
@@ -580,9 +585,9 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	outFormat := "vtt"
 	switch {
 	case playback.IsASS(track.Codec):
-		outFormat = "ass"
+		outFormat = subtitleFormatASS
 	case playback.IsPGS(track.Codec):
-		outFormat = "sup"
+		outFormat = subtitleFormatSUP
 	}
 
 	// ASS is fetched exactly once and consumed whole by its client-side
@@ -602,7 +607,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	case "vtt":
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
-	case "sup":
+	case subtitleFormatSUP:
 		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
 	}
 	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
@@ -647,14 +652,14 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	// cached full track when present (warming it in the background when
 	// not). All other formats stream uncached: VTT is already windowed
 	// and fast, ASS is small.
-	if outFormat == "sup" {
+	if outFormat == subtitleFormatSUP {
 		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
 		return
 	}
 
 	switch outFormat {
-	case "ass":
+	case subtitleFormatASS:
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
 	default:
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")

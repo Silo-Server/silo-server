@@ -37,8 +37,8 @@ retried.
 **Attempt keys are server-owned and opaque.** `plan_attempt_key` identifies "this
 plan, on this output, with these local mutations" for loop prevention. It is a
 hash the server computes. A client stores it, echoes it back, and never parses,
-compares by substring, or recomputes it. §9 publishes the preimage so a
-conformance test can reproduce it — not so a client can generate one.
+compares by substring, or recomputes it. Its algorithm and preimage are server
+implementation details; §9 specifies only the stability clients may rely on.
 
 **Claims are validated, not assumed.** When the server says a route preserves
 Atmos, or that Dolby Vision metadata was removed, that claim was checked against
@@ -175,6 +175,12 @@ paper over. If the attempt is known but its session has since expired, the
 response is a `201` terminal with reason `session_expired` rather than a replay
 of a plan that no longer exists.
 
+Playable and terminal decisions are both durable attempts. A terminal start has
+no `session_id` or plan identity, but its response and ownership are retained
+under `playback_attempt_id` for the same TTL. This makes terminal retries obey
+the same replay/conflict rules and gives terminal route events an addressable
+authorization record.
+
 A client generates a fresh `playback_attempt_id` per user-initiated playback and
 reuses it only to retry a request whose response it did not receive.
 
@@ -247,7 +253,7 @@ cap: **32 KiB**. Body: a single `RouteEventV3`, not a batch
 | `202` | — | Accepted. **No response body.** |
 | `400` | `bad_request` | Malformed or failed validation |
 | `401` | `unauthorized` | No authenticated user or no profile |
-| `403` | `forbidden` | The session belongs to another profile — or the referenced session/attempt does not exist (except the sessionless terminal-start event below) |
+| `403` | `forbidden` | The session or attempt belongs to another profile, or the referenced session/attempt does not exist |
 | `429` | `event_rate_limited` | 120 events/attempt/minute or 600/user/minute exceeded |
 | `500` | `internal_error` | Store outage |
 
@@ -263,13 +269,11 @@ is `403`, not `404` — the handler does not distinguish "not yours" from "not
 there." A store outage during that lookup is `500`, so a `403` genuinely means
 the event will never be accepted and should be dropped rather than retried.
 
-There is one narrow ownership-lookup exception. A terminal decision returned by
-`POST /playback/start` allocates no session or durable attempt row. The client
-may still report that outcome with `event: "terminal"`, the start request's
-`playback_attempt_id`, and no `session_id`, `plan_id`, `plan_attempt_id`, or
-`plan_attempt_key`; the server attributes that diagnostic to the authenticated
-user/profile and returns `202`. No other event or partially session-scoped event
-may use this exception.
+A terminal decision returned by `POST /playback/start` has a durable attempt but
+no playback session or plan. The client reports it with `event: "terminal"`,
+the start request's `playback_attempt_id`, and no `session_id`, `plan_id`,
+`plan_attempt_id`, or `plan_attempt_key`. The server authorizes the event through
+the persisted attempt ownership and returns `202`.
 
 Event names are the eleven in §7.4. `diagnostics` is a string→string map, capped
 at 32 entries, and the server keeps only the keys on its allowlist (§7.5),
@@ -674,54 +678,28 @@ type under the requested extension.
 
 ## 9. Plan identity
 
-Both identifiers are computed by the server from lowercase wire tokens joined
-with `|`. They are published here so a conformance test can reproduce them from
-the golden fixtures. **Clients must treat both as opaque.**
+The server mints both identifiers. **Clients treat both as opaque, case-sensitive
+tokens and never implement either identity algorithm.** Their wire prefixes and
+lengths are validation syntax, not a derivation recipe.
 
-### `plan_id` — SHA-256, `"plan:"` + first 16 bytes hex
+`plan_id` identifies the server's playback decision. It is stable when the same
+attempt produces the same source, delivery, recipe, tracks, subtitle mode,
+transformations, applied quirks, and recipe revision. A change to any of those
+inputs produces a different identity.
 
-Fields in order:
+`plan_attempt_key` is the replan loop guard for a plan as attempted on one output
+route with a set of client-reported local mutations. The server canonicalizes
+order-insensitive inputs internally. The client:
 
-```
-playback_attempt_id, requested_media_file_id, effective_media_file_id,
-delivery, stream.protocol, stream.container,
-recipe.video_codec, recipe.audio_codec,
-recipe.width, recipe.height, recipe.bitrate_kbps, recipe.dynamic_range,
-selected_tracks.audio, selected_tracks.subtitle,
-subtitle.mode, transformations,
-[quirk identity], plan_recipe_version
-```
+1. stores the exact key from `playback_plan.plan_attempt_key`;
+2. echoes it unchanged as `plan_attempt_key` when reporting that plan;
+3. adds the unchanged token to `attempted_plan_keys` after the plan fails; and
+4. never case-folds, parses, truncates, hashes, or synthesizes a replacement.
 
-### `plan_attempt_key` — FNV-64a, formatted `"v3:%016x"`
-
-```
-plan_id, delivery, stream.protocol, stream.container,
-recipe.video_codec, recipe.audio_codec,
-"{width}x{height}", recipe.bitrate_kbps, recipe.dynamic_range,
-subtitle.mode, transformations,
-[quirk identity], output_context_id, local_mutations
-```
-
-Shared encoding rules:
-
-- A nil integer encodes as `"0"`, never as an empty string.
-- A track identity encodes as `"{id}:{index}"`, with the same nil-integer rule;
-  an absent track is the empty string.
-- `transformations` is each entry rendered `"{executor}:{name}:{recipe_version}"`,
-  **sorted**, joined with `,`. Order in the plan does not affect identity.
-- The *quirk identity* is two joined fields — applied quirks as
-  `"{registry_revision}:{id}"` sorted, then runtime corrections sorted — and is
-  **omitted entirely** when there are no quirks and no runtime corrections. Both
-  arities are pinned in `attempt_keys.json` precisely so clients reproduce the
-  omission.
-- `local_mutations` are **sorted**, then joined with `,`. Reporting the same set
-  of mutations in a different order yields the same key, which is what makes the
-  loop guard robust against clients that build the list from a map.
-
-Every one of these rules is pinned by a fixture in
-`internal/playback/testdata/protocol_v3/attempt_keys.json`, including a case that
-names a transformation the server's registry no longer defines — the preimage
-never consults the registry, and the fixture exists to keep that true.
+`internal/playback/testdata/protocol_v3/attempt_keys.json` contains opaque
+cross-message vectors: a server-emitted token, the exact replan echo, and the
+loop-rejection result. The generator computes the server token internally but
+does not publish its preimage.
 
 ---
 
@@ -810,7 +788,10 @@ Three artifacts, in decreasing order of authority:
    Android and Apple CI vendor these and compare against them as **opaque
    expected output**. The direction of authority is inverted from where this
    protocol started: the server defines the contract and clients prove
-   conformance, not the reverse.
+   conformance, not the reverse. `conformance_matrix.json` covers the release
+   train's evidence tiers, delivery fallback chain, replan operations and
+   idempotency, quality ladder, audio-only route, output change, opaque loop
+   guard, and legacy-upgrade response in one generated cross-client corpus.
 2. **`docs/design/schemas/playback-v3/`** — JSON Schemas for every wire body,
    with valid and invalid fixtures. Every bound mirrors a server validator, so a
    body these schemas reject is a body the server rejects.
@@ -820,5 +801,5 @@ Three artifacts, in decreasing order of authority:
    for anything the schemas cannot express (idempotency semantics, the timeline
    model, evidence-tier strictness, ordinal density).
 
-A client that decodes the golden fixtures, reproduces the attempt keys, and
-round-trips a replan without recomputing an identity is conforming.
+A client that decodes the golden fixtures, echoes attempt keys byte-for-byte,
+and round-trips a replan without computing an identity is conforming.

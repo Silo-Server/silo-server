@@ -84,6 +84,11 @@ type TranscodeOpts struct {
 // copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
 const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
 
+const (
+	transcodeCodecH264 = "h264"
+	transcodeHWNVENC   = "nvenc"
+)
+
 // TranscodeSession manages a running ffmpeg HLS transcode process.
 type TranscodeSession struct {
 	cmd                  *exec.Cmd
@@ -303,7 +308,7 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 // supported by Intel VAAPI/QSV decode; scanner rows are not perfectly uniform,
 // so either the probed bit depth or the normalized profile is sufficient.
 func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
-	if normalizeCodecV3(codec) != "h264" {
+	if normalizeCodecV3(codec) != transcodeCodecH264 {
 		return false
 	}
 	normalizedProfile := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(profile)))
@@ -447,7 +452,7 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 	// Prefer the established libx264 fallback over selecting a decoder known
 	// not to accept this source. Intel QSV/VAAPI have the explicit upload paths
 	// below and retain hardware encoding.
-	if opts.SoftwareVideoDecode && hwAccel == "nvenc" {
+	if opts.SoftwareVideoDecode && hwAccel == transcodeHWNVENC {
 		return "none"
 	}
 	return hwAccel
@@ -536,7 +541,7 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 	// boundaries always start with an IDR frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
-	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" || opts.HWAccel == "nvenc" {
+	if opts.HWAccel == "qsv" || opts.HWAccel == "vaapi" || opts.HWAccel == transcodeHWNVENC {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
 	}
@@ -576,7 +581,7 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi")
 		}
-	case "nvenc":
+	case transcodeHWNVENC:
 		args = append(args,
 			"-hwaccel", "cuda",
 			"-hwaccel_output_format", "cuda",
@@ -606,7 +611,7 @@ func videoPreset(opts TranscodeOpts, hwAccel string) string {
 func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 	codec := opts.TargetCodecVideo
 	if codec == "" {
-		codec = "h264"
+		codec = transcodeCodecH264
 	}
 
 	if codec == "copy" {
@@ -617,7 +622,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 	hasBitrateCap := opts.TargetBitrateKbps > 0
 
 	switch {
-	case opts.HWAccel == "qsv" && codec == "h264":
+	case opts.HWAccel == "qsv" && codec == transcodeCodecH264:
 		if hasBitrateCap {
 			// VBR mode with bitrate cap instead of global_quality.
 			args = append(args, "-c:v", "h264_qsv", "-preset", preset,
@@ -636,7 +641,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		} else {
 			args = append(args, "-c:v", "hevc_qsv", "-preset", preset, "-global_quality", "28")
 		}
-	case opts.HWAccel == "vaapi" && codec == "h264":
+	case opts.HWAccel == "vaapi" && codec == transcodeCodecH264:
 		args = append(args, "-c:v", "h264_vaapi", "-qp", "23")
 		if hasBitrateCap {
 			args = append(args,
@@ -650,7 +655,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
 				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
 		}
-	case opts.HWAccel == "nvenc" && codec == "h264":
+	case opts.HWAccel == transcodeHWNVENC && codec == transcodeCodecH264:
 		args = append(args, "-c:v", "h264_nvenc", "-rc:v", "vbr")
 		if hasBitrateCap {
 			args = append(args,
@@ -660,7 +665,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		} else {
 			args = append(args, "-cq:v", "23", "-b:v", "0")
 		}
-	case opts.HWAccel == "nvenc" && codec == "hevc":
+	case opts.HWAccel == transcodeHWNVENC && codec == "hevc":
 		args = append(args, "-c:v", "hevc_nvenc", "-rc:v", "vbr")
 		if hasBitrateCap {
 			args = append(args,
@@ -710,7 +715,7 @@ func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 		return append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
 	case opts.HWAccel == "vaapi":
 		return append(args, "-vf", vaapiScaleFilter(opts.TargetResolution))
-	case opts.HWAccel == "nvenc":
+	case opts.HWAccel == transcodeHWNVENC:
 		return append(args, "-vf", nvencScaleFilter(opts.TargetResolution))
 	case opts.TargetResolution != "":
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
@@ -825,7 +830,7 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
 			cpuFilters += "," + scale
 		}
-		if opts.HWAccel == "nvenc" {
+		if opts.HWAccel == transcodeHWNVENC {
 			// Download to CPU for the overlay, then re-upload to CUDA.
 			graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
 				",format=nv12,hwupload_cuda[vout]"
@@ -892,7 +897,7 @@ func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 		// VAAPI-only: download, apply CPU filters, convert to nv12, upload back.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload"
 		args = append(args, "-vf", vf)
-	case "nvenc":
+	case transcodeHWNVENC:
 		// NVENC/CUDA: download to CPU for subtitle rendering, then upload back.
 		vf := "hwdownload,format=yuv420p," + cpuFilters + ",format=nv12,hwupload_cuda"
 		args = append(args, "-vf", vf)

@@ -29,6 +29,10 @@ type AttemptRecordV3 struct {
 	CurrentPlan            PlanV3
 	FrozenRecipe           ExecutableRecipeV3
 	NormalizedRequest      StartRequestV3
+	// StartResponse is the exact decision returned by the initial start. It is
+	// persisted for both playable and terminal outcomes so a byte-equivalent
+	// retry can replay the same contract decision without replanning.
+	StartResponse DecisionResponseV3
 	// RequestDigest fingerprints the normalized start request so an attempt-ID
 	// reused with different input is a detectable idempotency violation rather
 	// than a silent replay of the old plan.
@@ -117,16 +121,16 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 	now := time.Now()
 	// Expired rows are replaceable, mirroring the Postgres pre-delete: they
 	// linger until the hourly cleanup and must not wedge a legitimate retry.
-	for sessionID, existing := range s.attempts {
+	for attemptID, existing := range s.attempts {
 		if existing.ExpiresAt.After(now) {
 			continue
 		}
-		if existing.PlaybackAttemptID == record.PlaybackAttemptID || sessionID == record.SessionID {
-			s.deleteAttemptLocked(sessionID)
+		if existing.PlaybackAttemptID == record.PlaybackAttemptID || (record.SessionID != "" && existing.SessionID == record.SessionID) {
+			s.deleteAttemptLocked(attemptID)
 		}
 	}
-	for sessionID, existing := range s.attempts {
-		if existing.PlaybackAttemptID != record.PlaybackAttemptID && sessionID != record.SessionID {
+	for _, existing := range s.attempts {
+		if existing.PlaybackAttemptID != record.PlaybackAttemptID && (record.SessionID == "" || existing.SessionID != record.SessionID) {
 			continue
 		}
 		if existing.PlaybackAttemptID == record.PlaybackAttemptID &&
@@ -135,7 +139,7 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 		}
 		return ErrPlaybackAttemptExistsV3
 	}
-	s.attempts[record.SessionID] = record
+	s.attempts[record.PlaybackAttemptID] = record
 	return nil
 }
 
@@ -145,13 +149,24 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 func (s *MemoryPlanStoreV3) ReplaceAttempt(_ context.Context, record AttemptRecordV3) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.attempts[record.SessionID] = record
+	for attemptID, existing := range s.attempts {
+		if existing.PlaybackAttemptID == record.PlaybackAttemptID || (record.SessionID != "" && existing.SessionID == record.SessionID) {
+			// ReplaceAttempt simulates a mixed-version writer in tests. Preserve
+			// its replan rows just as an UPDATE of the durable attempt would.
+			delete(s.attempts, attemptID)
+		}
+	}
+	s.attempts[record.PlaybackAttemptID] = record
 }
 
-func (s *MemoryPlanStoreV3) deleteAttemptLocked(sessionID string) {
-	delete(s.attempts, sessionID)
+func (s *MemoryPlanStoreV3) deleteAttemptLocked(attemptID string) {
+	record, ok := s.attempts[attemptID]
+	delete(s.attempts, attemptID)
+	if !ok || record.SessionID == "" {
+		return
+	}
 	for key := range s.replans {
-		if strings.HasPrefix(key, sessionID+":") {
+		if strings.HasPrefix(key, record.SessionID+":") {
 			delete(s.replans, key)
 		}
 	}
@@ -160,11 +175,10 @@ func (s *MemoryPlanStoreV3) deleteAttemptLocked(sessionID string) {
 func (s *MemoryPlanStoreV3) GetAttemptByPlaybackAttemptID(_ context.Context, attemptID string) (*AttemptRecordV3, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, record := range s.attempts {
-		if record.PlaybackAttemptID == attemptID && record.ExpiresAt.After(time.Now()) {
-			copy := record
-			return &copy, nil
-		}
+	record, ok := s.attempts[attemptID]
+	if ok && record.ExpiresAt.After(time.Now()) {
+		copy := record
+		return &copy, nil
 	}
 	return nil, ErrSessionNotFound
 }
@@ -172,12 +186,13 @@ func (s *MemoryPlanStoreV3) GetAttemptByPlaybackAttemptID(_ context.Context, att
 func (s *MemoryPlanStoreV3) GetAttempt(_ context.Context, sessionID string) (*AttemptRecordV3, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.attempts[sessionID]
-	if !ok || !record.ExpiresAt.After(time.Now()) {
-		return nil, ErrSessionNotFound
+	for _, record := range s.attempts {
+		if record.SessionID == sessionID && record.ExpiresAt.After(time.Now()) {
+			copy := record
+			return &copy, nil
+		}
 	}
-	copy := record
-	return &copy, nil
+	return nil, ErrSessionNotFound
 }
 
 func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (ReplanLeaseV3, error) {
@@ -209,8 +224,15 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	existing, ok := s.attempts[sessionID]
-	if !ok {
+	var attemptID string
+	var existing AttemptRecordV3
+	for candidateID, candidate := range s.attempts {
+		if candidate.SessionID == sessionID {
+			attemptID, existing = candidateID, candidate
+			break
+		}
+	}
+	if attemptID == "" {
 		return ErrSessionNotFound
 	}
 	if existing.CurrentReplanRequestID != baseReplanRequestID {
@@ -224,7 +246,7 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	entry.completed = true
 	entry.response = append(json.RawMessage(nil), response...)
 	s.replans[key] = entry
-	s.attempts[sessionID] = record
+	s.attempts[attemptID] = record
 	return nil
 }
 
@@ -255,14 +277,9 @@ func (s *MemoryPlanStoreV3) CleanupExpired(_ context.Context, now time.Time) (in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var count int64
-	for sessionID, record := range s.attempts {
+	for attemptID, record := range s.attempts {
 		if !record.ExpiresAt.After(now) {
-			delete(s.attempts, sessionID)
-			for key := range s.replans {
-				if strings.HasPrefix(key, sessionID+":") {
-					delete(s.replans, key)
-				}
-			}
+			s.deleteAttemptLocked(attemptID)
 			count++
 		}
 	}
