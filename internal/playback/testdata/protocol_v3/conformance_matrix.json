@@ -79,7 +79,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -88,10 +88,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -107,7 +107,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -116,10 +116,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -134,7 +134,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -143,10 +143,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -323,7 +323,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -332,10 +332,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -351,7 +351,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -360,10 +360,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -378,7 +378,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -387,10 +387,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -530,7 +530,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -539,10 +539,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -558,7 +558,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -567,10 +567,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -585,7 +585,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -594,10 +594,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -737,7 +737,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -746,10 +746,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -765,7 +765,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -774,10 +774,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -792,7 +792,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -801,10 +801,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -944,7 +944,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -953,10 +953,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -972,7 +972,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -981,10 +981,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -999,7 +999,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1008,10 +1008,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -1154,7 +1154,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1163,10 +1163,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -1182,7 +1182,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1191,10 +1191,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -1209,7 +1209,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1218,10 +1218,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -1365,7 +1365,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1374,10 +1374,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -1393,7 +1393,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1402,10 +1402,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -1420,7 +1420,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1429,10 +1429,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -1609,7 +1609,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1618,10 +1618,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -1637,7 +1637,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1646,10 +1646,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -1664,7 +1664,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1673,10 +1673,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -1775,7 +1775,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "video_decode": [
             {
@@ -1809,7 +1809,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -1827,7 +1827,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1836,10 +1836,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -1855,7 +1855,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1864,10 +1864,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -1882,7 +1882,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -1891,10 +1891,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -2058,7 +2058,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2067,10 +2067,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -2086,7 +2086,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2095,10 +2095,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -2113,7 +2113,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2122,10 +2122,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -2236,7 +2236,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "video_decode": [
             {
@@ -2270,7 +2270,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -2288,7 +2288,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2297,10 +2297,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -2316,7 +2316,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2325,10 +2325,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -2343,7 +2343,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2352,10 +2352,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -2477,7 +2477,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "video_decode": [
             {
@@ -2511,7 +2511,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -2529,7 +2529,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2538,10 +2538,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -2557,7 +2557,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2566,10 +2566,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -2584,7 +2584,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2593,10 +2593,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -2715,7 +2715,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "audio_passthrough": {
             "passthrough_codecs": [
@@ -2767,7 +2767,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -2785,7 +2785,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2794,10 +2794,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -2813,7 +2813,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2822,10 +2822,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -2840,7 +2840,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -2849,10 +2849,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -2962,7 +2962,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "video_decode": [
             {
@@ -2996,7 +2996,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -3014,7 +3014,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3023,10 +3023,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -3042,7 +3042,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3051,10 +3051,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -3069,7 +3069,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3078,10 +3078,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -3210,7 +3210,7 @@
             "hdr10": true,
             "hdr10_plus": false,
             "hlg": false,
-            "dolby_vision_profiles": null
+            "dolby_vision_profiles": []
           },
           "video_decode": [
             {
@@ -3244,7 +3244,7 @@
               "hdr10": true,
               "hdr10_plus": false,
               "hlg": false,
-              "dolby_vision_profiles": null
+              "dolby_vision_profiles": []
             },
             "output_context_id": "output-a"
           },
@@ -3262,7 +3262,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
                 "sidecar_text": false,
@@ -3271,10 +3271,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": true
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -3290,7 +3290,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
                 "sidecar_text": false,
@@ -3299,10 +3299,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": true
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -3317,7 +3317,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": true,
                 "sidecar_text": false,
@@ -3326,10 +3326,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": true
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -3498,7 +3498,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3507,10 +3507,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -3526,7 +3526,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3535,10 +3535,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -3553,7 +3553,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3562,10 +3562,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }
@@ -3742,7 +3742,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3751,10 +3751,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "original_http": {
               "enabled": true,
@@ -3770,7 +3770,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3779,10 +3779,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             },
             "progressive": {
               "enabled": true,
@@ -3797,7 +3797,7 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": null,
+              "audio_passthrough_codecs": [],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,
@@ -3806,10 +3806,10 @@
                 "sidecar_bitmap": false,
                 "font_attachments": false
               },
-              "features": null,
+              "features": [],
               "auth_header_refresh": false,
-              "validated_claims": null,
-              "transformations": null
+              "validated_claims": [],
+              "transformations": []
             }
           }
         }

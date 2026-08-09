@@ -13,6 +13,7 @@ package contract
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -166,6 +167,57 @@ func TestGoldenFixturesSatisfyTheSchemas(t *testing.T) {
 				t.Fatalf("validate: %v", err)
 			}
 		})
+	}
+}
+
+// The conformance matrix embeds complete wire requests and responses inside a
+// larger cross-message document. Validate those nested bodies too: decoding
+// through Go structs first would normalize JSON null arrays to nil and conceal
+// a corpus that strict client decoders cannot consume.
+func TestConformanceMatrixEmbeddedWireBodiesSatisfySchemas(t *testing.T) {
+	schemas := compileSchemasV3(t)
+	matrix := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "conformance_matrix.json"))).(map[string]any)
+
+	validate := func(scenarioName, schemaName string, value any) {
+		t.Helper()
+		if err := schemas[schemaName].Validate(value); err != nil {
+			t.Errorf("scenario %q embedded %s: %v", scenarioName, schemaName, err)
+		}
+	}
+	reject := func(scenarioName, schemaName string, value any) {
+		t.Helper()
+		if err := schemas[schemaName].Validate(value); err == nil {
+			t.Errorf("scenario %q embedded %s is expected to be rejected", scenarioName, schemaName)
+		}
+	}
+	for _, raw := range matrix["planner_scenarios"].([]any) {
+		scenario := raw.(map[string]any)
+		validate(scenario["name"].(string), "start-request.schema.json", scenario["request"])
+	}
+	for _, raw := range matrix["replan_scenarios"].([]any) {
+		scenario := raw.(map[string]any)
+		validate(scenario["name"].(string), "replan-request.schema.json", scenario["request"])
+	}
+	protocolSchemas := map[string]string{
+		"start_request":      "start-request.schema.json",
+		"replan_request":     "replan-request.schema.json",
+		"route_event":        "route-event.schema.json",
+		"persisted_decision": "decision-response.schema.json",
+	}
+	for _, raw := range matrix["protocol_scenarios"].([]any) {
+		scenario := raw.(map[string]any)
+		input := scenario["input"].(map[string]any)
+		expected := scenario["expected"].(map[string]any)
+		expectsRejection := expected["error"] != nil && expected["http_status"].(float64) >= http.StatusBadRequest
+		for field, schemaName := range protocolSchemas {
+			if value, ok := input[field]; ok {
+				if expectsRejection {
+					reject(scenario["name"].(string), schemaName, value)
+				} else {
+					validate(scenario["name"].(string), schemaName, value)
+				}
+			}
+		}
 	}
 }
 

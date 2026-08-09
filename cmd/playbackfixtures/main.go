@@ -831,12 +831,26 @@ func conformanceStartRequest() playback.StartRequestV3 {
 		ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "3.0-test",
 		Device: playback.DeviceContextV3{Platform: "fixture"}, Output: playback.OutputContextV3{OutputContextID: "output-a"},
 		Deliveries: map[string]playback.DeliveryCapabilityV3{
-			playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{containerMKV, containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
-			playback.DeliveryClassProgressiveV3:  {Enabled: true, SupportedOnDevice: true, Containers: []string{containerMP4}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
-			playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{containerHLS}, VideoCodecs: []string{codecHEVC, codecH264}, AudioDecodeCodecs: []string{codecAAC}},
+			playback.DeliveryClassOriginalHTTPV3: conformanceDelivery([]string{containerMKV, containerMP4}),
+			playback.DeliveryClassProgressiveV3:  conformanceDelivery([]string{containerMP4}),
+			playback.DeliveryClassHLSV3:          conformanceDelivery([]string{containerHLS}),
 		},
 	}
 	return request
+}
+
+func conformanceDelivery(containers []string) playback.DeliveryCapabilityV3 {
+	return playback.DeliveryCapabilityV3{
+		Enabled:                true,
+		SupportedOnDevice:      true,
+		Containers:             append([]string(nil), containers...),
+		VideoCodecs:            []string{codecHEVC, codecH264},
+		AudioDecodeCodecs:      []string{codecAAC},
+		AudioPassthroughCodecs: []string{},
+		Features:               []string{},
+		ValidatedClaims:        []string{},
+		Transformations:        []playback.TransformationV3{},
+	}
 }
 
 func conformanceVideoFile() *models.MediaFile {
@@ -870,12 +884,12 @@ func conformanceHDRRequest() playback.StartRequestV3 {
 	request.Capabilities.Containers = []string{containerMKV}
 	request.Capabilities.MaxResolution = "2160p"
 	request.Capabilities.HDR = true
-	request.Capabilities.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true}
+	request.Capabilities.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{}}
 	request.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{{
 		Codec: codecHEVC, Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
 		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
 	}}
-	request.ClientPlaybackContext.Output.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true}
+	request.ClientPlaybackContext.Output.HDRDetails = &playback.HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{}}
 	return request
 }
 
