@@ -29,9 +29,9 @@ type AttemptRecordV3 struct {
 	CurrentPlan            PlanV3
 	FrozenRecipe           ExecutableRecipeV3
 	NormalizedRequest      StartRequestV3
-	// StartResponse is the exact decision returned by the initial start. It is
-	// persisted for both playable and terminal outcomes so a byte-equivalent
-	// retry can replay the same contract decision without replanning.
+	// StartResponse is the latest durable decision for this attempt. It begins
+	// as the exact start response and advances atomically with each completed
+	// replan so an idempotent start retry never resurrects a superseded plan.
 	StartResponse DecisionResponseV3
 	// RequestDigest fingerprints the normalized start request so an attempt-ID
 	// reused with different input is a detectable idempotency violation rather

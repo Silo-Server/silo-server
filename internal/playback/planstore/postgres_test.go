@@ -432,6 +432,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		completed.CurrentPlanID = "plan-2"
 		completed.CurrentReplanRequestID = "rq-1"
 		completed.CurrentPlan.PlanID = "plan-2"
+		completed.StartResponse = playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, Outcome: playback.OutcomePlayableV3, SessionID: sessionID, PlaybackPlan: &completed.CurrentPlan}
 		response := json.RawMessage(`{"plan_id": "plan-2"}`)
 		if err := store.CompleteReplan(ctx, sessionID, "rq-1", "", response, completed); err != nil {
 			t.Fatalf("CompleteReplan: %v", err)
@@ -452,6 +453,13 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 		if !bytes.Equal(mustJSON(t, storedResponse), mustJSON(t, wantResponse)) {
 			t.Fatalf("replayed response = %s, want %s", lease.Response, response)
+		}
+		storedAttempt, err := store.GetAttempt(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if storedAttempt.StartResponse.PlaybackPlan == nil || storedAttempt.StartResponse.PlaybackPlan.PlanID != "plan-2" {
+			t.Fatalf("durable replay decision = %#v, want plan-2", storedAttempt.StartResponse)
 		}
 
 		// Expired lease whose base revision no longer matches the retry.

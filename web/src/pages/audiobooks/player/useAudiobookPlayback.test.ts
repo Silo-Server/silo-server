@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { createElement, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
-import { useAudiobookPlayback } from "./useAudiobookPlayback";
+import { audiobookAbsoluteTime, useAudiobookPlayback } from "./useAudiobookPlayback";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 
@@ -91,7 +91,15 @@ function renderAudiobookPlayback(
  * when the browser can already decode the source, whose player clock starts at
  * the requested position.
  */
-function audioOnlyDecision(sessionId: string, startPosition: number) {
+function audioOnlyDecision(
+  sessionId: string,
+  startPosition: number,
+  timeline: Partial<{
+    stream_origin_seconds: number;
+    player_start_seconds: number;
+    can_seek_anywhere: boolean;
+  }> = {},
+) {
   return {
     protocol_version: 3,
     server_features: ["playback_plan_v3"],
@@ -116,6 +124,7 @@ function audioOnlyDecision(sessionId: string, startPosition: number) {
         timeline_offset_seconds: 0,
         can_seek_anywhere: true,
         seek_restoration: "player_position",
+        ...timeline,
       },
       selected_tracks: {},
       effective_recipe: {},
@@ -218,6 +227,7 @@ describe("useAudiobookPlayback", () => {
       // to this part's local clock, so an omitted value would hand resume policy
       // back to the server for a timeline it does not own.
       start_position: 0,
+      progress_persistence: "client",
       quality_preference: "original",
     });
   });
@@ -258,6 +268,52 @@ describe("useAudiobookPlayback", () => {
     expect(JSON.parse(String(startCall?.[1]?.body))).toMatchObject({
       file_id: 2,
       start_position: 150,
+    });
+  });
+
+  it("maps anchored player time and restarts a non-global seek at its file-local target", async () => {
+    let sessionCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          sessionCount += 1;
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(
+            audioOnlyDecision(`anchored-${sessionCount}`, body.start_position, {
+              stream_origin_seconds: body.start_position,
+              player_start_seconds: 0,
+              can_seek_anywhere: false,
+            }),
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+        if (url.includes("/progress") || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse({});
+      }),
+    );
+
+    const { result } = renderAudiobookPlayback({ initialPositionSeconds: 300 });
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+    expect(audiobookAbsoluteTime(0, 300, 5)).toBe(305);
+
+    act(() => result.current.seekTo(360));
+    await flushAsyncWork();
+    const starts = vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => String(url).endsWith("/playback/start"));
+    expect(starts).toHaveLength(2);
+    expect(JSON.parse(String(starts[1]?.[1]?.body))).toMatchObject({
+      start_position: 360,
+      progress_persistence: "client",
     });
   });
 

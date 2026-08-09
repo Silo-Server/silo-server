@@ -295,6 +295,10 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, bas
 	if err != nil {
 		return err
 	}
+	startResponseJSON, err := json.Marshal(record.StartResponse)
+	if err != nil {
+		return err
+	}
 	// The base-revision predicate makes the commit a true compare-and-swap:
 	// under the advisory session lock it never fails, but a skipped or broken
 	// lock must surface as a conflict rather than silently last-writer-win
@@ -303,9 +307,9 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, bas
 		UPDATE playback_v3_attempts SET
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, frozen_recipe = $6,
-			normalized_request = $7, expires_at = $8, updated_at = NOW()
-		WHERE session_id = $1::uuid AND current_replan_request_id = $9`,
-		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, record.ExpiresAt, baseReplanRequestID)
+			normalized_request = $7, start_response = $8, expires_at = $9, updated_at = NOW()
+		WHERE session_id = $1::uuid AND current_replan_request_id = $10`,
+		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, recipeJSON, requestJSON, startResponseJSON, record.ExpiresAt, baseReplanRequestID)
 	if err != nil {
 		return err
 	}

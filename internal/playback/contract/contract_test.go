@@ -96,6 +96,10 @@ var (
 		string(playback.SubtitleFidelityPreserveV3),
 		string(playback.SubtitleFidelityCompatibleV3),
 	}
+	progressPersistenceV3 = []string{
+		string(playback.ProgressPersistenceServerV3),
+		string(playback.ProgressPersistenceClientV3),
+	}
 	subtitleSourcesV3 = []string{
 		playback.SubtitleSourceExternalV3,
 		playback.SubtitleSourceEmbeddedV3,
@@ -144,6 +148,15 @@ func TestValidFixtures(t *testing.T) {
 				t.Fatalf("validate: %v", err)
 			}
 		})
+	}
+}
+
+func TestClientProgressPersistenceRequiresExplicitStartPosition(t *testing.T) {
+	schemas := compileSchemasV3(t)
+	request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "start_request.json"))).(map[string]any)
+	delete(request, "start_position")
+	if err := schemas["start-request.schema.json"].Validate(request); err == nil {
+		t.Fatal("client progress_persistence without start_position satisfied the schema")
 	}
 }
 
@@ -281,6 +294,7 @@ func TestSchemaEnumsStayInSync(t *testing.T) {
 	assertConstInt(t, "start.protocol_version.const", schemaValue(t, start, "properties", "protocol_version", "const"), playback.ProtocolV3)
 	assertConstInt(t, "start.client_playback_context.protocol_version.const", schemaValue(t, start, "$defs", "client_playback_context", "properties", "protocol_version", "const"), playback.ProtocolV3)
 	assertStringsEqual(t, "start.subtitle_fidelity_preference.enum", schemaStrings(t, start, "properties", "subtitle_fidelity_preference", "enum"), subtitleFidelityV3)
+	assertStringsEqual(t, "start.progress_persistence.enum", schemaStrings(t, start, "properties", "progress_persistence", "enum"), progressPersistenceV3)
 	assertStringsEqual(t, "start.capability_evidence.enum", schemaStrings(t, start, "$defs", "capability_evidence", "enum"), evidenceV3)
 	assertStringsEqual(t, "start.transformation_capability.executor.enum", schemaStrings(t, start, "$defs", "transformation_capability", "properties", "executor", "enum"), executorsV3)
 

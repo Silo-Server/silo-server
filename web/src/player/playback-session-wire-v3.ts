@@ -5,6 +5,7 @@ import {
   type ClientPlaybackContextV3,
   type FailureV3,
   type PlanV3,
+  type ProgressPersistenceV3,
   type ReplanOperationV3,
   type ReplanRequestV3,
   type SelectedTracksV3,
@@ -37,6 +38,8 @@ export interface StartRequestInput {
   position: number;
   /** Forces `start_position: 0` to be sent, which means "start over". */
   forceStartPosition: boolean;
+  /** Omitted means the server owns durable item progress. */
+  progressPersistence?: ProgressPersistenceV3;
   explicitAudioTrackIndex?: number | null;
   metered: boolean;
   bandwidthEstimateKbps?: number | null;
@@ -71,6 +74,7 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     ...(input.forceStartPosition || input.position > 0
       ? { start_position: clampPosition(input.position) }
       : {}),
+    ...(input.progressPersistence ? { progress_persistence: input.progressPersistence } : {}),
     ...(input.explicitAudioTrackIndex != null && input.explicitAudioTrackIndex >= 0
       ? { audio_track_index: input.explicitAudioTrackIndex }
       : {}),

@@ -1031,12 +1031,17 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	}
 	var envelope struct {
 		ProtocolVersion *int `json:"protocol_version"`
+		Capabilities    *struct {
+			VideoEvidence *string `json:"video_evidence"`
+			AudioEvidence *string `json:"audio_evidence"`
+		} `json:"client_capabilities"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if envelope.ProtocolVersion == nil || *envelope.ProtocolVersion != playback.ProtocolV3 {
+	if envelope.ProtocolVersion == nil || *envelope.ProtocolVersion != playback.ProtocolV3 ||
+		envelope.Capabilities == nil || envelope.Capabilities.VideoEvidence == nil || envelope.Capabilities.AudioEvidence == nil {
 		upgrade := playback.LegacyUpgradeErrorV3()
 		writeError(w, http.StatusUpgradeRequired, upgrade.Error, upgrade.Message)
 		return

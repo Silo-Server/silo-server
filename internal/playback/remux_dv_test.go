@@ -29,6 +29,14 @@ func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
 	}
 }
 
+func TestBuildRemuxArgsExcludesAttachedPictures(t *testing.T) {
+	args := buildRemuxArgs("/book.m4b", "mp4", 0, true, -1, 0, false)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-map 0:V:0?") {
+		t.Fatalf("remux args must exclude attached-picture video streams: %s", joined)
+	}
+}
+
 // An ffmpeg without the dovi_rpu bitstream filter (pre-7.1) would abort on
 // the unknown filter before producing any output. The profile must be
 // neutralized so the remux still starts, keeping the pre-strip behavior.

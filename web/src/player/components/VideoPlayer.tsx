@@ -53,6 +53,7 @@ import type {
 } from "../types";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import { mediaDurationSeconds, toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
+import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
 import {
   copyWatchTogetherInvite,
   endWatchTogetherRoom,
@@ -119,7 +120,7 @@ interface VideoPlayerProps {
   onNavigateEpisode?: (contentId: string) => void;
   /** The session's current quality preference, as the server normalized it. */
   qualityPreference: string;
-  onRefreshSubtitles?: () => void;
+  onRefreshSubtitles?: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in at the server's ordinal. */
   onApplySubtitleTrack?: (track: SubtitleInventoryItemV3) => void;
   audioTracks?: PlayerAudioTrack[];
@@ -286,7 +287,9 @@ export function VideoPlayer({
   const [muted, setMuted] = useState(() => getPersistedVolume().muted);
 
   // Subtitles
-  const [activeSubtitleIndex, setActiveSubtitleIndex] = useState<number | null>(null);
+  const [activeSubtitleIndex, setActiveSubtitleIndex] = useState<number | null>(
+    () => plan.selected_tracks.subtitle?.index ?? null,
+  );
   const lastSubtitleIndexRef = useRef<number | null>(null);
   const subtitleSelectionWasManualRef = useRef(false);
   // Per-session subtitle delay in ms. Positive = show later. Reset when the
@@ -652,11 +655,6 @@ export function VideoPlayer({
 
   const performPlayerSeek = useCallback(
     (seconds: number) => {
-      if (!isHlsStream) {
-        handleSeek(seconds);
-        return;
-      }
-
       const video = videoRef.current;
       if (!video) return;
 
@@ -665,14 +663,16 @@ export function VideoPlayer({
 
       const nativeSeconds = toPlayerTime(seconds, streamOriginRef.current);
       if (canSeekAnywhere) {
-        video.currentTime = nativeSeconds;
+        if (isHlsStream) video.currentTime = nativeSeconds;
+        else handleSeek(nativeSeconds);
         return;
       }
 
       const seekable = video.seekable;
       for (let i = 0; i < seekable.length; i++) {
         if (nativeSeconds >= seekable.start(i) && nativeSeconds <= seekable.end(i)) {
-          video.currentTime = nativeSeconds;
+          if (isHlsStream) video.currentTime = nativeSeconds;
+          else handleSeek(nativeSeconds);
           return;
         }
       }
@@ -936,7 +936,7 @@ export function VideoPlayer({
             if (event.payload.track) {
               onApplySubtitleTrack?.(event.payload.track);
             } else {
-              onRefreshSubtitles?.();
+              onRefreshSubtitles?.(getSubtitleStartPosition());
             }
           }
           break;
@@ -995,7 +995,7 @@ export function VideoPlayer({
             setLiveCues([]);
             handleSubtitleSelect(track.combined_index);
           } else {
-            onRefreshSubtitles?.();
+            onRefreshSubtitles?.(getSubtitleStartPosition());
           }
           break;
         }
@@ -1020,6 +1020,7 @@ export function VideoPlayer({
     },
     [
       activeFileId,
+      getSubtitleStartPosition,
       handleSubtitleSelect,
       onApplySubtitleTrack,
       onRealtimeEvent,
@@ -1768,7 +1769,18 @@ export function VideoPlayer({
       return;
     }
 
-    const requestKey = `${planRevision}:${serverRenderedSubtitleIndex ?? "none"}`;
+    const desiredServerIndex = pendingServerSubtitleSelection(
+      plan.subtitle.mode,
+      plan.selected_tracks.subtitle?.index ?? null,
+      activeSubtitleIndex,
+      activeSubtitleTrack?.burn_in_only === true,
+    );
+    if (desiredServerIndex === undefined) {
+      requestedSubtitleTrackChangeRef.current = null;
+      return;
+    }
+
+    const requestKey = `${plan.plan_id}:${desiredServerIndex ?? "none"}`;
     if (requestedSubtitleTrackChangeRef.current === requestKey) return;
     requestedSubtitleTrackChangeRef.current = requestKey;
 
@@ -1781,18 +1793,28 @@ export function VideoPlayer({
       video && video.readyState > 0
         ? currentTimeRef.current
         : (subtitleFetchAnchorRef.current ?? 0);
-    onSubtitleTrackChange?.(serverRenderedSubtitleIndex, position);
-  }, [onSubtitleTrackChange, planBurnsInSubtitles, planRevision, serverRenderedSubtitleIndex]);
+    onSubtitleTrackChange?.(desiredServerIndex, position);
+  }, [
+    activeSubtitleIndex,
+    activeSubtitleTrack?.burn_in_only,
+    onSubtitleTrackChange,
+    plan.plan_id,
+    plan.selected_tracks.subtitle?.index,
+    plan.subtitle.mode,
+    planBurnsInSubtitles,
+    serverRenderedSubtitleIndex,
+  ]);
 
   // A refused replan leaves the previous stream playing, so the selection has
   // to roll back too: without this the menu would keep claiming a track is on
   // that the server never rendered, and re-picking it would be suppressed as an
   // unchanged selection instead of retrying.
   useEffect(() => {
-    if (serverRenderedSubtitleIndex !== null && replanError && !replanning) {
-      setActiveSubtitleIndex(null);
+    if (requestedSubtitleTrackChangeRef.current && replanError && !replanning) {
+      setActiveSubtitleIndex(plan.selected_tracks.subtitle?.index ?? null);
+      requestedSubtitleTrackChangeRef.current = null;
     }
-  }, [replanError, replanning, serverRenderedSubtitleIndex]);
+  }, [plan.selected_tracks.subtitle?.index, replanError, replanning]);
 
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
@@ -2521,7 +2543,9 @@ export function VideoPlayer({
           onSubtitleDelayChange={setSubtitleDelayMs}
           mediaFileId={activeFileId ?? undefined}
           playerConfig={playerConfig}
-          onRefreshSubtitles={onRefreshSubtitles}
+          onRefreshSubtitles={
+            onRefreshSubtitles ? () => onRefreshSubtitles(getSubtitleStartPosition()) : undefined
+          }
           sessionId={sessionId}
           getSubtitleStartPosition={getSubtitleStartPosition}
           audioTracks={audioTracks}

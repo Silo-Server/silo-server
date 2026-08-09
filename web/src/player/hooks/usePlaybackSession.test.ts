@@ -55,6 +55,17 @@ describe("buildStartRequestV3", () => {
     ).toMatchObject({ start_position: 0 });
   });
 
+  it("declares client-owned progress with an explicit zero anchor", () => {
+    expect(
+      buildStartRequestV3({
+        ...startBase,
+        position: 0,
+        forceStartPosition: true,
+        progressPersistence: "client",
+      }),
+    ).toMatchObject({ start_position: 0, progress_persistence: "client" });
+  });
+
   it("omits the start position when playback should resume normally", () => {
     expect(buildStartRequestV3(startBase)).not.toHaveProperty("start_position");
   });

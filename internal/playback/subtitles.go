@@ -12,19 +12,30 @@ import (
 	"strings"
 )
 
+const (
+	subtitleCodecPGS       = "pgs"
+	subtitleCodecPGSShort  = "pgssub"
+	subtitleCodecPGSFFmpeg = "hdmv_pgs_subtitle"
+	subtitleCodecDVDShort  = "dvdsub"
+	subtitleCodecVOBShort  = "vobsub"
+	subtitleCodecDVDFFmpeg = "dvd_subtitle"
+	subtitleCodecDVBShort  = "dvbsub"
+	subtitleCodecDVBFFmpeg = "dvb_subtitle"
+)
+
 // bitmapSubtitleCodecs lists subtitle codecs that cannot be extracted as text
 // and must be burned into the video stream.
 var bitmapSubtitleCodecs = map[string]bool{
-	"pgs":               true,
-	"hdmv_pgs_subtitle": true,
-	"dvd_subtitle":      true,
-	"dvb_subtitle":      true,
+	subtitleCodecPGS:       true,
+	subtitleCodecPGSFFmpeg: true,
+	subtitleCodecDVDFFmpeg: true,
+	subtitleCodecDVBFFmpeg: true,
 }
 
 // NeedsBurnIn reports whether the given subtitle codec is bitmap-based and
 // requires burning into the video stream (cannot be extracted as text).
 func NeedsBurnIn(subtitleCodec string) bool {
-	return bitmapSubtitleCodecs[strings.ToLower(subtitleCodec)]
+	return bitmapSubtitleCodecs[normalizeCodecV3(subtitleCodec)]
 }
 
 // pgsSubtitleCodecs lists PGS (Blu-ray bitmap) subtitle codec names. Unlike
@@ -33,13 +44,13 @@ func NeedsBurnIn(subtitleCodec string) bool {
 // option. The web player burns in all bitmap codecs; DVD/DVB bitmap subs also
 // require burn-in for native clients that cannot render them directly.
 var pgsSubtitleCodecs = map[string]bool{
-	"pgs":               true,
-	"hdmv_pgs_subtitle": true,
+	subtitleCodecPGS:       true,
+	subtitleCodecPGSFFmpeg: true,
 }
 
 // IsPGS reports whether the given subtitle codec is PGS format.
 func IsPGS(codec string) bool {
-	return pgsSubtitleCodecs[strings.ToLower(codec)]
+	return pgsSubtitleCodecs[normalizeCodecV3(codec)]
 }
 
 // assSubtitleCodecs lists subtitle codecs that are ASS/SSA format and support

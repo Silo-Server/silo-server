@@ -96,7 +96,7 @@ the document is always the full one:
 {
   "enabled": true,
   "protocol_versions": [3],
-  "features": ["playback_plan_v3", "layout_aware_passthrough", "playback_route_diagnostics",
+  "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "layout_aware_passthrough", "playback_route_diagnostics",
                "device_quirks_v1", "seek_reanchor_v1", "direct_stream_resume_v1",
                "plan_source_duration_v1"],
   "deliveries": ["original_http", "server_remux_progressive", "server_remux_hls", "server_transcode_hls"],
@@ -104,11 +104,12 @@ the document is always the full one:
 }
 ```
 
-The seven feature strings above are the full set this server version advertises:
+The eight feature strings above are the full set this server version advertises:
 
 | Feature | What it promises |
 | --- | --- |
 | `playback_plan_v3` | The three plan endpoints exist and behave as specified here |
+| `neutral_playback_v3_contract_v1` | The server mints opaque `plan_attempt_key` values that clients only echo, and exposes `track_change` / `quality_change` as intent replans distinct from failure recovery |
 | `layout_aware_passthrough` | Audio passthrough is decided from channel *layouts*, not just channel counts (§3) |
 | `playback_route_diagnostics` | `POST /playback/route-events` is accepted |
 | `device_quirks_v1` | Plans may carry `applied_quirks` and `runtime_corrections` (§9) |
@@ -147,13 +148,13 @@ Body: `StartRequestV3`
 | `401` | `unauthorized` | No authenticated user |
 | `404` | `not_found` | `file_id` does not exist, is marked missing, or this profile cannot see it |
 | `409` | `playback_attempt_reused` | This `playback_attempt_id` was already used for a *different* request |
-| `426` | `client_upgrade_required` | The body does not declare `protocol_version: 3` |
+| `426` | `client_upgrade_required` | The body does not declare the finalized v3 shape: `protocol_version: 3` plus both capability evidence markers |
 | `500` | `internal_error` | Session store failure |
 
 A file the profile is not allowed to see is `404`, not `403` — parental and
 library restrictions do not confirm that a hidden item exists.
 
-The `426` is what a pre-v3 client gets. There is no protocol negotiation and no
+The `426` is what a pre-v3 or draft-v3 client gets. There is no protocol negotiation and no
 fallback: the server decodes v3 or it refuses, and the client is expected to
 render an "update required" state rather than retry. It is deliberately not a
 `400` — the request may be perfectly well-formed for the protocol it was written
@@ -189,8 +190,16 @@ constant:
 
 | Field | Omitted | Present |
 | --- | --- | --- |
-| `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary) | Exactly that position. `0` means *start over* |
+| `start_position` | The profile's saved resume point for this item, or `0` when there is none, it is already complete, or the file is one part of a multipart item (every part shares the item's resume point, so a part-local seek to it would land somewhere arbitrary). It is required when `progress_persistence` is `client` | Exactly that position. `0` means *start over* |
 | `audio_track_id` / `audio_track_index` | The profile's preferred audio track, resolved from the series preference, then the profile's audio-language setting, then the library override | Exactly that track |
+
+`progress_persistence` separates the live session clock from durable resume
+ownership. Omission (or `server`) means session progress may update the item's
+resume/history normally. `client` keeps heartbeats, route diagnostics, and live
+session state intact but suppresses those durable writes because the client
+persists its own item-global timeline (for example through `/sync/progress`). A
+client choosing that mode must send `start_position` explicitly, including
+explicit `0`; the server never substitutes saved resume state for it.
 
 Both are settled *before* planning, not after. This is not an implementation
 detail a client can ignore: the plan's timeline is cut at the start position

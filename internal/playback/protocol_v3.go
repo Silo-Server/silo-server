@@ -13,6 +13,7 @@ import (
 const (
 	ProtocolV3                    = 3
 	FeaturePlaybackPlanV3         = "playback_plan_v3"
+	FeatureNeutralContractV3      = "neutral_playback_v3_contract_v1"
 	FeatureLayoutPassthrough      = "layout_aware_passthrough"
 	FeatureClientVideoTransforms  = "client_video_transformations_v1"
 	FeatureRouteDiagnostics       = "playback_route_diagnostics"
@@ -36,6 +37,7 @@ const (
 func ServerFeaturesV3() []string {
 	return []string{
 		FeaturePlaybackPlanV3,
+		FeatureNeutralContractV3,
 		FeatureLayoutPassthrough,
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
@@ -329,6 +331,7 @@ type StartRequestV3 struct {
 	QualityPreference          string                    `json:"quality_preference"`
 	SubtitleFidelityPreference SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
 	StartPosition              *float64                  `json:"start_position,omitempty"`
+	ProgressPersistence        ProgressPersistenceV3     `json:"progress_persistence,omitempty"`
 	AudioTrackID               string                    `json:"audio_track_id,omitempty"`
 	AudioTrackIndex            *int                      `json:"audio_track_index,omitempty"`
 	SubtitleTrackID            string                    `json:"subtitle_track_id,omitempty"`
@@ -339,6 +342,16 @@ type StartRequestV3 struct {
 	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
 }
+
+// ProgressPersistenceV3 declares which side owns durable item resume/history.
+// Session progress is still reported in both modes so live playback state and
+// diagnostics remain accurate.
+type ProgressPersistenceV3 string
+
+const (
+	ProgressPersistenceServerV3 ProgressPersistenceV3 = "server"
+	ProgressPersistenceClientV3 ProgressPersistenceV3 = "client"
+)
 
 type TrackIdentityV3 struct {
 	ID    string `json:"id"`
@@ -688,6 +701,15 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 	}
 	if r.StartPosition != nil && (!isFiniteV3(*r.StartPosition) || *r.StartPosition < 0 || *r.StartPosition > 31_536_000) {
 		return nil, errors.New("start_position is outside the supported range")
+	}
+	if r.ProgressPersistence == "" {
+		r.ProgressPersistence = ProgressPersistenceServerV3
+	}
+	if r.ProgressPersistence != ProgressPersistenceServerV3 && r.ProgressPersistence != ProgressPersistenceClientV3 {
+		return nil, errors.New("progress_persistence is invalid")
+	}
+	if r.ProgressPersistence == ProgressPersistenceClientV3 && r.StartPosition == nil {
+		return nil, errors.New("start_position is required when progress_persistence is client")
 	}
 	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
 		return nil, err

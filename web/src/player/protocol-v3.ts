@@ -87,6 +87,9 @@ export type SubtitleModeV3 = "off" | "render" | "convert" | "burn_in";
 /** How much subtitle fidelity the client would rather keep. */
 export type SubtitleFidelityV3 = "preserve" | "compatible";
 
+/** Which side owns durable item resume/history persistence. */
+export type ProgressPersistenceV3 = "server" | "client";
+
 /** Presence and kind of a Dolby Vision enhancement layer on the source. */
 export type EnhancementLayerV3 = "none" | "mel" | "fel" | "unknown";
 
@@ -109,6 +112,9 @@ export type RouteEventNameV3 =
 
 /** Feature name the client advertises when it can consume a v3 plan. */
 export const FEATURE_PLAYBACK_PLAN_V3 = "playback_plan_v3";
+
+/** Server-minted attempt keys and intent replans from the neutral v3 contract. */
+export const FEATURE_NEUTRAL_PLAYBACK_V3_CONTRACT = "neutral_playback_v3_contract_v1";
 
 /** The `original` rung label, which always preserves the source. */
 export const QUALITY_ORIGINAL_V3 = "original";
@@ -249,6 +255,7 @@ export interface StartRequestV3 {
   quality_preference: string;
   subtitle_fidelity_preference: SubtitleFidelityV3;
   start_position?: number;
+  progress_persistence?: ProgressPersistenceV3;
   audio_track_id?: string;
   audio_track_index?: number;
   subtitle_track_id?: string;

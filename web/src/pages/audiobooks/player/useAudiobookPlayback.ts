@@ -12,6 +12,7 @@ import {
 } from "@/player/client-context-v3";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { playerFetch } from "@/player/player-fetch";
+import { randomUUID } from "@/lib/uuid";
 import { describePlanTerminal } from "@/player/playback-errors";
 import { QUALITY_ORIGINAL_V3, type DecisionResponseV3 } from "@/player/protocol-v3";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
@@ -76,6 +77,14 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+export function audiobookAbsoluteTime(
+  partStartSeconds: number,
+  streamOriginSeconds: number,
+  playerSeconds: number,
+): number {
+  return safeNumber(partStartSeconds) + safeNumber(streamOriginSeconds) + safeNumber(playerSeconds);
+}
+
 function buildParts(files: AudiobookFile[]): AudiobookPart[] {
   const parts: AudiobookPart[] = [];
   let offset = 0;
@@ -129,14 +138,21 @@ function absoluteBufferedRanges(
   ranges: TimeRanges,
   part: AudiobookPart | undefined,
   bookDuration: number,
+  streamOriginSeconds = 0,
 ): TimeRanges {
   if (!part) {
     return { length: 0, start: () => 0, end: () => 0 } as TimeRanges;
   }
   const out: Array<{ start: number; end: number }> = [];
   for (let i = 0; i < ranges.length; i++) {
-    const start = Math.min(bookDuration, part.start + safeNumber(ranges.start(i)));
-    const end = Math.min(bookDuration, part.start + safeNumber(ranges.end(i)));
+    const start = Math.min(
+      bookDuration,
+      part.start + streamOriginSeconds + safeNumber(ranges.start(i)),
+    );
+    const end = Math.min(
+      bookDuration,
+      part.start + streamOriginSeconds + safeNumber(ranges.end(i)),
+    );
     if (end > start) {
       out.push({ start, end });
     }
@@ -212,6 +228,7 @@ export function useAudiobookPlayback({
     sessionId: null,
     streamUrl: "",
   });
+  const [sourceRevision, setSourceRevision] = useState(0);
 
   const { mutate: reportProgress } = useReportMediaProgress();
   const activePart = activeFileIndex >= 0 ? parts[activeFileIndex] : undefined;
@@ -219,6 +236,8 @@ export function useAudiobookPlayback({
   const currentTimeRef = useRef(currentTime);
   const activePartRef = useRef<AudiobookPart | undefined>(activePart);
   const sessionIdRef = useRef<string | null>(null);
+  const streamOriginSecondsRef = useRef(0);
+  const canSeekAnywhereRef = useRef(true);
   const reportRef = useRef<(pos: number) => void>(() => {});
   const reportSessionRef = useRef<(pos: number, isPaused: boolean, keepalive?: boolean) => void>(
     () => {},
@@ -316,6 +335,8 @@ export function useAudiobookPlayback({
     const target = clampedBookTime(initialPositionSeconds, duration);
     const index = findPartIndex(parts, target);
     pendingLocalSeekRef.current = localTimeForPart(parts[index], target);
+    streamOriginSecondsRef.current = 0;
+    canSeekAnywhereRef.current = true;
     autoPlayPendingRef.current = autoPlay;
     setBuffered(null);
     setActiveFileIndex(index);
@@ -337,7 +358,7 @@ export function useAudiobookPlayback({
 
     setSessionState({ sessionId: null, streamUrl: "" });
 
-    const playbackAttemptId = crypto.randomUUID();
+    const playbackAttemptId = randomUUID();
 
     (async () => {
       const profileId = config.getProfileId();
@@ -360,6 +381,7 @@ export function useAudiobookPlayback({
             // local clock, so zero means "the start of this part" rather than
             // "resume wherever the server last saw us".
             forceStartPosition: true,
+            progressPersistence: "client",
             metered: detectMeteredV3(),
             bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
             clientCapabilities: buildClientCapabilitiesV3(capabilityProbe),
@@ -396,6 +418,8 @@ export function useAudiobookPlayback({
 
       startedSessionId = sessionId;
       sessionIdRef.current = sessionId;
+      streamOriginSecondsRef.current = plan.timeline.stream_origin_seconds;
+      canSeekAnywhereRef.current = plan.timeline.can_seek_anywhere;
       // The plan owns where the stream is anchored. On a converted part the
       // server anchors the stream at the seek position and restarts the player
       // clock at zero, so replaying `localStart` here would seek twice.
@@ -437,19 +461,34 @@ export function useAudiobookPlayback({
         }
       }
     };
-  }, [activePart, capabilityProbe, config, fileId, stopSession]);
+  }, [activePart, capabilityProbe, config, fileId, sourceRevision, stopSession]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !fileId || !activePart) return;
 
-    const absoluteFromAudio = () => activePart.start + safeNumber(audio.currentTime);
+    const absoluteFromAudio = () =>
+      audiobookAbsoluteTime(activePart.start, streamOriginSecondsRef.current, audio.currentTime);
 
     const onTimeUpdate = () => setAbsoluteTime(absoluteFromAudio());
     const onProgress = () =>
-      setBuffered(absoluteBufferedRanges(audio.buffered, activePart, duration));
+      setBuffered(
+        absoluteBufferedRanges(
+          audio.buffered,
+          activePart,
+          duration,
+          streamOriginSecondsRef.current,
+        ),
+      );
     const onDurationChange = () =>
-      setBuffered(absoluteBufferedRanges(audio.buffered, activePart, duration));
+      setBuffered(
+        absoluteBufferedRanges(
+          audio.buffered,
+          activePart,
+          duration,
+          streamOriginSecondsRef.current,
+        ),
+      );
     const onLoadedMetadata = () => {
       audio.playbackRate = rate;
       const pending = pendingLocalSeekRef.current;
@@ -576,8 +615,13 @@ export function useAudiobookPlayback({
         playAfterSourceSwitchRef.current = shouldContinuePlaying;
         setBuffered(null);
         setActiveFileIndex(nextIndex);
-      } else if (audio) {
-        audio.currentTime = local;
+      } else if (audio && canSeekAnywhereRef.current) {
+        audio.currentTime = Math.max(0, local - streamOriginSecondsRef.current);
+      } else {
+        pendingLocalSeekRef.current = local;
+        playAfterSourceSwitchRef.current = shouldContinuePlaying;
+        setBuffered(null);
+        setSourceRevision((revision) => revision + 1);
       }
 
       currentTimeRef.current = target;

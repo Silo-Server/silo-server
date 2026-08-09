@@ -161,14 +161,9 @@ func isTextSubtitleV3(codec string) bool {
 }
 
 func isClientRenderableBitmapSubtitleV3(codec string) bool {
-	switch normalizeCodecV3(codec) {
-	// pgssub, dvdsub, and dvbsub are ffmpeg's short aliases for the same
-	// bitstreams; scanners and older rows record either spelling.
-	case "pgs", "pgssub", "hdmv_pgs_subtitle", "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub", "vobsub":
-		return true
-	default:
-		return false
-	}
+	// normalizeCodecV3 centralizes the short spellings carried by older rows;
+	// the bitmap policy can then use the same canonical set as burn-in.
+	return NeedsBurnIn(codec)
 }
 
 func subtitleTerminalV3(reason, message string) SubtitlePolicyResultV3 {

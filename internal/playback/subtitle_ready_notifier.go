@@ -54,7 +54,7 @@ func (n *SubtitleReadyNotifier) SubtitleReady(ctx context.Context, mediaFileID, 
 		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
 			continue
 		}
-		track := n.resolveTrack(ctx, session.ID, mediaFileID, language, label)
+		track := n.resolveTrack(ctx, session.ID, mediaFileID, subtitleID)
 		event, err := NewSubtitleReadyEvent(session.ID, mediaFileID, subtitleID, language, label, track)
 		if err != nil {
 			slog.WarnContext(ctx, "failed to encode subtitle ready realtime event", "component", "playback",
@@ -84,7 +84,7 @@ func (n *SubtitleReadyNotifier) TranslationCues(ctx context.Context, sessionID s
 
 // TranslationCompleted tells one session a live translation finished.
 func (n *SubtitleReadyNotifier) TranslationCompleted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) {
-	track := n.resolveTrack(ctx, sessionID, fileID, language, label)
+	track := n.resolveTrack(ctx, sessionID, fileID, subtitleID)
 	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationCompletedEvent(sessionID, fileID, jobID, trackKey, subtitleID, language, label, track)
 	})
@@ -101,10 +101,9 @@ func (n *SubtitleReadyNotifier) TranslationFailed(ctx context.Context, sessionID
 // subtitle row is already committed when these events fire, so the entry it
 // resolves to carries the same ordinal the next plan will publish.
 //
-// It matches on language rather than on the subtitle ID because the inventory
-// is keyed by ordinal, not by row: the last entry whose language matches is the
-// one just written, since downloaded tracks are ordered by creation.
-func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID string, fileID int, language, label string) *SubtitleInventoryItemV3 {
+// The row ID is server-private but retained on each inventory item, so match it
+// exactly. Language/label are presentation metadata and need not be unique.
+func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID string, fileID, subtitleID int) *SubtitleInventoryItemV3 {
 	if n == nil || n.inventory == nil || fileID <= 0 {
 		return nil
 	}
@@ -115,11 +114,11 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 		return nil
 	}
 	items := SubtitleInventoryV3(sessionID, file, n.inventory.AdditionalSubtitles(ctx, file))
-	for i := len(items) - 1; i >= 0; i-- {
+	for i := range items {
 		if items[i].Source != SubtitleSourceDownloadedV3 {
 			continue
 		}
-		if items[i].Language == language || (label != "" && items[i].Label == label) {
+		if items[i].downloadedSubtitleID == subtitleID {
 			track := items[i]
 			return &track
 		}

@@ -514,10 +514,14 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
 	}
 	abort := func() { _ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), session.ID, false) }
-	if !sessionOwnsResumeTimelineV3(effectiveFile) {
+	if req.ProgressPersistence == playback.ProgressPersistenceClientV3 || !sessionOwnsResumeTimelineV3(effectiveFile) {
 		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
-			slog.WarnContext(r.Context(), "protocol v3 start: disable progress persistence failed", "component", "api",
-				"session_id", session.ID, "file_id", effectiveFile.ID, "error", err)
+			abort()
+			return playback.DecisionResponseV3{}, &transportErrorV3{
+				reason:  "internal_error",
+				message: "Failed to establish the requested progress persistence policy.",
+				cause:   err,
+			}
 		}
 	}
 	if err := h.sessionMgr.UpdateAudioTrack(session.ID, audioIndex, result.PlayMethod); err != nil {
@@ -1142,7 +1146,19 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		return
 	}
 	var req playback.ReplanRequestV3
-	if err := json.Unmarshal(body, &req); err != nil || req.Validate() != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
+		return
+	}
+	// Reject malformed identity/bounds before doing any session lookup. When
+	// client_features is omitted, temporarily allow the only validation rule
+	// that depends on the durable start request; the authoritative merge and a
+	// second full validation happen after the attempt is loaded below.
+	preflightReq := req
+	if preflightReq.ClientFeatures == nil {
+		preflightReq.ClientFeatures = []string{playback.FeatureClientVideoTransforms}
+	}
+	if err := preflightReq.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
 		return
 	}
@@ -1178,6 +1194,17 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	if record.PlaybackAttemptID != req.PlaybackAttemptID {
 		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
+		return
+	}
+	// Replan feature advertisement is optional. Validate transformations against
+	// the durable start-time features when the client omits the unchanged list;
+	// otherwise a valid replan can be rejected before executeReplanV3 gets the
+	// chance to perform the same merge.
+	if req.ClientFeatures == nil {
+		req.ClientFeatures = append([]string(nil), record.NormalizedRequest.ClientFeatures...)
+	}
+	if err := req.Validate(); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid replan request")
 		return
 	}
 	if _, err := h.sessionMgr.GetSession(sessionID); err != nil {
@@ -1234,6 +1261,9 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		updated = *record
 	}
 	updated.CurrentReplanRequestID = req.ReplanRequestID
+	// A replay of the original start id must return the current durable decision,
+	// not a superseded plan that the replan just replaced.
+	updated.StartResponse = response
 	encoded, _ := json.Marshal(response)
 	var rollbackSession func() error
 	if transport != nil && transport.applySession != nil {
@@ -1349,10 +1379,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				intentChange = req.ClientPlaybackContext.Output.OutputContextID != start.ClientPlaybackContext.Output.OutputContextID
 			}
 		}
-		// Failure replans use the current effective file. Explicit user/output
-		// intent changes restart source selection from the requested edition.
+		// Failure replans use the current effective file. Quality/output intent may
+		// restart source selection from the requested edition, but a track change
+		// is expressed in the mounted alternate's inventory and must stay pinned to
+		// that file or its combined ordinals can select unrelated tracks.
 		start.FileID = record.EffectiveMediaFileID
-		if intentChange {
+		if intentChange && !trackChange {
 			start.FileID = record.RequestedMediaFileID
 		}
 		if !trackChange || strings.TrimSpace(req.QualityPreference) != "" {
@@ -1414,7 +1446,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "source_unavailable", message: "The effective media source is unavailable."}
 	}
 	effectiveFile := currentEffectiveFile
-	if intentChange {
+	if intentChange && !trackChange {
 		// Prefer returning to the requested edition, but a quality/output/track
 		// change must not abandon a healthy active alternate merely because the
 		// inactive original has gone missing since playback started.
@@ -2396,7 +2428,7 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 		return playback.DecisionResponseV3{}
 	}
 	if record.StartResponse.Outcome != "" || record.StartResponse.Terminal != nil || record.StartResponse.PlaybackPlan != nil {
-		return record.StartResponse
+		return normalizeDecisionResponseV3(record.StartResponse)
 	}
 	plan := record.CurrentPlan
 	if plan.AppliedQuirks == nil {
@@ -2405,7 +2437,39 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 	if plan.RuntimeCorrections == nil {
 		plan.RuntimeCorrections = []string{}
 	}
-	return playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan}
+	return normalizeDecisionResponseV3(playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan})
+}
+
+func normalizeDecisionResponseV3(response playback.DecisionResponseV3) playback.DecisionResponseV3 {
+	if response.ServerFeatures == nil {
+		response.ServerFeatures = playback.ServerFeaturesV3()
+	}
+	if response.PlaybackPlan == nil {
+		return response
+	}
+	plan := response.PlaybackPlan
+	if plan.Stream.Headers == nil {
+		plan.Stream.Headers = map[string]string{}
+	}
+	if plan.Transformations == nil {
+		plan.Transformations = []playback.TransformationV3{}
+	}
+	if plan.AppliedQuirks == nil {
+		plan.AppliedQuirks = []playback.AppliedQuirkV3{}
+	}
+	if plan.RuntimeCorrections == nil {
+		plan.RuntimeCorrections = []string{}
+	}
+	if plan.AvailableQualities == nil {
+		plan.AvailableQualities = []playback.AvailableQualityV3{}
+	}
+	if plan.DegradationWarnings == nil {
+		plan.DegradationWarnings = []playback.DegradationWarningV3{}
+	}
+	if plan.Subtitle.Inventory == nil {
+		plan.Subtitle.Inventory = []playback.SubtitleInventoryItemV3{}
+	}
+	return response
 }
 
 func completedReplanResponseMatchesAttemptV3(raw json.RawMessage, record *playback.AttemptRecordV3) bool {

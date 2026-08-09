@@ -176,6 +176,7 @@ func goldenStartRequest() playback.StartRequestV3 {
 		QualityPreference:          playback.QualityOriginalV3,
 		SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3,
 		StartPosition:              &start,
+		ProgressPersistence:        playback.ProgressPersistenceClientV3,
 		AudioTrackID:               playback.TrackIDV3(goldenMediaFileID, "audio", 0),
 		AudioTrackIndex:            &audioIndex,
 		Capabilities:               goldenCapabilities(),
@@ -774,8 +775,10 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	for index := range 33 {
 		limitEvent.Diagnostics[fmt.Sprintf("diagnostic_%02d", index)] = "value"
 	}
+	draftProtocolVersion := playback.ProtocolV3
 	protocol := []playback.ProtocolScenarioV3{
 		{Name: "legacy_start_requires_upgrade", Category: "legacy_426", Input: playback.ProtocolScenarioInputV3{LegacyStartBody: &playback.LegacyStartBodyV3{FileID: goldenMediaFileID}}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusUpgradeRequired, Error: "client_upgrade_required"}},
+		{Name: "draft_v3_start_requires_upgrade", Category: "draft_v3_426", Input: playback.ProtocolScenarioInputV3{LegacyStartBody: &playback.LegacyStartBodyV3{ProtocolVersion: &draftProtocolVersion, FileID: goldenMediaFileID, ClientCapabilities: &playback.DraftClientCapabilitiesV3{CodecsVideo: []string{codecH264}}}}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusUpgradeRequired, Error: "client_upgrade_required"}},
 		{Name: "output_context_change_invalidates_attempt", Category: "output_context_invalidation", Input: playback.ProtocolScenarioInputV3{PlanID: plan.PlanID, FirstOutputContextID: "output-a", SecondOutputContextID: "output-b", FirstPlanAttemptKey: outputA, SecondPlanAttemptKey: outputB}, Expected: playback.ProtocolExpectationV3{PlanIDUnchanged: true, PlanAttemptKeyChanged: outputA != outputB}},
 		{Name: "opaque_attempt_key_loop", Category: "attempt_key_echo_and_loop", Input: playback.ProtocolScenarioInputV3{ServerPlanAttemptKey: plan.PlanAttemptKey, ReplanEcho: plan.PlanAttemptKey, AttemptedPlanKeys: []string{plan.PlanAttemptKey}}, Expected: playback.ProtocolExpectationV3{Action: "reject_already_attempted_plan"}},
 		{Name: "failure_recovery_preserves_intent", Category: "recovery_matrix", Input: playback.ProtocolScenarioInputV3{ReplanRequest: &recovery}, Expected: playback.ProtocolExpectationV3{HTTPStatus: http.StatusOK, SelectionPreserved: true, PositionPreserved: true, Action: "preserve_selected_tracks_and_position"}},

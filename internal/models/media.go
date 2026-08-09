@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+const (
+	mediaBaseTypeAudiobook = "audiobook"
+	mediaBaseTypePodcast   = "podcast"
+	mediaCodecMJPEG        = "mjpeg"
+)
+
 // MediaFolder represents a row in the media_folders table.
 type MediaFolder struct {
 	ID                       int
@@ -153,15 +159,44 @@ func (f *MediaFile) PrimaryDVProfile() int {
 	return f.VideoTracks[0].DVProfile
 }
 
-// IsAudioOnly reports whether a probed file carries no video stream at all —
+// HasLegacyAttachedPictureVideo reports the stale catalog shape produced when
+// older probes recorded embedded cover art as a video track. BaseType and
+// audio evidence keep genuine MJPEG video from being normalized away.
+func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
+	if f == nil || (f.BaseType != mediaBaseTypeAudiobook && f.BaseType != mediaBaseTypePodcast) {
+		return false
+	}
+	if len(f.AudioTracks) == 0 && strings.TrimSpace(f.CodecAudio) == "" {
+		return false
+	}
+	isImageCodec := func(codec string) bool {
+		switch strings.ToLower(strings.TrimSpace(codec)) {
+		case mediaCodecMJPEG, "jpeg", "png", "webp", "gif", "bmp":
+			return true
+		default:
+			return false
+		}
+	}
+	if len(f.VideoTracks) == 0 {
+		return isImageCodec(f.CodecVideo)
+	}
+	for _, track := range f.VideoTracks {
+		if !isImageCodec(track.Codec) {
+			return false
+		}
+	}
+	return strings.TrimSpace(f.CodecVideo) == "" || isImageCodec(f.CodecVideo)
+}
+
+// IsAudioOnly reports whether a probed file carries no playable video stream —
 // audiobooks and music, as opposed to a video file whose probe is incomplete.
-// Both track evidence and the flat codec column must agree, so a partially
-// probed video file is never mistaken for an audio-only source.
+// It also normalizes legacy audiobook/podcast cover-art rows until a repair
+// probe removes their stale image-only video metadata.
 func (f *MediaFile) IsAudioOnly() bool {
 	if f == nil {
 		return false
 	}
-	return len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == ""
+	return (len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
 }
 
 // NormalizeVideoBitDepth returns an explicit probe value when available and

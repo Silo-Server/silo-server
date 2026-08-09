@@ -156,7 +156,7 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 	// Select specific video and audio streams. The video map is optional so
 	// audio-only sources (audiobooks on the v3 audio remux route) produce an
 	// audio-only fMP4 instead of aborting on a missing stream.
-	args = append(args, "-map", "0:v:0?")
+	args = append(args, "-map", "0:V:0?")
 	if audioTrackIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
 	} else {

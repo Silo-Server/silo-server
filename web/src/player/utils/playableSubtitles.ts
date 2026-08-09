@@ -1,4 +1,5 @@
 import type { PlayerSubtitleInfo } from "../types";
+import type { SubtitleModeV3 } from "../protocol-v3";
 
 function hasPlayableUrl(track: PlayerSubtitleInfo): boolean {
   return track.url.trim().length > 0;
@@ -25,4 +26,22 @@ export function resolvePlayableSubtitles(
   // The watch-detail fallback is not an inventory: it carries no delivery
   // information, so a track without a URL there is simply unplayable.
   return fallbackTracks.filter(hasPlayableUrl);
+}
+
+/**
+ * Returns the selection that must be sent to settle server-rendered subtitle
+ * state, or undefined when the current plan already matches the UI. A sidecar
+ * selection still has to be replanned when replacing an active burn-in route,
+ * otherwise the old overlay remains composited behind the new track.
+ */
+export function pendingServerSubtitleSelection(
+  planMode: SubtitleModeV3,
+  planSelectedIndex: number | null,
+  activeIndex: number | null,
+  activeRequiresBurnIn: boolean,
+): number | null | undefined {
+  const planBurnsIn = planMode === "burn_in";
+  if (!planBurnsIn && !activeRequiresBurnIn) return undefined;
+  if (planSelectedIndex === activeIndex && planBurnsIn === activeRequiresBurnIn) return undefined;
+  return activeIndex;
 }

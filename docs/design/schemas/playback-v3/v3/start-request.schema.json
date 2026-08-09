@@ -51,6 +51,15 @@
       "minimum": 0,
       "maximum": 31536000
     },
+    "progress_persistence": {
+      "type": "string",
+      "description": "Who owns durable item resume/history persistence. Omission defaults to server. client keeps session heartbeats live but suppresses server item progress writes and requires an explicit start_position.",
+      "enum": [
+        "server",
+        "client"
+      ],
+      "default": "server"
+    },
     "audio_track_id": {
       "description": "Omitting both audio fields asks the server for the profile's preferred track, resolved from the series preference, then the profile audio-language setting, then the library override. Sending either one selects exactly that track.",
       "$ref": "#/$defs/track_id"
@@ -80,6 +89,25 @@
       "$ref": "#/$defs/client_playback_context"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "progress_persistence": {
+            "const": "client"
+          }
+        },
+        "required": [
+          "progress_persistence"
+        ]
+      },
+      "then": {
+        "required": [
+          "start_position"
+        ]
+      }
+    }
+  ],
   "$defs": {
     "bounded_identifier": {
       "type": "string",

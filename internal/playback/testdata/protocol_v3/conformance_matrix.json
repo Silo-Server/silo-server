@@ -15,6 +15,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -259,6 +260,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -485,6 +487,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -692,6 +695,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -899,6 +903,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -1109,6 +1114,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -1320,6 +1326,7 @@
         "quality_preference": "720p",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -1545,6 +1552,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -1751,6 +1759,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -1978,6 +1987,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -2212,6 +2222,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -2453,6 +2464,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -2691,6 +2703,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -2936,6 +2949,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "subtitle_track_id": "file:42:subtitle:0",
@@ -3184,6 +3198,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "preserve",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "subtitle_track_id": "file:42:subtitle:0",
@@ -3432,6 +3447,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "subtitle_track_id": "file:42:subtitle:0",
@@ -3697,6 +3713,7 @@
         "quality_preference": "original",
         "subtitle_fidelity_preference": "compatible",
         "start_position": 12.5,
+        "progress_persistence": "client",
         "audio_track_id": "file:42:audio:0",
         "audio_track_index": 0,
         "metered": false,
@@ -4981,6 +4998,25 @@
       }
     },
     {
+      "name": "draft_v3_start_requires_upgrade",
+      "category": "draft_v3_426",
+      "input": {
+        "body": {
+          "protocol_version": 3,
+          "file_id": 42,
+          "client_capabilities": {
+            "codecs_video": [
+              "h264"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "http_status": 426,
+        "error": "client_upgrade_required"
+      }
+    },
+    {
       "name": "output_context_change_invalidates_attempt",
       "category": "output_context_invalidation",
       "input": {
@@ -5153,6 +5189,7 @@
           "quality_preference": "original",
           "subtitle_fidelity_preference": "compatible",
           "start_position": 12.5,
+          "progress_persistence": "client",
           "audio_track_id": "file:42:audio:0",
           "audio_track_index": 0,
           "metered": false,
@@ -5244,6 +5281,7 @@
           "protocol_version": 3,
           "server_features": [
             "playback_plan_v3",
+            "neutral_playback_v3_contract_v1",
             "layout_aware_passthrough",
             "playback_route_diagnostics",
             "device_quirks_v1",
@@ -5283,6 +5321,7 @@
           "quality_preference": "original",
           "subtitle_fidelity_preference": "compatible",
           "start_position": 12.5,
+          "progress_persistence": "client",
           "audio_track_id": "file:42:audio:0",
           "audio_track_index": 0,
           "metered": false,

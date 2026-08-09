@@ -23,6 +23,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 	if file == nil {
 		return SourceDescriptorV3{DVEnhancementLayer: EnhancementUnknownV3}
 	}
+	audioOnly := file.IsAudioOnly()
 	source := SourceDescriptorV3{
 		MediaFileID:        file.ID,
 		DurationSeconds:    SourceDurationSecondsV3(file),
@@ -33,7 +34,10 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		BitrateKbps:        normalizeBitrateKbpsV3(file.Bitrate),
 		DVEnhancementLayer: EnhancementNoneV3,
 	}
-	if len(file.VideoTracks) > 0 {
+	if audioOnly {
+		source.VideoCodec = ""
+	}
+	if !audioOnly && len(file.VideoTracks) > 0 {
 		track := file.VideoTracks[0]
 		source.VideoCodec = firstNonEmptyV3(normalizeCodecV3(track.Codec), source.VideoCodec)
 		source.VideoProfile = strings.ToLower(strings.TrimSpace(track.Profile))
@@ -69,7 +73,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 			source.DVEnhancementLayer = EnhancementUnknownV3
 		}
 	}
-	if source.Width == 0 || source.Height == 0 {
+	if !audioOnly && (source.Width == 0 || source.Height == 0) {
 		source.Width, source.Height = dimensionsFromResolutionV3(file.Resolution)
 	}
 	if audioIndex >= 0 && audioIndex < len(file.AudioTracks) {
@@ -322,6 +326,12 @@ func normalizeCodecV3(value string) string {
 		return "eac3"
 	case "truehd", "mlp fba":
 		return "truehd"
+	case subtitleCodecPGSShort:
+		return subtitleCodecPGSFFmpeg
+	case subtitleCodecDVDShort, subtitleCodecVOBShort:
+		return subtitleCodecDVDFFmpeg
+	case subtitleCodecDVBShort:
+		return subtitleCodecDVBFFmpeg
 	default:
 		return v
 	}

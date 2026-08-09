@@ -91,7 +91,7 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   /** `seek_reanchor` replan when the target lies outside the seekable window. */
   reanchorSeek: (positionSeconds: number) => void;
   /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
-  refreshSubtitles: () => void;
+  refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
   applySubtitleTrack: (track: SubtitleInventoryItemV3) => void;
   /** Reports a playback route event as a diagnostic. Never affects playback. */
@@ -605,7 +605,12 @@ export function usePlaybackSession(
 
       const loadSequence = loadSequenceRef.current;
       replanInFlightRef.current = true;
-      setState((current) => ({ ...current, replanning: true }));
+      setState((current) => ({
+        ...current,
+        replanning: true,
+        errorTitle: null,
+        error: null,
+      }));
 
       try {
         const decision = await playerFetch<DecisionResponseV3>(
@@ -709,10 +714,13 @@ export function usePlaybackSession(
    * `track_change` that changes nothing returns a fresh plan — inventory
    * included — without excluding the route already playing.
    */
-  const refreshSubtitles = useCallback(() => {
-    if (!planRef.current) return;
-    void replan({ operation: "track_change", positionSeconds: stateRef.current.initialPosition });
-  }, [replan]);
+  const refreshSubtitles = useCallback(
+    (currentPosition: number) => {
+      if (!planRef.current) return;
+      void replan({ operation: "track_change", positionSeconds: currentPosition });
+    },
+    [replan],
+  );
 
   /**
    * Folds a track the server pushed over the realtime socket into the plan's

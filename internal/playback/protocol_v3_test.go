@@ -23,6 +23,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	second := ServerFeaturesV3()
 	expected := map[string]struct{}{
 		FeaturePlaybackPlanV3:       {},
+		FeatureNeutralContractV3:    {},
 		FeatureLayoutPassthrough:    {},
 		FeatureRouteDiagnostics:     {},
 		FeatureDeviceQuirksV3:       {},
@@ -71,6 +72,28 @@ func TestStartRequestV3Validation(t *testing.T) {
 	req.AudioTrackID = TrackIDV3(req.FileID, "audio", 2)
 	if _, err := req.NormalizeAndValidate(); err == nil {
 		t.Fatal("mismatched track id/index accepted")
+	}
+}
+
+func TestStartRequestV3ProgressPersistenceValidation(t *testing.T) {
+	req := validStartRequestV3()
+	if _, err := req.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if req.ProgressPersistence != ProgressPersistenceServerV3 {
+		t.Fatalf("omitted progress_persistence normalized to %q", req.ProgressPersistence)
+	}
+
+	req = validStartRequestV3()
+	req.ProgressPersistence = ProgressPersistenceClientV3
+	req.StartPosition = nil
+	if _, err := req.NormalizeAndValidate(); err == nil {
+		t.Fatal("client progress persistence without explicit start_position was accepted")
+	}
+	zero := 0.0
+	req.StartPosition = &zero
+	if _, err := req.NormalizeAndValidate(); err != nil {
+		t.Fatalf("explicit zero must remain distinguishable and valid: %v", err)
 	}
 }
 

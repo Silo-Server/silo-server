@@ -80,7 +80,16 @@ type ProtocolScenarioV3 struct {
 }
 
 type LegacyStartBodyV3 struct {
-	FileID int `json:"file_id"`
+	ProtocolVersion    *int                       `json:"protocol_version,omitempty"`
+	FileID             int                        `json:"file_id"`
+	ClientCapabilities *DraftClientCapabilitiesV3 `json:"client_capabilities,omitempty"`
+}
+
+// DraftClientCapabilitiesV3 is the typed pre-finalization shape used only by
+// the upgrade-required conformance vector. Its missing evidence markers are
+// what distinguish draft v3 from a malformed finalized request.
+type DraftClientCapabilitiesV3 struct {
+	CodecsVideo []string `json:"codecs_video"`
 }
 
 type ProtocolScenarioInputV3 struct {

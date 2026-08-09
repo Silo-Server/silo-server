@@ -24,6 +24,9 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file.BaseType == "ebook" {
 		return false
 	}
+	if file.HasLegacyAttachedPictureVideo() {
+		return true
+	}
 	if strings.TrimSpace(file.ProbeSource) == "" || file.ProbeUpdatedAt == nil {
 		return true
 	}

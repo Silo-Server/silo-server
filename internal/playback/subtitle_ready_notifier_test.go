@@ -55,7 +55,7 @@ func TestSubtitleReadyNotifierPublishesTheGeneratedTrackOrdinal(t *testing.T) {
 	}
 	resolver := &stubSubtitleInventoryResolver{
 		file:       file,
-		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish (AI)"}},
+		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish (AI)", DownloadedSubtitleID: 77}},
 	}
 
 	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
@@ -152,7 +152,7 @@ func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) 
 
 	resolver := &stubSubtitleInventoryResolver{
 		file:       &models.MediaFile{ID: 100, SubtitleTracks: []models.SubtitleTrack{{Index: 0, Language: "en", Codec: "subrip"}}},
-		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 1, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "fr", Label: "French (AI)"}},
+		additional: []SubtitleInventoryEntryV3{{CombinedIndex: 1, Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "fr", Label: "French (AI)", DownloadedSubtitleID: 55}},
 	}
 
 	notifier := NewSubtitleReadyNotifier(sessions, hub, resolver)
@@ -170,6 +170,32 @@ func TestSubtitleReadyNotifierTranslationCompletedCarriesTheTrack(t *testing.T) 
 	}
 	if payload.JobID != 9 || payload.TrackKey != "track-key" || payload.SubtitleID != 55 {
 		t.Errorf("payload lost its identifiers: %+v", payload)
+	}
+}
+
+func TestSubtitleReadyNotifierMatchesDownloadedRowIdentity(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	_ = sessions.SetRealtimeConnection(session.ID, true)
+	hub := NewRealtimeHub()
+	conn := &dispatchTestConn{}
+	reg := hub.Register(session.ID, conn)
+	defer hub.Unregister(reg)
+
+	resolver := &stubSubtitleInventoryResolver{
+		file: &models.MediaFile{ID: 100},
+		additional: []SubtitleInventoryEntryV3{
+			{Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish", DownloadedSubtitleID: 77},
+			{Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish", DownloadedSubtitleID: 88},
+		},
+	}
+	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 77, "es", "Spanish")
+	var payload SubtitleReadyPayload
+	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Track == nil || payload.Track.CombinedIndex != 0 {
+		t.Fatalf("track = %#v, want exact row 77 at ordinal 0", payload.Track)
 	}
 }
 

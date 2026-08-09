@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlayerSubtitleInfo } from "../types";
-import { resolvePlayableSubtitles } from "./playableSubtitles";
+import { pendingServerSubtitleSelection, resolvePlayableSubtitles } from "./playableSubtitles";
 
 function makeSubtitle(overrides: Partial<PlayerSubtitleInfo> = {}): PlayerSubtitleInfo {
   return {
@@ -67,5 +67,23 @@ describe("resolvePlayableSubtitles", () => {
     });
 
     expect(resolvePlayableSubtitles([], [fallbackTrack])).toEqual([fallbackTrack]);
+  });
+});
+
+describe("pendingServerSubtitleSelection", () => {
+  it("settles an already-selected burn-in plan without another replan", () => {
+    expect(pendingServerSubtitleSelection("burn_in", 2, 2, true)).toBeUndefined();
+  });
+
+  it("preserves a sidecar selection while replacing burn-in", () => {
+    expect(pendingServerSubtitleSelection("burn_in", 2, 0, false)).toBe(0);
+  });
+
+  it("turns burn-in off explicitly rather than looping", () => {
+    expect(pendingServerSubtitleSelection("burn_in", 2, null, false)).toBeNull();
+  });
+
+  it("requests a burn-in track from a sidecar plan", () => {
+    expect(pendingServerSubtitleSelection("render", 0, 2, true)).toBe(2);
   });
 });
