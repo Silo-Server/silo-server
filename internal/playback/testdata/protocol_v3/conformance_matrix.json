@@ -3921,9 +3921,6 @@
             "index": 1
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4042,9 +4039,6 @@
             "index": 0
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4162,9 +4156,6 @@
             "id": "",
             "index": 1
           }
-        },
-        "failure": {
-          "classification": ""
         },
         "client_capabilities": {
           "video_evidence": "exact",
@@ -4286,9 +4277,6 @@
             "index": 0
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4408,9 +4396,6 @@
             "id": "",
             "index": 1
           }
-        },
-        "failure": {
-          "classification": ""
         },
         "client_capabilities": {
           "video_evidence": "exact",
@@ -4532,9 +4517,6 @@
             "index": 0
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4655,9 +4637,6 @@
             "index": 1
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4777,9 +4756,6 @@
             "index": 0
           }
         },
-        "failure": {
-          "classification": ""
-        },
         "client_capabilities": {
           "video_evidence": "exact",
           "audio_evidence": "exact",
@@ -4898,9 +4874,6 @@
             "id": "file:42:audio:0",
             "index": 0
           }
-        },
-        "failure": {
-          "classification": ""
         },
         "client_capabilities": {
           "video_evidence": "exact",

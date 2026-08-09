@@ -396,7 +396,7 @@ type ReplanRequestV3 struct {
 	BandwidthEstimateKbps *int                      `json:"bandwidth_estimate_kbps,omitempty"`
 	BandwidthCapKbps      *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	SelectedTracks        SelectedTracksV3          `json:"selected_tracks"`
-	Failure               FailureV3                 `json:"failure"`
+	Failure               FailureV3                 `json:"failure,omitzero"`
 	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
 }

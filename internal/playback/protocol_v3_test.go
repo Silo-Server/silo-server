@@ -124,6 +124,9 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	if wire["operation"] != string(ReplanOperationSeekReanchorV3) {
 		t.Fatalf("serialized operation = %#v", wire["operation"])
 	}
+	if _, ok := wire["failure"]; ok {
+		t.Fatalf("seek reanchor serialized a synthetic failure = %#v", wire["failure"])
+	}
 
 	request.Operation = ReplanOperationSeekFailureRecoveryV3
 	if err := request.Validate(); err == nil {

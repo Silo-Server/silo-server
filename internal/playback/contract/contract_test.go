@@ -196,7 +196,15 @@ func TestConformanceMatrixEmbeddedWireBodiesSatisfySchemas(t *testing.T) {
 	}
 	for _, raw := range matrix["replan_scenarios"].([]any) {
 		scenario := raw.(map[string]any)
-		validate(scenario["name"].(string), "replan-request.schema.json", scenario["request"])
+		name := scenario["name"].(string)
+		request := scenario["request"].(map[string]any)
+		validate(name, "replan-request.schema.json", request)
+		switch request["operation"] {
+		case string(playback.ReplanOperationTrackChangeV3), string(playback.ReplanOperationQualityChangeV3), string(playback.ReplanOperationSeekReanchorV3):
+			if failure, ok := request["failure"]; ok {
+				t.Errorf("scenario %q intent-only replan carries failure = %#v", name, failure)
+			}
+		}
 	}
 	protocolSchemas := map[string]string{
 		"start_request":      "start-request.schema.json",
