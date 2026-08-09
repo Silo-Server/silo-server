@@ -524,13 +524,7 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 // pipeline, it works the same for direct play, remux, and transcode.
 func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
-	outFormat := "vtt"
-	switch {
-	case playback.IsASS(track.Codec):
-		outFormat = "ass"
-	case playback.IsPGS(track.Codec):
-		outFormat = "sup"
-	}
+	_, outFormat := playback.StreamExtractOutput(track.Codec, requestedFormat...)
 
 	// ASS is fetched exactly once and consumed whole by its client-side
 	// renderer (JASSUB), so it must never be windowed. PGS defaults to
@@ -545,11 +539,11 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	// misleading nonzero seek here.
 	var seek, duration float64
 	var allowWindow bool
-	switch outFormat {
-	case "vtt":
+	switch {
+	case outFormat == "webvtt" && !playback.IsASS(track.Codec):
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
-	case "sup":
+	case outFormat == "sup":
 		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
 	}
 	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
@@ -583,38 +577,16 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			return
 		}
 		opts.TargetFormat = "vtt"
-		outFormat = "vtt"
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Full-track PGS extracts are expensive (whole-file demux) and byte-
-	// identical across requests, so they are served from / teed into the
-	// subtitle cache; windowed PGS requests extract their slice from the
-	// cached full track when present (warming it in the background when
-	// not). All other formats stream uncached: VTT is already windowed
-	// and fast, ASS is small.
-	if outFormat == "sup" {
-		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
-		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
-		return
-	}
-
-	switch outFormat {
-	case "ass":
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-
-	opts.Writer = w
-	if err := playback.StreamExtractSubtitle(r.Context(), opts); err != nil {
-		// Headers already committed — best we can do is log and let
-		// the client see a truncated response.
-		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
-	}
+	// Embedded extracts are served from or teed into the subtitle cache.
+	// Requests whose effective ffmpeg argv includes seek/duration are never
+	// canonical: they stream uncached and warm a seek-0/duration-0 artifact,
+	// or re-extract from that artifact when it is already present.
+	err := h.SubtitleCache.ServeExtract(w, r, opts, playback.StreamExtractSubtitle)
+	playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
 }
 
 // subtitleSeekPosition picks the best-known starting position for a
@@ -633,12 +605,10 @@ func subtitleSeekPosition(r *http.Request, session *playback.Session) float64 {
 	return 0
 }
 
-// subtitleWindowDuration picks the bounded extract length. The client
-// overrides via ?duration=; absent that we use a 10-minute window,
-// which is long enough that a single fetch covers many minutes of
-// uninterrupted playback but short enough that the ffmpeg process
-// finishes (and frees its input handle) well before the next window
-// is requested.
+// subtitleWindowDuration picks the compatibility duration argument. The
+// client overrides via ?duration=; absent that we pass 10 minutes. ffmpeg
+// currently ignores this input-side -t for subtitle extracts and runs to EOF;
+// changing it would alter the whole-track response native clients depend on.
 func subtitleWindowDuration(r *http.Request) float64 {
 	const defaultDuration = 600.0
 	const maxDuration = 3600.0

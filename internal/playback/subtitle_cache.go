@@ -16,26 +16,25 @@ import (
 	"time"
 )
 
-// SubtitleCache stores full-track PGS (.sup) subtitle extracts on disk so
+// SubtitleCache stores canonical full-track subtitle extracts on disk so
 // repeat selections of the same embedded track don't re-run a whole-file
-// ffmpeg demux (minutes for a large remux). Only complete, unwindowed .sup
-// extracts are cached — VTT extracts are already windowed and fast, and ASS
-// extracts are small; neither pays the full-demux cost PGS does.
+// ffmpeg demux (minutes for a large remux). Only extracts whose effective
+// ffmpeg argv has no seek or duration are cached; partial requests may use a
+// canonical cached artifact as their input but are never published themselves.
 //
-// Entries are keyed by the source file path, subtitle stream ordinal, and the
-// source's mtime+size, all encoded in the cache filename. Invalidation is
-// therefore implicit: when the source changes, the lookup key changes and the
-// old entry becomes garbage that eviction reclaims. Entry recency for LRU is
-// tracked by bumping the cache file's mtime on every hit (portable, unlike
-// atime which is often disabled via noatime/relatime mounts).
+// Entries are keyed by schema version, source file path, subtitle stream
+// ordinal, resolved output codec+muxer, and source mtime+size, all encoded in
+// the cache filename. Invalidation is therefore implicit when any dimension
+// changes. Entry recency for LRU is tracked by bumping the cache file's mtime
+// on every hit (portable, unlike atime on noatime/relatime mounts).
 //
 // Concurrency: the first requester of an uncached track streams the extract
 // progressively to its client while teeing bytes into a temp file that is
 // atomically renamed into the cache on clean ffmpeg exit (and discarded on
 // any error, so a partial entry is never served). Concurrent requesters for
-// the same track while a fill is in flight simply run their own un-teed
-// extract — no worse than today's behavior, and it avoids making a viewer's
-// first-byte latency depend on another client's connection.
+// the same track and output profile while a fill is in flight simply run their
+// own un-teed extract — no worse than today's behavior, and it avoids making a
+// viewer's first-byte latency depend on another client's connection.
 type SubtitleCache struct {
 	// transcodeDir returns the current transcode directory; the cache lives
 	// in a subtitle-cache subdirectory beneath it, created lazily. An empty
@@ -56,8 +55,12 @@ type SubtitleCache struct {
 
 const (
 	subtitleCacheDirName = "subtitle-cache"
-	// defaultSubtitleCacheMaxBytes caps the cache at 2 GiB — PGS tracks run
-	// 15-80 MB, so this holds a few dozen tracks.
+	// subtitleCacheSchemaVersion invalidates artifacts when extraction argv or
+	// artifact semantics change in a way source mtime+size cannot detect.
+	subtitleCacheSchemaVersion = 1
+	// defaultSubtitleCacheMaxBytes caps all cached subtitle formats at 2 GiB.
+	// Bitmap tracks dominate sizing at roughly 15-80 MB apiece; text tracks
+	// are much smaller.
 	// TODO: expose as a config knob following the download.artifact_max_bytes
 	// pattern (internal/config/config.go DownloadConfig.ArtifactMaxBytes).
 	defaultSubtitleCacheMaxBytes = 2 << 30
@@ -74,12 +77,27 @@ const (
 	subtitleCacheWarmTimeout = 30 * time.Minute
 )
 
-// SUPExtractFunc runs one ffmpeg subtitle extract described by opts, writing
+// ffmpeg muxer names for the subtitle formats an extract can produce (see
+// StreamExtractOutput), plus the on-disk extension and the source codec the
+// PGS-only entry points key on. Named because the extraction plan, the cache
+// key, and the response Content-Type all have to agree on the same spellings.
+const (
+	subtitleFormatWebVTT = "webvtt"
+	subtitleFormatASS    = "ass"
+	subtitleFormatSUP    = "sup"
+	// subtitleExtVTT is the file extension for a webvtt artifact; the ffmpeg
+	// muxer name and the conventional extension differ only for this format.
+	subtitleExtVTT          = "vtt"
+	subtitleCodecPGS        = "hdmv_pgs_subtitle"
+	subtitleTypeOctetStream = "application/octet-stream"
+)
+
+// SubtitleExtractFunc runs one ffmpeg subtitle extract described by opts, writing
 // output to opts.Writer. Production callers pass StreamExtractSubtitle;
 // tests substitute fakes. The cache invokes it with the caller's options
-// rewritten as needed (tee writer for fills, cached-.sup input for windowed
+// rewritten as needed (tee writer for fills, cached-artifact input for partial
 // serves, cleared window for background warms).
-type SUPExtractFunc func(ctx context.Context, opts StreamExtractOpts) error
+type SubtitleExtractFunc func(ctx context.Context, opts StreamExtractOpts) error
 
 // NewSubtitleCache builds a cache rooted under the transcode directory
 // returned by transcodeDir at call time (so runtime config changes are
@@ -93,46 +111,48 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 	}
 }
 
-// ServeSUPExtract serves the .sup extract for one source+track described by
-// opts (opts.Writer is ignored; the cache supplies it). Full-track requests
-// (no AllowWindow): a cache hit is served with http.ServeContent (Range
-// support, Content-Length, Last-Modified from the source file's mtime,
-// revalidatable instead of no-store); a miss invokes extract with a writer
-// that streams to the client while teeing bytes into a temp file, atomically
-// published as the cache entry on clean extract exit and discarded on any
-// error (ffmpeg failure or client disconnect) — a partial entry is never
-// served. Windowed requests (opts.AllowWindow): the output covers only a
-// slice of the track, so it is never cached; but when the full-track entry
-// already exists, the windowed extract runs against the small cached .sup
-// instead of re-demuxing the original file, and when it doesn't, a detached
-// background warm is kicked off so subsequent windows get that fast path. A
-// nil receiver disables caching and just streams.
+// ServeExtract serves one embedded subtitle extract (opts.Writer is ignored;
+// the cache supplies it). Canonical requests may fill the cache on a miss.
+// Requests whose effective ffmpeg argv applies seek or duration are partial:
+// they never fill, re-extract from a cached canonical artifact on a hit, and
+// trigger a canonical background warm on a miss.
+//
+// PGS cache hits retain the existing http.ServeContent behavior. Text hits
+// deliberately use a plain copy with no-store, matching cold-path HTTP
+// semantics without adding Range, validators, or Content-Length based on cache
+// warmth. A nil receiver disables caching and just streams.
 //
 // The caller sets any extra response headers (e.g. CORS) before calling.
 // The returned error is the extract error; cache hits return nil.
-func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
-	if opts.AllowWindow {
-		return c.serveWindowedSUP(w, r, opts, extract)
+func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SubtitleExtractFunc) error {
+	plan := streamExtractPlanFor(opts)
+	if plan.partial() {
+		return c.serveWindowed(w, r, opts, plan, extract)
 	}
 
-	if cached, modTime, ok := c.Lookup(opts.InputPath, opts.TrackIndex); ok {
+	if cached, modTime, ok := c.lookup(opts); ok {
 		defer func() { _ = cached.Close() }()
 		slog.DebugContext(r.Context(), "subtitle stream served from cache",
 			"input", opts.InputPath, "track", opts.TrackIndex)
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Cache-Control", "private, no-cache")
-		http.ServeContent(w, r, "", modTime, cached)
-		return nil
+		w.Header().Set("Content-Type", subtitleContentType(plan.outFormat))
+		if plan.outFormat == subtitleFormatSUP {
+			w.Header().Set("Cache-Control", "private, no-cache")
+			http.ServeContent(w, r, "", modTime, cached)
+			return nil
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		return copyAndFlush(w, cached)
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Type", subtitleContentType(plan.outFormat))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
 	// BeginFill returns nil when another fill for this track is already in
 	// flight (or the cache dir is unusable); this request then streams its
 	// own uncached extract.
-	fill := c.BeginFill(opts.InputPath, opts.TrackIndex)
+	fill := c.beginFill(opts)
 	var writer io.Writer = w
 	if fill != nil {
 		writer = fill.Tee(w)
@@ -151,24 +171,24 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	return err
 }
 
-// serveWindowedSUP streams a windowed slice of the track. The output is a
-// position-dependent slice so it is never cached itself, but the cache still
-// speeds it up: with a committed full-track entry the extract's input is
-// rewritten to the cached .sup (15-80 MB, so the -ss scan is near-instant
+// serveWindowed streams a partial request. Its effective argv is noncanonical,
+// so its output is never cached itself, but the cache still speeds it up: with
+// a committed full-track entry the extract's input is
+// rewritten to the cached artifact (small enough that the -ss scan is fast
 // versus re-demuxing a multi-GB source); without one, a background warm is
 // started so later windows — the client re-fetches on every seek — hit the
 // fast path.
-func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, extract SUPExtractFunc) error {
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.TrackIndex); ok {
+func (c *SubtitleCache) serveWindowed(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, plan streamExtractPlan, extract SubtitleExtractFunc) error {
+	if cachedPath, _, ok := c.cachedEntryPath(opts); ok {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
-		opts.InputIsExtractedSup = true
+		opts.ExtractedInputFormat = plan.outFormat
 	} else {
 		c.WarmInBackground(opts, extract)
 	}
 
-	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Type", subtitleContentType(plan.outFormat))
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
@@ -177,15 +197,15 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 }
 
 // WarmInBackground starts a detached full-track extract that fills the cache
-// entry for opts' source+track, so future windowed requests can extract from
-// the small cached .sup instead of the original file. The warm runs on a
-// background context with a generous timeout — it must survive the request
-// that triggered it. BeginFill's in-flight coalescing guarantees at most one
-// fill per track (a concurrent client-driven fill wins and the warm is
+// entry for opts' source+track+output profile, so future partial requests can
+// extract from the small cached artifact instead of the original file. The
+// warm runs on a background context with a generous timeout — it must survive
+// the request that triggered it. BeginFill's in-flight coalescing guarantees at
+// most one fill per output profile (a concurrent client-driven fill wins and the warm is
 // skipped), and warmSem bounds warms server-wide: beyond the budget the warm
 // is dropped, not queued — the next windowed miss re-attempts it. A nil
 // receiver is a no-op.
-func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SUPExtractFunc) {
+func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SubtitleExtractFunc) {
 	if c == nil || extract == nil {
 		return
 	}
@@ -196,20 +216,19 @@ func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SUPExtr
 			"input", opts.InputPath, "track", opts.TrackIndex)
 		return
 	}
-	fill := c.BeginFill(opts.InputPath, opts.TrackIndex)
+	// Full-track options: the warm ignores the triggering request's window
+	// and writes only to the cache temp file (no response writer).
+	opts.SeekSeconds = 0
+	opts.DurationSeconds = 0
+	opts.AllowWindow = false
+	opts.ExtractedInputFormat = ""
+	fill := c.beginFill(opts)
 	if fill == nil {
 		// Another fill (client-driven or a previous warm) is already in
 		// flight, or the cache is unusable — either way, nothing to do.
 		<-c.warmSem
 		return
 	}
-
-	// Full-track options: the warm ignores the triggering request's window
-	// and writes only to the cache temp file (no response writer).
-	opts.SeekSeconds = 0
-	opts.DurationSeconds = 0
-	opts.AllowWindow = false
-	opts.InputIsExtractedSup = false
 	opts.Writer = fill.Tee(io.Discard)
 
 	go func() {
@@ -250,27 +269,65 @@ func (c *SubtitleCache) dir() string {
 	return filepath.Join(base, subtitleCacheDirName)
 }
 
-// subtitleCacheKeyPrefix identifies a source file + track ordinal regardless
-// of source version; the full key appends mtime+size so a changed source
-// yields a different filename.
-func subtitleCacheKeyPrefix(inputPath string, trackIndex int) string {
+type subtitleCacheProfile struct {
+	codec  string
+	format string
+}
+
+func subtitleProfile(opts StreamExtractOpts) subtitleCacheProfile {
+	plan := streamExtractPlanFor(opts)
+	return subtitleCacheProfile{codec: plan.outCodec, format: plan.outFormat}
+}
+
+// subtitleCacheKeyPrefix identifies a source file + track ordinal + resolved
+// output profile regardless of source version. Including the profile keeps,
+// for example, ASS and WebVTT artifacts for the same source track independent.
+func subtitleCacheKeyPrefix(inputPath string, trackIndex int, profile subtitleCacheProfile) string {
 	sum := sha256.Sum256([]byte(inputPath))
-	return fmt.Sprintf("%x-s%d-", sum[:12], trackIndex)
+	return fmt.Sprintf("v%d-%x-s%d-%s-%s-", subtitleCacheSchemaVersion, sum[:12], trackIndex, profile.codec, profile.format)
 }
 
-func subtitleCacheKey(inputPath string, trackIndex int, mtime time.Time, size int64) string {
-	return fmt.Sprintf("%s%d-%d.sup", subtitleCacheKeyPrefix(inputPath, trackIndex), mtime.UnixNano(), size)
+func subtitleCacheKey(inputPath string, trackIndex int, profile subtitleCacheProfile, mtime time.Time, size int64) string {
+	return fmt.Sprintf("%s%d-%d.%s", subtitleCacheKeyPrefix(inputPath, trackIndex, profile), mtime.UnixNano(), size, subtitleCacheExtension(profile.format))
 }
 
-// Lookup opens the cached full-track .sup extract for the given source file
-// and subtitle stream ordinal. The source is stat'ed on every lookup: an
+func subtitleCacheExtension(format string) string {
+	if format == subtitleFormatWebVTT {
+		return subtitleExtVTT
+	}
+	return format
+}
+
+func subtitleContentType(format string) string {
+	switch format {
+	case subtitleFormatASS:
+		return "text/x-ssa; charset=utf-8"
+	case subtitleFormatWebVTT:
+		return "text/vtt; charset=utf-8"
+	default:
+		return subtitleTypeOctetStream
+	}
+}
+
+// Lookup opens the cached canonical PGS extract for the source and track.
+// It is retained as a focused cache primitive; format-aware serving uses
+// lookup with the caller's resolved extraction options.
+//
 // mtime or size mismatch means the entry (if any) is stale and reads as a
 // miss. On a hit the returned modTime is the *source* file's mtime — stable
 // across hits, suitable for Last-Modified — while the cache file's own mtime
 // is bumped to record recency for LRU eviction. The caller owns closing the
 // returned file.
 func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, modTime time.Time, ok bool) {
-	path, modTime, ok := c.cachedEntryPath(inputPath, trackIndex)
+	return c.lookup(StreamExtractOpts{
+		InputPath:   inputPath,
+		TrackIndex:  trackIndex,
+		SourceCodec: subtitleCodecPGS,
+	})
+}
+
+func (c *SubtitleCache) lookup(opts StreamExtractOpts) (f *os.File, modTime time.Time, ok bool) {
+	path, modTime, ok := c.cachedEntryPath(opts)
 	if !ok {
 		return nil, time.Time{}, false
 	}
@@ -287,16 +344,16 @@ func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, mo
 // miss) and bumps the entry's mtime to record recency for LRU eviction.
 // Callers that hand the path to an external reader (ffmpeg) rather than
 // opening it themselves use this instead of Lookup.
-func (c *SubtitleCache) cachedEntryPath(inputPath string, trackIndex int) (path string, srcModTime time.Time, ok bool) {
+func (c *SubtitleCache) cachedEntryPath(opts StreamExtractOpts) (path string, srcModTime time.Time, ok bool) {
 	dir := c.dir()
 	if dir == "" {
 		return "", time.Time{}, false
 	}
-	src, err := os.Stat(inputPath)
+	src, err := os.Stat(opts.InputPath)
 	if err != nil {
 		return "", time.Time{}, false
 	}
-	path = filepath.Join(dir, subtitleCacheKey(inputPath, trackIndex, src.ModTime(), src.Size()))
+	path = filepath.Join(dir, subtitleCacheKey(opts.InputPath, opts.TrackIndex, subtitleProfile(opts), src.ModTime(), src.Size()))
 	if _, err := os.Stat(path); err != nil {
 		return "", time.Time{}, false
 	}
@@ -318,6 +375,7 @@ type SubtitleCacheFill struct {
 	key        string
 	inputPath  string
 	trackIndex int
+	profile    subtitleCacheProfile
 	srcMtime   time.Time
 	srcSize    int64
 	tmp        *os.File
@@ -326,17 +384,25 @@ type SubtitleCacheFill struct {
 	failed bool
 }
 
-// BeginFill reserves the in-flight slot for the given track and creates the
+// BeginFill reserves the in-flight slot for the given PGS track and creates the
 // temp file the tee will write into. Returns nil — meaning "stream without
 // caching" — when caching is disabled, the source can't be stat'ed, the
 // cache directory can't be created, or another fill for the same track is
 // already in flight.
 func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCacheFill {
+	return c.beginFill(StreamExtractOpts{
+		InputPath:   inputPath,
+		TrackIndex:  trackIndex,
+		SourceCodec: subtitleCodecPGS,
+	})
+}
+
+func (c *SubtitleCache) beginFill(opts StreamExtractOpts) *SubtitleCacheFill {
 	dir := c.dir()
 	if dir == "" {
 		return nil
 	}
-	src, err := os.Stat(inputPath)
+	src, err := os.Stat(opts.InputPath)
 	if err != nil {
 		return nil
 	}
@@ -344,7 +410,8 @@ func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCac
 		slog.Warn("subtitle cache dir create failed", "dir", dir, "error", err)
 		return nil
 	}
-	key := subtitleCacheKey(inputPath, trackIndex, src.ModTime(), src.Size())
+	profile := subtitleProfile(opts)
+	key := subtitleCacheKey(opts.InputPath, opts.TrackIndex, profile, src.ModTime(), src.Size())
 
 	c.mu.Lock()
 	if _, busy := c.inflight[key]; busy {
@@ -363,8 +430,9 @@ func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCac
 	return &SubtitleCacheFill{
 		c:          c,
 		key:        key,
-		inputPath:  inputPath,
-		trackIndex: trackIndex,
+		inputPath:  opts.InputPath,
+		trackIndex: opts.TrackIndex,
+		profile:    profile,
 		srcMtime:   src.ModTime(),
 		srcSize:    src.Size(),
 		tmp:        tmp,
@@ -442,7 +510,7 @@ func (f *SubtitleCacheFill) Commit() error {
 		return fmt.Errorf("publish subtitle cache entry: %w", err)
 	}
 
-	f.c.removeStaleSiblings(dir, f.inputPath, f.trackIndex, f.key)
+	f.c.removeStaleSiblings(dir, f.inputPath, f.trackIndex, f.profile, f.key)
 	f.c.evict(dir)
 	return nil
 }
@@ -462,18 +530,18 @@ func (f *SubtitleCacheFill) closeAndRemoveTmp() {
 	}
 }
 
-// removeStaleSiblings deletes committed entries for the same source+track
-// with a different mtime/size suffix — the source was replaced, so those can
-// never be served again.
-func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, keepKey string) {
-	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex)
+// removeStaleSiblings deletes committed entries for the same
+// source+track+output profile with a different mtime/size suffix. Other output
+// profiles remain valid siblings and must coexist.
+func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, profile subtitleCacheProfile, keepKey string) {
+	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex, profile)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name == keepKey || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".sup") {
+		if name == keepKey || !strings.HasPrefix(name, prefix) || strings.Contains(name, ".part-") {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
@@ -514,7 +582,7 @@ func (c *SubtitleCache) evict(dir string) {
 			}
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".sup") {
+		if !isCommittedSubtitleCacheEntry(e.Name()) {
 			continue
 		}
 		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})
@@ -537,4 +605,11 @@ func (c *SubtitleCache) evict(dir string) {
 		slog.Info("evicted cached subtitle track (LRU)", "path", e.path, "bytes", e.size)
 		total -= e.size
 	}
+}
+
+func isCommittedSubtitleCacheEntry(name string) bool {
+	if strings.Contains(name, ".part-") {
+		return false
+	}
+	return strings.HasSuffix(name, ".sup") || strings.HasSuffix(name, ".ass") || strings.HasSuffix(name, ".vtt")
 }

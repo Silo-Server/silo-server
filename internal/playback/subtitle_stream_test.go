@@ -42,9 +42,9 @@ func TestStreamExtractOutput(t *testing.T) {
 		{"mov_text", "webvtt", "webvtt"},
 	}
 	for _, tc := range cases {
-		outCodec, outFormat := streamExtractOutput(tc.codec)
+		outCodec, outFormat := StreamExtractOutput(tc.codec)
 		if outCodec != tc.wantCodec || outFormat != tc.wantFormat {
-			t.Errorf("streamExtractOutput(%q) = (%q, %q), want (%q, %q)",
+			t.Errorf("StreamExtractOutput(%q) = (%q, %q), want (%q, %q)",
 				tc.codec, outCodec, outFormat, tc.wantCodec, tc.wantFormat)
 		}
 	}
@@ -64,7 +64,7 @@ func TestStreamExtractArgs_TextCodecIsWindowed(t *testing.T) {
 		t.Fatalf("text extract should seek the input: %s", joined)
 	}
 	if !strings.Contains(joined, "-t 600.000") {
-		t.Fatalf("text extract should cap the read duration: %s", joined)
+		t.Fatalf("text extract should preserve the duration argument: %s", joined)
 	}
 	if !strings.Contains(joined, "-copyts") {
 		t.Fatalf("seeked extract must preserve source timestamps: %s", joined)
@@ -99,7 +99,8 @@ func TestStreamExtractArgs_WholeTrackCodecsIgnoreWindow(t *testing.T) {
 	}
 }
 
-// A client that opts in via AllowWindow gets a seeked, duration-capped PGS
+// A client that opts in via AllowWindow gets a seeked PGS extract with the
+// existing duration argument and
 // extract with -copyts preserving absolute source timestamps — the -ss must
 // be an input option (before -i) so ffmpeg uses the container index.
 func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
@@ -122,7 +123,7 @@ func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 		t.Fatalf("-ss must be an input option (before -i): %s", joined)
 	}
 	if !strings.Contains(joined, "-t 3600.000") {
-		t.Fatalf("windowed PGS extract should cap the read duration: %s", joined)
+		t.Fatalf("windowed PGS extract should preserve the duration argument: %s", joined)
 	}
 	if !strings.Contains(joined, "-copyts") {
 		t.Fatalf("windowed PGS extract must preserve source timestamps: %s", joined)
@@ -139,13 +140,13 @@ func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 // the cached stream's absolute timestamps survive into the output.
 func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
 	args := streamExtractArgs(StreamExtractOpts{
-		InputPath:           "/transcode/subtitle-cache/abc-s3-1-2.sup",
-		TrackIndex:          3,
-		SourceCodec:         "hdmv_pgs_subtitle",
-		SeekSeconds:         1200,
-		DurationSeconds:     3600,
-		AllowWindow:         true,
-		InputIsExtractedSup: true,
+		InputPath:            "/transcode/subtitle-cache/abc-s3-1-2.sup",
+		TrackIndex:           3,
+		SourceCodec:          "hdmv_pgs_subtitle",
+		SeekSeconds:          1200,
+		DurationSeconds:      3600,
+		AllowWindow:          true,
+		ExtractedInputFormat: "sup",
 	})
 
 	joined := strings.Join(args, " ")
@@ -245,9 +246,9 @@ func TestStreamExtractOutput_TargetFormatVTTGatedToTextSources(t *testing.T) {
 		{"hdmv_pgs_subtitle", "copy", "sup"},
 	}
 	for _, tc := range cases {
-		outCodec, outFormat := streamExtractOutput(tc.codec, "vtt")
+		outCodec, outFormat := StreamExtractOutput(tc.codec, "vtt")
 		if outCodec != tc.wantCodec || outFormat != tc.wantFormat {
-			t.Errorf("streamExtractOutput(%q, \"vtt\") = (%q, %q), want (%q, %q)",
+			t.Errorf("StreamExtractOutput(%q, \"vtt\") = (%q, %q), want (%q, %q)",
 				tc.codec, outCodec, outFormat, tc.wantCodec, tc.wantFormat)
 		}
 	}

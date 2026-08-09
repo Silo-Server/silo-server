@@ -35,11 +35,10 @@ type StreamExtractOpts struct {
 	// cues the client will never display. Ignored for ASS because ASS
 	// output needs the script header that only appears at offset 0.
 	SeekSeconds float64
-	// DurationSeconds bounds the extract to a window of this length
-	// (passed as ffmpeg's `-t`). Zero means "until end of file". A
-	// bounded window lets the client consume one fetch to completion
-	// while keeping memory and in-flight state finite; the client
-	// requests subsequent windows as playback approaches the tail.
+	// DurationSeconds preserves the existing input-side ffmpeg `-t` argument.
+	// It does not actually bound subtitle extraction: ffmpeg ignores it here
+	// and runs from the effective seek point to EOF. Zero omits the argument.
+	// See streamExtractArgs for why changing this would break native clients.
 	DurationSeconds float64
 	// AllowWindow lets SeekSeconds/DurationSeconds apply to PGS extracts.
 	// By default PGS is never windowed because clients fetch the .sup
@@ -49,18 +48,12 @@ type StreamExtractOpts struct {
 	// [Script Info] header exists only at stream offset 0, so a seeked
 	// extract would be structurally broken.
 	AllowWindow bool
-	// InputIsExtractedSup marks InputPath as a cached full-track .sup
-	// elementary stream (a previous full extract, produced with -copyts so
-	// its timestamps are absolute source PTS) rather than the original
-	// media container. The input format is forced with `-f sup` — the
-	// headerless stream is probeable via its "PG" magic, but an explicit
-	// format is robust against probe-size edge cases — and the stream
-	// mapping is forced to `0:s:0`: a .sup holds exactly one stream, so
-	// TrackIndex (which names the ordinal in the *original* container) no
-	// longer applies. Seeking such an input with -copyts re-emits the same
-	// absolute timestamps, so windowed output is byte-compatible with a
-	// window cut from the original file.
-	InputIsExtractedSup bool
+	// ExtractedInputFormat marks InputPath as a cached full-track subtitle
+	// artifact rather than the original media container. The input demuxer is
+	// forced to this value and mapping is forced to `0:s:0`, because a cached
+	// artifact holds exactly one stream and TrackIndex names the ordinal in the
+	// original container. Seeking with -copyts preserves absolute source PTS.
+	ExtractedInputFormat string
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -136,7 +129,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 // streamExtractArgs builds the ffmpeg argument list for a streaming
 // subtitle extract.
 func streamExtractArgs(opts StreamExtractOpts) []string {
-	outCodec, outFormat := streamExtractOutput(opts.SourceCodec, opts.TargetFormat)
+	plan := streamExtractPlanFor(opts)
 
 	args := []string{
 		"-hide_banner", "-nostats", "-loglevel", "error",
@@ -150,34 +143,32 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	// from offset 0 — windowing would silently drop every cue outside
 	// the window. Clients that manage their own sliding window opt in
 	// via AllowWindow; -copyts below keeps the windowed output on
-	// absolute source timestamps so cues stay in sync. The same logic
-	// governs the -t duration cap below.
-	windowable := !IsASS(opts.SourceCodec) && (!IsPGS(opts.SourceCodec) || opts.AllowWindow)
-	seekApplied := opts.SeekSeconds > 0 && windowable
-	if seekApplied {
+	// absolute source timestamps so cues stay in sync. The same predicate
+	// controls whether the compatibility -t argument is emitted below.
+	if plan.seekApplied {
 		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
 	}
 
-	// Duration limit must be an *input* option (placed before -i) so it
-	// caps how much of the file we read. Placed as an output option, -t
-	// combined with -copyts stops output when PTS reaches the given
-	// value — which with a non-zero seek is already in the past, so
-	// ffmpeg would emit only the WEBVTT header and zero cues.
-	if opts.DurationSeconds > 0 && windowable {
+	// This input-side -t is intentionally retained for byte compatibility,
+	// even though ffmpeg silently ignores it for these subtitle extracts and
+	// runs from the seek point to EOF. Moving it after -i or replacing it with
+	// -to would actually bound the output and break native clients that fetch
+	// once and depend on receiving the rest of the track.
+	if plan.durationApplied {
 		args = append(args, "-t", strconv.FormatFloat(opts.DurationSeconds, 'f', 3, 64))
 	}
 
-	// A cached .sup input has no container magic worth probing and exactly
-	// one stream: force the demuxer and remap to the sole stream ordinal.
+	// A cached artifact has exactly one stream: force its demuxer and remap to
+	// the sole stream ordinal.
 	trackIndex := opts.TrackIndex
-	if opts.InputIsExtractedSup {
-		args = append(args, "-f", "sup")
+	if opts.ExtractedInputFormat != "" {
+		args = append(args, "-f", opts.ExtractedInputFormat)
 		trackIndex = 0
 	}
 	args = append(args,
 		"-i", opts.InputPath,
 		"-map", fmt.Sprintf("0:s:%d", trackIndex),
-		"-c:s", outCodec,
+		"-c:s", plan.outCodec,
 	)
 
 	// When we seek the input, preserve the absolute source timestamps
@@ -185,14 +176,39 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	// which makes every cue play `opts.SeekSeconds` earlier than it
 	// should — the symptom is subtitles that look "out of sync" with
 	// the video the player is showing at the same media time.
-	if seekApplied {
+	if plan.seekApplied {
 		args = append(args, "-copyts", "-avoid_negative_ts", "disabled")
 	}
 
 	return append(args,
-		"-f", outFormat,
+		"-f", plan.outFormat,
 		"pipe:1",
 	)
+}
+
+type streamExtractPlan struct {
+	outCodec        string
+	outFormat       string
+	seekApplied     bool
+	durationApplied bool
+}
+
+// streamExtractPlanFor is the single source of truth for both ffmpeg argv and
+// cache canonicality. Any effective seek or duration makes an extract partial,
+// regardless of the handler flag that caused the argument to be applied.
+func streamExtractPlanFor(opts StreamExtractOpts) streamExtractPlan {
+	outCodec, outFormat := StreamExtractOutput(opts.SourceCodec, opts.TargetFormat)
+	windowable := !IsASS(opts.SourceCodec) && (!IsPGS(opts.SourceCodec) || opts.AllowWindow)
+	return streamExtractPlan{
+		outCodec:        outCodec,
+		outFormat:       outFormat,
+		seekApplied:     opts.SeekSeconds > 0 && windowable,
+		durationApplied: opts.DurationSeconds > 0 && windowable,
+	}
+}
+
+func (p streamExtractPlan) partial() bool {
+	return p.seekApplied || p.durationApplied
 }
 
 // PGSWindowRequest reports whether a subtitle request explicitly opts in
@@ -247,12 +263,12 @@ func copyAndFlush(dst io.Writer, src io.Reader) error {
 	}
 }
 
-// streamExtractOutput picks the ffmpeg output codec and muxer format for
+// StreamExtractOutput picks the ffmpeg output codec and muxer format for
 // a given source codec. ASS/SSA is copied so styling survives; PGS is
 // copied into a .sup elementary stream for client-side bitmap rendering
 // (libpgs); everything else is transmuxed to WebVTT for direct `<track>`
 // consumption.
-func streamExtractOutput(codec string, targetFormat ...string) (outCodec, outFormat string) {
+func StreamExtractOutput(codec string, targetFormat ...string) (outCodec, outFormat string) {
 	// A forced WebVTT target only applies to text sources: bitmap codecs
 	// carry no text for ffmpeg's webvtt encoder, so honoring the override
 	// would build a command that always fails mid-response. Fall through to

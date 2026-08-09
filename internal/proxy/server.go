@@ -252,7 +252,7 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// track when one exists (warming it in the background when not).
 	if requestedFormat == "sup" {
 		allowWindow, seek, duration := playback.PGSWindowRequest(r.URL.Query())
-		err := s.subCache.ServeSUPExtract(w, r, playback.StreamExtractOpts{
+		err := s.subCache.ServeExtract(w, r, playback.StreamExtractOpts{
 			InputPath:       claims.MediaPath,
 			TrackIndex:      trackIndex,
 			SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
