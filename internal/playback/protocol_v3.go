@@ -119,6 +119,8 @@ const AudioOnlyRemuxMIMEV3 = "audio/mp4"
 const (
 	DynamicRangeSDRV3         = "sdr"
 	DynamicRangeHDR10V3       = "hdr10"
+	DynamicRangeHDR10PlusV3   = "hdr10_plus"
+	DynamicRangeHLGV3         = "hlg"
 	DynamicRangeDolbyVisionV3 = "dolby_vision"
 )
 

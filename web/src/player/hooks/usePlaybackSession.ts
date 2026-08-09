@@ -448,6 +448,18 @@ export function usePlaybackSession(
       const previousSessionId = sessionIdRef.current;
       const hasExistingSession = !!previousState.sessionId && !!previousState.streamUrl;
       const loadSequence = ++loadSequenceRef.current;
+      const previousAttempt = {
+        playbackAttemptId: playbackAttemptIdRef.current,
+        planAttemptId: planAttemptIdRef.current,
+        attemptedPlanKeys: [...attemptedPlanKeysRef.current],
+        attemptCount: attemptCountRef.current,
+      };
+      const restorePreviousAttempt = () => {
+        playbackAttemptIdRef.current = previousAttempt.playbackAttemptId;
+        planAttemptIdRef.current = previousAttempt.planAttemptId;
+        attemptedPlanKeysRef.current = previousAttempt.attemptedPlanKeys;
+        attemptCountRef.current = previousAttempt.attemptCount;
+      };
 
       setState((current) => ({
         ...current,
@@ -487,6 +499,17 @@ export function usePlaybackSession(
         }
 
         const adopted = adoptDecision(decision);
+        if (!adopted && hasExistingSession && allowPreserveExistingSessionOnError) {
+          restorePreviousAttempt();
+          setState((current) => ({
+            ...current,
+            loading: false,
+            replacing: false,
+            errorTitle: previousState.errorTitle,
+            error: previousState.error,
+          }));
+          return;
+        }
         if (adopted && previousSessionId && previousSessionId !== sessionIdRef.current) {
           void stopSession(previousSessionId).catch(() => {
             // Best effort — stale session will time out server-side.
@@ -499,6 +522,7 @@ export function usePlaybackSession(
 
         if (hasExistingSession && allowPreserveExistingSessionOnError) {
           console.error(replacementErrorMessage, err);
+          restorePreviousAttempt();
           setState((current) => ({
             ...current,
             loading: false,
@@ -795,7 +819,7 @@ export function usePlaybackSession(
           await loadSession({
             preferredFileId: newFileId,
             position: currentPosition,
-            forceStartPosition: false,
+            forceStartPosition: true,
             allowPreserveExistingSessionOnError: true,
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",

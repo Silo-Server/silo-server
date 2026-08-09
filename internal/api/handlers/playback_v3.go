@@ -395,7 +395,11 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
-		audioIndex = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, requestedFile)
+		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, requestedFile)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load the saved audio preference")
+			return
+		}
 	}
 	effectiveFile := requestedFile
 	settings := h.plannerSettingsV3(r.Context())
@@ -404,7 +408,11 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	if req.StartPosition == nil {
-		req.StartPosition = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
+		req.StartPosition, err = h.resumePositionV3(r.Context(), userID, profileID, effectiveFile)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load saved playback progress")
+			return
+		}
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
@@ -728,18 +736,23 @@ func sessionOwnsResumeTimelineV3(file *models.MediaFile) bool {
 //
 // The client sends a track identity only when the viewer picked one. Defaulting
 // to ordinal zero instead would silently play the first track on the reel.
-func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) int {
+func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) (int, error) {
 	if file == nil || len(file.AudioTracks) == 0 || h.StoreProvider == nil {
-		return 0
+		return 0, nil
 	}
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
-		return normalizeAudioTrackIndex(file, 0)
+		return 0, err
 	}
 	var seriesPref *playback.AudioTrackPreference
 	if seriesID := h.resolveSeriesID(ctx, file); seriesID != "" {
-		if stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID); prefErr == nil && stored != nil {
+		stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID)
+		if prefErr != nil {
+			slog.ErrorContext(ctx, "protocol v3 start: series audio preference lookup failed", "component", "api", "profile_id", profileID, "series_id", seriesID, "error", prefErr)
+			return 0, prefErr
+		}
+		if stored != nil {
 			seriesPref = &playback.AudioTrackPreference{AudioTrackIndex: stored.AudioTrackIndex, AudioLanguage: stored.AudioLanguage, TrackSignature: stored.TrackSignature}
 			if seriesPref.AudioLanguage == playback.OriginalLanguageSentinel {
 				seriesPref.AudioLanguage = h.resolveOriginalLanguage(ctx, file)
@@ -767,7 +780,7 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	if libraryLang != "" {
 		preferredLang = libraryLang
 	}
-	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref))
+	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)), nil
 }
 
 // resumePositionV3 answers what an omitted `start_position` means: resume where
@@ -779,29 +792,29 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 // omission asks the server for its resume policy. Parts of a multipart item are
 // skipped for the same reason their progress is not persisted: they share one
 // resume point with the whole item, so a part-local seek to it is meaningless.
-func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) *float64 {
+func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) (*float64, error) {
 	if h.StoreProvider == nil || !sessionOwnsResumeTimelineV3(file) {
-		return nil
+		return nil, nil
 	}
 	targetID := playbackProgressTarget(file)
 	if targetID == "" {
-		return nil
+		return nil, nil
 	}
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: resume store lookup failed", "component", "api", "user_id", userID, "error", err)
-		return nil
+		return nil, err
 	}
 	progress, err := store.GetProgress(ctx, profileID, targetID)
 	if err != nil {
 		slog.ErrorContext(ctx, "protocol v3 start: resume progress lookup failed", "component", "api", "target", targetID, "error", err)
-		return nil
+		return nil, err
 	}
 	if progress == nil || progress.Completed || progress.PositionSeconds <= 0 {
-		return nil
+		return nil, nil
 	}
 	position := progress.PositionSeconds
-	return &position
+	return &position, nil
 }
 
 // A progressive remux is a freshly generated, chunked MP4 response and does
@@ -1257,6 +1270,15 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		_, _ = w.Write(lease.Response)
 		return
 	}
+	leaseCompleted := false
+	defer func() {
+		if leaseCompleted {
+			return
+		}
+		if err := h.PlanStoreV3.ReleaseReplan(context.WithoutCancel(r.Context()), sessionID, req.ReplanRequestID); err != nil {
+			slog.ErrorContext(r.Context(), "protocol v3 replan lease release failed", "component", "api", "session", sessionID, "replan_request_id", req.ReplanRequestID, "error", err)
+		}
+	}()
 	if record.CurrentPlanID != req.FailedPlanID {
 		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 		return
@@ -1266,13 +1288,23 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		if transport != nil {
 			transport.rollback()
 		}
-		writeJSON(w, http.StatusOK, playback.NewTerminalResponseV3(replanErr.reason, replanErr.message, replanErr.retryable))
+		response := playback.NewTerminalResponseV3(replanErr.reason, replanErr.message, replanErr.retryable)
+		encoded, _ := json.Marshal(response)
+		terminalRecord := *record
+		terminalRecord.CurrentReplanRequestID = req.ReplanRequestID
+		if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, record.CurrentReplanRequestID, encoded, terminalRecord); err != nil {
+			if errors.Is(err, playback.ErrReplanSupersededV3) {
+				writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist the terminal replan decision")
+			return
+		}
+		leaseCompleted = true
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	updated.CurrentReplanRequestID = req.ReplanRequestID
-	// A replay of the original start id must return the current durable decision,
-	// not a superseded plan that the replan just replaced.
-	updated.StartResponse = response
 	encoded, _ := json.Marshal(response)
 	var rollbackSession func() error
 	if transport != nil && transport.applySession != nil {
@@ -1305,6 +1337,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the replacement plan")
 		return
 	}
+	leaseCompleted = true
 	if transport != nil {
 		transport.commit()
 		if transport.afterDurableCommit != nil {
@@ -2442,9 +2475,6 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 
 func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int, profileID string, req playback.StartRequestV3, requestDigest string, requestedFileID, effectiveFileID int, failure *transportErrorV3) (playback.DecisionResponseV3, error) {
 	response := playback.NewTerminalResponseV3(failure.reason, failure.message, failure.retryable)
-	if failure.retryable {
-		return response, nil
-	}
 	return h.persistTerminalStartDecisionV3(ctx, userID, profileID, req, requestDigest, requestedFileID, effectiveFileID, response)
 }
 

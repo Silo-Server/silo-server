@@ -79,6 +79,9 @@ type PlanStoreV3 interface {
 	GetAttemptIdentity(context.Context, string) (*AttemptIdentityV3, error)
 	GetAttemptIdentityByPlaybackAttemptID(context.Context, string) (*AttemptIdentityV3, error)
 	BeginReplan(context.Context, string, string, string, string, time.Time) (ReplanLeaseV3, error)
+	// ReleaseReplan abandons an owned, incomplete lease after the handler fails
+	// before producing a durable response. Completed leases are never removed.
+	ReleaseReplan(context.Context, string, string) error
 	// CompleteReplan commits a replan atomically; the attempt row is only
 	// updated while its current_replan_request_id still equals the caller's
 	// base revision, otherwise ErrReplanSupersededV3 is returned.
@@ -219,6 +222,17 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 	existing.lease = leaseUntil
 	s.replans[key] = existing
 	return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
+}
+
+func (s *MemoryPlanStoreV3) ReleaseReplan(_ context.Context, sessionID, requestID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := sessionID + ":" + requestID
+	entry, ok := s.replans[key]
+	if ok && !entry.completed {
+		delete(s.replans, key)
+	}
+	return nil
 }
 
 func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {

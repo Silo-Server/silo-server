@@ -14,6 +14,7 @@ import (
 func TestNeedsCriticalProbeRepair_ProbedAudioOnlyFileIsComplete(t *testing.T) {
 	now := time.Now()
 	f := &models.MediaFile{
+		BaseType:       "audiobook",
 		ProbeSource:    "local",
 		ProbeUpdatedAt: &now,
 		Duration:       3600,
@@ -25,6 +26,23 @@ func TestNeedsCriticalProbeRepair_ProbedAudioOnlyFileIsComplete(t *testing.T) {
 	}
 	if NeedsCriticalProbeRepair(f) {
 		t.Fatal("a successfully-probed audio-only file must not need probe repair")
+	}
+}
+
+func TestNeedsCriticalProbeRepair_ProbedMovieWithOnlyAudioMetadataRepairs(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		BaseType:       "movie",
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       7200,
+		Container:      "mkv",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Codec: "aac"}},
+		Chapters:       []models.MediaChapter{},
+	}
+	if !NeedsCriticalProbeRepair(f) {
+		t.Fatal("a movie with only audio metadata must be reprobed before playback")
 	}
 }
 

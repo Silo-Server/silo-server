@@ -39,8 +39,16 @@ const WEB_SUBTITLE_CAPABILITIES: DeliverySubtitleCapabilitiesV3 = {
   font_attachments: true,
 };
 
-/** Detects whether hls.js can run here — it needs Media Source Extensions. */
+/** Detects whether either hls.js or the native media element can play HLS. */
 export function detectHLSSupport(): boolean {
+  if (typeof document !== "undefined") {
+    try {
+      const video = document.createElement("video");
+      if (video.canPlayType("application/vnd.apple.mpegurl") !== "") return true;
+    } catch {
+      // Fall through to the hls.js/MSE probe.
+    }
+  }
   if (typeof MediaSource === "undefined") return false;
   try {
     // hls.js muxes into fMP4/TS; the baseline it requires is an MSE that can
@@ -111,10 +119,8 @@ function buildDeliveryCapability(
 
 /**
  * Builds the `deliveries` map. `original_http` and `progressive` ride the
- * `<video>` element directly; `hls` needs hls.js (or native HLS, which the
- * player does not currently drive), so it is reported unsupported when MSE is
- * unavailable rather than silently omitted — the failure reason is worth having
- * in the plan's diagnostics.
+ * `<video>` element directly; `hls` uses hls.js where MSE is available and the
+ * media element's native HLS implementation otherwise.
  */
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
@@ -125,8 +131,7 @@ export function buildDeliveriesV3(
     hls: buildDeliveryCapability(probe, {
       supported_on_device: probe.hls,
       ...(probe.hls ? {} : { failure_reason: "media_source_extensions_unavailable" }),
-      // hls.js only ever hands the browser fMP4/TS segments.
-      containers: ["mp4"],
+      containers: ["hls"],
     }),
   };
 }

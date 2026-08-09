@@ -42,13 +42,13 @@ func (r *SubtitleInventoryResolver) MediaFile(ctx context.Context, fileID int) (
 
 // AdditionalSubtitles returns the downloaded and generated tracks that follow
 // the file's external and embedded tracks in the combined ordinal space.
-func (r *SubtitleInventoryResolver) AdditionalSubtitles(ctx context.Context, file *models.MediaFile) []playback.SubtitleInventoryEntryV3 {
+func (r *SubtitleInventoryResolver) AdditionalSubtitles(ctx context.Context, file *models.MediaFile) ([]playback.SubtitleInventoryEntryV3, error) {
 	if r == nil || r.subtitles == nil || file == nil {
-		return nil
+		return nil, nil
 	}
 	downloaded, err := r.subtitles.ListDownloadedSubtitles(ctx, file.ID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return downloadedSubtitleEntriesV3(file, downloaded)
+	return downloadedSubtitleEntriesV3(file, downloaded), nil
 }

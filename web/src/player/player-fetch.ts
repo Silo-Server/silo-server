@@ -25,7 +25,7 @@ export class PlayerFetchError extends Error {
 /**
  * Performs an authenticated fetch against the configured API.
  * Returns the parsed JSON body for 2xx responses, undefined when the response
- * carries no body (204, and the 202 the route-event endpoint answers with).
+ * carries no body.
  * Throws PlayerFetchError for non-2xx responses.
  */
 export async function playerFetch<T>(
@@ -86,12 +86,14 @@ export async function playerFetch<T>(
     throw new PlayerFetchError(res.status, message, code, text);
   }
 
-  // 204 never has a body; 202 is how the v3 route-event endpoint acknowledges
-  // an accepted diagnostic, also with no body. Calling res.json() on either
-  // throws on the empty payload.
-  if (res.status === 204 || res.status === 202) {
+  if (res.status === 204) {
     return undefined as T;
   }
 
-  return res.json();
+  // Accepted operations may return either a JSON status object (for example
+  // subtitle translation) or an empty acknowledgement (route diagnostics).
+  // Inspect the payload rather than assigning body semantics to status 202.
+  const text = await res.text();
+  if (text.trim() === "") return undefined as T;
+  return JSON.parse(text) as T;
 }

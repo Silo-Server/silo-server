@@ -189,14 +189,16 @@ func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
 }
 
 // IsAudioOnly reports whether a probed file carries no playable video stream —
-// audiobooks and music, as opposed to a video file whose probe is incomplete.
+// audiobooks and podcasts, as opposed to a video file whose probe is incomplete.
 // It also normalizes legacy audiobook/podcast cover-art rows until a repair
 // probe removes their stale image-only video metadata.
 func (f *MediaFile) IsAudioOnly() bool {
 	if f == nil {
 		return false
 	}
-	return (len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
+	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
+	hasAudio := len(f.AudioTracks) > 0 || strings.TrimSpace(f.CodecAudio) != ""
+	return (knownAudioType && hasAudio && len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
 }
 
 // NormalizeVideoBitDepth returns an explicit probe value when available and

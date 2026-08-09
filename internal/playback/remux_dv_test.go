@@ -23,17 +23,24 @@ func argsContainPair(args []string, a, b string) bool {
 // Stripping the RPUs yields a clean HDR10 stream — both a correctness fix and
 // the Apple-parity fallback presentation for devices without a P7 decoder.
 func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
-	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false)
+	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
 	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
 		t.Fatalf("profile 7 remux must strip DV RPUs from the base layer, args=%v", strings.Join(args, " "))
 	}
 }
 
 func TestBuildRemuxArgsExcludesAttachedPictures(t *testing.T) {
-	args := buildRemuxArgs("/book.m4b", "mp4", 0, true, -1, 0, false)
+	args := buildRemuxArgs("/book.m4b", "mp4", 0, true, -1, 0, false, true)
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-map 0:V:0?") {
 		t.Fatalf("remux args must exclude attached-picture video streams: %s", joined)
+	}
+}
+
+func TestBuildRemuxArgsRequiresVideoForVideoPlans(t *testing.T) {
+	args := buildRemuxArgs("/movie.mkv", "mp4", 0, false, -1, 0, false, false)
+	if !argsContainPair(args, "-map", "0:V:0") || argsContainPair(args, "-map", "0:V:0?") {
+		t.Fatalf("video remux must use a mandatory video map, args=%s", strings.Join(args, " "))
 	}
 }
 
@@ -60,7 +67,7 @@ func TestRemuxDVProfileFallsBackWithoutFilterSupport(t *testing.T) {
 // enhancement layer and DV-capable clients can render it. Never strip.
 func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 8} {
-		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false)
+		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false, false)
 		if argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
 			t.Fatalf("profile %d remux must not strip DV RPUs, args=%v", profile, strings.Join(args, " "))
 		}
@@ -71,15 +78,15 @@ func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 // Media3 keys decoder selection from it, but legacy web/jellycompat consumers
 // rely on the pre-v3 hev1 labeling their demuxers accept.
 func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
-	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, true)
+	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, true, false)
 	if !argsContainPair(args, "-tag:v", "dvhe") {
 		t.Fatalf("preserved Dolby Vision must retain a DV sample entry, args=%v", strings.Join(args, " "))
 	}
-	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false)
+	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false, false)
 	if argsContainPair(legacy, "-tag:v", "dvhe") {
 		t.Fatalf("legacy remux consumers must keep hev1 labeling, args=%v", strings.Join(legacy, " "))
 	}
-	stripped := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false)
+	stripped := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
 	if argsContainPair(stripped, "-tag:v", "dvhe") {
 		t.Fatalf("HDR10 fallback must not retain a DV sample entry, args=%v", strings.Join(stripped, " "))
 	}
@@ -104,7 +111,7 @@ func TestStartRemuxRejectsUnknownModeForAllProfiles(t *testing.T) {
 }
 
 func TestBuildRemuxArgsDelaysMoovForCopiedAtmosConfiguration(t *testing.T) {
-	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false)
+	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false, false)
 	if !argsContainPair(args, "-movflags", "frag_keyframe+delay_moov+default_base_moof") {
 		t.Fatalf("remux must delay moov until copied audio is parsed, args=%v", strings.Join(args, " "))
 	}

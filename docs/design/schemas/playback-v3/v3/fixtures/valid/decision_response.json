@@ -46,7 +46,7 @@
       "audio_codec": "aac",
       "width": 1920,
       "height": 1080,
-      "frame_rate": 23.976,
+      "frame_rate": 23.976023976023978,
       "bitrate_kbps": 8000,
       "dynamic_range": "sdr",
       "audio_channels": 2,
@@ -150,18 +150,6 @@
         "height": 1080,
         "bitrate_kbps": 8000,
         "preserves_source": true
-      },
-      {
-        "label": "720p",
-        "height": 720,
-        "bitrate_kbps": 2000,
-        "preserves_source": false
-      },
-      {
-        "label": "480p",
-        "height": 480,
-        "bitrate_kbps": 1500,
-        "preserves_source": false
       }
     ],
     "degradation_warnings": [],
@@ -170,7 +158,7 @@
     "effective_media_file_id": 42,
     "source": {
       "media_file_id": 42,
-      "duration_seconds": 7265.5,
+      "duration_seconds": 7200,
       "container": "mp4",
       "video_codec": "h264",
       "video_profile": "high",
@@ -178,7 +166,7 @@
       "bit_depth": 8,
       "width": 1920,
       "height": 1080,
-      "frame_rate": 23.976,
+      "frame_rate": 23.976023976023978,
       "bitrate_kbps": 8000,
       "dynamic_range": "sdr",
       "hdr10_plus": false,

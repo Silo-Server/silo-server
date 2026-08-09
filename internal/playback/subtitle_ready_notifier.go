@@ -17,7 +17,7 @@ type subtitleReadySessionLookup interface {
 // stream URL rather than leaving the client to reconstruct one.
 type SubtitleInventoryResolver interface {
 	MediaFile(ctx context.Context, fileID int) (*models.MediaFile, error)
-	AdditionalSubtitles(ctx context.Context, file *models.MediaFile) []SubtitleInventoryEntryV3
+	AdditionalSubtitles(ctx context.Context, file *models.MediaFile) ([]SubtitleInventoryEntryV3, error)
 }
 
 // SubtitleReadyNotifier pushes "subtitle ready" events to active playback
@@ -113,7 +113,13 @@ func (n *SubtitleReadyNotifier) resolveTrack(ctx context.Context, sessionID stri
 			"file_id", fileID, "error", err)
 		return nil
 	}
-	items := SubtitleInventoryV3(sessionID, file, n.inventory.AdditionalSubtitles(ctx, file))
+	additional, err := n.inventory.AdditionalSubtitles(ctx, file)
+	if err != nil {
+		slog.WarnContext(ctx, "subtitle realtime event omits track identity", "component", "playback",
+			"file_id", fileID, "error", err)
+		return nil
+	}
+	items := SubtitleInventoryV3(sessionID, file, additional)
 	for i := range items {
 		if items[i].Source != SubtitleSourceDownloadedV3 {
 			continue

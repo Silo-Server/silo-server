@@ -50,6 +50,9 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if hasAudio && (strings.TrimSpace(file.CodecAudio) == "" || len(file.AudioTracks) == 0) {
 		return true
 	}
+	if !hasVideo && hasAudio && !file.IsAudioOnly() {
+		return true
+	}
 	// Video metadata is playback-critical only for files that actually carry a
 	// video stream. Audio-only files (audiobooks, music) legitimately probe to
 	// zero video tracks and an empty video codec/resolution; treating that as

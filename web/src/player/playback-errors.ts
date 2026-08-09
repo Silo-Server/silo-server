@@ -132,6 +132,13 @@ export function describePlaybackTransportError(
     };
   }
 
+  if (error.code === "playback_session_not_found") {
+    return {
+      title: "Playback session expired",
+      message: "This playback session is no longer active. Start it again to keep watching.",
+    };
+  }
+
   if (error.status === 404) {
     return {
       title: "This item is no longer available",

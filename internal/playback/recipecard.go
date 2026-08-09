@@ -48,6 +48,8 @@ type RecipeCard struct {
 	InputPath              string  `json:"input_path"`
 	OutputSubdir           string  `json:"output_subdir,omitempty"`
 	SourceVideoCodec       string  `json:"source_video_codec,omitempty"`
+	SourceVideoProfile     string  `json:"source_video_profile,omitempty"`
+	SourceVideoBitDepth    int     `json:"source_video_bit_depth,omitempty"`
 	SoftwareVideoDecode    bool    `json:"software_video_decode,omitempty"`
 	VideoBitstreamFilter   string  `json:"video_bitstream_filter,omitempty"`
 	SeekSeconds            float64 `json:"seek_seconds"`
@@ -88,6 +90,8 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		InputPath:              opts.InputPath,
 		OutputSubdir:           opts.OutputSubdir,
 		SourceVideoCodec:       opts.SourceVideoCodec,
+		SourceVideoProfile:     opts.SourceVideoProfile,
+		SourceVideoBitDepth:    opts.SourceVideoBitDepth,
 		SoftwareVideoDecode:    opts.SoftwareVideoDecode,
 		VideoBitstreamFilter:   opts.VideoBitstreamFilter,
 		SeekSeconds:            opts.SeekSeconds,
@@ -155,6 +159,8 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SessionID:              c.SessionID,
 		TranscodeTransportID:   c.TranscodeTransportID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
 		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
@@ -211,6 +217,8 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ProfileID:              c.ProfileID,
 		MediaFileID:            c.MediaFileID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
 		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
@@ -253,6 +261,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		InputPath:              c.MediaPath,
 		OutputSubdir:           c.OutputSubdir,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
 		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,

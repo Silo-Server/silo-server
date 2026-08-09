@@ -90,6 +90,13 @@ func TestMemoryPlanStoreV3StartAndReplanIdempotency(t *testing.T) {
 	if _, err := store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-b", record.CurrentReplanRequestID, time.Now().Add(time.Minute)); !errors.Is(err, ErrIdempotencyKeyReusedV3) {
 		t.Fatalf("digest conflict = %v", err)
 	}
+	if err := store.ReleaseReplan(context.Background(), record.SessionID, "replan-0001"); err != nil {
+		t.Fatalf("release lease: %v", err)
+	}
+	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
+	if err != nil || lease.State != ReplanLeaseOwnedV3 {
+		t.Fatalf("released lease was not immediately reusable: %#v, err=%v", lease, err)
+	}
 	response := json.RawMessage(`{"protocol_version":3}`)
 	if err := store.CompleteReplan(context.Background(), record.SessionID, "replan-0001", record.CurrentReplanRequestID, response, record); err != nil {
 		t.Fatal(err)

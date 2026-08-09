@@ -118,7 +118,7 @@ const (
 // the RPUs would dangle — stripping yields a clean HDR10 base layer (the
 // Apple-parity fallback for devices without a P7 decoder). Profile 8 RPUs
 // stay: the base layer is self-contained and DV clients can render it.
-func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry bool) []string {
+func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry, audioOnly bool) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -153,10 +153,14 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 		"-map_chapters", "-1",
 	)
 
-	// Select specific video and audio streams. The video map is optional so
-	// audio-only sources (audiobooks on the v3 audio remux route) produce an
-	// audio-only fMP4 instead of aborting on a missing stream.
-	args = append(args, "-map", "0:V:0?")
+	// A planned video remux must fail if the promised video stream disappeared
+	// or became unreadable. Only positively identified audio-only media may
+	// make the video map optional.
+	videoMap := "0:V:0"
+	if audioOnly {
+		videoMap += "?"
+	}
+	args = append(args, "-map", videoMap)
 	if audioTrackIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
 	} else {
@@ -222,6 +226,10 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 // v3 callers must pass the configured playback path so the strip capability
 // promised by the planner's probe holds for the binary that actually runs.
 func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
+	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false)
+}
+
+func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ResolveFFmpegPath(ffmpegPath)
@@ -272,7 +280,7 @@ func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, se
 		cancel()
 		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
 	}
-	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagDVSampleEntry)
+	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagDVSampleEntry, audioOnly)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -334,6 +342,8 @@ type RemuxServeOptions struct {
 	// ContentType overrides the container-derived response type. Audio-only
 	// sources mux an audio-only fMP4, which must not be announced as video.
 	ContentType string
+	// AudioOnly permits the otherwise-mandatory video map to be absent.
+	AudioOnly bool
 }
 
 // RemuxContentType returns the override required for an audio-only fMP4.
@@ -378,7 +388,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
-	session, err := StartRemuxWithDVMode(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath)
+	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err

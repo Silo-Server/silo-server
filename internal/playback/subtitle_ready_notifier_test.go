@@ -10,10 +10,11 @@ import (
 )
 
 type stubSubtitleInventoryResolver struct {
-	file       *models.MediaFile
-	additional []SubtitleInventoryEntryV3
-	err        error
-	calls      int
+	file          *models.MediaFile
+	additional    []SubtitleInventoryEntryV3
+	err           error
+	additionalErr error
+	calls         int
 }
 
 func (s *stubSubtitleInventoryResolver) MediaFile(context.Context, int) (*models.MediaFile, error) {
@@ -24,8 +25,8 @@ func (s *stubSubtitleInventoryResolver) MediaFile(context.Context, int) (*models
 	return s.file, nil
 }
 
-func (s *stubSubtitleInventoryResolver) AdditionalSubtitles(context.Context, *models.MediaFile) []SubtitleInventoryEntryV3 {
-	return s.additional
+func (s *stubSubtitleInventoryResolver) AdditionalSubtitles(context.Context, *models.MediaFile) ([]SubtitleInventoryEntryV3, error) {
+	return s.additional, s.additionalErr
 }
 
 // A generated track's realtime event carries the ordinal the next plan will
@@ -116,6 +117,34 @@ func TestSubtitleReadyNotifierOmitsTrackWhenTheFileCannotBeResolved(t *testing.T
 	}
 	if payload.SubtitleID != 77 || payload.Language != "es" {
 		t.Errorf("payload lost its identifiers: %+v", payload)
+	}
+}
+
+func TestSubtitleReadyNotifierOmitsTrackWhenDownloadedInventoryCannotBeResolved(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	_ = sessions.SetRealtimeConnection(session.ID, true)
+
+	hub := NewRealtimeHub()
+	conn := &dispatchTestConn{}
+	reg := hub.Register(session.ID, conn)
+	defer hub.Unregister(reg)
+
+	resolver := &stubSubtitleInventoryResolver{
+		file:          &models.MediaFile{ID: 100},
+		additionalErr: errors.New("subtitle repository unavailable"),
+	}
+	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 77, "es", "Spanish (AI)")
+
+	if len(conn.messages) != 1 {
+		t.Fatalf("messages = %d, want one metadata-only event", len(conn.messages))
+	}
+	var payload SubtitleReadyPayload
+	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Track != nil {
+		t.Fatalf("track = %#v, want nil when the ordinal inventory is unavailable", payload.Track)
 	}
 }
 

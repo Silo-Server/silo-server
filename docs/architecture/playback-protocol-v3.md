@@ -518,13 +518,12 @@ alternate is kept. Track identities are remapped only when the edition really
 changes, because remapping within one file would degrade an exact selection to a
 best-match lookup and could silently move a listener off a commentary track.
 
-One field rule follows from this. On a `track_change`, omitting
-`quality_preference` keeps whatever quality the session already had; sending it
-sets it. That is the opposite of every other replan operation, where an absent
-preference normalizes to `auto` — and it has to be, because normalizing on a
-track change would silently reset `original` or a pinned rung as a side effect
-of switching audio. Clients that always send the current quality get identical
-behaviour either way, and that is the recommended thing to do.
+Omitting `quality_preference` on any replan preserves the session's current
+preference; sending it replaces that preference. A track change therefore does
+not silently reset `original` or a pinned rung, and failure recovery does not
+discard the viewer's requested quality unless the client explicitly asks it to.
+Clients should still send the current preference when they know it, so their
+intent remains explicit in diagnostics.
 
 For failure recovery, `attempted_plan_keys` is the loop guard. The client sends
 back every `plan_attempt_key` it has already tried for this attempt (up to 16);

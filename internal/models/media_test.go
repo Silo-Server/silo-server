@@ -87,7 +87,7 @@ func TestMediaFileIsAudioOnly(t *testing.T) {
 		{name: "nil file", file: nil},
 		{
 			name: "audiobook",
-			file: &MediaFile{CodecAudio: "aac", AudioTracks: []AudioTrack{{Codec: "aac"}}},
+			file: &MediaFile{BaseType: "audiobook", CodecAudio: "aac", AudioTracks: []AudioTrack{{Codec: "aac"}}},
 			want: true,
 		},
 		{
@@ -103,8 +103,12 @@ func TestMediaFileIsAudioOnly(t *testing.T) {
 			file: &MediaFile{VideoTracks: []VideoTrack{{Codec: "h264"}}},
 		},
 		{
-			name: "blank flat codec is not evidence of video",
-			file: &MediaFile{CodecVideo: "  ", CodecAudio: "flac"},
+			name: "missing video metadata is not audio-only evidence for a movie",
+			file: &MediaFile{BaseType: "movie", CodecVideo: "  ", CodecAudio: "flac", AudioTracks: []AudioTrack{{Codec: "flac"}}},
+		},
+		{
+			name: "podcast with no video stream",
+			file: &MediaFile{BaseType: "podcast", CodecAudio: "aac", AudioTracks: []AudioTrack{{Codec: "aac"}}},
 			want: true,
 		},
 		{

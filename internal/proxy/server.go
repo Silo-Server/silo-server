@@ -176,6 +176,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		DVMode:      playback.RemuxDVMode(claims.RemuxDVMode),
 		FFmpegPath:  s.watcher.Config().Playback.FFmpegPath,
 		ContentType: playback.RemuxContentType(claims.AudioOnly),
+		AudioOnly:   claims.AudioOnly,
 	})
 }
 

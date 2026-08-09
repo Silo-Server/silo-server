@@ -2826,7 +2826,9 @@
               "audio_decode_codecs": [
                 "aac"
               ],
-              "audio_passthrough_codecs": [],
+              "audio_passthrough_codecs": [
+                "truehd"
+              ],
               "subtitles": {
                 "embedded_text": false,
                 "sidecar_text": false,

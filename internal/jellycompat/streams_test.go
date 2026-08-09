@@ -136,7 +136,7 @@ func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
 		"play-1",
 		"upstream-1",
 		string(playback.PlayRemux),
-		&models.MediaFile{FilePath: "/media/book.m4b", CodecAudio: "aac"},
+		&models.MediaFile{FilePath: "/media/book.m4b", BaseType: "audiobook", CodecAudio: "aac"},
 		PlaybackMediaSource{},
 		"",
 		0,

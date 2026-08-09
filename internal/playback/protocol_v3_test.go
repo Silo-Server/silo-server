@@ -1526,6 +1526,75 @@ func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testi
 	}
 }
 
+func TestPlanPlaybackV3AppliesDeliverySpecificCodecAndChannelLimits(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.FilePath = "/media/movie.mp4"
+	file.Container = "mp4"
+	file.CodecVideo = "h264"
+	file.Resolution = "1080p"
+	file.Bitrate = 8_000
+	file.AudioChannels = 6
+	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
+	file.AudioTracks[0] = models.AudioTrack{Codec: "aac", Channels: 6, Layout: "5.1"}
+
+	request := validStartRequestV3()
+	request.Capabilities.CodecsVideo = []string{"h264"}
+	request.Capabilities.CodecsVideoHardware = []string{"h264"}
+	request.Capabilities.CodecsAudio = []string{"aac"}
+	request.Capabilities.Containers = []string{"mp4"}
+	request.Capabilities.MaxResolution = "1080p"
+	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
+	maxStereo := 2
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"}, MaxChannels: &maxStereo,
+	}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+	}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("delivery-specific stereo ceiling did not exclude original_http: %#v", result)
+	}
+
+	original := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	original.MaxChannels = nil
+	original.AudioDecodeCodecs = []string{"opus"}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+	result = PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("delivery-specific audio codec list did not exclude original_http: %#v", result)
+	}
+
+	original.AudioDecodeCodecs = nil
+	original.AudioPassthroughCodecs = []string{"aac"}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+	result = PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("passthrough-only delivery must not claim AAC decode support: %#v", result)
+	}
+}
+
+func TestPlanPlaybackV3AppliesDeliverySpecificHDRDetails(t *testing.T) {
+	file := detailedFixtureFileV3()
+	request := validStartRequestV3()
+	hdr := &HDRCapabilitiesV3{HDR10: true}
+	request.Capabilities.HDRDetails = hdr
+	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	request.ClientPlaybackContext.Output.HDRDetails = hdr
+	request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"}, HDRDetails: &HDRCapabilitiesV3{},
+	}
+	request.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"}, HDRDetails: hdr,
+	}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("delivery-specific HDR override did not exclude original_http: %#v", result)
+	}
+}
+
 func validStartRequestV3() StartRequestV3 {
 	return StartRequestV3{
 		ProtocolVersion:            ProtocolV3,
@@ -1708,7 +1777,7 @@ func TestAvailableQualitiesV3UnknownSourceHeightPublishesNoFixedRungs(t *testing
 }
 
 func audioOnlyFixtureFileV3() *models.MediaFile {
-	return &models.MediaFile{ID: 77, FilePath: "/media/audiobook.m4b", Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
+	return &models.MediaFile{ID: 77, BaseType: "audiobook", FilePath: "/media/audiobook.m4b", Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
 }
 
 // An audio-only source with client-decodable audio must plan the validated

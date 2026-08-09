@@ -1,0 +1,44 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type { PlayerConfig } from "./context/PlayerConfigContext";
+import { playerFetch } from "./player-fetch";
+
+const config: PlayerConfig = {
+  apiBaseUrl: "/api/v1",
+  getAccessToken: () => null,
+  getProfileId: () => null,
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("playerFetch", () => {
+  it("parses a JSON body returned with 202 Accepted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ job: { status: "running" } }), {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+
+    await expect(
+      playerFetch<{ job: { status: string } }>(config, "/subtitles/ai/translate"),
+    ).resolves.toEqual({
+      job: { status: "running" },
+    });
+  });
+
+  it("accepts an empty 202 response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 202 })),
+    );
+
+    await expect(playerFetch<void>(config, "/playback/route-events")).resolves.toBeUndefined();
+  });
+});

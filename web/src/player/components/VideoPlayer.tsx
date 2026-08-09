@@ -253,6 +253,7 @@ export function VideoPlayer({
   const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
+  const reportedPlanFailureKeyRef = useRef<string | null>(null);
   const streamOriginRef = useRef(0);
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
@@ -363,6 +364,18 @@ export function VideoPlayer({
   const isHlsStream = plan.stream.protocol === "hls";
   const effectiveStreamUrl = streamUrl;
   const isPlayerReady = effectiveStreamUrl !== "";
+  const reportCurrentPlanFailure = useCallback(
+    (failure: FailureV3): boolean => {
+      if (!onPlanFailure) return false;
+      const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+      if (reportedPlanFailureKeyRef.current === failureKey) return true;
+      reportedPlanFailureKeyRef.current = failureKey;
+      setError(null);
+      onPlanFailure(failure, currentTimeRef.current);
+      return true;
+    },
+    [onPlanFailure, plan.plan_attempt_key, sessionId],
+  );
 
   const failHlsStartup = useCallback(() => {
     console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
@@ -376,8 +389,15 @@ export function VideoPlayer({
       video.removeAttribute("src");
       video.load();
     }
-    setError("Playback failed. The media could not be loaded.");
-  }, []);
+    if (
+      !reportCurrentPlanFailure({
+        classification: "startup_timeout",
+        message: "HLS playback exhausted its startup recovery budget.",
+      })
+    ) {
+      setError("Playback failed. The media could not be loaded.");
+    }
+  }, [reportCurrentPlanFailure]);
 
   useEffect(() => {
     if (!isHlsStream || !isPlayerReady) return;
@@ -590,13 +610,10 @@ export function VideoPlayer({
         message: "Firefox stalled on the original stream. Retrying with encoded video.",
         tone: "info",
       });
-      onPlanFailure?.(
-        {
-          classification: "startup_timeout",
-          message: "Firefox produced no frames from the copy remux before the startup deadline.",
-        },
-        currentTimeRef.current,
-      );
+      reportCurrentPlanFailure({
+        classification: "startup_timeout",
+        message: "Firefox produced no frames from the copy remux before the startup deadline.",
+      });
     }, FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS);
 
     return () => clearTimeout(timer);
@@ -606,7 +623,7 @@ export function VideoPlayer({
     isCopyOriginalHLS,
     isFirefoxBrowser,
     isPlayerReady,
-    onPlanFailure,
+    reportCurrentPlanFailure,
     plan.plan_attempt_key,
     replanning,
     sessionId,
@@ -629,16 +646,16 @@ export function VideoPlayer({
       message: "Firefox rejected the original stream. Retrying with encoded video.",
       tone: "warning",
     });
-    onPlanFailure?.(
-      { classification: "decoder_error", message: "Firefox rejected the copy remux." },
-      currentTimeRef.current,
-    );
+    reportCurrentPlanFailure({
+      classification: "decoder_error",
+      message: "Firefox rejected the copy remux.",
+    });
   }, [
     error,
     isCopyOriginalHLS,
     isFirefoxBrowser,
     isPlayerReady,
-    onPlanFailure,
+    reportCurrentPlanFailure,
     plan.plan_attempt_key,
     replanning,
     sessionId,
@@ -1380,14 +1397,28 @@ export function VideoPlayer({
                   hls?.recoverMediaError();
                 } else {
                   console.error("[hls.js] Fatal media error, giving up after 3 attempts");
-                  setError("Playback failed. Please try again.");
+                  if (
+                    !reportCurrentPlanFailure({
+                      classification: "decoder_error",
+                      message: "HLS media recovery failed after three attempts.",
+                    })
+                  ) {
+                    setError("Playback failed. Please try again.");
+                  }
                   hls?.destroy();
                   hlsRef.current = null;
                 }
                 mediaRecoveryAttemptsRef.current++;
               } else {
                 console.error("[hls.js] Unrecoverable error:", data);
-                setError("Playback failed. Please try again.");
+                if (
+                  !reportCurrentPlanFailure({
+                    classification: "decoder_error",
+                    message: `HLS reported an unrecoverable ${data.type} error.`,
+                  })
+                ) {
+                  setError("Playback failed. Please try again.");
+                }
                 hls?.destroy();
                 hlsRef.current = null;
               }
@@ -1410,10 +1441,26 @@ export function VideoPlayer({
             video.src = effectiveStreamUrl;
             video.addEventListener("loadedmetadata", attemptAutoplayWhenReady, { once: true });
           } else {
-            setError("HLS playback is not supported in this browser.");
+            if (
+              !reportCurrentPlanFailure({
+                classification: "unsupported_transport",
+                message: "The browser rejected the planned HLS transport.",
+              })
+            ) {
+              setError("HLS playback is not supported in this browser.");
+            }
           }
-        } catch {
-          if (!destroyed) setError("Failed to load video player.");
+        } catch (error) {
+          if (
+            !destroyed &&
+            !reportCurrentPlanFailure({
+              classification: "player_initialization_error",
+              message:
+                error instanceof Error ? error.message : "Failed to initialize HLS playback.",
+            })
+          ) {
+            setError("Failed to load video player.");
+          }
         }
       } else {
         // Direct play — set video src directly.
@@ -1449,6 +1496,7 @@ export function VideoPlayer({
     isPlayerReady,
     planRevision,
     plannedBitrateKbps,
+    reportCurrentPlanFailure,
   ]);
 
   // -- Video event listeners --
@@ -1536,7 +1584,10 @@ export function VideoPlayer({
     };
     const onError = () => {
       if (video.error) {
-        setError(`Playback error: ${video.error.message || "Unknown error"}`);
+        const message = video.error.message || "Unknown media element error";
+        if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
+          setError(`Playback error: ${message}`);
+        }
       }
     };
     const onVideoEnded = () => {
@@ -1584,7 +1635,14 @@ export function VideoPlayer({
     // Listener behavior depends on pending seek reconciliation. Watch-together
     // deps are intentionally narrowed to the primitives the handlers read so
     // room snapshot churn doesn't re-subscribe every listener.
-  }, [pendingSeekTime, roomSyncWaiting, sessionId, watchTogetherRoomActive, watchTogetherSync]);
+  }, [
+    pendingSeekTime,
+    reportCurrentPlanFailure,
+    roomSyncWaiting,
+    sessionId,
+    watchTogetherRoomActive,
+    watchTogetherSync,
+  ]);
 
   // Apply persisted volume on mount (separate from listener effect).
   useEffect(() => {

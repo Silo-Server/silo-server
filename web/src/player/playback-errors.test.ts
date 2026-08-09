@@ -69,6 +69,17 @@ describe("describePlaybackTransportError", () => {
     expect(describePlaybackTransportError(new Error("boom"))).toBeNull();
   });
 
+  it("distinguishes an expired playback session from a missing item", () => {
+    expect(
+      describePlaybackTransportError(
+        new PlayerFetchError(404, "Playback session not found", "playback_session_not_found"),
+      ),
+    ).toEqual({
+      title: "Playback session expired",
+      message: "This playback session is no longer active. Start it again to keep watching.",
+    });
+  });
+
   it("ignores 4xx statuses it has nothing specific to say about", () => {
     expect(
       describePlaybackTransportError(new PlayerFetchError(409, "Conflict", "stale_playback_plan")),

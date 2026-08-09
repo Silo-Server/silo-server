@@ -217,6 +217,7 @@ func TestHandleStream_AudioOnlyRemuxServesAudioContentType(t *testing.T) {
 			file: &models.MediaFile{
 				ID:         42,
 				ContentID:  "audiobook-1",
+				BaseType:   "audiobook",
 				CodecAudio: "flac",
 				Duration:   39600,
 			},
@@ -506,6 +507,34 @@ func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/x-ssa") {
 		t.Fatalf("content type = %q, want raw ASS", got)
+	}
+}
+
+func TestHandleSubtitle_ExternalTextHEADDoesNotLoadTheArtifact(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "movie-1",
+		FilePath:          "/missing/movie.mkv",
+		Duration:          3600,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/missing/movie.en.srt", Language: "eng", Format: "srt"}},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", file.ID, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	req := httptest.NewRequest(http.MethodHead, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.vtt")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+
+	if rr.Code != http.StatusOK || rr.Body.Len() != 0 || !strings.HasPrefix(rr.Header().Get("Content-Type"), "text/vtt") {
+		t.Fatalf("HEAD status=%d type=%q body=%q", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
 }
 

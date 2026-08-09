@@ -22,6 +22,7 @@ import (
 
 const (
 	subtitleFormatASS = "ass"
+	subtitleFormatSSA = "ssa"
 	subtitleFormatSUP = "sup"
 )
 
@@ -172,6 +173,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			DVMode:      session.RemuxDVMode,
 			FFmpegPath:  h.ffmpegPath(),
 			ContentType: playback.RemuxContentType(file.IsAudioOnly()),
+			AudioOnly:   file.IsAudioOnly(),
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -265,6 +267,10 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
 			return
 		}
+		if r.Method == http.MethodHead {
+			writeSubtitleRepresentationHead(w, requestedFormat)
+			return
+		}
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
 		return
 	}
@@ -274,6 +280,10 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if !subtitleSidecarFormatSupported(sub.Format, requestedFormat, false) {
 			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
 				"Requested subtitle extension does not match the selected track")
+			return
+		}
+		if r.Method == http.MethodHead {
+			writeSubtitleRepresentationHead(w, requestedFormat)
 			return
 		}
 
@@ -317,6 +327,10 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 				"Requested subtitle extension does not match the selected track")
 			return
 		}
+		if r.Method == http.MethodHead && requestedFormat != subtitleFormatSUP {
+			writeSubtitleRepresentationHead(w, requestedFormat)
+			return
+		}
 
 		// Dedicated streaming extract — ffmpeg seeks to the current
 		// playback position and pipes cues to the response as they're
@@ -346,6 +360,10 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
+			if r.Method == http.MethodHead {
+				writeSubtitleRepresentationHead(w, requestedFormat)
+				return
+			}
 			h.serveDownloadedSubtitle(w, r, downloaded[downloadedIndex], requestedFormat)
 			return
 		}
@@ -404,9 +422,21 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 		return false
 	}
 	if playback.IsASS(codec) {
-		return requestedFormat == subtitleFormatASS || requestedFormat == "ssa" || requestedFormat == "vtt"
+		return requestedFormat == subtitleFormatASS || requestedFormat == subtitleFormatSSA || requestedFormat == "vtt"
 	}
 	return true
+}
+
+func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat string) {
+	switch strings.ToLower(strings.TrimSpace(requestedFormat)) {
+	case subtitleFormatASS, subtitleFormatSSA:
+		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	case subtitleFormatSUP:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	default:
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // subtitleSourceFileID pins a subtitle URL to the file whose track list was

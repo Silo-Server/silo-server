@@ -277,6 +277,14 @@ func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, di
 	return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, false, nil
 }
 
+func (s *Postgres) ReleaseReplan(ctx context.Context, sessionID, requestID string) error {
+	_, err := s.db.Exec(ctx, `
+		DELETE FROM playback_v3_replans
+		WHERE session_id = $1::uuid AND replan_request_id = $2 AND state = 'active'`,
+		sessionID, requestID)
+	return err
+}
+
 func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {

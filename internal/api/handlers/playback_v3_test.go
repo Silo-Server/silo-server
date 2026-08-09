@@ -21,11 +21,30 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type mutablePlaybackSettingsV3 struct {
 	mu     sync.Mutex
 	values map[string]string
+}
+
+type failingAudioPreferenceStoreV3 struct {
+	userstore.UserStore
+	err error
+}
+
+func (s failingAudioPreferenceStoreV3) GetAudioPreference(context.Context, string, string) (*userstore.AudioPreference, error) {
+	return nil, s.err
+}
+
+type failingProgressStoreV3 struct {
+	userstore.UserStore
+	err error
+}
+
+func (s failingProgressStoreV3) GetProgress(context.Context, string, string) (*userstore.WatchProgress, error) {
+	return nil, s.err
 }
 
 type failingCompletePlanStoreV3 struct {
@@ -418,6 +437,32 @@ func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 	}
 }
 
+func TestPreferredAudioTrackIndexV3PropagatesSeriesPreferenceReadFailure(t *testing.T) {
+	wantErr := errors.New("audio preference store unavailable")
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.StoreProvider = testUserStoreProvider{store: failingAudioPreferenceStoreV3{err: wantErr}}
+	handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{SeriesID: "series-1"}}
+	file := &models.MediaFile{
+		EpisodeID:   "episode-1",
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Language: "eng"}, {Codec: "aac", Language: "spa"}},
+	}
+
+	if _, err := handler.preferredAudioTrackIndexV3(context.Background(), 1, "profile-1", file); !errors.Is(err, wantErr) {
+		t.Fatalf("preferredAudioTrackIndexV3 error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestResumePositionV3PropagatesProgressReadFailure(t *testing.T) {
+	wantErr := errors.New("progress store unavailable")
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.StoreProvider = testUserStoreProvider{store: failingProgressStoreV3{err: wantErr}}
+	file := &models.MediaFile{ContentID: "movie-1"}
+
+	if _, err := handler.resumePositionV3(context.Background(), 1, "profile-1", file); !errors.Is(err, wantErr) {
+		t.Fatalf("resumePositionV3 error = %v, want %v", err, wantErr)
+	}
+}
+
 func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
@@ -498,8 +543,8 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	if retryRR.Code != http.StatusCreated || json.Unmarshal(retryRR.Body.Bytes(), &retried) != nil || retried.PlaybackPlan == nil {
 		t.Fatalf("start replay status=%d body=%s", retryRR.Code, retryRR.Body.String())
 	}
-	if retried.PlaybackPlan.PlanID != first.PlaybackPlan.PlanID {
-		t.Fatalf("start replay plan = %q, want latest %q", retried.PlaybackPlan.PlanID, first.PlaybackPlan.PlanID)
+	if retried.PlaybackPlan.PlanID != started.PlaybackPlan.PlanID {
+		t.Fatalf("start replay plan = %q, want original %q", retried.PlaybackPlan.PlanID, started.PlaybackPlan.PlanID)
 	}
 	replan.PositionSeconds++
 	conflictBody, err := json.Marshal(replan)
@@ -558,11 +603,15 @@ func TestHandleReplanPlaybackV3FailureDoesNotReplaceDurableStartDecision(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if record.CurrentReplanRequestID != "" {
-		t.Fatalf("current replan request id = %q, want unchanged", record.CurrentReplanRequestID)
+	if record.CurrentReplanRequestID != replan.ReplanRequestID {
+		t.Fatalf("current replan request id = %q, want completed terminal %q", record.CurrentReplanRequestID, replan.ReplanRequestID)
 	}
 	if record.StartResponse.PlaybackPlan == nil || record.StartResponse.PlaybackPlan.PlanID != started.PlaybackPlan.PlanID || record.StartResponse.Terminal != nil {
 		t.Fatalf("durable start response changed after failed replan: %#v", record.StartResponse)
+	}
+	replayedTerminal := postPlaybackReplanV3(t, handler, started.SessionID, replan)
+	if replayedTerminal.Terminal == nil || replayedTerminal.Terminal.Reason != failed.Terminal.Reason {
+		t.Fatalf("terminal replan replay = %#v, want %#v", replayedTerminal, failed)
 	}
 
 	replayRR := httptest.NewRecorder()
@@ -2076,7 +2125,7 @@ func TestPrepareLocalTransportV3ReturnsStableTerminalWhenFFmpegExitsBeforeReady(
 	}
 }
 
-func TestManifestStartupTimeoutWhileRunningIsNotPersisted(t *testing.T) {
+func TestManifestStartupTimeoutWhileRunningIsPersistedIdempotently(t *testing.T) {
 	if playback.ManifestStartupTimeout != 30*time.Second {
 		t.Fatalf("manifest startup timeout = %v, want 30s", playback.ManifestStartupTimeout)
 	}
@@ -2110,8 +2159,13 @@ func TestManifestStartupTimeoutWhileRunningIsNotPersisted(t *testing.T) {
 	if response.Terminal == nil || !response.Terminal.Retryable {
 		t.Fatalf("timeout response = %#v, want retryable terminal", response)
 	}
-	if _, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), request.PlaybackAttemptID); !errors.Is(err, playback.ErrSessionNotFound) {
-		t.Fatalf("retryable startup timeout was durably persisted: %v", err)
+	record, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), request.PlaybackAttemptID)
+	if err != nil || record.StartResponse.Terminal == nil || !record.StartResponse.Terminal.Retryable {
+		t.Fatalf("retryable startup timeout attempt = %#v, err=%v", record, err)
+	}
+	replayed, err := handler.startFailureDecisionV3(context.Background(), 1, request.ProfileID, request, "digest", request.FileID, request.FileID, failure)
+	if err != nil || replayed.Terminal == nil || replayed.Terminal.Reason != response.Terminal.Reason {
+		t.Fatalf("retryable timeout replay = %#v, err=%v", replayed, err)
 	}
 }
 
@@ -2762,7 +2816,7 @@ func TestHandleStartPlaybackV3MultipartSuppressesProgressPersistence(t *testing.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := &models.MediaFile{
-				ID: 42, ContentID: "book-1", FilePath: writePlaybackTestMediaFile(t, "book.m4b"),
+				ID: 42, ContentID: "book-1", BaseType: "audiobook", FilePath: writePlaybackTestMediaFile(t, "book.m4b"),
 				Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600,
 				AudioTracks:           []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
 				PresentationKind:      "multipart",

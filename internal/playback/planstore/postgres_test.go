@@ -426,6 +426,13 @@ func TestPostgresPlanStore(t *testing.T) {
 		if lease.State != playback.ReplanLeaseInFlightV3 {
 			t.Fatalf("BeginReplan in-flight state = %q, want in_flight", lease.State)
 		}
+		if err := store.ReleaseReplan(ctx, sessionID, "rq-1"); err != nil {
+			t.Fatalf("ReleaseReplan: %v", err)
+		}
+		lease, err = store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
+		if err != nil || lease.State != playback.ReplanLeaseOwnedV3 {
+			t.Fatalf("released lease = %#v, err=%v; want owned", lease, err)
+		}
 
 		// Completed replan replays the stored response.
 		completed := f.attemptRecord(sessionID, attemptID, "digest-replan")

@@ -191,10 +191,10 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		// warning for these assumed-range plans.
 		claims.HDR10 = hdr != nil && hdr.HDR10
 		return claims.HDR10, claims
-	case "hdr10_plus":
+	case DynamicRangeHDR10PlusV3:
 		claims.HDR10Plus = hdr != nil && hdr.HDR10Plus
 		return claims.HDR10Plus, claims
-	case "hlg":
+	case DynamicRangeHLGV3:
 		claims.HLG = hdr != nil && hdr.HLG
 		return claims.HLG, claims
 	case "dolby_vision":
@@ -263,11 +263,11 @@ func normalizeDynamicRangeV3(track models.VideoTrack) string {
 		return DynamicRangeDolbyVisionV3
 	}
 	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
-		return "hdr10_plus"
+		return DynamicRangeHDR10PlusV3
 	}
 	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))
 	if strings.Contains(joined, "hlg") || strings.Contains(joined, "arib-std-b67") {
-		return "hlg"
+		return DynamicRangeHLGV3
 	}
 	if strings.Contains(joined, "hdr") || strings.Contains(joined, "smpte2084") || strings.Contains(joined, "pq") {
 		return DynamicRangeHDR10V3

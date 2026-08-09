@@ -15,6 +15,7 @@ import (
 func TestConvertProbeDataExcludesCoverArt(t *testing.T) {
 	tests := []struct {
 		name           string
+		baseType       string
 		rawJSON        string
 		wantVideoCount int
 		wantCodecVideo string
@@ -22,7 +23,8 @@ func TestConvertProbeDataExcludesCoverArt(t *testing.T) {
 		wantAudioOnly  bool
 	}{
 		{
-			name: "audiobook with embedded cover stays audio-only",
+			name:     "audiobook with embedded cover stays audio-only",
+			baseType: "audiobook",
 			rawJSON: `{"streams":[
 				{"codec_type":"video","codec_name":"mjpeg","width":500,"height":500,"disposition":{"attached_pic":1}},
 				{"codec_type":"audio","codec_name":"aac","channels":2}
@@ -64,7 +66,7 @@ func TestConvertProbeDataExcludesCoverArt(t *testing.T) {
 				t.Fatalf("unmarshal ffprobe output: %v", err)
 			}
 
-			file := &models.MediaFile{}
+			file := &models.MediaFile{BaseType: tt.baseType}
 			applyProbeData(file, convertProbeData(&raw), "local")
 
 			if got := len(file.VideoTracks); got != tt.wantVideoCount {
