@@ -24,6 +24,10 @@ const (
 	authJWTSecretSetting                        = "auth.jwt_secret"
 )
 
+// remoteExtractOverheadBuffer covers HTTP transport and node-side scheduling
+// overhead on top of the extraction attempt deadlines.
+const remoteExtractOverheadBuffer = 3 * time.Second
+
 type RemoteExtractRequest struct {
 	InputPath   string  `json:"input_path"`
 	SeekSeconds float64 `json:"seek_seconds"`
@@ -111,7 +115,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 func remoteExtractTimeout(toneMap bool) time.Duration {
 	timeout := extractTimeoutForAttempt(true, toneMap) +
 		extractTimeoutForAttempt(false, toneMap) +
-		3*time.Second
+		remoteExtractOverheadBuffer
 	if toneMap {
 		timeout += softwareToneMapProbeTimeout
 	}

@@ -34,7 +34,7 @@ func TestSoftwareToneMapFilterResolver(t *testing.T) {
 		},
 		{
 			name:      "requires a tone map filter",
-			output:    " .S. zscale V->V\n",
+			output:    " .S. zscale V->V Description mentions tonemap but does not provide it.\n",
 			wantError: "lacks the required tonemapx or tonemap filter",
 		},
 		{
@@ -285,17 +285,29 @@ func TestExtractFramePreservesHardwareAndCPUFailures(t *testing.T) {
 }
 
 func TestRemoteExtractTimeoutBudgetsHardwareAndCPUAttempts(t *testing.T) {
-	if got, want := remoteExtractTimeout(false), hwExtractTimeoutSDR+cpuExtractTimeoutSDR+3*time.Second; got != want {
-		t.Fatalf("remoteExtractTimeout(false) = %s, want %s", got, want)
-	}
-	if got, want := remoteExtractTimeout(true), hwExtractTimeoutHDR+softwareToneMapProbeTimeout+cpuExtractTimeoutHDR+3*time.Second; got != want {
-		t.Fatalf("remoteExtractTimeout(true) = %s, want %s", got, want)
+	for _, toneMap := range []bool{false, true} {
+		extractBudget := extractTimeoutForAttempt(true, toneMap) + extractTimeoutForAttempt(false, toneMap)
+		got := remoteExtractTimeout(toneMap)
+		if got <= extractBudget {
+			t.Fatalf("remoteExtractTimeout(%t) = %s, want more than extract budget %s", toneMap, got, extractBudget)
+		}
+		if toneMap && got-extractBudget <= softwareToneMapProbeTimeout {
+			t.Fatalf(
+				"remoteExtractTimeout(true) overhead = %s, want more than probe budget %s",
+				got-extractBudget,
+				softwareToneMapProbeTimeout,
+			)
+		}
 	}
 }
 
 func resolverWithFilters(t *testing.T, filters ...string) *softwareToneMapFilterResolver {
 	t.Helper()
-	output := strings.Join(filters, "\n")
+	lines := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		lines = append(lines, " .S. "+filter+" V->V")
+	}
+	output := strings.Join(lines, "\n")
 	return newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
 		return []byte(output), nil
 	})

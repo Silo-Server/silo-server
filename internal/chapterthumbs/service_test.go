@@ -67,8 +67,9 @@ func TestBuildFrameExtractArgs(t *testing.T) {
 	})
 
 	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		if _, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "", false); err == nil {
-			t.Fatal("buildFrameExtractArgs() error = nil, want unsupported accelerator error")
+		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false)
+		if err == nil || !strings.Contains(err.Error(), "does not support") {
+			t.Fatalf("buildFrameExtractArgs() error = %v, want unsupported accelerator error", err)
 		}
 	})
 }

@@ -372,8 +372,12 @@ func runFFmpegFilterProbe(ffmpegPath string) ([]byte, error) {
 }
 
 func ffmpegFilterOutputHasToken(output []byte, token string) bool {
-	for _, field := range strings.Fields(string(output)) {
-		if strings.EqualFold(field, token) {
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || !strings.Contains(fields[2], "->") {
+			continue
+		}
+		if strings.EqualFold(fields[1], token) {
 			return true
 		}
 	}
