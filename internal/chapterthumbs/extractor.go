@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -20,6 +23,97 @@ type FrameExtractOptions struct {
 	HWDevice    string
 	ToneMap     bool
 	RunFunc     func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error)
+
+	softwareToneMapResolver *softwareToneMapFilterResolver
+}
+
+const (
+	defaultFFmpegExecutable     = "ffmpeg"
+	hwAccelQSV                  = "qsv"
+	hwAccelVAAPI                = "vaapi"
+	reasonDecodeInvalidData     = "decode_invalid_data"
+	reasonToneMapUnsupported    = "tonemap_unsupported"
+	softwareToneMapProbeTimeout = 3 * time.Second
+	softwareToneMapFilterBT2390 = "zscale=t=linear:npl=100,format=gbrpf32le,tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
+	softwareToneMapFilterHable  = "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
+)
+
+type softwareToneMapProbeResult struct {
+	filter string
+	reason string
+}
+
+type softwareToneMapFilterResolver struct {
+	mu      sync.Mutex
+	byPath  map[string]softwareToneMapProbeResult
+	probeFn func(ffmpegPath string) ([]byte, error)
+}
+
+var defaultSoftwareToneMapFilterResolver = newSoftwareToneMapFilterResolver(runFFmpegFilterProbe)
+
+func newSoftwareToneMapFilterResolver(probeFn func(ffmpegPath string) ([]byte, error)) *softwareToneMapFilterResolver {
+	return &softwareToneMapFilterResolver{
+		byPath:  make(map[string]softwareToneMapProbeResult),
+		probeFn: probeFn,
+	}
+}
+
+func (r *softwareToneMapFilterResolver) resolve(ffmpegPath string) (string, error) {
+	ffmpegPath = normalizeSoftwareToneMapFFmpegPath(ffmpegPath)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if result, ok := r.byPath[ffmpegPath]; ok {
+		return softwareToneMapProbeResultValue(result)
+	}
+
+	result := probeSoftwareToneMapFilter(ffmpegPath, r.probeFn)
+	r.byPath[ffmpegPath] = result
+	return softwareToneMapProbeResultValue(result)
+}
+
+func normalizeSoftwareToneMapFFmpegPath(ffmpegPath string) string {
+	ffmpegPath = strings.TrimSpace(ffmpegPath)
+	if ffmpegPath == "" {
+		return defaultFFmpegExecutable
+	}
+	if strings.ContainsRune(ffmpegPath, os.PathSeparator) {
+		return filepath.Clean(ffmpegPath)
+	}
+	return ffmpegPath
+}
+
+func softwareToneMapProbeResultValue(result softwareToneMapProbeResult) (string, error) {
+	if result.filter != "" {
+		return result.filter, nil
+	}
+	if result.reason == "" {
+		result.reason = "configured FFmpeg has no supported software HDR tone-map filter chain"
+	}
+	return "", errors.New(result.reason)
+}
+
+func probeSoftwareToneMapFilter(
+	ffmpegPath string,
+	probeFn func(ffmpegPath string) ([]byte, error),
+) softwareToneMapProbeResult {
+	if probeFn == nil {
+		return softwareToneMapProbeResult{reason: "FFmpeg filter probe is unavailable"}
+	}
+	output, err := probeFn(ffmpegPath)
+	if err != nil {
+		return softwareToneMapProbeResult{reason: "FFmpeg filter probe failed: " + filterProbeFailure(err, output)}
+	}
+	if !ffmpegFilterOutputHasToken(output, "zscale") {
+		return softwareToneMapProbeResult{reason: "configured FFmpeg lacks the required zscale filter"}
+	}
+	if ffmpegFilterOutputHasToken(output, "tonemapx") {
+		return softwareToneMapProbeResult{filter: softwareToneMapFilterBT2390}
+	}
+	if ffmpegFilterOutputHasToken(output, "tonemap") {
+		return softwareToneMapProbeResult{filter: softwareToneMapFilterHable}
+	}
+	return softwareToneMapProbeResult{reason: "configured FFmpeg lacks the required tonemapx or tonemap filter"}
 }
 
 func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string, error) {
@@ -31,23 +125,23 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 	if runExtract == nil {
 		runExtract = runFFmpegFrameExtract
 	}
-
-	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
-	// Resolve a multi-device hw_device list to one concrete GPU for this
-	// extraction; the reservation spans only the hardware attempt below.
-	resolvedDevice, releaseHWDevice := playback.AcquireHWDevice(opts.HWDevice, resolvedAccel)
-	defer releaseHWDevice()
-	if resolvedDevice == "" && (resolvedAccel == "qsv" || resolvedAccel == "vaapi") {
-		resolvedDevice = playback.PickRenderDevice("")
+	softwareToneMapResolver := opts.softwareToneMapResolver
+	if softwareToneMapResolver == nil {
+		softwareToneMapResolver = defaultSoftwareToneMapFilterResolver
 	}
 
-	if resolvedAccel != "none" {
+	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
+	if supportsHardwareFrameExtract(resolvedAccel) {
+		// Resolve a multi-device hw_device list to one concrete GPU for this
+		// extraction; the reservation spans only the hardware attempt below.
+		resolvedDevice, releaseHWDevice := playback.AcquireHWDevice(opts.HWDevice, resolvedAccel)
+		defer releaseHWDevice()
+		if resolvedDevice == "" {
+			resolvedDevice = playback.PickRenderDevice("")
+		}
+
 		args, buildErr := buildFrameExtractArgs(opts.InputPath, opts.SeekSeconds, resolvedAccel, resolvedDevice, opts.ToneMap)
-		if buildErr != nil {
-			if opts.ToneMap {
-				return nil, "tonemap_unsupported", wrapReason("tonemap_unsupported", buildErr)
-			}
-		} else {
+		if buildErr == nil {
 			attemptCtx, cancel := context.WithTimeout(ctx, extractTimeoutForAttempt(true, opts.ToneMap))
 			data, err := runExtract(attemptCtx, ffmpegPath, args)
 			cancel()
@@ -57,31 +151,79 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 			}
 
 			hwReason := classifyExtractError("hw", err)
-			if opts.ToneMap {
+			if hwReason == reasonDecodeInvalidData {
 				return nil, hwReason, wrapReason(hwReason, err)
 			}
-
-			cpuData, cpuReason, cpuErr := extractFrameCPU(
+			return extractFrameCPUFallback(
 				ctx,
 				opts.InputPath,
 				opts.SeekSeconds,
-				false,
+				opts.ToneMap,
 				runExtract,
 				ffmpegPath,
+				softwareToneMapResolver,
+				hwReason,
+				err,
 			)
-			if cpuErr == nil {
-				return cpuData, "", nil
-			}
-			return nil, cpuReason, fmt.Errorf("hardware extraction failed: %v; cpu fallback failed: %w", wrapReason(hwReason, err), cpuErr)
 		}
+
+		releaseHWDevice()
+		return extractFrameCPUFallback(
+			ctx,
+			opts.InputPath,
+			opts.SeekSeconds,
+			opts.ToneMap,
+			runExtract,
+			ffmpegPath,
+			softwareToneMapResolver,
+			"chapter_extract_failed",
+			buildErr,
+		)
 	}
 
-	if opts.ToneMap {
-		err := errors.New("hardware HDR tone mapping unavailable")
-		return nil, "tonemap_unsupported", wrapReason("tonemap_unsupported", err)
-	}
+	return extractFrameCPU(
+		ctx,
+		opts.InputPath,
+		opts.SeekSeconds,
+		opts.ToneMap,
+		runExtract,
+		ffmpegPath,
+		softwareToneMapResolver,
+	)
+}
 
-	return extractFrameCPU(ctx, opts.InputPath, opts.SeekSeconds, opts.ToneMap, runExtract, ffmpegPath)
+func supportsHardwareFrameExtract(hwAccel string) bool {
+	return hwAccel == hwAccelQSV || hwAccel == hwAccelVAAPI
+}
+
+func extractFrameCPUFallback(
+	ctx context.Context,
+	inputPath string,
+	seekSeconds float64,
+	toneMap bool,
+	runExtract func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error),
+	ffmpegPath string,
+	softwareToneMapResolver *softwareToneMapFilterResolver,
+	hwReason string,
+	hwErr error,
+) ([]byte, string, error) {
+	cpuData, cpuReason, cpuErr := extractFrameCPU(
+		ctx,
+		inputPath,
+		seekSeconds,
+		toneMap,
+		runExtract,
+		ffmpegPath,
+		softwareToneMapResolver,
+	)
+	if cpuErr == nil {
+		return cpuData, "", nil
+	}
+	return nil, cpuReason, fmt.Errorf(
+		"hardware extraction failed: %w; cpu fallback failed: %w",
+		wrapReason(hwReason, hwErr),
+		cpuErr,
+	)
 }
 
 func extractFrameCPU(
@@ -91,10 +233,20 @@ func extractFrameCPU(
 	toneMap bool,
 	runExtract func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error),
 	ffmpegPath string,
+	softwareToneMapResolver *softwareToneMapFilterResolver,
 ) ([]byte, string, error) {
+	softwareToneMapFilter := ""
+	if toneMap {
+		filter, err := softwareToneMapResolver.resolve(ffmpegPath)
+		if err != nil {
+			return nil, reasonToneMapUnsupported, wrapReason(reasonToneMapUnsupported, err)
+		}
+		softwareToneMapFilter = filter
+	}
+
 	attemptCtx, cancel := context.WithTimeout(ctx, extractTimeoutForAttempt(false, toneMap))
 	defer cancel()
-	data, err := runExtract(attemptCtx, ffmpegPath, buildCPUFrameExtractArgs(inputPath, seekSeconds, toneMap))
+	data, err := runExtract(attemptCtx, ffmpegPath, buildCPUFrameExtractArgs(inputPath, seekSeconds, softwareToneMapFilter))
 	if err != nil {
 		reason := classifyExtractError("cpu", err)
 		return nil, reason, wrapReason(reason, err)
@@ -110,12 +262,12 @@ func classifyExtractError(stage string, err error) string {
 	lower := strings.ToLower(message)
 	switch {
 	case strings.Contains(message, "No such filter") || strings.Contains(message, "tonemap") && strings.Contains(message, "Error"):
-		return "tonemap_unsupported"
+		return reasonToneMapUnsupported
 	case strings.Contains(lower, "invalid nal unit size"),
 		strings.Contains(lower, "error splitting the input into nal units"),
 		strings.Contains(lower, "invalid data found when processing input"),
 		strings.Contains(lower, "invalid as first byte of an ebml number"):
-		return "decode_invalid_data"
+		return reasonDecodeInvalidData
 	case stage == "hw" && strings.Contains(message, "signal: killed"):
 		return "hw_killed"
 	case stage == "hw" && isDeadlineError(err):
@@ -147,15 +299,15 @@ func extractTimeoutForAttempt(hardware bool, hdr bool) time.Duration {
 	return cpuExtractTimeoutSDR
 }
 
-func buildCPUFrameExtractArgs(inputPath string, seekSeconds float64, toneMap bool) []string {
+func buildCPUFrameExtractArgs(inputPath string, seekSeconds float64, softwareToneMapFilter string) []string {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-ss", fmt.Sprintf("%.3f", seekSeconds),
 		"-i", inputPath,
 	}
-	if toneMap {
-		args = append(args, "-vf", "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p")
+	if softwareToneMapFilter != "" {
+		args = append(args, "-vf", softwareToneMapFilter)
 	}
 	args = append(args,
 		"-frames:v", "1",
@@ -172,7 +324,7 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 		"-loglevel", "error",
 	}
 	switch hwAccel {
-	case "qsv":
+	case hwAccelQSV:
 		if hwDevice == "" {
 			return nil, fmt.Errorf("qsv requires a render device")
 		}
@@ -183,7 +335,7 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
 		)
-	case "vaapi":
+	case hwAccelVAAPI:
 		if hwDevice == "" {
 			return nil, fmt.Errorf("vaapi requires a render device")
 		}
@@ -194,7 +346,7 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 			"-hwaccel_output_format", "vaapi",
 		)
 	default:
-		return buildCPUFrameExtractArgs(inputPath, seekSeconds, toneMap), nil
+		return nil, fmt.Errorf("hardware chapter thumbnail extraction does not support %q", hwAccel)
 	}
 
 	filter := "hwdownload,format=nv12"
@@ -211,6 +363,32 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 		"-",
 	)
 	return args, nil
+}
+
+func runFFmpegFilterProbe(ffmpegPath string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), softwareToneMapProbeTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-filters").CombinedOutput()
+}
+
+func ffmpegFilterOutputHasToken(output []byte, token string) bool {
+	for _, field := range strings.Fields(string(output)) {
+		if strings.EqualFold(field, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func filterProbeFailure(err error, output []byte) string {
+	message := strings.TrimSpace(err.Error())
+	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
+		if len(trimmed) > 240 {
+			trimmed = trimmed[:240] + "..."
+		}
+		message += ": " + trimmed
+	}
+	return message
 }
 
 func runFFmpegFrameExtract(ctx context.Context, ffmpegPath string, args []string) ([]byte, error) {

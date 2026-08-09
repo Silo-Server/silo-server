@@ -66,14 +66,9 @@ func TestBuildFrameExtractArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown hw accel falls back to cpu args", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "none", "", false)
-		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
-		}
-		want := buildCPUFrameExtractArgs("/media/movie.mkv", 42.5, false)
-		if !slices.Equal(args, want) {
-			t.Fatalf("args = %#v, want %#v", args, want)
+	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
+		if _, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "", false); err == nil {
+			t.Fatal("buildFrameExtractArgs() error = nil, want unsupported accelerator error")
 		}
 	})
 }
@@ -423,6 +418,42 @@ func TestProcessRequestSkipsFileDuringCooldown(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("expected extractFrameFunc not to be called during cooldown")
+	}
+}
+
+func TestProcessRequestSkipsHDRWhenPolicyDisabled(t *testing.T) {
+	fileRepo := &testFileRepo{
+		file: &models.MediaFile{
+			ID:            42,
+			MediaFolderID: 9,
+			FilePath:      "/media/movie.mkv",
+			HDR:           true,
+			Chapters: []models.MediaChapter{
+				{Index: 0, StartSeconds: 0, EndSeconds: 10},
+			},
+		},
+	}
+	service := &Service{
+		fileRepo:   fileRepo,
+		folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+		settings: testSettingsReader{values: map[string]string{
+			chapterThumbnailHDRPolicySetting: chapterThumbnailHDRPolicyDisabled,
+		}},
+		extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+			t.Fatal("HDR extraction should not run when the policy is disabled")
+			return nil, "", nil
+		},
+	}
+
+	requeue, err := service.processRequest(context.Background(), ChapterThumbnailRequest{FileID: 42}, false)
+	if err != nil {
+		t.Fatalf("processRequest() error = %v", err)
+	}
+	if requeue {
+		t.Fatal("processRequest() requeue = true, want false")
+	}
+	if fileRepo.updateCalls != 0 {
+		t.Fatalf("updateCalls = %d, want 0", fileRepo.updateCalls)
 	}
 }
 

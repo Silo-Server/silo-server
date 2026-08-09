@@ -109,11 +109,13 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 }
 
 func remoteExtractTimeout(toneMap bool) time.Duration {
-	timeout := extractTimeoutForAttempt(true, toneMap)
-	if !toneMap {
-		timeout += extractTimeoutForAttempt(false, false)
+	timeout := extractTimeoutForAttempt(true, toneMap) +
+		extractTimeoutForAttempt(false, toneMap) +
+		3*time.Second
+	if toneMap {
+		timeout += softwareToneMapProbeTimeout
 	}
-	return timeout + 3*time.Second
+	return timeout
 }
 
 func isInfrastructureRemoteFailure(reason string) bool {
