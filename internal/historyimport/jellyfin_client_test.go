@@ -9,12 +9,74 @@ import (
 	"testing"
 )
 
+func assertJellyfinAuthorization(t *testing.T, r *http.Request, token string) {
+	t.Helper()
+
+	want := `MediaBrowser Client="watch-importer", Device="Silo", DeviceId="silo-history-import", Version="1.0.0"`
+	if token != "" {
+		want += `, Token="` + token + `"`
+	}
+	if got := r.Header.Get("Authorization"); got != want {
+		t.Fatalf("Authorization = %q, want %q", got, want)
+	}
+	if got := r.Header.Get("X-Emby-Authorization"); got != "" {
+		t.Fatalf("X-Emby-Authorization = %q, want empty", got)
+	}
+}
+
+func TestJellyfinAuthenticateServerUser_UsesStandardAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/Users/AuthenticateByName" {
+			t.Fatalf("path = %q, want /Users/AuthenticateByName", got)
+		}
+		assertJellyfinAuthorization(t, r, "")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"AccessToken":"user-token","User":{"Id":"user-1"}}`))
+	}))
+	defer server.Close()
+
+	client := NewJellyfinClient()
+	auth, err := client.AuthenticateServerUser(context.Background(), server.URL, "alice", "password")
+	if err != nil {
+		t.Fatalf("AuthenticateServerUser returned error: %v", err)
+	}
+	if auth.UserID != "user-1" || auth.AccessToken != "user-token" {
+		t.Fatalf("auth = %+v, want user-1 with user-token", auth)
+	}
+}
+
+func TestJellyfinListUsers_UsesStandardAuthorizationHeader(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Path; got != "/Users" {
+			t.Fatalf("path = %q, want /Users", got)
+		}
+		assertJellyfinAuthorization(t, r, "admin-token")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"Id":"user-1","Name":"Alice"},{"Id":"","Name":"Missing ID"}]`))
+	}))
+	defer server.Close()
+
+	client := NewJellyfinClient()
+	users, err := client.ListUsers(context.Background(), server.URL, "admin-token")
+	if err != nil {
+		t.Fatalf("ListUsers returned error: %v", err)
+	}
+	if len(users) != 1 || users[0].ID != "user-1" || users[0].Name != "Alice" {
+		t.Fatalf("users = %+v, want Alice (user-1)", users)
+	}
+}
+
 func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testing.T) {
 	t.Parallel()
 
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		assertJellyfinAuthorization(t, r, "token-1")
 
 		if got := r.URL.Path; got != "/UserItems/Resume" {
 			t.Fatalf("path = %q, want /UserItems/Resume", got)
@@ -71,6 +133,7 @@ func TestJellyfinFetchItems_PaginatesPlayedItems(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		assertJellyfinAuthorization(t, r, "token-1")
 
 		if got := r.URL.Path; got != "/Users/user-1/Items" {
 			t.Fatalf("path = %q, want /Users/user-1/Items", got)

@@ -69,7 +69,7 @@ func (c *JellyfinClient) AuthenticateServerUser(ctx context.Context, baseURL, us
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Emby-Authorization", jellyfinAuthorizationHeader())
+		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeader())
 		var resp jellyfinServerAuthResponse
 		err = c.doJSON(req, &resp)
 		if err == nil {
@@ -128,7 +128,7 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("X-Emby-Authorization", jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
+		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
 
 		var payload jellyfinItemsResponse
 		if err := c.doJSON(req, &payload); err != nil {
@@ -156,7 +156,7 @@ func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinL
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("X-Emby-Authorization", jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
+		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
 
 		var payload jellyfinItemsResponse
 		if err := c.doJSON(req, &payload); err != nil {
@@ -191,7 +191,7 @@ func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocal
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("X-Emby-Authorization", jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
+		setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(auth.AccessToken))
 
 		var payload jellyfinItemsResponse
 		if err := c.doJSON(req, &payload); err != nil {
@@ -244,13 +244,17 @@ func jellyfinAuthorizationHeaderWithToken(token string) string {
 	return jellyfinAuthorizationHeader() + `, Token="` + token + `"`
 }
 
+func setJellyfinAuthorizationHeader(req *http.Request, value string) {
+	req.Header.Set("Authorization", value)
+}
+
 // ListUsers returns all user accounts on the Jellyfin server using an admin API token.
 func (c *JellyfinClient) ListUsers(ctx context.Context, baseURL, adminToken string) ([]ExternalUser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/Users", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Emby-Authorization", jellyfinAuthorizationHeaderWithToken(adminToken))
+	setJellyfinAuthorizationHeader(req, jellyfinAuthorizationHeaderWithToken(adminToken))
 	var users []struct {
 		ID   string `json:"Id"`
 		Name string `json:"Name"`
