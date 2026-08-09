@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -204,11 +205,12 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 }
 
 func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
+	leaseToken := uuid.NewString()
 	// One retry: if a concurrent writer wins the insert race (possible only
 	// when a caller skips the advisory session lock), re-read its row and
 	// resolve to a replay/in-flight lease instead of surfacing a raw 23505.
 	for attempt := 0; ; attempt++ {
-		lease, retry, err := s.beginReplanOnce(ctx, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
+		lease, retry, err := s.beginReplanOnce(ctx, sessionID, requestID, digest, baseReplanRequestID, leaseToken, leaseUntil)
 		if retry && attempt == 0 {
 			continue
 		}
@@ -216,7 +218,7 @@ func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest
 	}
 }
 
-func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, bool, error) {
+func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID, leaseToken string, leaseUntil time.Time) (playback.ReplanLeaseV3, bool, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return playback.ReplanLeaseV3{}, false, err
@@ -232,8 +234,8 @@ func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, di
 		FOR UPDATE`, sessionID, requestID).Scan(&existingDigest, &existingBase, &state, &existingLease, &response)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, base_replan_request_id, lease_expires_at)
-			VALUES ($1::uuid, $2, $3, $4, $5)`, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
+			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, base_replan_request_id, lease_owner, lease_expires_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6)`, sessionID, requestID, digest, baseReplanRequestID, leaseToken, leaseUntil)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -244,7 +246,7 @@ func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, di
 		if err := tx.Commit(ctx); err != nil {
 			return playback.ReplanLeaseV3{}, false, err
 		}
-		return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, false, nil
+		return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3, LeaseToken: leaseToken}, false, nil
 	}
 	if err != nil {
 		return playback.ReplanLeaseV3{}, false, err
@@ -267,25 +269,26 @@ func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, di
 	if existingBase != baseReplanRequestID {
 		return playback.ReplanLeaseV3{}, false, playback.ErrStaleReplanLeaseV3
 	}
-	_, err = tx.Exec(ctx, `UPDATE playback_v3_replans SET lease_expires_at = $3, updated_at = NOW() WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID, leaseUntil)
+	_, err = tx.Exec(ctx, `UPDATE playback_v3_replans SET lease_owner = $3, lease_expires_at = $4, updated_at = NOW() WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID, leaseToken, leaseUntil)
 	if err != nil {
 		return playback.ReplanLeaseV3{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return playback.ReplanLeaseV3{}, false, err
 	}
-	return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, false, nil
+	return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3, LeaseToken: leaseToken}, false, nil
 }
 
-func (s *Postgres) ReleaseReplan(ctx context.Context, sessionID, requestID string) error {
+func (s *Postgres) ReleaseReplan(ctx context.Context, sessionID, requestID, leaseToken string) error {
 	_, err := s.db.Exec(ctx, `
 		DELETE FROM playback_v3_replans
-		WHERE session_id = $1::uuid AND replan_request_id = $2 AND state = 'active'`,
-		sessionID, requestID)
+		WHERE session_id = $1::uuid AND replan_request_id = $2
+		  AND state = 'active' AND lease_owner = $3`,
+		sessionID, requestID, leaseToken)
 	return err
 }
 
-func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
+func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -329,12 +332,17 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, bas
 		return playback.ErrSessionNotFound
 	}
 	replanResult, err := tx.Exec(ctx, `
-		UPDATE playback_v3_replans SET state = 'completed', response = $3, updated_at = NOW()
-		WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID, response)
+		UPDATE playback_v3_replans SET state = 'completed', response = $4, updated_at = NOW()
+		WHERE session_id = $1::uuid AND replan_request_id = $2
+		  AND state = 'active' AND lease_owner = $3`, sessionID, requestID, leaseToken, response)
 	if err != nil {
 		return err
 	}
 	if replanResult.RowsAffected() != 1 {
+		var exists bool
+		if scanErr := tx.QueryRow(ctx, `SELECT true FROM playback_v3_replans WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID).Scan(&exists); scanErr == nil {
+			return playback.ErrReplanSupersededV3
+		}
 		return playback.ErrSessionNotFound
 	}
 	return tx.Commit(ctx)

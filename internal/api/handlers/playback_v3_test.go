@@ -69,7 +69,7 @@ func (p staticNodePlannerV3) PlanSession(string, string, bool, int) nodepool.Pla
 	return p.plan
 }
 
-func (f *failingCompletePlanStoreV3) CompleteReplan(context.Context, string, string, string, json.RawMessage, playback.AttemptRecordV3) error {
+func (f *failingCompletePlanStoreV3) CompleteReplan(context.Context, string, string, string, string, json.RawMessage, playback.AttemptRecordV3) error {
 	return fmt.Errorf("injected complete replan failure")
 }
 

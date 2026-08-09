@@ -46,6 +46,50 @@ func TestNeedsCriticalProbeRepair_ProbedMovieWithOnlyAudioMetadataRepairs(t *tes
 	}
 }
 
+func TestNeedsCriticalProbeRepairScanState_UsesMediaAwareAudioOnlyEvidence(t *testing.T) {
+	now := time.Now()
+	completeAudio := scanStateFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       3600,
+		Container:      "mp3",
+		CodecAudio:     "mp3",
+		HasAudioTracks: true,
+		HasChapters:    true,
+	}
+
+	audiobook := completeAudio
+	audiobook.BaseType = "audiobook"
+	if needsCriticalProbeRepairScanState(&audiobook) {
+		t.Fatal("a complete audio-only audiobook must remain stable during library scans")
+	}
+
+	movie := completeAudio
+	movie.BaseType = "movie"
+	if !needsCriticalProbeRepairScanState(&movie) {
+		t.Fatal("a movie with only audio metadata must be repaired during library scans")
+	}
+
+	legacyCoverArt := completeAudio
+	legacyCoverArt.BaseType = "audiobook"
+	legacyCoverArt.Container = "mp4"
+	legacyCoverArt.CodecAudio = "aac"
+	legacyCoverArt.CodecVideo = "mjpeg"
+	legacyCoverArt.Resolution = "500x500"
+	legacyCoverArt.HasVideoTracks = true
+	if !needsCriticalProbeRepairScanState(&legacyCoverArt) {
+		t.Fatal("legacy attached-picture video metadata must be repaired during library scans")
+	}
+
+	genuineVideo := legacyCoverArt
+	genuineVideo.CodecVideo = "h264"
+	genuineVideo.Resolution = "1080p"
+	genuineVideo.HasNonImageVideoTracks = true
+	if needsCriticalProbeRepairScanState(&genuineVideo) {
+		t.Fatal("a complete non-image video stream must not be mistaken for attached cover art")
+	}
+}
+
 // A successfully-probed synthetic clip may legitimately have no audio
 // stream. Requiring audio metadata made both request-time repair and stable
 // library scans retry ffprobe forever, even though another probe could never

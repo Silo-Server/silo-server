@@ -159,33 +159,77 @@ func (f *MediaFile) PrimaryDVProfile() int {
 	return f.VideoTracks[0].DVProfile
 }
 
+// AudioOnlyProbeFacts is the compact probe shape needed to distinguish known
+// audio media from incomplete video probes and legacy attached cover art.
+type AudioOnlyProbeFacts struct {
+	BaseType               string
+	CodecVideo             string
+	CodecAudio             string
+	HasVideoTracks         bool
+	HasAudioTracks         bool
+	HasNonImageVideoTracks bool
+}
+
+func isImageVideoCodec(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case mediaCodecMJPEG, "jpeg", "png", "webp", "gif", "bmp":
+		return true
+	default:
+		return false
+	}
+}
+
+// HasLegacyAttachedPictureVideo reports the stale shape in which every video
+// track on known audio media is embedded cover art.
+func (f AudioOnlyProbeFacts) HasLegacyAttachedPictureVideo() bool {
+	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
+	hasAudio := f.HasAudioTracks || strings.TrimSpace(f.CodecAudio) != ""
+	if !knownAudioType || !hasAudio {
+		return false
+	}
+	if !f.HasVideoTracks {
+		return isImageVideoCodec(f.CodecVideo)
+	}
+	if f.HasNonImageVideoTracks {
+		return false
+	}
+	return strings.TrimSpace(f.CodecVideo) == "" || isImageVideoCodec(f.CodecVideo)
+}
+
+// IsAudioOnly reports whether these facts contain positive evidence for known
+// audio media with no playable video stream.
+func (f AudioOnlyProbeFacts) IsAudioOnly() bool {
+	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
+	hasAudio := f.HasAudioTracks || strings.TrimSpace(f.CodecAudio) != ""
+	return (knownAudioType && hasAudio && !f.HasVideoTracks && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
+}
+
+// AudioOnlyProbeFacts returns the compact stream evidence for this media file.
+func (f *MediaFile) AudioOnlyProbeFacts() AudioOnlyProbeFacts {
+	if f == nil {
+		return AudioOnlyProbeFacts{}
+	}
+	facts := AudioOnlyProbeFacts{
+		BaseType:       f.BaseType,
+		CodecVideo:     f.CodecVideo,
+		CodecAudio:     f.CodecAudio,
+		HasVideoTracks: len(f.VideoTracks) > 0,
+		HasAudioTracks: len(f.AudioTracks) > 0,
+	}
+	for _, track := range f.VideoTracks {
+		if !isImageVideoCodec(track.Codec) {
+			facts.HasNonImageVideoTracks = true
+			break
+		}
+	}
+	return facts
+}
+
 // HasLegacyAttachedPictureVideo reports the stale catalog shape produced when
 // older probes recorded embedded cover art as a video track. BaseType and
 // audio evidence keep genuine MJPEG video from being normalized away.
 func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
-	if f == nil || (f.BaseType != mediaBaseTypeAudiobook && f.BaseType != mediaBaseTypePodcast) {
-		return false
-	}
-	if len(f.AudioTracks) == 0 && strings.TrimSpace(f.CodecAudio) == "" {
-		return false
-	}
-	isImageCodec := func(codec string) bool {
-		switch strings.ToLower(strings.TrimSpace(codec)) {
-		case mediaCodecMJPEG, "jpeg", "png", "webp", "gif", "bmp":
-			return true
-		default:
-			return false
-		}
-	}
-	if len(f.VideoTracks) == 0 {
-		return isImageCodec(f.CodecVideo)
-	}
-	for _, track := range f.VideoTracks {
-		if !isImageCodec(track.Codec) {
-			return false
-		}
-	}
-	return strings.TrimSpace(f.CodecVideo) == "" || isImageCodec(f.CodecVideo)
+	return f.AudioOnlyProbeFacts().HasLegacyAttachedPictureVideo()
 }
 
 // IsAudioOnly reports whether a probed file carries no playable video stream —
@@ -193,12 +237,7 @@ func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
 // It also normalizes legacy audiobook/podcast cover-art rows until a repair
 // probe removes their stale image-only video metadata.
 func (f *MediaFile) IsAudioOnly() bool {
-	if f == nil {
-		return false
-	}
-	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
-	hasAudio := len(f.AudioTracks) > 0 || strings.TrimSpace(f.CodecAudio) != ""
-	return (knownAudioType && hasAudio && len(f.VideoTracks) == 0 && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
+	return f.AudioOnlyProbeFacts().IsAudioOnly()
 }
 
 // NormalizeVideoBitDepth returns an explicit probe value when available and

@@ -412,6 +412,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		if lease.State != playback.ReplanLeaseOwnedV3 {
 			t.Fatalf("BeginReplan new state = %q, want owned", lease.State)
 		}
+		ownedLease := lease
 
 		// Same request-ID with different input.
 		if _, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-other", "", future); !errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
@@ -426,7 +427,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		if lease.State != playback.ReplanLeaseInFlightV3 {
 			t.Fatalf("BeginReplan in-flight state = %q, want in_flight", lease.State)
 		}
-		if err := store.ReleaseReplan(ctx, sessionID, "rq-1"); err != nil {
+		if err := store.ReleaseReplan(ctx, sessionID, "rq-1", ownedLease.LeaseToken); err != nil {
 			t.Fatalf("ReleaseReplan: %v", err)
 		}
 		lease, err = store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
@@ -441,7 +442,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		completed.CurrentPlan.PlanID = "plan-2"
 		completed.StartResponse = playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, Outcome: playback.OutcomePlayableV3, SessionID: sessionID, PlaybackPlan: &completed.CurrentPlan}
 		response := json.RawMessage(`{"plan_id": "plan-2"}`)
-		if err := store.CompleteReplan(ctx, sessionID, "rq-1", "", response, completed); err != nil {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", lease.LeaseToken, "", response, completed); err != nil {
 			t.Fatalf("CompleteReplan: %v", err)
 		}
 		lease, err = store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
@@ -498,7 +499,8 @@ func TestPostgresPlanStore(t *testing.T) {
 			t.Fatalf("SaveAttempt: %v", err)
 		}
 		future := time.Now().Add(time.Minute)
-		if _, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future); err != nil {
+		lease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
+		if err != nil {
 			t.Fatalf("BeginReplan: %v", err)
 		}
 
@@ -513,7 +515,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		updated.ExpiresAt = time.Now().Add(2 * time.Hour).UTC().Truncate(time.Microsecond)
 		response := json.RawMessage(`{"plan_id": "plan-2", "status": "replanned"}`)
 
-		if err := store.CompleteReplan(ctx, sessionID, "rq-1", "", response, updated); err != nil {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", lease.LeaseToken, "", response, updated); err != nil {
 			t.Fatalf("CompleteReplan happy path: %v", err)
 		}
 
@@ -556,18 +558,63 @@ func TestPostgresPlanStore(t *testing.T) {
 
 		// A second replan whose base does not match the current revision must
 		// lose the compare-and-swap.
-		if _, err := store.BeginReplan(ctx, sessionID, "rq-2", "rq-digest-2", "rq-1", future); err != nil {
+		secondLease, err := store.BeginReplan(ctx, sessionID, "rq-2", "rq-digest-2", "rq-1", future)
+		if err != nil {
 			t.Fatalf("BeginReplan second: %v", err)
 		}
 		stale := updated
 		stale.CurrentReplanRequestID = "rq-2"
-		if err := store.CompleteReplan(ctx, sessionID, "rq-2", "wrong-base", response, stale); !errors.Is(err, playback.ErrReplanSupersededV3) {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-2", secondLease.LeaseToken, "wrong-base", response, stale); !errors.Is(err, playback.ErrReplanSupersededV3) {
 			t.Fatalf("CompleteReplan wrong base: got %v, want ErrReplanSupersededV3", err)
 		}
 
 		// Unknown session.
-		if err := store.CompleteReplan(ctx, uuid.NewString(), "rq-1", "", response, updated); !errors.Is(err, playback.ErrSessionNotFound) {
+		if err := store.CompleteReplan(ctx, uuid.NewString(), "rq-1", "missing-lease", "", response, updated); !errors.Is(err, playback.ErrSessionNotFound) {
 			t.Fatalf("CompleteReplan missing session: got %v, want ErrSessionNotFound", err)
+		}
+	})
+
+	t.Run("ExpiredOwnerCannotMutateReclaimedLease", func(t *testing.T) {
+		sessionID := uuid.NewString()
+		attemptID := "att-reclaimed-" + sessionID
+		original := f.attemptRecord(sessionID, attemptID, "digest-reclaimed")
+		if err := store.SaveAttempt(ctx, original); err != nil {
+			t.Fatalf("SaveAttempt: %v", err)
+		}
+		oldLease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(-time.Second))
+		if err != nil || oldLease.State != playback.ReplanLeaseOwnedV3 {
+			t.Fatalf("old lease = %#v, err=%v", oldLease, err)
+		}
+		newLease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(time.Minute))
+		if err != nil || newLease.State != playback.ReplanLeaseOwnedV3 || newLease.LeaseToken == oldLease.LeaseToken {
+			t.Fatalf("reclaimed lease = %#v, old=%#v, err=%v", newLease, oldLease, err)
+		}
+
+		if err := store.ReleaseReplan(ctx, sessionID, "rq-1", oldLease.LeaseToken); err != nil {
+			t.Fatalf("late release: %v", err)
+		}
+		lease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(time.Minute))
+		if err != nil || lease.State != playback.ReplanLeaseInFlightV3 {
+			t.Fatalf("late release removed current lease: lease=%#v err=%v", lease, err)
+		}
+
+		updated := original
+		updated.CurrentPlanID = "plan-2"
+		updated.CurrentReplanRequestID = "rq-1"
+		updated.CurrentPlan.PlanID = "plan-2"
+		response := json.RawMessage(`{"plan_id":"plan-2"}`)
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", oldLease.LeaseToken, "", response, updated); !errors.Is(err, playback.ErrReplanSupersededV3) {
+			t.Fatalf("late completion error = %v, want ErrReplanSupersededV3", err)
+		}
+		stored, err := store.GetAttempt(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.CurrentPlanID != original.CurrentPlanID {
+			t.Fatalf("late completion changed plan to %q", stored.CurrentPlanID)
+		}
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", newLease.LeaseToken, "", response, updated); err != nil {
+			t.Fatalf("current owner completion: %v", err)
 		}
 	})
 

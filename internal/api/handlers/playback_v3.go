@@ -1275,7 +1275,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		if leaseCompleted {
 			return
 		}
-		if err := h.PlanStoreV3.ReleaseReplan(context.WithoutCancel(r.Context()), sessionID, req.ReplanRequestID); err != nil {
+		if err := h.PlanStoreV3.ReleaseReplan(context.WithoutCancel(r.Context()), sessionID, req.ReplanRequestID, lease.LeaseToken); err != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replan lease release failed", "component", "api", "session", sessionID, "replan_request_id", req.ReplanRequestID, "error", err)
 		}
 	}()
@@ -1292,7 +1292,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		encoded, _ := json.Marshal(response)
 		terminalRecord := *record
 		terminalRecord.CurrentReplanRequestID = req.ReplanRequestID
-		if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, record.CurrentReplanRequestID, encoded, terminalRecord); err != nil {
+		if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, lease.LeaseToken, record.CurrentReplanRequestID, encoded, terminalRecord); err != nil {
 			if errors.Is(err, playback.ErrReplanSupersededV3) {
 				writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
 				return
@@ -1316,7 +1316,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, record.CurrentReplanRequestID, encoded, updated); err != nil {
+	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, lease.LeaseToken, record.CurrentReplanRequestID, encoded, updated); err != nil {
 		rollbackFailed := false
 		if rollbackSession != nil {
 			if rollbackErr := rollbackSession(); rollbackErr != nil {

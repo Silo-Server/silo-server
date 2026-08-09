@@ -13,43 +13,44 @@ import (
 // scanStateFile is the lightweight media_files row shape used by library scans.
 // It intentionally excludes large JSON payloads like tracks and chapters.
 type scanStateFile struct {
-	ID                    int
-	ContentID             string
-	ExtraID               string
-	CanonicalRootPath     string
-	ObservedRootPath      string
-	ContentGroupKey       string
-	GroupKeyVersion       int
-	BaseTitle             string
-	BaseYear              int
-	BaseType              string
-	IdentityConfidence    string
-	IdentityJSON          []byte
-	FilePath              string
-	FileSize              int64
-	FileModifiedAt        *time.Time
-	FileHash              string
-	CodecVideo            string
-	CodecAudio            string
-	Resolution            string
-	Container             string
-	Duration              int
-	EditionRaw            string
-	EditionKey            string
-	EditionConfidence     *float64
-	EditionSource         string
-	PresentationKind      string
-	PresentationGroupKey  string
-	PresentationPartIndex int
-	MultiEpisodeStart     int
-	MultiEpisodeEnd       int
-	ProbeSource           string
-	ProbeUpdatedAt        *time.Time
-	MissingSince          *time.Time
-	HasVideoTracks        bool
-	HasAudioTracks        bool
-	HasChapters           bool
-	ExternalSubtitlePaths []string
+	ID                     int
+	ContentID              string
+	ExtraID                string
+	CanonicalRootPath      string
+	ObservedRootPath       string
+	ContentGroupKey        string
+	GroupKeyVersion        int
+	BaseTitle              string
+	BaseYear               int
+	BaseType               string
+	IdentityConfidence     string
+	IdentityJSON           []byte
+	FilePath               string
+	FileSize               int64
+	FileModifiedAt         *time.Time
+	FileHash               string
+	CodecVideo             string
+	CodecAudio             string
+	Resolution             string
+	Container              string
+	Duration               int
+	EditionRaw             string
+	EditionKey             string
+	EditionConfidence      *float64
+	EditionSource          string
+	PresentationKind       string
+	PresentationGroupKey   string
+	PresentationPartIndex  int
+	MultiEpisodeStart      int
+	MultiEpisodeEnd        int
+	ProbeSource            string
+	ProbeUpdatedAt         *time.Time
+	MissingSince           *time.Time
+	HasVideoTracks         bool
+	HasNonImageVideoTracks bool
+	HasAudioTracks         bool
+	HasChapters            bool
+	ExternalSubtitlePaths  []string
 }
 
 const scanStateColumns = `id, content_id, extra_id,
@@ -62,6 +63,10 @@ const scanStateColumns = `id, content_id, extra_id,
 	multi_episode_start, multi_episode_end,
 	probe_source, probe_updated_at, missing_since,
 	COALESCE(jsonb_typeof(video_tracks) = 'array' AND jsonb_array_length(video_tracks) > 0, FALSE) AS has_video_tracks,
+	COALESCE((
+		SELECT bool_or(lower(btrim(COALESCE(track->>'codec', ''))) NOT IN ('mjpeg', 'jpeg', 'png', 'webp', 'gif', 'bmp'))
+		FROM jsonb_array_elements(CASE WHEN jsonb_typeof(video_tracks) = 'array' THEN video_tracks ELSE '[]'::jsonb END) AS video_track(track)
+	), FALSE) AS has_non_image_video_tracks,
 	COALESCE(jsonb_typeof(audio_tracks) = 'array' AND jsonb_array_length(audio_tracks) > 0, FALSE) AS has_audio_tracks,
 	chapters IS NOT NULL AS has_chapters,
 	COALESCE((
@@ -126,6 +131,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		&state.ProbeUpdatedAt,
 		&state.MissingSince,
 		&state.HasVideoTracks,
+		&state.HasNonImageVideoTracks,
 		&state.HasAudioTracks,
 		&state.HasChapters,
 		&externalSubtitlePathsJSON,
@@ -266,44 +272,46 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 	if file == nil {
 		return nil
 	}
+	probeFacts := file.AudioOnlyProbeFacts()
 	return &scanStateFile{
-		ID:                    file.ID,
-		ContentID:             file.ContentID,
-		ExtraID:               file.ExtraID,
-		CanonicalRootPath:     file.CanonicalRootPath,
-		ObservedRootPath:      file.ObservedRootPath,
-		ContentGroupKey:       file.ContentGroupKey,
-		GroupKeyVersion:       file.GroupKeyVersion,
-		BaseTitle:             file.BaseTitle,
-		BaseYear:              file.BaseYear,
-		BaseType:              file.BaseType,
-		IdentityConfidence:    file.IdentityConfidence,
-		IdentityJSON:          append([]byte(nil), file.IdentityJSON...),
-		FilePath:              file.FilePath,
-		FileSize:              file.FileSize,
-		FileModifiedAt:        file.FileModifiedAt,
-		FileHash:              file.FileHash,
-		CodecVideo:            file.CodecVideo,
-		CodecAudio:            file.CodecAudio,
-		Resolution:            file.Resolution,
-		Container:             file.Container,
-		Duration:              file.Duration,
-		EditionRaw:            file.EditionRaw,
-		EditionKey:            file.EditionKey,
-		EditionConfidence:     file.EditionConfidence,
-		EditionSource:         file.EditionSource,
-		PresentationKind:      file.PresentationKind,
-		PresentationGroupKey:  file.PresentationGroupKey,
-		PresentationPartIndex: file.PresentationPartIndex,
-		MultiEpisodeStart:     file.MultiEpisodeStart,
-		MultiEpisodeEnd:       file.MultiEpisodeEnd,
-		ProbeSource:           file.ProbeSource,
-		ProbeUpdatedAt:        file.ProbeUpdatedAt,
-		MissingSince:          file.MissingSince,
-		HasVideoTracks:        len(file.VideoTracks) > 0,
-		HasAudioTracks:        len(file.AudioTracks) > 0,
-		HasChapters:           file.Chapters != nil,
-		ExternalSubtitlePaths: externalSubtitlePaths(file.ExternalSubtitles),
+		ID:                     file.ID,
+		ContentID:              file.ContentID,
+		ExtraID:                file.ExtraID,
+		CanonicalRootPath:      file.CanonicalRootPath,
+		ObservedRootPath:       file.ObservedRootPath,
+		ContentGroupKey:        file.ContentGroupKey,
+		GroupKeyVersion:        file.GroupKeyVersion,
+		BaseTitle:              file.BaseTitle,
+		BaseYear:               file.BaseYear,
+		BaseType:               file.BaseType,
+		IdentityConfidence:     file.IdentityConfidence,
+		IdentityJSON:           append([]byte(nil), file.IdentityJSON...),
+		FilePath:               file.FilePath,
+		FileSize:               file.FileSize,
+		FileModifiedAt:         file.FileModifiedAt,
+		FileHash:               file.FileHash,
+		CodecVideo:             file.CodecVideo,
+		CodecAudio:             file.CodecAudio,
+		Resolution:             file.Resolution,
+		Container:              file.Container,
+		Duration:               file.Duration,
+		EditionRaw:             file.EditionRaw,
+		EditionKey:             file.EditionKey,
+		EditionConfidence:      file.EditionConfidence,
+		EditionSource:          file.EditionSource,
+		PresentationKind:       file.PresentationKind,
+		PresentationGroupKey:   file.PresentationGroupKey,
+		PresentationPartIndex:  file.PresentationPartIndex,
+		MultiEpisodeStart:      file.MultiEpisodeStart,
+		MultiEpisodeEnd:        file.MultiEpisodeEnd,
+		ProbeSource:            file.ProbeSource,
+		ProbeUpdatedAt:         file.ProbeUpdatedAt,
+		MissingSince:           file.MissingSince,
+		HasVideoTracks:         len(file.VideoTracks) > 0,
+		HasNonImageVideoTracks: probeFacts.HasNonImageVideoTracks,
+		HasAudioTracks:         len(file.AudioTracks) > 0,
+		HasChapters:            file.Chapters != nil,
+		ExternalSubtitlePaths:  externalSubtitlePaths(file.ExternalSubtitles),
 	}
 }
 

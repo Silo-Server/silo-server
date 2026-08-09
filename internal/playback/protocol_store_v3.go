@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrIdempotencyKeyReusedV3 = errors.New("idempotency key reused")
@@ -67,8 +69,11 @@ const (
 )
 
 type ReplanLeaseV3 struct {
-	State    ReplanLeaseStateV3
-	Response json.RawMessage
+	State ReplanLeaseStateV3
+	// LeaseToken identifies one ownership generation of an active replan. It
+	// is opaque to callers and must accompany release and completion writes.
+	LeaseToken string
+	Response   json.RawMessage
 }
 
 type PlanStoreV3 interface {
@@ -80,22 +85,25 @@ type PlanStoreV3 interface {
 	GetAttemptIdentityByPlaybackAttemptID(context.Context, string) (*AttemptIdentityV3, error)
 	BeginReplan(context.Context, string, string, string, string, time.Time) (ReplanLeaseV3, error)
 	// ReleaseReplan abandons an owned, incomplete lease after the handler fails
-	// before producing a durable response. Completed leases are never removed.
-	ReleaseReplan(context.Context, string, string) error
+	// before producing a durable response. The token prevents cleanup from an
+	// expired owner deleting a lease that has since been reclaimed.
+	ReleaseReplan(context.Context, string, string, string) error
 	// CompleteReplan commits a replan atomically; the attempt row is only
-	// updated while its current_replan_request_id still equals the caller's
-	// base revision, otherwise ErrReplanSupersededV3 is returned.
-	CompleteReplan(ctx context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error
+	// updated while the caller still owns the lease and its
+	// current_replan_request_id equals the caller's base revision, otherwise
+	// ErrReplanSupersededV3 is returned.
+	CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error
 	RecordRouteEvent(context.Context, RouteEventRecordV3) error
 	CleanupExpired(context.Context, time.Time) (int64, error)
 }
 
 type memoryReplanV3 struct {
-	digest    string
-	base      string
-	lease     time.Time
-	completed bool
-	response  json.RawMessage
+	digest     string
+	base       string
+	lease      time.Time
+	leaseToken string
+	completed  bool
+	response   json.RawMessage
 }
 
 type MemoryPlanStoreV3 struct {
@@ -204,8 +212,9 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 	key := sessionID + ":" + requestID
 	existing, ok := s.replans[key]
 	if !ok {
-		s.replans[key] = memoryReplanV3{digest: digest, base: baseReplanRequestID, lease: leaseUntil}
-		return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
+		leaseToken := uuid.NewString()
+		s.replans[key] = memoryReplanV3{digest: digest, base: baseReplanRequestID, lease: leaseUntil, leaseToken: leaseToken}
+		return ReplanLeaseV3{State: ReplanLeaseOwnedV3, LeaseToken: leaseToken}, nil
 	}
 	if existing.digest != digest {
 		return ReplanLeaseV3{}, ErrIdempotencyKeyReusedV3
@@ -220,22 +229,23 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 		return ReplanLeaseV3{}, ErrStaleReplanLeaseV3
 	}
 	existing.lease = leaseUntil
+	existing.leaseToken = uuid.NewString()
 	s.replans[key] = existing
-	return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
+	return ReplanLeaseV3{State: ReplanLeaseOwnedV3, LeaseToken: existing.leaseToken}, nil
 }
 
-func (s *MemoryPlanStoreV3) ReleaseReplan(_ context.Context, sessionID, requestID string) error {
+func (s *MemoryPlanStoreV3) ReleaseReplan(_ context.Context, sessionID, requestID, leaseToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := sessionID + ":" + requestID
 	entry, ok := s.replans[key]
-	if ok && !entry.completed {
+	if ok && !entry.completed && entry.leaseToken == leaseToken {
 		delete(s.replans, key)
 	}
 	return nil
 }
 
-func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
+func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var attemptID string
@@ -256,6 +266,9 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	entry, ok := s.replans[key]
 	if !ok {
 		return ErrSessionNotFound
+	}
+	if entry.completed || entry.leaseToken != leaseToken {
+		return ErrReplanSupersededV3
 	}
 	entry.completed = true
 	entry.response = append(json.RawMessage(nil), response...)
