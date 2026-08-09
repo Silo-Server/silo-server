@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import {
   fixtureClientCapabilitiesV3,
   fixtureClientPlaybackContextV3,
@@ -10,6 +13,30 @@ import {
   buildStartRequestV3,
   routeEventPlanIdentityV3,
 } from "../playback-session-wire-v3";
+import { usePlaybackSession } from "./usePlaybackSession";
+
+const playerConfig: PlayerConfig = {
+  apiBaseUrl: "/api/v1",
+  getAccessToken: () => "token",
+  getProfileId: () => "profile-1",
+  getProfileToken: () => null,
+};
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(PlayerConfigProvider, { config: playerConfig, children });
+}
+
+function jsonResponse(body: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const startBase = {
   fileId: 42,
@@ -249,5 +276,228 @@ describe("routeEventPlanIdentityV3", () => {
       planAttemptId: "plan-attempt-1",
       planAttemptKey: plan.plan_attempt_key,
     });
+  });
+});
+
+describe("usePlaybackSession quality changes", () => {
+  it("rolls back a rejected quality and keeps it out of later replans", async () => {
+    const plan = fixturePlanV3();
+    let replanCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: plan,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanCount += 1;
+        if (replanCount === 1) {
+          return jsonResponse({ message: "temporary failure" }, { status: 500 });
+        }
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            plan_id: "plan:fedcba9876543210",
+            plan_attempt_key: "v3:fedcba9876543210",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "original"),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.changeQuality("720p", 120));
+    await waitFor(() => {
+      expect(result.current.replanning).toBe(false);
+      expect(result.current.qualityPreference).toBe("original");
+      expect(result.current.error).toBeTruthy();
+    });
+
+    act(() => result.current.refreshSubtitles(120));
+    await waitFor(() => expect(replanCount).toBe(2));
+
+    const replanBodies = fetchMock.mock.calls
+      .filter(([url]) => String(url).endsWith("/playback/session-1/replan"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { quality_preference: string });
+    expect(replanBodies.map((body) => body.quality_preference)).toEqual(["720p", "original"]);
+
+    unmount();
+  });
+});
+
+describe("usePlaybackSession replans", () => {
+  it("coalesces reanchor seeks behind an in-flight replan and keeps the latest position", async () => {
+    const initialPlan = fixturePlanV3();
+    const firstReplannedPlan = fixturePlanV3({
+      plan_id: "plan:1111111111111111",
+      plan_attempt_key: "v3:1111111111111111",
+    });
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const replanBodies: Array<{ operation: string; position_seconds: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: initialPlan,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(
+          JSON.parse(String(init?.body)) as { operation: string; position_seconds: number },
+        );
+        if (replanBodies.length === 1) return firstReplanResponse;
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            plan_id: "plan:2222222222222222",
+            plan_attempt_key: "v3:2222222222222222",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.refreshSubtitles(120));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    act(() => {
+      result.current.reanchorSeek(300);
+      result.current.reanchorSeek(450);
+    });
+    expect(replanBodies).toHaveLength(1);
+
+    await act(async () => {
+      resolveFirstReplan?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: firstReplannedPlan,
+        }),
+      );
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(
+      replanBodies.map(({ operation, position_seconds }) => ({ operation, position_seconds })),
+    ).toEqual([
+      { operation: "track_change", position_seconds: 120 },
+      { operation: "seek_reanchor", position_seconds: 450 },
+    ]);
+
+    unmount();
+  });
+
+  it("surfaces an error after the failure-recovery cap is exhausted", async () => {
+    let replanCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: fixturePlanV3(),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanCount += 1;
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3(),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.planRevision).toBe(1));
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      act(() => {
+        result.current.recoverFromFailure({ classification: "decoder_error" }, 120 + attempt);
+      });
+      await waitFor(() => expect(result.current.planRevision).toBe(attempt + 2));
+    }
+
+    act(() => {
+      result.current.recoverFromFailure({ classification: "decoder_error" }, 200);
+    });
+    await waitFor(() => {
+      expect(result.current.errorTitle).toBe("Playback failed");
+      expect(result.current.error).toBe("Playback failed after repeated recovery attempts.");
+    });
+    expect(replanCount).toBe(8);
+
+    unmount();
   });
 });

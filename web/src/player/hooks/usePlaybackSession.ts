@@ -290,6 +290,10 @@ export function usePlaybackSession(
   const attemptedPlanKeysRef = useRef<string[]>([]);
   const attemptCountRef = useRef(1);
   const replanInFlightRef = useRef(false);
+  const pendingReanchorRef = useRef<{
+    options: ReplanOptions;
+    loadSequence: number;
+  } | null>(null);
   const qualityRef = useRef(qualityPreference?.trim() || "auto");
 
   useEffect(() => {
@@ -568,16 +572,32 @@ export function usePlaybackSession(
    * means the client never asks for one.
    */
   const replan = useCallback(
-    async (options: ReplanOptions): Promise<void> => {
+    async function issueReplan(options: ReplanOptions): Promise<boolean> {
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
       const playbackAttemptId = playbackAttemptIdRef.current;
-      if (!plan || !sessionId || !playbackAttemptId) return;
-      if (replanInFlightRef.current) return;
+      if (!plan || !sessionId || !playbackAttemptId) return false;
+      if (replanInFlightRef.current) {
+        if (options.operation === "seek_reanchor") {
+          pendingReanchorRef.current = {
+            options,
+            loadSequence: loadSequenceRef.current,
+          };
+        }
+        return false;
+      }
 
       const isFailureRecovery =
         options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
-      if (isFailureRecovery && attemptCountRef.current > MAX_ATTEMPT_COUNT) return;
+      if (isFailureRecovery && attemptCountRef.current > MAX_ATTEMPT_COUNT) {
+        setState((current) => ({
+          ...current,
+          replanning: false,
+          errorTitle: "Playback failed",
+          error: "Playback failed after repeated recovery attempts.",
+        }));
+        return false;
+      }
 
       // On a track or quality change nothing failed, so the previous route
       // stays eligible: the loop guard and the recovery counter reset. Only a
@@ -621,7 +641,7 @@ export function usePlaybackSession(
 
         // A version switch or a fresh start that landed while this was in
         // flight owns the session now; this plan is already superseded.
-        if (loadSequence !== loadSequenceRef.current) return;
+        if (loadSequence !== loadSequenceRef.current) return false;
 
         if (isFailureRecovery) {
           attemptedPlanKeysRef.current = attemptedPlanKeys;
@@ -631,9 +651,9 @@ export function usePlaybackSession(
           attemptCountRef.current = 1;
         }
 
-        adoptDecision(decision);
+        return adoptDecision(decision);
       } catch (err) {
-        if (loadSequence !== loadSequenceRef.current) return;
+        if (loadSequence !== loadSequenceRef.current) return false;
         const nextError = describePlaybackSessionError(err, "Failed to update playback");
         setState((current) => ({
           ...current,
@@ -641,9 +661,16 @@ export function usePlaybackSession(
           errorTitle: nextError.title,
           error: nextError.message,
         }));
+        return false;
       } finally {
         replanInFlightRef.current = false;
         setState((current) => (current.replanning ? { ...current, replanning: false } : current));
+
+        const pendingReanchor = pendingReanchorRef.current;
+        pendingReanchorRef.current = null;
+        if (pendingReanchor?.loadSequence === loadSequenceRef.current) {
+          void issueReplan(pendingReanchor.options);
+        }
       }
     },
     [adoptDecision, clientCapabilities, clientPlaybackContext, config, maxBitrateKbps],
@@ -681,9 +708,20 @@ export function usePlaybackSession(
   const changeQuality = useCallback(
     (label: string, currentPosition: number) => {
       const normalized = label.trim() || QUALITY_ORIGINAL_V3;
+      const previousPreference = qualityRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
-      void replan({ operation: "quality_change", positionSeconds: currentPosition });
+      void replan({ operation: "quality_change", positionSeconds: currentPosition }).then(
+        (adopted) => {
+          if (adopted || qualityRef.current !== normalized) return;
+          qualityRef.current = previousPreference;
+          setState((current) =>
+            current.qualityPreference === normalized
+              ? { ...current, qualityPreference: previousPreference }
+              : current,
+          );
+        },
+      );
     },
     [replan],
   );

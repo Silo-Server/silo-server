@@ -3,8 +3,9 @@
  * capability block and the per-delivery-class context the server negotiates
  * against.
  *
- * The browser can only answer `MediaSource.isTypeSupported(...)` — a boolean per
- * MIME string — so every claim here is `declared` evidence (see §3 of
+ * The browser can only answer MIME support probes through
+ * `MediaSource.isTypeSupported(...)` and `HTMLMediaElement.canPlayType(...)`, so
+ * every claim here is `declared` evidence (see §3 of
  * `docs/architecture/playback-protocol-v3.md`). We deliberately never populate
  * `video_decode[]`: on `declared` the server matches the flat codec lists and
  * ignores the detail walk, and fabricating profile/level entries we cannot

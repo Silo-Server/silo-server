@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { detectHLSSupport, type WebCapabilityProbe } from "../client-context-v3";
 
-/** Maps our codec names to MIME codec strings for MediaSource.isTypeSupported(). */
+/** Maps our codec names to the MIME declarations browsers expose for them. */
 const VIDEO_CODEC_MAP: Record<string, string> = {
   h264: "avc1.640028",
   hevc: "hev1.1.6.L120.90",
@@ -9,19 +9,31 @@ const VIDEO_CODEC_MAP: Record<string, string> = {
   vp9: "vp09.00.10.08",
 };
 
-const AUDIO_CODEC_MAP: Record<string, string> = {
-  aac: "mp4a.40.2",
-  opus: "opus",
-  flac: "flac",
-  ac3: "ac-3",
-  eac3: "ec-3",
-  dts: "dts+",
+const AUDIO_CODEC_MAP: Record<string, string[]> = {
+  aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
+  mp3: ["audio/mpeg"],
+  opus: [
+    'audio/mp4; codecs="opus"',
+    'video/mp4; codecs="opus"',
+    'audio/ogg; codecs="opus"',
+    'audio/webm; codecs="opus"',
+  ],
+  vorbis: ['audio/ogg; codecs="vorbis"', 'audio/webm; codecs="vorbis"'],
+  flac: ["audio/flac", 'audio/mp4; codecs="flac"', 'video/mp4; codecs="flac"'],
+  ac3: ['audio/mp4; codecs="ac-3"', 'video/mp4; codecs="ac-3"'],
+  eac3: ['audio/mp4; codecs="ec-3"', 'video/mp4; codecs="ec-3"'],
+  dts: ['audio/mp4; codecs="dts+"', 'video/mp4; codecs="dts+"'],
 };
 
-const CONTAINER_MAP: Record<string, string> = {
-  mp4: "video/mp4",
-  webm: "video/webm",
-  mkv: "video/x-matroska",
+// The scanner normalizes M4A/M4B to mp4. Standalone MP3, FLAC, and OGG keep
+// their own container keys, so they need matching direct-play probes here.
+const CONTAINER_MAP: Record<string, string[]> = {
+  mp4: ['video/mp4; codecs="avc1.640028"', 'audio/mp4; codecs="mp4a.40.2"'],
+  webm: ['video/webm; codecs="avc1.640028"'],
+  mkv: ['video/x-matroska; codecs="avc1.640028"'],
+  mp3: ["audio/mpeg"],
+  flac: ["audio/flac"],
+  ogg: ["audio/ogg"],
 };
 
 export function detectMaxResolutionFromScreen(screenWidth: number, screenHeight: number): string {
@@ -47,10 +59,20 @@ export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefi
   );
 }
 
-function testCodec(mimeWithCodec: string): boolean {
-  if (typeof MediaSource === "undefined") return false;
+function testMediaType(mime: string): boolean {
+  if (typeof MediaSource !== "undefined") {
+    try {
+      if (MediaSource.isTypeSupported(mime)) return true;
+    } catch {
+      // Fall through to the media element probe.
+    }
+  }
+
+  if (typeof document === "undefined") return false;
   try {
-    return MediaSource.isTypeSupported(mimeWithCodec);
+    return (
+      document.createElement(mime.startsWith("audio/") ? "audio" : "video").canPlayType(mime) !== ""
+    );
   } catch {
     return false;
   }
@@ -59,11 +81,12 @@ function testCodec(mimeWithCodec: string): boolean {
 /**
  * Probes what this browser will admit to decoding.
  *
- * Every answer here comes from `MediaSource.isTypeSupported(...)`, a boolean per
- * MIME string, which is why the v3 capability block built from this probe is
- * `declared` evidence and never claims hardware decode detail it cannot observe.
- * The screen-derived resolution and the HDR media queries are hints about the
- * *output*, not the decoder, and the server treats them as such.
+ * Every answer here comes from `MediaSource.isTypeSupported(...)` or
+ * `HTMLMediaElement.canPlayType(...)`, which is why the v3 capability block
+ * built from this probe is `declared` evidence and never claims hardware decode
+ * detail it cannot observe. The screen-derived resolution and the HDR media
+ * queries are hints about the *output*, not the decoder, and the server treats
+ * them as such.
  */
 export function probeWebCapabilities(): WebCapabilityProbe {
   const codecsVideo: string[] = [];
@@ -71,22 +94,22 @@ export function probeWebCapabilities(): WebCapabilityProbe {
   const containers: string[] = [];
 
   // Test containers.
-  for (const [name, mime] of Object.entries(CONTAINER_MAP)) {
-    if (testCodec(`${mime}; codecs="avc1.640028"`)) {
+  for (const [name, mimeTypes] of Object.entries(CONTAINER_MAP)) {
+    if (mimeTypes.some(testMediaType)) {
       containers.push(name);
     }
   }
 
   // Test video codecs (in mp4 container).
   for (const [name, codec] of Object.entries(VIDEO_CODEC_MAP)) {
-    if (testCodec(`video/mp4; codecs="${codec}"`)) {
+    if (testMediaType(`video/mp4; codecs="${codec}"`)) {
       codecsVideo.push(name);
     }
   }
 
   // Test audio codecs.
-  for (const [name, codec] of Object.entries(AUDIO_CODEC_MAP)) {
-    if (testCodec(`audio/mp4; codecs="${codec}"`) || testCodec(`video/mp4; codecs="${codec}"`)) {
+  for (const [name, mimeTypes] of Object.entries(AUDIO_CODEC_MAP)) {
+    if (mimeTypes.some(testMediaType)) {
       codecsAudio.push(name);
     }
   }

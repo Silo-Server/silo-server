@@ -8,6 +8,14 @@ export function toPlayerTime(mediaTimeSeconds: number, streamOriginSeconds = 0):
   return mediaTimeSeconds - streamOriginSeconds;
 }
 
+export function subtitleStartPositionSeconds(
+  readyState: number,
+  currentTimeSeconds: number,
+  fetchAnchorSeconds: number | null | undefined,
+): number {
+  return readyState > 0 ? currentTimeSeconds : (fetchAnchorSeconds ?? 0);
+}
+
 /**
  * Picks the runtime that belongs alongside a media-time position.
  *

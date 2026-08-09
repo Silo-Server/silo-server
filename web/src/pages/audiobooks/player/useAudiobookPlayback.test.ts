@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { createElement, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
@@ -176,6 +176,13 @@ async function flushAsyncWork() {
 describe("useAudiobookPlayback", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      ["audio/mp4", "audio/mpeg", "audio/flac", "audio/ogg"].some((supported) =>
+        mime.startsWith(supported),
+      )
+        ? "probably"
+        : "",
+    );
     let sessionCount = 0;
     vi.stubGlobal(
       "fetch",
@@ -199,6 +206,12 @@ describe("useAudiobookPlayback", () => {
       }),
     );
     realtimeOptions.current = null;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("returns a flattened chapter list across files", () => {
@@ -241,8 +254,15 @@ describe("useAudiobookPlayback", () => {
       .mocked(fetch)
       .mock.calls.find(([url]) => String(url).endsWith("/playback/start"));
     const body = JSON.parse(String(startCall?.[1]?.body)) as {
+      client_capabilities: { codecs_audio: string[]; containers: string[] };
       client_playback_context: { deliveries: Record<string, unknown> };
     };
+    expect(body.client_capabilities.codecs_audio).toEqual(
+      expect.arrayContaining(["mp3", "flac", "opus", "vorbis"]),
+    );
+    expect(body.client_capabilities.containers).toEqual(
+      expect.arrayContaining(["mp4", "mp3", "flac", "ogg"]),
+    );
     expect(Object.keys(body.client_playback_context.deliveries).sort()).toEqual([
       "hls",
       "original_http",

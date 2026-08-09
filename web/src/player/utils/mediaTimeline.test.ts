@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { mediaDurationSeconds, toMediaTime, toPlayerTime } from "./mediaTimeline";
+import {
+  mediaDurationSeconds,
+  subtitleStartPositionSeconds,
+  toMediaTime,
+  toPlayerTime,
+} from "./mediaTimeline";
 
 describe("toMediaTime / toPlayerTime", () => {
   it("round-trips a position through a stream origin", () => {
@@ -41,5 +46,13 @@ describe("mediaDurationSeconds", () => {
     expect(mediaDurationSeconds(0, 0)).toBeUndefined();
     expect(mediaDurationSeconds(null, undefined)).toBeUndefined();
     expect(mediaDurationSeconds(undefined, NaN)).toBeUndefined();
+  });
+});
+
+describe("subtitleStartPositionSeconds", () => {
+  it("uses the resume anchor while media metadata is not ready", () => {
+    const resumePosition = toMediaTime(60, 3000);
+
+    expect(subtitleStartPositionSeconds(0, 0, resumePosition)).toBe(3060);
   });
 });

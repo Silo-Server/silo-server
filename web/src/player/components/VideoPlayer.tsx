@@ -52,7 +52,12 @@ import type {
   SubtitleMode,
 } from "../types";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
-import { mediaDurationSeconds, toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
+import {
+  mediaDurationSeconds,
+  subtitleStartPositionSeconds,
+  toMediaTime,
+  toPlayerTime,
+} from "../utils/mediaTimeline";
 import { pendingServerSubtitleSelection } from "../utils/playableSubtitles";
 import {
   copyWatchTogetherInvite,
@@ -902,10 +907,13 @@ export function VideoPlayer({
 
   // The media-time playhead, sent with a translate request so the server starts
   // where the viewer is watching.
-  const getSubtitleStartPosition = useCallback(
-    () => toMediaTime(videoRef.current?.currentTime ?? 0, streamOriginRef.current ?? 0),
-    [],
-  );
+  const getSubtitleStartPosition = useCallback(() => {
+    return subtitleStartPositionSeconds(
+      videoRef.current?.readyState ?? 0,
+      currentTimeRef.current,
+      subtitleFetchAnchorRef.current,
+    );
+  }, []);
 
   const resumeFromTranslationPause = useCallback(() => {
     if (translationResumeTimerRef.current !== null) {
@@ -1788,11 +1796,11 @@ export function VideoPlayer({
     // session start, or a stream reload), currentTime still reads 0 rather than
     // the resume/seek target — use the intended position, as the subtitle
     // window fetcher does.
-    const video = videoRef.current;
-    const position =
-      video && video.readyState > 0
-        ? currentTimeRef.current
-        : (subtitleFetchAnchorRef.current ?? 0);
+    const position = subtitleStartPositionSeconds(
+      videoRef.current?.readyState ?? 0,
+      currentTimeRef.current,
+      subtitleFetchAnchorRef.current,
+    );
     onSubtitleTrackChange?.(desiredServerIndex, position);
   }, [
     activeSubtitleIndex,

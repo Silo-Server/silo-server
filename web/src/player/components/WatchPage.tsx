@@ -404,30 +404,6 @@ export function WatchPage({
     );
   }
 
-  if (session.error && !session.replacing) {
-    return (
-      <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
-        <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
-          <div className="space-y-2">
-            <p className="text-base font-semibold text-white">
-              {session.errorTitle ?? "Playback unavailable"}
-            </p>
-            <p className="text-sm text-white/60">{session.error}</p>
-          </div>
-          <button
-            onClick={() => {
-              void onExit();
-            }}
-            type="button"
-            className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // Find the duration of the selected file so the player knows the total
   // length even when the stream is chunked (no Content-Length header).
   const selectedDuration =
