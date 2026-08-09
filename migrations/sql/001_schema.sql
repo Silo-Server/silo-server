@@ -2443,7 +2443,7 @@ INSERT INTO public.server_settings (key, value) VALUES
   ('s3.metadata_presign_expiry', '4h'),
   ('metadb.url', 'https://metadb.example.invalid'),
   ('playback.ffmpeg_path', '/usr/lib/jellyfin-ffmpeg/ffmpeg'),
-  ('playback.transcode_dir', '/tmp/streamapp-transcode'),
+  ('playback.transcode_dir', '/tmp/silo-transcode'),
   ('playback.hw_accel', 'auto'),
   ('playback.transcode_enabled', 'true'),
   ('playback.allow_hevc_encoding', 'false'),
