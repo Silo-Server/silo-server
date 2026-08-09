@@ -294,7 +294,7 @@ export interface ReplanRequestV3 {
   bandwidth_estimate_kbps?: number;
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;
-  failure: FailureV3;
+  failure?: FailureV3;
   client_capabilities: ClientCodecCapabilitiesV3;
   client_playback_context: ClientPlaybackContextV3;
 }

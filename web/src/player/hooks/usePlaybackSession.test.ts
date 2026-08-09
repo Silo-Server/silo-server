@@ -173,6 +173,7 @@ describe("buildReplanRequestV3", () => {
     });
 
     expect(body.selected_tracks).toEqual(plan.selected_tracks);
+    expect(body).not.toHaveProperty("failure");
   });
 
   it("carries the loop guard and the failure classification on a recovery", () => {
@@ -192,10 +193,10 @@ describe("buildReplanRequestV3", () => {
     });
   });
 
-  it("sends an empty classification when nothing failed", () => {
+  it("omits failure when nothing failed", () => {
     const body = buildReplanRequestV3({ ...replanBase, operation: "quality_change" });
 
-    expect(body.failure).toEqual({ classification: "" });
+    expect(body).not.toHaveProperty("failure");
     expect(body.attempted_plan_keys).toEqual([]);
     expect(body.attempt_count).toBe(1);
   });

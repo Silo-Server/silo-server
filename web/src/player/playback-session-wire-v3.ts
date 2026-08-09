@@ -132,9 +132,9 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
     position_seconds: clampPosition(input.positionSeconds),
     metered: input.metered,
     selected_tracks: selectedTracks,
-    failure: input.failure ?? { classification: "" },
     client_capabilities: input.clientCapabilities,
     client_playback_context: input.clientPlaybackContext,
+    ...(input.failure ? { failure: input.failure } : {}),
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
       : {}),
