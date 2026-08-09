@@ -304,6 +304,16 @@ func writePlaybackTestFFmpegAlwaysFailing(t *testing.T) string {
 	return path
 }
 
+func writePlaybackTestFFmpegNeverReady(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "not-ready-ffmpeg.sh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write not-ready fake ffmpeg: %v", err)
+	}
+	return path
+}
+
 func playbackTestConfig(ffmpegPath, transcodeDir string) func() config.PlaybackConfig {
 	return func() config.PlaybackConfig {
 		return config.PlaybackConfig{

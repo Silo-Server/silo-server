@@ -1652,6 +1652,17 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	}
 }
 
+func TestAvailableQualitiesV3UnknownSourceHeightPublishesNoFixedRungs(t *testing.T) {
+	request := validStartRequestV3()
+	qualities := availableQualitiesV3(PlannerInputV3{
+		Request:  request,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	}, SourceDescriptorV3{VideoCodec: "h264", BitrateKbps: 8_000})
+	if len(qualities) != 1 || qualities[0].Label != QualityOriginalV3 || !qualities[0].PreservesSource {
+		t.Fatalf("unknown-height qualities = %#v, want original only", qualities)
+	}
+}
+
 func audioOnlyFixtureFileV3() *models.MediaFile {
 	return &models.MediaFile{ID: 77, FilePath: "/media/audiobook.m4b", Container: "mp4", CodecAudio: "aac", Bitrate: 128, AudioChannels: 2, Duration: 39_600, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
 }

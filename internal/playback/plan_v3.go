@@ -15,6 +15,8 @@ type PlannerSettingsV3 struct {
 	Allow4KTranscode bool
 }
 
+const TerminalMessage4KTranscodeDisabledV3 = "A lower-resolution source is required because 4K transcoding is disabled."
+
 type PlannerInputV3 struct {
 	Request         StartRequestV3
 	RequestedFile   *models.MediaFile
@@ -476,6 +478,11 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 		BitrateKbps:     source.BitrateKbps,
 		PreservesSource: true,
 	}}
+	if source.Height <= 0 {
+		// Fixed rungs must sit strictly below a known source height; unknown
+		// probe metadata cannot prove that any advertised rung avoids upscaling.
+		return qualities
+	}
 	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled {
 		return qualities
 	}
@@ -486,7 +493,7 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 		return qualities
 	}
 	for _, height := range []int{2160, 1080, 720, 480} {
-		if source.Height > 0 && height >= source.Height {
+		if height >= source.Height {
 			continue
 		}
 		qualities = append(qualities, AvailableQualityV3{
@@ -596,7 +603,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3(reason, "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
-		return terminalPlannerResultV3("no_alternate_version", "A lower-resolution source is required because 4K transcoding is disabled.", false)
+		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
 	if hdrTranscodeUnavailableV3(source) {
 		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
@@ -623,7 +630,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetAudioChannels)
 	plan.EffectiveRecipe.AudioLayout = audioLayout
 	plan.Transformations = append(plan.Transformations,
-		TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimH264DecodeV3}},
+		TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}},
 		TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimAudioDecodeV3}},
 	)
 	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Passthrough: false, AtmosPreserved: false, Reason: "server_audio_adaptation"}

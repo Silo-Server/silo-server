@@ -432,6 +432,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 			result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 		}
 	}
+	h.clarifyOriginalQuality4KTerminalV3(r.Context(), result.Terminal, requestedFile, !shouldTryAlternateFileV3(req.QualityPreference))
 	if result.Terminal != nil {
 		slog.InfoContext(r.Context(), "playback plan decided", "component", "playback",
 			"outcome", "terminal",
@@ -477,7 +478,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		if statusErr.reason == "internal_error" {
 			slog.ErrorContext(r.Context(), "protocol v3 start failed", "component", "api", "reason", statusErr.reason, "error", statusErr.cause)
 		}
-		persistedResponse, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigest, requestedFile.ID, effectiveFile.ID, playback.NewTerminalResponseV3(statusErr.reason, statusErr.message, statusErr.retryable))
+		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigest, requestedFile.ID, effectiveFile.ID, statusErr)
 		if persistErr != nil {
 			writeStartAttemptPersistenceErrorV3(w, persistErr)
 			return
@@ -841,22 +842,19 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		videoCodec = "copy"
 	}
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
+	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, sourceMetadata.DurationSeconds)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	ts, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink})
+	ts, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink})
 	if err != nil {
 		unlock()
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
 	}
-	if _, readyErr := ts.WaitForManifest(8 * time.Second); readyErr != nil {
-		retryable := ts.IsRunning()
+	if _, readyErr := ts.WaitForManifest(playback.ManifestStartupTimeout); readyErr != nil {
+		transportErr := manifestStartupTransportErrorV3(ts.IsRunning(), readyErr)
 		_ = ts.Close()
 		unlock()
-		message := "The playback transport failed before media became ready."
-		if retryable {
-			message = "The playback transport did not become ready in time."
-		}
-		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: message, retryable: retryable, cause: readyErr}
+		return preparedTransportV3{}, transportErr
 	}
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
 	url := appendStreamToken(fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID), h.signSessionToken(card))
@@ -896,6 +894,14 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	}, nil
 }
 
+func manifestStartupTransportErrorV3(running bool, cause error) *transportErrorV3 {
+	message := "The playback transport failed before media became ready."
+	if running {
+		message = "The playback transport did not become ready in time."
+	}
+	return &transportErrorV3{reason: "transcode_start_failed", message: message, retryable: running, cause: cause}
+}
+
 func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, nodePlan nodepool.Plan) (preparedTransportV3, *transportErrorV3) {
 	node := nodePlan.TranscodeNode
 	transportID := transportGenerationV3(session.ID, result.Plan.PlanID)
@@ -904,8 +910,9 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		videoCodec = "copy"
 	}
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
+	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, sourceMetadata.DurationSeconds)
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
 	if err != nil {
 		// A timeout can fire after the node actually started the job; the
@@ -919,7 +926,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "The selected transcode node rejected the playback transport.", retryable: true}
 	}
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, node.URL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SoftwareVideoDecode: req.SoftwareVideoDecode, VideoBitstreamFilter: req.VideoBitstreamFilter, SeekSeconds: req.SeekSeconds, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration})
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, node.URL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SoftwareVideoDecode: req.SoftwareVideoDecode, VideoBitstreamFilter: req.VideoBitstreamFilter, SeekSeconds: req.SeekSeconds, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration})
 	url := h.buildProxyManifestURL(card, nodePlan.ProxyNode)
 	committed := false
 	previousNodeURL := session.TranscodeNodeURL
@@ -958,21 +965,20 @@ func sourceExecutionMetadataV3(file *models.MediaFile, result playback.PlannerRe
 	if file == nil {
 		return playback.SourceExecutionMetadataV3{}
 	}
-	profile := ""
-	bitDepth := 0
-	videoCodec := file.CodecVideo
-	if len(file.VideoTracks) > 0 {
-		if strings.TrimSpace(videoCodec) == "" {
-			videoCodec = file.VideoTracks[0].Codec
-		}
-		profile = file.VideoTracks[0].Profile
-		bitDepth = file.VideoTracks[0].BitDepth
-	}
+	videoCodec, profile, bitDepth := playback.SourceVideoTranscodeFacts(file)
 	return playback.SourceExecutionMetadataV3{
 		VideoCodec:          videoCodec,
 		SoftwareVideoDecode: playback.RequiresSoftwareVideoDecode(videoCodec, profile, bitDepth),
 		DurationSeconds:     float64(file.Duration),
 	}
+}
+
+func sourceVideoTranscodeFactsV3(file *models.MediaFile, result playback.PlannerResultV3) (string, int) {
+	if result.FrozenSourceMetadata != nil {
+		return "", 0
+	}
+	_, profile, bitDepth := playback.SourceVideoTranscodeFacts(file)
+	return profile, bitDepth
 }
 
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) playback.SessionStreamState {
@@ -1257,8 +1263,11 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
 	if replanErr != nil {
-		response = playback.NewTerminalResponseV3(replanErr.reason, replanErr.message, replanErr.retryable)
-		updated = *record
+		if transport != nil {
+			transport.rollback()
+		}
+		writeJSON(w, http.StatusOK, playback.NewTerminalResponseV3(replanErr.reason, replanErr.message, replanErr.retryable))
+		return
 	}
 	updated.CurrentReplanRequestID = req.ReplanRequestID
 	// A replay of the original start id must return the current durable decision,
@@ -1387,10 +1396,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if intentChange && !trackChange {
 			start.FileID = record.RequestedMediaFileID
 		}
-		if !trackChange || strings.TrimSpace(req.QualityPreference) != "" {
-			// A track change with no quality field keeps the durable quality:
-			// normalizing the absent value would silently reset "original" or a
-			// fixed rung to "auto" as a side effect of switching audio tracks.
+		if strings.TrimSpace(req.QualityPreference) != "" {
+			// Replans may omit unchanged intent. Normalizing an absent quality
+			// would silently reset "original" or a fixed rung to "auto".
 			start.QualityPreference = req.QualityPreference
 		}
 		start.StartPosition = &req.PositionSeconds
@@ -1560,6 +1568,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
+	h.clarifyOriginalQuality4KTerminalV3(r.Context(), result.Terminal, requestedFile, replanAlternateFilePinnedByOriginalQualityV3(operation, start.QualityPreference))
 	if result.Terminal != nil {
 		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
 	}
@@ -2042,6 +2051,22 @@ func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPr
 	}
 }
 
+func replanAlternateFilePinnedByOriginalQualityV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
+	if shouldTryAlternateFileV3(qualityPreference) {
+		return false
+	}
+	return operation == playback.ReplanOperationFailureRecoveryV3 || operation == playback.ReplanOperationQualityChangeV3
+}
+
+func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context, terminal *playback.TerminalV3, requestedFile *models.MediaFile, alternateFilePinned bool) {
+	if !alternateFilePinned || terminal == nil || terminal.Reason != "no_alternate_version" || terminal.Message != playback.TerminalMessage4KTranscodeDisabledV3 {
+		return
+	}
+	if alternate, err := h.findAlternateFile(ctx, requestedFile); err == nil && alternate != nil {
+		terminal.Message = "4K transcoding is disabled and quality 'original' pins the 4K version; a compatible lower-resolution version of this title is available."
+	}
+}
+
 func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
 	h.v3ReplanMu.Lock()
 	if h.v3ReplanLocks == nil {
@@ -2413,6 +2438,14 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 		return playback.DecisionResponseV3{}, playback.ErrIdempotencyKeyReusedV3
 	}
 	return decisionResponseFromAttemptV3(existing), nil
+}
+
+func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int, profileID string, req playback.StartRequestV3, requestDigest string, requestedFileID, effectiveFileID int, failure *transportErrorV3) (playback.DecisionResponseV3, error) {
+	response := playback.NewTerminalResponseV3(failure.reason, failure.message, failure.retryable)
+	if failure.retryable {
+		return response, nil
+	}
+	return h.persistTerminalStartDecisionV3(ctx, userID, profileID, req, requestDigest, requestedFileID, effectiveFileID, response)
 }
 
 func writeStartAttemptPersistenceErrorV3(w http.ResponseWriter, err error) {

@@ -33,7 +33,7 @@ func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
 			return
 		}
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
-			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
 			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 		}})
 	}))
@@ -42,7 +42,7 @@ func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: "video_to_h264", RecipeVersion: "1"},
+		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "audio_to_aac", RecipeVersion: "1"},
 		{Name: "server_dv7_to_hdr10", RecipeVersion: "1"},
 	}))
@@ -123,7 +123,7 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 	capable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
-			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
 			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 		}})
 	}))
@@ -146,7 +146,7 @@ func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 		PlanID:   "plan:heterogeneous",
 		Delivery: playback.DeliveryTranscodeHLSV3,
 		Transformations: []playback.TransformationV3{
-			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
 			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 		},
 	}
@@ -165,14 +165,14 @@ func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 func TestPrepareTransportV3LocalFallbackRejectsUnavailableTransformations(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: "video_to_h264", RecipeVersion: "1"},
+		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "audio_to_aac", RecipeVersion: "1"},
 	}))
 	plan := &playback.PlanV3{
 		PlanID:   "plan:local-capability",
 		Delivery: playback.DeliveryTranscodeHLSV3,
 		Transformations: []playback.TransformationV3{
-			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
 			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 		},
 	}

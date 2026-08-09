@@ -175,8 +175,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_original",
-        "plan_id": "plan:a7f5c7091b7a5ce1cd4fc43b2a6b327c",
-        "plan_attempt_key": "v3:8da9bae216075de8",
+        "plan_id": "plan:7b3b4cdf37a1a1084395bc810c9ac179",
+        "plan_attempt_key": "v3:5f2c9f8566a979cc",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -210,7 +210,7 @@
           {
             "name": "video_to_h264",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "2",
             "validated_claims": [
               "h264_decode"
             ]
@@ -1467,8 +1467,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:85ff00dd716863e27555e38202a9cefb",
-        "plan_attempt_key": "v3:cc8428ba187f6470",
+        "plan_id": "plan:36db80a93b9d295f44c2c3be6a7cb0ce",
+        "plan_attempt_key": "v3:aad5ccea009fea2a",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -1502,7 +1502,7 @@
           {
             "name": "video_to_h264",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "2",
             "validated_claims": [
               "h264_decode"
             ]
@@ -3609,8 +3609,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "subtitle_burn_in_required",
-        "plan_id": "plan:d7b6522ee3cef9299cdb650f339848c6",
-        "plan_attempt_key": "v3:624c543b8e5e7f44",
+        "plan_id": "plan:67e9593ed921a129645e41427a081943",
+        "plan_attempt_key": "v3:4d2de636abf938b1",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3663,7 +3663,7 @@
           {
             "name": "video_to_h264",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "2",
             "validated_claims": [
               "h264_decode"
             ]

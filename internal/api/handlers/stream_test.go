@@ -435,14 +435,18 @@ func TestHandleSubtitle_BitmapTrackVTTRequestReturns415(t *testing.T) {
 	}
 }
 
-func TestHandleSubtitle_ExternalTextTrackSUPRequestReturns415(t *testing.T) {
+func TestHandleSubtitle_ExternalTextTrackSRTRequestReturnsVTT(t *testing.T) {
+	subtitlePath := filepath.Join(t.TempDir(), "movie.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	file := &models.MediaFile{
 		ID:        42,
 		ContentID: "movie-1",
 		FilePath:  "/tmp/movie.mkv",
 		Duration:  3600,
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/tmp/movie.en.srt", Language: "eng", Format: "srt"},
+			{Path: subtitlePath, Language: "eng", Format: "srt"},
 		},
 	}
 	baseMgr := playback.NewSessionManager(0, 0)
@@ -451,19 +455,57 @@ func TestHandleSubtitle_ExternalTextTrackSUPRequestReturns415(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.sup", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.srt", nil)
 	req = req.WithContext(newAuthorizedPlaybackContext())
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("session_id", session.ID)
-	routeCtx.URLParams.Add("track", "0.sup")
+	routeCtx.URLParams.Add("track", "0.srt")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 	rr := httptest.NewRecorder()
 	handler.HandleSubtitle(rr, req)
-	if rr.Code != http.StatusUnsupportedMediaType {
-		t.Fatalf("status = %d, content-type = %q, body = %s; want 415", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, content-type = %q, body = %s; want 200", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
 	}
-	if got := rr.Header().Get("Content-Type"); strings.HasPrefix(got, "text/vtt") {
-		t.Fatalf("mismatched .sup request unexpectedly emitted WebVTT: %q", got)
+	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/vtt") {
+		t.Fatalf("content type = %q, want WebVTT", got)
+	}
+	if body := rr.Body.String(); !strings.HasPrefix(body, "WEBVTT") || !strings.Contains(body, "Hello") {
+		t.Fatalf("body = %q, want converted WebVTT", body)
+	}
+}
+
+func TestHandleSubtitle_ExternalASSTrackASSRequestReturnsRawASS(t *testing.T) {
+	const assBody = "[Script Info]\nTitle: Test\n"
+	subtitlePath := filepath.Join(t.TempDir(), "movie.en.ass")
+	if err := os.WriteFile(subtitlePath, []byte(assBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "movie-1",
+		FilePath:          "/tmp/movie.mkv",
+		Duration:          3600,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: subtitlePath, Language: "eng", Format: "ass"}},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.ass", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.ass")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+	if rr.Code != http.StatusOK || rr.Body.String() != assBody {
+		t.Fatalf("status = %d, content-type = %q, body = %q; want raw ASS", rr.Code, rr.Header().Get("Content-Type"), rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/x-ssa") {
+		t.Fatalf("content type = %q, want raw ASS", got)
 	}
 }
 

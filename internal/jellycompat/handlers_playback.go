@@ -370,6 +370,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		PlayMethod:      method,
 		TranscodeAudio:  source.TranscodeAudio,
 		AudioTrackIndex: audioTrackIndex,
+		AudioOnly:       file.IsAudioOnly(),
 		TranscodeNode:   transcodeNodeURL,
 		DVProfile:       file.PrimaryDVProfile(),
 	}
@@ -438,18 +439,22 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	if initialSeekSeconds > 0 && segmentDuration > 0 {
 		startSegmentNumber = int(initialSeekSeconds / float64(segmentDuration))
 	}
+	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
 
 	reqBody := transcodenode.TranscodeStartRequest{
-		SessionID:          upstreamSessionID,
-		InputPath:          file.FilePath,
-		SeekSeconds:        initialSeekSeconds,
-		StartSegmentNumber: startSegmentNumber,
-		TargetCodecVideo:   "h264",
-		TargetCodecAudio:   "aac",
-		SegmentDuration:    segmentDuration,
-		HWAccel:            h.HWAccel,
-		AudioTrackIndex:    compatAudioTrackIndexOrDefault(source),
-		TotalDuration:      float64(source.Version.Duration),
+		SessionID:           upstreamSessionID,
+		InputPath:           file.FilePath,
+		SourceVideoCodec:    sourceVideoCodec,
+		SourceVideoProfile:  sourceVideoProfile,
+		SourceVideoBitDepth: sourceVideoBitDepth,
+		SeekSeconds:         initialSeekSeconds,
+		StartSegmentNumber:  startSegmentNumber,
+		TargetCodecVideo:    compatTargetVideoCodec,
+		TargetCodecAudio:    compatTargetAudioCodec,
+		SegmentDuration:     segmentDuration,
+		HWAccel:             h.HWAccel,
+		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+		TotalDuration:       float64(source.Version.Duration),
 	}
 	if source.TranscodeAudio {
 		reqBody.TargetCodecVideo = "copy"
@@ -486,16 +491,19 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	// token of their own, so without a persisted recipe a node or central restart
 	// cannot rebuild ffmpeg and segment serves 404.
 	opts := playback.TranscodeOpts{
-		SessionID:          upstreamSessionID,
-		InputPath:          reqBody.InputPath,
-		SeekSeconds:        reqBody.SeekSeconds,
-		StartSegmentNumber: reqBody.StartSegmentNumber,
-		TargetCodecVideo:   reqBody.TargetCodecVideo,
-		TargetCodecAudio:   reqBody.TargetCodecAudio,
-		SegmentDuration:    reqBody.SegmentDuration,
-		HWAccel:            reqBody.HWAccel,
-		AudioTrackIndex:    reqBody.AudioTrackIndex,
-		TotalDuration:      reqBody.TotalDuration,
+		SessionID:           upstreamSessionID,
+		InputPath:           reqBody.InputPath,
+		SourceVideoCodec:    reqBody.SourceVideoCodec,
+		SourceVideoProfile:  reqBody.SourceVideoProfile,
+		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
+		SeekSeconds:         reqBody.SeekSeconds,
+		StartSegmentNumber:  reqBody.StartSegmentNumber,
+		TargetCodecVideo:    reqBody.TargetCodecVideo,
+		TargetCodecAudio:    reqBody.TargetCodecAudio,
+		SegmentDuration:     reqBody.SegmentDuration,
+		HWAccel:             reqBody.HWAccel,
+		AudioTrackIndex:     reqBody.AudioTrackIndex,
+		TotalDuration:       reqBody.TotalDuration,
 	}
 	if source.TranscodeAudio {
 		opts.TargetCodecVideo = "copy"

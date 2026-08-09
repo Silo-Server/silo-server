@@ -75,6 +75,7 @@ type RecipeCard struct {
 // re-resolved from live config on reconstruct rather than pinned here, so an
 // operator's config change applies to reconstructed sessions too.
 func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeURL string, opts TranscodeOpts) RecipeCard {
+	opts = resolveSoftwareVideoDecode(opts)
 	return RecipeCard{
 		SessionID:              opts.SessionID,
 		UserID:                 userID,

@@ -29,6 +29,7 @@ type Claims struct {
 	AudioCodec           string `json:"ac,omitempty"`
 	AudioChannels        int    `json:"ach,omitempty"`
 	AudioTrackIndex      int    `json:"ati,omitempty"`
+	AudioOnly            bool   `json:"ao,omitempty"`
 	// DVProfile is the file's Dolby Vision profile (0 = none); remux nodes
 	// use it to strip dangling profile 7 RPUs. Absent in older tokens, which
 	// decodes as 0 (no strip — the pre-existing behavior).

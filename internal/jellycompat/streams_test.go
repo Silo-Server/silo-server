@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // withCompatSession attaches a compat session carrying tok to req, so the
@@ -126,6 +127,31 @@ func TestBuildProxyRedirectURLRequestsSourceAlignedCompatManifest(t *testing.T) 
 	}
 	if !strings.HasSuffix(redirectURL, "/master.m3u8?"+playback.SourceTimelineQueryParam+"=1") {
 		t.Fatalf("redirect URL = %q, want source-timeline opt-in", redirectURL)
+	}
+}
+
+func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	redirectURL, err := h.buildProxyRedirectURL(
+		"play-1",
+		"upstream-1",
+		string(playback.PlayRemux),
+		&models.MediaFile{FilePath: "/media/book.m4b", CodecAudio: "aac"},
+		PlaybackMediaSource{},
+		"",
+		0,
+		&nodepool.Node{URL: "http://proxy-1"},
+	)
+	if err != nil {
+		t.Fatalf("buildProxyRedirectURL: %v", err)
+	}
+	token := strings.TrimPrefix(redirectURL, "http://proxy-1/stream/remux/")
+	claims, err := streamtoken.Verify(token, h.JWTSecret)
+	if err != nil {
+		t.Fatalf("verify redirect token: %v", err)
+	}
+	if !claims.AudioOnly {
+		t.Fatalf("audio-only remux claim = false: %#v", claims)
 	}
 }
 

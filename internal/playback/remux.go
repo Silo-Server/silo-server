@@ -336,6 +336,14 @@ type RemuxServeOptions struct {
 	ContentType string
 }
 
+// RemuxContentType returns the override required for an audio-only fMP4.
+func RemuxContentType(audioOnly bool) string {
+	if audioOnly {
+		return AudioOnlyRemuxMIMEV3
+	}
+	return ""
+}
+
 // ServeRemux streams a remuxed file to the HTTP response.
 // It starts an ffmpeg remux session and copies the output directly to the
 // response writer. The response is streamed (chunked transfer) since the

@@ -168,14 +168,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// audio/mp4 for it, and a declared-tier client refuses to attach a
 		// source buffer whose advertised type its probe rejected — so the
 		// response has to keep the same promise the plan made.
-		contentType := ""
-		if file.IsAudioOnly() {
-			contentType = playback.AudioOnlyRemuxMIMEV3
-		}
 		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			DVMode:      session.RemuxDVMode,
 			FFmpegPath:  h.ffmpegPath(),
-			ContentType: contentType,
+			ContentType: playback.RemuxContentType(file.IsAudioOnly()),
 		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
@@ -391,10 +387,11 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 	playback.ServeSubtitle(w, vttData, "vtt")
 }
 
-// subtitleSidecarFormatSupported keeps the path extension, source codec, and
-// response representation in agreement. Text tracks may be converted to the
-// contract's .vtt representation, ASS/SSA may also be served losslessly, and
-// only an embedded PGS track has a binary .sup representation.
+// subtitleSidecarFormatSupported keeps bitmap and styled-text requests within
+// the representations the server can produce. Plain text tracks preserve the
+// v1 endpoint's permissive extension behavior and are always returned as VTT;
+// ASS/SSA may also be served losslessly, and only an embedded PGS track has a
+// binary .sup representation.
 func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS bool) bool {
 	requestedFormat = strings.ToLower(strings.TrimSpace(requestedFormat))
 	if requestedFormat == "" {
@@ -409,7 +406,7 @@ func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS b
 	if playback.IsASS(codec) {
 		return requestedFormat == subtitleFormatASS || requestedFormat == "ssa" || requestedFormat == "vtt"
 	}
-	return requestedFormat == "vtt"
+	return true
 }
 
 // subtitleSourceFileID pins a subtitle URL to the file whose track list was

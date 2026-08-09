@@ -321,6 +321,30 @@ func TestBuildFFmpegArgs_H264High10QSVUsesSoftwareDecodeUpload(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgs_H264High10DerivesSoftwareDecodeFromSourceFacts(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/high10.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-high10-derived",
+		SourceVideoCodec:    "h264",
+		SourceVideoProfile:  "High 10",
+		SourceVideoBitDepth: 10,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "qsv",
+		TargetResolution:    "720p",
+	})
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "-hwaccel vaapi") || strings.Contains(joined, "-hwaccel_output_format vaapi") {
+		t.Fatalf("High 10 source facts must suppress hardware decode args: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_qsv") || !strings.Contains(joined, "format=nv12,hwupload") {
+		t.Fatalf("High 10 source facts must retain the software-decode QSV upload path: %s", joined)
+	}
+}
+
 func TestBuildFFmpegArgs_H264High10QSVASSBurnInUsesSoftwareFrames(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:           "/media/high10.mkv",

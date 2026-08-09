@@ -41,7 +41,7 @@
     {
       "name": "video_to_h264",
       "executor": "server",
-      "recipe_version": "1",
+      "recipe_version": "2",
       "validated_claims": [
         "h264_decode"
       ]

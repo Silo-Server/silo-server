@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func init() {
@@ -36,6 +38,8 @@ type TranscodeOpts struct {
 	TranscodeTransportID string
 	SessionID            string
 	SourceVideoCodec     string
+	SourceVideoProfile   string
+	SourceVideoBitDepth  int
 	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
 	SeekSeconds          float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
@@ -174,6 +178,10 @@ const maxPersistedFFmpegLines = 2000
 const maxPersistedFFmpegBytes = 256 * 1024
 const maxPersistedFFmpegChars = 2000
 
+// ManifestStartupTimeout is the maximum wait for FFmpeg's first safe playback
+// window before the caller reports a retryable startup timeout.
+const ManifestStartupTimeout = 30 * time.Second
+
 const (
 	maxSequentialMissingSegments = 2
 	activeSegmentWait            = 12 * time.Second
@@ -192,6 +200,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
+	opts = resolveSoftwareVideoDecode(opts)
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 	configuredHWDevices := ParseHWDeviceSet(opts.HWDevice)
 	reserveHWDeviceOnRestart := configuredHWDevices.Multi() && hwAccelBalancesRenderDevices(opts.HWAccel)
@@ -317,8 +326,33 @@ func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
 	return bitDepth > 8 || normalizedProfile == "high10" || normalizedProfile == "high10intra" || normalizedProfile == "hi10p"
 }
 
+// SourceVideoTranscodeFacts returns the primary source facts needed to choose
+// a safe FFmpeg decoder. Track metadata fills gaps in legacy media-file rows.
+func SourceVideoTranscodeFacts(file *models.MediaFile) (codec, profile string, bitDepth int) {
+	if file == nil {
+		return "", "", 0
+	}
+	codec = file.CodecVideo
+	if len(file.VideoTracks) == 0 {
+		return codec, "", 0
+	}
+	track := file.VideoTracks[0]
+	if strings.TrimSpace(codec) == "" {
+		codec = track.Codec
+	}
+	return codec, track.Profile, models.NormalizeVideoBitDepth(track.BitDepth, track.PixelFormat, track.Profile)
+}
+
+func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
+	if RequiresSoftwareVideoDecode(opts.SourceVideoCodec, opts.SourceVideoProfile, opts.SourceVideoBitDepth) {
+		opts.SoftwareVideoDecode = true
+	}
+	return opts
+}
+
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
+	opts = resolveSoftwareVideoDecode(opts)
 	// Resolve "auto" into a concrete accel method once so all downstream
 	// helpers (appendHWAccelArgs, appendVideoArgs, etc.) see the real value.
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
@@ -1128,7 +1162,7 @@ func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		// Copy-video, unknown-duration, or oversized sessions must use FFmpeg's
 		// real manifest.
-		manifest, err := s.WaitForManifest(30 * time.Second)
+		manifest, err := s.WaitForManifest(ManifestStartupTimeout)
 		if err != nil {
 			return nil, err
 		}

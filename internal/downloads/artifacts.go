@@ -443,19 +443,22 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 			cfg = *c
 		}
 	}
+	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
 	return playback.TranscodeOpts{
-		InputPath:          file.FilePath,
-		SourceVideoCodec:   file.CodecVideo,
-		TargetCodecVideo:   a.CodecVideo,
-		TargetCodecAudio:   a.CodecAudio,
-		TargetResolution:   a.Resolution,
-		TargetBitrateKbps:  a.TargetBitrateKbps,
-		AudioTrackIndex:    a.AudioTrackIndex,
-		SubtitleTrackIndex: -1,
-		FFmpegPath:         cfg.Playback.FFmpegPath,
-		HWAccel:            cfg.Playback.HWAccel,
-		HWDevice:           cfg.Playback.HWDevice,
-		TotalDuration:      float64(file.Duration),
+		InputPath:           file.FilePath,
+		SourceVideoCodec:    sourceVideoCodec,
+		SourceVideoProfile:  sourceVideoProfile,
+		SourceVideoBitDepth: sourceVideoBitDepth,
+		TargetCodecVideo:    a.CodecVideo,
+		TargetCodecAudio:    a.CodecAudio,
+		TargetResolution:    a.Resolution,
+		TargetBitrateKbps:   a.TargetBitrateKbps,
+		AudioTrackIndex:     a.AudioTrackIndex,
+		SubtitleTrackIndex:  -1,
+		FFmpegPath:          cfg.Playback.FFmpegPath,
+		HWAccel:             cfg.Playback.HWAccel,
+		HWDevice:            cfg.Playback.HWDevice,
+		TotalDuration:       float64(file.Duration),
 	}
 }
 

@@ -13,7 +13,7 @@ func staticHLSRegistryV3(registry *TransformationRegistryV3) func() *Transformat
 func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "1"},
-		{Name: "video_to_h264", RecipeVersion: "1"},
+		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
 	})
 	if got := registry.WithAdvertised(nil); got != registry {
@@ -21,7 +21,7 @@ func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	}
 	widened := registry.WithAdvertised([]TransformationV3{
 		{Name: "Audio_To_AAC", Executor: "server", RecipeVersion: "1"},
-		{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
+		{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
 		{Name: "made_up_transform", Executor: "server", RecipeVersion: "1"},
 	})
 	if !widened.Available("audio_to_aac") {
@@ -57,7 +57,7 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 	req.QualityPreference = "480p"
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	local := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: "video_to_h264", RecipeVersion: "1"},
+		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "audio_to_aac", RecipeVersion: "1"},
 	})
 	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
@@ -68,7 +68,7 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 	}
 
 	union := local.WithAdvertised([]TransformationV3{
-		{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+		{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
 		{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 	})
 	withNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
