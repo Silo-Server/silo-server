@@ -29,7 +29,7 @@ const AUDIO_CODEC_MAP: Record<string, string[]> = {
 // their own container keys, so they need matching direct-play probes here.
 const CONTAINER_MAP: Record<string, string[]> = {
   mp4: ['video/mp4; codecs="avc1.640028"', 'audio/mp4; codecs="mp4a.40.2"'],
-  webm: ['video/webm; codecs="avc1.640028"'],
+  webm: ['video/webm; codecs="vp09.00.10.08"'],
   mkv: ['video/x-matroska; codecs="avc1.640028"'],
   mp3: ["audio/mpeg"],
   flac: ["audio/flac"],

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PlayerFileVersion, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
+import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerFetch } from "../player-fetch";
@@ -179,11 +180,12 @@ export function WatchPage({
    * on its own rather than one composite request that half-applies.
    */
   const handleSubtitleChanged = useCallback(
-    (index: number | null) => {
+    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
       const requests = buildSubtitleChoiceRequests({
         seriesId: seriesContext?.seriesId ?? contentId,
         index,
         tracks: playableSubtitles,
+        inventoryTrack,
         showForcedSubtitles,
       });
       for (const request of requests) {

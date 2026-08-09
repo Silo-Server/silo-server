@@ -3,6 +3,7 @@ import {
   seriesSubtitleSettingPath,
   seriesSubtitleSettingValues,
 } from "@/lib/seriesSubtitleSettings";
+import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature } from "../types";
 import { derivePersistedSubtitleMode } from "./subtitleMode";
 
@@ -37,26 +38,46 @@ export interface SubtitleChoiceRequest {
  * rides along on the legacy composite row, which is keyed to a concrete track
  * selection and is not part of the canonical resolution ladder.
  *
- * Returns an empty list when the index names no real track (e.g. the
- * in-progress AI live track's sentinel): persisting it would store a
- * nonexistent track with an empty language and clobber the saved preference.
+ * Returns an empty list when the index names neither a current track nor the
+ * supplied just-created inventory entry (e.g. the in-progress AI live track's
+ * sentinel): persisting it would store a nonexistent track with an empty
+ * language and clobber the saved preference.
  */
 export function buildSubtitleChoiceRequests({
   seriesId,
   index,
   tracks,
+  inventoryTrack,
   showForcedSubtitles,
 }: {
   seriesId: string;
   /** The chosen track's backend index, or null for "subtitles off". */
   index: number | null;
   tracks: readonly PlayerSubtitleInfo[];
+  /** A just-created inventory entry that has not reached `tracks` yet. */
+  inventoryTrack?: SubtitleInventoryItemV3;
   /** The resolved forced-subtitle behavior, preserved in the legacy row. */
   showForcedSubtitles?: boolean;
 }): SubtitleChoiceRequest[] {
   if (!seriesId) return [];
 
-  const track = index !== null ? tracks.find((candidate) => candidate.index === index) : null;
+  const pushedTrack =
+    index !== null && inventoryTrack?.combined_index === index
+      ? {
+          index,
+          language: inventoryTrack.language ?? "",
+          codec: inventoryTrack.codec,
+          label:
+            inventoryTrack.label ??
+            inventoryTrack.language ??
+            `Track ${inventoryTrack.combined_index + 1}`,
+          source: subtitleSourceOf(inventoryTrack.source),
+          forced: inventoryTrack.forced,
+          hearing_impaired: inventoryTrack.hearing_impaired,
+        }
+      : null;
+  const track =
+    pushedTrack ?? (index !== null ? tracks.find((candidate) => candidate.index === index) : null);
   if (index !== null && !track) return [];
 
   const trackSignature: PlayerSubtitleTrackSignature | null = track
@@ -92,4 +113,15 @@ export function buildSubtitleChoiceRequests({
   });
 
   return requests;
+}
+
+function subtitleSourceOf(source: string): PlayerSubtitleTrackSignature["source"] {
+  switch (source) {
+    case "external":
+    case "embedded":
+    case "downloaded":
+      return source;
+    default:
+      return undefined;
+  }
 }

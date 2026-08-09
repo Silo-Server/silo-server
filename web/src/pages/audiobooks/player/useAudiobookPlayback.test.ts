@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
-import { createElement, type MutableRefObject, type ReactNode } from "react";
+import { act, fireEvent, render, renderHook } from "@testing-library/react";
+import { createElement, useEffect, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
-import { audiobookAbsoluteTime, useAudiobookPlayback } from "./useAudiobookPlayback";
+import {
+  audiobookAbsoluteTime,
+  useAudiobookPlayback,
+  type AudiobookPlayback,
+} from "./useAudiobookPlayback";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 
@@ -268,6 +272,87 @@ describe("useAudiobookPlayback", () => {
       "original_http",
       "progressive",
     ]);
+  });
+
+  it("replans a failed media-element route without starting a new attempt", async () => {
+    const observed: {
+      startBody?: Record<string, unknown>;
+      replanBody?: Record<string, unknown>;
+    } = {};
+    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
+    const replacement = audioOnlyDecision("session-1", 0);
+    replacement.playback_plan.plan_id = "plan:replacement";
+    replacement.playback_plan.plan_attempt_key = "v3:0000000000000002";
+    replacement.playback_plan.stream.url = "/stream/replacement";
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          observed.startBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return jsonResponse(audioOnlyDecision("session-1", 0), { status: 201 });
+        }
+        if (url.endsWith("/playback/session-1/replan")) {
+          observed.replanBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return jsonResponse(replacement);
+        }
+        if (url.endsWith("/playback/route-events")) {
+          return new Response(null, { status: 202 });
+        }
+        if (url.includes("/progress") || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse({});
+      }),
+    );
+
+    function Harness() {
+      const playback = useAudiobookPlayback({
+        contentId: "c",
+        files,
+        initialPositionSeconds: 0,
+      });
+      useEffect(() => {
+        onPlayback(playback);
+      }, [playback]);
+      return createElement("audio", {
+        ref: playback.audioRef,
+        src: playback.streamUrl || undefined,
+      });
+    }
+
+    const { container } = render(createElement(Harness), { wrapper });
+    await flushAsyncWork();
+    expect(onPlayback.mock.lastCall?.[0].streamUrl).toContain("/stream/session-1");
+
+    const audio = container.querySelector("audio");
+    if (!audio) throw new Error("expected audio element");
+    Object.defineProperty(audio, "error", {
+      configurable: true,
+      value: { code: 3, message: "decoder rejected original container" },
+    });
+    fireEvent.error(audio);
+
+    await flushAsyncWork();
+    expect(onPlayback.mock.lastCall?.[0].streamUrl).toContain("/stream/replacement");
+    expect(observed.replanBody).toMatchObject({
+      operation: "failure_recovery",
+      playback_attempt_id: observed.startBody?.playback_attempt_id,
+      failed_plan_id: "plan:session-1",
+      plan_attempt_key: "v3:0000000000000001",
+      attempted_plan_keys: ["v3:0000000000000001"],
+      attempt_count: 1,
+      quality_preference: "original",
+      failure: {
+        classification: "decoder_error",
+        message: "decoder rejected original container",
+      },
+    });
+    expect(typeof observed.replanBody?.plan_attempt_id).toBe("string");
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
+    ).toHaveLength(1);
   });
 
   it("starts from the part containing the initial absolute position", async () => {

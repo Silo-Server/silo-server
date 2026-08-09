@@ -15,6 +15,12 @@
 /** Protocol version carried by every v3 request and response. */
 export const PROTOCOL_V3 = 3;
 
+/** Maximum number of opaque plan keys a recovery request may carry. */
+export const MAX_ATTEMPTED_PLAN_KEYS_V3 = 16;
+
+/** Maximum number of failed plans in one recovery chain. */
+export const MAX_ATTEMPT_COUNT_V3 = 8;
+
 /**
  * How the server delivers the stream. Clients negotiate in delivery *classes*
  * (see {@link DeliveryClassV3}); these finer-grained values only appear on a

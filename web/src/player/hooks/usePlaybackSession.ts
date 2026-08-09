@@ -14,6 +14,8 @@ import { reportRouteEventV3 } from "../route-events-v3";
 import { buildPlayerStreamUrl } from "../stream-url";
 import { randomUUID } from "@/lib/uuid";
 import {
+  MAX_ATTEMPT_COUNT_V3,
+  MAX_ATTEMPTED_PLAN_KEYS_V3,
   QUALITY_ORIGINAL_V3,
   type DecisionResponseV3,
   type FailureV3,
@@ -33,11 +35,6 @@ import type {
   PlayerSubtitleInfo,
   ResumeHints,
 } from "../types";
-
-/** Contract bound on the replan loop guard. */
-const MAX_ATTEMPTED_PLAN_KEYS = 16;
-/** Contract bound on the recovery chain length. */
-const MAX_ATTEMPT_COUNT = 8;
 
 interface PlaybackSessionState {
   /**
@@ -613,7 +610,7 @@ export function usePlaybackSession(
 
       const isFailureRecovery =
         options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
-      if (isFailureRecovery && attemptCountRef.current > MAX_ATTEMPT_COUNT) {
+      if (isFailureRecovery && attemptCountRef.current > MAX_ATTEMPT_COUNT_V3) {
         setState((current) => ({
           ...current,
           replanning: false,
@@ -627,7 +624,9 @@ export function usePlaybackSession(
       // stays eligible: the loop guard and the recovery counter reset. Only a
       // recovery accumulates them.
       const attemptedPlanKeys = isFailureRecovery
-        ? [...attemptedPlanKeysRef.current, plan.plan_attempt_key].slice(-MAX_ATTEMPTED_PLAN_KEYS)
+        ? [...attemptedPlanKeysRef.current, plan.plan_attempt_key].slice(
+            -MAX_ATTEMPTED_PLAN_KEYS_V3,
+          )
         : [];
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
@@ -669,7 +668,7 @@ export function usePlaybackSession(
 
         if (isFailureRecovery) {
           attemptedPlanKeysRef.current = attemptedPlanKeys;
-          attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT + 1);
+          attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
         } else {
           attemptedPlanKeysRef.current = [];
           attemptCountRef.current = 1;

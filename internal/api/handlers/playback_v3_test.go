@@ -47,6 +47,15 @@ func (s failingProgressStoreV3) GetProgress(context.Context, string, string) (*u
 	return nil, s.err
 }
 
+type failingLibraryPlaybackPreferenceStoreV3 struct {
+	userstore.UserStore
+	err error
+}
+
+func (s failingLibraryPlaybackPreferenceStoreV3) GetLibraryPlaybackPreference(context.Context, string, int) (*userstore.LibraryPlaybackPreference, error) {
+	return nil, s.err
+}
+
 type failingCompletePlanStoreV3 struct {
 	playback.PlanStoreV3
 }
@@ -445,6 +454,21 @@ func TestPreferredAudioTrackIndexV3PropagatesSeriesPreferenceReadFailure(t *test
 	file := &models.MediaFile{
 		EpisodeID:   "episode-1",
 		AudioTracks: []models.AudioTrack{{Codec: "aac", Language: "eng"}, {Codec: "aac", Language: "spa"}},
+	}
+
+	if _, err := handler.preferredAudioTrackIndexV3(context.Background(), 1, "profile-1", file); !errors.Is(err, wantErr) {
+		t.Fatalf("preferredAudioTrackIndexV3 error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestPreferredAudioTrackIndexV3PropagatesLibraryPreferenceReadFailure(t *testing.T) {
+	wantErr := errors.New("library playback preference store unavailable")
+	store := failingLibraryPlaybackPreferenceStoreV3{UserStore: newPlaybackTestStore(t), err: wantErr}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	file := &models.MediaFile{
+		MediaFolderID: 9,
+		AudioTracks:   []models.AudioTrack{{Codec: "aac", Language: "eng"}, {Codec: "aac", Language: "spa"}},
 	}
 
 	if _, err := handler.preferredAudioTrackIndexV3(context.Background(), 1, "profile-1", file); !errors.Is(err, wantErr) {

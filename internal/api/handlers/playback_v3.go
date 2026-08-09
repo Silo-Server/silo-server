@@ -764,7 +764,12 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	// having watched this series in a language outranks the library default.
 	libraryLang := ""
 	if seriesPref == nil {
-		if stored, prefErr := store.GetLibraryPlaybackPreference(ctx, profileID, file.MediaFolderID); prefErr == nil && stored != nil {
+		stored, prefErr := store.GetLibraryPlaybackPreference(ctx, profileID, file.MediaFolderID)
+		if prefErr != nil {
+			slog.ErrorContext(ctx, "protocol v3 start: library audio preference lookup failed", "component", "api", "profile_id", profileID, "library_id", file.MediaFolderID, "error", prefErr)
+			return 0, prefErr
+		}
+		if stored != nil {
 			libraryLang = stored.AudioLanguage
 		}
 	}

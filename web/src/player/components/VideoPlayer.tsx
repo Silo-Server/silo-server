@@ -131,7 +131,7 @@ interface VideoPlayerProps {
   audioTracks?: PlayerAudioTrack[];
   activeAudioIndex?: number;
   onAudioSelect?: (index: number, currentPosition: number) => void;
-  onSubtitleChanged?: (index: number | null) => void;
+  onSubtitleChanged?: (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => void;
   onExit: (state?: PlaybackExitState) => void | Promise<void>;
   onMinimize?: (state?: PlaybackExitState) => void | Promise<void>;
   onEnded?: () => void;
@@ -910,14 +910,14 @@ export function VideoPlayer({
   }, [activeSubtitleIndex, onSubtitleChanged]);
 
   const handleSubtitleSelect = useCallback(
-    (index: number | null) => {
+    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
       subtitleSelectionWasManualRef.current = true;
       setActiveSubtitleIndex(index);
       // The in-progress live translation track is synthetic (a sentinel index
       // that exists only in memory); never persist it as the saved preference or
       // we'd store a nonexistent track and lose the real selection.
       if (index === LIVE_SUBTITLE_INDEX) return;
-      onSubtitleChanged?.(index);
+      onSubtitleChanged?.(index, inventoryTrack);
     },
     [onSubtitleChanged],
   );
@@ -1018,7 +1018,7 @@ export function VideoPlayer({
             onApplySubtitleTrack?.(track);
             setLiveTranslation(null);
             setLiveCues([]);
-            handleSubtitleSelect(track.combined_index);
+            handleSubtitleSelect(track.combined_index, track);
           } else {
             onRefreshSubtitles?.(getSubtitleStartPosition());
           }

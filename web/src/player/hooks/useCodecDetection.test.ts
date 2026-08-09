@@ -57,4 +57,18 @@ describe("probeWebCapabilities", () => {
     );
     expect(capabilities.containers).toEqual(expect.arrayContaining(["mp4", "mp3", "flac", "ogg"]));
   });
+
+  it("probes WebM with a codec that belongs to the container", () => {
+    const canPlayType = vi
+      .spyOn(HTMLMediaElement.prototype, "canPlayType")
+      .mockImplementation((mime) =>
+        mime === 'video/webm; codecs="vp09.00.10.08"' ? "probably" : "",
+      );
+
+    const capabilities = probeWebCapabilities();
+
+    expect(capabilities.containers).toContain("webm");
+    expect(canPlayType).toHaveBeenCalledWith('video/webm; codecs="vp09.00.10.08"');
+    expect(canPlayType).not.toHaveBeenCalledWith('video/webm; codecs="avc1.640028"');
+  });
 });
