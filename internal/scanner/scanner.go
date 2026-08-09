@@ -3203,19 +3203,15 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
-	if strings.TrimSpace(file.CodecVideo) == "" {
+	hasVideo := strings.TrimSpace(file.CodecVideo) != "" || file.HasVideoTracks
+	hasAudio := strings.TrimSpace(file.CodecAudio) != "" || file.HasAudioTracks
+	if !hasVideo && !hasAudio {
 		return true
 	}
-	if strings.TrimSpace(file.CodecAudio) == "" {
+	if hasVideo && (strings.TrimSpace(file.CodecVideo) == "" || strings.TrimSpace(file.Resolution) == "" || !file.HasVideoTracks) {
 		return true
 	}
-	if strings.TrimSpace(file.Resolution) == "" {
-		return true
-	}
-	if !file.HasVideoTracks {
-		return true
-	}
-	if !file.HasAudioTracks {
+	if hasAudio && (strings.TrimSpace(file.CodecAudio) == "" || !file.HasAudioTracks) {
 		return true
 	}
 	if !file.HasChapters {

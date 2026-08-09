@@ -113,7 +113,7 @@ const EvidenceInsufficientForDirectV3 = "evidence_insufficient_for_direct"
 // tier — the client claims the codec in its flat lists but the tier's
 // validation could not confirm the stream — rather than by device facts.
 func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, bool) {
-	if !detailedVideoEvidenceCompleteV3(source) {
+	if !routeVideoMetadataCompleteV3(source) {
 		return false, false
 	}
 	flatClaims := containsFoldV3(request.Capabilities.CodecsVideo, source.VideoCodec) ||
@@ -133,10 +133,10 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 			}
 			matchedCodec = true
 			if !skipProfileLevel {
-				if len(capability.Profiles) > 0 && !containsFoldV3(capability.Profiles, source.VideoProfile) {
+				if len(capability.Profiles) > 0 && (source.VideoProfile == "" || !containsFoldV3(capability.Profiles, source.VideoProfile)) {
 					continue
 				}
-				if len(capability.Levels) > 0 && !containsAtLeastV3(capability.Levels, source.VideoLevel) {
+				if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
 					continue
 				}
 			}
@@ -157,10 +157,13 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	}
 }
 
-func detailedVideoEvidenceCompleteV3(source SourceDescriptorV3) bool {
+// routeVideoMetadataCompleteV3 covers the fields every validated route needs.
+// Profile and level are direct-decode constraints, not prerequisites for a
+// server transcode: ffprobe legitimately reports an unknown level for codecs
+// such as VP9. Exact evidence still rejects a direct route when the client's
+// capability entry constrains a profile or level the source does not expose.
+func routeVideoMetadataCompleteV3(source SourceDescriptorV3) bool {
 	return source.VideoCodec != "" &&
-		source.VideoProfile != "" &&
-		source.VideoLevel > 0 &&
 		source.BitDepth > 0 &&
 		source.Width > 0 &&
 		source.Height > 0 &&

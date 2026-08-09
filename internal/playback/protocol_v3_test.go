@@ -709,6 +709,50 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3TranscodesVP9WithUnknownCodecLevel(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.CodecVideo = "vp9"
+	file.CodecAudio = "opus"
+	file.Resolution = "2160p"
+	file.Bitrate = 2_797
+	file.VideoTracks[0] = models.VideoTrack{
+		Codec: "vp9", Profile: "Profile 0", Level: -99,
+		Width: 1080, Height: 1920, FrameRate: "24.000", Bitrate: 2_797,
+		BitDepth: 8, PixelFormat: "yuv420p", VideoRange: "SDR",
+		VideoRangeType: "SDR", ColorRange: "tv", ColorTransfer: "bt709",
+	}
+	file.AudioTracks[0] = models.AudioTrack{Codec: "opus", Channels: 2, Layout: "stereo"}
+
+	// An exact client that constrains VP9 levels must not earn a direct route
+	// from the unknown ffprobe sentinel. The level is optional for planning a
+	// server transcode, but it cannot satisfy a concrete decoder bound.
+	source := SourceDescriptorFromFileV3(file, 0)
+	exact := validStartRequestV3()
+	exact.Capabilities.CodecsVideo = []string{"vp9"}
+	exact.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+		Codec: "vp9", Profiles: []string{"profile 0"}, Levels: []int{41},
+		BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, Hardware: true,
+	}}
+	if direct, _ := videoEligibleV3(source, exact); direct {
+		t.Fatal("an unknown VP9 level satisfied an exact decoder level bound")
+	}
+
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidencePlatformAttestedV3
+	req.Capabilities.AudioEvidence = EvidencePlatformAttestedV3
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	})
+
+	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.TargetVideoCodec != "h264" || result.TargetAudioCodec != "aac" {
+		t.Fatalf("targets = video %q audio %q", result.TargetVideoCodec, result.TargetAudioCodec)
+	}
+}
+
 func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.Resolution = "2160p"

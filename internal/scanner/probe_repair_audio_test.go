@@ -28,6 +28,42 @@ func TestNeedsCriticalProbeRepair_ProbedAudioOnlyFileIsComplete(t *testing.T) {
 	}
 }
 
+// A successfully-probed synthetic clip may legitimately have no audio
+// stream. Requiring audio metadata made both request-time repair and stable
+// library scans retry ffprobe forever, even though another probe could never
+// populate an audio track that is not in the file.
+func TestNeedsCriticalProbeRepair_ProbedVideoOnlyFileIsComplete(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       30,
+		Container:      "mkv",
+		CodecVideo:     "h264",
+		Resolution:     "1080p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264", ColorRange: "tv"}},
+		Chapters:       []models.MediaChapter{},
+		// video-only: CodecAudio and AudioTracks intentionally empty
+	}
+	if NeedsCriticalProbeRepair(f) {
+		t.Fatal("a successfully-probed video-only file must not need probe repair")
+	}
+
+	scanFile := &scanStateFile{
+		ProbeSource:    f.ProbeSource,
+		ProbeUpdatedAt: f.ProbeUpdatedAt,
+		Duration:       f.Duration,
+		Container:      f.Container,
+		CodecVideo:     f.CodecVideo,
+		Resolution:     f.Resolution,
+		HasVideoTracks: true,
+		HasChapters:    true,
+	}
+	if needsCriticalProbeRepairScanState(scanFile) {
+		t.Fatal("a successfully-probed video-only file must not be reprobed on a stable scan")
+	}
+}
+
 func TestNeedsCriticalProbeRepair_LegacyAudiobookCoverArtRepairs(t *testing.T) {
 	now := time.Now()
 	f := &models.MediaFile{

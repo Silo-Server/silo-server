@@ -228,7 +228,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			Message: "This source's Dolby Vision metadata cannot be removed cleanly, so the validated HDR10 route is unavailable for it.",
 		})
 	}
-	if !detailedVideoEvidenceCompleteV3(source) {
+	if !routeVideoMetadataCompleteV3(source) {
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 	if !videoOK && videoEvidenceInsufficient {
