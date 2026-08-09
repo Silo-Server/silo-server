@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { SETTING_DEFINITIONS, SETTING_KEYS } from "./settingsContract";
 import {
   computeSubtitleFontScale,
   computeSubtitleFontSize,
@@ -75,6 +76,14 @@ describe("computeSubtitleFontSize", () => {
 });
 
 describe("computeSubtitleStyles", () => {
+  it("matches the contract's shared Box 75% fallback", () => {
+    expect(DEFAULT_SUBTITLE_APPEARANCE.backgroundStyle).toBe("box");
+    expect(DEFAULT_SUBTITLE_APPEARANCE.backgroundOpacity).toBe(75);
+    expect(DEFAULT_SUBTITLE_APPEARANCE).toEqual(
+      SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE].defaultValue,
+    );
+  });
+
   it("applies the font scale to the cue font size", () => {
     const unscaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE);
     const scaled = computeSubtitleStyles(DEFAULT_SUBTITLE_APPEARANCE, 2);

@@ -49,6 +49,29 @@ func TestEmbeddedManifestLoads(t *testing.T) {
 	}
 }
 
+func TestSubtitleAppearanceDefaultUsesBoxBackground(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	def, ok := manifest.Lookup(keySubtitleAppearance)
+	if !ok {
+		t.Fatal("playback.subtitle_appearance is not registered")
+	}
+
+	var appearance struct {
+		BackgroundStyle   string `json:"backgroundStyle"`
+		BackgroundOpacity int    `json:"backgroundOpacity"`
+	}
+	if err := json.Unmarshal(def.DefaultValue, &appearance); err != nil {
+		t.Fatalf("decoding subtitle appearance default: %v", err)
+	}
+	if appearance.BackgroundStyle != "box" || appearance.BackgroundOpacity != 75 {
+		t.Errorf("subtitle background default = %s %d%%, want box 75%%",
+			appearance.BackgroundStyle, appearance.BackgroundOpacity)
+	}
+}
+
 // TestEveryCurrentServerKeyIsRegistered pins the inventory. The design makes an
 // unregistered official key a release blocker, so a key that exists in the
 // legacy registry but not in the manifest has to fail here rather than be

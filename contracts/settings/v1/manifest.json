@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 5,
+  "revision": 6,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -233,7 +233,7 @@
         "fontFamily": "sans-serif",
         "fontColor": "#ffffff",
         "backgroundColor": "#000000",
-        "backgroundStyle": "shadow",
+        "backgroundStyle": "box",
         "backgroundOpacity": 75,
         "textOutline": false,
         "textOutlineColor": "#000000",
@@ -243,7 +243,7 @@
       "label": "Subtitle appearance",
       "description": "How subtitles are drawn during playback.",
       "recommended_control": "panel",
-      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. The default below is the web client's; Apple defaults to a box background and Android to no background with an outline, so migration must first write each platform's own default into a row for users who never opened the panel, or their subtitles silently change appearance at cutover."
+      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. Revision 6 changes the fallback background from shadow to a 75% opaque box, matching the previous intended web default and the current Apple fallback. Connected clients receive the complete effective default from the server; clients should adopt revision 6 so their local and sparse-object decoding fallbacks match it. Stored profile and device overrides remain authoritative."
     },
     {
       "key": "playback.preferred_quality",

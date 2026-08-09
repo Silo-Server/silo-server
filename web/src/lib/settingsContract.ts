@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 5;
+export const SETTINGS_REVISION = 6;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -626,7 +626,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       fontFamily: "sans-serif",
       fontColor: "#ffffff",
       backgroundColor: "#000000",
-      backgroundStyle: "shadow",
+      backgroundStyle: "box",
       backgroundOpacity: 75,
       textOutline: false,
       textOutlineColor: "#000000",
