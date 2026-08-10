@@ -511,6 +511,10 @@ func audioAvailableQualitiesV3(source SourceDescriptorV3) []AvailableQualityV3 {
 	return []AvailableQualityV3{{Label: QualityOriginalV3, BitrateKbps: source.BitrateKbps, PreservesSource: true}}
 }
 
+// decisionReasonBandwidthCapV3 marks a plan whose recipe was constrained by
+// the request's bandwidth cap rather than by decode capability.
+const decisionReasonBandwidthCapV3 = "quality_bandwidth_cap"
+
 // planAudioOnlyV3 plans sources without a video track (audiobooks, music).
 // The route family is deliberately small: the original container over
 // progressive HTTP when the client decodes the audio codec, otherwise a
@@ -519,6 +523,8 @@ func audioAvailableQualitiesV3(source SourceDescriptorV3) []AvailableQualityV3 {
 func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source SourceDescriptorV3) PlannerResultV3 {
 	request := input.Request
 	audioOK, _, audioClaims := audioEligibilityV3(source, request)
+	bandwidthCapKbps := optionalValueV3(request.BandwidthCapKbps)
+	bandwidthCapExceeded := bandwidthCapKbps > 0 && source.BitrateKbps > bandwidthCapKbps
 	if source.AudioCodec == "" {
 		// A file with neither a video track nor a probed audio codec has no
 		// stream the planner can validate a route for.
@@ -545,7 +551,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(request.StartPosition), PlayerStartSeconds: floatOrZeroV3(request.StartPosition), CanSeekAnywhere: true, SeekRestoration: "player_position"},
 	}
 	containerOK := containsFoldV3(request.Capabilities.Containers, source.Container)
-	if audioOK && containerOK && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3) {
+	if audioOK && containerOK && !bandwidthCapExceeded && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3) {
 		plan := base
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
@@ -558,7 +564,7 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	if !deliveryAvailableV3(request, DeliveryClassProgressiveV3) {
 		return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this audio source.", false)
 	}
-	transcodeAudio := !audioOK
+	transcodeAudio := !audioOK || bandwidthCapExceeded
 	if transcodeAudio && (input.Registry == nil || !input.Registry.Available(TransformationAudioToAACV3)) {
 		return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, "The required validated AAC conversion toolchain is unavailable.", true)
 	}
@@ -570,14 +576,16 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	// track is exactly the mismatch that makes that probe lie.
 	plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: "mp4", MIMEType: AudioOnlyRemuxMIMEV3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 	plan.DecisionReason = "container_normalization"
+	targetAudioChannels := audioOnlyAACOutputChannelsV3(request, source)
 	if transcodeAudio {
-		plan.EffectiveRecipe.AudioCodec = "aac"
-		plan.EffectiveRecipe.AudioChannels = intPointerV3(2)
-		plan.EffectiveRecipe.AudioLayout = "stereo"
-		plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "server_audio_adaptation"}
-		plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimAudioDecodeV3}})
-		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: "The selected audio track is converted to AAC stereo."})
-		plan.DecisionReason = "audio_adaptation"
+		applyAudioOnlyAACConversionV3(&plan, targetAudioChannels, bandwidthCapExceeded)
+	} else if !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, plan) && input.Registry != nil && input.Registry.Available(TransformationAudioToAACV3) {
+		converted := plan
+		applyAudioOnlyAACConversionV3(&converted, targetAudioChannels, false)
+		if deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, converted) {
+			plan = converted
+			transcodeAudio = true
+		}
 	}
 	if !deliverySupportsPlanV3(request, DeliveryClassProgressiveV3, plan) {
 		return terminalPlannerResultV3("adaptation_unavailable", "The progressive delivery cannot decode the planned audio recipe.", false)
@@ -586,7 +594,42 @@ func planAudioOnlyV3(input PlannerInputV3, file *models.MediaFile, source Source
 	if planAttemptedV3(plan, request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
+	if !transcodeAudio {
+		targetAudioChannels = 0
+	}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, TargetAudioChannels: targetAudioChannels, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
+}
+
+func audioOnlyAACOutputChannelsV3(request StartRequestV3, source SourceDescriptorV3) int {
+	channels := 2
+	if source.AudioChannels > 0 && source.AudioChannels < channels {
+		channels = source.AudioChannels
+	}
+	if capability, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]; ok &&
+		capability.MaxChannels != nil && *capability.MaxChannels > 0 && *capability.MaxChannels < channels {
+		channels = *capability.MaxChannels
+	}
+	return channels
+}
+
+func applyAudioOnlyAACConversionV3(plan *PlanV3, targetChannels int, bandwidthCapExceeded bool) {
+	layout := "stereo"
+	warning := "The selected audio track is converted to AAC stereo."
+	if targetChannels == 1 {
+		layout = "mono"
+		warning = "The selected audio track is converted to AAC mono."
+	}
+	plan.EffectiveRecipe.AudioCodec = "aac"
+	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetChannels)
+	plan.EffectiveRecipe.AudioLayout = layout
+	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "server_audio_adaptation"}
+	plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimAudioDecodeV3}})
+	plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: warning})
+	plan.DecisionReason = "audio_adaptation"
+	if bandwidthCapExceeded {
+		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
+		plan.DecisionReason = decisionReasonBandwidthCapV3
+	}
 }
 
 // planVideoTranscodeV3 always executes on the HLS delivery, so the caller must
@@ -815,7 +858,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		}
 	}
 	if capApplied {
-		reason = "quality_bandwidth_cap"
+		reason = decisionReasonBandwidthCapV3
 		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
 	}
 	if source.Height > 0 && targetHeight >= source.Height && !capApplied {

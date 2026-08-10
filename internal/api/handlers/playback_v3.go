@@ -34,6 +34,7 @@ const (
 	maxPlaybackV3BodyBytes      = 256 << 10
 	maxPlaybackV3EventBodyBytes = 32 << 10
 	replanLeaseDurationV3       = 15 * time.Second
+	replanReleaseTimeoutV3      = 3 * time.Second
 	v3NodeCapabilityTTL         = time.Minute
 	playbackNodeIntegratedV3    = "integrated"
 	subtitleFormatVTTV3         = "vtt"
@@ -1309,7 +1310,9 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		if leaseCompleted {
 			return
 		}
-		if err := h.PlanStoreV3.ReleaseReplan(context.WithoutCancel(r.Context()), sessionID, req.ReplanRequestID, lease.LeaseToken); err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), replanReleaseTimeoutV3)
+		defer cancel()
+		if err := h.PlanStoreV3.ReleaseReplan(releaseCtx, sessionID, req.ReplanRequestID, lease.LeaseToken); err != nil {
 			slog.ErrorContext(r.Context(), "protocol v3 replan lease release failed", "component", "api", "session", sessionID, "replan_request_id", req.ReplanRequestID, "error", err)
 		}
 	}()

@@ -287,7 +287,7 @@ export function usePlaybackSession(
   const attemptedPlanKeysRef = useRef<string[]>([]);
   const attemptCountRef = useRef(1);
   const replanInFlightRef = useRef(false);
-  const pendingReanchorRef = useRef<{
+  const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
   } | null>(null);
@@ -507,6 +507,31 @@ export function usePlaybackSession(
           }));
           return;
         }
+        if (!adopted) {
+          if (previousSessionId) {
+            void stopSession(previousSessionId).catch(() => {
+              // Best effort — stale session will time out server-side.
+            });
+          }
+          planRef.current = null;
+          sessionIdRef.current = null;
+          setState((current) => ({
+            ...current,
+            plan: null,
+            streamUrl: null,
+            sessionId: null,
+            playbackAttemptId,
+            mediaFileId: null,
+            initialPosition: 0,
+            audioTrackIndex: 0,
+            durationSeconds: null,
+            subtitleUrls: [],
+            loading: false,
+            replacing: false,
+            replanning: false,
+          }));
+          return;
+        }
         if (adopted && previousSessionId && previousSessionId !== sessionIdRef.current) {
           void stopSession(previousSessionId).catch(() => {
             // Best effort — stale session will time out server-side.
@@ -599,8 +624,16 @@ export function usePlaybackSession(
       const playbackAttemptId = playbackAttemptIdRef.current;
       if (!plan || !sessionId || !playbackAttemptId) return false;
       if (replanInFlightRef.current) {
-        if (options.operation === "seek_reanchor") {
-          pendingReanchorRef.current = {
+        const isPendingFailureRecovery =
+          options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
+        const queuedOperation = pendingReplanRef.current?.options.operation;
+        const hasQueuedFailureRecovery =
+          queuedOperation === "failure_recovery" || queuedOperation === "seek_failure_recovery";
+        if (
+          isPendingFailureRecovery ||
+          (options.operation === "seek_reanchor" && !hasQueuedFailureRecovery)
+        ) {
+          pendingReplanRef.current = {
             options,
             loadSequence: loadSequenceRef.current,
           };
@@ -689,10 +722,10 @@ export function usePlaybackSession(
         replanInFlightRef.current = false;
         setState((current) => (current.replanning ? { ...current, replanning: false } : current));
 
-        const pendingReanchor = pendingReanchorRef.current;
-        pendingReanchorRef.current = null;
-        if (pendingReanchor?.loadSequence === loadSequenceRef.current) {
-          void issueReplan(pendingReanchor.options);
+        const pendingReplan = pendingReplanRef.current;
+        pendingReplanRef.current = null;
+        if (pendingReplan?.loadSequence === loadSequenceRef.current) {
+          void issueReplan(pendingReplan.options);
         }
       }
     },

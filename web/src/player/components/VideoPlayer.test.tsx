@@ -1,0 +1,254 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
+import { fixturePlanV3 } from "../protocol-v3.fixtures";
+import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
+import type { PlayerSubtitleInfo } from "../types";
+import { VideoPlayer } from "./VideoPlayer";
+
+const realtimeOptions = vi.hoisted(() => ({
+  current: null as null | { onEvent?: (event: PlaybackRealtimeEventEnvelope) => void },
+}));
+const controls = vi.hoisted(() => ({
+  current: null as null | {
+    activeSubtitleIndex: number | null;
+    subtitleTracks: PlayerSubtitleInfo[];
+  },
+}));
+
+vi.mock("../hooks/usePlaybackRealtime", () => ({
+  usePlaybackRealtime: vi.fn((options) => {
+    realtimeOptions.current = options;
+    return { connectionState: "connected" };
+  }),
+}));
+vi.mock("../hooks/useWatchProgress", () => ({
+  useWatchProgress: () => vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../hooks/useKeyboardShortcuts", () => ({ useKeyboardShortcuts: vi.fn() }));
+vi.mock("../hooks/useRemuxSeeking", () => ({
+  useRemuxSeeking: () => ({ handleSeek: vi.fn() }),
+}));
+vi.mock("../hooks/useSubtitleTracks", () => ({ useSubtitleTracks: () => [] }));
+vi.mock("../hooks/useASSSubtitles", () => ({
+  useASSSubtitles: () => ({ isActive: false }),
+}));
+vi.mock("../hooks/useSubtitleAppearance", () => ({
+  useSubtitleAppearance: () => ({
+    settings: { position: "bottom", fontSize: "large" },
+    containerStyle: {},
+    cueStyle: {},
+  }),
+}));
+vi.mock("../hooks/useSubtitleLayout", () => ({
+  useSubtitleLayout: () => ({ positionStyle: {}, fontScale: 1 }),
+}));
+vi.mock("./PlayerControls", () => ({
+  PlayerControls: vi.fn(
+    (props: { activeSubtitleIndex: number | null; subtitleTracks: PlayerSubtitleInfo[] }) => {
+      controls.current = props;
+      return null;
+    },
+  ),
+}));
+
+const playerConfig: PlayerConfig = {
+  apiBaseUrl: "/api/v1",
+  getAccessToken: () => "token",
+  getProfileId: () => "profile-1",
+  getProfileToken: () => null,
+};
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(PlayerConfigProvider, { config: playerConfig, children });
+}
+
+const directPlan = fixturePlanV3({
+  delivery: "original_http",
+  stream: {
+    url: "/stream/session-1",
+    protocol: "http_progressive",
+    headers: {},
+    header_refresh: "none",
+  },
+});
+
+function playerProps(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+  return {
+    title: "Test movie",
+    streamUrl: "/api/v1/stream/session-1?token=token",
+    plan: directPlan,
+    planRevision: 1,
+    sessionId: "session-1",
+    subtitleUrls: [] as PlayerSubtitleInfo[],
+    initialPosition: 0,
+    intro: null,
+    credits: null,
+    qualityPreference: "original",
+    onExit: vi.fn(),
+    ...overrides,
+  };
+}
+
+function renderPlayer(overrides: Partial<Parameters<typeof VideoPlayer>[0]> = {}) {
+  const props = playerProps(overrides);
+  const rendered = render(createElement(VideoPlayer, props), { wrapper });
+  return {
+    ...rendered,
+    rerenderPlayer(next: Partial<Parameters<typeof VideoPlayer>[0]>) {
+      rendered.rerender(createElement(VideoPlayer, { ...props, ...next }));
+    },
+  };
+}
+
+function setMediaError(video: HTMLVideoElement, message: string) {
+  Object.defineProperty(video, "error", {
+    configurable: true,
+    value: { code: 3, message },
+  });
+}
+
+describe("VideoPlayer plan failure recovery", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("surfaces a refused replan only for the transport-dead plan revision", async () => {
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    rerenderPlayer({ replanError: "Recovery was refused." });
+    expect(await screen.findByText("Recovery was refused.")).toBeInTheDocument();
+
+    const nextPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:2222222222222222",
+      plan_attempt_key: "v3:2222222222222222",
+    });
+    rerenderPlayer({ plan: nextPlan, planRevision: 2, replanError: null });
+    await waitFor(() =>
+      expect(screen.queryByText("Recovery was refused.")).not.toBeInTheDocument(),
+    );
+
+    rerenderPlayer({ plan: nextPlan, planRevision: 2, replanError: "Unrelated replan error." });
+    await act(async () => Promise.resolve());
+    expect(screen.queryByText("Unrelated replan error.")).not.toBeInTheDocument();
+  });
+
+  it("re-arms the plan failure guard after a transient recovery request failure", async () => {
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    rerenderPlayer({ replanError: "Temporary recovery failure." });
+    await screen.findByText("Temporary recovery failure.");
+
+    fireEvent.error(video);
+    expect(onPlanFailure).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("VideoPlayer translation handoff", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("selects the refreshed downloaded track and clears the live overlay", async () => {
+    const onRefreshSubtitles = vi.fn();
+    const onSubtitleChanged = vi.fn();
+    const { rerenderPlayer } = renderPlayer({ onRefreshSubtitles, onSubtitleChanged });
+
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_started",
+        payload: {
+          session_id: "session-1",
+          file_id: 7,
+          job_id: 1,
+          track_key: "translation-1",
+          language: "es",
+          label: "Spanish (AI)",
+          total_cues: 2,
+        },
+      });
+    });
+    expect(controls.current?.activeSubtitleIndex).toBe(1_000_000);
+    expect(controls.current?.subtitleTracks.some((track) => track.live)).toBe(true);
+
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_completed",
+        payload: {
+          session_id: "session-1",
+          file_id: 7,
+          job_id: 1,
+          track_key: "translation-1",
+          subtitle_id: 44,
+          language: "es",
+          label: "Spanish (AI)",
+        },
+      });
+    });
+    expect(onRefreshSubtitles).toHaveBeenCalledOnce();
+    expect(controls.current?.activeSubtitleIndex).toBe(1_000_000);
+
+    const downloadedTrack: PlayerSubtitleInfo = {
+      index: 4,
+      media_file_id: 7,
+      track_id: "downloaded:44",
+      language: "es",
+      codec: "srt",
+      label: "Spanish (AI)",
+      source: "downloaded",
+      url: "/subtitles/44",
+    };
+    rerenderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        plan_id: "plan:2222222222222222",
+        plan_attempt_key: "v3:2222222222222222",
+      }),
+      planRevision: 2,
+      subtitleUrls: [downloadedTrack],
+    });
+
+    await waitFor(() => expect(onSubtitleChanged).toHaveBeenCalledWith(4, undefined));
+    expect(controls.current?.activeSubtitleIndex).toBe(4);
+    expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
+  });
+});

@@ -449,6 +449,13 @@ export function useAudiobookPlayback({
         setBuffered(null);
         adoptPlan(decision, playbackAttemptId);
       } catch (err) {
+        if (
+          planRef.current?.plan_attempt_key === expectedPlanKey &&
+          playbackAttemptIdRef.current === playbackAttemptId &&
+          failedPlanKeyRef.current === expectedPlanKey
+        ) {
+          failedPlanKeyRef.current = null;
+        }
         console.error("audiobook playback recovery failed", err);
         toast.error(err instanceof Error ? err.message : "Failed to recover audiobook playback");
       } finally {

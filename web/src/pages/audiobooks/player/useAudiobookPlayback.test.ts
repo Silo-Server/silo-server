@@ -355,6 +355,60 @@ describe("useAudiobookPlayback", () => {
     ).toHaveLength(1);
   });
 
+  it("allows another recovery attempt after a transient recovery request failure", async () => {
+    let replanCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          return jsonResponse(audioOnlyDecision("session-1", 0), { status: 201 });
+        }
+        if (url.endsWith("/playback/session-1/replan")) {
+          replanCount += 1;
+          return jsonResponse({ message: "temporary failure" }, { status: 503 });
+        }
+        if (url.endsWith("/playback/route-events")) {
+          return new Response(null, { status: 202 });
+        }
+        if (url.includes("/progress") || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse({});
+      }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    function Harness() {
+      const playback = useAudiobookPlayback({
+        contentId: "c",
+        files,
+        initialPositionSeconds: 0,
+      });
+      return createElement("audio", {
+        ref: playback.audioRef,
+        src: playback.streamUrl || undefined,
+      });
+    }
+
+    const { container } = render(createElement(Harness), { wrapper });
+    await flushAsyncWork();
+    const audio = container.querySelector("audio");
+    if (!audio) throw new Error("expected audio element");
+    Object.defineProperty(audio, "error", {
+      configurable: true,
+      value: { code: 3, message: "decoder rejected original container" },
+    });
+
+    fireEvent.error(audio);
+    await flushAsyncWork();
+    expect(replanCount).toBe(1);
+
+    fireEvent.error(audio);
+    await flushAsyncWork();
+    expect(replanCount).toBe(2);
+  });
+
   it("starts from the part containing the initial absolute position", async () => {
     const { result } = renderAudiobookPlayback({
       files: multiFile,

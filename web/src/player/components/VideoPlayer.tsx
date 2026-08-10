@@ -254,6 +254,7 @@ export function VideoPlayer({
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
+  const transportFailedForPlanRevisionRef = useRef<number | null>(null);
   const streamOriginRef = useRef(0);
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
@@ -315,6 +316,11 @@ export function VideoPlayer({
     label: string;
   } | null>(null);
   const [liveCues, setLiveCues] = useState<ParsedCue[]>([]);
+  const [pendingTranslationHandoff, setPendingTranslationHandoff] = useState<{
+    language: string;
+    planRevision: number;
+    existingTrackIndexes: number[];
+  } | null>(null);
   const [translationBuffering, setTranslationBuffering] = useState(false);
   const translationPauseRef = useRef(false);
   const translationResumeTimerRef = useRef<number | null>(null);
@@ -335,6 +341,7 @@ export function VideoPlayer({
       window.clearTimeout(translationResumeTimerRef.current);
       translationResumeTimerRef.current = null;
     }
+    setPendingTranslationHandoff(null);
     setLiveTranslation(null);
     setLiveCues([]);
     setTranslationBuffering(false);
@@ -370,12 +377,17 @@ export function VideoPlayer({
       const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
       if (reportedPlanFailureKeyRef.current === failureKey) return true;
       reportedPlanFailureKeyRef.current = failureKey;
+      transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
       onPlanFailure(failure, currentTimeRef.current);
       return true;
     },
-    [onPlanFailure, plan.plan_attempt_key, sessionId],
+    [onPlanFailure, plan.plan_attempt_key, planRevision, sessionId],
   );
+
+  useEffect(() => {
+    transportFailedForPlanRevisionRef.current = null;
+  }, [planRevision]);
 
   const failHlsStartup = useCallback(() => {
     console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
@@ -661,14 +673,20 @@ export function VideoPlayer({
     sessionId,
   ]);
 
-  // A replan the server refused leaves the current stream playing, but if
-  // nothing is playing yet there is no stream to keep — surface it so the
-  // error overlay with "Go Back" appears instead of an endless spinner.
+  // A failed recovery leaves no transport behind. Surface the refusal for the
+  // same plan revision and re-arm its failure key so a later media error can
+  // retry a transiently failed recovery request.
   useEffect(() => {
-    if (replanError && !isPlayerReady && !replanning) {
+    if (!replanError || replanning) return;
+
+    const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+    if (reportedPlanFailureKeyRef.current === failureKey) {
+      reportedPlanFailureKeyRef.current = null;
+    }
+    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
       setError(replanError);
     }
-  }, [replanError, isPlayerReady, replanning]);
+  }, [isPlayerReady, plan.plan_attempt_key, planRevision, replanError, replanning, sessionId]);
 
   // -- Remux seeking (callback-based) --
   // Only the progressive/direct routes take this path; HLS seeking is handled
@@ -922,6 +940,35 @@ export function VideoPlayer({
     [onSubtitleChanged],
   );
 
+  useEffect(() => {
+    if (!pendingTranslationHandoff || replanning) return;
+
+    const refreshSettled =
+      planRevision !== pendingTranslationHandoff.planRevision || replanError !== null;
+    if (!refreshSettled) return;
+
+    const normalizedLanguage = pendingTranslationHandoff.language.trim().toLowerCase();
+    const track = subtitleUrls.find(
+      (candidate) =>
+        candidate.source === "downloaded" &&
+        candidate.language.trim().toLowerCase() === normalizedLanguage &&
+        !pendingTranslationHandoff.existingTrackIndexes.includes(candidate.index),
+    );
+    setPendingTranslationHandoff(null);
+    if (!track) return;
+
+    handleSubtitleSelect(track.index);
+    setLiveTranslation(null);
+    setLiveCues([]);
+  }, [
+    handleSubtitleSelect,
+    pendingTranslationHandoff,
+    planRevision,
+    replanError,
+    replanning,
+    subtitleUrls,
+  ]);
+
   // The media-time playhead, sent with a translate request so the server starts
   // where the viewer is watching.
   const getSubtitleStartPosition = useCallback(() => {
@@ -1020,6 +1067,18 @@ export function VideoPlayer({
             setLiveCues([]);
             handleSubtitleSelect(track.combined_index, track);
           } else {
+            const language = event.payload.language.trim().toLowerCase();
+            setPendingTranslationHandoff({
+              language: event.payload.language,
+              planRevision,
+              existingTrackIndexes: subtitleUrls
+                .filter(
+                  (track) =>
+                    track.source === "downloaded" &&
+                    track.language.trim().toLowerCase() === language,
+                )
+                .map((track) => track.index),
+            });
             onRefreshSubtitles?.(getSubtitleStartPosition());
           }
           break;
@@ -1050,7 +1109,9 @@ export function VideoPlayer({
       onApplySubtitleTrack,
       onRealtimeEvent,
       onRefreshSubtitles,
+      planRevision,
       resumeFromTranslationPause,
+      subtitleUrls,
     ],
   );
 

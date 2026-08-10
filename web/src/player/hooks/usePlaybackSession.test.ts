@@ -350,6 +350,67 @@ describe("usePlaybackSession quality changes", () => {
 });
 
 describe("usePlaybackSession version switches", () => {
+  it("clears and stops the previous session when a new request ends terminally", async () => {
+    let startCount = 0;
+    const stoppedSessions: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startCount += 1;
+        if (startCount === 2) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "terminal",
+            terminal: {
+              reason: "no_playable_route",
+              message: "The next item has no playable route.",
+              retryable: false,
+            },
+          });
+        }
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: fixturePlanV3({ session_id: "session-1" }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        stoppedSessions.push(url);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ requestKey, fileId }: { requestKey: string; fileId: number }) =>
+        usePlaybackSession(requestKey, [], [], fileId, 0, false, "auto"),
+      { wrapper, initialProps: { requestKey: "episode-1", fileId: 7 } },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    rerender({ requestKey: "episode-2", fileId: 8 });
+
+    await waitFor(() => {
+      expect(result.current.plan).toBeNull();
+      expect(result.current.error).toBe("The next item has no playable route.");
+    });
+    expect(result.current.streamUrl).toBeNull();
+    expect(result.current.sessionId).toBeNull();
+    expect(stoppedSessions).toEqual(["/api/v1/playback/session-1"]);
+
+    unmount();
+  });
+
   it("keeps the active attempt identity when a replacement start fails", async () => {
     const startBodies: Array<{ playback_attempt_id: string; start_position?: number }> = [];
     const replanBodies: Array<{ playback_attempt_id: string }> = [];
@@ -423,6 +484,96 @@ describe("usePlaybackSession version switches", () => {
 });
 
 describe("usePlaybackSession replans", () => {
+  it("runs a queued failure recovery after the in-flight replan settles", async () => {
+    const initialPlan = fixturePlanV3();
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const replanBodies: Array<{ operation: string; position_seconds: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: initialPlan,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(
+          JSON.parse(String(init?.body)) as { operation: string; position_seconds: number },
+        );
+        if (replanBodies.length === 1) return firstReplanResponse;
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            plan_id: "plan:2222222222222222",
+            plan_attempt_key: "v3:2222222222222222",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.refreshSubtitles(120));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    act(() => {
+      result.current.reanchorSeek(300);
+      result.current.recoverFromFailure({ classification: "decoder_error" }, 450);
+      result.current.reanchorSeek(600);
+    });
+    expect(replanBodies).toHaveLength(1);
+
+    await act(async () => {
+      resolveFirstReplan?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: fixturePlanV3({
+            plan_id: "plan:1111111111111111",
+            plan_attempt_key: "v3:1111111111111111",
+          }),
+        }),
+      );
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(
+      replanBodies.map(({ operation, position_seconds }) => ({ operation, position_seconds })),
+    ).toEqual([
+      { operation: "track_change", position_seconds: 120 },
+      { operation: "failure_recovery", position_seconds: 450 },
+    ]);
+
+    unmount();
+  });
+
   it("coalesces reanchor seeks behind an in-flight replan and keeps the latest position", async () => {
     const initialPlan = fixturePlanV3();
     const firstReplannedPlan = fixturePlanV3({

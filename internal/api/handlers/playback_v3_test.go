@@ -65,8 +65,27 @@ type recordingRouteEventPlanStoreV3 struct {
 	events chan playback.RouteEventRecordV3
 }
 
+type releaseDeadlinePlanStoreV3 struct {
+	playback.PlanStoreV3
+	called       bool
+	hasDeadline  bool
+	timeToExpiry time.Duration
+	contextErr   error
+}
+
 func (s *recordingRouteEventPlanStoreV3) RecordRouteEvent(_ context.Context, event playback.RouteEventRecordV3) error {
 	s.events <- event
+	return nil
+}
+
+func (s *releaseDeadlinePlanStoreV3) ReleaseReplan(ctx context.Context, _, _, _ string) error {
+	s.called = true
+	deadline, ok := ctx.Deadline()
+	s.hasDeadline = ok
+	if ok {
+		s.timeToExpiry = time.Until(deadline)
+	}
+	s.contextErr = ctx.Err()
 	return nil
 }
 
@@ -646,6 +665,55 @@ func TestHandleReplanPlaybackV3FailureDoesNotReplaceDurableStartDecision(t *test
 	}
 	if replayed.PlaybackPlan.PlanID != started.PlaybackPlan.PlanID || replayed.Terminal != nil {
 		t.Fatalf("start replay = %#v, want original plan %q", replayed, started.PlaybackPlan.PlanID)
+	}
+}
+
+func TestHandleReplanPlaybackV3BoundsDeferredLeaseRelease(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+
+	recordingStore := &releaseDeadlinePlanStoreV3{PlanStoreV3: handler.PlanStoreV3}
+	handler.PlanStoreV3 = recordingStore
+	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+	replan := playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
+		ReplanRequestID:       "replan-release-deadline-0001",
+		FailedPlanID:          "stale-plan-id",
+		PlanAttemptID:         "plan-attempt-release-deadline-0001",
+		PlanAttemptKey:        failedKey,
+		AttemptedPlanKeys:     []string{failedKey},
+		AttemptCount:          1,
+		QualityPreference:     "original",
+		Failure:               playback.FailureV3{Classification: "decoder_failure"},
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	}
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+	req = withPlaybackRouteParam(req, "session_id", started.SessionID)
+	rr := httptest.NewRecorder()
+	handler.HandleReplanPlaybackV3(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("replan status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !recordingStore.called || !recordingStore.hasDeadline || recordingStore.contextErr != nil {
+		t.Fatalf("release context: called=%v deadline=%v err=%v", recordingStore.called, recordingStore.hasDeadline, recordingStore.contextErr)
+	}
+	if recordingStore.timeToExpiry < 2500*time.Millisecond || recordingStore.timeToExpiry > replanReleaseTimeoutV3 {
+		t.Fatalf("release deadline remaining = %v, want approximately %v", recordingStore.timeToExpiry, replanReleaseTimeoutV3)
 	}
 }
 

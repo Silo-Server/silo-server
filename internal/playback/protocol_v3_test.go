@@ -1806,6 +1806,43 @@ func TestPlanPlaybackV3AudioOnlyPlansOriginalHTTP(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3AudioOnlyHonorsBandwidthCap(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		bitrate    int
+		capKbps    *int
+		wantDirect bool
+	}{
+		{name: "source exceeds cap", bitrate: 1_200, capKbps: intPointerV3(256)},
+		{name: "source is below cap", bitrate: 128, capKbps: intPointerV3(256), wantDirect: true},
+		{name: "uncapped", bitrate: 1_200, wantDirect: true},
+		{name: "unknown source bitrate", capKbps: intPointerV3(256), wantDirect: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := audioOnlyFixtureFileV3()
+			file.Bitrate = test.bitrate
+			req := validStartRequestV3()
+			req.FileID = file.ID
+			req.Capabilities.Containers = []string{"mp4"}
+			req.BandwidthCapKbps = test.capKbps
+
+			result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+			if test.wantDirect {
+				if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.TranscodeAudio {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+				return
+			}
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.Plan.DecisionReason != "quality_bandwidth_cap" || !hasDegradationWarningV3(result.Plan.DegradationWarnings, "audio_converted") || !hasDegradationWarningV3(result.Plan.DegradationWarnings, "bandwidth_cap_applied") {
+				t.Fatalf("capped plan = %#v", result.Plan)
+			}
+		})
+	}
+}
+
 // An audio-only source whose codec the client cannot decode must take the
 // progressive audio_to_aac conversion route, and keep an accurate retryable
 // terminal when the toolchain is missing.
@@ -1829,6 +1866,33 @@ func TestPlanPlaybackV3AudioOnlyConvertsUnsupportedCodec(t *testing.T) {
 	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: noToolchain})
 	if result.Terminal == nil || result.Terminal.Reason != "audio_conversion_unsupported" || !result.Terminal.Retryable {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3AudioOnlyConvertsForProgressiveCodecSubset(t *testing.T) {
+	file := audioOnlyFixtureFileV3()
+	file.CodecAudio = "flac"
+	file.AudioChannels = 2
+	file.AudioTracks[0].Codec = "flac"
+	req := validStartRequestV3()
+	req.FileID = file.ID
+	req.Capabilities.CodecsAudio = []string{"aac", "flac"}
+	req.Capabilities.Containers = []string{"mp4"}
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+	maxChannels := 1
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"}, AudioDecodeCodecs: []string{"aac"}, MaxChannels: &maxChannels,
+	}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 1 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.EffectiveRecipe.AudioChannels == nil || *result.Plan.EffectiveRecipe.AudioChannels != 1 || result.Plan.EffectiveRecipe.AudioLayout != "mono" {
+		t.Fatalf("AAC recipe = %#v", result.Plan.EffectiveRecipe)
+	}
+	if result.Plan.DecisionReason != "audio_adaptation" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationAudioToAACV3 || !hasDegradationWarningV3(result.Plan.DegradationWarnings, "audio_converted") {
+		t.Fatalf("converted plan = %#v", result.Plan)
 	}
 }
 
