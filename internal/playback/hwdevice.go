@@ -151,6 +151,13 @@ var nvencMultiDeviceWarnOnce sync.Once
 //     addresses GPUs by CUDA index/UUID, not render-node path): falls back to
 //     the first entry without reserving.
 func AcquireHWDevice(configured, resolvedHWAccel string) (string, func()) {
+	return acquireHWDevice(configured, resolvedHWAccel, "")
+}
+
+// acquireHWDevice applies the normal allocator while optionally excluding one
+// previously failed render device when another present device is available.
+// The selected device is still reserved through the same accounting path.
+func acquireHWDevice(configured, resolvedHWAccel, avoidDevice string) (string, func()) {
 	noop := func() {}
 	set := ParseHWDeviceSet(configured)
 	if !set.Multi() {
@@ -168,6 +175,17 @@ func AcquireHWDevice(configured, resolvedHWAccel string) (string, func()) {
 	// Select and reserve in one critical section so concurrent workload starts
 	// observe each other's reservations instead of piling onto one device.
 	present := presentHWDevices(set.List())
+	if len(present) > 1 && avoidDevice != "" {
+		eligible := make([]string, 0, len(present)-1)
+		for _, device := range present {
+			if device != avoidDevice {
+				eligible = append(eligible, device)
+			}
+		}
+		if len(eligible) > 0 {
+			present = eligible
+		}
+	}
 	hwDeviceLoad.mu.Lock()
 	device := leastLoadedHWDeviceLocked(present)
 	hwDeviceLoad.counts[device]++

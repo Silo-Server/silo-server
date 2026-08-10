@@ -181,6 +181,26 @@ func TestAcquireHWDeviceReleaseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAcquireHWDeviceAvoidsFailedRenderDeviceAndReservesAlternate(t *testing.T) {
+	resetDeviceLoad(t)
+	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
+	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
+	got, release := acquireHWDevice(configured, "qsv", "/dev/dri/renderD128")
+	defer release()
+	if got != "/dev/dri/renderD129" {
+		t.Fatalf("alternate device = %q, want renderD129", got)
+	}
+	if active := hwDeviceActiveCount(got); active != 1 {
+		t.Fatalf("alternate device active count = %d, want 1", active)
+	}
+	if got, releaseNVENC := acquireHWDevice(configured, "nvenc", "/dev/dri/renderD128"); got != "/dev/dri/renderD128" {
+		releaseNVENC()
+		t.Fatalf("NVENC retry device = %q, want first configured device", got)
+	} else {
+		releaseNVENC()
+	}
+}
+
 func TestPickRenderDeviceExplicitValuePassesThrough(t *testing.T) {
 	// PickRenderDevice is auto-detection only; list resolution happens in
 	// AcquireHWDevice before args are built, so an explicit value — even a

@@ -32,6 +32,9 @@ func init() {
 type TranscodeOpts struct {
 	InputPath string
 	OutputDir string // e.g., /tmp/silo-transcode/{session_id}/
+	// subtitleFilterInputPath is a parser-safe local alias used only by the
+	// libass subtitles filter. FFmpeg still opens InputPath as the media input.
+	subtitleFilterInputPath string
 	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
 	// retains the legacy flat {session_id} layout.
 	OutputSubdir         string
@@ -58,6 +61,11 @@ type TranscodeOpts struct {
 	FFmpegPath             string // optional explicit ffmpeg binary path
 	HWAccel                string // auto, qsv, vaapi, nvenc, none
 	HWDevice               string // e.g., /dev/dri/renderD128 (default if empty)
+	// AvoidHWDevice asks the initial multi-device allocator to prefer any other
+	// present render device. It is a process-local startup hint used after an
+	// early GPU failure; the selected concrete device remains fully reserved and
+	// is the value frozen into the session recipe.
+	AvoidHWDevice string
 	// SoftwareVideoDecode keeps a hardware encoder while decoding the source
 	// on the CPU. Intel's VAAPI/QSV decoders cannot accept 10-bit AVC, but the
 	// decoded frames can still be converted to NV12, uploaded, and encoded by
@@ -206,13 +214,18 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	reserveHWDeviceOnRestart := configuredHWDevices.Multi() && hwAccelBalancesRenderDevices(opts.HWAccel)
 	// Resolve a multi-device hw_device list to one concrete GPU. Restarts reuse
 	// the selected device, but each ffmpeg process owns its own reservation.
-	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
+	hwDevice, releaseHWDevice := acquireHWDevice(opts.HWDevice, opts.HWAccel, opts.AvoidHWDevice)
 	opts.HWDevice = hwDevice
+	opts.AvoidHWDevice = ""
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
+	}
+	if err := prepareSubtitleFilterInput(&opts); err != nil {
+		releaseHWDevice()
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -574,12 +587,20 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 
 	// Hardware encoders (QSV, VAAPI, NVENC) may not reliably honor
 	// force_key_frames expressions. Set explicit GOP size so segment
-	// boundaries always start with an IDR frame. We assume 30 fps as a
+	// boundaries always start with an intra frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
 	if opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI || opts.HWAccel == transcodeHWNVENC {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
+	}
+	// QSV otherwise encodes force_key_frames requests as non-IDR intra frames.
+	// The HLS muxer cannot split independent segments on those frames, so a
+	// 23.976 fps source with a 60-frame GOP produces 2.5-5 second fragments and
+	// breaks the fixed-duration VOD manifest/restart timeline. Promote requested
+	// keyframes to IDRs so the muxer cuts at the requested boundaries.
+	if opts.HWAccel == transcodeHWQSV {
+		args = append(args, "-forced_idr", "1")
 	}
 
 	return args
@@ -902,8 +923,12 @@ func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv b
 // then re-uploaded: hwdownload → format=yuv420p → [scale,] subtitles → hwupload → hwmap.
 func appendSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	scale := resolutionToScale(opts.TargetResolution)
+	subtitleInputPath := opts.InputPath
+	if opts.subtitleFilterInputPath != "" {
+		subtitleInputPath = opts.subtitleFilterInputPath
+	}
 	subFilter := fmt.Sprintf("subtitles='%s':si=%d",
-		escapeFilterPath(opts.InputPath), opts.SubtitleTrackIndex)
+		escapeFilterPath(subtitleInputPath), opts.SubtitleTrackIndex)
 
 	// Build the CPU filter portion: scale (if any) then subtitle overlay.
 	// Scale must come before subtitles so text is rendered at target resolution.
@@ -1058,6 +1083,37 @@ var filterPathReplacer = strings.NewReplacer(
 // escapeFilterPath escapes special characters in file paths for ffmpeg filter syntax.
 func escapeFilterPath(path string) string {
 	return filterPathReplacer.Replace(path)
+}
+
+const subtitleFilterAliasName = "subtitle-source.media"
+
+// prepareSubtitleFilterInput avoids passing the library filename through
+// FFmpeg's nested filter parsers. In particular, an apostrophe can be consumed
+// by the filtergraph parser even after it was escaped for the subtitles filter.
+// A stable alias in the session directory keeps the media input unchanged and
+// is retained for seek restarts with the rest of TranscodeOpts.
+func prepareSubtitleFilterInput(opts *TranscodeOpts) error {
+	if !opts.SubtitleBurnIn || opts.SubtitleTrackIndex < 0 || NeedsBurnIn(opts.SubtitleCodec) {
+		return nil
+	}
+
+	aliasPath := filepath.Join(opts.OutputDir, subtitleFilterAliasName)
+	target, err := os.Readlink(aliasPath)
+	switch {
+	case err == nil:
+		if target != opts.InputPath {
+			return fmt.Errorf("prepare subtitle filter input: alias targets unexpected source")
+		}
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.Symlink(opts.InputPath, aliasPath); err != nil {
+			return fmt.Errorf("prepare subtitle filter input: %w", err)
+		}
+	default:
+		return fmt.Errorf("prepare subtitle filter input: inspect alias: %w", err)
+	}
+
+	opts.subtitleFilterInputPath = aliasPath
+	return nil
 }
 
 // minManifestSegments is the standard startup lead for actively encoded HLS.

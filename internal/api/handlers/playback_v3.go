@@ -863,16 +863,45 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, sourceMetadata.DurationSeconds)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	ts, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink})
+	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
+	ts, err := h.startLocalPlaybackTransport(r.Context(), opts)
 	if err != nil {
 		unlock()
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
 	}
 	if _, readyErr := ts.WaitForManifest(playback.ManifestStartupTimeout); readyErr != nil {
-		transportErr := manifestStartupTransportErrorV3(ts.IsRunning(), readyErr)
+		wasRunning := ts.IsRunning()
+		failedDevice := ts.Opts().HWDevice
+		transportErr := manifestStartupTransportErrorV3(wasRunning, readyErr)
 		_ = ts.Close()
-		unlock()
-		return preparedTransportV3{}, transportErr
+		if wasRunning {
+			unlock()
+			return preparedTransportV3{}, transportErr
+		}
+
+		// FFmpeg and GPU drivers can fail before producing their first segment
+		// even though the recipe is valid. Retry one clean generation, preferring
+		// another configured render device so a transient device failure does not
+		// become an immediate client-visible transport error.
+		retryOpts := opts
+		retryOpts.AvoidHWDevice = failedDevice
+		slog.WarnContext(r.Context(), "local transcode crashed during startup; retrying once",
+			"component", "playback",
+			"playback_session_id", session.ID,
+			"failed_device", failedDevice,
+			"configured_devices", retryOpts.HWDevice,
+			"error", readyErr)
+		ts, err = h.startLocalPlaybackTransport(r.Context(), retryOpts)
+		if err != nil {
+			unlock()
+			return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
+		}
+		if _, retryReadyErr := ts.WaitForManifest(playback.ManifestStartupTimeout); retryReadyErr != nil {
+			transportErr = manifestStartupTransportErrorV3(ts.IsRunning(), retryReadyErr)
+			_ = ts.Close()
+			unlock()
+			return preparedTransportV3{}, transportErr
+		}
 	}
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
 	url := appendStreamToken(fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID), h.signSessionToken(card))

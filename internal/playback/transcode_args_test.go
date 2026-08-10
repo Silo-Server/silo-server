@@ -2,9 +2,48 @@ package playback
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestPrepareSubtitleFilterInputCreatesParserSafeAlias(t *testing.T) {
+	outputDir := t.TempDir()
+	inputPath := "/media/I'm here [1080p].mkv"
+	opts := TranscodeOpts{
+		InputPath:          inputPath,
+		OutputDir:          outputDir,
+		SubtitleBurnIn:     true,
+		SubtitleTrackIndex: 2,
+		SubtitleCodec:      "subrip",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+	}
+
+	if err := prepareSubtitleFilterInput(&opts); err != nil {
+		t.Fatalf("prepareSubtitleFilterInput() error = %v", err)
+	}
+	wantAlias := filepath.Join(outputDir, subtitleFilterAliasName)
+	if opts.subtitleFilterInputPath != wantAlias {
+		t.Fatalf("subtitleFilterInputPath = %q, want %q", opts.subtitleFilterInputPath, wantAlias)
+	}
+	target, err := os.Readlink(wantAlias)
+	if err != nil {
+		t.Fatalf("read subtitle filter alias: %v", err)
+	}
+	if target != inputPath {
+		t.Fatalf("subtitle filter alias target = %q, want %q", target, inputPath)
+	}
+
+	joined := strings.Join(buildFFmpegArgs(opts), " ")
+	if !strings.Contains(joined, "-i "+inputPath) {
+		t.Fatalf("media input should keep its original path: %s", joined)
+	}
+	if !strings.Contains(joined, "subtitles='"+wantAlias+"':si=2") {
+		t.Fatalf("subtitle filter should use the parser-safe alias: %s", joined)
+	}
+}
 
 func TestStartTranscodeRejectsUnvalidatedBitstreamFilter(t *testing.T) {
 	_, err := StartTranscode(context.Background(), TranscodeOpts{
@@ -318,6 +357,48 @@ func TestBuildFFmpegArgs_H264High10QSVUsesSoftwareDecodeUpload(t *testing.T) {
 	}
 	if strings.Contains(joined, "scale_vaapi") {
 		t.Fatalf("High 10 sidecar route must scale software frames before upload: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_QSVPromotesForcedSegmentKeyframesToIDR(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:        "/media/movie.mkv",
+		OutputDir:        "/tmp/out",
+		SessionID:        "session-qsv-idr",
+		SourceVideoCodec: "vp9",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		HWAccel:          "qsv",
+	})
+
+	joined := strings.Join(args, " ")
+	for _, required := range []string{
+		"-force_key_frames expr:gte(t,n_forced*2)",
+		"-g 60 -keyint_min 60",
+		"-forced_idr 1",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("QSV segment boundary args missing %q: %s", required, joined)
+		}
+	}
+}
+
+func TestBuildFFmpegArgs_NonQSVDoesNotUseQSVForcedIDROption(t *testing.T) {
+	for _, hwAccel := range []string{"vaapi", "nvenc", "none"} {
+		args := buildFFmpegArgs(TranscodeOpts{
+			InputPath:        "/media/movie.mkv",
+			OutputDir:        "/tmp/out",
+			SessionID:        "session-non-qsv-idr",
+			SourceVideoCodec: "vp9",
+			TargetCodecVideo: "h264",
+			TargetCodecAudio: "aac",
+			SegmentDuration:  2,
+			HWAccel:          hwAccel,
+		})
+		if joined := strings.Join(args, " "); strings.Contains(joined, "-forced_idr") {
+			t.Fatalf("%s args must not contain QSV-only -forced_idr: %s", hwAccel, joined)
+		}
 	}
 }
 

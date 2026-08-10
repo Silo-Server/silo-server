@@ -190,6 +190,59 @@ func TestRestartReacquiresSameGPUAfterNaturalExit(t *testing.T) {
 	}
 }
 
+func TestAvoidedStartupDeviceKeepsReservationAcrossRestart(t *testing.T) {
+	resetDeviceLoad(t)
+	devA, devB := "/dev/dri/renderD888", "/dev/dri/renderD889"
+	configured := devA + "," + devB
+	fakeDeviceStat(t, devA, devB)
+
+	s, err := StartTranscode(context.Background(), TranscodeOpts{
+		InputPath:        "/nonexistent/input.mkv",
+		OutputDir:        t.TempDir(),
+		SessionID:        "hwdevice-avoid-restart",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		FFmpegPath:       restartableFakeFFmpegScript(t),
+		HWAccel:          "qsv",
+		HWDevice:         configured,
+		AvoidHWDevice:    devA,
+	})
+	if err != nil {
+		t.Fatalf("StartTranscode: %v", err)
+	}
+	t.Cleanup(func() { _ = s.CloseProcess() })
+
+	select {
+	case <-s.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial ffmpeg process did not exit")
+	}
+	if got := s.Opts().HWDevice; got != devB {
+		t.Fatalf("retry session device = %q, want alternate device %q", got, devB)
+	}
+	if got := hwDeviceActiveCount(devB); got != 0 {
+		t.Fatalf("active count after initial exit = %d, want 0", got)
+	}
+
+	if err := s.Restart(context.Background(), 10, 5); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if got := s.Opts().HWDevice; got != devB {
+		t.Fatalf("restart device = %q, want alternate device %q", got, devB)
+	}
+	if got := hwDeviceActiveCount(devB); got != 1 {
+		t.Fatalf("active count while restarted process runs = %d, want 1", got)
+	}
+
+	if err := s.CloseProcess(); err != nil {
+		t.Fatalf("CloseProcess: %v", err)
+	}
+	if got := hwDeviceActiveCount(devB); got != 0 {
+		t.Fatalf("active count after restarted process exit = %d, want 0", got)
+	}
+}
+
 func TestRestartReleasesReservationOnSpawnFailure(t *testing.T) {
 	resetDeviceLoad(t)
 	devA, devB := "/dev/dri/renderD888", "/dev/dri/renderD889"
