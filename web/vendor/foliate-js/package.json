@@ -24,7 +24,7 @@
     "fflate": "^0.8.2",
     "fs-extra": "^11.2.0",
     "globals": "^15.9.0",
-    "pdfjs-dist": "^5.4.530",
+    "pdfjs-dist": "^6.2.108",
     "rollup": "^4.22.4"
   },
   "scripts": {

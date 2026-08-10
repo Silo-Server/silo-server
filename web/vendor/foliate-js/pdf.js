@@ -6,8 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsPath('pdf.worker.min.mjs')
 
 const fetchText = async url => await (await fetch(url)).text()
 
-let textLayerBuilderCSS = null
-let annotationLayerBuilderCSS = null
+let pdfViewerCSS = null
 
 // Track active render tasks per iframe document to cancel superseded renders
 const activeRenderTasks = new WeakMap()
@@ -158,8 +157,7 @@ const render = async (page, doc, zoom, pageColors) => {
     const canvas = document.createElement('canvas')
     canvas.height = viewport.height
     canvas.width = viewport.width
-    const canvasContext = canvas.getContext('2d')
-    const renderTask = page.render({ canvasContext, viewport, pageColors })
+    const renderTask = page.render({ canvas, viewport, pageColors })
     activeRenderTasks.set(doc, renderTask)
 
     try {
@@ -249,8 +247,7 @@ const renderPage = async (page, getImageBlob) => {
         const canvas = document.createElement('canvas')
         canvas.height = viewport.height
         canvas.width = viewport.width
-        const canvasContext = canvas.getContext('2d')
-        await page.render({ canvasContext, viewport }).promise
+        await page.render({ canvas, viewport }).promise
         return new Promise(resolve => canvas.toBlob(blob => {
             // Release canvas bitmap memory after extracting the blob
             canvas.width = 0
@@ -258,13 +255,8 @@ const renderPage = async (page, getImageBlob) => {
             resolve(blob)
         }))
     }
-    // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/text_layer_builder.css
-    if (textLayerBuilderCSS == null) {
-        textLayerBuilderCSS = await fetchText(pdfjsPath('text_layer_builder.css'))
-    }
-    // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/annotation_layer_builder.css
-    if (annotationLayerBuilderCSS == null) {
-        annotationLayerBuilderCSS = await fetchText(pdfjsPath('annotation_layer_builder.css'))
+    if (pdfViewerCSS == null) {
+        pdfViewerCSS = await fetchText(pdfjsPath('pdf_viewer.css'))
     }
     const data = `
         <!DOCTYPE html>
@@ -276,8 +268,7 @@ const renderPage = async (page, getImageBlob) => {
             margin: 0;
             padding: 0;
         }
-        ${textLayerBuilderCSS}
-        ${annotationLayerBuilderCSS}
+        ${pdfViewerCSS}
         </style>
         <div id="canvas"></div>
         <div class="textLayer"></div>
@@ -357,6 +348,7 @@ export const makePDF = async file => {
         wasmUrl: pdfjsPath(''),
         cMapUrl: pdfjsPath('cmaps/'),
         standardFontDataUrl: pdfjsPath('standard_fonts/'),
+        enableScripting: false,
         isEvalSupported: false,
     }).promise
 
