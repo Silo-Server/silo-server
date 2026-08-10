@@ -62,7 +62,7 @@ type TranscodeOpts struct {
 	SegmentDuration        int    // seconds, default 6
 	StartSegmentNumber     int    // -hls_segment_start_number, default 0
 	FFmpegPath             string // optional explicit ffmpeg binary path
-	HWAccel                string // auto, qsv, vaapi, nvenc, none
+	HWAccel                string // auto, qsv, vaapi, nvenc, videotoolbox, none
 	HWDevice               string // e.g., /dev/dri/renderD128 (default if empty)
 	// AvoidHWDevice asks the initial multi-device allocator to prefer any other
 	// present render device. It is a process-local startup hint used after an
@@ -906,7 +906,11 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		// so the software filter graph (scale, subtitle burn-in, tone paths)
 		// applies unchanged and the *_videotoolbox encoders upload
 		// internally. HW decode + HW encode carries nearly all of the win.
-		args = append(args, "-hwaccel", "videotoolbox")
+		// H.264 Hi10P decodes in software (VideoToolbox cannot), same as the
+		// QSV/VAAPI paths; the encoder still runs in hardware.
+		if !opts.SoftwareVideoDecode {
+			args = append(args, "-hwaccel", "videotoolbox")
+		}
 	}
 	return args
 }

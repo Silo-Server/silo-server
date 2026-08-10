@@ -1340,6 +1340,29 @@ func TestBuildFFmpegArgs_VideoToolboxH264UsesSoftwareFilters(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgs_VideoToolboxHi10PDecodesInSoftware(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-vt-hi10p",
+		SourceVideoCodec:   "h264",
+		SourceVideoProfile: "High 10",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "videotoolbox",
+		TargetBitrateKbps:  2000,
+	})
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "-hwaccel videotoolbox") {
+		t.Fatalf("Hi10P source must decode in software (VideoToolbox cannot): %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_videotoolbox") {
+		t.Fatalf("encode should still use the hardware encoder: %s", joined)
+	}
+}
+
 func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:        "/media/movie.mkv",
