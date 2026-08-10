@@ -1672,9 +1672,29 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		artifactRecipe = frozenRecipe
 	}
-	transport, transportErr := h.prepareTransportV3(r, session, effectiveFile, result)
-	if transportErr != nil {
-		return playback.DecisionResponseV3{}, *record, nil, transportErr
+	transportReused := trackChange && h.hasActiveHLSTransportV3(session) && sidecarOnlyHLSReplanV3(record, result.Plan, artifactRecipe, req.ClientPlaybackContext.Output.OutputContextID)
+	var transport preparedTransportV3
+	if transportReused {
+		// A sidecar selection changes the plan and subtitle artifact, but it does
+		// not change the bytes FFmpeg produces. Keep the active HLS generation and
+		// its timeline so a client remount cannot strand itself between the killed
+		// old window and a replacement window that starts at a different segment.
+		result.Plan.Stream = record.CurrentPlan.Stream
+		result.Plan.Timeline = record.CurrentPlan.Timeline
+		result.Plan.ExpiresAt = record.CurrentPlan.ExpiresAt
+		transport = reusedHLSTransportV3(session, record.CurrentPlan.Stream.URL)
+		slog.InfoContext(r.Context(), "protocol v3 replan reused active HLS A/V transport",
+			"component", "playback",
+			"playback_session_id", session.ID,
+			"previous_plan_id", record.CurrentPlanID,
+			"plan_id", result.Plan.PlanID,
+		)
+	} else {
+		var transportErr *transportErrorV3
+		transport, transportErr = h.prepareTransportV3(r, session, effectiveFile, result)
+		if transportErr != nil {
+			return playback.DecisionResponseV3{}, *record, nil, transportErr
+		}
 	}
 	result.Plan.Stream.URL = transport.url
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &artifactRecipe); err != nil {
@@ -1712,6 +1732,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	updated.NormalizedRequest = start
 	updated.EffectiveMediaFileID = effectiveFile.ID
 	updated.ExpiresAt = time.Now().Add(playback.MaxTokenTTL)
+	if transportReused {
+		if expiresAt, parseErr := time.Parse(time.RFC3339, result.Plan.ExpiresAt); parseErr == nil {
+			updated.ExpiresAt = expiresAt
+		}
+	}
 	originalRollback := transport.rollback
 	replacement := playback.SessionReplacement{
 		EffectiveMediaFileID: effectiveFile.ID,
@@ -2030,6 +2055,86 @@ func sameStringMultisetV3(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+// sidecarOnlyHLSReplanV3 proves that a track-change plan can keep the active
+// HLS A/V generation. Subtitle identity and claims are intentionally excluded:
+// those are the point of the replan and are delivered by the independently
+// addressed sidecar artifact. Every field that can change FFmpeg's audio/video
+// output remains part of the comparison.
+func sidecarOnlyHLSReplanV3(record *playback.AttemptRecordV3, candidate *playback.PlanV3, candidateRecipe playback.ExecutableRecipeV3, outputContextID string) bool {
+	if record == nil || candidate == nil || record.CurrentPlan.Stream.URL == "" ||
+		!record.FrozenRecipe.ValidFor(record.CurrentPlan) || !candidateRecipe.ValidFor(*candidate) ||
+		record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID != outputContextID ||
+		record.EffectiveMediaFileID != candidate.EffectiveMediaFileID ||
+		record.CurrentPlan.RequestedMediaFileID != candidate.RequestedMediaFileID ||
+		record.CurrentPlan.EffectiveMediaFileID != candidate.EffectiveMediaFileID ||
+		!isHLSDeliveryV3(record.CurrentPlan.Delivery) || record.CurrentPlan.Delivery != candidate.Delivery ||
+		record.CurrentPlan.Subtitle.Mode == playback.SubtitleBurnInV3 || candidate.Subtitle.Mode == playback.SubtitleBurnInV3 ||
+		!sameTrackIdentityV3(record.CurrentPlan.SelectedTracks.Audio, candidate.SelectedTracks.Audio) {
+		return false
+	}
+	if record.CurrentPlan.Stream.Protocol != candidate.Stream.Protocol ||
+		record.CurrentPlan.Stream.Container != candidate.Stream.Container ||
+		record.CurrentPlan.Stream.MIMEType != candidate.Stream.MIMEType ||
+		record.CurrentPlan.Stream.HeaderRefresh != candidate.Stream.HeaderRefresh ||
+		!sameExecutableAVRecipeV3(record.FrozenRecipe, candidateRecipe) ||
+		!sameEffectiveAVRecipeV3(record.CurrentPlan.EffectiveRecipe, candidate.EffectiveRecipe) ||
+		record.CurrentPlan.Claims.Video != candidate.Claims.Video ||
+		record.CurrentPlan.Claims.Audio != candidate.Claims.Audio ||
+		!sameTransformationsV3(record.CurrentPlan.Transformations, candidate.Transformations) ||
+		!sameAppliedQuirksV3(record.CurrentPlan.AppliedQuirks, candidate.AppliedQuirks) ||
+		!sameStringMultisetV3(record.CurrentPlan.RuntimeCorrections, candidate.RuntimeCorrections) {
+		return false
+	}
+	return true
+}
+
+func isHLSDeliveryV3(delivery playback.DeliveryV3) bool {
+	return delivery == playback.DeliveryRemuxHLSV3 || delivery == playback.DeliveryTranscodeHLSV3
+}
+
+func sameExecutableAVRecipeV3(left, right playback.ExecutableRecipeV3) bool {
+	return left.PlayMethod == right.PlayMethod &&
+		left.TranscodeAudio == right.TranscodeAudio &&
+		left.TargetVideoCodec == right.TargetVideoCodec &&
+		left.TargetAudioCodec == right.TargetAudioCodec &&
+		left.TargetAudioChannels == right.TargetAudioChannels &&
+		left.TargetResolution == right.TargetResolution &&
+		left.TargetBitrateKbps == right.TargetBitrateKbps &&
+		left.SourceVideoCodec == right.SourceVideoCodec &&
+		left.SoftwareVideoDecode == right.SoftwareVideoDecode &&
+		left.SourceDurationSeconds == right.SourceDurationSeconds
+}
+
+func sameEffectiveAVRecipeV3(left, right playback.EffectiveRecipeV3) bool {
+	return left.VideoCodec == right.VideoCodec && left.AudioCodec == right.AudioCodec &&
+		optionalIntEqualV3(left.Width, right.Width) && optionalIntEqualV3(left.Height, right.Height) &&
+		optionalFloatEqualV3(left.FrameRate, right.FrameRate) &&
+		optionalIntEqualV3(left.BitrateKbps, right.BitrateKbps) &&
+		left.DynamicRange == right.DynamicRange &&
+		optionalIntEqualV3(left.AudioChannels, right.AudioChannels) && left.AudioLayout == right.AudioLayout
+}
+
+func reusedHLSTransportV3(session *playback.Session, streamURL string) preparedTransportV3 {
+	transport := preparedTransportV3{url: streamURL}
+	if session != nil {
+		transport.nodeURL = session.TranscodeNodeURL
+		transport.transportID = session.TranscodeTransportID
+	}
+	transport.commit = func() {}
+	transport.rollback = func() {}
+	return transport
+}
+
+func (h *PlaybackHandler) hasActiveHLSTransportV3(session *playback.Session) bool {
+	if h == nil || session == nil {
+		return false
+	}
+	if session.TranscodeNodeURL != "" {
+		return true
+	}
+	return h.tm.GetTranscodeSession(session.ID) != nil
 }
 
 func applySelectedTracksToStartV3(start *playback.StartRequestV3, selected playback.SelectedTracksV3) {
