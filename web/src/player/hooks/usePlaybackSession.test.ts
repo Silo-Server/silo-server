@@ -411,9 +411,9 @@ describe("usePlaybackSession version switches", () => {
     unmount();
   });
 
-  it("keeps the active attempt identity when a replacement start fails", async () => {
+  it("clears and stops the previous session when a replacement start request fails", async () => {
     const startBodies: Array<{ playback_attempt_id: string; start_position?: number }> = [];
-    const replanBodies: Array<{ playback_attempt_id: string }> = [];
+    const stoppedSessions: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/playback/start")) {
@@ -439,21 +439,11 @@ describe("usePlaybackSession version switches", () => {
           { status: 201 },
         );
       }
-      if (url.endsWith("/playback/session-1/replan")) {
-        replanBodies.push(JSON.parse(String(init?.body)) as { playback_attempt_id: string });
-        return jsonResponse({
-          protocol_version: 3,
-          server_features: ["playback_plan_v3"],
-          outcome: "playable",
-          session_id: "session-1",
-          playback_plan: fixturePlanV3({
-            plan_id: "plan:1111111111111111",
-            plan_attempt_key: "v3:1111111111111111",
-          }),
-        });
-      }
       if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
-      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (init?.method === "DELETE") {
+        stoppedSessions.push(url);
+        return new Response(null, { status: 204 });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -466,18 +456,17 @@ describe("usePlaybackSession version switches", () => {
 
     act(() => result.current.switchVersion(99, 0));
     await waitFor(() => expect(startBodies).toHaveLength(2));
-    await waitFor(() => expect(result.current.replacing).toBe(false));
+    await waitFor(() => expect(result.current.sessionId).toBeNull());
     const originalStart = startBodies[0];
     const replacementStart = startBodies[1];
     if (!originalStart || !replacementStart) throw new Error("expected two start requests");
     expect(replacementStart.start_position).toBe(0);
-
-    act(() => result.current.refreshSubtitles(10));
-    await waitFor(() => expect(replanBodies).toHaveLength(1));
-    const replan = replanBodies[0];
-    if (!replan) throw new Error("expected a replan request");
-    expect(replan.playback_attempt_id).toBe(originalStart.playback_attempt_id);
-    expect(replan.playback_attempt_id).not.toBe(replacementStart.playback_attempt_id);
+    expect(replacementStart.playback_attempt_id).not.toBe(originalStart.playback_attempt_id);
+    expect(result.current.plan).toBeNull();
+    expect(result.current.streamUrl).toBeNull();
+    expect(result.current.sessionId).toBeNull();
+    expect(result.current.error).toContain("could not start playback");
+    expect(stoppedSessions).toEqual(["/api/v1/playback/session-1"]);
 
     unmount();
   });

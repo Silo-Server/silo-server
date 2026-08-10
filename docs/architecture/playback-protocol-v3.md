@@ -349,15 +349,17 @@ validate a level-3.0 stream, while a decoder that handles 8- and 10-bit must
 list both — `[10]` alone rejects an 8-bit source. Levels use the integer form
 (4.1 → `41`).
 
-**Both strict tiers also require a fully probed source.** Before any tier logic
-runs, the server checks that the *file's* own metadata is complete: video codec,
-profile, level, bit depth, width, height, frame rate, and bitrate must all be
-present and non-zero. A source that was probed incompletely is ineligible for a
-direct route regardless of how good the client's evidence is, and this case is
-*not* reported as `evidence_insufficient_for_direct` — the client's evidence was
-never the problem. Clients cannot influence this; it is documented so
-implementers stop looking for a capability bug when a specific file transcodes on
-a device that plays everything else directly.
+**Every validated video route requires complete routing metadata.** Before any
+tier logic runs, the server requires video codec, bit depth, width, height,
+frame rate, and bitrate. Profile and level are decoder bounds instead: an
+`exact` entry that supplies either bound cannot validate a source whose matching
+probe value is absent or unknown, while an omitted bound keeps the explicit
+“unconstrained” meaning above. This permits server adaptation of sources such as
+VP9 whose probe reports an unknown level without allowing that sentinel to
+satisfy a concrete client limit. A source missing the routing fields is
+ineligible for any route and this case is *not* reported as
+`evidence_insufficient_for_direct` — the client's evidence was never the
+problem.
 
 **Passthrough requires `exact` audio evidence.** A validated passthrough claim
 (bitstreaming E-AC-3/TrueHD to a receiver) additionally requires the
@@ -601,9 +603,11 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 
 *Transport and session:* `internal_error`, `session_expired`,
 `subtitle_artifact_unavailable`, `capacity_unavailable`,
+`audio_transcoding_disabled`,
 `transcode_start_failed`, `transcode_node_unavailable`,
 `transcode_node_capability_unavailable`, `track_unavailable`,
 `invalid_seek_position`, `invalid_replan`, `seek_reanchor_route_changed`,
+`seek_reanchor_recipe_unavailable`,
 `seek_reanchor_intent_mismatch`, `seek_failure_recovery_intent_mismatch`,
 `policy_denied`.
 
@@ -748,14 +752,14 @@ the `quality_preference_normalized` warning rather than an error.
 
 A transformation is a named, versioned media operation with claims attached.
 
-| Name | Executor | Promises | Claims |
-| --- | --- | --- | --- |
-| `audio_to_aac` | `server` | — | `audio_decode` |
-| `video_to_h264` | `server` | `sdr` output | `h264_decode` |
-| `server_dv7_to_hdr10` | `server` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| Name | Executor | Recipe version | Promises | Claims |
+| --- | --- | --- | --- | --- |
+| `audio_to_aac` | `server` | `1` | — | `audio_decode` |
+| `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
+| `server_dv7_to_hdr10` | `server` | `1` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
-All ship at `recipe_version` `"1"`, and all are advertised only if the installed
-FFmpeg actually has the required capability, probed once at startup:
+They are advertised only if the installed FFmpeg actually has the required
+capability, probed once at startup:
 
 | Transformation | Probe |
 | --- | --- |

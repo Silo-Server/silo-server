@@ -37,6 +37,13 @@ func TestBuildRemuxArgsExcludesAttachedPictures(t *testing.T) {
 	}
 }
 
+func TestBuildRemuxArgsHonorsPlannedAACOutput(t *testing.T) {
+	args := buildRemuxArgsWithAudioV3("/book.m4b", "mp4", 0, true, -1, 0, false, true, 1, 96)
+	if !argsContainPair(args, "-ac", "1") || !argsContainPair(args, "-b:a", "96k") {
+		t.Fatalf("planned mono bitrate missing from remux args: %s", strings.Join(args, " "))
+	}
+}
+
 func TestBuildRemuxArgsRequiresVideoForVideoPlans(t *testing.T) {
 	args := buildRemuxArgs("/movie.mkv", "mp4", 0, false, -1, 0, false, false)
 	if !argsContainPair(args, "-map", "0:V:0") || argsContainPair(args, "-map", "0:V:0?") {

@@ -25,7 +25,7 @@
       "container": "mp4",
       "mime_type": "video/mp4",
       "headers": {},
-      "header_refresh": "session"
+      "header_refresh": "none"
     },
     "timeline": {
       "source_start_seconds": 12.5,

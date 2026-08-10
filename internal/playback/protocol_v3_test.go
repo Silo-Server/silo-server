@@ -736,6 +736,16 @@ func TestPlanPlaybackV3TranscodesVP9WithUnknownCodecLevel(t *testing.T) {
 	if direct, _ := videoEligibleV3(source, exact); direct {
 		t.Fatal("an unknown VP9 level satisfied an exact decoder level bound")
 	}
+	// Empty exact-tier bounds are an affirmative claim that every variant is
+	// supported, not missing evidence. Keep this distinct from the concrete
+	// level constraint above so relaxing transcode metadata requirements cannot
+	// accidentally weaken a bound the client actually supplied.
+	unconstrained := exact
+	unconstrained.Capabilities.VideoDecode[0].Profiles = nil
+	unconstrained.Capabilities.VideoDecode[0].Levels = nil
+	if direct, _ := videoEligibleV3(source, unconstrained); !direct {
+		t.Fatal("an exact decoder's explicitly unconstrained profile/level claim was rejected")
+	}
 
 	req := validStartRequestV3()
 	req.Capabilities.VideoEvidence = EvidencePlatformAttestedV3
@@ -1812,8 +1822,10 @@ func TestPlanPlaybackV3AudioOnlyHonorsBandwidthCap(t *testing.T) {
 		bitrate    int
 		capKbps    *int
 		wantDirect bool
+		wantAAC    int
 	}{
-		{name: "source exceeds cap", bitrate: 1_200, capKbps: intPointerV3(256)},
+		{name: "source exceeds cap", bitrate: 1_200, capKbps: intPointerV3(256), wantAAC: 192},
+		{name: "cap below AAC default", bitrate: 1_200, capKbps: intPointerV3(96), wantAAC: 96},
 		{name: "source is below cap", bitrate: 128, capKbps: intPointerV3(256), wantDirect: true},
 		{name: "uncapped", bitrate: 1_200, wantDirect: true},
 		{name: "unknown source bitrate", capKbps: intPointerV3(256), wantDirect: true},
@@ -1839,7 +1851,55 @@ func TestPlanPlaybackV3AudioOnlyHonorsBandwidthCap(t *testing.T) {
 			if result.Plan.DecisionReason != "quality_bandwidth_cap" || !hasDegradationWarningV3(result.Plan.DegradationWarnings, "audio_converted") || !hasDegradationWarningV3(result.Plan.DegradationWarnings, "bandwidth_cap_applied") {
 				t.Fatalf("capped plan = %#v", result.Plan)
 			}
+			if result.TargetAudioBitrateKbps != test.wantAAC || result.Plan.EffectiveRecipe.BitrateKbps == nil || *result.Plan.EffectiveRecipe.BitrateKbps != test.wantAAC {
+				t.Fatalf("AAC bitrate = target %d recipe %#v, want %d", result.TargetAudioBitrateKbps, result.Plan.EffectiveRecipe.BitrateKbps, test.wantAAC)
+			}
 		})
+	}
+}
+
+func TestPlanPlaybackV3NonDefaultAudioSelectionCannotUseOriginalHTTP(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.AudioTracks = []models.AudioTrack{
+		{Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
+		{Codec: "aac", Channels: 2, Layout: "stereo"},
+	}
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 1, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || result.TranscodeAudio {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.SelectedTracks.Audio == nil || result.Plan.SelectedTracks.Audio.Index == nil || *result.Plan.SelectedTracks.Audio.Index != 1 {
+		t.Fatalf("selected audio = %#v", result.Plan.SelectedTracks.Audio)
+	}
+}
+
+func TestPlanPlaybackV3HLSAudioConversionHonorsChannelCeiling(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.CodecAudio = "dts"
+	file.AudioChannels = 8
+	file.AudioTracks[0] = models.AudioTrack{Codec: "dts", Channels: 8, Layout: "7.1", Default: true}
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+	maxChannels := 2
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.MaxChannels = &maxChannels
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !result.TranscodeAudio || result.TargetAudioChannels != 2 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.EffectiveRecipe.AudioChannels == nil || *result.Plan.EffectiveRecipe.AudioChannels != 2 || result.Plan.EffectiveRecipe.AudioLayout != "stereo" {
+		t.Fatalf("AAC recipe = %#v", result.Plan.EffectiveRecipe)
 	}
 }
 

@@ -1367,6 +1367,7 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let destroyed = false;
     let autoplayStarted = false;
+    let nativeHLSMetadataHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1376,6 +1377,10 @@ export function VideoPlayer({
       video.removeEventListener("loadeddata", attemptAutoplayWhenReady);
       video.removeEventListener("canplay", attemptAutoplayWhenReady);
       video.removeEventListener("loadedmetadata", attemptAutoplayWhenReady);
+      if (nativeHLSMetadataHandler) {
+        video.removeEventListener("loadedmetadata", nativeHLSMetadataHandler);
+        nativeHLSMetadataHandler = null;
+      }
     };
 
     const attemptAutoplayWhenReady = () => {
@@ -1500,7 +1505,11 @@ export function VideoPlayer({
             hlsRef.current = hls;
           } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = effectiveStreamUrl;
-            video.addEventListener("loadedmetadata", attemptAutoplayWhenReady, { once: true });
+            nativeHLSMetadataHandler = () => {
+              video.currentTime = effectiveInitialPosition;
+              attemptAutoplayWhenReady();
+            };
+            video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
           } else {
             if (
               !reportCurrentPlanFailure({
@@ -1874,7 +1883,7 @@ export function VideoPlayer({
     subtitleDelayMs,
   );
 
-  // -- Server-rendered subtitle tracks --
+  // -- Authoritative subtitle track selection --
   // Some tracks (bitmap PGS/DVD/DVB) cannot be delivered as a sidecar and are
   // published `burn_in_only`: the server composites them into the video. The
   // client does not decide that and does not translate ordinals for it — it
@@ -1884,18 +1893,8 @@ export function VideoPlayer({
     activeSubtitleIndex !== null
       ? (effectiveSubtitleTracks.find((track) => track.index === activeSubtitleIndex) ?? null)
       : null;
-  const serverRenderedSubtitleIndex =
-    activeSubtitleTrack?.burn_in_only === true ? activeSubtitleTrack.index : null;
-  const planBurnsInSubtitles = plan.subtitle.mode === "burn_in";
   const requestedSubtitleTrackChangeRef = useRef<string | null>(null);
   useEffect(() => {
-    // Only a track the server has to render needs a replan; everything else is
-    // fetched as a sidecar and swapped client-side with no server round trip.
-    if (!planBurnsInSubtitles && serverRenderedSubtitleIndex === null) {
-      requestedSubtitleTrackChangeRef.current = null;
-      return;
-    }
-
     const desiredServerIndex = pendingServerSubtitleSelection(
       plan.subtitle.mode,
       plan.selected_tracks.subtitle?.index ?? null,
@@ -1928,8 +1927,6 @@ export function VideoPlayer({
     plan.plan_id,
     plan.selected_tracks.subtitle?.index,
     plan.subtitle.mode,
-    planBurnsInSubtitles,
-    serverRenderedSubtitleIndex,
   ]);
 
   // A refused replan leaves the previous stream playing, so the selection has

@@ -572,8 +572,10 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 		handler.StoreProvider = testUserStoreProvider{store: store}
 		handler.ItemAccess = allowAllPlaybackItemAccess{}
 
+		startRequest := v3HandlerStartRequest()
+		startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
-			strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest()))).WithContext(newAuthorizedPlaybackContext())
+			strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 		rr := httptest.NewRecorder()
 		handler.HandleStartPlayback(rr, req)
 		if rr.Code != http.StatusCreated {

@@ -119,6 +119,10 @@ const (
 // Apple-parity fallback for devices without a P7 decoder). Profile 8 RPUs
 // stay: the base layer is self-contained and DV clients can render it.
 func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry, audioOnly bool) []string {
+	return buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagDVSampleEntry, audioOnly, 0, 0)
+}
+
+func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -181,7 +185,8 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 	}
 
 	if transcodeAudio {
-		// Video copy + stereo AAC encode is effectively single-threaded work.
+		channels, bitrateKbps := resolvedAACOutputV3(targetAudioChannels, targetAudioBitrateKbps)
+		// Video copy + AAC encode is effectively single-threaded work.
 		// ffmpeg's default auto-threading spawns one filter thread per CPU
 		// core for the implicit downmix/resampler, all idle. Pin to one.
 		args = append(args,
@@ -190,8 +195,8 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 			"-filter_complex_threads", "1",
 			"-c:v", "copy",
 			"-c:a", "aac",
-			"-ac", "2",
-			"-b:a", "192k",
+			"-ac", strconv.Itoa(channels),
+			"-b:a", strconv.Itoa(bitrateKbps)+"k",
 		)
 	} else {
 		args = append(args, "-c", "copy")
@@ -226,10 +231,10 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 // v3 callers must pass the configured playback path so the strip capability
 // promised by the planner's probe holds for the binary that actually runs.
 func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
-	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false)
+	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0)
 }
 
-func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool) (*RemuxSession, error) {
+func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ResolveFFmpegPath(ffmpegPath)
@@ -280,7 +285,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		cancel()
 		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
 	}
-	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagDVSampleEntry, audioOnly)
+	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagDVSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -344,6 +349,10 @@ type RemuxServeOptions struct {
 	ContentType string
 	// AudioOnly permits the otherwise-mandatory video map to be absent.
 	AudioOnly bool
+	// TargetAudioChannels and TargetAudioBitrateKbps freeze the planned AAC
+	// output. Zero values retain the historical stereo 192 kbps behavior.
+	TargetAudioChannels    int
+	TargetAudioBitrateKbps int
 }
 
 // RemuxContentType returns the override required for an audio-only fMP4.
@@ -388,7 +397,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
-	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly)
+	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err

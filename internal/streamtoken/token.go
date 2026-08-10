@@ -65,6 +65,8 @@ type Claims struct {
 	TotalDuration          float64 `json:"dur,omitempty"`
 	FastStart              bool    `json:"fs,omitempty"`
 	TargetCodecAudio       string  `json:"tca,omitempty"`
+	TargetAudioChannels    int     `json:"tac,omitempty"`
+	TargetAudioBitrateKbps int     `json:"tabr,omitempty"`
 
 	// Recipe staleness hint, bumped on each re-mint after a recipe mutation
 	// (audio/quality/seek switch). An optional client-side hint only.

@@ -33,12 +33,14 @@ type Session struct {
 	TranscodeTransportID string // remote node process identity; empty means session ID
 	AudioTrackIndex      int
 
-	StreamBitrateKbps int    // currently delivered bitrate, when known
-	TargetResolution  string // requested output resolution for transcodes
-	TargetVideoCodec  string // requested output video codec for transcodes
-	TargetAudioCodec  string // requested output audio codec when audio is transcoded
-	TargetBitrateKbps int    // requested output bitrate cap for transcodes
-	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
+	StreamBitrateKbps      int    // currently delivered bitrate, when known
+	TargetResolution       string // requested output resolution for transcodes
+	TargetVideoCodec       string // requested output video codec for transcodes
+	TargetAudioCodec       string // requested output audio codec when audio is transcoded
+	TargetAudioChannels    int    // requested encoded audio channel count
+	TargetAudioBitrateKbps int    // requested encoded audio bitrate cap
+	TargetBitrateKbps      int    // requested output bitrate cap for transcodes
+	TranscodeHWAccel       string // effective hardware acceleration mode for transcodes
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
@@ -66,24 +68,26 @@ type Session struct {
 // change after a session is created (audio track, client IP, transcode target,
 // and reported bitrate).
 type SessionStreamState struct {
-	PlayMethod           PlayMethod
-	BasePlayMethod       PlayMethod
-	AudioTrackIndex      int
-	TranscodeAudio       bool
-	RemuxDVMode          RemuxDVMode
-	ClientIP             string
-	ClientName           string
-	ClientVersion        string
-	ClientUserAgent      string
-	StreamBitrateKbps    int
-	TargetResolution     string
-	TargetVideoCodec     string
-	TargetAudioCodec     string
-	TargetBitrateKbps    int
-	TranscodeHWAccel     string
-	TranscodeNodeURL     string
-	TranscodeTransportID string
-	TranscodeRouteSet    bool
+	PlayMethod             PlayMethod
+	BasePlayMethod         PlayMethod
+	AudioTrackIndex        int
+	TranscodeAudio         bool
+	RemuxDVMode            RemuxDVMode
+	ClientIP               string
+	ClientName             string
+	ClientVersion          string
+	ClientUserAgent        string
+	StreamBitrateKbps      int
+	TargetResolution       string
+	TargetVideoCodec       string
+	TargetAudioCodec       string
+	TargetAudioChannels    int
+	TargetAudioBitrateKbps int
+	TargetBitrateKbps      int
+	TranscodeHWAccel       string
+	TranscodeNodeURL       string
+	TranscodeTransportID   string
+	TranscodeRouteSet      bool
 
 	// Byte-affecting transcode recipe fields preserved so an offloaded restart
 	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
@@ -769,6 +773,8 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.TargetAudioChannels = state.TargetAudioChannels
+	s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	if state.TranscodeRouteSet {
@@ -788,27 +794,29 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 
 func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 	return SessionStreamState{
-		PlayMethod:           s.PlayMethod,
-		BasePlayMethod:       s.BasePlayMethod,
-		AudioTrackIndex:      s.AudioTrackIndex,
-		TranscodeAudio:       s.TranscodeAudio,
-		RemuxDVMode:          s.RemuxDVMode,
-		ClientIP:             s.ClientIP,
-		ClientName:           s.ClientName,
-		ClientVersion:        s.ClientVersion,
-		ClientUserAgent:      s.ClientUserAgent,
-		StreamBitrateKbps:    s.StreamBitrateKbps,
-		TargetResolution:     s.TargetResolution,
-		TargetVideoCodec:     s.TargetVideoCodec,
-		TargetAudioCodec:     s.TargetAudioCodec,
-		TargetBitrateKbps:    s.TargetBitrateKbps,
-		TranscodeHWAccel:     s.TranscodeHWAccel,
-		TranscodeNodeURL:     s.TranscodeNodeURL,
-		TranscodeTransportID: s.TranscodeTransportID,
-		TranscodeRouteSet:    true,
-		SubtitleTrackIndex:   s.SubtitleTrackIndex,
-		SubtitleBurnIn:       s.SubtitleBurnIn,
-		SegmentDuration:      s.SegmentDuration,
+		PlayMethod:             s.PlayMethod,
+		BasePlayMethod:         s.BasePlayMethod,
+		AudioTrackIndex:        s.AudioTrackIndex,
+		TranscodeAudio:         s.TranscodeAudio,
+		RemuxDVMode:            s.RemuxDVMode,
+		ClientIP:               s.ClientIP,
+		ClientName:             s.ClientName,
+		ClientVersion:          s.ClientVersion,
+		ClientUserAgent:        s.ClientUserAgent,
+		StreamBitrateKbps:      s.StreamBitrateKbps,
+		TargetResolution:       s.TargetResolution,
+		TargetVideoCodec:       s.TargetVideoCodec,
+		TargetAudioCodec:       s.TargetAudioCodec,
+		TargetAudioChannels:    s.TargetAudioChannels,
+		TargetAudioBitrateKbps: s.TargetAudioBitrateKbps,
+		TargetBitrateKbps:      s.TargetBitrateKbps,
+		TranscodeHWAccel:       s.TranscodeHWAccel,
+		TranscodeNodeURL:       s.TranscodeNodeURL,
+		TranscodeTransportID:   s.TranscodeTransportID,
+		TranscodeRouteSet:      true,
+		SubtitleTrackIndex:     s.SubtitleTrackIndex,
+		SubtitleBurnIn:         s.SubtitleBurnIn,
+		SegmentDuration:        s.SegmentDuration,
 	}
 }
 
@@ -826,6 +834,8 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.TargetAudioChannels = state.TargetAudioChannels
+	s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.TranscodeNodeURL = state.TranscodeNodeURL

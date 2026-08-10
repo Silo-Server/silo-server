@@ -489,7 +489,11 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	switch s.PlayMethod {
 	case playback.PlayRemux:
-		return playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
+		card := playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
+		card.TargetCodecAudio = s.TargetAudioCodec
+		card.TargetAudioChannels = s.TargetAudioChannels
+		card.TargetAudioBitrateKbps = s.TargetAudioBitrateKbps
+		return card
 	default:
 		return playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}

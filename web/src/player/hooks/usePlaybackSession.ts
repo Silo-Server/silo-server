@@ -472,6 +472,34 @@ export function usePlaybackSession(
       attemptedPlanKeysRef.current = [];
       attemptCountRef.current = 1;
 
+      const retirePreviousSession = (nextError?: { title: string; message: string }) => {
+        if (previousSessionId) {
+          void stopSession(previousSessionId).catch(() => {
+            // Best effort — stale session will time out server-side.
+          });
+        }
+        planRef.current = null;
+        sessionIdRef.current = null;
+        planAttemptIdRef.current = null;
+        setState((current) => ({
+          ...current,
+          plan: null,
+          streamUrl: null,
+          sessionId: null,
+          playbackAttemptId,
+          mediaFileId: null,
+          initialPosition: 0,
+          audioTrackIndex: 0,
+          durationSeconds: null,
+          subtitleUrls: [],
+          loading: false,
+          replacing: false,
+          replanning: false,
+          errorTitle: nextError?.title ?? current.errorTitle,
+          error: nextError?.message ?? current.error,
+        }));
+      };
+
       try {
         const selectedFileId = selectFileId(preferredFileId);
         if (!selectedFileId) {
@@ -508,28 +536,7 @@ export function usePlaybackSession(
           return;
         }
         if (!adopted) {
-          if (previousSessionId) {
-            void stopSession(previousSessionId).catch(() => {
-              // Best effort — stale session will time out server-side.
-            });
-          }
-          planRef.current = null;
-          sessionIdRef.current = null;
-          setState((current) => ({
-            ...current,
-            plan: null,
-            streamUrl: null,
-            sessionId: null,
-            playbackAttemptId,
-            mediaFileId: null,
-            initialPosition: 0,
-            audioTrackIndex: 0,
-            durationSeconds: null,
-            subtitleUrls: [],
-            loading: false,
-            replacing: false,
-            replanning: false,
-          }));
+          retirePreviousSession();
           return;
         }
         if (adopted && previousSessionId && previousSessionId !== sessionIdRef.current) {
@@ -554,13 +561,7 @@ export function usePlaybackSession(
         }
 
         const nextError = describePlaybackSessionError(err, initialErrorMessage);
-        setState((current) => ({
-          ...current,
-          loading: false,
-          replacing: false,
-          errorTitle: nextError.title,
-          error: nextError.message,
-        }));
+        retirePreviousSession(nextError);
       }
     },
     [adoptDecision, requestStart, selectFileId, stopSession],
@@ -852,7 +853,10 @@ export function usePlaybackSession(
             preferredFileId: newFileId,
             position: currentPosition,
             forceStartPosition: true,
-            allowPreserveExistingSessionOnError: true,
+            // The server retires the old session before it attempts a
+            // replacement start. A failed response therefore cannot leave the
+            // old plan active on the client.
+            allowPreserveExistingSessionOnError: false,
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",
           });

@@ -23,6 +23,8 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		TargetResolution:       "1080p",
 		TargetCodecVideo:       "h264",
 		TargetCodecAudio:       "aac",
+		TargetAudioChannels:    1,
+		TargetAudioBitrateKbps: 96,
 		SegmentDuration:        2,
 		StartSegmentNumber:     450,
 		HWAccel:                "qsv",
@@ -63,6 +65,9 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if got.TargetCodecVideo != "h264" || got.TargetBitrateKbps != 8000 {
 		t.Errorf("encode params wrong: %+v", got)
+	}
+	if got.TargetAudioChannels != 1 || got.TargetAudioBitrateKbps != 96 {
+		t.Errorf("audio encode params wrong: %+v", got)
 	}
 	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
@@ -223,6 +228,8 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		TargetResolution:       "1080p",
 		TargetCodecVideo:       "h264",
 		TargetCodecAudio:       "aac",
+		TargetAudioChannels:    6,
+		TargetAudioBitrateKbps: 320,
 		SegmentDuration:        2,
 		StartSegmentNumber:     450,
 		SubtitleTrackIndex:     3,
@@ -251,6 +258,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.SeekSeconds != card.SeekSeconds || got.StreamOriginSeconds != card.StreamOriginSeconds ||
 		got.CopySeekAnchorResolved != card.CopySeekAnchorResolved || got.TargetResolution != card.TargetResolution ||
 		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
+		got.TargetAudioChannels != card.TargetAudioChannels || got.TargetAudioBitrateKbps != card.TargetAudioBitrateKbps ||
 		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||
 		got.SubtitleTrackIndex != card.SubtitleTrackIndex || got.SubtitleBurnIn != card.SubtitleBurnIn ||
 		got.SubtitleCodec != card.SubtitleCodec ||

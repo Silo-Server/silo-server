@@ -45,6 +45,7 @@ vi.mock("../hooks/useSubtitleAppearance", () => ({
 vi.mock("../hooks/useSubtitleLayout", () => ({
   useSubtitleLayout: () => ({ positionStyle: {}, fontScale: 1 }),
 }));
+vi.mock("hls.js", () => ({ default: { isSupported: () => false } }));
 vi.mock("./PlayerControls", () => ({
   PlayerControls: vi.fn(
     (props: { activeSubtitleIndex: number | null; subtitleTracks: PlayerSubtitleInfo[] }) => {
@@ -167,6 +168,51 @@ describe("VideoPlayer plan failure recovery", () => {
 
     fireEvent.error(video);
     expect(onPlanFailure).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("VideoPlayer native HLS timeline", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === "application/vnd.apple.mpegurl" ? "probably" : "",
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("applies player_start_seconds before native HLS playback", async () => {
+    const plan = fixturePlanV3({
+      delivery: "remux_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 42,
+        player_start_seconds: 7,
+        stream_origin_seconds: 35,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+    const { container } = renderPlayer({ plan, initialPosition: 42 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    fireEvent.loadedMetadata(video);
+
+    expect(video.currentTime).toBe(7);
   });
 });
 

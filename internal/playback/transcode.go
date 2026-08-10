@@ -80,16 +80,18 @@ type TranscodeOpts struct {
 	// Empty preserves the legacy text path for callers minted before the field.
 	SubtitleCodec   string
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
-	// TargetAudioChannels caps the re-encoded channel count. 0 (or anything
-	// below 3) keeps the historical stereo downmix; 6 preserves 5.1 from a
-	// surround source. Ignored for copy/passthrough audio targets.
+	// TargetAudioChannels selects mono (1), stereo (2/default), or 5.1 (6+)
+	// output. Ignored for copy/passthrough audio targets.
 	TargetAudioChannels int
-	TargetBitrateKbps   int     // max video bitrate in kbps; 0 = CRF-only (no cap)
-	TotalDuration       float64 // total media duration in seconds (for VOD manifest)
-	FastStart           bool    // use superfast preset for faster first-segment production
-	NodeType            string
-	ExecutionMode       string
-	FFmpegLogSink       FFmpegLogSink
+	// TargetAudioBitrateKbps caps an encoded audio stream. Zero selects the
+	// layout-appropriate AAC default. Ignored for copy/passthrough targets.
+	TargetAudioBitrateKbps int
+	TargetBitrateKbps      int     // max video bitrate in kbps; 0 = CRF-only (no cap)
+	TotalDuration          float64 // total media duration in seconds (for VOD manifest)
+	FastStart              bool    // use superfast preset for faster first-segment production
+	NodeType               string
+	ExecutionMode          string
+	FFmpegLogSink          FFmpegLogSink
 }
 
 // DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
@@ -825,17 +827,31 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		// Legacy Dolby Digital; universal AVR support.
 		args = append(args, "-c:a", "ac3", "-b:a", "448k")
 	default:
-		// Preserve surround from multichannel sources when the planner asked
-		// for it (AAC 5.1 decodes universally in Media3); the historical
-		// default stays a stereo 192k downmix.
-		if opts.TargetAudioChannels >= 6 {
-			args = append(args, "-c:a", "aac", "-b:a", "384k", "-ac", "6")
-		} else {
-			args = append(args, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
-		}
+		channels, bitrateKbps := resolvedAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
+		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))
 	}
 
 	return args
+}
+
+func resolvedAACOutputV3(targetChannels, targetBitrateKbps int) (int, int) {
+	channels := 2
+	if targetChannels == 1 {
+		channels = 1
+	} else if targetChannels >= 6 {
+		channels = 6
+	}
+	if targetBitrateKbps > 0 {
+		return channels, targetBitrateKbps
+	}
+	switch channels {
+	case 1:
+		return channels, 128
+	case 6:
+		return channels, 384
+	default:
+		return channels, 192
+	}
 }
 
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle

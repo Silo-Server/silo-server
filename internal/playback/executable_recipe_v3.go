@@ -14,6 +14,7 @@ type ExecutableRecipeV3 struct {
 	TargetVideoCodec            string     `json:"target_video_codec,omitempty"`
 	TargetAudioCodec            string     `json:"target_audio_codec,omitempty"`
 	TargetAudioChannels         int        `json:"target_audio_channels,omitempty"`
+	TargetAudioBitrateKbps      int        `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetResolution            string     `json:"target_resolution,omitempty"`
 	TargetBitrateKbps           int        `json:"target_bitrate_kbps,omitempty"`
 	SourceVideoCodec            string     `json:"source_video_codec,omitempty"`
@@ -54,6 +55,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		TargetVideoCodec:            result.TargetVideoCodec,
 		TargetAudioCodec:            result.TargetAudioCodec,
 		TargetAudioChannels:         result.TargetAudioChannels,
+		TargetAudioBitrateKbps:      result.TargetAudioBitrateKbps,
 		TargetResolution:            result.TargetResolution,
 		TargetBitrateKbps:           result.TargetBitrateKbps,
 		SourceVideoCodec:            sourceMetadata.VideoCodec,
@@ -85,14 +87,15 @@ func (r ExecutableRecipeV3) ValidFor(plan PlanV3) bool {
 
 func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 	return PlannerResultV3{
-		Plan:                plan,
-		PlayMethod:          r.PlayMethod,
-		TranscodeAudio:      r.TranscodeAudio,
-		TargetVideoCodec:    r.TargetVideoCodec,
-		TargetAudioCodec:    r.TargetAudioCodec,
-		TargetAudioChannels: r.TargetAudioChannels,
-		TargetResolution:    r.TargetResolution,
-		TargetBitrateKbps:   r.TargetBitrateKbps,
+		Plan:                   plan,
+		PlayMethod:             r.PlayMethod,
+		TranscodeAudio:         r.TranscodeAudio,
+		TargetVideoCodec:       r.TargetVideoCodec,
+		TargetAudioCodec:       r.TargetAudioCodec,
+		TargetAudioChannels:    r.TargetAudioChannels,
+		TargetAudioBitrateKbps: r.TargetAudioBitrateKbps,
+		TargetResolution:       r.TargetResolution,
+		TargetBitrateKbps:      r.TargetBitrateKbps,
 		FrozenSourceMetadata: &SourceExecutionMetadataV3{
 			VideoCodec:          r.SourceVideoCodec,
 			SoftwareVideoDecode: r.SoftwareVideoDecode,

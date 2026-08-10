@@ -29,10 +29,10 @@ export function resolvePlayableSubtitles(
 }
 
 /**
- * Returns the selection that must be sent to settle server-rendered subtitle
- * state, or undefined when the current plan already matches the UI. A sidecar
- * selection still has to be replanned when replacing an active burn-in route,
- * otherwise the old overlay remains composited behind the new track.
+ * Returns the selection that must be sent to settle the plan's authoritative
+ * selected_tracks state, or undefined when the current plan already matches
+ * the UI. Sidecar selections are included: the server owns durable track
+ * intent even when the browser renders the selected artifact itself.
  */
 export function pendingServerSubtitleSelection(
   planMode: SubtitleModeV3,
@@ -41,7 +41,6 @@ export function pendingServerSubtitleSelection(
   activeRequiresBurnIn: boolean,
 ): number | null | undefined {
   const planBurnsIn = planMode === "burn_in";
-  if (!planBurnsIn && !activeRequiresBurnIn) return undefined;
   if (planSelectedIndex === activeIndex && planBurnsIn === activeRequiresBurnIn) return undefined;
   return activeIndex;
 }

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -254,6 +255,59 @@ func TestHandleStartPlaybackRejectsRequestsThatDoNotDeclareV3(t *testing.T) {
 				t.Fatalf("sessions = %d, want 0", got)
 			}
 		})
+	}
+}
+
+func TestHandleStartPlaybackV3CommitsStartSideEffectsOnce(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.EpisodeID = "episode-1"
+	file.MediaFolderID = 7
+	scrobbler := &recordingPlaybackWatchScrobbler{}
+	analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
+		markers.SettingLazyPlayback: "true",
+		markers.SettingMode:         "local",
+	}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: file.EpisodeID, SeriesID: "series-1"}}
+	handler.WatchScrobbler = scrobbler
+	handler.IntroRepository = fakePlaybackIntroEligibility{eligible: true}
+	handler.IntroAnalyzer = analyzer
+	handler.MarkerLazyContext = context.Background()
+
+	startRequest := v3HandlerStartRequest()
+	position := 37.0
+	startRequest.StartPosition = &position
+	body := marshalV3StartRequest(t, startRequest)
+	start := func() playback.DecisionResponseV3 {
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(body)).WithContext(newAuthorizedPlaybackContext()))
+		var response playback.DecisionResponseV3
+		if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
+			t.Fatalf("start status=%d body=%s", rr.Code, rr.Body.String())
+		}
+		return response
+	}
+	first := start()
+	second := start()
+	if first.SessionID != second.SessionID {
+		t.Fatalf("idempotent replay session = %q, want %q", second.SessionID, first.SessionID)
+	}
+	if len(scrobbler.starts) != 1 {
+		t.Fatalf("start scrobbles = %d, want 1", len(scrobbler.starts))
+	}
+	event := scrobbler.starts[0]
+	if event.PlaybackSessionID != first.SessionID || event.MediaItemID != file.EpisodeID || event.PositionSeconds != position || event.DurationSeconds != float64(file.Duration) {
+		t.Fatalf("start scrobble = %#v", event)
+	}
+	select {
+	case <-analyzer.started:
+	case <-time.After(time.Second):
+		t.Fatal("v3 start did not queue lazy marker analysis")
+	}
+	if analyzer.callCount() != 1 {
+		t.Fatalf("lazy marker calls = %d, want 1", analyzer.callCount())
 	}
 }
 
@@ -515,6 +569,7 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureClientVideoTransforms)
 	delivery := startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
 	delivery.Transformations = []playback.TransformationV3{{Name: playback.ClientDV7ToDV81V3, Executor: playback.ExecutorClientV3, RecipeVersion: playback.ClientDVTransformVersionV3}}
@@ -1021,7 +1076,8 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 
 func TestHandleReplanPlaybackV3SeekReanchorIgnoresRefreshedProbeMetadata(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
-	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo"})
+	file.AudioTracks[0].Default = false
+	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Default: true})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
@@ -2473,7 +2529,7 @@ func TestRouteEventV3HasPerUserLimitAcrossAttemptIDs(t *testing.T) {
 
 func v3HandlerFixtureFile(t *testing.T) *models.MediaFile {
 	t.Helper()
-	return &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: writePlaybackTestMediaFile(t, "movie.mp4"), Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 3600, VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
+	return &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: writePlaybackTestMediaFile(t, "movie.mp4"), Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 3600, VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo", Default: true}}}
 }
 
 func v3HandlerStartRequest() playback.StartRequestV3 {
@@ -2586,6 +2642,7 @@ func TestHandleReplanPlaybackV3TrackChangeStaysOnEffectiveAlternate(t *testing.T
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
 	startRequest.QualityPreference = "auto"
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 	startRR := httptest.NewRecorder()
 	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
@@ -2629,6 +2686,7 @@ func TestHandleReplanPlaybackV3TrackChangeOperation(t *testing.T) {
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
 	startRR := httptest.NewRecorder()
 	handler.HandleStartPlayback(startRR, startReq)
@@ -2681,8 +2739,8 @@ func TestHandleReplanPlaybackV3TrackChangeOperation(t *testing.T) {
 	if first.PlaybackPlan == nil || second.PlaybackPlan == nil || first.PlaybackPlan.PlanID != second.PlaybackPlan.PlanID {
 		t.Fatalf("first=%#v second=%#v", first, second)
 	}
-	if first.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
-		t.Fatalf("track change left the validated route: %#v", first.PlaybackPlan)
+	if first.PlaybackPlan.Delivery != playback.DeliveryRemuxProgressiveV3 {
+		t.Fatalf("track change did not map the non-default audio stream: %#v", first.PlaybackPlan)
 	}
 	if first.PlaybackPlan.SelectedTracks.Audio == nil || first.PlaybackPlan.SelectedTracks.Audio.Index == nil || *first.PlaybackPlan.SelectedTracks.Audio.Index != audioIndex {
 		t.Fatalf("selected tracks = %#v", first.PlaybackPlan.SelectedTracks)
@@ -2791,8 +2849,18 @@ func TestHandleReplanPlaybackV3SidecarChangeReusesCopyHLSTransport(t *testing.T)
 			t.Fatalf("reused copy-HLS manifest missing stable remount tag %q:\n%s", want, manifest)
 		}
 	}
-	if replanned.PlaybackPlan.Stream.URL != beforeURL || !reflect.DeepEqual(replanned.PlaybackPlan.Timeline, beforeTimeline) {
-		t.Fatalf("sidecar-only replan changed stream window: url %q -> %q, timeline %#v -> %#v", beforeURL, replanned.PlaybackPlan.Stream.URL, beforeTimeline, replanned.PlaybackPlan.Timeline)
+	afterTimeline := replanned.PlaybackPlan.Timeline
+	if replanned.PlaybackPlan.Stream.URL != beforeURL ||
+		afterTimeline.StreamOriginSeconds != beforeTimeline.StreamOriginSeconds ||
+		afterTimeline.TimelineOffsetSeconds != beforeTimeline.TimelineOffsetSeconds ||
+		!reflect.DeepEqual(afterTimeline.SeekWindowStartSeconds, beforeTimeline.SeekWindowStartSeconds) ||
+		!reflect.DeepEqual(afterTimeline.SeekWindowEndSeconds, beforeTimeline.SeekWindowEndSeconds) ||
+		afterTimeline.CanSeekAnywhere != beforeTimeline.CanSeekAnywhere ||
+		afterTimeline.SeekRestoration != beforeTimeline.SeekRestoration {
+		t.Fatalf("sidecar-only replan changed stream window: url %q -> %q, timeline %#v -> %#v", beforeURL, replanned.PlaybackPlan.Stream.URL, beforeTimeline, afterTimeline)
+	}
+	if afterTimeline.SourceStartSeconds != 120 || afterTimeline.PlayerStartSeconds != max(0, 120-beforeTimeline.StreamOriginSeconds) {
+		t.Fatalf("sidecar-only replan lost requested position: timeline %#v", afterTimeline)
 	}
 	if replanned.PlaybackPlan.PlanID == started.PlaybackPlan.PlanID || replanned.PlaybackPlan.PlanAttemptKey == started.PlaybackPlan.PlanAttemptKey {
 		t.Fatal("subtitle identity changed without minting a distinct plan identity")

@@ -86,4 +86,16 @@ describe("pendingServerSubtitleSelection", () => {
   it("requests a burn-in track from a sidecar plan", () => {
     expect(pendingServerSubtitleSelection("render", 0, 2, true)).toBe(2);
   });
+
+  it("persists a newly selected sidecar track", () => {
+    expect(pendingServerSubtitleSelection("off", null, 0, false)).toBe(0);
+  });
+
+  it("persists a switch between sidecar tracks", () => {
+    expect(pendingServerSubtitleSelection("render", 0, 1, false)).toBe(1);
+  });
+
+  it("persists turning a sidecar track off", () => {
+    expect(pendingServerSubtitleSelection("render", 0, null, false)).toBeNull();
+  });
 });
