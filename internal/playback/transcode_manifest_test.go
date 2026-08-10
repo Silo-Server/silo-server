@@ -54,6 +54,8 @@ func TestBuildPlaybackManifest_CopyVideoUsesRealManifest(t *testing.T) {
 
 	text := string(got)
 	for _, want := range []string{
+		"#EXT-X-PLAYLIST-TYPE:EVENT",
+		"#EXT-X-START:TIME-OFFSET=0.001,PRECISE=YES",
 		"#EXT-X-MEDIA-SEQUENCE:9",
 		"#EXTINF:2.669000,",
 		"#EXTINF:1.669000,",
@@ -67,6 +69,90 @@ func TestBuildPlaybackManifest_CopyVideoUsesRealManifest(t *testing.T) {
 	}
 	if strings.Contains(text, "#EXT-X-PLAYLIST-TYPE:VOD") {
 		t.Fatalf("copy-mode manifest should not be synthetic VOD:\n%s", text)
+	}
+}
+
+func TestBuildPlaybackManifest_AdvancedCopyGenerationKeepsHistoricalRemountPosition(t *testing.T) {
+	tempDir := t.TempDir()
+	const producedSegments = 160
+	lines := []string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:7",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MEDIA-SEQUENCE:0",
+		"#EXT-X-INDEPENDENT-SEGMENTS",
+		"#EXT-X-MAP:URI=\"init.mp4\"",
+	}
+	for i := range producedSegments {
+		lines = append(lines, "#EXTINF:2.000000,", fmt.Sprintf("seg_%05d.m4s", i))
+	}
+	lines = append(lines, "")
+	manifestPath := filepath.Join(tempDir, "stream.m3u8")
+	if err := os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for _, name := range []string{"init.mp4", "seg_00000.m4s", "seg_00001.m4s"} {
+		if err := os.WriteFile(filepath.Join(tempDir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	session := &TranscodeSession{
+		outputDir: tempDir,
+		opts: TranscodeOpts{
+			TargetCodecVideo: "copy",
+			TargetCodecAudio: "aac",
+			SegmentDuration:  2,
+			TotalDuration:    6_519,
+		},
+	}
+	got, err := session.BuildPlaybackManifest("segment/", "token=test")
+	if err != nil {
+		t.Fatalf("BuildPlaybackManifest: %v", err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		"#EXT-X-PLAYLIST-TYPE:EVENT",
+		"#EXT-X-START:TIME-OFFSET=0.001,PRECISE=YES",
+		"segment/seg_00025.m4s?token=test",
+		"segment/seg_00159.m4s?token=test",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("advanced manifest missing %q:\n%s", want, text)
+		}
+	}
+	timeline, err := parseManifestTimeline(got)
+	if err != nil {
+		t.Fatalf("parse advanced manifest: %v", err)
+	}
+	// A 51-second remount belongs to historical segment 25, not the produced
+	// edge at segment 159. The stable origin lets Media3 apply that seek after
+	// rebuilding its MediaSource instead of projecting the default to the edge.
+	historical := timeline.entries[int(51/2)]
+	if historical.number != 25 || historical.number >= timeline.entries[len(timeline.entries)-1].number {
+		t.Fatalf("historical remount segment = %d, produced edge = %d", historical.number, timeline.entries[len(timeline.entries)-1].number)
+	}
+
+	// Manifest stabilization is a pure presentation rewrite: when FFmpeg adds
+	// the next segment, cadence advances by exactly one and the same stable tags
+	// remain without duplication.
+	lines = append(lines[:len(lines)-1], "#EXTINF:2.000000,", "seg_00160.m4s", "")
+	if err := os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("advance manifest: %v", err)
+	}
+	advanced, err := session.BuildPlaybackManifest("segment/", "token=test")
+	if err != nil {
+		t.Fatalf("BuildPlaybackManifest after cadence advance: %v", err)
+	}
+	advancedTimeline, err := parseManifestTimeline(advanced)
+	if err != nil {
+		t.Fatalf("parse advanced cadence: %v", err)
+	}
+	if len(advancedTimeline.entries) != len(timeline.entries)+1 || advancedTimeline.entries[len(advancedTimeline.entries)-1].number != 160 {
+		t.Fatalf("advanced cadence = %d entries ending at %d", len(advancedTimeline.entries), advancedTimeline.entries[len(advancedTimeline.entries)-1].number)
+	}
+	if strings.Count(string(advanced), "#EXT-X-PLAYLIST-TYPE:EVENT") != 1 || strings.Count(string(advanced), "#EXT-X-START:") != 1 {
+		t.Fatalf("stable tags duplicated after manifest advance:\n%s", advanced)
 	}
 }
 
@@ -124,6 +210,9 @@ func TestBuildPlaybackManifest_CopyVideoWithoutDurationUsesRealManifest(t *testi
 	}
 	if strings.Contains(text, "#EXT-X-PLAYLIST-TYPE:VOD") {
 		t.Fatalf("real manifest should not be synthetic VOD:\n%s", text)
+	}
+	if strings.Contains(text, "#EXT-X-PLAYLIST-TYPE:EVENT") || strings.Contains(text, "#EXT-X-START:") {
+		t.Fatalf("unknown-duration manifest cannot promise append-only EVENT semantics:\n%s", text)
 	}
 }
 

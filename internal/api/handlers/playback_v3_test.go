@@ -2747,6 +2747,8 @@ func TestHandleReplanPlaybackV3SidecarChangeReusesCopyHLSTransport(t *testing.T)
 	beforeOpts := before.Opts()
 	beforeTimeline := started.PlaybackPlan.Timeline
 	beforeURL := started.PlaybackPlan.Stream.URL
+	before.ReportSegmentDownloaded(25)
+	beforeRequestedSegment := before.LastRequestedSegment()
 
 	english := 1
 	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
@@ -2776,6 +2778,18 @@ func TestHandleReplanPlaybackV3SidecarChangeReusesCopyHLSTransport(t *testing.T)
 	}
 	if afterOpts := after.Opts(); afterOpts.OutputDir != beforeOpts.OutputDir || afterOpts.SeekSeconds != beforeOpts.SeekSeconds || afterOpts.StartSegmentNumber != beforeOpts.StartSegmentNumber {
 		t.Fatalf("sidecar-only replan changed HLS generation: before=%#v after=%#v", beforeOpts, afterOpts)
+	}
+	if after.LastRequestedSegment() != beforeRequestedSegment {
+		t.Fatalf("sidecar-only replan reset throttle progress: before=%d after=%d", beforeRequestedSegment, after.LastRequestedSegment())
+	}
+	manifest, err := after.BuildPlaybackManifest("segment/", "")
+	if err != nil {
+		t.Fatalf("build reused copy-HLS manifest: %v", err)
+	}
+	for _, want := range []string{"#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-START:TIME-OFFSET=0.001,PRECISE=YES"} {
+		if !strings.Contains(string(manifest), want) {
+			t.Fatalf("reused copy-HLS manifest missing stable remount tag %q:\n%s", want, manifest)
+		}
 	}
 	if replanned.PlaybackPlan.Stream.URL != beforeURL || !reflect.DeepEqual(replanned.PlaybackPlan.Timeline, beforeTimeline) {
 		t.Fatalf("sidecar-only replan changed stream window: url %q -> %q, timeline %#v -> %#v", beforeURL, replanned.PlaybackPlan.Stream.URL, beforeTimeline, replanned.PlaybackPlan.Timeline)

@@ -182,6 +182,13 @@ const DefaultSegmentDuration = defaultSegmentDuration
 // real sliding playlist instead of allocating a complete synthetic manifest.
 const maxSyntheticManifestSegments = 50_000
 
+// remountStartOffsetSeconds is a positive, effectively-zero HLS start offset.
+// Media3 suppresses live-edge position projection for EVENT playlists only
+// when EXT-X-START is positive. Anchoring one millisecond after the generation
+// origin keeps an initial start indistinguishable from zero while giving a
+// rebuilt MediaSource a stable timeline on which to restore its playhead.
+const remountStartOffsetSeconds = 0.001
+
 const maxPersistedFFmpegLines = 2000
 const maxPersistedFFmpegBytes = 256 * 1024
 const maxPersistedFFmpegChars = 2000
@@ -1222,10 +1229,66 @@ func (s *TranscodeSession) BuildPlaybackManifest(segPrefix, rawQuery string) ([]
 		if err != nil {
 			return nil, err
 		}
+		manifest = stabilizeCopyHLSRemountTimeline(manifest, opts)
 		return RewriteManifestPaths(manifest, segPrefix, rawQuery)
 	}
 
 	return s.GenerateFullManifest(segPrefix, rawQuery), nil
+}
+
+// stabilizeCopyHLSRemountTimeline marks a bounded copy-HLS playlist as an
+// append-only EVENT and gives it a precise start at the generation origin.
+//
+// FFmpeg's real playlist has no end tag while it is growing, so players treat
+// it as live. Media3 consequently chooses the production edge whenever a track
+// change rebuilds its MediaSource, even though protocol v3 deliberately reused
+// the same A/V generation and the requested historical position is still in
+// the playlist. EVENT plus a positive EXT-X-START disables that projection and
+// leaves the client free to restore the source position on the stable timeline.
+//
+// The EVENT promise is made only when the known complete media fits within the
+// same 50,000-segment bound passed to FFmpeg. Such a playlist never evicts an
+// entry, and segment files are retained because delete_segments is not enabled.
+// Unknown or oversized real playlists remain ordinary sliding live playlists.
+func stabilizeCopyHLSRemountTimeline(manifest []byte, opts TranscodeOpts) []byte {
+	if !strings.EqualFold(opts.TargetCodecVideo, "copy") ||
+		opts.TotalDuration <= 0 ||
+		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) ||
+		validateManifestHeader(manifest) != nil {
+		return manifest
+	}
+
+	lines := bytes.Split(manifest, []byte("\n"))
+	hasPlaylistType := false
+	hasStart := false
+	insertAfter := 0
+	for i, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		switch {
+		case bytes.HasPrefix(trimmed, []byte("#EXT-X-PLAYLIST-TYPE:")):
+			hasPlaylistType = true
+		case bytes.HasPrefix(trimmed, []byte("#EXT-X-START:")):
+			hasStart = true
+		case bytes.HasPrefix(trimmed, []byte("#EXT-X-VERSION:")):
+			insertAfter = i + 1
+		}
+	}
+	if hasPlaylistType && hasStart {
+		return manifest
+	}
+
+	tags := make([][]byte, 0, 2)
+	if !hasPlaylistType {
+		tags = append(tags, []byte("#EXT-X-PLAYLIST-TYPE:EVENT"))
+	}
+	if !hasStart {
+		tags = append(tags, []byte(fmt.Sprintf("#EXT-X-START:TIME-OFFSET=%.3f,PRECISE=YES", remountStartOffsetSeconds)))
+	}
+	result := make([][]byte, 0, len(lines)+len(tags))
+	result = append(result, lines[:insertAfter]...)
+	result = append(result, tags...)
+	result = append(result, lines[insertAfter:]...)
+	return bytes.Join(result, []byte("\n"))
 }
 
 // SourceTimelineQueryParam opts a real transcode manifest into source-time
