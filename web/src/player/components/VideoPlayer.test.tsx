@@ -190,7 +190,7 @@ describe("VideoPlayer native HLS timeline", () => {
 
   it("applies player_start_seconds before native HLS playback", async () => {
     const plan = fixturePlanV3({
-      delivery: "remux_hls",
+      delivery: "server_remux_hls",
       stream: {
         url: "/playback/transcode/session-1/master.m3u8",
         protocol: "hls",
@@ -201,6 +201,7 @@ describe("VideoPlayer native HLS timeline", () => {
         source_start_seconds: 42,
         player_start_seconds: 7,
         stream_origin_seconds: 35,
+        timeline_offset_seconds: 0,
         can_seek_anywhere: true,
         seek_restoration: "player_position",
       },

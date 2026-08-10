@@ -480,7 +480,7 @@ export function usePlaybackSession(
         }
         planRef.current = null;
         sessionIdRef.current = null;
-        planAttemptIdRef.current = null;
+        planAttemptIdRef.current = randomUUID();
         setState((current) => ({
           ...current,
           plan: null,
