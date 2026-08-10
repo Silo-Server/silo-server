@@ -144,6 +144,7 @@ const (
 	transcodeHWVAAPI        = "vaapi"
 	transcodeHWNVENC        = "nvenc"
 	transcodeHWVideoToolbox = "videotoolbox"
+	transcodeHWNone         = "none"
 )
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
