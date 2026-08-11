@@ -46,33 +46,55 @@ type softwareToneMapProbeResult struct {
 	cacheable     bool
 }
 
+type softwareToneMapProbeCall struct {
+	done    chan struct{}
+	result  softwareToneMapProbeResult
+	waiters int
+}
+
 type softwareToneMapFilterResolver struct {
-	mu      sync.Mutex
-	byPath  map[string]softwareToneMapProbeResult
-	probeFn func(ffmpegPath string) ([]byte, error)
+	mu       sync.Mutex
+	byPath   map[string]softwareToneMapProbeResult
+	inFlight map[string]*softwareToneMapProbeCall
+	probeFn  func(ffmpegPath string) ([]byte, error)
 }
 
 var defaultSoftwareToneMapFilterResolver = newSoftwareToneMapFilterResolver(runFFmpegFilterProbe)
 
 func newSoftwareToneMapFilterResolver(probeFn func(ffmpegPath string) ([]byte, error)) *softwareToneMapFilterResolver {
 	return &softwareToneMapFilterResolver{
-		byPath:  make(map[string]softwareToneMapProbeResult),
-		probeFn: probeFn,
+		byPath:   make(map[string]softwareToneMapProbeResult),
+		inFlight: make(map[string]*softwareToneMapProbeCall),
+		probeFn:  probeFn,
 	}
 }
 
 func (r *softwareToneMapFilterResolver) resolve(ffmpegPath string) (string, string, error) {
 	cacheKey := softwareToneMapCacheKey(ffmpegPath)
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if result, ok := r.byPath[cacheKey]; ok {
+		r.mu.Unlock()
 		return softwareToneMapProbeResultValue(result)
 	}
+	if call, ok := r.inFlight[cacheKey]; ok {
+		call.waiters++
+		r.mu.Unlock()
+		<-call.done
+		return softwareToneMapProbeResultValue(call.result)
+	}
+	call := &softwareToneMapProbeCall{done: make(chan struct{})}
+	r.inFlight[cacheKey] = call
+	r.mu.Unlock()
 
 	result := probeSoftwareToneMapFilter(ffmpegPath, r.probeFn)
+	r.mu.Lock()
 	if result.cacheable {
 		r.byPath[cacheKey] = result
 	}
+	call.result = result
+	delete(r.inFlight, cacheKey)
+	close(call.done)
+	r.mu.Unlock()
 	return softwareToneMapProbeResultValue(result)
 }
 

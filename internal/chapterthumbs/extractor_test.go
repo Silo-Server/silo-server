@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -118,6 +121,88 @@ func TestSoftwareToneMapFilterResolverKeepsExecutableSeparateFromCacheKey(t *tes
 	}
 	if calls != 1 {
 		t.Fatalf("probe calls = %d, want 1 cached call", calls)
+	}
+}
+
+func TestSoftwareToneMapFilterResolverCoalescesTransientProbeFailures(t *testing.T) {
+	const callers = 8
+
+	probeStarted := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	var probeCalls atomic.Int32
+	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+		if probeCalls.Add(1) == 1 {
+			close(probeStarted)
+			<-releaseProbe
+			return []byte("temporary stderr"), errors.New("resource temporarily unavailable")
+		}
+		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
+	})
+
+	type resolveResult struct {
+		filter string
+		reason string
+		err    error
+	}
+	results := make(chan resolveResult, callers)
+	start := make(chan struct{})
+	var callersReady sync.WaitGroup
+	callersReady.Add(callers)
+	for range callers {
+		go func() {
+			callersReady.Done()
+			<-start
+			filter, reason, err := resolver.resolve("/test/ffmpeg")
+			results <- resolveResult{filter: filter, reason: reason, err: err}
+		}()
+	}
+	callersReady.Wait()
+	close(start)
+	<-probeStarted
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		resolver.mu.Lock()
+		call := resolver.inFlight["/test/ffmpeg"]
+		waiters := 0
+		if call != nil {
+			waiters = call.waiters
+		}
+		resolver.mu.Unlock()
+		if waiters == callers-1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("coalesced waiters = %d, want %d", waiters, callers-1)
+		}
+		runtime.Gosched()
+	}
+	close(releaseProbe)
+
+	for range callers {
+		result := <-results
+		if result.filter != "" || result.reason != reasonFFmpegProbeFailed || result.err == nil {
+			t.Fatalf("resolve() = %q, %q, %v, want shared transient failure", result.filter, result.reason, result.err)
+		}
+	}
+	if calls := probeCalls.Load(); calls != 1 {
+		t.Fatalf("concurrent probe calls = %d, want 1", calls)
+	}
+
+	filter, reason, err := resolver.resolve("/test/ffmpeg")
+	if err != nil || reason != "" || filter != softwareToneMapFilterHable {
+		t.Fatalf("retry resolve() = %q, %q, %v", filter, reason, err)
+	}
+	if calls := probeCalls.Load(); calls != 2 {
+		t.Fatalf("probe calls after retry = %d, want 2", calls)
+	}
+
+	filter, reason, err = resolver.resolve("/test/ffmpeg")
+	if err != nil || reason != "" || filter != softwareToneMapFilterHable {
+		t.Fatalf("cached resolve() = %q, %q, %v", filter, reason, err)
+	}
+	if calls := probeCalls.Load(); calls != 2 {
+		t.Fatalf("probe calls after cached resolve = %d, want 2", calls)
 	}
 }
 
