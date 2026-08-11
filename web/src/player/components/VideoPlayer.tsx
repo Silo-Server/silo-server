@@ -1935,9 +1935,12 @@ export function VideoPlayer({
   // A refused replan leaves the previous stream playing, so the selection has
   // to roll back too: without this the menu would keep claiming a track is on
   // that the server never rendered, and re-picking it would be suppressed as an
-  // unchanged selection instead of retrying.
+  // unchanged selection instead of retrying. Pin the accepted selection just
+  // like a manual choice so auto-selection does not immediately request the
+  // rejected track again; a later user choice can still retry it explicitly.
   useEffect(() => {
     if (requestedSubtitleTrackChangeRef.current && replanError && !replanning) {
+      subtitleSelectionWasManualRef.current = true;
       setActiveSubtitleIndex(plan.selected_tracks.subtitle?.index ?? null);
       requestedSubtitleTrackChangeRef.current = null;
     }

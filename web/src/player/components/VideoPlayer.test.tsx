@@ -183,6 +183,34 @@ describe("VideoPlayer plan failure recovery", () => {
     fireEvent.error(video);
     expect(onPlanFailure).toHaveBeenCalledTimes(2);
   });
+
+  it("does not retry an auto-selected subtitle after its replan is refused", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const sidecarTrack: PlayerSubtitleInfo = {
+      index: 2,
+      media_file_id: 7,
+      track_id: "file:7:subtitle:2",
+      language: "en",
+      codec: "srt",
+      label: "English",
+      source: "external",
+      url: "/stream/session-1/subtitles/2.vtt",
+    };
+    const { rerenderPlayer } = renderPlayer({
+      subtitleUrls: [sidecarTrack],
+      subtitleMode: "always",
+      preferredSubtitleLanguage: "en",
+      onSubtitleTrackChange,
+    });
+
+    await waitFor(() => expect(onSubtitleTrackChange).toHaveBeenCalledOnce());
+    expect(onSubtitleTrackChange).toHaveBeenCalledWith(2, 0);
+
+    rerenderPlayer({ replanError: "Silo could not apply the subtitle selection." });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBeNull());
+    expect(onSubtitleTrackChange).toHaveBeenCalledOnce();
+  });
 });
 
 describe("VideoPlayer native HLS timeline", () => {
