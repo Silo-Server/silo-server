@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,27 +58,63 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 		limit = 20
 	}
 
-	query, args := buildListNextUpQuery(q, limit)
-
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("querying next-up episodes: %w", err)
-	}
-	defer rows.Close()
-
 	var results []NextUpResult
-	for rows.Next() {
-		var res NextUpResult
-		if err := rows.Scan(
-			&res.ContentID, &res.SeriesID, &res.SeriesTitle,
-			&res.SeasonNumber, &res.EpisodeNumber, &res.CompletedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scanning next-up row: %w", err)
+	if q.SeriesID != "" {
+		query, args := buildListNextUpQuery(q, limit, nil)
+		rows, err := r.pool.Query(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("querying next-up episodes: %w", err)
 		}
-		results = append(results, res)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating next-up rows: %w", err)
+		defer rows.Close()
+
+		for rows.Next() {
+			var res NextUpResult
+			if err := rows.Scan(
+				&res.ContentID, &res.SeriesID, &res.SeriesTitle,
+				&res.SeasonNumber, &res.EpisodeNumber, &res.CompletedAt,
+			); err != nil {
+				return nil, fmt.Errorf("scanning next-up row: %w", err)
+			}
+			results = append(results, res)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating next-up rows: %w", err)
+		}
+	} else {
+		remaining := limit
+		var cursor *nextUpWalkCursor
+		batchesRun := 0
+		exhausted := false
+
+		// Every batch resumes below the previous compound frontier, so appending
+		// batches preserves strictly descending (updated_at, media_item_id) order.
+		for batch := 0; batch < nextUpAnchorMaxBatches; batch++ {
+			batchResults, frontier, err := r.listNextUpBatch(ctx, q, remaining, cursor)
+			if err != nil {
+				return nil, err
+			}
+			batchesRun++
+			results = append(results, batchResults...)
+			remaining -= len(batchResults)
+
+			if remaining <= 0 {
+				exhausted = true
+				break
+			}
+			if frontier == nil || frontier.n < nextUpAnchorMaxSeries {
+				exhausted = true
+				break
+			}
+			cursor = &frontier.nextUpWalkCursor
+		}
+
+		if !exhausted && remaining > 0 {
+			slog.WarnContext(ctx, "next-up anchor walk hit batch cap; eligible series tail left unscanned",
+				"component", "catalog",
+				"profile_id", q.ProfileID,
+				"batches", batchesRun,
+				"results_found", len(results))
+		}
 	}
 
 	if q.EnableResumable {
@@ -109,19 +146,82 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 	return results, nil
 }
 
-// nextUpAnchorMaxSeries bounds the number of distinct series anchors the global
-// next-up query derives. A row-based cap let a bulk mark-watched operation flood
-// the window with one series and evict every other series; counting distinct
-// series makes that impossible regardless of how many of one series' rows are
-// newest. The rail surfaces about 24 items, so 96 anchors leave ample headroom.
-// Progress rows are recency-ordered on idx_uwp_profile_completed; when a profile
-// has fewer than 96 completed series, the worst case is one full ordered walk of
-// that partial index. Series-scoped calls (the show-detail tile) stay unbounded:
-// they must anchor on the series' last completed episode no matter how long ago
-// it was watched, and are naturally bounded by one series.
+type nextUpWalkCursor struct {
+	updatedAt   time.Time
+	mediaItemID string
+	seen        []string
+}
+
+type nextUpWalkFrontier struct {
+	nextUpWalkCursor
+	n int
+}
+
+// nextUpAnchorMaxSeries bounds the number of distinct series anchors visited by
+// one global next-up batch. A row-based cap let one series consume the window;
+// counting distinct series prevents that, while batching continues past a full
+// batch whose anchors are all ineligible. Series-scoped calls stay unbounded so
+// they can anchor on the series' last completed episode regardless of age.
 const nextUpAnchorMaxSeries = 96
 
-func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
+// nextUpAnchorMaxBatches bounds a global call to 10 × 96 = 960 visited series
+// as a runaway guard.
+const nextUpAnchorMaxBatches = 10
+
+func (r *NextUpRepository) listNextUpBatch(
+	ctx context.Context,
+	q NextUpQuery,
+	limit int,
+	cursor *nextUpWalkCursor,
+) ([]NextUpResult, *nextUpWalkFrontier, error) {
+	query, args := buildListNextUpQuery(q, limit, cursor)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("querying next-up episodes: %w", err)
+	}
+	defer rows.Close()
+
+	var results []NextUpResult
+	var frontier *nextUpWalkFrontier
+	for rows.Next() {
+		currentFrontier := nextUpWalkFrontier{}
+		var contentID, seriesID, seriesTitle *string
+		var seasonNumber, episodeNumber *int
+		var completedAt *time.Time
+		if err := rows.Scan(
+			&currentFrontier.updatedAt,
+			&currentFrontier.mediaItemID,
+			&currentFrontier.seen,
+			&currentFrontier.n,
+			&contentID,
+			&seriesID,
+			&seriesTitle,
+			&seasonNumber,
+			&episodeNumber,
+			&completedAt,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scanning next-up row: %w", err)
+		}
+		frontier = &currentFrontier
+		if contentID == nil {
+			continue
+		}
+		results = append(results, NextUpResult{
+			ContentID:     *contentID,
+			SeriesID:      *seriesID,
+			SeriesTitle:   *seriesTitle,
+			SeasonNumber:  *seasonNumber,
+			EpisodeNumber: *episodeNumber,
+			CompletedAt:   *completedAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterating next-up rows: %w", err)
+	}
+	return results, frontier, nil
+}
+
+func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (string, []interface{}) {
 	args := []interface{}{q.UserID, q.ProfileID, limit}
 	argIdx := 4
 
@@ -137,6 +237,19 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 		dateCutoffFilter = fmt.Sprintf(" AND uwp.updated_at >= $%d", argIdx)
 		args = append(args, *q.DateCutoff)
 		argIdx++
+	}
+
+	cursorFilter := ""
+	seedSeen := "ARRAY[e.series_id]"
+	if q.SeriesID == "" && cursor != nil {
+		cursorUpdatedAtArg := argIdx
+		cursorMediaItemIDArg := argIdx + 1
+		cursorSeenArg := argIdx + 2
+		cursorFilter = fmt.Sprintf(`
+				  AND (uwp.updated_at, uwp.media_item_id) < ($%d, $%d)
+				  AND NOT (e.series_id = ANY($%d))`, cursorUpdatedAtArg, cursorMediaItemIDArg, cursorSeenArg)
+		seedSeen = fmt.Sprintf("$%d::text[] || e.series_id", cursorSeenArg)
+		args = append(args, cursor.updatedAt, cursor.mediaItemID, cursor.seen)
 	}
 
 	// When resumable items are disabled, suppress next-up only if the series has
@@ -210,7 +323,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 					e.episode_number,
 					uwp.updated_at,
 					uwp.media_item_id,
-					ARRAY[e.series_id] AS seen,
+					%s AS seen,
 					1 AS n
 				FROM user_watch_progress uwp
 				JOIN episodes e ON e.content_id = uwp.media_item_id
@@ -225,6 +338,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 					    AND hhi.media_item_id = uwp.media_item_id
 					    AND uwp.updated_at <= hhi.hidden_before
 				  )
+				  %s
 				  %s
 				ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC,
 					e.season_number DESC, e.episode_number DESC
@@ -271,10 +385,11 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 		completed_episodes AS (
 			SELECT series_id, season_number, episode_number, updated_at
 			FROM walk
-		)`, dateCutoffFilter, dateCutoffFilter, nextUpAnchorMaxSeries)
+		)`, seedSeen, cursorFilter, dateCutoffFilter, dateCutoffFilter, nextUpAnchorMaxSeries)
 	}
 
-	query := fmt.Sprintf(`
+	if q.SeriesID != "" {
+		query := fmt.Sprintf(`
 		WITH %s
 		%s
 		SELECT
@@ -304,6 +419,64 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 		) next_ep ON true
 		ORDER BY es.updated_at DESC
 		LIMIT $3`, completedEpisodesCTE, inProgressExclusion, sourceTable)
+		return query, args
+	}
+
+	resultQuery := fmt.Sprintf(`
+		SELECT
+			next_ep.content_id,
+			next_ep.series_id,
+			si.title,
+			next_ep.season_number,
+			next_ep.episode_number,
+			es.updated_at AS completed_at
+		FROM %s es
+		JOIN media_items si ON si.content_id = es.series_id
+		JOIN LATERAL (
+			SELECT e2.content_id, e2.series_id, e2.season_number, e2.episode_number
+			FROM episodes e2
+			WHERE e2.series_id = es.series_id
+			  AND (e2.season_number, e2.episode_number) > (es.season_number, es.episode_number)
+			  AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = e2.content_id AND mf.missing_since IS NULL)
+			  AND NOT EXISTS (
+				  SELECT 1 FROM user_watch_progress uwp2
+				  WHERE uwp2.user_id = $1
+				    AND uwp2.profile_id = $2
+				    AND uwp2.media_item_id = e2.content_id
+				    AND (uwp2.completed = TRUE OR uwp2.position_seconds > 0)
+			  )
+			ORDER BY e2.season_number, e2.episode_number
+			LIMIT 1
+		) next_ep ON true
+		ORDER BY es.updated_at DESC
+		LIMIT $3`, sourceTable)
+
+	query := fmt.Sprintf(`
+		WITH %s
+		%s
+		,
+		frontier AS (
+			SELECT w.updated_at, w.media_item_id, w.seen, w.n
+			FROM walk w
+			ORDER BY w.n DESC
+			LIMIT 1
+		)
+		SELECT
+			f.updated_at AS frontier_updated_at,
+			f.media_item_id AS frontier_media_item_id,
+			f.seen AS frontier_seen,
+			f.n AS frontier_n,
+			r.content_id,
+			r.series_id,
+			r.title,
+			r.season_number,
+			r.episode_number,
+			r.completed_at
+		FROM frontier f
+		LEFT JOIN (
+			%s
+		) r ON true
+		ORDER BY r.completed_at DESC NULLS LAST`, completedEpisodesCTE, inProgressExclusion, resultQuery)
 
 	return query, args
 }

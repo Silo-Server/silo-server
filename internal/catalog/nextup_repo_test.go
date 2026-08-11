@@ -52,7 +52,7 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 	query, args := buildListNextUpQuery(NextUpQuery{
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, 20)
+	}, 20, nil)
 
 	expectedFragments := []string{
 		"eligible_series AS (",
@@ -83,16 +83,19 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
 	t.Parallel()
 
-	query, _ := buildListNextUpQuery(NextUpQuery{
+	q := NextUpQuery{
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, 20)
+	}
+	query, args := buildListNextUpQuery(q, 20, nil)
 
 	expectedFragments := []string{
 		"WITH RECURSIVE",
 		"(uwp.updated_at, uwp.media_item_id) < (w.updated_at, w.media_item_id)",
 		"NOT (e.series_id = ANY(w.seen))",
 		fmt.Sprintf("w.n < %d", nextUpAnchorMaxSeries),
+		"frontier AS (",
+		"LEFT JOIN (",
 	}
 	for _, fragment := range expectedFragments {
 		if !strings.Contains(query, fragment) {
@@ -101,6 +104,48 @@ func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
 	}
 	if got := strings.Count(query, "FROM user_history_hidden_items hhi"); got != 2 {
 		t.Fatalf("expected hidden-items filter in seed and recursive step, got %d occurrences:\n%s", got, query)
+	}
+	seed := strings.SplitN(query, "UNION ALL", 2)[0]
+	if strings.Contains(seed, "(uwp.updated_at, uwp.media_item_id) < ($") {
+		t.Fatalf("first batch seed must not contain a continuation cursor, got:\n%s", seed)
+	}
+	if strings.Contains(seed, "e.series_id = ANY($") {
+		t.Fatalf("first batch seed must not contain a seen-series exclusion, got:\n%s", seed)
+	}
+	if len(args) != 3 {
+		t.Fatalf("expected first batch args only, got %v", args)
+	}
+
+	cursorAt := time.Now().UTC()
+	cursor := &nextUpWalkCursor{
+		updatedAt:   cursorAt,
+		mediaItemID: "episode-96",
+		seen:        []string{"series-1", "series-2"},
+	}
+	continuedQuery, continuedArgs := buildListNextUpQuery(q, 7, cursor)
+	continuedSeed := strings.SplitN(continuedQuery, "UNION ALL", 2)[0]
+	continuedFragments := []string{
+		"(uwp.updated_at, uwp.media_item_id) < ($4, $5)",
+		"NOT (e.series_id = ANY($6))",
+		"$6::text[] || e.series_id AS seen",
+		"frontier AS (",
+		"LEFT JOIN (",
+	}
+	for _, fragment := range continuedFragments {
+		if !strings.Contains(continuedQuery, fragment) {
+			t.Fatalf("expected continued query to contain %q, got:\n%s", fragment, continuedQuery)
+		}
+	}
+	if !strings.Contains(continuedSeed, "(uwp.updated_at, uwp.media_item_id) < ($4, $5)") ||
+		!strings.Contains(continuedSeed, "NOT (e.series_id = ANY($6))") {
+		t.Fatalf("continued batch seed must contain cursor and seen-series predicates, got:\n%s", continuedSeed)
+	}
+	if len(continuedArgs) != 6 || continuedArgs[3] != cursorAt || continuedArgs[4] != cursor.mediaItemID {
+		t.Fatalf("unexpected continuation args: %v", continuedArgs)
+	}
+	seenArg, ok := continuedArgs[5].([]string)
+	if !ok || len(seenArg) != len(cursor.seen) || seenArg[0] != cursor.seen[0] || seenArg[1] != cursor.seen[1] {
+		t.Fatalf("expected cursor seen array verbatim, got %#v", continuedArgs[5])
 	}
 }
 
@@ -112,7 +157,7 @@ func TestBuildListNextUpQuery_GlobalDateCutoffAppliesToEveryWalkStep(t *testing.
 		UserID:     7,
 		ProfileID:  "profile-1",
 		DateCutoff: &cutoff,
-	}, 20)
+	}, 20, nil)
 
 	if got := strings.Count(query, "AND uwp.updated_at >= $4"); got != 2 {
 		t.Fatalf("expected date cutoff in seed and recursive step, got %d occurrences:\n%s", got, query)
@@ -125,11 +170,12 @@ func TestBuildListNextUpQuery_GlobalDateCutoffAppliesToEveryWalkStep(t *testing.
 func TestBuildListNextUpQuery_SeriesScopedKeepsUnboundedAnchor(t *testing.T) {
 	t.Parallel()
 
-	query, args := buildListNextUpQuery(NextUpQuery{
+	q := NextUpQuery{
 		UserID:    7,
 		ProfileID: "profile-1",
 		SeriesID:  "series-42",
-	}, 20)
+	}
+	query, args := buildListNextUpQuery(q, 20, nil)
 
 	// The show-detail tile must anchor on the series' last completed episode
 	// no matter how long ago it was watched: the recency bound would make a
@@ -145,6 +191,15 @@ func TestBuildListNextUpQuery_SeriesScopedKeepsUnboundedAnchor(t *testing.T) {
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args with SeriesID, got %d (%v)", len(args), args)
+	}
+
+	queryWithCursor, argsWithCursor := buildListNextUpQuery(q, 20, &nextUpWalkCursor{
+		updatedAt:   time.Now().UTC(),
+		mediaItemID: "ignored-episode",
+		seen:        []string{"ignored-series"},
+	})
+	if queryWithCursor != query || fmt.Sprint(argsWithCursor) != fmt.Sprint(args) {
+		t.Fatalf("series-scoped SQL and args must be byte-identical when a walk cursor is supplied")
 	}
 }
 
@@ -272,6 +327,132 @@ func TestNextUpRepository_GlobalAnchorWalkKeepsSameTimestampSeries(t *testing.T)
 	assertNextUpContentIDs(t, results, episodeD2, episodeE2)
 }
 
+func TestNextUpRepository_GlobalAnchorWalkContinuesPastIneligibleSeries(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-ineligible-%d", time.Now().UnixNano())
+
+	const ineligibleCount = 100
+	seriesIDs := make([]string, 0, ineligibleCount+2)
+	episodeIDs := make([]string, 0, ineligibleCount+4)
+	episodeSeriesIDs := make([]string, 0, ineligibleCount+4)
+	episodeNumbers := make([]int, 0, ineligibleCount+4)
+	completedEpisodeIDs := make([]string, 0, ineligibleCount+2)
+	completedTimes := make([]time.Time, 0, ineligibleCount+2)
+
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, seriesIDs)
+	})
+
+	newest := time.Now().UTC().Truncate(time.Microsecond)
+	for i := 0; i < ineligibleCount; i++ {
+		seriesID := fmt.Sprintf("%s-series-%03d", prefix, i)
+		episodeID := seriesID + "-episode-1"
+		seriesIDs = append(seriesIDs, seriesID)
+		episodeIDs = append(episodeIDs, episodeID)
+		episodeSeriesIDs = append(episodeSeriesIDs, seriesID)
+		episodeNumbers = append(episodeNumbers, 1)
+		completedEpisodeIDs = append(completedEpisodeIDs, episodeID)
+		completedTimes = append(completedTimes, newest.Add(-time.Duration(i)*time.Minute))
+		seedNextUpSeries(t, ctx, pool, seriesID, fmt.Sprintf("%s Ineligible %03d", prefix, i))
+	}
+
+	olderSeriesA := prefix + "-older-series-a"
+	olderSeriesB := prefix + "-older-series-b"
+	olderA1 := olderSeriesA + "-episode-1"
+	olderA2 := olderSeriesA + "-episode-2"
+	olderB1 := olderSeriesB + "-episode-1"
+	olderB2 := olderSeriesB + "-episode-2"
+	seriesIDs = append(seriesIDs, olderSeriesA, olderSeriesB)
+	seedNextUpSeries(t, ctx, pool, olderSeriesA, prefix+" Older A")
+	seedNextUpSeries(t, ctx, pool, olderSeriesB, prefix+" Older B")
+	episodeIDs = append(episodeIDs, olderA1, olderA2, olderB1, olderB2)
+	episodeSeriesIDs = append(episodeSeriesIDs, olderSeriesA, olderSeriesA, olderSeriesB, olderSeriesB)
+	episodeNumbers = append(episodeNumbers, 1, 2, 1, 2)
+	completedEpisodeIDs = append(completedEpisodeIDs, olderA1, olderB1)
+	completedTimes = append(completedTimes,
+		newest.Add(-(ineligibleCount+1)*time.Minute),
+		newest.Add(-(ineligibleCount+2)*time.Minute),
+	)
+
+	seedNextUpEpisodes(t, ctx, pool, episodeIDs, episodeSeriesIDs, episodeNumbers)
+	seedNextUpFiles(t, ctx, pool, folderID, []string{olderA2, olderB2})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (
+			user_id, profile_id, media_item_id, position_seconds,
+			duration_seconds, completed, updated_at
+		)
+		SELECT $1, $2, episode_id, 0, 1800, TRUE, completed_at
+		FROM unnest($3::text[], $4::timestamptz[]) AS fixture(episode_id, completed_at)
+	`, userID, profileID, completedEpisodeIDs, completedTimes); err != nil {
+		t.Fatalf("seed ineligible-flood progress: %v", err)
+	}
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{
+		UserID:          userID,
+		ProfileID:       profileID,
+		Limit:           20,
+		EnableResumable: false,
+	})
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	assertNextUpContentIDs(t, results, olderA2, olderB2)
+}
+
+func TestNextUpRepository_GlobalAnchorWalkStopsWhenHistoryExhausted(t *testing.T) {
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-exhausted-%d", time.Now().UnixNano())
+	seriesIDs := []string{
+		prefix + "-series-a",
+		prefix + "-series-b",
+		prefix + "-series-c",
+	}
+	episodeIDs := []string{
+		seriesIDs[0] + "-episode-1",
+		seriesIDs[1] + "-episode-1",
+		seriesIDs[2] + "-episode-1",
+	}
+
+	userID, profileID, _ := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, seriesIDs)
+	})
+	for i, seriesID := range seriesIDs {
+		seedNextUpSeries(t, ctx, pool, seriesID, fmt.Sprintf("%s Finished %d", prefix, i))
+	}
+	seedNextUpEpisodes(t, ctx, pool, episodeIDs, seriesIDs, []int{1, 1, 1})
+
+	completedAt := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (
+			user_id, profile_id, media_item_id, position_seconds,
+			duration_seconds, completed, updated_at
+		)
+		SELECT $1, $2, episode_id, 0, 1800, TRUE, $4::timestamptz - (ordinality * INTERVAL '1 minute')
+		FROM unnest($3::text[]) WITH ORDINALITY AS fixture(episode_id, ordinality)
+	`, userID, profileID, episodeIDs, completedAt); err != nil {
+		t.Fatalf("seed exhausted progress: %v", err)
+	}
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{
+		UserID:          userID,
+		ProfileID:       profileID,
+		Limit:           20,
+		EnableResumable: false,
+	})
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("ListNextUp returned %d rows after exhausting finished history: %+v", len(results), results)
+	}
+}
+
 func seedNextUpTestOwner(t *testing.T, ctx context.Context, pool *pgxpool.Pool, prefix string) (int, string, int) {
 	t.Helper()
 
@@ -379,7 +560,7 @@ func TestBuildListNextUpQuery_EnableResumableSkipsSeriesSuppressionCTE(t *testin
 		UserID:          7,
 		ProfileID:       "profile-1",
 		EnableResumable: true,
-	}, 20)
+	}, 20, nil)
 
 	if strings.Contains(query, "eligible_series AS (") {
 		t.Fatalf("expected resumable query to skip eligible_series suppression CTE, got:\n%s", query)
