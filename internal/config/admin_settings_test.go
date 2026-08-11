@@ -181,7 +181,7 @@ func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 
 func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
 	effective := EffectiveAdminSettings(nil)
-	if got := effective["playback.chapter_thumbnail_software_tone_map_enabled"]; got != "false" {
+	if got := effective[chapterThumbnailSoftwareToneMapKey]; got != "false" {
 		t.Fatalf("software tone-map default = %q, want false", got)
 	}
 }
@@ -216,7 +216,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	}{
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
-		{key: "playback.chapter_thumbnail_software_tone_map_enabled", value: "maybe"},
+		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
 		{key: "recommendations.embeddings_cron", value: "not a cron"},
 		{key: "notifications.server_channels.batch_seconds", value: "119"},
