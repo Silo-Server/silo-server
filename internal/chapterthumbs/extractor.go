@@ -28,10 +28,11 @@ type FrameExtractOptions struct {
 }
 
 const (
-	defaultFFmpegExecutable     = "ffmpeg"
 	hwAccelQSV                  = "qsv"
 	hwAccelVAAPI                = "vaapi"
+	reasonChapterExtractFailed  = "chapter_extract_failed"
 	reasonDecodeInvalidData     = "decode_invalid_data"
+	reasonFFmpegProbeFailed     = "ffmpeg_probe_failed"
 	reasonToneMapUnsupported    = "tonemap_unsupported"
 	softwareToneMapProbeTimeout = 3 * time.Second
 	softwareToneMapFilterBT2390 = "zscale=t=linear:npl=100,format=gbrpf32le,tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
@@ -39,8 +40,10 @@ const (
 )
 
 type softwareToneMapProbeResult struct {
-	filter string
-	reason string
+	filter        string
+	failureReason string
+	detail        string
+	cacheable     bool
 }
 
 type softwareToneMapFilterResolver struct {
@@ -58,39 +61,42 @@ func newSoftwareToneMapFilterResolver(probeFn func(ffmpegPath string) ([]byte, e
 	}
 }
 
-func (r *softwareToneMapFilterResolver) resolve(ffmpegPath string) (string, error) {
-	ffmpegPath = normalizeSoftwareToneMapFFmpegPath(ffmpegPath)
-
+func (r *softwareToneMapFilterResolver) resolve(ffmpegPath string) (string, string, error) {
+	cacheKey := softwareToneMapCacheKey(ffmpegPath)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if result, ok := r.byPath[ffmpegPath]; ok {
+	if result, ok := r.byPath[cacheKey]; ok {
 		return softwareToneMapProbeResultValue(result)
 	}
 
 	result := probeSoftwareToneMapFilter(ffmpegPath, r.probeFn)
-	r.byPath[ffmpegPath] = result
+	if result.cacheable {
+		r.byPath[cacheKey] = result
+	}
 	return softwareToneMapProbeResultValue(result)
 }
 
-func normalizeSoftwareToneMapFFmpegPath(ffmpegPath string) string {
-	ffmpegPath = strings.TrimSpace(ffmpegPath)
-	if ffmpegPath == "" {
-		return defaultFFmpegExecutable
-	}
+func softwareToneMapCacheKey(ffmpegPath string) string {
 	if strings.ContainsRune(ffmpegPath, os.PathSeparator) {
+		if absolutePath, err := filepath.Abs(ffmpegPath); err == nil {
+			return filepath.Clean(absolutePath)
+		}
 		return filepath.Clean(ffmpegPath)
 	}
 	return ffmpegPath
 }
 
-func softwareToneMapProbeResultValue(result softwareToneMapProbeResult) (string, error) {
+func softwareToneMapProbeResultValue(result softwareToneMapProbeResult) (string, string, error) {
 	if result.filter != "" {
-		return result.filter, nil
+		return result.filter, "", nil
 	}
-	if result.reason == "" {
-		result.reason = "configured FFmpeg has no supported software HDR tone-map filter chain"
+	if result.failureReason == "" {
+		result.failureReason = reasonChapterExtractFailed
 	}
-	return "", errors.New(result.reason)
+	if result.detail == "" {
+		result.detail = "configured FFmpeg software HDR tone-map capability could not be determined"
+	}
+	return "", result.failureReason, errors.New(result.detail)
 }
 
 func probeSoftwareToneMapFilter(
@@ -98,29 +104,40 @@ func probeSoftwareToneMapFilter(
 	probeFn func(ffmpegPath string) ([]byte, error),
 ) softwareToneMapProbeResult {
 	if probeFn == nil {
-		return softwareToneMapProbeResult{reason: "FFmpeg filter probe is unavailable"}
+		return softwareToneMapProbeResult{
+			failureReason: reasonFFmpegProbeFailed,
+			detail:        "FFmpeg filter probe is unavailable",
+		}
 	}
 	output, err := probeFn(ffmpegPath)
 	if err != nil {
-		return softwareToneMapProbeResult{reason: "FFmpeg filter probe failed: " + filterProbeFailure(err, output)}
+		return softwareToneMapProbeResult{
+			failureReason: reasonFFmpegProbeFailed,
+			detail:        "FFmpeg filter probe failed: " + playback.FormatFFmpegProbeFailure(err, output),
+		}
 	}
 	if !ffmpegFilterOutputHasToken(output, "zscale") {
-		return softwareToneMapProbeResult{reason: "configured FFmpeg lacks the required zscale filter"}
+		return softwareToneMapProbeResult{
+			failureReason: reasonToneMapUnsupported,
+			detail:        "configured FFmpeg lacks the required zscale filter",
+			cacheable:     true,
+		}
 	}
 	if ffmpegFilterOutputHasToken(output, "tonemapx") {
-		return softwareToneMapProbeResult{filter: softwareToneMapFilterBT2390}
+		return softwareToneMapProbeResult{filter: softwareToneMapFilterBT2390, cacheable: true}
 	}
 	if ffmpegFilterOutputHasToken(output, "tonemap") {
-		return softwareToneMapProbeResult{filter: softwareToneMapFilterHable}
+		return softwareToneMapProbeResult{filter: softwareToneMapFilterHable, cacheable: true}
 	}
-	return softwareToneMapProbeResult{reason: "configured FFmpeg lacks the required tonemapx or tonemap filter"}
+	return softwareToneMapProbeResult{
+		failureReason: reasonToneMapUnsupported,
+		detail:        "configured FFmpeg lacks the required tonemapx or tonemap filter",
+		cacheable:     true,
+	}
 }
 
 func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string, error) {
-	ffmpegPath := opts.FFmpegPath
-	if ffmpegPath == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	ffmpegPath := playback.ResolveFFmpegPath(opts.FFmpegPath)
 	runExtract := opts.RunFunc
 	if runExtract == nil {
 		runExtract = runFFmpegFrameExtract
@@ -128,6 +145,15 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 	softwareToneMapResolver := opts.softwareToneMapResolver
 	if softwareToneMapResolver == nil {
 		softwareToneMapResolver = defaultSoftwareToneMapFilterResolver
+	}
+	cpuOpts := cpuFrameExtractOptions{
+		ctx:                     ctx,
+		inputPath:               opts.InputPath,
+		seekSeconds:             opts.SeekSeconds,
+		toneMap:                 opts.ToneMap,
+		runExtract:              runExtract,
+		ffmpegPath:              ffmpegPath,
+		softwareToneMapResolver: softwareToneMapResolver,
 	}
 
 	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
@@ -155,13 +181,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 				return nil, hwReason, wrapReason(hwReason, err)
 			}
 			return extractFrameCPUFallback(
-				ctx,
-				opts.InputPath,
-				opts.SeekSeconds,
-				opts.ToneMap,
-				runExtract,
-				ffmpegPath,
-				softwareToneMapResolver,
+				cpuOpts,
 				hwReason,
 				err,
 			)
@@ -169,53 +189,55 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 
 		releaseHWDevice()
 		return extractFrameCPUFallback(
-			ctx,
-			opts.InputPath,
-			opts.SeekSeconds,
-			opts.ToneMap,
-			runExtract,
-			ffmpegPath,
-			softwareToneMapResolver,
-			"chapter_extract_failed",
+			cpuOpts,
+			reasonChapterExtractFailed,
 			buildErr,
 		)
 	}
 
-	return extractFrameCPU(
-		ctx,
-		opts.InputPath,
-		opts.SeekSeconds,
-		opts.ToneMap,
-		runExtract,
-		ffmpegPath,
-		softwareToneMapResolver,
-	)
+	if resolvedAccel != "none" && !opts.ToneMap {
+		return extractFrameUnsupportedSDRWithRetry(cpuOpts)
+	}
+
+	return extractFrameCPU(cpuOpts)
 }
 
 func supportsHardwareFrameExtract(hwAccel string) bool {
 	return hwAccel == hwAccelQSV || hwAccel == hwAccelVAAPI
 }
 
+type cpuFrameExtractOptions struct {
+	ctx                     context.Context
+	inputPath               string
+	seekSeconds             float64
+	toneMap                 bool
+	runExtract              func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error)
+	ffmpegPath              string
+	softwareToneMapResolver *softwareToneMapFilterResolver
+}
+
+func extractFrameUnsupportedSDRWithRetry(opts cpuFrameExtractOptions) ([]byte, string, error) {
+	attemptCtx, cancel := context.WithTimeout(opts.ctx, extractTimeoutForAttempt(true, false))
+	data, err := opts.runExtract(
+		attemptCtx,
+		opts.ffmpegPath,
+		buildCPUFrameExtractArgs(opts.inputPath, opts.seekSeconds, ""),
+	)
+	cancel()
+	if err == nil {
+		return data, "", nil
+	}
+
+	hwReason := classifyExtractError("hw", err)
+	return extractFrameCPUFallback(opts, hwReason, err)
+}
+
 func extractFrameCPUFallback(
-	ctx context.Context,
-	inputPath string,
-	seekSeconds float64,
-	toneMap bool,
-	runExtract func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error),
-	ffmpegPath string,
-	softwareToneMapResolver *softwareToneMapFilterResolver,
+	opts cpuFrameExtractOptions,
 	hwReason string,
 	hwErr error,
 ) ([]byte, string, error) {
-	cpuData, cpuReason, cpuErr := extractFrameCPU(
-		ctx,
-		inputPath,
-		seekSeconds,
-		toneMap,
-		runExtract,
-		ffmpegPath,
-		softwareToneMapResolver,
-	)
+	cpuData, cpuReason, cpuErr := extractFrameCPU(opts)
 	if cpuErr == nil {
 		return cpuData, "", nil
 	}
@@ -227,26 +249,24 @@ func extractFrameCPUFallback(
 }
 
 func extractFrameCPU(
-	ctx context.Context,
-	inputPath string,
-	seekSeconds float64,
-	toneMap bool,
-	runExtract func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error),
-	ffmpegPath string,
-	softwareToneMapResolver *softwareToneMapFilterResolver,
+	opts cpuFrameExtractOptions,
 ) ([]byte, string, error) {
 	softwareToneMapFilter := ""
-	if toneMap {
-		filter, err := softwareToneMapResolver.resolve(ffmpegPath)
+	if opts.toneMap {
+		filter, reason, err := opts.softwareToneMapResolver.resolve(opts.ffmpegPath)
 		if err != nil {
-			return nil, reasonToneMapUnsupported, wrapReason(reasonToneMapUnsupported, err)
+			return nil, reason, wrapReason(reason, err)
 		}
 		softwareToneMapFilter = filter
 	}
 
-	attemptCtx, cancel := context.WithTimeout(ctx, extractTimeoutForAttempt(false, toneMap))
+	attemptCtx, cancel := context.WithTimeout(opts.ctx, extractTimeoutForAttempt(false, opts.toneMap))
 	defer cancel()
-	data, err := runExtract(attemptCtx, ffmpegPath, buildCPUFrameExtractArgs(inputPath, seekSeconds, softwareToneMapFilter))
+	data, err := opts.runExtract(
+		attemptCtx,
+		opts.ffmpegPath,
+		buildCPUFrameExtractArgs(opts.inputPath, opts.seekSeconds, softwareToneMapFilter),
+	)
 	if err != nil {
 		reason := classifyExtractError("cpu", err)
 		return nil, reason, wrapReason(reason, err)
@@ -275,7 +295,7 @@ func classifyExtractError(stage string, err error) string {
 	case stage == "cpu" && isDeadlineError(err):
 		return "cpu_timeout"
 	default:
-		return "chapter_extract_failed"
+		return reasonChapterExtractFailed
 	}
 }
 
@@ -382,17 +402,6 @@ func ffmpegFilterOutputHasToken(output []byte, token string) bool {
 		}
 	}
 	return false
-}
-
-func filterProbeFailure(err error, output []byte) string {
-	message := strings.TrimSpace(err.Error())
-	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
-		if len(trimmed) > 240 {
-			trimmed = trimmed[:240] + "..."
-		}
-		message += ": " + trimmed
-	}
-	return message
 }
 
 func runFFmpegFrameExtract(ctx context.Context, ffmpegPath string, args []string) ([]byte, error) {

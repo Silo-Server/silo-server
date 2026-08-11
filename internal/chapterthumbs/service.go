@@ -436,7 +436,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			mutated = true
 			failed++
 			if shouldApplyFileFailure(reason) {
-				hardFileFailure = buildPersistentFileFailure(&updated, now, reason, err)
+				hardFileFailure = buildFileFailure(&updated, now, reason, err)
 				slog.WarnContext(ctx,
 					"chapter thumbnail file marked failed", "component", "chapterthumbs",
 					"file_id",
@@ -460,11 +460,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 				"chapter_index",
 				chapter.Index,
 				"reason",
-				"chapter_extract_failed",
+				reasonChapterExtractFailed,
 				"error",
 				err,
 			)
-			recordChapterFailure(&updated.Chapters[candidate.offset], now, "chapter_extract_failed", err)
+			recordChapterFailure(&updated.Chapters[candidate.offset], now, reasonChapterExtractFailed, err)
 			mutated = true
 			failed++
 			continue
@@ -1179,21 +1179,26 @@ func retryDurationForCount(failureCount int) time.Duration {
 
 func shouldApplyFileFailure(reason string) bool {
 	switch reason {
-	case "decode_invalid_data":
+	case reasonDecodeInvalidData, reasonFFmpegProbeFailed, reasonToneMapUnsupported:
 		return true
 	default:
 		return false
 	}
 }
 
-func buildPersistentFileFailure(
+func buildFileFailure(
 	file *models.MediaFile,
 	now time.Time,
 	reason string,
 	err error,
 ) *scanner.ChapterThumbnailFailureState {
-	failureCount := len(chapterThumbnailRetrySchedule)
-	if file != nil && file.ChapterThumbnailFailureCount >= failureCount {
+	failureCount := 1
+	if reason == reasonDecodeInvalidData {
+		failureCount = len(chapterThumbnailRetrySchedule)
+		if file != nil && file.ChapterThumbnailFailureCount >= failureCount {
+			failureCount = file.ChapterThumbnailFailureCount + 1
+		}
+	} else if file != nil {
 		failureCount = file.ChapterThumbnailFailureCount + 1
 	}
 	retryAfter := now.Add(retryDurationForCount(failureCount))

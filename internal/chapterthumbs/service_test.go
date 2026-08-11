@@ -517,6 +517,87 @@ func TestProcessRequestMarksDecodeInvalidDataAsFileFailure(t *testing.T) {
 	}
 }
 
+func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		err    error
+	}{
+		{
+			name:   "unsupported filters",
+			reason: reasonToneMapUnsupported,
+			err:    errors.New("configured FFmpeg lacks the required zscale filter"),
+		},
+		{
+			name:   "transient probe failure",
+			reason: reasonFFmpegProbeFailed,
+			err:    errors.New("FFmpeg filter probe failed: resource temporarily unavailable"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Unix(1_700_000_000, 0).UTC()
+			fileRepo := &testFileRepo{
+				file: &models.MediaFile{
+					ID:            42,
+					MediaFolderID: 9,
+					FilePath:      "/media/movie.mkv",
+					HDR:           true,
+					Chapters: []models.MediaChapter{
+						{Index: 0, StartSeconds: 0, EndSeconds: 10},
+						{Index: 1, StartSeconds: 10, EndSeconds: 20},
+					},
+				},
+			}
+			callCount := 0
+			service := &Service{
+				fileRepo:   fileRepo,
+				folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+				clock: func() time.Time {
+					return now
+				},
+				extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+					callCount++
+					return nil, tt.reason, tt.err
+				},
+			}
+
+			requeue, err := service.processRequest(context.Background(), ChapterThumbnailRequest{FileID: 42}, false)
+			if err != nil {
+				t.Fatalf("processRequest() error = %v", err)
+			}
+			if requeue {
+				t.Fatal("processRequest() requeue = true, want false")
+			}
+			if callCount != 1 {
+				t.Fatalf("callCount = %d, want 1", callCount)
+			}
+			if fileRepo.updateCalls != 1 {
+				t.Fatalf("updateCalls = %d, want 1", fileRepo.updateCalls)
+			}
+			if fileRepo.file.ChapterThumbnailFailureCount != 1 {
+				t.Fatalf("failureCount = %d, want 1", fileRepo.file.ChapterThumbnailFailureCount)
+			}
+			if fileRepo.file.ChapterThumbnailRetryAfter == nil {
+				t.Fatal("expected file-level retry_after to be set")
+			}
+			if got, want := *fileRepo.file.ChapterThumbnailRetryAfter, now.Add(15*time.Minute); !got.Equal(want) {
+				t.Fatalf("retryAfter = %v, want %v", got, want)
+			}
+			if !strings.HasPrefix(fileRepo.file.ChapterThumbnailLastError, tt.reason+":") {
+				t.Fatalf("lastError = %q, want %s prefix", fileRepo.file.ChapterThumbnailLastError, tt.reason)
+			}
+			if fileRepo.file.Chapters[0].ThumbnailRetryAfter == nil {
+				t.Fatal("expected first chapter retry_after to be set")
+			}
+			if fileRepo.file.Chapters[1].ThumbnailRetryAfter != nil {
+				t.Fatal("expected later chapters to be skipped after file-level failure")
+			}
+		})
+	}
+}
+
 func TestExtractFrameCPUFallbackGetsFreshDeadline(t *testing.T) {
 	service := &Service{
 		hwAccel:  "vaapi",

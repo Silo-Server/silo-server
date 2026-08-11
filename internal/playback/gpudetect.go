@@ -181,13 +181,13 @@ func normalizeFFmpegPath(ffmpegPath string) string {
 
 func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return nvencProbeResult{reason: "hwaccels probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "cuda") {
 		return nvencProbeResult{reason: "cuda hwaccel unavailable"}
 	}
 
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return nvencProbeResult{reason: "encoders probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "h264_nvenc") {
 		return nvencProbeResult{reason: "h264_nvenc encoder unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hevc_nvenc") {
@@ -195,7 +195,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 	}
 
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-filters"); err != nil {
-		return nvencProbeResult{reason: "filters probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "filters probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "scale_cuda") {
 		return nvencProbeResult{reason: "scale_cuda filter unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hwupload_cuda") {
@@ -213,7 +213,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 		"-f", "null",
 		"-",
 	); err != nil {
-		return nvencProbeResult{reason: "h264_nvenc smoke encode failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "h264_nvenc smoke encode failed: " + FormatFFmpegProbeFailure(err, output)}
 	}
 
 	return nvencProbeResult{available: true}
@@ -234,7 +234,8 @@ func ffmpegOutputHasToken(output []byte, token string) bool {
 	return false
 }
 
-func probeFailure(err error, output []byte) string {
+// FormatFFmpegProbeFailure combines a probe error with bounded command output.
+func FormatFFmpegProbeFailure(err error, output []byte) string {
 	message := strings.TrimSpace(err.Error())
 	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
 		if len(trimmed) > 240 {

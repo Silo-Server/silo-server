@@ -44,7 +44,7 @@ func ffmpegBinary() string {
 // probes must resolve through this same function so a feature advertised at
 // planning time is guaranteed present in the binary that later runs.
 func ResolveFFmpegPath(configured string) string {
-	if strings.TrimSpace(configured) != "" {
+	if configured = strings.TrimSpace(configured); configured != "" {
 		return configured
 	}
 	return ffmpegBinary()

@@ -3,6 +3,7 @@ package chapterthumbs
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -15,33 +16,43 @@ func TestSoftwareToneMapFilterResolver(t *testing.T) {
 		output     string
 		probeErr   error
 		wantFilter string
+		wantReason string
 		wantError  string
+		wantCalls  int
 	}{
 		{
 			name:       "prefers tonemapx bt2390",
 			output:     " .S. zscale V->V\n .S. tonemap V->V\n .S. tonemapx V->V\n",
 			wantFilter: softwareToneMapFilterBT2390,
+			wantCalls:  1,
 		},
 		{
 			name:       "falls back to standard hable",
 			output:     " .S. zscale V->V\n .S. tonemap V->V\n",
 			wantFilter: softwareToneMapFilterHable,
+			wantCalls:  1,
 		},
 		{
-			name:      "requires zscale",
-			output:    " .S. tonemapx V->V\n",
-			wantError: "lacks the required zscale filter",
+			name:       "requires zscale",
+			output:     " .S. tonemapx V->V\n",
+			wantReason: reasonToneMapUnsupported,
+			wantError:  "lacks the required zscale filter",
+			wantCalls:  1,
 		},
 		{
-			name:      "requires a tone map filter",
-			output:    " .S. zscale V->V Description mentions tonemap but does not provide it.\n",
-			wantError: "lacks the required tonemapx or tonemap filter",
+			name:       "requires a tone map filter",
+			output:     " .S. zscale V->V Description mentions tonemap but does not provide it.\n",
+			wantReason: reasonToneMapUnsupported,
+			wantError:  "lacks the required tonemapx or tonemap filter",
+			wantCalls:  1,
 		},
 		{
-			name:      "reports probe failure",
-			output:    "probe stderr",
-			probeErr:  errors.New("exit status 1"),
-			wantError: "FFmpeg filter probe failed: exit status 1: probe stderr",
+			name:       "does not cache transient probe failure",
+			output:     "probe stderr",
+			probeErr:   errors.New("exit status 1"),
+			wantReason: reasonFFmpegProbeFailed,
+			wantError:  "FFmpeg filter probe failed: exit status 1: probe stderr",
+			wantCalls:  2,
 		},
 	}
 
@@ -50,17 +61,20 @@ func TestSoftwareToneMapFilterResolver(t *testing.T) {
 			calls := 0
 			resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
 				calls++
-				if ffmpegPath != "/test/ffmpeg" {
-					t.Fatalf("ffmpegPath = %q, want /test/ffmpeg", ffmpegPath)
+				if cacheKey := softwareToneMapCacheKey(ffmpegPath); cacheKey != "/test/ffmpeg" {
+					t.Fatalf("ffmpegPath = %q, cache key = %q, want /test/ffmpeg", ffmpegPath, cacheKey)
 				}
 				return []byte(tt.output), tt.probeErr
 			})
 
-			for _, ffmpegPath := range []string{"/test/ffmpeg", " /test/../test/ffmpeg "} {
-				filter, err := resolver.resolve(ffmpegPath)
+			for _, ffmpegPath := range []string{"/test/ffmpeg", "/test/../test/ffmpeg"} {
+				filter, reason, err := resolver.resolve(ffmpegPath)
 				if tt.wantError != "" {
 					if err == nil || !strings.Contains(err.Error(), tt.wantError) {
 						t.Fatalf("resolve() error = %v, want containing %q", err, tt.wantError)
+					}
+					if reason != tt.wantReason {
+						t.Fatalf("resolve() reason = %q, want %q", reason, tt.wantReason)
 					}
 					continue
 				}
@@ -70,11 +84,40 @@ func TestSoftwareToneMapFilterResolver(t *testing.T) {
 				if filter != tt.wantFilter {
 					t.Fatalf("resolve() filter = %q, want %q", filter, tt.wantFilter)
 				}
+				if reason != "" {
+					t.Fatalf("resolve() reason = %q, want empty", reason)
+				}
 			}
-			if calls != 1 {
-				t.Fatalf("probe calls = %d, want 1 cached call", calls)
+			if calls != tt.wantCalls {
+				t.Fatalf("probe calls = %d, want %d", calls, tt.wantCalls)
 			}
 		})
+	}
+}
+
+func TestSoftwareToneMapFilterResolverKeepsExecutableSeparateFromCacheKey(t *testing.T) {
+	workingDirectory, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("resolve working directory: %v", err)
+	}
+
+	calls := 0
+	resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
+		calls++
+		if ffmpegPath != "./ffmpeg" {
+			t.Fatalf("probe path = %q, want ./ffmpeg", ffmpegPath)
+		}
+		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
+	})
+
+	for _, ffmpegPath := range []string{"./ffmpeg", filepath.Join(workingDirectory, "ffmpeg")} {
+		filter, reason, err := resolver.resolve(ffmpegPath)
+		if err != nil || reason != "" || filter != softwareToneMapFilterHable {
+			t.Fatalf("resolve(%q) = %q, %q, %v", ffmpegPath, filter, reason, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("probe calls = %d, want 1 cached call", calls)
 	}
 }
 
@@ -129,6 +172,98 @@ func TestExtractFrameUnsupportedHardwareUsesCPU(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "-hwaccel") || strings.Contains(joined, "nvenc") {
 		t.Fatalf("unsupported chapter-thumbnail accelerator used hardware args: %s", joined)
+	}
+}
+
+func TestExtractFrameUnsupportedHardwarePreservesSDRRetry(t *testing.T) {
+	calls := 0
+	var firstRemaining, retryRemaining time.Duration
+	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:   "/media/movie.mkv",
+		SeekSeconds: 42.5,
+		HWAccel:     "nvenc",
+		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
+			calls++
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Fatalf("extraction attempt %d has no deadline", calls)
+			}
+			if strings.Contains(strings.Join(args, " "), "-hwaccel") {
+				t.Fatalf("unsupported accelerator used hardware args: %#v", args)
+			}
+			if calls == 1 {
+				firstRemaining = time.Until(deadline)
+				return nil, errors.New("transient software decode failure")
+			}
+			retryRemaining = time.Until(deadline)
+			return []byte("frame"), nil
+		},
+	})
+	if err != nil || reason != "" || string(data) != "frame" {
+		t.Fatalf("ExtractFrame() = %q, %q, %v", data, reason, err)
+	}
+	if calls != 2 {
+		t.Fatalf("extract calls = %d, want 2", calls)
+	}
+	assertApproximateDeadline(t, firstRemaining, hwExtractTimeoutSDR)
+	assertApproximateDeadline(t, retryRemaining, cpuExtractTimeoutSDR)
+}
+
+func TestExtractFrameProbesAndRunsSameRelativeFFmpeg(t *testing.T) {
+	var probedPath, extractPath string
+	resolver := newSoftwareToneMapFilterResolver(func(ffmpegPath string) ([]byte, error) {
+		probedPath = ffmpegPath
+		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
+	})
+
+	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:               "/media/movie.mkv",
+		FFmpegPath:              " ./ffmpeg ",
+		HWAccel:                 "none",
+		ToneMap:                 true,
+		softwareToneMapResolver: resolver,
+		RunFunc: func(_ context.Context, ffmpegPath string, _ []string) ([]byte, error) {
+			extractPath = ffmpegPath
+			return []byte("frame"), nil
+		},
+	})
+	if err != nil || reason != "" {
+		t.Fatalf("ExtractFrame() reason = %q, error = %v", reason, err)
+	}
+	if probedPath != "./ffmpeg" || extractPath != "./ffmpeg" {
+		t.Fatalf("probe path = %q, extract path = %q, want ./ffmpeg for both", probedPath, extractPath)
+	}
+}
+
+func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
+	probeCalls := 0
+	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+		probeCalls++
+		if probeCalls == 1 {
+			return []byte("temporary stderr"), errors.New("resource temporarily unavailable")
+		}
+		return []byte(" .S. zscale V->V\n .S. tonemap V->V\n"), nil
+	})
+	opts := FrameExtractOptions{
+		InputPath:               "/media/movie.mkv",
+		FFmpegPath:              "/test/ffmpeg",
+		HWAccel:                 "none",
+		ToneMap:                 true,
+		softwareToneMapResolver: resolver,
+		RunFunc: func(context.Context, string, []string) ([]byte, error) {
+			return []byte("frame"), nil
+		},
+	}
+
+	if _, reason, err := ExtractFrame(context.Background(), opts); err == nil || reason != reasonFFmpegProbeFailed {
+		t.Fatalf("first ExtractFrame() reason = %q, error = %v, want retryable probe failure", reason, err)
+	}
+	data, reason, err := ExtractFrame(context.Background(), opts)
+	if err != nil || reason != "" || string(data) != "frame" {
+		t.Fatalf("second ExtractFrame() = %q, %q, %v", data, reason, err)
+	}
+	if probeCalls != 2 {
+		t.Fatalf("probe calls = %d, want 2", probeCalls)
 	}
 }
 
@@ -298,6 +433,12 @@ func TestRemoteExtractTimeoutBudgetsHardwareAndCPUAttempts(t *testing.T) {
 				softwareToneMapProbeTimeout,
 			)
 		}
+	}
+}
+
+func TestRemoteProbeFailureAllowsPreferredLocalFallback(t *testing.T) {
+	if !isInfrastructureRemoteFailure(reasonFFmpegProbeFailed) {
+		t.Fatalf("isInfrastructureRemoteFailure(%q) = false, want true", reasonFFmpegProbeFailed)
 	}
 }
 

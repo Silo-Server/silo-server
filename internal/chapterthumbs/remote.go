@@ -62,7 +62,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, "chapter_extract_failed", fmt.Errorf("chapter thumbnail remote extract: marshal request: %w", err)
+		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: marshal request: %w", err)
 	}
 
 	timeout := remoteExtractTimeout(req.ToneMap)
@@ -107,7 +107,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: read response: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, "chapter_extract_failed", fmt.Errorf("chapter thumbnail remote extract: empty response")
+		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: empty response")
 	}
 	return data, "", nil
 }
@@ -124,7 +124,7 @@ func remoteExtractTimeout(toneMap bool) time.Duration {
 
 func isInfrastructureRemoteFailure(reason string) bool {
 	switch reason {
-	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason:
+	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason, reasonFFmpegProbeFailed:
 		return true
 	default:
 		return false
