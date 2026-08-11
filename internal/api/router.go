@@ -1671,6 +1671,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
+			cfg := deps.CurrentConfig()
+			if cfg == nil {
+				return ""
+			}
+			return cfg.Auth.JWTSecret
+		})
 		if profileHandler != nil {
 			// Profiles may live outside Postgres (sqlite userdb backend), so
 			// deleting one cannot FK-cascade the shared user_devices table;

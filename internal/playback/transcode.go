@@ -217,8 +217,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
-	opts = resolveSoftwareVideoDecode(opts)
-	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	opts = normalizeTranscodeOpts(opts)
 	configuredHWDevices := ParseHWDeviceSet(opts.HWDevice)
 	reserveHWDeviceOnRestart := configuredHWDevices.Multi() && hwAccelBalancesRenderDevices(opts.HWAccel)
 	// Resolve a multi-device hw_device list to one concrete GPU. Restarts reuse
@@ -372,12 +371,19 @@ func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
 	return opts
 }
 
+// normalizeTranscodeOpts resolves source-specific decode safety and the
+// configured hardware execution mode in one place. Every FFmpeg entry point
+// must pass through this helper so streaming and prepared-file recipes cannot
+// disagree about whether a source may use hardware decode or encode.
+func normalizeTranscodeOpts(opts TranscodeOpts) TranscodeOpts {
+	opts = resolveSoftwareVideoDecode(opts)
+	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	return opts
+}
+
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
-	opts = resolveSoftwareVideoDecode(opts)
-	// Resolve "auto" into a concrete accel method once so all downstream
-	// helpers (appendHWAccelArgs, appendVideoArgs, etc.) see the real value.
-	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	opts = normalizeTranscodeOpts(opts)
 
 	isVideoCopy := opts.TargetCodecVideo == "copy"
 	isAudioCopy := opts.TargetCodecAudio == "copy"

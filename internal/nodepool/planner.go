@@ -20,6 +20,13 @@ type SessionPlanner interface {
 	PlanSession(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int) Plan
 }
 
+// TranscodeWorkPlanner reserves capacity for non-streaming GPU work such as a
+// prepared download. The returned release function must be called after the
+// remote operation ends or falls back locally.
+type TranscodeWorkPlanner interface {
+	ReserveTranscodeWork(workID string) (*Node, func())
+}
+
 // reservation bridges the gap between assigning a session to a node and the
 // node's health reports reflecting that session.
 //
@@ -178,6 +185,42 @@ func (p *Planner) ReleaseSession(sessionID string) {
 	p.mu.Lock()
 	delete(p.reserved, sessionID)
 	p.mu.Unlock()
+}
+
+// ReserveTranscodeWork selects the least-loaded healthy transcode node while
+// sharing the same health-bridging reservation accounting as playback. Unlike
+// a playback session it does not require a proxy partner: the completed file
+// is written to the configured shared artifact store and served later.
+func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
+	if p == nil || p.transcodes == nil || workID == "" {
+		return nil, func() {}
+	}
+	p.mu.Lock()
+	now := p.now()
+	p.pruneReservations(now)
+	delete(p.reserved, workID)
+
+	var best *Node
+	for _, node := range p.transcodes.Nodes() {
+		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+			continue
+		}
+		if best == nil || p.effectiveJobs(node, now) < p.effectiveJobs(best, now) {
+			best = node
+		}
+	}
+	if best != nil {
+		p.reserved[workID] = &reservation{transcodeURL: best.URL, createdAt: now}
+	}
+	p.mu.Unlock()
+	if best == nil {
+		return nil, func() {}
+	}
+
+	var once sync.Once
+	return best, func() {
+		once.Do(func() { p.ReleaseSession(workID) })
+	}
 }
 
 // groupHealth reports, for every group label present in either pool, whether

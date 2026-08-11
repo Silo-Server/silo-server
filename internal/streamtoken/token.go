@@ -7,6 +7,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const (
+	// PlayMethodDownload identifies a token minted only after the API has
+	// authorized a file download. Proxy download routes reject playback tokens.
+	PlayMethodDownload = "download"
+)
+
 // Claims holds everything a stateless proxy or transcode node needs
 // to serve a streaming session without database access.
 //

@@ -1,18 +1,24 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -28,6 +34,13 @@ type Server struct {
 	// subCache stores full-track PGS (.sup) extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
+	// Download limits are node-local once egress is delegated. Rebuild the
+	// manager when hot-reloaded settings change so existing transfers retain
+	// their original limiter while new transfers use the new values.
+	downloadBandwidthMu sync.Mutex
+	downloadBandwidth   *downloads.BandwidthManager
+	downloadServerBPS   int64
+	downloadUserBPS     int64
 }
 
 // NewServer creates a new proxy server backed by a config watcher and session
@@ -73,8 +86,7 @@ func (s *Server) Handler() http.Handler {
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
 	r.Group(func(r chi.Router) {
-		// Everything under /stream counts toward the node's measured
-		// egress bandwidth.
+		// Streaming and download bytes count toward the node's measured egress.
 		r.Use(s.meterEgress)
 		r.Head("/stream/direct/{token}", s.handleDirectPlay)
 		r.Get("/stream/direct/{token}", s.handleDirectPlay)
@@ -85,6 +97,8 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/stream/transcode/{token}/segment/{name}", s.handleTranscodeSegment)
 		r.Get("/stream/subtitles/{token}/{track}/fonts", s.handleSubtitleFonts)
 		r.Get("/stream/subtitles/{token}/{track}", s.handleSubtitle)
+		r.Head("/downloads/file/{token}", s.handleDownloadFile)
+		r.Get("/downloads/file/{token}", s.handleDownloadFile)
 	})
 
 	// Admin routes — bearer-auth protected.
@@ -151,6 +165,63 @@ func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
 	http.ServeFile(w, r, claims.MediaPath)
+}
+
+func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
+	claims := s.verifyToken(w, r)
+	if claims == nil {
+		return
+	}
+	if claims.PlayMethod != streamtoken.PlayMethodDownload || strings.TrimSpace(claims.MediaPath) == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if s.tracker != nil {
+		info := sessionInfo(s.tracker, claims, "download")
+		s.tracker.Track(r.Context(), info)
+		defer s.tracker.Remove(context.WithoutCancel(r.Context()), claims.SessionID)
+	}
+
+	f, err := os.Open(claims.MediaPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	stat, err := f.Stat()
+	if err != nil {
+		http.Error(w, "download unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	filename := filepath.Base(claims.MediaPath)
+	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
+		w.Header().Set("Content-Disposition", disposition)
+	}
+	w.Header().Set("Content-Type", playback.MimeFromExtension(claims.MediaPath))
+	reader := io.ReadSeeker(f)
+	if bandwidth := s.downloadBandwidthManager(); bandwidth != nil {
+		reader = bandwidth.ThrottledReader(r.Context(), f, claims.UserID)
+	}
+	http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
+}
+
+func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
+	cfg := s.watcher.Config()
+	if cfg == nil {
+		return nil
+	}
+	serverBPS := cfg.Download.ServerBandwidthBPS
+	userBPS := cfg.Download.UserBandwidthBPS
+	s.downloadBandwidthMu.Lock()
+	defer s.downloadBandwidthMu.Unlock()
+	if s.downloadBandwidth == nil || serverBPS != s.downloadServerBPS || userBPS != s.downloadUserBPS {
+		s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
+		s.downloadServerBPS = serverBPS
+		s.downloadUserBPS = userBPS
+	}
+	return s.downloadBandwidth
 }
 
 func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {

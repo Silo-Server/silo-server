@@ -2060,20 +2060,22 @@ func main() {
 			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
 			// queue hosted on the task manager. Built here (before Start) and shared
 			// with the API via deps so the download service can enqueue jobs.
+			liveDownloadConfig := func() *config.Config {
+				if deps.LiveConfig != nil {
+					if c := deps.LiveConfig(); c != nil {
+						return c
+					}
+				}
+				return deps.Config
+			}
+			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), deps.NodePlanner, liveDownloadConfig)
 			artifactMgr := downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(deps.DB),
 				downloads.NewRepository(deps.DB),
 				deps.FileRepo,
-				downloads.NewPlaybackPreparer(),
+				preparer,
 				deps.NodeID,
-				func() *config.Config {
-					if deps.LiveConfig != nil {
-						if c := deps.LiveConfig(); c != nil {
-							return c
-						}
-					}
-					return deps.Config
-				},
+				liveDownloadConfig,
 				func(ctx context.Context, d *downloads.Download) {
 					if deps.EventsHub == nil {
 						return

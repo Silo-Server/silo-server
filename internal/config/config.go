@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -408,8 +409,21 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 ).String()
 
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
-// artifacts default to a sibling directory (see downloads.effectiveArtifactDir).
+// artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).
 const DefaultTranscodeDir = "/tmp/silo-transcode"
+
+// EffectiveDownloadArtifactDir resolves the shared prepared-download artifact
+// root. Keeping this path rule in config lets API and transcode-node processes
+// independently derive the same destination from the same live settings.
+func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
+	if artifactDir != "" {
+		return artifactDir
+	}
+	if transcodeDir == "" {
+		transcodeDir = DefaultTranscodeDir
+	}
+	return filepath.Join(filepath.Dir(transcodeDir), "silo-download-artifacts")
+}
 
 const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"

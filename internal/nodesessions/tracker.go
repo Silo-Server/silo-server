@@ -26,7 +26,7 @@ type SessionInfo struct {
 	UserID      string `json:"user_id,omitempty"`
 	MediaItemID string `json:"media_item_id,omitempty"`
 	MediaTitle  string `json:"media_title,omitempty"`
-	Type        string `json:"type"` // "direct_play", "remux", "transcode"
+	Type        string `json:"type"` // "direct_play", "remux", "transcode", "download_prepare", "download"
 	CodecVideo  string `json:"codec_video,omitempty"`
 	CodecAudio  string `json:"codec_audio,omitempty"`
 	Resolution  string `json:"resolution,omitempty"`

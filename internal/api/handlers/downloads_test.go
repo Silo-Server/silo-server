@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +15,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // fakeDownloadService is a programmable DownloadService for handler tests. It
@@ -79,6 +82,21 @@ type identityCall struct {
 	profileID  string
 	deviceID   string
 	downloadID string
+}
+
+type proxyDownloadService struct {
+	*fakeDownloadService
+	directTarget  *downloads.FileTarget
+	managedTarget *downloads.FileTarget
+	resolveErr    error
+}
+
+func (s *proxyDownloadService) ResolveDirectFile(context.Context, int, int, string, catalog.AccessFilter) (*downloads.FileTarget, error) {
+	return s.directTarget, s.resolveErr
+}
+
+func (s *proxyDownloadService) ResolveManagedFile(context.Context, int, string, string, string, catalog.AccessFilter) (*downloads.FileTarget, error) {
+	return s.managedTarget, s.resolveErr
 }
 
 func (f *fakeDownloadService) Capability(context.Context, int) (downloads.Capability, error) {
@@ -429,6 +447,47 @@ func TestManagedFileThreadsIdentity(t *testing.T) {
 	}
 }
 
+func TestManagedFileRedirectsAuthorizedArtifactToProxy(t *testing.T) {
+	const secret = "download-proxy-secret"
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Errorf("preflight method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxy.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		managedTarget:       &downloads.FileTarget{Path: "/artifacts/movie.mp4", DownloadID: "dl1", MediaFileID: 42, ProxyEligible: true},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl1/file", nil, 7, "pA", "devA"), "dl1")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFile(rec, req)
+
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307 (body: %s)", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	prefix := proxy.URL + "/downloads/file/"
+	if !strings.HasPrefix(location, prefix) {
+		t.Fatalf("Location = %q", location)
+	}
+	claims, err := streamtoken.Verify(strings.TrimPrefix(location, prefix), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.PlayMethod != streamtoken.PlayMethodDownload || claims.MediaPath != "/artifacts/movie.mp4" || claims.UserID != 7 || claims.ProfileID != "pA" {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if svc.gotServe != (identityCall{}) {
+		t.Fatalf("local ServeFile was called: %+v", svc.gotServe)
+	}
+}
+
 func TestManagedListThreadsIdentity(t *testing.T) {
 	svc := &fakeDownloadService{}
 	h := NewDownloadHandler(svc)
@@ -511,6 +570,75 @@ func TestHandleDirectDownloadThreadsOriginalFormat(t *testing.T) {
 	}
 	if svc.gotDirectFormat != downloads.FormatOriginal {
 		t.Fatalf("direct format = %q, want original", svc.gotDirectFormat)
+	}
+}
+
+func TestHandleDirectDownloadRedirectsToProxy(t *testing.T) {
+	const secret = "download-proxy-secret"
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxy.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		directTarget:        &downloads.FileTarget{Path: "/media/movie.mkv", MediaFileID: 42, ProxyEligible: true},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL + "/", Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
+	rec := httptest.NewRecorder()
+	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodHead, "/direct-download?file_id=42", nil, 7, "", ""))
+
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want 307 (body: %s)", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	claims, err := streamtoken.Verify(strings.TrimPrefix(location, proxy.URL+"/downloads/file/"), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.MediaPath != "/media/movie.mkv" || claims.MediaFileID != 42 {
+		t.Fatalf("claims = %+v", claims)
+	}
+	if svc.gotDirectFileID != 0 {
+		t.Fatalf("local ServeDirect called for file %d", svc.gotDirectFileID)
+	}
+}
+
+func TestHandleDirectDownloadFallsBackWithoutHealthyProxy(t *testing.T) {
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		directTarget:        &downloads.FileTarget{Path: "/media/movie.mkv", MediaFileID: 42, ProxyEligible: true},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: "https://proxy.example", Enabled: true, Healthy: false}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	rec := httptest.NewRecorder()
+	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42", nil, 7, "", ""))
+
+	if rec.Code != http.StatusOK || svc.gotDirectFileID != 42 {
+		t.Fatalf("status = %d file = %d body = %s", rec.Code, svc.gotDirectFileID, rec.Body.String())
+	}
+}
+
+func TestHandleDirectDownloadFallsBackWhenProxyCannotServePath(t *testing.T) {
+	proxy := httptest.NewServer(http.NotFoundHandler())
+	defer proxy.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		directTarget:        &downloads.FileTarget{Path: "/media/movie.mkv", MediaFileID: 42, ProxyEligible: true},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL, Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	rec := httptest.NewRecorder()
+	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42", nil, 7, "", ""))
+
+	if rec.Code != http.StatusOK || svc.gotDirectFileID != 42 {
+		t.Fatalf("status = %d file = %d body = %s", rec.Code, svc.gotDirectFileID, rec.Body.String())
 	}
 }
 

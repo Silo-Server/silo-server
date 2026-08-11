@@ -57,12 +57,6 @@ func paramsHash(format, container, codecVideo, codecAudio, resolution string, au
 	return hex.EncodeToString(sum[:])
 }
 
-// defaultTranscodeDir is config's TranscodeDir default and roots
-// prepared download artifacts when neither download.artifact_dir nor the
-// transcode dir is configured. Keeping it absolute avoids writing artifacts
-// relative to the process working directory.
-const defaultTranscodeDir = config.DefaultTranscodeDir
-
 // effectiveArtifactDir resolves where prepared artifacts are written: the
 // configured download.artifact_dir when set, otherwise a dedicated directory
 // alongside the transcode dir. The result is always rooted at a real volume,
@@ -73,13 +67,7 @@ const defaultTranscodeDir = config.DefaultTranscodeDir
 // transcode dir, so an artifact dir nested under it would be wiped on the next
 // transcode sweep.
 func effectiveArtifactDir(artifactDir, transcodeDir string) string {
-	if artifactDir != "" {
-		return artifactDir
-	}
-	if transcodeDir == "" {
-		transcodeDir = defaultTranscodeDir
-	}
-	return filepath.Join(filepath.Dir(transcodeDir), "silo-download-artifacts")
+	return config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 }
 
 // artifactOutputPath derives a deterministic output path from

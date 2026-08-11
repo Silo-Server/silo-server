@@ -349,10 +349,17 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		}
 	}
 
-	var size int64
-	if fi, statErr := os.Stat(a.OutputPath); statErr == nil {
-		size = fi.Size()
+	fi, err := os.Stat(a.OutputPath)
+	if err != nil {
+		// A remote node can report success while writing to a path that is not
+		// actually shared with the API node. Never publish that artifact: retry
+		// so another node or the local fallback can produce an observable file.
+		msg := fmt.Sprintf("prepared artifact output unavailable: %v", err)
+		slog.WarnContext(ctx, "prepared artifact output unavailable", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath, "error", err)
+		m.failJob(ctx, a, msg)
+		return
 	}
+	size := fi.Size()
 	// Fenced on lease ownership: if we lost the lease between encode and commit,
 	// applied is false and the current owner is responsible for flipping links —
 	// do not flip them here or we would race/duplicate that owner's work.

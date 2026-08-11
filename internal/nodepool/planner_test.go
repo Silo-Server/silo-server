@@ -509,3 +509,33 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 		t.Fatalf("unknown-bitrate stream should be rejected at cap, got %+v", got)
 	}
 }
+
+func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
+	capOne := 1
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{
+		{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capOne},
+		{URL: "http://transcode-b", Enabled: true, Healthy: true, MaxJobs: &capOne},
+	})
+	planner := NewPlanner(NewProxyPool(), transcodes)
+
+	first, releaseFirst := planner.ReserveTranscodeWork("download-1")
+	if first == nil || first.URL != "http://transcode-a" {
+		t.Fatalf("first node = %+v", first)
+	}
+	second, releaseSecond := planner.ReserveTranscodeWork("download-2")
+	if second == nil || second.URL != "http://transcode-b" {
+		t.Fatalf("second node = %+v", second)
+	}
+	if third, _ := planner.ReserveTranscodeWork("download-3"); third != nil {
+		t.Fatalf("third node = %+v, want no capacity", third)
+	}
+
+	releaseFirst()
+	third, releaseThird := planner.ReserveTranscodeWork("download-3")
+	if third == nil || third.URL != "http://transcode-a" {
+		t.Fatalf("third node after release = %+v", third)
+	}
+	releaseSecond()
+	releaseThird()
+}

@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,7 +18,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // DownloadService is the interface that the download handler depends on. A
@@ -44,13 +50,39 @@ type DownloadService interface {
 
 // DownloadHandler handles download endpoints.
 type DownloadHandler struct {
-	svc DownloadService
+	svc             DownloadService
+	nodePlanner     nodepool.SessionPlanner
+	jwtSecret       func() string
+	proxyHTTPClient *http.Client
 }
 
 // NewDownloadHandler creates a new DownloadHandler.
 func NewDownloadHandler(svc DownloadService) *DownloadHandler {
-	return &DownloadHandler{svc: svc}
+	return &DownloadHandler{
+		svc: svc,
+		proxyHTTPClient: &http.Client{
+			Timeout: 3 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}
 }
+
+// SetProxyDelivery enables stateless proxy-node egress after the API service
+// has authorized and resolved a download target. It is optional; integrated
+// deployments continue to serve bytes locally.
+func (h *DownloadHandler) SetProxyDelivery(planner nodepool.SessionPlanner, jwtSecret func() string) {
+	h.nodePlanner = planner
+	h.jwtSecret = jwtSecret
+}
+
+type downloadFileResolver interface {
+	ResolveDirectFile(ctx context.Context, userID, fileID int, format string, filter catalog.AccessFilter) (*downloads.FileTarget, error)
+	ResolveManagedFile(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (*downloads.FileTarget, error)
+}
+
+const proxyDownloadTokenTTL = 15 * time.Minute
 
 // downloadRequest represents the JSON body for POST /downloads.
 type downloadRequest struct {
@@ -399,29 +431,37 @@ func (h *DownloadHandler) HandleDownloadFile(w http.ResponseWriter, r *http.Requ
 
 	profileID, deviceID, _, _ := managedIdentity(r)
 	filter := requestAccessFilter(r)
+	if deviceID != "" {
+		handled, err := h.redirectManagedDownload(r.Context(), w, r, userID, profileID, deviceID, id, filter)
+		if err != nil {
+			h.writeDownloadFileError(w, r, id, err)
+			return
+		}
+		if handled {
+			return
+		}
+	}
 	// Full media downloads outlive the server's absolute WriteTimeout; roll
 	// the write deadline with progress instead.
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	if err := h.svc.ServeFile(r.Context(), sw, r, userID, profileID, deviceID, id, filter); err != nil {
-		if errors.Is(err, downloads.ErrNotFound) || errors.Is(err, catalog.ErrItemNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Download not found")
-			return
-		}
-		if errors.Is(err, downloads.ErrDownloadNotActive) {
-			writeError(w, http.StatusConflict, "download_inactive", "This download is no longer active")
-			return
-		}
-		if errors.Is(err, downloads.ErrProfileRequired) {
-			writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
-			return
-		}
-		if errors.Is(err, downloads.ErrFeatureDisabled) || errors.Is(err, downloads.ErrDownloadNotAllowed) {
-			writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
-			return
-		}
+		h.writeDownloadFileError(w, r, id, err)
+	}
+}
+
+func (h *DownloadHandler) writeDownloadFileError(w http.ResponseWriter, r *http.Request, id string, err error) {
+	switch {
+	case errors.Is(err, downloads.ErrNotFound), errors.Is(err, catalog.ErrItemNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "Download not found")
+	case errors.Is(err, downloads.ErrDownloadNotActive):
+		writeError(w, http.StatusConflict, "download_inactive", "This download is no longer active")
+	case errors.Is(err, downloads.ErrProfileRequired):
+		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
+	case errors.Is(err, downloads.ErrFeatureDisabled), errors.Is(err, downloads.ErrDownloadNotAllowed):
+		writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
+	default:
 		slog.ErrorContext(r.Context(), "failed to serve download file", "component", "api", "download_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve download")
-		return
 	}
 }
 
@@ -446,10 +486,116 @@ func (h *DownloadHandler) HandleDirectDownload(w http.ResponseWriter, r *http.Re
 	}
 
 	filter := requestAccessFilter(r)
+	if handled, redirectErr := h.redirectDirectDownload(r.Context(), w, r, userID, fileID, r.URL.Query().Get("format"), filter); redirectErr != nil {
+		h.writeDownloadError(w, redirectErr)
+		return
+	} else if handled {
+		return
+	}
 	if err := h.svc.ServeDirect(r.Context(), w, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
 		h.writeDownloadError(w, err)
 		return
 	}
+}
+
+func (h *DownloadHandler) redirectDirectDownload(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) (bool, error) {
+	resolver, secret, ok := h.proxyTarget()
+	if !ok {
+		return false, nil
+	}
+	target, err := resolver.ResolveDirectFile(ctx, userID, fileID, format, filter)
+	if err != nil {
+		return false, err
+	}
+	return h.redirectToProxy(w, r, secret, target, userID, "")
+}
+
+func (h *DownloadHandler) redirectManagedDownload(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (bool, error) {
+	resolver, secret, ok := h.proxyTarget()
+	if !ok {
+		return false, nil
+	}
+	target, err := resolver.ResolveManagedFile(ctx, userID, profileID, deviceID, downloadID, filter)
+	if err != nil {
+		return false, err
+	}
+	return h.redirectToProxy(w, r, secret, target, userID, profileID)
+}
+
+func (h *DownloadHandler) proxyTarget() (downloadFileResolver, string, bool) {
+	resolver, ok := h.svc.(downloadFileResolver)
+	if !ok || h.nodePlanner == nil || h.jwtSecret == nil {
+		return nil, "", false
+	}
+	secret := strings.TrimSpace(h.jwtSecret())
+	if secret == "" {
+		return nil, "", false
+	}
+	return resolver, secret, true
+}
+
+func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request, secret string, target *downloads.FileTarget, userID int, profileID string) (bool, error) {
+	if target == nil || strings.TrimSpace(target.Path) == "" {
+		return false, fmt.Errorf("download target is empty")
+	}
+	if !target.ProxyEligible {
+		return false, nil
+	}
+	reservationKey := target.DownloadID
+	if reservationKey == "" {
+		reservationKey = fmt.Sprintf("direct-%d-%d", userID, target.MediaFileID)
+	}
+	sessionID := fmt.Sprintf("download-%s-%d", reservationKey, time.Now().UnixNano())
+	plan := h.nodePlanner.PlanSession(sessionID, "", false, 0)
+	if plan.ProxyNode == nil {
+		return false, nil
+	}
+	releaseReservation := func() {
+		if releaser, ok := h.nodePlanner.(interface{ ReleaseSession(string) }); ok {
+			releaser.ReleaseSession(sessionID)
+		}
+	}
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:   sessionID,
+		MediaPath:   target.Path,
+		PlayMethod:  streamtoken.PlayMethodDownload,
+		UserID:      userID,
+		ProfileID:   profileID,
+		MediaFileID: target.MediaFileID,
+	}, secret, proxyDownloadTokenTTL)
+	if err != nil {
+		releaseReservation()
+		return false, fmt.Errorf("sign proxy download token: %w", err)
+	}
+	location := strings.TrimRight(plan.ProxyNode.URL, "/") + "/downloads/file/" + url.PathEscape(token)
+	if !h.proxyCanServe(r.Context(), location) {
+		releaseReservation()
+		return false, nil
+	}
+	http.Redirect(w, r, location, http.StatusTemporaryRedirect)
+	return true, nil
+}
+
+func (h *DownloadHandler) proxyCanServe(ctx context.Context, location string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, location, nil)
+	if err != nil {
+		return false
+	}
+	client := h.proxyHTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		slog.DebugContext(ctx, "download proxy preflight failed; serving locally", "component", "api", "error", err)
+		return false
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		slog.DebugContext(ctx, "download proxy preflight unavailable; serving locally", "component", "api", "status", resp.StatusCode)
+		return false
+	}
+	return true
 }
 
 // requireManaged validates a managed (device-scoped) request: authentication, a

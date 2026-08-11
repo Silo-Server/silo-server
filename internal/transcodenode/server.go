@@ -19,6 +19,8 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -383,6 +385,7 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.requireBearer)
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
+		r.Post("/downloads/prepare", s.handleDownloadPrepare)
 		r.Post("/transcode/start", s.handleStart)
 		r.Delete("/transcode/{session_id}", s.handleStop)
 		r.Get("/transcode/{session_id}/master.m3u8", s.handleManifest)
@@ -391,6 +394,70 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/status", s.handleStatus)
 	})
 	return r
+}
+
+func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
+	var req downloadprepare.Request
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.JobID) == "" || strings.TrimSpace(req.InputPath) == "" || strings.TrimSpace(req.OutputPath) == "" {
+		http.Error(w, "job_id, input_path, and output_path are required", http.StatusBadRequest)
+		return
+	}
+
+	cfg := s.watcher.Config()
+	artifactRoot := config.EffectiveDownloadArtifactDir(cfg.Download.ArtifactDir, cfg.Playback.TranscodeDir)
+	if !pathWithinRoot(artifactRoot, req.OutputPath) || !strings.EqualFold(filepath.Ext(req.OutputPath), ".mp4") {
+		http.Error(w, "output_path must be an mp4 under the configured artifact directory", http.StatusBadRequest)
+		return
+	}
+
+	jobCtx := r.Context()
+	s.activeJobs.Add(1)
+	defer s.activeJobs.Add(-1)
+	if s.tracker != nil {
+		s.tracker.Track(jobCtx, nodesessions.SessionInfo{
+			SessionID:  "download-" + req.JobID,
+			NodeURL:    s.tracker.NodeURL(),
+			NodeName:   s.tracker.NodeName(),
+			Type:       "download_prepare",
+			CodecVideo: req.TargetCodecVideo,
+			CodecAudio: req.TargetCodecAudio,
+			Resolution: req.TargetResolution,
+			StartedAt:  time.Now().UTC().Format(time.RFC3339),
+		})
+		defer s.tracker.Remove(context.WithoutCancel(jobCtx), "download-"+req.JobID)
+	}
+
+	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
+	if err := playback.PrepareFile(jobCtx, opts, req.OutputPath); err != nil {
+		if jobCtx.Err() == nil {
+			slog.ErrorContext(jobCtx, "prepare download artifact", "component", "transcodenode", "job_id", req.JobID, "error", err)
+		}
+		http.Error(w, "failed to prepare download artifact", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": req.JobID, "status": "ready"})
+}
+
+func pathWithinRoot(root, target string) bool {
+	rootAbs, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(target))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, targetAbs)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
