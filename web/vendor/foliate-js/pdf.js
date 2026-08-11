@@ -129,7 +129,7 @@ const setupPanningEvents = (doc) => {
     container.style.cursor = 'grab'
 }
 
-const render = async (page, doc, zoom, pageColors) => {
+const render = async (page, doc, zoom, pageColors, getAttachmentContent) => {
     if (!doc) return
 
     // Increment generation to invalidate any in-progress render for this doc
@@ -235,13 +235,14 @@ const render = async (page, doc, zoom, pageColors) => {
         goToDestination: () => {},
         getDestinationHash: dest => JSON.stringify(dest),
         addLinkAttributes: (link, url) => link.href = url,
+        getAttachmentContent,
     }
     await new pdfjsLib.AnnotationLayer({ page, viewport, div, linkService }).render({
         annotations: await page.getAnnotations(),
     })
 }
 
-const renderPage = async (page, getImageBlob) => {
+const renderPage = async (page, getImageBlob, getAttachmentContent) => {
     const viewport = page.getViewport({ scale: 1 })
     if (getImageBlob) {
         const canvas = document.createElement('canvas')
@@ -275,7 +276,8 @@ const renderPage = async (page, getImageBlob) => {
         <div class="annotationLayer"></div>
     `
     const src = URL.createObjectURL(new Blob([data], { type: 'text/html' }))
-    const onZoom = ({ doc, scale, pageColors }) => render(page, doc, scale, pageColors)
+    const onZoom = ({ doc, scale, pageColors }) =>
+        render(page, doc, scale, pageColors, getAttachmentContent)
     return { src, data, onZoom }
 }
 
@@ -352,6 +354,14 @@ export const makePDF = async file => {
         isEvalSupported: false,
     })
     const pdf = await loadingTask.promise
+    const getAttachmentContent = async id => {
+        try {
+            return await pdf.getAttachmentContent(id)
+        } catch (error) {
+            console.warn(`Unable to load PDF attachment content: ${error}`)
+            return null
+        }
+    }
 
     // Get viewport dimensions from first page for fixed-layout rendering
     const firstPage = await pdf.getPage(1)
@@ -415,7 +425,7 @@ export const makePDF = async file => {
                 cache.set(i, cached)
                 return cached
             }
-            const url = await renderPage(await getPage(i))
+            const url = await renderPage(await getPage(i), false, getAttachmentContent)
             cache.set(i, url)
 
             // Evict oldest render results when over limit
