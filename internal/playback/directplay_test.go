@@ -244,6 +244,7 @@ func TestDirectStreamConditionalResult(t *testing.T) {
 		{name: "If-Match passed", status: http.StatusPartialContent, hadRange: true, hadIfMatch: true, want: directStreamConditionalIfMatchPassed},
 		{name: "If-Match failed", status: http.StatusPreconditionFailed, hadRange: true, hadIfMatch: true, want: directStreamConditionalIfMatchFailed},
 		{name: "If-Range matched", status: http.StatusPartialContent, hadRange: true, hadIfRange: true, want: directStreamConditionalIfRangeMatched},
+		{name: "If-Range matched before range rejected", status: http.StatusRequestedRangeNotSatisfiable, hadRange: true, hadIfRange: true, want: directStreamConditionalIfRangeMatched},
 		{name: "If-Range mismatched", status: http.StatusOK, hadRange: true, hadIfRange: true, want: directStreamConditionalIfRangeMismatched},
 		{name: "If-Range without Range", status: http.StatusOK, hadIfRange: true, want: directStreamConditionalIfRangeNotEvaluated},
 	}
@@ -291,9 +292,18 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 	previousLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
 	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	initial := httptest.NewRecorder()
+	if err := ServeDirectPlay(initial, httptest.NewRequest(http.MethodGet, "/stream", nil), filePath); err != nil {
+		t.Fatal(err)
+	}
+	currentETag := initial.Header().Get("ETag")
+	if currentETag == "" {
+		t.Fatal("initial response omitted ETag")
+	}
 
 	tests := []struct {
 		name            string
+		rangeHeader     string
 		headerName      string
 		validator       string
 		wantStatus      int
@@ -302,6 +312,7 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 	}{
 		{
 			name:            "If-Match mismatch",
+			rangeHeader:     "bytes=2-4",
 			headerName:      "If-Match",
 			validator:       "\"stale-private-if-match\"",
 			wantStatus:      http.StatusPreconditionFailed,
@@ -310,10 +321,20 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 		},
 		{
 			name:            "If-Range mismatch",
+			rangeHeader:     "bytes=2-4",
 			headerName:      "If-Range",
 			validator:       "\"stale-private-if-range\"",
 			wantStatus:      http.StatusOK,
 			wantResult:      directStreamConditionalIfRangeMismatched,
+			fingerprintName: "if_range_fingerprint",
+		},
+		{
+			name:            "If-Range match with unsatisfiable range",
+			rangeHeader:     "bytes=999-1000",
+			headerName:      "If-Range",
+			validator:       currentETag,
+			wantStatus:      http.StatusRequestedRangeNotSatisfiable,
+			wantResult:      directStreamConditionalIfRangeMatched,
 			fingerprintName: "if_range_fingerprint",
 		},
 	}
@@ -321,7 +342,7 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			logs.Reset()
 			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
-			req.Header.Set("Range", "bytes=2-4")
+			req.Header.Set("Range", tt.rangeHeader)
 			req.Header.Set(tt.headerName, tt.validator)
 			rr := httptest.NewRecorder()
 			if err := ServeDirectPlay(rr, req, filePath); err != nil {
@@ -345,6 +366,11 @@ func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
 				t.Fatalf("%s = %v, want request fingerprint", tt.fingerprintName, got)
 			}
 			responseETag := rr.Header().Get("ETag")
+			if tt.wantStatus == http.StatusRequestedRangeNotSatisfiable {
+				// ServeContent strips ETag from its 416 response, but the end log
+				// still fingerprints the validator used for If-Range evaluation.
+				responseETag = currentETag
+			}
 			if got := record["etag_fingerprint"]; got != directStreamValidatorFingerprint(responseETag) {
 				t.Fatalf("etag_fingerprint = %v, want response ETag fingerprint", got)
 			}

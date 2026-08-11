@@ -173,7 +173,7 @@ func directStreamConditionalResult(status int, hadRange, hadIfMatch, hadIfRange 
 	switch {
 	case hadIfMatch && status == http.StatusPreconditionFailed:
 		return directStreamConditionalIfMatchFailed
-	case hadRange && hadIfRange && status == http.StatusPartialContent:
+	case hadRange && hadIfRange && (status == http.StatusPartialContent || status == http.StatusRequestedRangeNotSatisfiable):
 		return directStreamConditionalIfRangeMatched
 	case hadRange && hadIfRange && status == http.StatusOK:
 		return directStreamConditionalIfRangeMismatched
