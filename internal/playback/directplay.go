@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -52,8 +53,8 @@ func MimeFromExtension(name string) string {
 
 // ServeDirectPlay serves a media file with HTTP byte-range support.
 // Uses http.ServeContent for proper range handling, which supports
-// Range requests, conditional requests (If-Modified-Since, If-None-Match),
-// and Content-Type detection.
+// Range requests, conditional requests (including If-Match, If-Range, and
+// If-None-Match), and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
 	// Media bodies routinely take longer than the server's absolute
 	// WriteTimeout; roll the write deadline with progress instead.
@@ -81,7 +82,8 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	}
 
 	w.Header().Del("ETag")
-	if etag := directPlayEntityTag(f, stat); etag != "" {
+	etag := directPlayEntityTag(f, stat)
+	if etag != "" {
 		w.Header().Set("ETag", etag)
 	}
 
@@ -89,6 +91,7 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	w.Header().Set("Content-Type", MimeFromExtension(filePath))
 
 	hadRange := len(r.Header.Values("Range")) > 0
+	hadIfMatch := len(r.Header.Values("If-Match")) > 0
 	hadIfRange := len(r.Header.Values("If-Range")) > 0
 	directStreamActive.Inc()
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
@@ -97,15 +100,27 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	bytesSent := streamWriter.BytesWritten()
 	rangeStart := directStreamRangeStart(status, w.Header().Get("Content-Range"))
 	recordDirectStreamEnd(outcome, status, bytesSent, rangeStart)
-	slog.InfoContext(r.Context(), "direct stream ended",
+	logAttrs := []any{
 		"component", "playback",
 		"outcome", outcome,
 		"status", status,
 		"bytes_sent", bytesSent,
 		"range_requested", hadRange,
 		"range_start", rangeStart,
+		"had_if_match", hadIfMatch,
 		"had_if_range", hadIfRange,
-	)
+		"conditional_result", directStreamConditionalResult(status, hadRange, hadIfMatch, hadIfRange),
+	}
+	if fingerprint := directStreamValidatorFingerprint(etag); fingerprint != "" {
+		logAttrs = append(logAttrs, "etag_fingerprint", fingerprint)
+	}
+	if fingerprint := directStreamHeaderFingerprint(r.Header, "If-Match"); fingerprint != "" {
+		logAttrs = append(logAttrs, "if_match_fingerprint", fingerprint)
+	}
+	if fingerprint := directStreamHeaderFingerprint(r.Header, "If-Range"); fingerprint != "" {
+		logAttrs = append(logAttrs, "if_range_fingerprint", fingerprint)
+	}
+	slog.InfoContext(r.Context(), "direct stream ended", logAttrs...)
 	return nil
 }
 
@@ -143,4 +158,42 @@ func directStreamRangeStart(status int, contentRange string) int64 {
 		return -1
 	}
 	return parsedStart
+}
+
+const (
+	directStreamConditionalNone                = "none"
+	directStreamConditionalIfMatchPassed       = "if_match_passed"
+	directStreamConditionalIfMatchFailed       = "if_match_failed"
+	directStreamConditionalIfRangeMatched      = "if_range_matched"
+	directStreamConditionalIfRangeMismatched   = "if_range_mismatched"
+	directStreamConditionalIfRangeNotEvaluated = "if_range_not_evaluated"
+)
+
+func directStreamConditionalResult(status int, hadRange, hadIfMatch, hadIfRange bool) string {
+	switch {
+	case hadIfMatch && status == http.StatusPreconditionFailed:
+		return directStreamConditionalIfMatchFailed
+	case hadRange && hadIfRange && status == http.StatusPartialContent:
+		return directStreamConditionalIfRangeMatched
+	case hadRange && hadIfRange && status == http.StatusOK:
+		return directStreamConditionalIfRangeMismatched
+	case hadIfMatch:
+		return directStreamConditionalIfMatchPassed
+	case hadIfRange:
+		return directStreamConditionalIfRangeNotEvaluated
+	default:
+		return directStreamConditionalNone
+	}
+}
+
+func directStreamHeaderFingerprint(header http.Header, name string) string {
+	return directStreamValidatorFingerprint(strings.Join(header.Values(name), "\x00"))
+}
+
+func directStreamValidatorFingerprint(validator string) string {
+	if strings.TrimSpace(validator) == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(validator))
+	return fmt.Sprintf("%x", digest[:8])
 }

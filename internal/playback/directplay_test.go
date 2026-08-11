@@ -1,8 +1,11 @@
 package playback
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -30,11 +33,14 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serve := func(method, rangeHeader, ifRange, ifNoneMatch string) *httptest.ResponseRecorder {
+	serve := func(method, rangeHeader, ifMatch, ifRange, ifNoneMatch string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, "/stream", nil)
 		if rangeHeader != "" {
 			req.Header.Set("Range", rangeHeader)
+		}
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
 		}
 		if ifRange != "" {
 			req.Header.Set("If-Range", ifRange)
@@ -49,7 +55,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		return rr
 	}
 
-	full := serve(http.MethodGet, "", "", "")
+	full := serve(http.MethodGet, "", "", "", "")
 	if full.Code != http.StatusOK {
 		t.Fatalf("full status = %d, want 200", full.Code)
 	}
@@ -72,7 +78,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	}
 
 	t.Run("HEAD", func(t *testing.T) {
-		rr := serve(http.MethodHead, "", "", "")
+		rr := serve(http.MethodHead, "", "", "", "")
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rr.Code)
 		}
@@ -144,7 +150,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resumesBefore := counterValue(t, directStreamRangeResumes)
-			rr := serve(http.MethodGet, tt.rangeHeader, "", "")
+			rr := serve(http.MethodGet, tt.rangeHeader, "", "", "")
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %q", rr.Code, tt.wantStatus, rr.Body.String())
 			}
@@ -169,7 +175,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		if !validatorRequired {
 			t.Skip("platform does not expose a durable file revision")
 		}
-		rr := serve(http.MethodGet, "bytes=7-", etag, "")
+		rr := serve(http.MethodGet, "bytes=7-", "", etag, "")
 		if rr.Code != http.StatusPartialContent {
 			t.Fatalf("status = %d, want 206", rr.Code)
 		}
@@ -179,7 +185,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	})
 
 	t.Run("stale If-Range", func(t *testing.T) {
-		rr := serve(http.MethodGet, "bytes=7-", "\"stale\"", "")
+		rr := serve(http.MethodGet, "bytes=7-", "", "\"stale\"", "")
 		if rr.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", rr.Code)
 		}
@@ -188,11 +194,34 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		}
 	})
 
+	t.Run("bounded range with matching If-Match", func(t *testing.T) {
+		if !validatorRequired {
+			t.Skip("platform does not expose a durable file revision")
+		}
+		rr := serve(http.MethodGet, "bytes=7-11", etag, "", "")
+		if rr.Code != http.StatusPartialContent {
+			t.Fatalf("status = %d, want 206", rr.Code)
+		}
+		if body := rr.Body.String(); body != content[7:12] {
+			t.Fatalf("body = %q, want %q", body, content[7:12])
+		}
+	})
+
+	t.Run("bounded range with stale If-Match", func(t *testing.T) {
+		rr := serve(http.MethodGet, "bytes=7-11", "\"stale\"", "", "")
+		if rr.Code != http.StatusPreconditionFailed {
+			t.Fatalf("status = %d, want 412", rr.Code)
+		}
+		if rr.Body.Len() != 0 {
+			t.Fatalf("body length = %d, want 0", rr.Body.Len())
+		}
+	})
+
 	t.Run("If-None-Match", func(t *testing.T) {
 		if !validatorRequired {
 			t.Skip("platform does not expose a durable file revision")
 		}
-		rr := serve(http.MethodGet, "", "", etag)
+		rr := serve(http.MethodGet, "", "", "", etag)
 		if rr.Code != http.StatusNotModified {
 			t.Fatalf("status = %d, want 304", rr.Code)
 		}
@@ -202,7 +231,137 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	})
 }
 
-func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
+func TestDirectStreamConditionalResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     int
+		hadRange   bool
+		hadIfMatch bool
+		hadIfRange bool
+		want       string
+	}{
+		{name: "unconditional", status: http.StatusOK, want: directStreamConditionalNone},
+		{name: "If-Match passed", status: http.StatusPartialContent, hadRange: true, hadIfMatch: true, want: directStreamConditionalIfMatchPassed},
+		{name: "If-Match failed", status: http.StatusPreconditionFailed, hadRange: true, hadIfMatch: true, want: directStreamConditionalIfMatchFailed},
+		{name: "If-Range matched", status: http.StatusPartialContent, hadRange: true, hadIfRange: true, want: directStreamConditionalIfRangeMatched},
+		{name: "If-Range mismatched", status: http.StatusOK, hadRange: true, hadIfRange: true, want: directStreamConditionalIfRangeMismatched},
+		{name: "If-Range without Range", status: http.StatusOK, hadIfRange: true, want: directStreamConditionalIfRangeNotEvaluated},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := directStreamConditionalResult(tt.status, tt.hadRange, tt.hadIfMatch, tt.hadIfRange); got != tt.want {
+				t.Fatalf("conditional result = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDirectStreamValidatorFingerprint(t *testing.T) {
+	const validator = "\"private-validator\""
+	fingerprint := directStreamValidatorFingerprint(validator)
+	if len(fingerprint) != 16 {
+		t.Fatalf("fingerprint length = %d, want 16", len(fingerprint))
+	}
+	if strings.Contains(fingerprint, "private") || strings.Contains(fingerprint, "validator") {
+		t.Fatalf("fingerprint leaked validator text: %q", fingerprint)
+	}
+	if got := directStreamValidatorFingerprint(validator); got != fingerprint {
+		t.Fatalf("fingerprint = %q, want stable %q", got, fingerprint)
+	}
+	if got := directStreamValidatorFingerprint("\"different\""); got == fingerprint {
+		t.Fatalf("different validator produced the same fingerprint %q", got)
+	}
+	if got := directStreamValidatorFingerprint("  "); got != "" {
+		t.Fatalf("blank validator fingerprint = %q, want omitted", got)
+	}
+}
+
+func TestServeDirectPlayConditionalDiagnostics(t *testing.T) {
+	if !platformRequiresDirectPlayValidator() {
+		t.Skip("platform does not expose a durable file revision")
+	}
+
+	filePath := filepath.Join(t.TempDir(), "private-fixture.mp4")
+	if err := os.WriteFile(filePath, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	tests := []struct {
+		name            string
+		headerName      string
+		validator       string
+		wantStatus      int
+		wantResult      string
+		fingerprintName string
+	}{
+		{
+			name:            "If-Match mismatch",
+			headerName:      "If-Match",
+			validator:       "\"stale-private-if-match\"",
+			wantStatus:      http.StatusPreconditionFailed,
+			wantResult:      directStreamConditionalIfMatchFailed,
+			fingerprintName: "if_match_fingerprint",
+		},
+		{
+			name:            "If-Range mismatch",
+			headerName:      "If-Range",
+			validator:       "\"stale-private-if-range\"",
+			wantStatus:      http.StatusOK,
+			wantResult:      directStreamConditionalIfRangeMismatched,
+			fingerprintName: "if_range_fingerprint",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs.Reset()
+			req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+			req.Header.Set("Range", "bytes=2-4")
+			req.Header.Set(tt.headerName, tt.validator)
+			rr := httptest.NewRecorder()
+			if err := ServeDirectPlay(rr, req, filePath); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tt.wantStatus)
+			}
+
+			var record map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+				t.Fatalf("decode structured log %q: %v", logs.String(), err)
+			}
+			if got := record["conditional_result"]; got != tt.wantResult {
+				t.Fatalf("conditional_result = %v, want %q", got, tt.wantResult)
+			}
+			if got := record["had_if_match"]; got != (tt.headerName == "If-Match") {
+				t.Fatalf("had_if_match = %v, want %v", got, tt.headerName == "If-Match")
+			}
+			if got := record[tt.fingerprintName]; got != directStreamValidatorFingerprint(tt.validator) {
+				t.Fatalf("%s = %v, want request fingerprint", tt.fingerprintName, got)
+			}
+			responseETag := rr.Header().Get("ETag")
+			if got := record["etag_fingerprint"]; got != directStreamValidatorFingerprint(responseETag) {
+				t.Fatalf("etag_fingerprint = %v, want response ETag fingerprint", got)
+			}
+			if strings.Contains(logs.String(), strings.Trim(tt.validator, "\"")) {
+				t.Fatalf("structured log leaked raw request validator: %s", logs.String())
+			}
+			if strings.Contains(logs.String(), strings.Trim(responseETag, "\"")) {
+				t.Fatalf("structured log leaked raw response validator: %s", logs.String())
+			}
+			if strings.Contains(logs.String(), filePath) {
+				t.Fatalf("structured log leaked media path: %s", logs.String())
+			}
+		})
+	}
+}
+
+func TestServeDirectPlayChangedEntityRejectsOldValidators(t *testing.T) {
 	if !platformRequiresDirectPlayValidator() {
 		t.Skip("platform does not expose a durable file revision")
 	}
@@ -274,6 +433,23 @@ func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
 	}
 	if newETag := rr.Header().Get("ETag"); newETag == oldETag {
 		t.Fatalf("ETag did not change after replacement: %q", newETag)
+	}
+
+	ifMatchRequest := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	ifMatchRequest.Header.Set("Range", "bytes=5-8")
+	ifMatchRequest.Header.Set("If-Match", oldETag)
+	ifMatchResponse := httptest.NewRecorder()
+	if err := ServeDirectPlay(ifMatchResponse, ifMatchRequest, filePath); err != nil {
+		t.Fatal(err)
+	}
+	if ifMatchResponse.Code != http.StatusPreconditionFailed {
+		t.Fatalf("If-Match status = %d, want 412", ifMatchResponse.Code)
+	}
+	if ifMatchResponse.Body.Len() != 0 {
+		t.Fatalf("If-Match body length = %d, want 0", ifMatchResponse.Body.Len())
+	}
+	if newETag := ifMatchResponse.Header().Get("ETag"); newETag == oldETag {
+		t.Fatalf("If-Match response did not expose the replacement ETag: %q", newETag)
 	}
 }
 

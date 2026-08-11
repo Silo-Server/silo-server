@@ -31,6 +31,20 @@ entire current entity as `200 OK`, preventing bytes from different revisions
 from being combined. `If-None-Match` uses the same validator for ordinary
 conditional requests.
 
+For a bounded chunk read, a client can instead send `Range` and `If-Match`.
+When the validator matches, the server returns the requested `206` interval.
+When it does not match, the server returns `412 Precondition Failed` without a
+body. This contract avoids materializing a full entity when a bounded read's
+validator is stale. It does not change `If-Range`: an `If-Range` mismatch still
+ignores the range and returns the full current entity as `200 OK`, as required
+by the HTTP range contract.
+
+Direct-stream completion logs record whether `If-Match` and `If-Range` were
+present, a bounded conditional-result value, and short SHA-256 fingerprints for
+the emitted and requested validators. The raw validators and media path are not
+logged. The fingerprints are only correlation aids and are not protocol
+validators.
+
 Playback sessions already treat each transport request independently.
 Sequential ranged requests refresh transport activity, and cleanup never
 expires a session while one of those transport requests is active. A late
