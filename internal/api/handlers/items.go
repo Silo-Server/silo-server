@@ -2115,6 +2115,7 @@ func filterSortClause(sort, order string) string {
 }
 
 func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
+	deviceID := deviceMetadataFromRequest(r).DeviceID
 	selectedFileID := 0
 	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
 		if fileID, err := strconv.Atoi(fileIDRaw); err == nil && fileID > 0 {
@@ -2141,6 +2142,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 			SelectedFileID:            selectedFileID,
 			UserID:                    apimw.GetUserID(r.Context()),
 			ProfileID:                 apimw.GetProfileID(r.Context()),
+			DeviceID:                  deviceID,
 		}
 	}
 
@@ -2168,6 +2170,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 		SelectedFileID:        selectedFileID,
 		UserID:                apimw.GetUserID(r.Context()),
 		ProfileID:             apimw.GetProfileID(r.Context()),
+		DeviceID:              deviceID,
 	}
 }
 

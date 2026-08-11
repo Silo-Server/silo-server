@@ -624,23 +624,20 @@ func (h *PlaybackHandler) resolveOriginalLanguage(ctx context.Context, file *mod
 	return lang
 }
 
-// resolvedProfileAudioLanguage returns the effective playback.audio_language
-// for the profile with no content context, resolved through the settings
-// contract — the canonical replacement for reading the legacy
-// user_profiles.language column, matching catalog's detail resolution. It may
-// return playback.OriginalLanguageSentinel, which the caller resolves to a
-// concrete language. Returns "" when nothing is stored: the contract default
-// is null, "no preference".
-func resolvedProfileAudioLanguage(ctx context.Context, store userstore.UserStore, profileID string) string {
-	if store == nil || profileID == "" {
+// resolvedPlaybackAudioLanguage returns the effective playback.audio_language
+// for one canonical settings context. It may return
+// playback.OriginalLanguageSentinel, which the caller resolves to a concrete
+// language. Returns "" when nothing is stored: the contract default is null,
+// "no preference".
+func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStore, rc settingsresolve.Context) string {
+	if store == nil || rc.ProfileID == "" {
 		return ""
 	}
 	contract, err := settingscontract.Load()
 	if err != nil {
 		return ""
 	}
-	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
-		settingsresolve.Context{ProfileID: profileID},
+	resolved, err := settingsresolve.New(contract).Resolve(ctx, store, rc,
 		[]string{settingskeys.PlaybackAudioLanguage}, nil)
 	if err != nil || len(resolved) == 0 {
 		return ""

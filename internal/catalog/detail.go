@@ -3105,6 +3105,7 @@ type audioPrefResolver struct {
 	store     userstore.UserStore
 	valid     bool
 	profileID string
+	deviceID  string
 	contentID string
 
 	profileDone bool
@@ -3136,6 +3137,7 @@ func (s *DetailService) newAudioPrefResolver(ctx context.Context, filter AccessF
 	r := &audioPrefResolver{
 		svc:          s,
 		profileID:    filter.ProfileID,
+		deviceID:     filter.DeviceID,
 		contentID:    audioPreferenceContentID,
 		resolvedLang: map[int]string{},
 	}
@@ -3176,15 +3178,16 @@ func (r *audioPrefResolver) audioPreference(ctx context.Context) *playback.Audio
 
 // audioLanguage resolves with every content identity in context. The language
 // preference lives in the canonical table at profile_series/profile_library/
-// profile scopes; the specialized audio row supplies only concrete track
-// identity. Caching by library keeps a multi-file item at one canonical read
-// per distinct folder rather than one read per file.
+// profile_device/profile scopes; the specialized audio row supplies only
+// concrete track identity. Caching by library keeps a multi-file item at one
+// canonical read per distinct folder rather than one read per file.
 func (r *audioPrefResolver) audioLanguage(ctx context.Context, libraryID int) string {
 	if lang, ok := r.resolvedLang[libraryID]; ok {
 		return lang
 	}
 	rc := settingsresolve.Context{
 		ProfileID:  r.profileID,
+		DeviceID:   r.deviceID,
 		LibraryIDs: []int{libraryID},
 	}
 	if strings.TrimSpace(r.contentID) != "" {

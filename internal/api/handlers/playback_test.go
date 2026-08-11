@@ -551,6 +551,8 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 		file.AudioTracks = []models.AudioTrack{
 			{Language: "eng", Codec: "aac", Channels: 2, Layout: "stereo", Default: true},
 			{Language: "jpn", Codec: "aac", Channels: 2, Layout: "stereo"},
+			{Language: "spa", Codec: "aac", Channels: 2, Layout: "stereo"},
+			{Language: "fra", Codec: "aac", Channels: 2, Layout: "stereo"},
 		}
 		return file
 	}
@@ -564,18 +566,49 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 		}
 	}
 
-	startPlayback := func(t *testing.T, store userstore.UserStore, file *models.MediaFile) int {
+	setCanonicalLanguage := func(t *testing.T, store userstore.UserStore, identity userstore.SettingIdentity, language string) {
+		t.Helper()
+		identity.Key = settingskeys.PlaybackAudioLanguage
+		identity.ProfileID = "profile-1"
+		encoded, err := json.Marshal(language)
+		if err != nil {
+			t.Fatalf("encode canonical audio language: %v", err)
+		}
+		if _, err := store.UpsertSettingValue(context.Background(), identity, encoded); err != nil {
+			t.Fatalf("seed canonical audio language: %v", err)
+		}
+	}
+
+	startPlayback := func(
+		t *testing.T,
+		store userstore.UserStore,
+		file *models.MediaFile,
+		deviceID string,
+		mutate func(*playback.StartRequestV3),
+	) int {
 		t.Helper()
 		manager := playback.NewSessionManager(0, 0)
 		handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 		handler.StoreProvider = testUserStoreProvider{store: store}
 		handler.ItemAccess = allowAllPlaybackItemAccess{}
+		if file.EpisodeID != "" {
+			handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{ContentID: file.EpisodeID, SeriesID: "series-1"}}
+		}
 
 		startRequest := v3HandlerStartRequest()
 		startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+		if mutate != nil {
+			mutate(&startRequest)
+		}
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start",
 			strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+		// A client name or user agent is not a stable settings identity. Only
+		// the explicit device header may select a profile_device row.
+		req.Header.Set("User-Agent", "SiloTV/apple-tv")
+		if deviceID != "" {
+			req.Header.Set(deviceIDHeader, deviceID)
+		}
 		rr := httptest.NewRecorder()
 		handler.HandleStartPlayback(rr, req)
 		if rr.Code != http.StatusCreated {
@@ -598,15 +631,11 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 	t.Run("canonical value wins over legacy column", func(t *testing.T) {
 		store := newPlaybackTestStore(t)
 		setLegacyLanguage(t, store, "eng")
-		if _, err := store.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-			Key:       settingskeys.PlaybackAudioLanguage,
-			Scope:     settingscontract.ScopeProfile,
-			ProfileID: "profile-1",
-		}, json.RawMessage(`"ja"`)); err != nil {
-			t.Fatalf("seed canonical audio language: %v", err)
-		}
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope: settingscontract.ScopeProfile,
+		}, "ja")
 
-		if index := startPlayback(t, store, newFile(t)); index != 1 {
+		if index := startPlayback(t, store, newFile(t), "", nil); index != 1 {
 			t.Fatalf("AudioTrackIndex = %d, want 1 (canonical \"ja\" track)", index)
 		}
 	})
@@ -617,8 +646,73 @@ func TestHandleStartPlaybackV3_AudioLanguageResolvesCanonically(t *testing.T) {
 
 		// No canonical value stored: the contract default is "no preference",
 		// so selection falls to the file's default track, not the column's.
-		if index := startPlayback(t, store, newFile(t)); index != 0 {
+		if index := startPlayback(t, store, newFile(t), "", nil); index != 0 {
 			t.Fatalf("AudioTrackIndex = %d, want 0 (file default track)", index)
+		}
+	})
+
+	t.Run("device value applies only to the identified device", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+
+		if index := startPlayback(t, store, newFile(t), "apple-tv", nil); index != 1 {
+			t.Fatalf("AudioTrackIndex = %d, want 1 (device \"ja\" track)", index)
+		}
+		if index := startPlayback(t, store, newFile(t), "", nil); index != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (profile \"en\" track without device identity)", index)
+		}
+		if index := startPlayback(t, store, newFile(t), "iphone", nil); index != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (profile \"en\" track on another device)", index)
+		}
+	})
+
+	t.Run("series and library values outrank device value", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "en")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:     settingscontract.ScopeProfileLibrary,
+			LibraryID: 12,
+		}, "es")
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileSeries,
+			SeriesID: "series-1",
+		}, "fr")
+
+		movie := newFile(t)
+		movie.MediaFolderID = 12
+		if index := startPlayback(t, store, movie, "apple-tv", nil); index != 2 {
+			t.Fatalf("AudioTrackIndex = %d, want 2 (library \"es\" track)", index)
+		}
+
+		episode := newFile(t)
+		episode.MediaFolderID = 12
+		episode.EpisodeID = "episode-1"
+		if index := startPlayback(t, store, episode, "apple-tv", nil); index != 3 {
+			t.Fatalf("AudioTrackIndex = %d, want 3 (series \"fr\" track)", index)
+		}
+	})
+
+	t.Run("explicit track selection outranks saved settings", func(t *testing.T) {
+		store := newPlaybackTestStore(t)
+		setCanonicalLanguage(t, store, userstore.SettingIdentity{
+			Scope:    settingscontract.ScopeProfileDevice,
+			DeviceID: "apple-tv",
+		}, "ja")
+		file := newFile(t)
+		if index := startPlayback(t, store, file, "apple-tv", func(request *playback.StartRequestV3) {
+			explicit := 0
+			request.AudioTrackIndex = &explicit
+			request.AudioTrackID = playback.TrackIDV3(file.ID, "audio", explicit)
+		}); index != 0 {
+			t.Fatalf("AudioTrackIndex = %d, want 0 (explicit \"en\" track)", index)
 		}
 	})
 }

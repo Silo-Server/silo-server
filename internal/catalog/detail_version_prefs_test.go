@@ -204,6 +204,42 @@ func TestEffectiveAudioTrackIndex_PrefersSeriesAudioPreferenceOverLibraryAndProf
 	}
 }
 
+func TestEffectiveAudioTrackIndex_ResolvesDeviceLanguageWithCanonicalPrecedence(t *testing.T) {
+	store := newDetailTestStore(t)
+	setProfileAudioLanguage(t, store, "en")
+	setScopedAudioLanguageForDevice(t, store, settingscontract.ScopeProfileDevice, "", 0, "apple-tv", "ja")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileLibrary, "", 12, "es")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, "series-1", 0, "fr")
+
+	service := &DetailService{}
+	service.SetUserStoreProvider(testDetailUserStoreProvider{store: store})
+	file := &models.MediaFile{
+		AudioTracks: []models.AudioTrack{
+			{Language: "en", Default: true},
+			{Language: "ja"},
+			{Language: "es"},
+			{Language: "fr"},
+		},
+	}
+
+	assertIndex := func(name, deviceID, contentID string, libraryID, want int) {
+		t.Helper()
+		file.MediaFolderID = libraryID
+		if got := service.effectiveAudioTrackIndex(context.Background(), AccessFilter{
+			UserID:    1,
+			ProfileID: "profile-1",
+			DeviceID:  deviceID,
+		}, contentID, file); got != want {
+			t.Fatalf("%s: effectiveAudioTrackIndex() = %d, want %d", name, got, want)
+		}
+	}
+
+	assertIndex("device override", "apple-tv", "movie-1", 99, 1)
+	assertIndex("other device isolation", "iphone", "movie-1", 99, 0)
+	assertIndex("library over device", "apple-tv", "movie-1", 12, 2)
+	assertIndex("series over library and device", "apple-tv", "series-1", 12, 3)
+}
+
 func TestBuildPlaybackInfo_SetsEffectiveAudioLanguageFromOriginalWhenTrackLanguageMissing(t *testing.T) {
 	store := newDetailTestStore(t)
 	language := playback.OriginalLanguageSentinel
@@ -513,6 +549,19 @@ func setScopedAudioLanguage(
 	language string,
 ) {
 	t.Helper()
+	setScopedAudioLanguageForDevice(t, store, scope, seriesID, libraryID, "", language)
+}
+
+func setScopedAudioLanguageForDevice(
+	t *testing.T,
+	store userstore.UserStore,
+	scope settingscontract.Scope,
+	seriesID string,
+	libraryID int,
+	deviceID string,
+	language string,
+) {
+	t.Helper()
 	encoded, err := json.Marshal(language)
 	if err != nil {
 		t.Fatalf("encoding language: %v", err)
@@ -523,6 +572,7 @@ func setScopedAudioLanguage(
 		ProfileID: "profile-1",
 		SeriesID:  seriesID,
 		LibraryID: libraryID,
+		DeviceID:  deviceID,
 	}, encoded); err != nil {
 		t.Fatalf("seeding %s: %v", settingskeys.PlaybackAudioLanguage, err)
 	}

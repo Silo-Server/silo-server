@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -404,7 +405,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
-		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, requestedFile)
+		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceMetadataFromRequest(r).DeviceID, requestedFile)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load the saved audio preference")
 			return
@@ -814,14 +815,14 @@ func sessionOwnsResumeTimelineV3(file *models.MediaFile) bool {
 }
 
 // preferredAudioTrackIndexV3 answers what an omitted audio track means: the
-// language this profile has settled on for this series, this library, or
-// generally — the same resolution the catalog performs when it publishes
-// `effective_audio_track_index`, so the track a client sees on the detail page
-// is the track that plays when it does not ask for one.
+// language this profile has settled on for this series, this library, this
+// device, or generally — the same resolution the catalog performs when it
+// publishes `effective_audio_track_index`, so the track a client sees on the
+// detail page is the track that plays when it does not ask for one.
 //
 // The client sends a track identity only when the viewer picked one. Defaulting
 // to ordinal zero instead would silently play the first track on the reel.
-func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID string, file *models.MediaFile) (int, error) {
+func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID int, profileID, deviceID string, file *models.MediaFile) (int, error) {
 	if file == nil || len(file.AudioTracks) == 0 || h.StoreProvider == nil {
 		return 0, nil
 	}
@@ -830,8 +831,9 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		slog.ErrorContext(ctx, "protocol v3 start: audio preference store lookup failed", "component", "api", "user_id", userID, "error", err)
 		return 0, err
 	}
+	seriesID := h.resolveSeriesID(ctx, file)
 	var seriesPref *playback.AudioTrackPreference
-	if seriesID := h.resolveSeriesID(ctx, file); seriesID != "" {
+	if seriesID != "" {
 		stored, prefErr := store.GetAudioPreference(ctx, profileID, seriesID)
 		if prefErr != nil {
 			slog.ErrorContext(ctx, "protocol v3 start: series audio preference lookup failed", "component", "api", "profile_id", profileID, "series_id", seriesID, "error", prefErr)
@@ -839,36 +841,30 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 		}
 		if stored != nil {
 			seriesPref = &playback.AudioTrackPreference{AudioTrackIndex: stored.AudioTrackIndex, AudioLanguage: stored.AudioLanguage, TrackSignature: stored.TrackSignature}
-			if seriesPref.AudioLanguage == playback.OriginalLanguageSentinel {
-				seriesPref.AudioLanguage = h.resolveOriginalLanguage(ctx, file)
+		}
+	}
+	rc := settingsresolve.Context{
+		ProfileID:  profileID,
+		DeviceID:   deviceID,
+		LibraryIDs: []int{file.MediaFolderID},
+	}
+	if seriesID != "" {
+		rc.SeriesIDs = []string{seriesID}
+	}
+	preferredLang := resolvedPlaybackAudioLanguage(ctx, store, rc)
+	if preferredLang == playback.OriginalLanguageSentinel {
+		preferredLang = h.resolveOriginalLanguage(ctx, file)
+		if preferredLang == "" {
+			preferredLang = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
+			if preferredLang == playback.OriginalLanguageSentinel {
+				preferredLang = h.resolveOriginalLanguage(ctx, file)
 			}
 		}
 	}
-	preferredLang := resolvedProfileAudioLanguage(ctx, store, profileID)
-	// A library override applies only where no series-sticky choice exists;
-	// having watched this series in a language outranks the library default.
-	libraryLang := ""
-	if seriesPref == nil {
-		stored, prefErr := store.GetLibraryPlaybackPreference(ctx, profileID, file.MediaFolderID)
-		if prefErr != nil {
-			slog.ErrorContext(ctx, "protocol v3 start: library audio preference lookup failed", "component", "api", "profile_id", profileID, "library_id", file.MediaFolderID, "error", prefErr)
-			return 0, prefErr
-		}
-		if stored != nil {
-			libraryLang = stored.AudioLanguage
-		}
-	}
-	if preferredLang == playback.OriginalLanguageSentinel || libraryLang == playback.OriginalLanguageSentinel {
-		originalLang := h.resolveOriginalLanguage(ctx, file)
-		if preferredLang == playback.OriginalLanguageSentinel {
-			preferredLang = originalLang
-		}
-		if libraryLang == playback.OriginalLanguageSentinel {
-			libraryLang = originalLang
-		}
-	}
-	if libraryLang != "" {
-		preferredLang = libraryLang
+	if seriesPref != nil {
+		// The specialized row supplies concrete track identity; canonical
+		// settings own the language and its scope precedence.
+		seriesPref.AudioLanguage = preferredLang
 	}
 	return normalizeAudioTrackIndex(file, playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)), nil
 }

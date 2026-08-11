@@ -9,6 +9,7 @@ import (
 )
 
 func requestAccessFilter(r *http.Request) catalog.AccessFilter {
+	deviceID := deviceMetadataFromRequest(r).DeviceID
 	if scope, ok := access.GetScope(r.Context()); ok {
 		return catalog.AccessFilter{
 			AllowedLibraryIDs:  scope.AllowedLibraryIDs,
@@ -17,10 +18,12 @@ func requestAccessFilter(r *http.Request) catalog.AccessFilter {
 			MaxPlaybackQuality: scope.MaxPlaybackQuality,
 			UserID:             apimw.GetUserID(r.Context()),
 			ProfileID:          apimw.GetProfileID(r.Context()),
+			DeviceID:           deviceID,
 		}
 	}
 	return catalog.AccessFilter{
 		UserID:    apimw.GetUserID(r.Context()),
 		ProfileID: apimw.GetProfileID(r.Context()),
+		DeviceID:  deviceID,
 	}
 }
