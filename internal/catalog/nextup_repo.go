@@ -239,8 +239,10 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		argIdx++
 	}
 
+	// seedSeen is projected alongside the seed's picked series, which the global
+	// walk exposes as `pick`; the series-scoped branch has no walk and no seed.
 	cursorFilter := ""
-	seedSeen := "ARRAY[e.series_id]"
+	seedSeen := "ARRAY[pick.series_id]"
 	if q.SeriesID == "" && cursor != nil {
 		cursorUpdatedAtArg := argIdx
 		cursorMediaItemIDArg := argIdx + 1
@@ -248,7 +250,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		cursorFilter = fmt.Sprintf(`
 				  AND (uwp.updated_at, uwp.media_item_id) < ($%d, $%d)
 				  AND NOT (e.series_id = ANY($%d))`, cursorUpdatedAtArg, cursorMediaItemIDArg, cursorSeenArg)
-		seedSeen = fmt.Sprintf("$%d::text[] || e.series_id", cursorSeenArg)
+		seedSeen = fmt.Sprintf("$%d::text[] || pick.series_id", cursorSeenArg)
 		args = append(args, cursor.updatedAt, cursor.mediaItemID, cursor.seen)
 	}
 
@@ -282,9 +284,9 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 	// Global queries use a recursive loose-index scan to find at most
 	// nextUpAnchorMaxSeries distinct series without letting one series' rows
 	// consume the budget. The compound cursor is the total order required when
-	// bulk updates give many rows the same timestamp. media_item_id is only a
-	// deterministic tie-break, not episode order; for equal timestamps the
-	// downstream lookup still skips every completed or in-progress episode.
+	// bulk updates give many rows the same timestamp; because media_item_id is
+	// unique it can only order the walk, never decide which episode of a series
+	// anchors it — see the anchor lateral below.
 	// Series-scoped queries keep the unbounded shape so the anchor is the
 	// series' last completed episode regardless of age. Hidden rows and the date
 	// cutoff are excluded inside every walk step so they neither become anchors
@@ -315,52 +317,90 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 			ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC
 		)`, seriesFilter, dateCutoffFilter)
 	} else {
-		completedEpisodesCTE = fmt.Sprintf(`RECURSIVE walk AS (
-			(
-				SELECT
-					e.series_id,
-					e.season_number,
-					e.episode_number,
-					uwp.updated_at,
-					uwp.media_item_id,
-					%s AS seen,
-					1 AS n
-				FROM user_watch_progress uwp
-				JOIN episodes e ON e.content_id = uwp.media_item_id
-				WHERE uwp.user_id = $1
-				  AND uwp.profile_id = $2
-				  AND uwp.completed = TRUE
+		// Picking the series and picking which of its episodes to anchor on are
+		// two different orderings, so they are two different steps.
+		//
+		// The walk advances on (updated_at, media_item_id), the total order that
+		// guarantees forward progress. media_item_id is unique, so no two rows
+		// ever tie on that pair and any season/episode clause appended behind it
+		// is unreachable. A bulk mark-watched series — every row written with one
+		// timestamp — would then anchor on whichever content_id sorts highest,
+		// which is an arbitrary season once IDs are not scan-ordered (season 2
+		// scanned before a season-1 backfill), and the rail would surface an
+		// already-watched episode's successor.
+		//
+		// So `pick` chooses the series and the cursor position, and the anchor
+		// lateral then chooses the episode by (season, episode) among that
+		// series' rows sharing pick.updated_at — its newest completed timestamp.
+		// Pinning updated_at rather than re-sorting keeps this an index probe,
+		// and both rows carry the same updated_at, so cursor order and the
+		// reported CompletedAt are unchanged by the split.
+		anchorLateral := `JOIN LATERAL (
+				SELECT e_a.season_number, e_a.episode_number
+				FROM episodes e_a
+				JOIN user_watch_progress uwp_a
+				  ON uwp_a.media_item_id = e_a.content_id
+				 AND uwp_a.user_id = $1
+				 AND uwp_a.profile_id = $2
+				 AND uwp_a.completed = TRUE
+				 AND uwp_a.updated_at = pick.updated_at
+				WHERE e_a.series_id = pick.series_id
 				  AND NOT EXISTS (
 					  SELECT 1
 					  FROM user_history_hidden_items hhi
-					  WHERE hhi.user_id = uwp.user_id
-					    AND hhi.profile_id = uwp.profile_id
-					    AND hhi.media_item_id = uwp.media_item_id
-					    AND uwp.updated_at <= hhi.hidden_before
+					  WHERE hhi.user_id = uwp_a.user_id
+					    AND hhi.profile_id = uwp_a.profile_id
+					    AND hhi.media_item_id = uwp_a.media_item_id
+					    AND uwp_a.updated_at <= hhi.hidden_before
 				  )
-				  %s
-				  %s
-				ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC,
-					e.season_number DESC, e.episode_number DESC
+				ORDER BY e_a.season_number DESC, e_a.episode_number DESC
 				LIMIT 1
+			) anchor ON TRUE`
+
+		completedEpisodesCTE = fmt.Sprintf(`RECURSIVE walk AS (
+			(
+				SELECT
+					pick.series_id,
+					anchor.season_number,
+					anchor.episode_number,
+					pick.updated_at,
+					pick.media_item_id,
+					%s AS seen,
+					1 AS n
+				FROM (
+					SELECT e.series_id, uwp.updated_at, uwp.media_item_id
+					FROM user_watch_progress uwp
+					JOIN episodes e ON e.content_id = uwp.media_item_id
+					WHERE uwp.user_id = $1
+					  AND uwp.profile_id = $2
+					  AND uwp.completed = TRUE
+					  AND NOT EXISTS (
+						  SELECT 1
+						  FROM user_history_hidden_items hhi
+						  WHERE hhi.user_id = uwp.user_id
+						    AND hhi.profile_id = uwp.profile_id
+						    AND hhi.media_item_id = uwp.media_item_id
+						    AND uwp.updated_at <= hhi.hidden_before
+					  )
+					  %s
+					  %s
+					ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC
+					LIMIT 1
+				) pick
+				%s
 			)
 			UNION ALL
 			SELECT
 				pick.series_id,
-				pick.season_number,
-				pick.episode_number,
+				anchor.season_number,
+				anchor.episode_number,
 				pick.updated_at,
 				pick.media_item_id,
 				w.seen || pick.series_id,
 				w.n + 1
 			FROM walk w
 			JOIN LATERAL (
-				SELECT
-					e.series_id,
-					e.season_number,
-					e.episode_number,
-					uwp.updated_at,
-					uwp.media_item_id
+				SELECT e.series_id, uwp.updated_at, uwp.media_item_id
 				FROM user_watch_progress uwp
 				JOIN episodes e ON e.content_id = uwp.media_item_id
 				WHERE uwp.user_id = $1
@@ -380,12 +420,14 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 				ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC
 				LIMIT 1
 			) pick ON true
+			%s
 			WHERE w.n < %d
 		),
 		completed_episodes AS (
 			SELECT series_id, season_number, episode_number, updated_at
 			FROM walk
-		)`, seedSeen, cursorFilter, dateCutoffFilter, dateCutoffFilter, nextUpAnchorMaxSeries)
+		)`, seedSeen, cursorFilter, dateCutoffFilter, anchorLateral,
+			dateCutoffFilter, anchorLateral, nextUpAnchorMaxSeries)
 	}
 
 	if q.SeriesID != "" {

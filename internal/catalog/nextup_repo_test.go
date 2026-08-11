@@ -62,7 +62,7 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 		"FROM user_history_hidden_items hhi",
 		"uwp.updated_at <= hhi.hidden_before",
 		"AND (uwp2.completed = TRUE OR uwp2.position_seconds > 0)",
-		"ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC,",
+		"ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC",
 		"LIMIT $3",
 	}
 	for _, fragment := range expectedFragments {
@@ -102,8 +102,9 @@ func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
 			t.Fatalf("expected global anchor walk to contain %q, got:\n%s", fragment, query)
 		}
 	}
-	if got := strings.Count(query, "FROM user_history_hidden_items hhi"); got != 2 {
-		t.Fatalf("expected hidden-items filter in seed and recursive step, got %d occurrences:\n%s", got, query)
+	// Seed step, recursive step, and the anchor lateral attached to each.
+	if got := strings.Count(query, "FROM user_history_hidden_items hhi"); got != 4 {
+		t.Fatalf("expected hidden-items filter in every walk step and anchor, got %d occurrences:\n%s", got, query)
 	}
 	seed := strings.SplitN(query, "UNION ALL", 2)[0]
 	if strings.Contains(seed, "(uwp.updated_at, uwp.media_item_id) < ($") {
@@ -127,7 +128,7 @@ func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
 	continuedFragments := []string{
 		"(uwp.updated_at, uwp.media_item_id) < ($4, $5)",
 		"NOT (e.series_id = ANY($6))",
-		"$6::text[] || e.series_id AS seen",
+		"$6::text[] || pick.series_id AS seen",
 		"frontier AS (",
 		"LEFT JOIN (",
 	}
@@ -201,6 +202,93 @@ func TestBuildListNextUpQuery_SeriesScopedKeepsUnboundedAnchor(t *testing.T) {
 	if queryWithCursor != query || fmt.Sprint(argsWithCursor) != fmt.Sprint(args) {
 		t.Fatalf("series-scoped SQL and args must be byte-identical when a walk cursor is supplied")
 	}
+}
+
+func TestBuildListNextUpQuery_GlobalAnchorOrdersByEpisodeNotMediaItemID(t *testing.T) {
+	t.Parallel()
+
+	// media_item_id is unique, so a season/episode tie-break appended behind it
+	// can never be reached. Choosing the series and choosing which of its
+	// episodes anchors the rail have to be separate orderings.
+	query, _ := buildListNextUpQuery(NextUpQuery{
+		UserID:    7,
+		ProfileID: "profile-1",
+	}, 20, nil)
+
+	if strings.Contains(query, `ORDER BY uwp.updated_at DESC, uwp.media_item_id DESC,
+					e.season_number DESC, e.episode_number DESC`) {
+		t.Fatalf("season/episode must not sit behind the unique media_item_id tie-break, got:\n%s", query)
+	}
+	if got := strings.Count(query, "ORDER BY e_a.season_number DESC, e_a.episode_number DESC"); got != 2 {
+		t.Fatalf("expected episode-ordered anchor in seed and recursive step, got %d occurrences:\n%s", got, query)
+	}
+	if got := strings.Count(query, "AND uwp_a.updated_at = pick.updated_at"); got != 2 {
+		t.Fatalf("expected anchor pinned to the series' newest completed timestamp, got %d:\n%s", got, query)
+	}
+}
+
+func TestNextUpRepository_BulkMarkWatchedAnchorsOnHighestEpisode(t *testing.T) {
+	// A bulk mark-watched series writes every row with one timestamp. The anchor
+	// must then be the highest (season, episode), not the highest content_id:
+	// with production-shape IDs where season 2 was scanned before a season-1
+	// backfill, season 1 sorts higher and the rail would surface s01e04 — an
+	// episode after one the user already watched — instead of s02e04.
+	pool := newNextUpTestPool(t)
+	ctx := context.Background()
+	prefix := fmt.Sprintf("nextup-order-%d", time.Now().UnixNano())
+	seriesID := prefix + "-series"
+
+	userID, profileID, folderID := seedNextUpTestOwner(t, ctx, pool, prefix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
+	})
+	seedNextUpSeries(t, ctx, pool, seriesID, prefix+" Ordering")
+
+	// Season 2 scanned first (lower IDs), season 1 backfilled later (higher IDs).
+	const wantContentID = "1" + "00000000000000004" // s02e04
+	const trapContentID = "9" + "00000000000000004" // s01e04
+	episodeIDs := []string{
+		"100000000000000001", "100000000000000002", "100000000000000003", wantContentID,
+		"900000000000000001", "900000000000000002", "900000000000000003", trapContentID,
+	}
+	seasons := []int{2, 2, 2, 2, 1, 1, 1, 1}
+	numbers := []int{1, 2, 3, 4, 1, 2, 3, 4}
+	for i, episodeID := range episodeIDs {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+			VALUES ($1, $2, $3, $4, 'Ordering Episode')
+		`, episodeID, seriesID, seasons[i], numbers[i]); err != nil {
+			t.Fatalf("seed episode %s: %v", episodeID, err)
+		}
+	}
+	seedNextUpFiles(t, ctx, pool, folderID, episodeIDs)
+
+	// Every completed row shares one timestamp, as a bulk mark-watched write does.
+	bulkAt := time.Now().UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress (
+			user_id, profile_id, media_item_id, position_seconds,
+			duration_seconds, completed, updated_at
+		)
+		SELECT $1, $2, unnest($3::text[]), 0, 1800, TRUE, $4
+	`, userID, profileID, []string{
+		"100000000000000001", "100000000000000002", "100000000000000003",
+		"900000000000000001", "900000000000000002", "900000000000000003",
+	}, bulkAt); err != nil {
+		t.Fatalf("seed bulk progress: %v", err)
+	}
+
+	repo := NewNextUpRepository(pool, nextUpTestStoreProvider{})
+	results, err := repo.ListNextUp(ctx, NextUpQuery{
+		UserID:          userID,
+		ProfileID:       profileID,
+		Limit:           20,
+		EnableResumable: false,
+	})
+	if err != nil {
+		t.Fatalf("ListNextUp: %v", err)
+	}
+	assertNextUpContentIDs(t, results, wantContentID)
 }
 
 func TestNextUpRepository_GlobalAnchorWalkSurvivesFloodedSeries(t *testing.T) {
