@@ -100,6 +100,7 @@ function audioOnlyDecision(
   startPosition: number,
   timeline: Partial<{
     stream_origin_seconds: number;
+    timeline_offset_seconds: number;
     player_start_seconds: number;
     can_seek_anywhere: boolean;
   }> = {},
@@ -442,6 +443,7 @@ describe("useAudiobookPlayback", () => {
           return jsonResponse(
             audioOnlyDecision(`anchored-${sessionCount}`, body.start_position, {
               stream_origin_seconds: body.start_position,
+              timeline_offset_seconds: body.start_position,
               player_start_seconds: 0,
               can_seek_anywhere: false,
             }),
@@ -474,6 +476,42 @@ describe("useAudiobookPlayback", () => {
       start_position: 360,
       progress_persistence: "client",
     });
+  });
+
+  it("maps native seeks with the contract timeline offset", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(
+            audioOnlyDecision("offset-contract", body.start_position, {
+              stream_origin_seconds: 300,
+              timeline_offset_seconds: 290,
+              player_start_seconds: 10,
+              can_seek_anywhere: true,
+            }),
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+        if (url.includes("/progress") || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse({});
+      }),
+    );
+
+    const { result } = renderAudiobookPlayback({ initialPositionSeconds: 300 });
+    const audio = makeAudio();
+    act(() => {
+      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
+    });
+    await flushAsyncWork();
+
+    act(() => result.current.seekTo(360));
+    expect(audio.currentTime).toBe(70);
   });
 
   it("togglePlay invokes audio.play when paused, audio.pause otherwise", () => {

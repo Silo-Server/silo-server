@@ -326,7 +326,7 @@ export function useAudiobookPlayback({
       planAttemptIdRef.current = planAttemptId;
       sessionIdRef.current = sessionId ?? null;
       failedPlanKeyRef.current = null;
-      streamOriginSecondsRef.current = plan.timeline.stream_origin_seconds;
+      streamOriginSecondsRef.current = plan.timeline.timeline_offset_seconds;
       canSeekAnywhereRef.current = plan.timeline.can_seek_anywhere;
       // The plan owns where the stream is anchored. On a converted part the
       // server anchors the stream at the seek position and restarts the player

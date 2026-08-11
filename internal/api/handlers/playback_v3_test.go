@@ -566,6 +566,7 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
@@ -1186,6 +1187,7 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "1", Available: true},
@@ -1269,6 +1271,7 @@ func TestHandleReplanPlaybackV3SeekReanchorWithoutFrozenRecipeFailsRetryably(t *
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()
@@ -1368,6 +1371,7 @@ func TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion(t *te
 		source.ID: source, alternate.ID: alternate,
 	}
 	handler := NewPlaybackHandler(manager, mapPlaybackFileResolver{files: files})
+	stubCopySeekAnchorV3(handler)
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
 		source.ContentID: {source, alternate},
 	}}
@@ -2054,29 +2058,40 @@ func TestFrozenSubtitleIdentityV3RejectsExternalAndEmbeddedInventoryDrift(t *tes
 	}
 }
 
-func TestPrepareIdentityTransportV3ProgressiveRemuxNeverAdvertisesNativeSeek(t *testing.T) {
+func TestPrepareTransportV3ProgressiveRemuxUsesResolvedCopyAnchor(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.copySeekAnchor = func(_ context.Context, _ string, inputPath string, requested float64, segmentDuration int) (float64, int, error) {
+		if inputPath != "/media/movie.mkv" || segmentDuration != 2 {
+			t.Fatalf("copy seek probe input=%q segment=%d", inputPath, segmentDuration)
+		}
+		return requested - 0.75, int((requested - 0.75) / float64(segmentDuration)), nil
+	}
 	session := &playback.Session{ID: "session-progressive", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayRemux, BasePlayMethod: playback.PlayRemux, AudioTrackIndex: 0}
-	for index, origin := range []float64{321.25, 654.5} {
+	file := &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}
+	for index, requested := range []float64{321.25, 654.5} {
 		plan := &playback.PlanV3{
 			PlanID:               "plan:progressive",
 			Delivery:             playback.DeliveryRemuxProgressiveV3,
 			EffectiveMediaFileID: 42,
-			Timeline:             playback.TimelineV3{SourceStartSeconds: origin, PlayerStartSeconds: origin, CanSeekAnywhere: true, SeekRestoration: "player_position"},
+			Timeline:             playback.TimelineV3{SourceStartSeconds: requested, PlayerStartSeconds: requested, CanSeekAnywhere: true, SeekRestoration: "player_position"},
 		}
-		transport := handler.prepareIdentityTransportV3(session, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
+		transport, transportErr := handler.prepareTransportV3(httptest.NewRequest(http.MethodPost, "/", nil), session, file, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux})
+		if transportErr != nil {
+			t.Fatalf("prepare progressive transport: %v", transportErr)
+		}
 
 		parsed, err := url.Parse(transport.url)
 		if err != nil {
 			transport.rollback()
 			t.Fatal(err)
 		}
-		if parsed.Query().Get("st") == "" || parsed.Query().Get("seek") != strconv.FormatFloat(origin, 'f', -1, 64) {
+		if parsed.Query().Get("st") == "" || parsed.Query().Get("seek") != strconv.FormatFloat(requested, 'f', -1, 64) {
 			transport.rollback()
 			t.Fatalf("progressive reanchor URL %d = %q", index, transport.url)
 		}
-		if plan.Timeline.PlayerStartSeconds != 0 || plan.Timeline.StreamOriginSeconds != origin ||
+		origin := requested - 0.75
+		if plan.Timeline.PlayerStartSeconds != 0.75 || plan.Timeline.StreamOriginSeconds != origin ||
 			plan.Timeline.TimelineOffsetSeconds != origin || plan.Timeline.CanSeekAnywhere ||
 			plan.Timeline.SeekWindowStartSeconds == nil || *plan.Timeline.SeekWindowStartSeconds != origin ||
 			plan.Timeline.SeekWindowEndSeconds != nil || plan.Timeline.SeekRestoration != "source_position" {
@@ -2084,6 +2099,23 @@ func TestPrepareIdentityTransportV3ProgressiveRemuxNeverAdvertisesNativeSeek(t *
 			t.Fatalf("progressive reanchor timeline %d = %#v", index, plan.Timeline)
 		}
 		transport.rollback()
+	}
+}
+
+func TestPrepareTransportV3CopyAnchorFailureIsRetryable(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
+		return 0, 0, errors.New("probe failed")
+	}
+	plan := &playback.PlanV3{PlanID: "plan:copy-failure", Delivery: playback.DeliveryRemuxHLSV3, Timeline: playback.TimelineV3{SourceStartSeconds: 120}}
+	_, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-copy-failure"},
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"},
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux},
+	)
+	if transportErr == nil || transportErr.reason != "transcode_start_failed" || !transportErr.retryable || transportErr.cause == nil || transportErr.cause.Error() != "probe failed" {
+		t.Fatalf("transport error = %#v, want retryable copy anchor failure", transportErr)
 	}
 }
 
@@ -2164,6 +2196,52 @@ func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
 	defer transport.rollback()
 	if !startRequest.RequireReady {
 		t.Fatal("protocol-v3 remote start did not require manifest readiness")
+	}
+}
+
+func TestPrepareTransportV3SendsResolvedCopyAnchorToRemoteExecutor(t *testing.T) {
+	var startRequest transcodenode.TranscodeStartRequest
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+			if err := json.NewDecoder(r.Body).Decode(&startRequest); err != nil {
+				t.Errorf("decode remote start: %v", err)
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: startRequest.SessionID, Status: "started"})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
+		return 1085.501, 542, nil
+	}
+	plan := &playback.PlanV3{PlanID: "plan:remote-copy-anchor", Delivery: playback.DeliveryRemuxHLSV3, Timeline: playback.TimelineV3{SourceStartSeconds: 1086.2}}
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-remote-copy-anchor", UserID: 7, ProfileID: "profile-1"},
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", CodecVideo: "h264"},
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetAudioCodec: "aac"},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare remote copy transport: %v", transportErr)
+	}
+	defer transport.rollback()
+	if startRequest.SeekSeconds != 1086.2 || startRequest.StreamOriginSeconds != 1085.501 ||
+		!startRequest.CopySeekAnchorResolved || startRequest.StartSegmentNumber != 542 {
+		t.Fatalf("remote copy timeline = %#v", startRequest)
+	}
+	if plan.Timeline.StreamOriginSeconds != 1085.501 || plan.Timeline.TimelineOffsetSeconds != 1085.501 ||
+		math.Abs(plan.Timeline.PlayerStartSeconds-0.699) > 0.0001 {
+		t.Fatalf("advertised copy timeline = %#v", plan.Timeline)
 	}
 }
 
@@ -2261,7 +2339,11 @@ func TestPrepareLocalTransportV3ReturnsStableTerminalWhenFFmpegExitsBeforeReady(
 		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
 	}
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
-	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: "session-startup-failure", UserID: 7, ProfileID: "profile-1"}, file, result)
+	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: "session-startup-failure"}, file, result)
+	if timelineErr != nil {
+		t.Fatalf("prepare timeline: %v", timelineErr)
+	}
+	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: "session-startup-failure", UserID: 7, ProfileID: "profile-1"}, file, result, timeline)
 	if transportErr == nil {
 		transport.rollback()
 		t.Fatal("failed ffmpeg startup returned a playable transport")
@@ -2325,12 +2407,12 @@ func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
 	// locally seekable — sending them past the produced head instead of back
 	// to the server. The runtime belongs on source.duration_seconds.
 	copyPlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
-	copySeek, copySegment := configureHLSTimelineV3(copyPlan, "copy", 2, 600)
-	if copySeek != 17.3 || copySegment != 8 || copyPlan.Timeline.StreamOriginSeconds != 17.3 || copyPlan.Timeline.TimelineOffsetSeconds != 17.3 || copyPlan.Timeline.PlayerStartSeconds != 0 || copyPlan.Timeline.CanSeekAnywhere ||
-		copyPlan.Timeline.SeekWindowStartSeconds == nil || *copyPlan.Timeline.SeekWindowStartSeconds != 17.3 ||
+	configureCopyRemuxTimelineV3(copyPlan, 16)
+	if copyPlan.Timeline.StreamOriginSeconds != 16 || copyPlan.Timeline.TimelineOffsetSeconds != 16 || math.Abs(copyPlan.Timeline.PlayerStartSeconds-1.3) > 0.0001 || copyPlan.Timeline.CanSeekAnywhere ||
+		copyPlan.Timeline.SeekWindowStartSeconds == nil || *copyPlan.Timeline.SeekWindowStartSeconds != 16 ||
 		copyPlan.Timeline.SeekWindowEndSeconds != nil ||
 		copyPlan.Timeline.SeekRestoration != "source_position" {
-		t.Fatalf("copy timeline=%#v seek=%v segment=%d", copyPlan.Timeline, copySeek, copySegment)
+		t.Fatalf("copy timeline=%#v", copyPlan.Timeline)
 	}
 
 	encodePlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
@@ -2532,6 +2614,12 @@ func v3HandlerFixtureFile(t *testing.T) *models.MediaFile {
 	return &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: writePlaybackTestMediaFile(t, "movie.mp4"), Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", Bitrate: 8_000, AudioChannels: 2, Duration: 3600, VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo", Default: true}}}
 }
 
+func stubCopySeekAnchorV3(handler *PlaybackHandler) {
+	handler.copySeekAnchor = func(_ context.Context, _ string, _ string, requested float64, segmentDuration int) (float64, int, error) {
+		return requested, computeStartSegment(requested, segmentDuration), nil
+	}
+}
+
 func v3HandlerStartRequest() playback.StartRequestV3 {
 	return playback.StartRequestV3{ProtocolVersion: playback.ProtocolV3, ClientFeatures: []string{playback.FeaturePlaybackPlanV3}, FileID: 42, ProfileID: "profile-1", PlaybackAttemptID: "attempt-handler-0001", QualityPreference: "original", SubtitleFidelityPreference: playback.SubtitleFidelityCompatibleV3, Capabilities: playback.ClientCodecCapabilitiesV3{VideoEvidence: playback.EvidenceExactV3, AudioEvidence: playback.EvidenceExactV3, CodecsVideo: []string{"h264"}, CodecsVideoHardware: []string{"h264"}, CodecsAudio: []string{"aac"}, Containers: []string{"mp4"}, MaxResolution: "1080p", VideoDecode: []playback.VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}}, ClientPlaybackContext: playback.ClientPlaybackContextV3{ProtocolVersion: playback.ProtocolV3, FormFactor: "tv", AppVersion: "test", Device: playback.DeviceContextV3{Platform: "android"}, Output: playback.OutputContextV3{OutputContextID: "route-1"}, Deliveries: map[string]playback.DeliveryCapabilityV3{playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true}}}}}
 }
@@ -2637,6 +2725,7 @@ func TestHandleReplanPlaybackV3TrackChangeStaysOnEffectiveAlternate(t *testing.T
 	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, mapPlaybackFileResolver{files: files})
+	stubCopySeekAnchorV3(handler)
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -2683,6 +2772,7 @@ func TestHandleReplanPlaybackV3TrackChangeOperation(t *testing.T) {
 	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()

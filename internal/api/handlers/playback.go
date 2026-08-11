@@ -133,6 +133,14 @@ type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
 }
 
+type copySeekAnchorResolver func(
+	ctx context.Context,
+	ffmpegPath string,
+	inputPath string,
+	requestedSeekSeconds float64,
+	segmentDuration int,
+) (float64, int, error)
+
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
@@ -175,6 +183,7 @@ type PlaybackHandler struct {
 	// playbackConfig(), which falls back to defaults when unset.
 	PlaybackConfig    func() config.PlaybackConfig
 	FFmpegLogSink     playback.FFmpegLogSink
+	copySeekAnchor    copySeekAnchorResolver
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and

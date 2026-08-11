@@ -451,17 +451,19 @@ position, `can_seek_anywhere` is true when the runtime is known, and
 `seek_restoration` is `player_position` — the client seeks locally.
 
 **Copy remux over HLS** is served from FFmpeg's live, still-growing playlist,
-which starts at the requested position. So `player_start` is `0`,
-`stream_origin` and `timeline_offset` both equal the seek position,
-`seek_window_start_seconds` is that position, and **`seek_window_end_seconds` is
-deliberately absent**. An open end marks the window as incomplete; combined with
-`can_seek_anywhere: false` it routes every seek back through the server as a
-reanchor (§6), which is correct because the playlist has no bytes for positions
-FFmpeg has not reached yet. `seek_restoration` is `source_position`.
+which starts at the preceding keyframe selected by FFmpeg's input seek.
+`stream_origin` and `timeline_offset` both equal that resolved source position,
+while `player_start` is the requested position minus the resolved origin so the
+client advances past copied pre-roll. `seek_window_start_seconds` is the resolved
+origin, and **`seek_window_end_seconds` is deliberately absent**. An open end
+marks the window as incomplete; combined with `can_seek_anywhere: false` it
+routes every seek back through the server as a reanchor (§6), which is correct
+because the playlist has no bytes for positions FFmpeg has not reached yet.
+`seek_restoration` is `source_position`.
 
 **Progressive remux** is a freshly generated chunked response with no byte-range
-support, so it behaves the same way: player-zero is stream-zero is the seek
-position, the window is open-ended, and seeks go through the server.
+support, so it uses the same resolved keyframe origin and player pre-roll offset;
+the window is open-ended and seeks go through the server.
 
 ### `source.duration_seconds`
 

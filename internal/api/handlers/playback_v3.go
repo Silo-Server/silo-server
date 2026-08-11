@@ -31,16 +31,17 @@ import (
 )
 
 const (
-	maxPlaybackV3BodyBytes      = 256 << 10
-	maxPlaybackV3EventBodyBytes = 32 << 10
-	replanLeaseDurationV3       = 15 * time.Second
-	replanReleaseTimeoutV3      = 3 * time.Second
-	v3NodeCapabilityTTL         = time.Minute
-	playbackNodeIntegratedV3    = "integrated"
-	subtitleFormatVTTV3         = "vtt"
-	subtitleMIMEVTTV3           = "text/vtt"
-	subtitleUnavailableReasonV3 = "subtitle_artifact_unavailable"
-	seekRestorationPlayerV3     = "player_position"
+	maxPlaybackV3BodyBytes       = 256 << 10
+	maxPlaybackV3EventBodyBytes  = 32 << 10
+	replanLeaseDurationV3        = 15 * time.Second
+	replanReleaseTimeoutV3       = 3 * time.Second
+	v3NodeCapabilityTTL          = time.Minute
+	playbackNodeIntegratedV3     = "integrated"
+	subtitleFormatVTTV3          = "vtt"
+	subtitleMIMEVTTV3            = "text/vtt"
+	subtitleUnavailableReasonV3  = "subtitle_artifact_unavailable"
+	transcodeStartFailedReasonV3 = "transcode_start_failed"
+	seekRestorationPlayerV3      = "player_position"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -66,6 +67,13 @@ type preparedTransportV3 struct {
 	rollback           func()
 	applySession       func() (func() error, error)
 	afterDurableCommit func()
+}
+
+type preparedTimelineV3 struct {
+	seekSeconds            float64
+	streamOriginSeconds    float64
+	startSegmentNumber     int
+	copySeekAnchorResolved bool
 }
 
 type transportErrorV3 struct {
@@ -633,8 +641,12 @@ func (h *PlaybackHandler) persistSeriesSelectionsV3(ctx context.Context, userID 
 }
 
 func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3) (preparedTransportV3, *transportErrorV3) {
+	timeline, timelineErr := h.prepareTransportTimelineV3(r.Context(), session, file, result)
+	if timelineErr != nil {
+		return preparedTransportV3{}, timelineErr
+	}
 	if result.Plan.Delivery != playback.DeliveryTranscodeHLSV3 && result.Plan.Delivery != playback.DeliveryRemuxHLSV3 {
-		return h.prepareIdentityTransportV3(session, result), nil
+		return h.prepareIdentityTransportV3(session, result, timeline), nil
 	}
 	if h.NodePlanner != nil {
 		plan := h.planNodeSessionV3(r.Context(), session, result)
@@ -644,7 +656,7 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 				err = validateAdvertisedTransformationsV3(result.Plan, transformations)
 			}
 			if err == nil {
-				transport, transportErr := h.prepareRemoteTransportV3(r, session, file, result, plan)
+				transport, transportErr := h.prepareRemoteTransportV3(r, session, file, result, plan, timeline)
 				if transportErr != nil {
 					if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
 						releaser.ReleaseSession(session.ID)
@@ -674,7 +686,47 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 			return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err}
 		}
 	}
-	return h.prepareLocalTransportV3(r, session, file, result)
+	return h.prepareLocalTransportV3(r, session, file, result, timeline)
+}
+
+func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3) (preparedTimelineV3, *transportErrorV3) {
+	if result.Plan == nil {
+		return preparedTimelineV3{}, nil
+	}
+
+	requested := result.Plan.Timeline.SourceStartSeconds
+	switch result.Plan.Delivery {
+	case playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3:
+		origin, startSegment := 0.0, 0
+		if requested > 0 {
+			if file == nil || strings.TrimSpace(file.FilePath) == "" {
+				return preparedTimelineV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "Failed to resolve remux seek position.", retryable: true, cause: errors.New("copy seek anchor requires a media file path")}
+			}
+			resolver := h.copySeekAnchor
+			if resolver == nil {
+				resolver = playback.ResolveCopySeekAnchor
+			}
+			var err error
+			origin, startSegment, err = resolver(ctx, h.playbackConfig().FFmpegPath, file.FilePath, requested, 2)
+			if err != nil {
+				slog.ErrorContext(ctx, "failed to resolve protocol v3 copy-video seek anchor",
+					"component", "api",
+					"playback_session_id", session.ID,
+					"requested_seek_seconds", requested,
+					"error", err,
+				)
+				return preparedTimelineV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "Failed to resolve remux seek position.", retryable: true, cause: err}
+			}
+		}
+		configureCopyRemuxTimelineV3(result.Plan, origin)
+		return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: origin, startSegmentNumber: startSegment, copySeekAnchorResolved: true}, nil
+	case playback.DeliveryTranscodeHLSV3:
+		sourceMetadata := sourceExecutionMetadataV3(file, result)
+		seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, result.TargetVideoCodec, 2, sourceMetadata.DurationSeconds)
+		return preparedTimelineV3{seekSeconds: seekSeconds, streamOriginSeconds: result.Plan.Timeline.StreamOriginSeconds, startSegmentNumber: startSegment}, nil
+	default:
+		return preparedTimelineV3{}, nil
+	}
 }
 
 // planRequiresServerTransformationsV3 reports whether the plan carries any
@@ -692,7 +744,7 @@ func planRequiresServerTransformationsV3(plan *playback.PlanV3) bool {
 	return false
 }
 
-func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, result playback.PlannerResultV3) preparedTransportV3 {
+func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, result playback.PlannerResultV3, timeline preparedTimelineV3) preparedTransportV3 {
 	routeSession := *session
 	routeSession.PlayMethod = result.PlayMethod
 	routeSession.BasePlayMethod = result.PlayMethod
@@ -709,8 +761,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, 
 	committed := false
 	streamURL := h.playbackStreamURL(&routeSession)
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
-		configureProgressiveRemuxTimelineV3(result.Plan)
-		if seek := result.Plan.Timeline.StreamOriginSeconds; seek > 0 {
+		if seek := timeline.seekSeconds; seek > 0 {
 			streamURL = appendPlaybackQueryV3(streamURL, "seek", strconv.FormatFloat(seek, 'f', -1, 64))
 		}
 	}
@@ -849,16 +900,16 @@ func (h *PlaybackHandler) resumePositionV3(ctx context.Context, userID int, prof
 	return &position, nil
 }
 
-// A progressive remux is a freshly generated, chunked MP4 response and does
-// not implement byte ranges. Its player clock therefore begins at zero at the
-// requested source origin, and arbitrary seeks must request another server
-// reanchor rather than issuing a Range request against the remux pipe.
-func configureProgressiveRemuxTimelineV3(plan *playback.PlanV3) {
+// A copy remux starts at the preceding keyframe selected by the demuxer, not
+// necessarily at the requested source position. Its player clock therefore
+// begins at the resolved stream origin and advances through the copied pre-roll
+// before reaching the requested position. Neither progressive nor growing HLS
+// copy transports can seek arbitrarily inside their current response.
+func configureCopyRemuxTimelineV3(plan *playback.PlanV3, origin float64) {
 	if plan == nil {
 		return
 	}
-	origin := plan.Timeline.SourceStartSeconds
-	plan.Timeline.PlayerStartSeconds = 0
+	plan.Timeline.PlayerStartSeconds = max(0, plan.Timeline.SourceStartSeconds-origin)
 	plan.Timeline.StreamOriginSeconds = origin
 	plan.Timeline.TimelineOffsetSeconds = origin
 	plan.Timeline.SeekWindowStartSeconds = &origin
@@ -875,7 +926,7 @@ func appendPlaybackQueryV3(rawURL, key, value string) string {
 	return rawURL + separator + key + "=" + value
 }
 
-func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3) (preparedTransportV3, *transportErrorV3) {
+func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3) (preparedTransportV3, *transportErrorV3) {
 	cfg := h.playbackConfig()
 	if err := os.MkdirAll(cfg.TranscodeDir, 0o755); err != nil {
 		return preparedTransportV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to prepare the transcode directory.", cause: err}
@@ -888,13 +939,12 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	}
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
-	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, sourceMetadata.DurationSeconds)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
-	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
+	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
 	ts, err := h.startLocalPlaybackTransport(r.Context(), opts)
 	if err != nil {
 		unlock()
-		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
+		return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "Failed to start the playback transport.", retryable: true, cause: err}
 	}
 	if _, readyErr := ts.WaitForManifest(playback.ManifestStartupTimeout); readyErr != nil {
 		wasRunning := ts.IsRunning()
@@ -921,7 +971,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 		ts, err = h.startLocalPlaybackTransport(r.Context(), retryOpts)
 		if err != nil {
 			unlock()
-			return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "Failed to start the playback transport.", retryable: true, cause: err}
+			return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "Failed to start the playback transport.", retryable: true, cause: err}
 		}
 		if _, retryReadyErr := ts.WaitForManifest(playback.ManifestStartupTimeout); retryReadyErr != nil {
 			transportErr = manifestStartupTransportErrorV3(ts.IsRunning(), retryReadyErr)
@@ -973,10 +1023,10 @@ func manifestStartupTransportErrorV3(running bool, cause error) *transportErrorV
 	if running {
 		message = "The playback transport did not become ready in time."
 	}
-	return &transportErrorV3{reason: "transcode_start_failed", message: message, retryable: running, cause: cause}
+	return &transportErrorV3{reason: transcodeStartFailedReasonV3, message: message, retryable: running, cause: cause}
 }
 
-func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, nodePlan nodepool.Plan) (preparedTransportV3, *transportErrorV3) {
+func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, nodePlan nodepool.Plan, timeline preparedTimelineV3) (preparedTransportV3, *transportErrorV3) {
 	node := nodePlan.TranscodeNode
 	transportID := transportGenerationV3(session.ID, result.Plan.PlanID)
 	videoCodec := result.TargetVideoCodec
@@ -985,8 +1035,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	sourceMetadata := sourceExecutionMetadataV3(file, result)
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
-	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, sourceMetadata.DurationSeconds)
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
 	if err != nil {
 		// A timeout can fire after the node actually started the job; the
@@ -997,10 +1046,10 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	if status != http.StatusAccepted {
 		h.tm.StopRemoteTranscode(transportID, node.URL)
-		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "The selected transcode node rejected the playback transport.", retryable: true}
+		return preparedTransportV3{}, &transportErrorV3{reason: transcodeStartFailedReasonV3, message: "The selected transcode node rejected the playback transport.", retryable: true}
 	}
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
-	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, node.URL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SoftwareVideoDecode: req.SoftwareVideoDecode, VideoBitstreamFilter: req.VideoBitstreamFilter, SeekSeconds: req.SeekSeconds, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration})
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, node.URL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SoftwareVideoDecode: req.SoftwareVideoDecode, VideoBitstreamFilter: req.VideoBitstreamFilter, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration})
 	url := h.buildProxyManifestURL(card, nodePlan.ProxyNode)
 	committed := false
 	previousNodeURL := session.TranscodeNodeURL
@@ -2884,12 +2933,12 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 	seek := alignedSeekSeconds(requested, segmentDuration, videoCodec)
 	startSegment := computeStartSegment(seek, segmentDuration)
 	plan.Timeline.SourceStartSeconds = requested
-	usesGrowingManifest := strings.EqualFold(videoCodec, "copy") ||
-		!playback.CanGenerateSyntheticManifest(durationSeconds, segmentDuration)
+	usesGrowingManifest := !playback.CanGenerateSyntheticManifest(durationSeconds, segmentDuration)
 	if usesGrowingManifest {
 		// Encoded streams seek to the preceding segment boundary. Preserve the
 		// requested sub-segment offset so playback still begins at the exact
-		// requested source position. Copy seeks are already exact, making this 0.
+		// requested source position. Copy remuxes are configured separately with
+		// their probed keyframe origin.
 		plan.Timeline.PlayerStartSeconds = max(0, requested-seek)
 		plan.Timeline.StreamOriginSeconds = seek
 		plan.Timeline.TimelineOffsetSeconds = seek
