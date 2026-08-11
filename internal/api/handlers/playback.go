@@ -628,25 +628,29 @@ func (h *PlaybackHandler) resolveOriginalLanguage(ctx context.Context, file *mod
 // for one canonical settings context. It may return
 // playback.OriginalLanguageSentinel, which the caller resolves to a concrete
 // language. Returns "" when nothing is stored: the contract default is null,
-// "no preference".
-func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStore, rc settingsresolve.Context) string {
+// "no preference". Resolution and decoding failures are returned so playback
+// does not silently substitute a different track.
+func resolvedPlaybackAudioLanguage(ctx context.Context, store userstore.UserStore, rc settingsresolve.Context) (string, error) {
 	if store == nil || rc.ProfileID == "" {
-		return ""
+		return "", nil
 	}
 	contract, err := settingscontract.Load()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("loading settings contract: %w", err)
 	}
 	resolved, err := settingsresolve.New(contract).Resolve(ctx, store, rc,
 		[]string{settingskeys.PlaybackAudioLanguage}, nil)
-	if err != nil || len(resolved) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("resolving playback audio language: %w", err)
+	}
+	if len(resolved) == 0 {
+		return "", nil
 	}
 	var language string
-	if json.Unmarshal(resolved[0].Value, &language) != nil {
-		return ""
+	if err := json.Unmarshal(resolved[0].Value, &language); err != nil {
+		return "", fmt.Errorf("decoding playback audio language: %w", err)
 	}
-	return strings.TrimSpace(language)
+	return strings.TrimSpace(language), nil
 }
 
 // --- Persistence helpers ---

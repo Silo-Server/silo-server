@@ -363,8 +363,8 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
-	digestBytes := sha256.Sum256(body)
-	requestDigest := hex.EncodeToString(digestBytes[:])
+	deviceID := deviceMetadataFromRequest(r).DeviceID
+	requestDigest := playbackStartRequestDigestV3(body, deviceID)
 	if existing, lookupErr := h.PlanStoreV3.GetAttemptByPlaybackAttemptID(r.Context(), req.PlaybackAttemptID); lookupErr == nil {
 		if existing.UserID != userID || existing.ProfileID != profileID || existing.RequestedMediaFileID != req.FileID ||
 			(existing.RequestDigest != "" && existing.RequestDigest != requestDigest) {
@@ -405,7 +405,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	if req.AudioTrackID == "" && req.AudioTrackIndex == nil {
-		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceMetadataFromRequest(r).DeviceID, requestedFile)
+		audioIndex, err = h.preferredAudioTrackIndexV3(r.Context(), userID, profileID, deviceID, requestedFile)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load the saved audio preference")
 			return
@@ -505,6 +505,18 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusCreated, response)
+}
+
+// playbackStartRequestDigestV3 fingerprints both the body and the normalized
+// device identity because either can change the selected playback plan. The
+// length prefix keeps the two inputs unambiguous without changing the public
+// request contract.
+func playbackStartRequestDigestV3(body []byte, deviceID string) string {
+	hasher := sha256.New()
+	_, _ = fmt.Fprintf(hasher, "%d:", len(body))
+	_, _ = hasher.Write(body)
+	_, _ = hasher.Write([]byte(deviceID))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, profileID string, req playback.StartRequestV3, requestDigest string, requestedFile, effectiveFile *models.MediaFile, audioIndex int, result playback.PlannerResultV3) (playback.DecisionResponseV3, *transportErrorV3) {
@@ -851,11 +863,19 @@ func (h *PlaybackHandler) preferredAudioTrackIndexV3(ctx context.Context, userID
 	if seriesID != "" {
 		rc.SeriesIDs = []string{seriesID}
 	}
-	preferredLang := resolvedPlaybackAudioLanguage(ctx, store, rc)
+	preferredLang, err := resolvedPlaybackAudioLanguage(ctx, store, rc)
+	if err != nil {
+		slog.ErrorContext(ctx, "protocol v3 start: canonical audio preference lookup failed", "component", "api", "profile_id", profileID, "device_id", deviceID, "error", err)
+		return 0, err
+	}
 	if preferredLang == playback.OriginalLanguageSentinel {
 		preferredLang = h.resolveOriginalLanguage(ctx, file)
 		if preferredLang == "" {
-			preferredLang = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
+			preferredLang, err = resolvedPlaybackAudioLanguage(ctx, store, settingsresolve.Context{ProfileID: profileID})
+			if err != nil {
+				slog.ErrorContext(ctx, "protocol v3 start: profile audio preference fallback failed", "component", "api", "profile_id", profileID, "error", err)
+				return 0, err
+			}
 			if preferredLang == playback.OriginalLanguageSentinel {
 				preferredLang = h.resolveOriginalLanguage(ctx, file)
 			}

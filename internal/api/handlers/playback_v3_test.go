@@ -49,6 +49,15 @@ func (s failingProgressStoreV3) GetProgress(context.Context, string, string) (*u
 	return nil, s.err
 }
 
+type failingSettingsResolutionStoreV3 struct {
+	userstore.UserStore
+	err error
+}
+
+func (s failingSettingsResolutionStoreV3) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	return nil, s.err
+}
+
 type failingCompletePlanStoreV3 struct {
 	playback.PlanStoreV3
 }
@@ -302,6 +311,39 @@ func TestHandleStartPlaybackV3CommitsStartSideEffectsOnce(t *testing.T) {
 	}
 }
 
+func TestHandleStartPlaybackV3RejectsAttemptReplayFromAnotherDevice(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	body := marshalV3StartRequest(t, v3HandlerStartRequest())
+
+	start := func(deviceID string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(body)).WithContext(newAuthorizedPlaybackContext())
+		req.Header.Set(deviceIDHeader, deviceID)
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, req)
+		return rr
+	}
+
+	first := start("  living-room  ")
+	sameDevice := start("living-room")
+	otherDevice := start("bedroom")
+	if first.Code != http.StatusCreated || sameDevice.Code != http.StatusCreated {
+		t.Fatalf("same-device statuses = %d, %d; first=%s replay=%s", first.Code, sameDevice.Code, first.Body.String(), sameDevice.Body.String())
+	}
+	if first.Body.String() != sameDevice.Body.String() {
+		t.Fatalf("normalized same-device replay changed response:\nfirst=%s\nreplay=%s", first.Body.String(), sameDevice.Body.String())
+	}
+	if otherDevice.Code != http.StatusConflict || !strings.Contains(otherDevice.Body.String(), "playback_attempt_reused") {
+		t.Fatalf("other-device status = %d, body = %s", otherDevice.Code, otherDevice.Body.String())
+	}
+	if got := len(manager.AllSessions()); got != 1 {
+		t.Fatalf("sessions = %d, want 1", got)
+	}
+}
+
 func TestHandlePlaybackCapabilityV3AdvertisesTheFinalizedContract(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 
@@ -522,6 +564,20 @@ func TestPreferredAudioTrackIndexV3PropagatesSeriesPreferenceReadFailure(t *test
 	}
 
 	if _, err := handler.preferredAudioTrackIndexV3(context.Background(), 1, "profile-1", "", file); !errors.Is(err, wantErr) {
+		t.Fatalf("preferredAudioTrackIndexV3 error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestPreferredAudioTrackIndexV3PropagatesCanonicalPreferenceReadFailure(t *testing.T) {
+	wantErr := errors.New("settings resolution unavailable")
+	store := failingSettingsResolutionStoreV3{UserStore: newPlaybackTestStore(t), err: wantErr}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	file := &models.MediaFile{
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Language: "eng"}, {Codec: "aac", Language: "spa"}},
+	}
+
+	if _, err := handler.preferredAudioTrackIndexV3(context.Background(), 1, "profile-1", "living-room", file); !errors.Is(err, wantErr) {
 		t.Fatalf("preferredAudioTrackIndexV3 error = %v, want %v", err, wantErr)
 	}
 }
