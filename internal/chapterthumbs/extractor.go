@@ -28,6 +28,7 @@ type FrameExtractOptions struct {
 }
 
 const (
+	hwAccelNone                 = "none"
 	hwAccelQSV                  = "qsv"
 	hwAccelVAAPI                = "vaapi"
 	reasonChapterExtractFailed  = "chapter_extract_failed"
@@ -217,7 +218,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 		)
 	}
 
-	if resolvedAccel != "none" && !opts.ToneMap {
+	if resolvedAccel != hwAccelNone && !opts.ToneMap {
 		return extractFrameUnsupportedSDRWithRetry(cpuOpts)
 	}
 

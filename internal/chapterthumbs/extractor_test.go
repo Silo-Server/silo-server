@@ -213,7 +213,7 @@ func TestExtractFrameSoftwareHDRWithoutHardware(t *testing.T) {
 		InputPath:               "/media/movie.mkv",
 		SeekSeconds:             42.5,
 		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 "none",
+		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
@@ -304,7 +304,7 @@ func TestExtractFrameProbesAndRunsSameRelativeFFmpeg(t *testing.T) {
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
 		InputPath:               "/media/movie.mkv",
 		FFmpegPath:              " ./ffmpeg ",
-		HWAccel:                 "none",
+		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(_ context.Context, ffmpegPath string, _ []string) ([]byte, error) {
@@ -332,7 +332,7 @@ func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
 	opts := FrameExtractOptions{
 		InputPath:               "/media/movie.mkv",
 		FFmpegPath:              "/test/ffmpeg",
-		HWAccel:                 "none",
+		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
@@ -454,7 +454,7 @@ func TestExtractFrameMissingSoftwareFiltersIsActionable(t *testing.T) {
 	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
 		InputPath:               "/media/movie.mkv",
 		SeekSeconds:             42.5,
-		HWAccel:                 "none",
+		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
