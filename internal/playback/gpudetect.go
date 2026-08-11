@@ -318,13 +318,13 @@ func ffmpegSupportsVideoToolbox(ffmpegPath string) (bool, string) {
 // memory, so the regular software filter graph applies (see appendHWAccelArgs).
 func probeFFmpegVideoToolbox(ffmpegPath string) nvencProbeResult {
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return nvencProbeResult{reason: "hwaccels probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "videotoolbox") {
 		return nvencProbeResult{reason: "videotoolbox hwaccel unavailable"}
 	}
 
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return nvencProbeResult{reason: "encoders probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "h264_videotoolbox") {
 		return nvencProbeResult{reason: "h264_videotoolbox encoder unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hevc_videotoolbox") {
@@ -350,7 +350,7 @@ func probeFFmpegVideoToolbox(ffmpegPath string) nvencProbeResult {
 			"-f", "null",
 			"-",
 		); err != nil {
-			return nvencProbeResult{reason: smoke.encoder + " smoke encode failed: " + probeFailure(err, output)}
+			return nvencProbeResult{reason: smoke.encoder + " smoke encode failed: " + FormatFFmpegProbeFailure(err, output)}
 		}
 	}
 
