@@ -6,7 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsPath('pdf.worker.min.mjs')
 
 const fetchText = async url => await (await fetch(url)).text()
 
-let pdfViewerCSS = null
+let pdfLayerCSS = null
 
 // Track active render tasks per iframe document to cancel superseded renders
 const activeRenderTasks = new WeakMap()
@@ -255,8 +255,8 @@ const renderPage = async (page, getImageBlob) => {
             resolve(blob)
         }))
     }
-    if (pdfViewerCSS == null) {
-        pdfViewerCSS = await fetchText(pdfjsPath('pdf_viewer.css'))
+    if (pdfLayerCSS == null) {
+        pdfLayerCSS = await fetchText(pdfjsPath('pdf_layers.css'))
     }
     const data = `
         <!DOCTYPE html>
@@ -268,7 +268,7 @@ const renderPage = async (page, getImageBlob) => {
             margin: 0;
             padding: 0;
         }
-        ${pdfViewerCSS}
+        ${pdfLayerCSS}
         </style>
         <div id="canvas"></div>
         <div class="textLayer"></div>
@@ -343,14 +343,15 @@ export const makePDF = async file => {
             transport.onDataRange(begin, chunk)
         })
     }
-    const pdf = await pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({
         range: transport,
         wasmUrl: pdfjsPath(''),
         cMapUrl: pdfjsPath('cmaps/'),
         standardFontDataUrl: pdfjsPath('standard_fonts/'),
         enableScripting: false,
         isEvalSupported: false,
-    }).promise
+    })
+    const pdf = await loadingTask.promise
 
     // Get viewport dimensions from first page for fixed-layout rendering
     const firstPage = await pdf.getPage(1)
@@ -499,7 +500,7 @@ export const makePDF = async file => {
             page?.cleanup()
         }
         pageCache.clear()
-        pdf.destroy()
+        return loadingTask.destroy()
     }
     return book
 }

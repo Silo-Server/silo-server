@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -59,6 +62,41 @@ describe("PDF reader security", () => {
         enableScripting: false,
         isEvalSupported: false,
       }),
+    );
+  });
+
+  it("destroys the PDF.js loading task when the book closes", async () => {
+    const destroy = vi.fn();
+    const firstPage = {
+      getViewport: vi.fn(() => ({ height: 792, width: 612 })),
+    };
+    mocks.getDocument.mockReturnValue({
+      destroy,
+      promise: Promise.resolve({
+        getMetadata: vi.fn(async () => ({ info: {}, metadata: null })),
+        getOutline: vi.fn(async () => null),
+        getPage: vi.fn(async () => firstPage),
+        numPages: 1,
+      }),
+    });
+
+    const book = await makePDF(new File(["%PDF-1.7"], "safe.pdf", { type: "application/pdf" }));
+    await book.destroy();
+
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("ships only the PDF.js layers used by the embedded reader", () => {
+    const pdfLayerCSS = readFileSync(
+      resolve(process.cwd(), "public/vendor/pdfjs/pdf_layers.css"),
+      "utf8",
+    );
+
+    expect(pdfLayerCSS).toContain(".textLayer{");
+    expect(pdfLayerCSS).toContain(".textLayerImages{");
+    expect(pdfLayerCSS).toContain(".annotationLayer{");
+    expect(pdfLayerCSS).not.toMatch(
+      /\.(?:annotationEditorLayer|dialog|pdfViewer|sidebar|toolbar|xfaLayer)\b/,
     );
   });
 });
