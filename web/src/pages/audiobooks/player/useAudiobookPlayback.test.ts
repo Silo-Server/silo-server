@@ -514,6 +514,72 @@ describe("useAudiobookPlayback", () => {
     expect(audio.currentTime).toBe(70);
   });
 
+  it("preserves negative timeline offsets and clamps absolute buffered ranges", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          const body = JSON.parse(String(init?.body)) as { start_position: number };
+          return jsonResponse(
+            audioOnlyDecision("negative-offset", body.start_position, {
+              timeline_offset_seconds: -5,
+              player_start_seconds: 5,
+              can_seek_anywhere: true,
+            }),
+            { status: 201 },
+          );
+        }
+        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+        if (url.includes("/progress") || init?.method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        return jsonResponse({});
+      }),
+    );
+
+    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
+
+    function Harness() {
+      const playback = useAudiobookPlayback({
+        contentId: "c",
+        files,
+        initialPositionSeconds: 0,
+      });
+      useEffect(() => {
+        onPlayback(playback);
+      }, [playback]);
+      return createElement("audio", {
+        ref: playback.audioRef,
+        src: playback.streamUrl || undefined,
+      });
+    }
+
+    const { container } = render(createElement(Harness), { wrapper });
+    await flushAsyncWork();
+    const audio = container.querySelector("audio");
+    if (!audio) throw new Error("expected audio element");
+    Object.defineProperty(audio, "buffered", {
+      configurable: true,
+      value: {
+        length: 1,
+        start: () => 0,
+        end: () => 8,
+      } as TimeRanges,
+    });
+
+    act(() => {
+      audio.currentTime = 7;
+      fireEvent.timeUpdate(audio);
+      fireEvent.progress(audio);
+    });
+    await flushAsyncWork();
+
+    expect(onPlayback.mock.lastCall?.[0].currentTime).toBe(2);
+    expect(onPlayback.mock.lastCall?.[0].buffered?.start(0)).toBe(0);
+    expect(onPlayback.mock.lastCall?.[0].buffered?.end(0)).toBe(3);
+  });
+
   it("togglePlay invokes audio.play when paused, audio.pause otherwise", () => {
     const { result } = renderAudiobookPlayback();
     const audio = makeAudio();

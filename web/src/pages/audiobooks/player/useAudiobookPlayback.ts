@@ -86,10 +86,11 @@ function safeNumber(value: number): number {
 
 export function audiobookAbsoluteTime(
   partStartSeconds: number,
-  streamOriginSeconds: number,
+  timelineOffsetSeconds: number,
   playerSeconds: number,
 ): number {
-  return safeNumber(partStartSeconds) + safeNumber(streamOriginSeconds) + safeNumber(playerSeconds);
+  const timelineOffset = Number.isFinite(timelineOffsetSeconds) ? timelineOffsetSeconds : 0;
+  return Math.max(0, safeNumber(partStartSeconds) + timelineOffset + safeNumber(playerSeconds));
 }
 
 function buildParts(files: AudiobookFile[]): AudiobookPart[] {
@@ -145,20 +146,21 @@ function absoluteBufferedRanges(
   ranges: TimeRanges,
   part: AudiobookPart | undefined,
   bookDuration: number,
-  streamOriginSeconds = 0,
+  timelineOffsetSeconds = 0,
 ): TimeRanges {
   if (!part) {
     return { length: 0, start: () => 0, end: () => 0 } as TimeRanges;
   }
+  const timelineOffset = Number.isFinite(timelineOffsetSeconds) ? timelineOffsetSeconds : 0;
   const out: Array<{ start: number; end: number }> = [];
   for (let i = 0; i < ranges.length; i++) {
-    const start = Math.min(
-      bookDuration,
-      part.start + streamOriginSeconds + safeNumber(ranges.start(i)),
+    const start = Math.max(
+      0,
+      Math.min(bookDuration, part.start + timelineOffset + safeNumber(ranges.start(i))),
     );
-    const end = Math.min(
-      bookDuration,
-      part.start + streamOriginSeconds + safeNumber(ranges.end(i)),
+    const end = Math.max(
+      0,
+      Math.min(bookDuration, part.start + timelineOffset + safeNumber(ranges.end(i))),
     );
     if (end > start) {
       out.push({ start, end });
@@ -258,7 +260,7 @@ export function useAudiobookPlayback({
   const attemptCountRef = useRef(1);
   const replanInFlightPlanKeyRef = useRef<string | null>(null);
   const failedPlanKeyRef = useRef<string | null>(null);
-  const streamOriginSecondsRef = useRef(0);
+  const timelineOffsetSecondsRef = useRef(0);
   const canSeekAnywhereRef = useRef(true);
   const reportRef = useRef<(pos: number) => void>(() => {});
   const reportSessionRef = useRef<(pos: number, isPaused: boolean, keepalive?: boolean) => void>(
@@ -326,7 +328,7 @@ export function useAudiobookPlayback({
       planAttemptIdRef.current = planAttemptId;
       sessionIdRef.current = sessionId ?? null;
       failedPlanKeyRef.current = null;
-      streamOriginSecondsRef.current = plan.timeline.timeline_offset_seconds;
+      timelineOffsetSecondsRef.current = plan.timeline.timeline_offset_seconds;
       canSeekAnywhereRef.current = plan.timeline.can_seek_anywhere;
       // The plan owns where the stream is anchored. On a converted part the
       // server anchors the stream at the seek position and restarts the player
@@ -511,7 +513,7 @@ export function useAudiobookPlayback({
     const target = clampedBookTime(initialPositionSeconds, duration);
     const index = findPartIndex(parts, target);
     pendingLocalSeekRef.current = localTimeForPart(parts[index], target);
-    streamOriginSecondsRef.current = 0;
+    timelineOffsetSecondsRef.current = 0;
     canSeekAnywhereRef.current = true;
     autoPlayPendingRef.current = autoPlay;
     setBuffered(null);
@@ -643,7 +645,7 @@ export function useAudiobookPlayback({
     if (!audio || !fileId || !activePart) return;
 
     const absoluteFromAudio = () =>
-      audiobookAbsoluteTime(activePart.start, streamOriginSecondsRef.current, audio.currentTime);
+      audiobookAbsoluteTime(activePart.start, timelineOffsetSecondsRef.current, audio.currentTime);
 
     const onTimeUpdate = () => setAbsoluteTime(absoluteFromAudio());
     const onProgress = () =>
@@ -652,7 +654,7 @@ export function useAudiobookPlayback({
           audio.buffered,
           activePart,
           duration,
-          streamOriginSecondsRef.current,
+          timelineOffsetSecondsRef.current,
         ),
       );
     const onDurationChange = () =>
@@ -661,7 +663,7 @@ export function useAudiobookPlayback({
           audio.buffered,
           activePart,
           duration,
-          streamOriginSecondsRef.current,
+          timelineOffsetSecondsRef.current,
         ),
       );
     const onLoadedMetadata = () => {
@@ -805,7 +807,7 @@ export function useAudiobookPlayback({
         setBuffered(null);
         setActiveFileIndex(nextIndex);
       } else if (audio && canSeekAnywhereRef.current) {
-        audio.currentTime = Math.max(0, local - streamOriginSecondsRef.current);
+        audio.currentTime = Math.max(0, local - timelineOffsetSecondsRef.current);
       } else {
         pendingLocalSeekRef.current = local;
         playAfterSourceSwitchRef.current = shouldContinuePlaying;
