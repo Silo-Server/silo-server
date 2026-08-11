@@ -2148,9 +2148,10 @@ func TestPrepareTransportV3AudioOnlyRemuxSkipsVideoCopyAnchor(t *testing.T) {
 	if parsed.Query().Get("seek") != strconv.FormatFloat(requested, 'f', -1, 64) {
 		t.Fatalf("audio-only seek URL = %q", transport.url)
 	}
-	if plan.Timeline.PlayerStartSeconds != requested || !plan.Timeline.CanSeekAnywhere ||
-		plan.Timeline.SeekRestoration != "player_position" || plan.Timeline.StreamOriginSeconds != 0 ||
-		plan.Timeline.TimelineOffsetSeconds != 0 {
+	if plan.Timeline.PlayerStartSeconds != 0 || plan.Timeline.CanSeekAnywhere ||
+		plan.Timeline.SeekRestoration != "source_position" || plan.Timeline.StreamOriginSeconds != requested ||
+		plan.Timeline.TimelineOffsetSeconds != requested || plan.Timeline.SeekWindowStartSeconds == nil ||
+		*plan.Timeline.SeekWindowStartSeconds != requested || plan.Timeline.SeekWindowEndSeconds != nil {
 		t.Fatalf("audio-only timeline changed = %#v", plan.Timeline)
 	}
 }
