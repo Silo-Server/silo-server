@@ -29,9 +29,10 @@ const (
 const remoteExtractOverheadBuffer = 3 * time.Second
 
 type RemoteExtractRequest struct {
-	InputPath   string  `json:"input_path"`
-	SeekSeconds float64 `json:"seek_seconds"`
-	ToneMap     bool    `json:"tone_map"`
+	InputPath            string  `json:"input_path"`
+	SeekSeconds          float64 `json:"seek_seconds"`
+	ToneMap              bool    `json:"tone_map"`
+	AllowSoftwareToneMap bool    `json:"allow_software_tone_map"`
 }
 
 type RemoteExtractErrorResponse struct {
@@ -65,7 +66,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: marshal request: %w", err)
 	}
 
-	timeout := remoteExtractTimeout(req.ToneMap)
+	timeout := remoteExtractTimeout(req.ToneMap, req.AllowSoftwareToneMap)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -112,11 +113,12 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 	return data, "", nil
 }
 
-func remoteExtractTimeout(toneMap bool) time.Duration {
-	timeout := extractTimeoutForAttempt(true, toneMap) +
-		extractTimeoutForAttempt(false, toneMap) +
-		remoteExtractOverheadBuffer
-	if toneMap {
+func remoteExtractTimeout(toneMap bool, allowSoftwareToneMap bool) time.Duration {
+	timeout := extractTimeoutForAttempt(true, toneMap) + remoteExtractOverheadBuffer
+	if !toneMap || allowSoftwareToneMap {
+		timeout += extractTimeoutForAttempt(false, toneMap)
+	}
+	if toneMap && allowSoftwareToneMap {
 		timeout += softwareToneMapProbeTimeout
 	}
 	return timeout

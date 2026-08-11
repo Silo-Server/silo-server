@@ -16,13 +16,14 @@ import (
 )
 
 type FrameExtractOptions struct {
-	InputPath   string
-	SeekSeconds float64
-	FFmpegPath  string
-	HWAccel     string
-	HWDevice    string
-	ToneMap     bool
-	RunFunc     func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error)
+	InputPath            string
+	SeekSeconds          float64
+	FFmpegPath           string
+	HWAccel              string
+	HWDevice             string
+	ToneMap              bool
+	AllowSoftwareToneMap bool
+	RunFunc              func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error)
 
 	softwareToneMapResolver *softwareToneMapFilterResolver
 }
@@ -203,6 +204,9 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 			if hwReason == reasonDecodeInvalidData {
 				return nil, hwReason, wrapReason(hwReason, err)
 			}
+			if opts.ToneMap && !opts.AllowSoftwareToneMap {
+				return nil, hwReason, wrapReason(hwReason, err)
+			}
 			return extractFrameCPUFallback(
 				cpuOpts,
 				hwReason,
@@ -211,11 +215,19 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 		}
 
 		releaseHWDevice()
+		if opts.ToneMap && !opts.AllowSoftwareToneMap {
+			return nil, reasonToneMapUnsupported, wrapReason(reasonToneMapUnsupported, buildErr)
+		}
 		return extractFrameCPUFallback(
 			cpuOpts,
 			reasonChapterExtractFailed,
 			buildErr,
 		)
+	}
+
+	if opts.ToneMap && !opts.AllowSoftwareToneMap {
+		err := errors.New("software HDR tone mapping is disabled")
+		return nil, reasonToneMapUnsupported, wrapReason(reasonToneMapUnsupported, err)
 	}
 
 	if resolvedAccel != hwAccelNone && !opts.ToneMap {

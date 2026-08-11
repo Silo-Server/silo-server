@@ -31,10 +31,11 @@ const (
 	cpuExtractTimeoutSDR       = 10 * time.Second
 	cpuExtractTimeoutHDR       = 25 * time.Second
 
-	chapterThumbnailHDRPolicySetting    = "playback.chapter_thumbnail_hdr_policy"
-	chapterThumbnailHDRPolicyDefault    = "best_effort"
-	chapterThumbnailHDRPolicyDisabled   = "disabled"
-	chapterThumbnailHDRPolicyBestEffort = "best_effort"
+	chapterThumbnailHDRPolicySetting       = "playback.chapter_thumbnail_hdr_policy"
+	chapterThumbnailHDRPolicyDefault       = "best_effort"
+	chapterThumbnailHDRPolicyDisabled      = "disabled"
+	chapterThumbnailHDRPolicyBestEffort    = "best_effort"
+	chapterThumbnailSoftwareToneMapSetting = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
 
 var chapterThumbnailRetrySchedule = []time.Duration{
@@ -587,9 +588,10 @@ func (s *Service) extractFrame(
 		return s.extractFrameFunc(ctx, file, seekSeconds, hdrPolicy)
 	}
 	toneMap := needsTonemap(file) && hdrPolicy == chapterThumbnailHDRPolicyBestEffort
+	allowSoftwareToneMap := toneMap && s.chapterThumbnailSoftwareToneMapEnabled(ctx)
 	mode := s.chapterThumbnailExecutionMode(ctx)
 	if mode == chapterThumbnailExecutionLocal {
-		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 	}
 
 	node, release, nodeReason := s.reserveRemoteNode(ctx)
@@ -602,7 +604,7 @@ func (s *Service) extractFrame(
 				"reason",
 				nodeReason,
 			)
-			return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+			return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 		}
 		return nil, nodeReason, wrapReason(nodeReason, fmt.Errorf("no transcode node available for chapter thumbnail extraction"))
 	}
@@ -610,9 +612,10 @@ func (s *Service) extractFrame(
 
 	jwtSecret := s.chapterThumbnailJWTSecret(ctx)
 	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, jwtSecret, RemoteExtractRequest{
-		InputPath:   file.FilePath,
-		SeekSeconds: seekSeconds,
-		ToneMap:     toneMap,
+		InputPath:            file.FilePath,
+		SeekSeconds:          seekSeconds,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
 	})
 	if err == nil {
 		return data, "", nil
@@ -630,22 +633,29 @@ func (s *Service) extractFrame(
 			"error",
 			err,
 		)
-		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 	}
 
 	return nil, reason, err
 }
 
-func (s *Service) extractFrameLocal(ctx context.Context, inputPath string, seekSeconds float64, toneMap bool) ([]byte, string, error) {
+func (s *Service) extractFrameLocal(
+	ctx context.Context,
+	inputPath string,
+	seekSeconds float64,
+	toneMap bool,
+	allowSoftwareToneMap bool,
+) ([]byte, string, error) {
 	resolvedAccel, resolvedDevice := s.resolveHWConfig()
 	return ExtractFrame(ctx, FrameExtractOptions{
-		InputPath:   inputPath,
-		SeekSeconds: seekSeconds,
-		FFmpegPath:  s.ffmpegPath,
-		HWAccel:     resolvedAccel,
-		HWDevice:    resolvedDevice,
-		ToneMap:     toneMap,
-		RunFunc:     s.runFFmpegFrameExtractFunc,
+		InputPath:            inputPath,
+		SeekSeconds:          seekSeconds,
+		FFmpegPath:           s.ffmpegPath,
+		HWAccel:              resolvedAccel,
+		HWDevice:             resolvedDevice,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
+		RunFunc:              s.runFFmpegFrameExtractFunc,
 	})
 }
 
@@ -1041,6 +1051,14 @@ func (s *Service) chapterThumbnailHDRPolicy(ctx context.Context) string {
 	default:
 		return chapterThumbnailHDRPolicyDefault
 	}
+}
+
+func (s *Service) chapterThumbnailSoftwareToneMapEnabled(ctx context.Context) bool {
+	if s == nil || s.settings == nil {
+		return false
+	}
+	value, err := s.settings.Get(ctx, chapterThumbnailSoftwareToneMapSetting)
+	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
 func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time) bool {

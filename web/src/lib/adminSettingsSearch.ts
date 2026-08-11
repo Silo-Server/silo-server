@@ -269,6 +269,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Chapter Thumbnail Execution",
           "Chapter Thumbnail Node Capacity",
           "HDR Chapter Thumbnail Policy",
+          "Enable CPU Tone Mapping",
           "Watched Threshold (%)",
           "Min Resume Threshold (%)",
         ),

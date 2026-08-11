@@ -27,6 +27,7 @@ const KEYS = [
   "playback.chapter_thumbnail_execution",
   "playback.chapter_thumbnail_node_capacity",
   "playback.chapter_thumbnail_hdr_policy",
+  "playback.chapter_thumbnail_software_tone_map_enabled",
   "playback.watched_threshold",
   "playback.min_resume_threshold",
 ];
@@ -232,6 +233,16 @@ export default function PlaybackSettings() {
             hint="Controls whether chapter thumbnails are generated for HDR or Dolby Vision sources. SDR files are unaffected."
             value={form.getValue("playback.chapter_thumbnail_hdr_policy") || "best_effort"}
             onChange={(v) => form.setValue("playback.chapter_thumbnail_hdr_policy", v)}
+          />
+          <SettingField
+            label="Enable CPU Tone Mapping"
+            type="toggle"
+            hint="Allows CPU/software tone mapping when hardware HDR chapter-thumbnail extraction is unavailable or fails. Disabled by default because it can be CPU-intensive."
+            value={form.getValue("playback.chapter_thumbnail_software_tone_map_enabled") || "false"}
+            onChange={(v) =>
+              form.setValue("playback.chapter_thumbnail_software_tone_map_enabled", v)
+            }
+            disabled={form.getValue("playback.chapter_thumbnail_hdr_policy") === "disabled"}
           />
         </FieldGroup>
 

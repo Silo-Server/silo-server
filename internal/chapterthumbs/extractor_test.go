@@ -215,6 +215,7 @@ func TestExtractFrameSoftwareHDRWithoutHardware(t *testing.T) {
 		FFmpegPath:              "/test/ffmpeg",
 		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
 			deadline, ok := ctx.Deadline()
@@ -238,6 +239,31 @@ func TestExtractFrameSoftwareHDRWithoutHardware(t *testing.T) {
 		t.Fatalf("ExtractFrame() data = %q, want frame", data)
 	}
 	assertApproximateDeadline(t, remaining, cpuExtractTimeoutHDR)
+}
+
+func TestExtractFrameSoftwareHDRDisabledByDefault(t *testing.T) {
+	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+		t.Fatal("software filter probe should not run while CPU tone mapping is disabled")
+		return nil, nil
+	})
+
+	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:               "/media/movie.mkv",
+		FFmpegPath:              "/test/ffmpeg",
+		HWAccel:                 hwAccelNone,
+		ToneMap:                 true,
+		softwareToneMapResolver: resolver,
+		RunFunc: func(context.Context, string, []string) ([]byte, error) {
+			t.Fatal("CPU extraction should not run while CPU tone mapping is disabled")
+			return nil, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "software HDR tone mapping is disabled") {
+		t.Fatalf("ExtractFrame() error = %v, want disabled software tone-map error", err)
+	}
+	if reason != reasonToneMapUnsupported {
+		t.Fatalf("ExtractFrame() reason = %q, want %q", reason, reasonToneMapUnsupported)
+	}
 }
 
 func TestExtractFrameUnsupportedHardwareUsesCPU(t *testing.T) {
@@ -306,6 +332,7 @@ func TestExtractFrameProbesAndRunsSameRelativeFFmpeg(t *testing.T) {
 		FFmpegPath:              " ./ffmpeg ",
 		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(_ context.Context, ffmpegPath string, _ []string) ([]byte, error) {
 			extractPath = ffmpegPath
@@ -334,6 +361,7 @@ func TestExtractFrameRetriesTransientSoftwareProbeFailure(t *testing.T) {
 		FFmpegPath:              "/test/ffmpeg",
 		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			return []byte("frame"), nil
@@ -381,6 +409,34 @@ func TestExtractFrameHardwareHDRSuccessSkipsSoftwareProbe(t *testing.T) {
 	}
 }
 
+func TestExtractFrameHardwareHDRFailureDoesNotUseSoftwareWhenDisabled(t *testing.T) {
+	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
+		t.Fatal("software filter probe should not run while CPU tone mapping is disabled")
+		return nil, nil
+	})
+	calls := 0
+	_, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:               "/media/movie.mkv",
+		HWAccel:                 hwAccelVAAPI,
+		HWDevice:                "/dev/dri/renderD128",
+		ToneMap:                 true,
+		softwareToneMapResolver: resolver,
+		RunFunc: func(context.Context, string, []string) ([]byte, error) {
+			calls++
+			return nil, context.DeadlineExceeded
+		},
+	})
+	if err == nil {
+		t.Fatal("ExtractFrame() error = nil, want hardware failure")
+	}
+	if reason != "hw_timeout" {
+		t.Fatalf("ExtractFrame() reason = %q, want hw_timeout", reason)
+	}
+	if calls != 1 {
+		t.Fatalf("extract calls = %d, want hardware attempt only", calls)
+	}
+}
+
 func TestExtractFrameHardwareHDRFailureFallsBackWithFreshDeadline(t *testing.T) {
 	resolver := resolverWithFilters(t, "zscale", "tonemapx")
 	calls := 0
@@ -391,6 +447,7 @@ func TestExtractFrameHardwareHDRFailureFallsBackWithFreshDeadline(t *testing.T) 
 		HWAccel:                 "vaapi",
 		HWDevice:                "/dev/dri/renderD128",
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(ctx context.Context, _ string, args []string) ([]byte, error) {
 			calls++
@@ -456,6 +513,7 @@ func TestExtractFrameMissingSoftwareFiltersIsActionable(t *testing.T) {
 		SeekSeconds:             42.5,
 		HWAccel:                 hwAccelNone,
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
@@ -482,6 +540,7 @@ func TestExtractFramePreservesHardwareAndCPUFailures(t *testing.T) {
 		HWAccel:                 "vaapi",
 		HWDevice:                "/dev/dri/renderD128",
 		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
 		softwareToneMapResolver: resolver,
 		RunFunc: func(context.Context, string, []string) ([]byte, error) {
 			calls++
@@ -504,20 +563,25 @@ func TestExtractFramePreservesHardwareAndCPUFailures(t *testing.T) {
 	}
 }
 
-func TestRemoteExtractTimeoutBudgetsHardwareAndCPUAttempts(t *testing.T) {
-	for _, toneMap := range []bool{false, true} {
-		extractBudget := extractTimeoutForAttempt(true, toneMap) + extractTimeoutForAttempt(false, toneMap)
-		got := remoteExtractTimeout(toneMap)
-		if got <= extractBudget {
-			t.Fatalf("remoteExtractTimeout(%t) = %s, want more than extract budget %s", toneMap, got, extractBudget)
-		}
-		if toneMap && got-extractBudget <= softwareToneMapProbeTimeout {
-			t.Fatalf(
-				"remoteExtractTimeout(true) overhead = %s, want more than probe budget %s",
-				got-extractBudget,
-				softwareToneMapProbeTimeout,
-			)
-		}
+func TestRemoteExtractTimeoutBudgetsOnlyAllowedAttempts(t *testing.T) {
+	sdrExtractBudget := extractTimeoutForAttempt(true, false) + extractTimeoutForAttempt(false, false)
+	if got := remoteExtractTimeout(false, false); got <= sdrExtractBudget {
+		t.Fatalf("remoteExtractTimeout(SDR) = %s, want more than extract budget %s", got, sdrExtractBudget)
+	}
+
+	hardwareHDRBudget := extractTimeoutForAttempt(true, true)
+	softwareHDRBudget := extractTimeoutForAttempt(false, true)
+	if got := remoteExtractTimeout(true, false); got <= hardwareHDRBudget || got >= hardwareHDRBudget+softwareHDRBudget {
+		t.Fatalf("remoteExtractTimeout(HDR hardware only) = %s, want hardware plus overhead without CPU budget", got)
+	}
+
+	hdrExtractBudget := hardwareHDRBudget + softwareHDRBudget
+	if got := remoteExtractTimeout(true, true); got-hdrExtractBudget <= softwareToneMapProbeTimeout {
+		t.Fatalf(
+			"remoteExtractTimeout(HDR with CPU) overhead = %s, want more than probe budget %s",
+			got-hdrExtractBudget,
+			softwareToneMapProbeTimeout,
+		)
 	}
 }
 

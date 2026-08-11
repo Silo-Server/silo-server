@@ -421,12 +421,13 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 
 	cfg := s.watcher.Config()
 	frame, reason, err := chapterthumbs.ExtractFrame(r.Context(), chapterthumbs.FrameExtractOptions{
-		InputPath:   req.InputPath,
-		SeekSeconds: req.SeekSeconds,
-		FFmpegPath:  cfg.Playback.FFmpegPath,
-		HWAccel:     cfg.Playback.HWAccel,
-		HWDevice:    cfg.Playback.HWDevice,
-		ToneMap:     req.ToneMap,
+		InputPath:            req.InputPath,
+		SeekSeconds:          req.SeekSeconds,
+		FFmpegPath:           cfg.Playback.FFmpegPath,
+		HWAccel:              cfg.Playback.HWAccel,
+		HWDevice:             cfg.Playback.HWDevice,
+		ToneMap:              req.ToneMap,
+		AllowSoftwareToneMap: req.AllowSoftwareToneMap,
 	})
 	if err != nil {
 		writeChapterThumbnailError(w, http.StatusUnprocessableEntity, reason, err.Error())

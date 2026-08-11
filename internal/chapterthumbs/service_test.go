@@ -271,21 +271,23 @@ func (r testSettingsReader) Get(_ context.Context, key string) (string, error) {
 }
 
 type testRemoteFrameExtractor struct {
-	data   []byte
-	reason string
-	err    error
-	nodes  []string
+	data     []byte
+	reason   string
+	err      error
+	nodes    []string
+	requests []RemoteExtractRequest
 }
 
 func (e *testRemoteFrameExtractor) ExtractFrame(
 	_ context.Context,
 	node *nodepool.Node,
 	_ string,
-	_ RemoteExtractRequest,
+	req RemoteExtractRequest,
 ) ([]byte, string, error) {
 	if node != nil {
 		e.nodes = append(e.nodes, node.URL)
 	}
+	e.requests = append(e.requests, req)
 	return e.data, e.reason, e.err
 }
 
@@ -679,6 +681,61 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	}
 	if len(remote.nodes) != 1 || remote.nodes[0] != "http://node-1" {
 		t.Fatalf("remote nodes = %#v, want node-1", remote.nodes)
+	}
+}
+
+func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) {
+	tests := []struct {
+		name         string
+		settingValue string
+		wantAllowed  bool
+	}{
+		{name: "disabled by default", wantAllowed: false},
+		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
+			settings := map[string]string{
+				chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
+				authJWTSecretSetting:             "secret",
+			}
+			if tt.settingValue != "" {
+				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+			}
+			service := &Service{
+				settings:           testSettingsReader{values: settings},
+				transcodePool:      &nodepool.TranscodePool{},
+				remoteReservations: make(map[string]int),
+				remoteExtractor:    remote,
+			}
+			service.transcodePool.SetNodes([]*nodepool.Node{{
+				URL:     "http://node-1",
+				Enabled: true,
+				Healthy: true,
+			}})
+
+			_, _, err := service.extractFrame(
+				context.Background(),
+				&models.MediaFile{FilePath: "/media/movie.mkv", HDR: true},
+				5,
+				chapterThumbnailHDRPolicyBestEffort,
+			)
+			if err != nil {
+				t.Fatalf("extractFrame() error = %v", err)
+			}
+			if len(remote.requests) != 1 {
+				t.Fatalf("remote requests = %d, want 1", len(remote.requests))
+			}
+			request := remote.requests[0]
+			if !request.ToneMap {
+				t.Fatal("remote request tone_map = false, want true for HDR")
+			}
+			if request.AllowSoftwareToneMap != tt.wantAllowed {
+				t.Fatalf("remote request allow_software_tone_map = %t, want %t", request.AllowSoftwareToneMap, tt.wantAllowed)
+			}
+		})
 	}
 }
 
