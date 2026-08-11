@@ -210,6 +210,18 @@ describe("VideoPlayer plan failure recovery", () => {
 
     await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBeNull());
     expect(onSubtitleTrackChange).toHaveBeenCalledOnce();
+
+    const nextPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:next-session",
+      plan_attempt_key: "v3:next-session",
+      session_id: "session-2",
+    });
+    rerenderPlayer({ sessionId: "session-2", plan: nextPlan, replanError: null });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(2));
+    expect(onSubtitleTrackChange).toHaveBeenCalledTimes(2);
+    expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(2, 0);
   });
 });
 

@@ -17,10 +17,12 @@ func TestResolveCopySeekAnchorUsesKeyPacketTimestamp(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
 	ffprobePath := filepath.Join(dir, "ffprobe")
+	argsPath := filepath.Join(dir, "ffprobe-args")
 	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	probe := `#!/bin/sh
+printf '%s\n' "$@" > "` + argsPath + `"
 printf '%s' '{"packets":[{"pts_time":"N/A","dts_time":"14.500000","flags":"K__"}]}'
 `
 	if err := os.WriteFile(ffprobePath, []byte(probe), 0o755); err != nil {
@@ -33,6 +35,13 @@ printf '%s' '{"packets":[{"pts_time":"N/A","dts_time":"14.500000","flags":"K__"}
 	}
 	if anchor != 14.5 || segment != 7 {
 		t.Fatalf("resolved anchor = %v, segment = %d; want 14.5, 7", anchor, segment)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read ffprobe args: %v", err)
+	}
+	if !strings.Contains(string(args), "-select_streams\nV:0\n") {
+		t.Fatalf("ffprobe did not select the remux video stream:\n%s", args)
 	}
 }
 

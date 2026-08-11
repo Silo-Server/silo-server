@@ -2102,6 +2102,59 @@ func TestPrepareTransportV3ProgressiveRemuxUsesResolvedCopyAnchor(t *testing.T) 
 	}
 }
 
+func TestPrepareTransportV3AudioOnlyRemuxSkipsVideoCopyAnchor(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	probeCalls := 0
+	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
+		probeCalls++
+		return 0, 0, errors.New("audio-only remux must not probe a video keyframe")
+	}
+	requested := 321.25
+	plan := &playback.PlanV3{
+		PlanID:   "plan:audio-only-progressive",
+		Delivery: playback.DeliveryRemuxProgressiveV3,
+		Timeline: playback.TimelineV3{
+			SourceStartSeconds: requested,
+			PlayerStartSeconds: requested,
+			CanSeekAnywhere:    true,
+			SeekRestoration:    "player_position",
+		},
+	}
+	file := &models.MediaFile{
+		ID:          42,
+		BaseType:    "audiobook",
+		FilePath:    "/media/book.m4b",
+		CodecAudio:  "aac",
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+	}
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-audio-only", MediaFileID: 42},
+		file,
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetAudioCodec: "aac"},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare audio-only transport: %v", transportErr)
+	}
+	defer transport.rollback()
+	if probeCalls != 0 {
+		t.Fatalf("audio-only copy anchor probes = %d, want 0", probeCalls)
+	}
+	parsed, err := url.Parse(transport.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("seek") != strconv.FormatFloat(requested, 'f', -1, 64) {
+		t.Fatalf("audio-only seek URL = %q", transport.url)
+	}
+	if plan.Timeline.PlayerStartSeconds != requested || !plan.Timeline.CanSeekAnywhere ||
+		plan.Timeline.SeekRestoration != "player_position" || plan.Timeline.StreamOriginSeconds != 0 ||
+		plan.Timeline.TimelineOffsetSeconds != 0 {
+		t.Fatalf("audio-only timeline changed = %#v", plan.Timeline)
+	}
+}
+
 func TestPrepareTransportV3CopyAnchorFailureIsRetryable(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {

@@ -697,6 +697,12 @@ func (h *PlaybackHandler) prepareTransportTimelineV3(ctx context.Context, sessio
 	requested := result.Plan.Timeline.SourceStartSeconds
 	switch result.Plan.Delivery {
 	case playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3:
+		// Audio-only remuxes have no copied video keyframe to resolve. Keep the
+		// planner's progressive audio timeline and pass the requested input seek
+		// through to the remux transport unchanged.
+		if file != nil && file.IsAudioOnly() {
+			return preparedTimelineV3{seekSeconds: requested, streamOriginSeconds: result.Plan.Timeline.StreamOriginSeconds}, nil
+		}
 		origin, startSegment := 0.0, 0
 		if requested > 0 {
 			if file == nil || strings.TrimSpace(file.FilePath) == "" {

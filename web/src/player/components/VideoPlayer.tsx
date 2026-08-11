@@ -1946,6 +1946,13 @@ export function VideoPlayer({
     }
   }, [plan.selected_tracks.subtitle?.index, replanError, replanning]);
 
+  // A refusal pin belongs only to the session that rejected the automatic
+  // selection. Clear it before the auto-selection effect evaluates a new
+  // session so the viewer's persisted subtitle mode applies to the next title.
+  useEffect(() => {
+    subtitleSelectionWasManualRef.current = false;
+  }, [sessionId]);
+
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
     if (subtitleSelectionWasManualRef.current) {
@@ -1997,11 +2004,8 @@ export function VideoPlayer({
     audioTracks,
     activeAudioIndex,
     selectedVersion,
+    sessionId,
   ]);
-
-  useEffect(() => {
-    subtitleSelectionWasManualRef.current = false;
-  }, [sessionId]);
 
   // -- Control callbacks --
   const handlePlayPause = useCallback(() => {
