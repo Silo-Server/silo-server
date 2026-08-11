@@ -3,6 +3,8 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -341,6 +343,53 @@ func TestHandleStartPlaybackV3RejectsAttemptReplayFromAnotherDevice(t *testing.T
 	}
 	if got := len(manager.AllSessions()); got != 1 {
 		t.Fatalf("sessions = %d, want 1", got)
+	}
+}
+
+func TestHandleStartPlaybackV3AcceptsPreDeviceDigestReplay(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	body := marshalV3StartRequest(t, startRequest)
+
+	start := func(requestBody, deviceID string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(requestBody)).WithContext(newAuthorizedPlaybackContext())
+		req.Header.Set(deviceIDHeader, deviceID)
+		rr := httptest.NewRecorder()
+		handler.HandleStartPlayback(rr, req)
+		return rr
+	}
+
+	first := start(body, "living-room")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, body = %s", first.Code, first.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(first.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), response.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyDigest := sha256.Sum256([]byte(body))
+	record.RequestDigest = hex.EncodeToString(legacyDigest[:])
+	handler.PlanStoreV3.(*playback.MemoryPlanStoreV3).ReplaceAttempt(context.Background(), *record)
+
+	replay := start(body, "living-room")
+	if replay.Code != http.StatusCreated || replay.Body.String() != first.Body.String() {
+		t.Fatalf("legacy replay status = %d, body = %s; first = %s", replay.Code, replay.Body.String(), first.Body.String())
+	}
+
+	changedRequest := startRequest
+	position := 42.0
+	changedRequest.StartPosition = &position
+	conflict := start(marshalV3StartRequest(t, changedRequest), "living-room")
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "playback_attempt_reused") {
+		t.Fatalf("changed legacy replay status = %d, body = %s", conflict.Code, conflict.Body.String())
 	}
 }
 
@@ -2469,7 +2518,8 @@ func TestManifestStartupTimeoutWhileRunningIsPersistedIdempotently(t *testing.T)
 	failure := manifestStartupTransportErrorV3(session.IsRunning(), waitErr)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	request := v3HandlerStartRequest()
-	response, err := handler.startFailureDecisionV3(context.Background(), 1, request.ProfileID, request, "digest", request.FileID, request.FileID, failure)
+	requestDigests := playbackStartRequestDigestsV3{current: "digest"}
+	response, err := handler.startFailureDecisionV3(context.Background(), 1, request.ProfileID, request, requestDigests, request.FileID, request.FileID, failure)
 	if err != nil {
 		t.Fatalf("start failure decision: %v", err)
 	}
@@ -2480,7 +2530,7 @@ func TestManifestStartupTimeoutWhileRunningIsPersistedIdempotently(t *testing.T)
 	if err != nil || record.StartResponse.Terminal == nil || !record.StartResponse.Terminal.Retryable {
 		t.Fatalf("retryable startup timeout attempt = %#v, err=%v", record, err)
 	}
-	replayed, err := handler.startFailureDecisionV3(context.Background(), 1, request.ProfileID, request, "digest", request.FileID, request.FileID, failure)
+	replayed, err := handler.startFailureDecisionV3(context.Background(), 1, request.ProfileID, request, requestDigests, request.FileID, request.FileID, failure)
 	if err != nil || replayed.Terminal == nil || replayed.Terminal.Reason != response.Terminal.Reason {
 		t.Fatalf("retryable timeout replay = %#v, err=%v", replayed, err)
 	}

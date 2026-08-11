@@ -21,6 +21,7 @@ vi.mock("../context/PlayerConfigContext", () => ({
     apiBaseUrl: "/api/v1",
     getAccessToken: () => "token",
     getProfileId: () => "profile-1",
+    getDeviceId: () => "test-device",
   }),
 }));
 vi.mock("@tanstack/react-query", () => ({

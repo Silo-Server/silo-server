@@ -145,7 +145,7 @@ function isCapturedProfileAuthorityActive(snapshot: ProfileRequestContextSnapsho
   );
 }
 
-function getOrCreateDeviceId(): string {
+export function getOrCreateDeviceId(): string {
   const existing = storage.get(storage.KEYS.DEVICE_ID);
   if (existing) {
     return existing;

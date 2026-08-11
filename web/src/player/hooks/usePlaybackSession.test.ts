@@ -19,6 +19,7 @@ const playerConfig: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
+  getDeviceId: () => "test-device",
   getProfileToken: () => null,
 };
 

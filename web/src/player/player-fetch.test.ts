@@ -7,6 +7,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v1",
   getAccessToken: () => null,
   getProfileId: () => null,
+  getDeviceId: () => "web-player-device",
 };
 
 afterEach(() => {
@@ -40,5 +41,19 @@ describe("playerFetch", () => {
     );
 
     await expect(playerFetch<void>(config, "/playback/route-events")).resolves.toBeUndefined();
+  });
+
+  it("sends the host application's stable device identity", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await playerFetch<void>(config, "/playback/start", { method: "POST" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/playback/start",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-Silo-Device-Id": "web-player-device" }),
+      }),
+    );
   });
 });

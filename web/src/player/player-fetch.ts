@@ -55,6 +55,8 @@ export async function playerFetch<T>(
     headers["X-Profile-Token"] = profileToken;
   }
 
+  headers["X-Silo-Device-Id"] = config.getDeviceId();
+
   const res = await fetch(`${config.apiBaseUrl}${path}`, {
     ...options,
     headers,
