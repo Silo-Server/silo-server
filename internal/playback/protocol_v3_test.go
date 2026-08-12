@@ -945,6 +945,24 @@ func TestPlanPlaybackV3NeverClaimsUnimplementedHDRTranscode(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3ReportsHDRLimitationBefore4KPolicy(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.Resolution = "2160p"
+	file.VideoTracks[0].Width = 3840
+	file.VideoTracks[0].Height = 2160
+	req := validStartRequestV3()
+	req.Capabilities.HDRDetails = nil
+	req.ClientPlaybackContext.Output.HDRDetails = nil
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3Profile7StripFallsBackToValidatedHLSCopy(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7

@@ -9,6 +9,15 @@ const VIDEO_CODEC_MAP: Record<string, string> = {
   vp9: "vp09.00.10.08",
 };
 
+// Silo's native Dolby Vision remux recipe preserves the DOVI configuration
+// record under a dvhe sample entry. Probe the exact shape the browser would
+// receive instead of inferring Dolby Vision support from generic HEVC decode.
+// Level 6 covers the 2160p24 source class involved in the web regression.
+const DOLBY_VISION_PROFILE_CODEC_MAP: Record<number, string> = {
+  5: 'video/mp4; codecs="dvhe.05.06"',
+  8: 'video/mp4; codecs="dvhe.08.06"',
+};
+
 const AUDIO_CODEC_MAP: Record<string, string[]> = {
   aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
   mp3: ["audio/mpeg"],
@@ -78,6 +87,15 @@ function testMediaType(mime: string): boolean {
   }
 }
 
+function testMediaElementType(mime: string): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    return document.createElement("video").canPlayType(mime) !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Probes what this browser will admit to decoding.
  *
@@ -124,6 +142,20 @@ export function probeWebCapabilities(): WebCapabilityProbe {
   const hdr = detectHDRFromMatchMedia(
     typeof matchMedia !== "undefined" ? (query) => matchMedia(query) : undefined,
   );
+  const dolbyVisionProfiles = hdr
+    ? Object.entries(DOLBY_VISION_PROFILE_CODEC_MAP)
+        .filter(([, mime]) => testMediaElementType(mime))
+        .map(([profile]) => Number(profile))
+    : [];
+  const hdrDetails = {
+    // Browsers expose active high-dynamic-range output eligibility, but not
+    // independent HDR10/HLG modes. This mirrors the platform's macOS
+    // attestation: both static HDR paths follow the same live output signal.
+    hdr10: hdr,
+    hdr10_plus: false,
+    hlg: hdr,
+    dolby_vision_profiles: dolbyVisionProfiles,
+  };
 
   return {
     containers,
@@ -131,6 +163,7 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     codecsAudio,
     maxResolution,
     hdr,
+    hdrDetails,
     hls: detectHLSSupport(),
   };
 }

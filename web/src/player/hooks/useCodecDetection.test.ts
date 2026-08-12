@@ -7,6 +7,7 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("detectMaxResolutionFromScreen", () => {
@@ -41,6 +42,34 @@ describe("detectHDRFromMatchMedia", () => {
 });
 
 describe("probeWebCapabilities", () => {
+  it("advertises native Dolby Vision Profile 8 only on an HDR output", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : "",
+    );
+
+    const capabilities = probeWebCapabilities();
+
+    expect(capabilities.hdrDetails).toEqual({
+      hdr10: true,
+      hdr10_plus: false,
+      hlg: true,
+      dolby_vision_profiles: [8],
+    });
+  });
+
+  it("does not advertise a Dolby Vision decoder against an SDR output", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const canPlayType = vi
+      .spyOn(HTMLMediaElement.prototype, "canPlayType")
+      .mockImplementation((mime) => (mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : ""));
+
+    const capabilities = probeWebCapabilities();
+
+    expect(capabilities.hdrDetails.dolby_vision_profiles).toEqual([]);
+    expect(canPlayType).not.toHaveBeenCalledWith('video/mp4; codecs="dvhe.08.06"');
+  });
+
   it("advertises browser-playable MP3, FLAC, and OGG audio", () => {
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
       ["audio/mp4", "audio/mpeg", "audio/flac", "audio/ogg"].some((supported) =>

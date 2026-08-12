@@ -699,11 +699,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3(reason, "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
-	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
-		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
-	}
 	if hdrTranscodeUnavailableV3(source) {
 		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
+	}
+	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
+		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
 	if !input.hlsRegistry().Available(TransformationVideoToH264V3) || !input.hlsRegistry().Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)

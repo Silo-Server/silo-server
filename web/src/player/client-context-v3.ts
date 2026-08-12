@@ -19,6 +19,7 @@ import {
   type DeliveryCapabilityV3,
   type DeliveryClassV3,
   type DeliverySubtitleCapabilitiesV3,
+  type HDRCapabilitiesV3,
 } from "./protocol-v3";
 
 /** App version reported to the server for diagnostics. */
@@ -71,6 +72,8 @@ export interface WebCapabilityProbe {
   maxResolution: string;
   /** Best-effort HDR display detection. */
   hdr: boolean;
+  /** Structured HDR formats supported by the active browser output path. */
+  hdrDetails: HDRCapabilitiesV3;
   /** Whether hls.js can be used on this browser. */
   hls: boolean;
 }
@@ -91,6 +94,7 @@ export function buildClientCapabilitiesV3(probe: WebCapabilityProbe): ClientCode
     containers: probe.containers,
     max_resolution: probe.maxResolution,
     hdr: probe.hdr,
+    hdr_details: probe.hdrDetails,
   };
 }
 
@@ -107,6 +111,7 @@ function buildDeliveryCapability(
     // A browser cannot bitstream audio to a receiver, and passthrough claims
     // are only ever honoured under the `exact` tier anyway.
     audio_passthrough_codecs: [],
+    hdr_details: probe.hdrDetails,
     subtitles: WEB_SUBTITLE_CAPABILITIES,
     features: [],
     // The stream URL carries its own token; the player reloads the source
@@ -219,7 +224,7 @@ export function buildClientPlaybackContextV3(probe: WebCapabilityProbe): ClientP
       platform: "web",
       ...(Object.keys(platformDetails).length > 0 ? { platform_details: platformDetails } : {}),
     },
-    output: {},
+    output: { hdr_details: probe.hdrDetails },
     deliveries: buildDeliveriesV3(probe),
   };
 }
