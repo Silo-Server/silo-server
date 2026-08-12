@@ -90,7 +90,7 @@ func newTestServer(t *testing.T) *Server {
 		watcher:      w,
 		inputPaths:   allowInputPaths{},
 		transcodeDir: cfg.Playback.TranscodeDir,
-		artifactRoot: nodeDownloadArtifactRoot(cfg),
+		artifactRoot: filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
 		sessions:     make(map[string]*playback.TranscodeSession),
 	}
 }
@@ -169,6 +169,16 @@ func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T)
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after prepare = %d, want 0", got)
+	}
+}
+
+func TestSessionOutputDirKeepsStartupPathAcrossReload(t *testing.T) {
+	server := newTestServer(t)
+	startupDir := server.transcodeDir
+	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
+
+	if got, want := server.sessionOutputDir("session-1"), filepath.Join(startupDir, "session-1"); got != want {
+		t.Fatalf("session output dir = %q, want startup path %q", got, want)
 	}
 }
 

@@ -507,11 +507,8 @@ func writeDownloadPrepareResult(w http.ResponseWriter, artifactID string, fileSi
 	_ = json.NewEncoder(w).Encode(downloadprepare.Result{ArtifactID: artifactID, FileSize: fileSize})
 }
 
-func nodeDownloadArtifactRoot(cfg *config.Config) string {
-	if strings.TrimSpace(cfg.Playback.TranscodeDir) == "" {
-		return filepath.Join(config.DefaultTranscodeDir, downloadprepare.ArtifactDirectoryName)
-	}
-	return filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
+func (s *Server) sessionOutputDir(sessionID string) string {
+	return filepath.Join(s.transcodeDir, sessionID)
 }
 
 func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
@@ -696,7 +693,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
-	outputDir := filepath.Join(cfg.Playback.TranscodeDir, req.SessionID)
+	outputDir := s.sessionOutputDir(req.SessionID)
 
 	opts := playback.TranscodeOpts{
 		InputPath:              req.InputPath,
@@ -950,7 +947,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	if cfg == nil {
 		return nil
 	}
-	outputDir := filepath.Join(cfg.Playback.TranscodeDir, sessionID)
+	outputDir := s.sessionOutputDir(sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
 	opts.SessionID = sessionID
 	// Re-resolve environment-specific encode knobs from this node's live config; the
@@ -1068,9 +1065,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 
-	cfg := s.watcher.Config()
-	outputDir := filepath.Join(cfg.Playback.TranscodeDir, sessionID)
-	os.RemoveAll(outputDir)
+	os.RemoveAll(s.sessionOutputDir(sessionID))
 
 	// Drop the recipe so a buffered/retrying request after a node restart cannot
 	// reconstruct a new ffmpeg for this now-stopped session. Best-effort: a stop
@@ -1260,12 +1255,11 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	cfg := s.watcher.Config()
 	s.mu.Lock()
 	stopped := make([]string, 0, len(s.sessions))
 	for id, session := range s.sessions {
 		session.Close()
-		os.RemoveAll(filepath.Join(cfg.Playback.TranscodeDir, id))
+		os.RemoveAll(s.sessionOutputDir(id))
 		delete(s.sessions, id)
 		delete(s.lastAccess, id)
 		stopped = append(stopped, id)

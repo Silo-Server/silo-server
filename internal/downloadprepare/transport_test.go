@@ -96,6 +96,29 @@ func TestDefaultPrepareClientHasNoResponseHeaderDeadline(t *testing.T) {
 	}
 }
 
+func TestHTTPPreparerPrepareStopsStalledResultBodyRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	started := time.Now()
+	_, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Prepare(
+		context.Background(), server.URL, "secret", Request{ArtifactID: "artifact-stalled-result"},
+	)
+	if !errors.Is(err, ErrRelayReadIdle) {
+		t.Fatalf("Prepare error = %v, want ErrRelayReadIdle", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled result read took %s, want a bounded failure", elapsed)
+	}
+}
+
 func TestRelayStatusAllowedPreservesServeContentOutcomes(t *testing.T) {
 	for _, status := range []int{
 		http.StatusOK,

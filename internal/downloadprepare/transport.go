@@ -146,15 +146,21 @@ func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, re
 	if err != nil {
 		return Result{}, fmt.Errorf("remote download prepare: marshal request: %w", err)
 	}
-	httpReq, err := p.request(ctx, http.MethodPost, nodeURL, jwtSecret, "/downloads/prepare", bytes.NewReader(body))
+	responseCtx, cancel := context.WithCancel(ctx)
+	httpReq, err := p.request(responseCtx, http.MethodPost, nodeURL, jwtSecret, "/downloads/prepare", bytes.NewReader(body))
 	if err != nil {
+		cancel()
 		return Result{}, fmt.Errorf("remote download prepare: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := p.prepareClient().Do(httpReq)
 	if err != nil {
+		cancel()
 		return Result{}, fmt.Errorf("remote download prepare: request: %w", err)
 	}
+	// The encode itself remains unbounded while waiting for response headers, but
+	// once the node starts its small JSON result body, each read must make progress.
+	resp.Body = newIdleReadCloser(resp.Body, p.readIdleTimeout(), cancel)
 	defer func() { _ = resp.Body.Close() }()
 	return decodeResult(resp, "remote download prepare")
 }

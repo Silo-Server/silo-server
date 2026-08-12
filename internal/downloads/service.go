@@ -83,6 +83,8 @@ type FileTarget struct {
 	Path             string
 	DownloadID       string
 	MediaFileID      int
+	ArtifactID       string
+	OriginNodeID     int
 	OriginNodeURL    string
 	OriginNodeGroup  string
 	OriginArtifactID string
@@ -1120,6 +1122,8 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 			Path:             artifact.OutputPath,
 			DownloadID:       dl.ID,
 			MediaFileID:      file.ID,
+			ArtifactID:       artifact.ID,
+			OriginNodeID:     artifact.OriginNodeID,
 			OriginNodeURL:    artifact.OriginNodeURL,
 			OriginNodeGroup:  artifact.OriginNodeGroup,
 			OriginArtifactID: artifact.OriginArtifactID,
@@ -1193,7 +1197,17 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return catalog.ErrItemNotFound
+		artifact := &Artifact{
+			ID:               target.ArtifactID,
+			OriginNodeID:     target.OriginNodeID,
+			OriginNodeURL:    target.OriginNodeURL,
+			OriginNodeGroup:  target.OriginNodeGroup,
+			OriginArtifactID: target.OriginArtifactID,
+		}
+		if _, err := s.artifacts.requeueRemoteArtifactNow(ctx, artifact, "remote output missing"); err != nil {
+			return err
+		}
+		return fmt.Errorf("remote artifact was missing and preparation was requeued: %w", ErrDownloadNotActive)
 	}
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)

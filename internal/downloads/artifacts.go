@@ -401,20 +401,35 @@ func (m *ArtifactManager) resolveRemoteArtifact(ctx context.Context, lifecycle r
 }
 
 func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) bool {
-	linked, applied, err := m.repo.RequeueRemote(ctx, a)
+	applied, err := m.requeueRemoteArtifactNow(ctx, a, reason)
 	if err != nil {
 		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return false
 	}
+	return applied
+}
+
+// requeueRemoteArtifactNow synchronously fences a stale remote locator, resets
+// every linked download, and schedules the abandoned node-local file for
+// cleanup. Request paths use the returned error so a failed state transition is
+// never disguised as an ordinary missing catalog item.
+func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
+	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID == 0 || a.OriginArtifactID == "" {
+		return false, errors.New("remote artifact locator unavailable for requeue")
+	}
+	linked, applied, err := m.repo.RequeueRemote(ctx, a)
+	if err != nil {
+		return false, err
+	}
 	if !applied {
-		return false
+		return false, nil
 	}
 	for _, download := range linked {
 		m.publish(ctx, download)
 	}
 	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
 	m.triggerDrain()
-	return true
+	return true, nil
 }
 
 // drain claims and encodes jobs through a bounded worker pool until the queue is
