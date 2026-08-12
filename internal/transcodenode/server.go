@@ -125,11 +125,12 @@ type Server struct {
 	reconstructSemOnce sync.Once
 	reconstructSem     chan struct{}
 
-	// lifecycleMu guards lifecycleLocks, the per-session mutexes that serialize
+	// lifecycleMu guards lifecycleLocks, the per-session locks that serialize
 	// every path which spawns ffmpeg into a session's output dir (fresh start and
 	// reconstruct). reconstructGroup only single-flights reconstructs against each
 	// other; without this a reconstruct racing a fresh /transcode/start could run
-	// two ffmpeg writers against the same dir.
+	// two ffmpeg writers against the same dir. Artifact readers use the shared side
+	// so concurrent relays remain independent while prepare/delete stay exclusive.
 	lifecycleMu    sync.Mutex
 	lifecycleLocks map[string]*sessionLifecycleLock
 
@@ -138,19 +139,17 @@ type Server struct {
 	recipeStore recipeStore
 }
 
-// sessionLifecycleLock is a refcounted per-session mutex; the refcount lets the
+// sessionLifecycleLock is a refcounted per-session lock; the refcount lets the
 // node drop the map entry once no path holds or waits on it so the map stays
 // bounded over the node's lifetime.
 type sessionLifecycleLock struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	refs int
 }
 
-// lockSessionLifecycle acquires the per-session lifecycle mutex and returns a
-// release func. Held across "check existing → spawn → register" so a fresh start
-// and a reconstruct never run concurrent ffmpeg writers for one session's dir.
-func (s *Server) lockSessionLifecycle(sessionID string) func() {
+func (s *Server) retainSessionLifecycleLock(sessionID string) *sessionLifecycleLock {
 	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	if s.lifecycleLocks == nil {
 		s.lifecycleLocks = make(map[string]*sessionLifecycleLock)
 	}
@@ -160,17 +159,39 @@ func (s *Server) lockSessionLifecycle(sessionID string) func() {
 		s.lifecycleLocks[sessionID] = lk
 	}
 	lk.refs++
-	s.lifecycleMu.Unlock()
+	return lk
+}
 
+func (s *Server) releaseSessionLifecycleLock(sessionID string, lk *sessionLifecycleLock) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	lk.refs--
+	if lk.refs == 0 {
+		delete(s.lifecycleLocks, sessionID)
+	}
+}
+
+// lockSessionLifecycle acquires the per-session lifecycle mutex and returns a
+// release func. Held across "check existing → spawn → register" so a fresh start
+// and a reconstruct never run concurrent ffmpeg writers for one session's dir.
+func (s *Server) lockSessionLifecycle(sessionID string) func() {
+	lk := s.retainSessionLifecycleLock(sessionID)
 	lk.mu.Lock()
 	return func() {
 		lk.mu.Unlock()
-		s.lifecycleMu.Lock()
-		lk.refs--
-		if lk.refs == 0 {
-			delete(s.lifecycleLocks, sessionID)
-		}
-		s.lifecycleMu.Unlock()
+		s.releaseSessionLifecycleLock(sessionID, lk)
+	}
+}
+
+// lockSessionLifecycleRead holds the shared side of a lifecycle lock. Artifact
+// relays can therefore proceed concurrently, while preparation and deletion
+// remain exclusive for the full transfer.
+func (s *Server) lockSessionLifecycleRead(sessionID string) func() {
+	lk := s.retainSessionLifecycleLock(sessionID)
+	lk.mu.RLock()
+	return func() {
+		lk.mu.RUnlock()
+		s.releaseSessionLifecycleLock(sessionID, lk)
 	}
 }
 
@@ -533,9 +554,10 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
-	// Serialize with preparation and deletion. A recovery HEAD must not report
-	// a definitive 404 while PrepareFile is still publishing this artifact.
-	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
+	// Share the lock with other readers, but serialize with preparation and
+	// deletion. A recovery HEAD must not report a definitive 404 while
+	// PrepareFile is still publishing this artifact.
+	unlock := s.lockSessionLifecycleRead("download-artifact-" + artifactID)
 	defer unlock()
 	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	f, err := os.Open(path)

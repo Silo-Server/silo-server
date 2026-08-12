@@ -42,6 +42,29 @@ type blockingSessionTracker struct {
 	removeHasDeadline bool
 }
 
+type blockingResponseWriter struct {
+	header       http.Header
+	writeStarted chan struct{}
+	releaseWrite chan struct{}
+	startOnce    sync.Once
+}
+
+func newBlockingResponseWriter() *blockingResponseWriter {
+	return &blockingResponseWriter{
+		header:       make(http.Header),
+		writeStarted: make(chan struct{}),
+		releaseWrite: make(chan struct{}),
+	}
+}
+
+func (w *blockingResponseWriter) Header() http.Header { return w.header }
+func (*blockingResponseWriter) WriteHeader(int)       {}
+func (w *blockingResponseWriter) Write(p []byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.releaseWrite
+	return len(p), nil
+}
+
 func newBlockingSessionTracker() *blockingSessionTracker {
 	return &blockingSessionTracker{
 		trackStarted:  make(chan struct{}),
@@ -452,6 +475,60 @@ func TestDownloadArtifactHeadWaitsForInFlightPrepare(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
+	server := newTestServer(t)
+	const artifactID = "artifact-concurrent-read"
+	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(server.artifactRoot, artifactID+".mp4")
+	if err := os.WriteFile(path, []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := newBlockingResponseWriter()
+	releaseOnce := sync.Once{}
+	release := func() { releaseOnce.Do(func() { close(blocked.releaseWrite) }) }
+	defer release()
+	getDone := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/"+artifactID, nil)
+		req.Header.Set("Authorization", "Bearer "+testSecret)
+		server.Handler().ServeHTTP(blocked, req)
+		close(getDone)
+	}()
+
+	select {
+	case <-blocked.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GET did not begin relaying the artifact")
+	}
+
+	headDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
+		req.Header.Set("Authorization", "Bearer "+testSecret)
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr, req)
+		headDone <- rr
+	}()
+	select {
+	case rr := <-headDone:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("HEAD status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("HEAD waited for a concurrent artifact relay")
+	}
+
+	release()
+	select {
+	case <-getDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GET did not finish after the response writer was released")
 	}
 }
 
