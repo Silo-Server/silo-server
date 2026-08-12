@@ -51,11 +51,13 @@ describe("probeWebCapabilities", () => {
     const capabilities = probeWebCapabilities();
 
     expect(capabilities.hdrDetails).toEqual({
-      hdr10: true,
+      hdr10: false,
       hdr10_plus: false,
-      hlg: true,
+      hlg: false,
       dolby_vision_profiles: [8],
+      dolby_vision_profile_levels: [{ profile: 8, max_level: 6 }],
     });
+    expect(capabilities.codecsVideo).toContain("hevc");
   });
 
   it("does not advertise a Dolby Vision decoder against an SDR output", () => {
@@ -67,6 +69,7 @@ describe("probeWebCapabilities", () => {
     const capabilities = probeWebCapabilities();
 
     expect(capabilities.hdrDetails.dolby_vision_profiles).toEqual([]);
+    expect(capabilities.hdrDetails.dolby_vision_profile_levels).toEqual([]);
     expect(canPlayType).not.toHaveBeenCalledWith('video/mp4; codecs="dvhe.08.06"');
   });
 

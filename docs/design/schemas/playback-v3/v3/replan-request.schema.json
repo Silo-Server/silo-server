@@ -231,6 +231,29 @@
           "items": {
             "type": "integer"
           }
+        },
+        "dolby_vision_profile_levels": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "profile",
+              "max_level"
+            ],
+            "properties": {
+              "profile": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_level": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 13
+              }
+            },
+            "additionalProperties": true
+          }
         }
       },
       "additionalProperties": true

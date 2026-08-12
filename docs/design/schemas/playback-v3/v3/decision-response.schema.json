@@ -761,6 +761,9 @@
         "dolby_vision_profile": {
           "type": "integer"
         },
+        "dolby_vision_level": {
+          "type": "integer"
+        },
         "dv_bl_compat_id": {
           "type": "integer"
         },

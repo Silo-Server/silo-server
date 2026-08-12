@@ -105,6 +105,7 @@ type ffprobeChapter struct {
 type ffprobeSideData struct {
 	SideDataType string `json:"side_data_type"`
 	DVProfile    int    `json:"dv_profile"`
+	DVLevel      int    `json:"dv_level"`
 	DVBlPresent  int    `json:"dv_bl_present"`
 	DVElPresent  int    `json:"dv_el_present"`
 	DVBLCompatID int    `json:"dv_bl_signal_compatibility_id"`
@@ -206,6 +207,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				Codec:              s.CodecName,
 				DolbyVision:        dolbyVisionProfile(s.SideDataList),
 				DVProfile:          dvProfile,
+				DVLevel:            dolbyVisionLevel(s.SideDataList),
 				DVBLCompatID:       dolbyVisionBLCompatID(s.SideDataList),
 				DVELPresent:        dolbyVisionELPresent(s.SideDataList),
 				DVEnhancementLayer: dolbyVisionEnhancementLayer(dolbyVisionELPresent(s.SideDataList)),
@@ -788,6 +790,15 @@ func dolbyVisionProfileNumber(sideData []ffprobeSideData) int {
 	for _, data := range sideData {
 		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVProfile > 0 {
 			return data.DVProfile
+		}
+	}
+	return 0
+}
+
+func dolbyVisionLevel(sideData []ffprobeSideData) int {
+	for _, data := range sideData {
+		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVLevel > 0 {
+			return data.DVLevel
 		}
 	}
 	return 0

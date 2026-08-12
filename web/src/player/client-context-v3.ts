@@ -131,6 +131,13 @@ function buildDeliveryCapability(
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
 ): Partial<Record<DeliveryClassV3, DeliveryCapabilityV3>> {
+  const hlsHDRDetails: HDRCapabilitiesV3 = {
+    ...probe.hdrDetails,
+    // The Dolby Vision probe covers direct progressive playback through the
+    // media element. It says nothing about hls.js' MediaSource append path.
+    dolby_vision_profiles: [],
+    dolby_vision_profile_levels: [],
+  };
   return {
     original_http: buildDeliveryCapability(probe, {}),
     progressive: buildDeliveryCapability(probe, {}),
@@ -138,6 +145,7 @@ export function buildDeliveriesV3(
       supported_on_device: probe.hls,
       ...(probe.hls ? {} : { failure_reason: "media_source_extensions_unavailable" }),
       containers: ["hls"],
+      hdr_details: hlsHDRDetails,
     }),
   };
 }

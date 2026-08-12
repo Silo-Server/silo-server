@@ -3661,6 +3661,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Codec:              vt.Codec,
 			DolbyVision:        vt.DolbyVision,
 			DVProfile:          vt.DVProfile,
+			DVLevel:            vt.DVLevel,
 			DVBLCompatID:       vt.DVBLCompatID,
 			DVELPresent:        vt.DVELPresent,
 			DVEnhancementLayer: vt.DVEnhancementLayer,

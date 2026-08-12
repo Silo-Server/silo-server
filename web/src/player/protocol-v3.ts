@@ -139,6 +139,10 @@ export interface HDRCapabilitiesV3 {
   hdr10_plus: boolean;
   hlg: boolean;
   dolby_vision_profiles: number[];
+  dolby_vision_profile_levels?: Array<{
+    profile: number;
+    max_level: number;
+  }>;
 }
 
 export interface AudioPassthroughEntryV3 {
@@ -388,6 +392,7 @@ export interface SourceDescriptorV3 {
   dynamic_range?: string;
   hdr10_plus: boolean;
   dolby_vision_profile?: number;
+  dolby_vision_level?: number;
   dv_bl_compat_id?: number;
   dv_enhancement_layer: EnhancementLayerV3;
   audio_codec?: string;

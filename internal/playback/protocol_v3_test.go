@@ -963,6 +963,43 @@ func TestPlanPlaybackV3ReportsHDRLimitationBefore4KPolicy(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3HonorsDolbyVisionLevelBound(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+	file.VideoTracks[0].DVProfile = 8
+	file.VideoTracks[0].DVLevel = 7
+	file.VideoTracks[0].DVBLCompatID = 1
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
+		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+	}}
+	hdr := &HDRCapabilitiesV3{
+		DolbyVisionProfiles:      []int{8},
+		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6}},
+	}
+	req.Capabilities.HDRDetails = hdr
+	req.ClientPlaybackContext.Output.HDRDetails = hdr
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+
+	file.VideoTracks[0].DVLevel = 6
+	result = PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	})
+	if result.Plan == nil || !result.Plan.Claims.Video.DolbyVision {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3Profile7StripFallsBackToValidatedHLSCopy(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7
@@ -1404,6 +1441,12 @@ func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
 			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 			delivery.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
 			r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = delivery
+		}},
+		{"capability_dolby_vision_profile_levels", func(r *StartRequestV3) {
+			r.Capabilities.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfileLevels: make([]DolbyVisionProfileCapabilityV3, 17)}
+		}},
+		{"invalid_dolby_vision_profile_level", func(r *StartRequestV3) {
+			r.Capabilities.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 14}}}
 		}},
 		{"delivery_container_length", func(r *StartRequestV3) {
 			delivery := r.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]

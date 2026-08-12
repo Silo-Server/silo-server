@@ -191,10 +191,16 @@ const (
 )
 
 type HDRCapabilitiesV3 struct {
-	HDR10               bool  `json:"hdr10"`
-	HDR10Plus           bool  `json:"hdr10_plus"`
-	HLG                 bool  `json:"hlg"`
-	DolbyVisionProfiles []int `json:"dolby_vision_profiles"`
+	HDR10                    bool                             `json:"hdr10"`
+	HDR10Plus                bool                             `json:"hdr10_plus"`
+	HLG                      bool                             `json:"hlg"`
+	DolbyVisionProfiles      []int                            `json:"dolby_vision_profiles"`
+	DolbyVisionProfileLevels []DolbyVisionProfileCapabilityV3 `json:"dolby_vision_profile_levels,omitempty"`
+}
+
+type DolbyVisionProfileCapabilityV3 struct {
+	Profile  int `json:"profile"`
+	MaxLevel int `json:"max_level"`
 }
 
 type AudioPassthroughV3 struct {
@@ -543,6 +549,7 @@ type SourceDescriptorV3 struct {
 	DynamicRange       string             `json:"dynamic_range,omitempty"`
 	HDR10Plus          bool               `json:"hdr10_plus"`
 	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
+	DVLevel            int                `json:"dolby_vision_level,omitempty"`
 	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
 	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
 	AudioCodec         string             `json:"audio_codec,omitempty"`
@@ -902,16 +909,16 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 		}
 	}
 	for _, hdr := range []*HDRCapabilitiesV3{c.HDRDetails, ctx.Output.HDRDetails} {
-		if hdr != nil && len(hdr.DolbyVisionProfiles) > 16 {
-			return errors.New("dolby vision profile list exceeds supported size")
+		if err := validateHDRCapabilitiesV3(hdr); err != nil {
+			return err
 		}
 	}
 	for name, delivery := range ctx.Deliveries {
 		if len(name) > 64 || len(delivery.Containers) > 64 || len(delivery.VideoCodecs) > 64 || len(delivery.AudioDecodeCodecs) > 64 || len(delivery.AudioPassthroughCodecs) > 64 || len(delivery.Features) > 64 || len(delivery.ValidatedClaims) > 64 || len(delivery.Transformations) > 16 {
 			return errors.New("delivery capability exceeds supported size")
 		}
-		if delivery.HDRDetails != nil && len(delivery.HDRDetails.DolbyVisionProfiles) > 16 {
-			return errors.New("dolby vision profile list exceeds supported size")
+		if err := validateHDRCapabilitiesV3(delivery.HDRDetails); err != nil {
+			return err
 		}
 		for _, values := range [][]string{delivery.Containers, delivery.VideoCodecs, delivery.AudioDecodeCodecs, delivery.AudioPassthroughCodecs, delivery.Features, delivery.ValidatedClaims} {
 			for _, value := range values {
@@ -961,6 +968,21 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 			if len(entry.Codec) > 64 || len(entry.ChannelCounts) > 32 || len(entry.Layouts) > 32 {
 				return errors.New("audio passthrough entry exceeds supported size")
 			}
+		}
+	}
+	return nil
+}
+
+func validateHDRCapabilitiesV3(hdr *HDRCapabilitiesV3) error {
+	if hdr == nil {
+		return nil
+	}
+	if len(hdr.DolbyVisionProfiles) > 16 || len(hdr.DolbyVisionProfileLevels) > 16 {
+		return errors.New("dolby vision profile list exceeds supported size")
+	}
+	for _, capability := range hdr.DolbyVisionProfileLevels {
+		if capability.Profile <= 0 || capability.MaxLevel < 1 || capability.MaxLevel > 13 {
+			return errors.New("invalid dolby vision profile level capability")
 		}
 	}
 	return nil

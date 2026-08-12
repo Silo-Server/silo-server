@@ -17,6 +17,7 @@ const DOLBY_VISION_PROFILE_CODEC_MAP: Record<number, string> = {
   5: 'video/mp4; codecs="dvhe.05.06"',
   8: 'video/mp4; codecs="dvhe.08.06"',
 };
+const DOLBY_VISION_PROBE_LEVEL = 6;
 
 const AUDIO_CODEC_MAP: Record<string, string[]> = {
   aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
@@ -147,14 +148,22 @@ export function probeWebCapabilities(): WebCapabilityProbe {
         .filter(([, mime]) => testMediaElementType(mime))
         .map(([profile]) => Number(profile))
     : [];
+  if (dolbyVisionProfiles.length > 0 && !codecsVideo.includes("hevc")) {
+    // Every Dolby Vision profile probed above uses an HEVC base layer. The
+    // planner requires the flat base-codec claim as well as the HDR profile.
+    codecsVideo.push("hevc");
+  }
   const hdrDetails = {
-    // Browsers expose active high-dynamic-range output eligibility, but not
-    // independent HDR10/HLG modes. This mirrors the platform's macOS
-    // attestation: both static HDR paths follow the same live output signal.
-    hdr10: hdr,
+    // Generic HDR output eligibility does not prove either static HDR format.
+    // Only publish the exact Dolby Vision formats tested above.
+    hdr10: false,
     hdr10_plus: false,
-    hlg: hdr,
+    hlg: false,
     dolby_vision_profiles: dolbyVisionProfiles,
+    dolby_vision_profile_levels: dolbyVisionProfiles.map((profile) => ({
+      profile,
+      max_level: DOLBY_VISION_PROBE_LEVEL,
+    })),
   };
 
   return {

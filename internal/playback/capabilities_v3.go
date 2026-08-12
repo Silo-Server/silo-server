@@ -53,6 +53,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.DynamicRange = normalizeDynamicRangeV3(track)
 		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
 		source.DVProfile = track.DVProfile
+		source.DVLevel = track.DVLevel
 		source.DVBLCompatID = track.DVBLCompatID
 		source.VideoCopyUnsafe = videoCopyUnsafeFile(file)
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
@@ -202,7 +203,7 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 			claims.DolbyVisionReason = "profile_7_enhancement_layer_unknown"
 			return false, claims
 		}
-		if hdr != nil && containsIntV3(hdr.DolbyVisionProfiles, source.DVProfile) {
+		if hdr != nil && hdrSupportsDolbyVisionSourceV3(*hdr, source) {
 			claims.DolbyVision = true
 			claims.DolbyVisionReason = "native_profile_supported"
 			return true, claims

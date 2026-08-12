@@ -773,7 +773,7 @@ func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartReques
 
 func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartRequestV3) bool {
 	return source.DynamicRange == DynamicRangeDolbyVisionV3 && source.DVProfile == 7 &&
-		clientSupportsDVProfileV3(request, 8) &&
+		clientSupportsDVProfileV3(request, source, 8) &&
 		clientTransformationAvailableV3(request, ClientDV7ToDV81V3, ClientDVTransformVersionV3)
 }
 
@@ -782,12 +782,13 @@ func canClientTransformDV7ToHDR10V3(source SourceDescriptorV3, request StartRequ
 		clientTransformationAvailableV3(request, ClientDV7ToHDR10V3, ClientDVTransformVersionV3)
 }
 
-func clientSupportsDVProfileV3(request StartRequestV3, profile int) bool {
+func clientSupportsDVProfileV3(request StartRequestV3, source SourceDescriptorV3, profile int) bool {
 	hdr := request.ClientPlaybackContext.Output.HDRDetails
 	if hdr == nil {
 		hdr = request.Capabilities.HDRDetails
 	}
-	return hdr != nil && containsIntV3(hdr.DolbyVisionProfiles, profile)
+	source.DVProfile = profile
+	return hdr != nil && hdrSupportsDolbyVisionSourceV3(*hdr, source)
 }
 
 func clientTransformationAvailableV3(request StartRequestV3, name, version string) bool {
@@ -1199,10 +1200,60 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 				break
 			}
 		}
-		return containsIntV3(hdr.DolbyVisionProfiles, profile)
+		candidate := plan.Source
+		candidate.DVProfile = profile
+		return hdrSupportsDolbyVisionSourceV3(hdr, candidate)
 	default:
 		return false
 	}
+}
+
+func hdrSupportsDolbyVisionSourceV3(hdr HDRCapabilitiesV3, source SourceDescriptorV3) bool {
+	if !containsIntV3(hdr.DolbyVisionProfiles, source.DVProfile) {
+		return false
+	}
+	maxLevel := 0
+	for _, capability := range hdr.DolbyVisionProfileLevels {
+		if capability.Profile == source.DVProfile && (maxLevel == 0 || capability.MaxLevel < maxLevel) {
+			maxLevel = capability.MaxLevel
+		}
+	}
+	if maxLevel == 0 {
+		// Existing clients predate level-bounded Dolby Vision claims. Once a
+		// client sends any bounds, every advertised profile must have one.
+		return len(hdr.DolbyVisionProfileLevels) == 0
+	}
+	if source.DVLevel > 0 {
+		return source.DVLevel <= maxLevel
+	}
+	return dolbyVisionSourceFitsLevelV3(source, maxLevel)
+}
+
+func dolbyVisionSourceFitsLevelV3(source SourceDescriptorV3, maxLevel int) bool {
+	// Dolby Vision Version 2.0 defines levels by maximum pixel rate, decoded
+	// width, and high-tier bitrate. Use those physical bounds for legacy rows
+	// scanned before Silo persisted ffprobe's exact dv_level.
+	type levelLimit struct {
+		pixelRate   float64
+		width       int
+		bitrateKbps int
+	}
+	limits := map[int]levelLimit{
+		1: {22_118_400, 1280, 50_000}, 2: {27_648_000, 1280, 50_000},
+		3: {49_766_400, 1920, 70_000}, 4: {62_208_000, 2560, 70_000},
+		5: {124_416_000, 3840, 70_000}, 6: {199_065_600, 3840, 130_000},
+		7: {248_832_000, 3840, 130_000}, 8: {398_131_200, 3840, 130_000},
+		9: {497_664_000, 3840, 130_000}, 10: {995_328_000, 3840, 240_000},
+		11: {995_328_000, 7680, 240_000}, 12: {1_990_656_000, 7680, 480_000},
+		13: {3_981_312_000, 7680, 800_000},
+	}
+	limit, ok := limits[maxLevel]
+	if !ok || source.Width <= 0 || source.Height <= 0 || source.FrameRate <= 0 || source.BitrateKbps <= 0 {
+		return false
+	}
+	return source.Width <= limit.width &&
+		float64(source.Width*source.Height)*source.FrameRate <= limit.pixelRate &&
+		source.BitrateKbps <= limit.bitrateKbps
 }
 func ExplainPlannerResultV3(result PlannerResultV3) string {
 	if result.Plan != nil {

@@ -292,6 +292,7 @@ type VideoTrack struct {
 	Codec              string `json:"codec,omitempty"`
 	DolbyVision        string `json:"dolby_vision,omitempty"`
 	DVProfile          int    `json:"dv_profile,omitempty"`
+	DVLevel            int    `json:"dv_level,omitempty"`
 	DVBLCompatID       int    `json:"dv_bl_compat_id,omitempty"`
 	DVELPresent        bool   `json:"dv_el_present,omitempty"`
 	DVEnhancementLayer string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown

@@ -7,9 +7,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestToVideoTrackRecordsPreservesColorRange(t *testing.T) {
+func TestToVideoTrackRecordsPreservesVideoMetadata(t *testing.T) {
 	got := toVideoTrackRecords([]models.VideoTrack{
-		{ColorRange: "tv"},
+		{ColorRange: "tv", DVLevel: 6},
 		{ColorRange: "pc"},
 		{ColorRange: "unknown"},
 	})
@@ -24,6 +24,9 @@ func TestToVideoTrackRecordsPreservesColorRange(t *testing.T) {
 			got[1].ColorRange,
 			got[2].ColorRange,
 		)
+	}
+	if got[0].DVLevel != 6 {
+		t.Fatalf("DVLevel = %d, want 6", got[0].DVLevel)
 	}
 }
 

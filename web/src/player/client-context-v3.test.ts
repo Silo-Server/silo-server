@@ -45,6 +45,7 @@ describe("buildDeliveriesV3", () => {
         hdr10_plus: false,
         hlg: false,
         dolby_vision_profiles: [],
+        dolby_vision_profile_levels: [],
       },
       hls: true,
     });
@@ -64,10 +65,11 @@ describe("structured HDR capabilities", () => {
     maxResolution: "2160p",
     hdr: true,
     hdrDetails: {
-      hdr10: true,
+      hdr10: false,
       hdr10_plus: false,
-      hlg: true,
+      hlg: false,
       dolby_vision_profiles: [8],
+      dolby_vision_profile_levels: [{ profile: 8, max_level: 6 }],
     },
     hls: true,
   };
@@ -77,9 +79,14 @@ describe("structured HDR capabilities", () => {
     expect(buildClientPlaybackContextV3(probe).output.hdr_details).toEqual(probe.hdrDetails);
   });
 
-  it("scopes the same output formats to every web delivery path", () => {
-    for (const delivery of Object.values(buildDeliveriesV3(probe))) {
-      expect(delivery.hdr_details).toEqual(probe.hdrDetails);
-    }
+  it("scopes media-element Dolby Vision support to direct and progressive delivery", () => {
+    const deliveries = buildDeliveriesV3(probe);
+    expect(deliveries.original_http?.hdr_details).toEqual(probe.hdrDetails);
+    expect(deliveries.progressive?.hdr_details).toEqual(probe.hdrDetails);
+    expect(deliveries.hls?.hdr_details).toEqual({
+      ...probe.hdrDetails,
+      dolby_vision_profiles: [],
+      dolby_vision_profile_levels: [],
+    });
   });
 });
