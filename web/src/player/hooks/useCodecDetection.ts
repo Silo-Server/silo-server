@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { detectHLSSupport, type WebCapabilityProbe } from "../client-context-v3";
 
 /** Maps our codec names to the MIME declarations browsers expose for them. */
@@ -91,7 +91,10 @@ function testMediaType(mime: string): boolean {
 function testMediaElementType(mime: string): boolean {
   if (typeof document === "undefined") return false;
   try {
-    return document.createElement("video").canPlayType(mime) !== "";
+    // `maybe` only recognizes the container/type. Structured Dolby Vision
+    // claims require the media element's definitive answer for the exact
+    // sample entry.
+    return document.createElement("video").canPlayType(mime) === "probably";
   } catch {
     return false;
   }
@@ -178,9 +181,32 @@ export function probeWebCapabilities(): WebCapabilityProbe {
 }
 
 /**
- * Memoizes the browser capability probe for the lifetime of the component.
- * Nothing it measures changes while the page is open.
+ * Keeps the browser capability probe current with the active output route.
+ * Moving a window between SDR and HDR displays can change the media-query
+ * result without remounting the player, so refresh when either query changes.
  */
 export function useCodecDetection(): WebCapabilityProbe {
-  return useMemo(() => probeWebCapabilities(), []);
+  const [capabilities, setCapabilities] = useState(probeWebCapabilities);
+
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const queries = [
+      matchMedia("(dynamic-range: high)"),
+      matchMedia("(video-dynamic-range: high)"),
+    ];
+    const refresh = () => setCapabilities(probeWebCapabilities());
+    for (const query of queries) {
+      if (typeof query.addEventListener === "function") query.addEventListener("change", refresh);
+      else query.addListener?.(refresh);
+    }
+    return () => {
+      for (const query of queries) {
+        if (typeof query.removeEventListener === "function")
+          query.removeEventListener("change", refresh);
+        else query.removeListener?.(refresh);
+      }
+    };
+  }, []);
+
+  return capabilities;
 }

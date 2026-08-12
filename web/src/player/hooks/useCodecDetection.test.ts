@@ -1,8 +1,10 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectHDRFromMatchMedia,
   detectMaxResolutionFromScreen,
   probeWebCapabilities,
+  useCodecDetection,
 } from "./useCodecDetection";
 
 afterEach(() => {
@@ -71,6 +73,41 @@ describe("probeWebCapabilities", () => {
     expect(capabilities.hdrDetails.dolby_vision_profiles).toEqual([]);
     expect(capabilities.hdrDetails.dolby_vision_profile_levels).toEqual([]);
     expect(canPlayType).not.toHaveBeenCalledWith('video/mp4; codecs="dvhe.08.06"');
+  });
+
+  it("does not promote an indeterminate media-element answer to Dolby Vision support", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === 'video/mp4; codecs="dvhe.08.06"' ? "maybe" : "",
+    );
+
+    expect(probeWebCapabilities().hdrDetails.dolby_vision_profiles).toEqual([]);
+  });
+
+  it("refreshes Dolby Vision claims when the active HDR output changes", () => {
+    let hdr = false;
+    const listeners = new Set<() => void>();
+    const query = {
+      get matches() {
+        return hdr;
+      },
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
+    vi.stubGlobal("matchMedia", () => query);
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : "",
+    );
+
+    const { result, unmount } = renderHook(() => useCodecDetection());
+    expect(result.current.hdrDetails.dolby_vision_profiles).toEqual([]);
+
+    act(() => {
+      hdr = true;
+      for (const listener of listeners) listener();
+    });
+    expect(result.current.hdrDetails.dolby_vision_profiles).toEqual([8]);
+    unmount();
   });
 
   it("advertises browser-playable MP3, FLAC, and OGG audio", () => {

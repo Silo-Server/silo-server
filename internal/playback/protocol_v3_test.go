@@ -1000,6 +1000,14 @@ func TestPlanPlaybackV3HonorsDolbyVisionLevelBound(t *testing.T) {
 	}
 }
 
+func TestSourceDescriptorV3OmitsInvalidDolbyVisionLevel(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVLevel = 14
+	if got := SourceDescriptorFromFileV3(file, 0).DVLevel; got != 0 {
+		t.Fatalf("DVLevel = %d, want omitted", got)
+	}
+}
+
 func TestPlanPlaybackV3Profile7StripFallsBackToValidatedHLSCopy(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7

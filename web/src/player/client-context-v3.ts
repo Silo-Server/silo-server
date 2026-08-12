@@ -131,21 +131,24 @@ function buildDeliveryCapability(
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
 ): Partial<Record<DeliveryClassV3, DeliveryCapabilityV3>> {
-  const hlsHDRDetails: HDRCapabilitiesV3 = {
+  const progressiveOnlyHDRDetails: HDRCapabilitiesV3 = {
     ...probe.hdrDetails,
     // The Dolby Vision probe covers direct progressive playback through the
-    // media element. It says nothing about hls.js' MediaSource append path.
+    // media element after Silo normalizes the sample entry. It says nothing
+    // about an untouched original file or hls.js' MediaSource append path.
     dolby_vision_profiles: [],
     dolby_vision_profile_levels: [],
   };
   return {
-    original_http: buildDeliveryCapability(probe, {}),
+    original_http: buildDeliveryCapability(probe, {
+      hdr_details: progressiveOnlyHDRDetails,
+    }),
     progressive: buildDeliveryCapability(probe, {}),
     hls: buildDeliveryCapability(probe, {
       supported_on_device: probe.hls,
       ...(probe.hls ? {} : { failure_reason: "media_source_extensions_unavailable" }),
       containers: ["hls"],
-      hdr_details: hlsHDRDetails,
+      hdr_details: progressiveOnlyHDRDetails,
     }),
   };
 }

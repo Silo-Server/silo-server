@@ -762,7 +762,9 @@
           "type": "integer"
         },
         "dolby_vision_level": {
-          "type": "integer"
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 13
         },
         "dv_bl_compat_id": {
           "type": "integer"

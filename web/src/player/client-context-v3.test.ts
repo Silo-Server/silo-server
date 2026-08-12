@@ -79,14 +79,15 @@ describe("structured HDR capabilities", () => {
     expect(buildClientPlaybackContextV3(probe).output.hdr_details).toEqual(probe.hdrDetails);
   });
 
-  it("scopes media-element Dolby Vision support to direct and progressive delivery", () => {
+  it("scopes the normalized Dolby Vision sample entry to progressive delivery", () => {
     const deliveries = buildDeliveriesV3(probe);
-    expect(deliveries.original_http?.hdr_details).toEqual(probe.hdrDetails);
     expect(deliveries.progressive?.hdr_details).toEqual(probe.hdrDetails);
-    expect(deliveries.hls?.hdr_details).toEqual({
+    const nonProgressiveHDRDetails = {
       ...probe.hdrDetails,
       dolby_vision_profiles: [],
       dolby_vision_profile_levels: [],
-    });
+    };
+    expect(deliveries.original_http?.hdr_details).toEqual(nonProgressiveHDRDetails);
+    expect(deliveries.hls?.hdr_details).toEqual(nonProgressiveHDRDetails);
   });
 });
