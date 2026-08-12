@@ -209,11 +209,15 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 			artifactDir = cfg.Download.ArtifactDir
 		}
 	}
+	artifactRoot := filepath.Join(transcodeDir, downloadprepare.ArtifactDirectoryName)
+	if strings.TrimSpace(artifactDir) != "" {
+		artifactRoot = config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
+	}
 	s := &Server{
 		watcher:      watcher,
 		tracker:      trackerImpl,
 		transcodeDir: transcodeDir,
-		artifactRoot: config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir),
+		artifactRoot: artifactRoot,
 		sessions:     make(map[string]*playback.TranscodeSession),
 		lastAccess:   make(map[string]time.Time),
 	}

@@ -600,14 +600,15 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		mediaPath = ""
 	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:          sessionID,
-		MediaPath:          mediaPath,
-		PlayMethod:         streamtoken.PlayMethodDownload,
-		TranscodeNode:      target.OriginNodeURL,
-		DownloadArtifactID: target.OriginArtifactID,
-		UserID:             userID,
-		ProfileID:          profileID,
-		MediaFileID:        target.MediaFileID,
+		SessionID:             sessionID,
+		MediaPath:             mediaPath,
+		PlayMethod:            streamtoken.PlayMethodDownload,
+		TranscodeNode:         target.OriginNodeURL,
+		DownloadArtifactID:    target.OriginArtifactID,
+		DownloadArtifactRowID: target.ArtifactID,
+		UserID:                userID,
+		ProfileID:             profileID,
+		MediaFileID:           target.MediaFileID,
 	}, secret, proxyDownloadTokenTTL)
 	if err != nil {
 		releaseReservation()

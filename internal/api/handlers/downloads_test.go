@@ -545,6 +545,7 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 		fakeDownloadService: &fakeDownloadService{},
 		managedTarget: &downloads.FileTarget{
 			DownloadID:       "dl-remote",
+			ArtifactID:       "artifact-row",
 			MediaFileID:      42,
 			OriginNodeURL:    "http://transcode-b.internal:8096",
 			OriginNodeGroup:  "host-b",
@@ -575,7 +576,8 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if claims.MediaPath != "" || claims.TranscodeNode != "http://transcode-b.internal:8096" || claims.DownloadArtifactID != "artifact-remote" {
+	if claims.MediaPath != "" || claims.TranscodeNode != "http://transcode-b.internal:8096" ||
+		claims.DownloadArtifactID != "artifact-remote" || claims.DownloadArtifactRowID != "artifact-row" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }

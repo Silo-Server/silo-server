@@ -28,10 +28,11 @@ import (
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	watcher    *nodeconfig.Watcher
-	tracker    *nodesessions.Tracker
-	httpClient *http.Client
-	egress     *egressMeter
+	watcher              *nodeconfig.Watcher
+	tracker              *nodesessions.Tracker
+	httpClient           *http.Client
+	artifactMissReporter remoteArtifactMissReporter
+	egress               *egressMeter
 	// subCache stores full-track PGS (.sup) extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
@@ -42,6 +43,10 @@ type Server struct {
 	downloadBandwidth   *downloads.BandwidthManager
 	downloadServerBPS   int64
 	downloadUserBPS     int64
+}
+
+type remoteArtifactMissReporter interface {
+	ReportRemoteArtifactMissing(ctx context.Context, artifactID, originNodeURL, originArtifactID string) error
 }
 
 // NewServer creates a new proxy server backed by a config watcher and session
@@ -63,6 +68,12 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 			return watcher.Config().Playback.TranscodeDir
 		}),
 	}
+}
+
+// SetRemoteArtifactMissReporter wires the authoritative database transition
+// used when an origin returns 404 after the API's proxy preflight.
+func (s *Server) SetRemoteArtifactMissReporter(reporter remoteArtifactMissReporter) {
+	s.artifactMissReporter = reporter
 }
 
 // newStreamTransport tunes the proxy→transcode-node connection pool. Many
@@ -240,6 +251,16 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
+		if s.artifactMissReporter != nil && strings.TrimSpace(claims.DownloadArtifactRowID) != "" {
+			reportCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+			err := s.artifactMissReporter.ReportRemoteArtifactMissing(
+				reportCtx, claims.DownloadArtifactRowID, claims.TranscodeNode, claims.DownloadArtifactID,
+			)
+			cancel()
+			if err != nil {
+				slog.WarnContext(r.Context(), "report missing remote download artifact", "component", "proxy", "artifact_id", claims.DownloadArtifactRowID, "error", err)
+			}
+		}
 		http.NotFound(w, r)
 		return
 	}

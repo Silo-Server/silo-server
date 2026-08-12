@@ -53,6 +53,9 @@ type Claims struct {
 	// download tokens TranscodeNode is its authenticated origin; MediaPath stays
 	// empty so node-local filesystem paths never leave the owning node.
 	DownloadArtifactID string `json:"daid,omitempty"`
+	// DownloadArtifactRowID identifies the authoritative database row so a
+	// proxy can fence and requeue a signed remote locator that returns 404.
+	DownloadArtifactRowID string `json:"darid,omitempty"`
 
 	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct

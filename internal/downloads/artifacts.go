@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,6 +132,37 @@ func NewArtifactManager(
 		repo: repo, downloads: downloadRepo, fileRepo: fileRepo, preparer: preparer,
 		owner: owner, liveCfg: liveCfg, notify: notify,
 	}
+}
+
+// ReportRemoteArtifactMissing fences a proxy-observed 404 against the signed
+// database-row and node locator, then atomically requeues the artifact and its
+// linked downloads. Stale tokens are harmless: the exact-locator transition
+// only applies while the complete locator still owns the ready row.
+func (m *ArtifactManager) ReportRemoteArtifactMissing(ctx context.Context, artifactID, originNodeURL, originArtifactID string) error {
+	if m == nil || m.repo == nil || strings.TrimSpace(artifactID) == "" ||
+		strings.TrimSpace(originNodeURL) == "" || !downloadprepare.ValidArtifactID(originArtifactID) {
+		return errors.New("remote artifact locator unavailable for missing report")
+	}
+	artifact, err := m.repo.GetByID(ctx, artifactID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if artifact.Status != ArtifactReady || artifact.OriginNodeURL != originNodeURL || artifact.OriginArtifactID != originArtifactID {
+		return nil
+	}
+	linked, applied, err := m.repo.RequeueRemoteExactLocator(ctx, artifact)
+	if err != nil || !applied {
+		return err
+	}
+	for _, download := range linked {
+		m.publish(ctx, download)
+	}
+	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", artifact.ID, "node", artifact.OriginNodeURL, "reason", "proxy observed remote output missing")
+	m.triggerDrain()
+	return nil
 }
 
 // SetKick wires a low-latency drain trigger (e.g. taskmanager RunTask) invoked

@@ -409,6 +409,7 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 ).String()
 
 const playbackTranscodeDirSettingKey = "playback.transcode_dir"
+const downloadArtifactDirSettingKey = "download.artifact_dir"
 
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
 // artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).

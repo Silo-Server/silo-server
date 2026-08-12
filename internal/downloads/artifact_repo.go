@@ -271,6 +271,17 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 // be deleted while the row still advertises it if either database write fails.
 // applied is false when the row changed concurrently or no longer exists.
 func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+	return r.requeueRemote(ctx, artifact, false)
+}
+
+// RequeueRemoteExactLocator additionally fences on the origin URL. Proxy miss
+// reports use it so an older signed URL cannot requeue a row after an
+// administrator has moved the same node/artifact locator to a new endpoint.
+func (r *ArtifactRepository) RequeueRemoteExactLocator(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+	return r.requeueRemote(ctx, artifact, true)
+}
+
+func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifact, fenceURL bool) (linked []*Download, applied bool, err error) {
 	if artifact == nil {
 		return nil, false, nil
 	}
@@ -279,14 +290,17 @@ func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifa
 		return nil, false, fmt.Errorf("beginning remote artifact requeue: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(ctx,
-		`UPDATE download_artifacts
+	query := `UPDATE download_artifacts
 		 SET status = 'queued', attempts = 0, error_message = '', next_retry_at = NULL,
 		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
 		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
-		 WHERE id = $1 AND status = 'ready' AND origin_node_id = $2 AND origin_artifact_id = $3`,
-		artifact.ID, artifact.OriginNodeID, artifact.OriginArtifactID,
-	)
+		 WHERE id = $1 AND status = 'ready' AND origin_node_id = $2 AND origin_artifact_id = $3`
+	args := []any{artifact.ID, artifact.OriginNodeID, artifact.OriginArtifactID}
+	if fenceURL {
+		query += ` AND origin_node_url = $4`
+		args = append(args, artifact.OriginNodeURL)
+	}
+	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("requeuing remote artifact: %w", err)
 	}

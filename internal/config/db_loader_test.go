@@ -36,7 +36,7 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 }
 
 func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{"download.artifact_dir": "/mnt/silo-downloads"})
+	cfg, err := LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "/mnt/silo-downloads"})
 	if err != nil {
 		t.Fatalf("LoadFromDB() with absolute artifact dir: %v", err)
 	}
@@ -44,8 +44,8 @@ func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
 		t.Fatalf("artifact dir = %q", cfg.Download.ArtifactDir)
 	}
 
-	_, err = LoadFromDB(map[string]string{"download.artifact_dir": "relative/downloads"})
-	if err == nil || !strings.Contains(err.Error(), "download.artifact_dir") {
+	_, err = LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "relative/downloads"})
+	if err == nil || !strings.Contains(err.Error(), downloadArtifactDirSettingKey) {
 		t.Fatalf("relative artifact dir error = %v", err)
 	}
 }

@@ -109,6 +109,22 @@ func TestNewServerUsesConfiguredDownloadArtifactDir(t *testing.T) {
 	}
 }
 
+func TestNewServerKeepsDefaultDownloadArtifactsInsideTranscodeVolume(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
+	w.SetConfigForTest(cfg)
+
+	server := NewServer(w, nil)
+	want := filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
+	if server.artifactRoot != want {
+		t.Fatalf("artifact root = %q, want mounted path %q", server.artifactRoot, want)
+	}
+	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
+		t.Fatal("default artifact directory is not protected from the transcode orphan sweep")
+	}
+}
+
 func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
 	server := newTestServer(t)
 	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")

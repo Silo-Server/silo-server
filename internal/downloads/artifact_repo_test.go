@@ -533,6 +533,50 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	}
 }
 
+func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-proxy-missing-report-%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", "", 23, "http://transcode-current", "host-a", "artifact-missing", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	manager := NewArtifactManager(repo, nil, nil, nil, "proxy-test", nil, nil)
+	if err := manager.ReportRemoteArtifactMissing(ctx, row.ID, "http://transcode-stale", "artifact-missing"); err != nil {
+		t.Fatal(err)
+	}
+	stillReady, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillReady.Status != ArtifactReady {
+		t.Fatalf("stale report changed artifact = %+v", stillReady)
+	}
+	if err := manager.ReportRemoteArtifactMissing(ctx, row.ID, "http://transcode-current", "artifact-missing"); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != ArtifactQueued || queued.OriginArtifactID != "" {
+		t.Fatalf("artifact after authoritative missing report = %+v", queued)
+	}
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 1 || orphans[0].DownloadArtifactID != row.ID || orphans[0].OriginArtifactID != "artifact-missing" {
+		t.Fatalf("remote cleanup queue = %+v", orphans)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
+}
+
 func TestListRemoteOrphansDueIsFairAcrossOrigins(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()

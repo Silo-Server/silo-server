@@ -718,6 +718,15 @@ func main() {
 		var handler http.Handler
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
+			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
+				downloads.NewArtifactRepository(pool),
+				downloads.NewRepository(pool),
+				nil,
+				downloads.NewPlaybackPreparer(),
+				nodeID,
+				watcher.Config,
+				nil,
+			))
 			handler = srv.Handler()
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)

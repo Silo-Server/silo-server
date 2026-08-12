@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
+
+type recordingArtifactMissReporter struct {
+	artifactID       string
+	originNodeURL    string
+	originArtifactID string
+}
+
+func (r *recordingArtifactMissReporter) ReportRemoteArtifactMissing(_ context.Context, artifactID, originNodeURL, originArtifactID string) error {
+	r.artifactID = artifactID
+	r.originNodeURL = originNodeURL
+	r.originArtifactID = originArtifactID
+	return nil
+}
 
 func newDownloadProxyServer(t *testing.T, secret string) *Server {
 	t.Helper()
@@ -137,6 +151,34 @@ func TestProxyDownloadRelaysNodeLocalArtifactPreconditionFailure(t *testing.T) {
 	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusPreconditionFailed || rr.Header().Get("ETag") != `"new-etag"` {
 		t.Fatalf("status=%d etag=%q body=%q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
+	}
+}
+
+func TestProxyDownloadReportsNodeLocalArtifactMissing(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.NotFoundHandler())
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:             "download-remote-missing",
+		PlayMethod:            streamtoken.PlayMethodDownload,
+		TranscodeNode:         origin.URL,
+		DownloadArtifactID:    "artifact-opaque",
+		DownloadArtifactRowID: "artifact-row",
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &recordingArtifactMissReporter{}
+	server := newDownloadProxyServer(t, secret)
+	server.SetRemoteArtifactMissReporter(reporter)
+	rr := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if reporter.artifactID != "artifact-row" || reporter.originNodeURL != origin.URL || reporter.originArtifactID != "artifact-opaque" {
+		t.Fatalf("missing report = %+v", reporter)
 	}
 }
 
