@@ -166,6 +166,8 @@ describe("probeWebCapabilities", () => {
 
     const { result, unmount } = renderHook(() => useCodecDetection());
     expect(result.current.hdrDetails.hdr10).toBe(false);
+    expect(result.current.codecsVideo).not.toContain("hevc");
+    expect(result.current.progressiveCodecsVideo).not.toContain("hevc");
     await act(async () => Promise.resolve());
     expect(result.current.hdrDetails).toMatchObject({
       hdr10: true,
@@ -174,6 +176,8 @@ describe("probeWebCapabilities", () => {
       hdr10_max_frame_rate: 24,
       hdr10_max_bitrate_kbps: 80_000,
     });
+    expect(result.current.codecsVideo).not.toContain("hevc");
+    expect(result.current.progressiveCodecsVideo).toContain("hevc");
     unmount();
   });
 

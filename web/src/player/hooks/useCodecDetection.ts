@@ -256,6 +256,12 @@ export function useCodecDetection(): WebCapabilityProbe {
         if (disposed || generation !== probeGeneration || !hdr10) return;
         setCapabilities((current) => ({
           ...current,
+          // The exact HDR10 query proves the HEVC Main10 base codec for the
+          // progressive MP4 route even when the separate generic HEVC probe was
+          // rejected. Keep that evidence scoped away from original and HLS.
+          progressiveCodecsVideo: current.progressiveCodecsVideo.includes("hevc")
+            ? current.progressiveCodecsVideo
+            : [...current.progressiveCodecsVideo, "hevc"],
           hdrDetails: {
             ...current.hdrDetails,
             hdr10: true,

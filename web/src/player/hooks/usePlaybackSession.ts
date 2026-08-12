@@ -808,10 +808,6 @@ export function usePlaybackSession(
       });
 
       const loadSequence = loadSequenceRef.current;
-      const hasPendingReplan = () => {
-        const pending = pendingReplanRef.current;
-        return pending?.loadSequence === loadSequence;
-      };
       replanInFlightRef.current = true;
       setState((current) => ({
         ...current,
@@ -840,8 +836,25 @@ export function usePlaybackSession(
         }
 
         const adopted = adoptDecision(decision);
-        if (!adopted && retireSessionOnRefusal && !hasPendingReplan()) {
-          retireActiveSession(sessionId);
+        if (!adopted && retireSessionOnRefusal) {
+          const pending = pendingReplanRef.current;
+          const pendingCanValidateOutput =
+            pending?.loadSequence === loadSequence &&
+            pending.options.operation !== "seek_reanchor" &&
+            pending.options.operation !== "seek_failure_recovery";
+          if (pending && pendingCanValidateOutput) {
+            // The output refusal proves the predecessor route is incompatible.
+            // Let a queued planner-backed intent try the latest output evidence,
+            // but require it to retire the session too if it is refused. Frozen
+            // seek replans cannot validate new output evidence, so they must not
+            // postpone retirement.
+            pendingReplanRef.current = {
+              ...pending,
+              retireSessionOnRefusal: true,
+            };
+          } else {
+            retireActiveSession(sessionId);
+          }
         }
         return adopted;
       } catch (err) {

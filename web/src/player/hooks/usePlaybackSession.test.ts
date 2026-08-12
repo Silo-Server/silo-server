@@ -752,6 +752,73 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("retires after a queued user intent also refuses refreshed output", async () => {
+    const setHDR = outputProbe(true);
+    let resolveOutputReplan: ((response: Response) => void) | undefined;
+    const outputReplanResponse = new Promise<Response>((resolve) => {
+      resolveOutputReplan = resolve;
+    });
+    const replanOperations: string[] = [];
+    const stoppedSessions: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({ session_id: "session-hdr" }),
+        });
+      }
+      if (url.endsWith("/playback/session-hdr/replan")) {
+        replanOperations.push((JSON.parse(String(init?.body)) as { operation: string }).operation);
+        if (replanOperations.length === 1) return outputReplanResponse;
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "terminal",
+          terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") {
+        stoppedSessions.push(url);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    act(() => setHDR(false));
+    await waitFor(() => expect(replanOperations).toEqual(["output_change"]));
+    act(() => result.current.changeQuality("1080p", 91));
+    expect(replanOperations).toEqual(["output_change"]);
+
+    await act(async () => {
+      resolveOutputReplan?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "terminal",
+          terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+        }),
+      );
+      await outputReplanResponse;
+    });
+
+    await waitFor(() => expect(replanOperations).toEqual(["output_change", "quality_change"]));
+    await waitFor(() => expect(result.current.plan).toBeNull());
+    expect(stoppedSessions).toContain("/api/v1/playback/session-hdr");
+    unmount();
+  });
+
   it("keeps the active plan when an output refresh request fails", async () => {
     const setHDR = outputProbe(true);
     const stoppedSessions: string[] = [];
