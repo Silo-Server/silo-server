@@ -28,6 +28,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeatureRouteDiagnostics:     {},
 		FeatureDeviceQuirksV3:       {},
 		FeatureSeekReanchorV3:       {},
+		FeatureOutputChangeV3:       {},
 		FeatureDirectStreamResumeV3: {},
 		FeaturePlanSourceDurationV3: {},
 	}

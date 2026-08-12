@@ -123,6 +123,9 @@ export const FEATURE_PLAYBACK_PLAN_V3 = "playback_plan_v3";
 /** Server-minted attempt keys and intent replans from the neutral v3 contract. */
 export const FEATURE_NEUTRAL_PLAYBACK_V3_CONTRACT = "neutral_playback_v3_contract_v1";
 
+/** Server accepts output-capability refreshes without treating the route as failed. */
+export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
+
 /** The `original` rung label, which always preserves the source. */
 export const QUALITY_ORIGINAL_V3 = "original";
 

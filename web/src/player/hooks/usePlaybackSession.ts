@@ -14,6 +14,7 @@ import { reportRouteEventV3 } from "../route-events-v3";
 import { buildPlayerStreamUrl } from "../stream-url";
 import { randomUUID } from "@/lib/uuid";
 import {
+  FEATURE_OUTPUT_CHANGE_V3,
   MAX_ATTEMPT_COUNT_V3,
   MAX_ATTEMPTED_PLAN_KEYS_V3,
   QUALITY_ORIGINAL_V3,
@@ -283,6 +284,7 @@ export function usePlaybackSession(
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
   const planRevisionRef = useRef(0);
+  const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
   const activeRequestKeyRef = useRef<string | null>(null);
   const activeCapabilityRequestKeyRef = useRef<string | null>(null);
@@ -312,6 +314,7 @@ export function usePlaybackSession(
     loadSequence: number;
     retireSessionOnRefusal: boolean;
     resolve: (adopted: boolean) => void;
+    planId: string;
   } | null>(null);
   const issueReplanRef = useRef<
     (options: ReplanOptions, retireSessionOnRefusal?: boolean) => Promise<boolean>
@@ -350,6 +353,7 @@ export function usePlaybackSession(
    */
   const adoptDecision = useCallback(
     (decision: DecisionResponseV3): boolean => {
+      serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
       if (!plan) {
         const failure = describeDecisionWithoutPlan(decision);
@@ -758,6 +762,7 @@ export function usePlaybackSession(
               loadSequence: loadSequenceRef.current,
               retireSessionOnRefusal,
               resolve,
+              planId: plan.plan_id,
             };
           });
         }
@@ -860,12 +865,21 @@ export function usePlaybackSession(
         const pendingReplan = pendingReplanRef.current;
         pendingReplanRef.current = null;
         if (pendingReplan?.loadSequence === loadSequenceRef.current) {
-          // A capability change can queue behind a replan created by an older
-          // render. Dispatch through the latest callback so its request carries
-          // the current output evidence rather than the closed-over snapshot.
-          void issueReplanRef
-            .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
-            .then(pendingReplan.resolve);
+          const recoveryAppliesToCurrentPlan =
+            pendingReplan.options.operation !== "failure_recovery" &&
+            pendingReplan.options.operation !== "seek_failure_recovery"
+              ? true
+              : pendingReplan.planId === planRef.current?.plan_id;
+          if (recoveryAppliesToCurrentPlan) {
+            // A capability change can queue behind a replan created by an older
+            // render. Dispatch through the latest callback so its request carries
+            // the current output evidence rather than the closed-over snapshot.
+            void issueReplanRef
+              .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
+              .then(pendingReplan.resolve);
+          } else {
+            pendingReplan.resolve(false);
+          }
         } else {
           pendingReplan?.resolve(false);
         }
@@ -904,6 +918,10 @@ export function usePlaybackSession(
         replacementErrorMessage: "Failed to refresh playback output",
         initialErrorMessage: "Failed to refresh playback output",
       });
+      return;
+    }
+
+    if (!serverFeaturesRef.current.includes(FEATURE_OUTPUT_CHANGE_V3)) {
       return;
     }
 

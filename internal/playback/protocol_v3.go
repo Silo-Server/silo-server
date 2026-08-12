@@ -19,6 +19,7 @@ const (
 	FeatureRouteDiagnostics       = "playback_route_diagnostics"
 	FeatureDeviceQuirksV3         = "device_quirks_v1"
 	FeatureSeekReanchorV3         = "seek_reanchor_v1"
+	FeatureOutputChangeV3         = "output_change_v1"
 	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
 	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
 	PlanRecipeVersionV3           = "v3.4"
@@ -42,6 +43,7 @@ func ServerFeaturesV3() []string {
 		FeatureRouteDiagnostics,
 		FeatureDeviceQuirksV3,
 		FeatureSeekReanchorV3,
+		FeatureOutputChangeV3,
 		FeatureDirectStreamResumeV3,
 		// Advertised so a client can tell "this server does not populate
 		// source.duration_seconds" apart from "this server knows the runtime
