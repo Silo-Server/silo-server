@@ -71,7 +71,8 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 }
 
 // SetRemoteArtifactMissReporter wires the authoritative database transition
-// used when an origin returns 404 after the API's proxy preflight.
+// used when an origin returns 404 after the API's proxy preflight. It must be
+// called during construction, before the server begins handling requests.
 func (s *Server) SetRemoteArtifactMissReporter(reporter remoteArtifactMissReporter) {
 	s.artifactMissReporter = reporter
 }

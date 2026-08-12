@@ -68,6 +68,16 @@ func newArtifact(t *testing.T, fileID int, hash string) *Artifact {
 	}
 }
 
+func remoteOrphansForArtifact(orphans []RemoteArtifactOrphan, artifactID string) []RemoteArtifactOrphan {
+	filtered := make([]RemoteArtifactOrphan, 0, 1)
+	for _, orphan := range orphans {
+		if orphan.DownloadArtifactID == artifactID {
+			filtered = append(filtered, orphan)
+		}
+	}
+	return filtered
+}
+
 // TestArtifactQueueClaimAndLeaseRecovery is the Phase 3 / invariant-3 acceptance
 // test: a crash mid-encode (an expired lease) is recovered on the next sweep so
 // the job re-enqueues and reaches ready, and concurrent workers never claim the
@@ -435,6 +445,7 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	orphans = remoteOrphansForArtifact(orphans, row.ID)
 	if len(orphans) != 1 || orphans[0].OriginNodeID != 17 || orphans[0].OriginArtifactID != "artifact-truncated" {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
@@ -447,7 +458,7 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
-	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-remote-atomic-requeue"))
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-remote-atomic-requeue-%d", time.Now().UnixNano())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,6 +502,7 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	orphans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	orphans = remoteOrphansForArtifact(orphans, row.ID)
 	if err != nil || len(orphans) != 1 {
 		t.Fatalf("uncertain cleanup queue = %+v (%v)", orphans, err)
 	}
@@ -498,7 +510,7 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	if err != nil || !claimed || !owned {
 		t.Fatalf("PrepareRemoteOrphanCleanup = (owned=%v claimed=%v err=%v)", owned, claimed, err)
 	}
-	if left, err := repo.ListRemoteOrphansDue(ctx, 10); err != nil || len(left) != 0 {
+	if left, err := repo.ListRemoteOrphansDue(ctx, 10); err != nil || len(remoteOrphansForArtifact(left, row.ID)) != 0 {
 		t.Fatalf("owned cleanup rows left = %+v (%v)", left, err)
 	}
 	// The in-memory URL may already have followed an administrative edit; the
@@ -523,6 +535,7 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	orphans = remoteOrphansForArtifact(orphans, row.ID)
 	if len(orphans) != 1 || orphans[0].DownloadArtifactID != row.ID || orphans[0].OriginNodeURL != "http://transcode-new" || orphans[0].OriginArtifactID != "artifact-abandoned" {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
@@ -571,6 +584,7 @@ func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	orphans = remoteOrphansForArtifact(orphans, row.ID)
 	if len(orphans) != 1 || orphans[0].DownloadArtifactID != row.ID || orphans[0].OriginArtifactID != "artifact-missing" {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
