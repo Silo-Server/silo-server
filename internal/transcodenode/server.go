@@ -81,10 +81,22 @@ const sessionIdleTTL = 10 * time.Minute
 // sessionReapInterval is how often the idle reaper sweeps for stale jobs.
 const sessionReapInterval = time.Minute
 
+// Session tracking is monitoring-only and must never make a healthy node's
+// control-plane response depend on Redis latency.
+const sessionTrackingOperationTimeout = 2 * time.Second
+
+type sessionTracker interface {
+	Track(context.Context, nodesessions.SessionInfo)
+	Remove(context.Context, string)
+	Cleanup(context.Context)
+	NodeURL() string
+	NodeName() string
+}
+
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher    *nodeconfig.Watcher
-	tracker    *nodesessions.Tracker
+	tracker    sessionTracker
 	ffmpegSink playback.FFmpegLogSink
 	inputPaths InputPathAuthorizer
 	sessions   map[string]*playback.TranscodeSession
@@ -178,9 +190,13 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 
 // NewServer creates a new transcode server.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
+	var trackerImpl sessionTracker
+	if tracker != nil {
+		trackerImpl = tracker
+	}
 	s := &Server{
 		watcher:    watcher,
-		tracker:    tracker,
+		tracker:    trackerImpl,
 		sessions:   make(map[string]*playback.TranscodeSession),
 		lastAccess: make(map[string]time.Time),
 	}
@@ -436,7 +452,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
-		s.tracker.Track(jobCtx, nodesessions.SessionInfo{
+		finishTracking := s.trackDownloadPrepare(jobCtx, nodesessions.SessionInfo{
 			SessionID:  "download-" + req.JobID,
 			NodeURL:    s.tracker.NodeURL(),
 			NodeName:   s.tracker.NodeName(),
@@ -446,7 +462,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 			Resolution: req.TargetResolution,
 			StartedAt:  time.Now().UTC().Format(time.RFC3339),
 		})
-		defer s.tracker.Remove(context.WithoutCancel(jobCtx), "download-"+req.JobID)
+		defer finishTracking()
 	}
 
 	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
@@ -460,6 +476,29 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": req.JobID, "status": "ready"})
+}
+
+// trackDownloadPrepare runs the monitoring lifecycle off the request path.
+// One goroutine owns both operations so Remove can never overtake Track, even
+// when the encode completes before Redis responds. finish only signals that
+// the job ended; it never waits for either bounded Redis operation.
+func (s *Server) trackDownloadPrepare(ctx context.Context, info nodesessions.SessionInfo) func() {
+	finished := make(chan struct{})
+	var finishOnce sync.Once
+	baseCtx := context.WithoutCancel(ctx)
+	go func() {
+		trackCtx, cancelTrack := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
+		s.tracker.Track(trackCtx, info)
+		cancelTrack()
+
+		<-finished
+		removeCtx, cancelRemove := context.WithTimeout(baseCtx, sessionTrackingOperationTimeout)
+		s.tracker.Remove(removeCtx, info.SessionID)
+		cancelRemove()
+	}()
+	return func() {
+		finishOnce.Do(func() { close(finished) })
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {

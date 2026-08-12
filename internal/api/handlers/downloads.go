@@ -607,6 +607,13 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		releaseReservation()
 		return false, nil
 	}
+	// A HEAD request only proves that the proxy can read the selected path; the
+	// proxy deliberately does not count it as an active transfer. Release the
+	// provisional slot before redirecting so a probe cannot hold max_jobs
+	// capacity until the planner's reservation bridge expires.
+	if r.Method == http.MethodHead {
+		releaseReservation()
+	}
 	http.Redirect(w, r, location, http.StatusTemporaryRedirect)
 	return true, nil
 }

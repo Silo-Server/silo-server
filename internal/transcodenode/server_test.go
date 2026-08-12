@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,51 @@ type allowInputPaths struct{}
 func (allowInputPaths) Allowed(context.Context, string) (bool, error) {
 	return true, nil
 }
+
+type blockingSessionTracker struct {
+	trackStarted  chan struct{}
+	trackRelease  chan struct{}
+	removeStarted chan struct{}
+
+	mu                sync.Mutex
+	events            []string
+	trackHasDeadline  bool
+	removeHasDeadline bool
+}
+
+func newBlockingSessionTracker() *blockingSessionTracker {
+	return &blockingSessionTracker{
+		trackStarted:  make(chan struct{}),
+		trackRelease:  make(chan struct{}),
+		removeStarted: make(chan struct{}),
+	}
+}
+
+func (t *blockingSessionTracker) Track(ctx context.Context, _ nodesessions.SessionInfo) {
+	_, hasDeadline := ctx.Deadline()
+	t.mu.Lock()
+	t.trackHasDeadline = hasDeadline
+	t.events = append(t.events, "track")
+	t.mu.Unlock()
+	close(t.trackStarted)
+	<-t.trackRelease
+	t.mu.Lock()
+	t.events = append(t.events, "track-done")
+	t.mu.Unlock()
+}
+
+func (t *blockingSessionTracker) Remove(ctx context.Context, _ string) {
+	_, hasDeadline := ctx.Deadline()
+	t.mu.Lock()
+	t.removeHasDeadline = hasDeadline
+	t.events = append(t.events, "remove")
+	t.mu.Unlock()
+	close(t.removeStarted)
+}
+
+func (*blockingSessionTracker) Cleanup(context.Context) {}
+func (*blockingSessionTracker) NodeURL() string         { return "http://node" }
+func (*blockingSessionTracker) NodeName() string        { return "node" }
 
 // newTestServer builds a transcode Server whose config carries a known JWT secret
 // so reconstructFromToken can verify forwarded stream tokens. The tracker is left
@@ -113,6 +159,71 @@ func TestHandleDownloadPrepareWritesConfiguredSharedArtifact(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after prepare = %d, want 0", got)
+	}
+}
+
+func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testing.T) {
+	server := newTestServer(t)
+	tracker := newBlockingSessionTracker()
+	server.tracker = tracker
+	artifactDir := t.TempDir()
+	server.watcher.Config().Download.ArtifactDir = artifactDir
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	server.watcher.Config().Playback.HWAccel = "none"
+	body, err := json.Marshal(downloadprepare.Request{
+		JobID:            "artifact-tracking",
+		InputPath:        "/media/movie.mkv",
+		OutputPath:       filepath.Join(artifactDir, "artifact.mp4"),
+		TargetCodecVideo: "copy",
+		TargetCodecAudio: "copy",
+		AudioTrackIndex:  -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleDownloadPrepare(rr, req)
+		close(handlerDone)
+	}()
+
+	select {
+	case <-tracker.trackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("tracking did not start")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(250 * time.Millisecond):
+		close(tracker.trackRelease)
+		<-handlerDone
+		t.Fatal("download prepare waited for session tracking")
+	}
+	if rr.Code != http.StatusOK {
+		close(tracker.trackRelease)
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	close(tracker.trackRelease)
+	select {
+	case <-tracker.removeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("tracking cleanup was not scheduled")
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if !tracker.trackHasDeadline || !tracker.removeHasDeadline {
+		t.Fatalf("tracking deadlines: track=%t remove=%t", tracker.trackHasDeadline, tracker.removeHasDeadline)
+	}
+	if got := strings.Join(tracker.events, ","); got != "track,track-done,remove" {
+		t.Fatalf("tracking order = %q", got)
 	}
 }
 

@@ -594,6 +594,7 @@ func TestHandleDirectDownloadThreadsOriginalFormat(t *testing.T) {
 
 func TestHandleDirectDownloadViaProxyRedirectsToProxy(t *testing.T) {
 	const secret = "download-proxy-secret"
+	maxJobs := 1
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -603,9 +604,10 @@ func TestHandleDirectDownloadViaProxyRedirectsToProxy(t *testing.T) {
 		directTarget:        &downloads.FileTarget{Path: "/media/movie.mkv", MediaFileID: 42, ProxyEligible: true},
 	}
 	proxies := nodepool.NewProxyPool()
-	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL + "/", Enabled: true, Healthy: true}})
+	proxies.SetNodes([]*nodepool.Node{{URL: proxy.URL + "/", Enabled: true, Healthy: true, MaxJobs: &maxJobs}})
+	planner := nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())
 	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
+	h.SetProxyDelivery(planner, func() string { return secret })
 	rec := httptest.NewRecorder()
 	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodHead, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
 
@@ -623,6 +625,12 @@ func TestHandleDirectDownloadViaProxyRedirectsToProxy(t *testing.T) {
 	if svc.gotDirectFileID != 0 {
 		t.Fatalf("local ServeDirect called for file %d", svc.gotDirectFileID)
 	}
+	// HEAD never becomes an active proxy transfer, so it must return the only
+	// available slot immediately rather than waiting for reservation expiry.
+	if plan := planner.PlanDownload("after-head"); plan.ProxyNode == nil {
+		t.Fatal("HEAD request retained the proxy's only job slot")
+	}
+	planner.ReleaseSession("after-head")
 }
 
 func TestHandleDirectDownloadFallsBackWithoutHealthyProxy(t *testing.T) {
