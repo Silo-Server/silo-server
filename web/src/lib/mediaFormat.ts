@@ -12,7 +12,7 @@ export const CODEC_LABELS: Record<string, string> = {
   av1: "AV1",
   dts: "DTS",
   dtshd: "DTS-HD",
-  eac3: "EAC3",
+  eac3: "Dolby Digital+",
   flac: "FLAC",
   h264: "H.264",
   hevc: "HEVC",

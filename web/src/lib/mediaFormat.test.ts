@@ -21,6 +21,7 @@ describe("formatCodecLabel", () => {
   it("maps known codecs to display labels", () => {
     expect(formatCodecLabel("h264")).toBe("H.264");
     expect(formatCodecLabel("hevc")).toBe("HEVC");
+    expect(formatCodecLabel("eac3")).toBe("Dolby Digital+");
     expect(formatCodecLabel("truehd")).toBe("TrueHD");
     expect(formatCodecLabel("opus")).toBe("Opus");
   });

@@ -94,7 +94,9 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Video Info", "Player dimensions")).toBe("2560x1277");
     expect(rowValue(sections, "Video Info", "Video resolution")).toBe("3840x2160");
     expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("HEVC (direct)");
-    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("EAC3 (direct)");
+    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe(
+      "Dolby Digital+ (direct)",
+    );
     expect(rowValue(sections, "Current Source File", "Size")).toBe("7.1 GiB");
     expect(rowValue(sections, "Current Source File", "Bitrate")).toBe("22.5 Mbps");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("HEVC Main 10");
