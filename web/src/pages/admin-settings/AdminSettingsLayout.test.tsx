@@ -69,28 +69,20 @@ describe("AdminSettingsLayout", () => {
     }
   });
 
-  it("renders desktop category jump links with section counts", () => {
+  it("names each settings group exactly once", () => {
     renderInteractiveLayout();
 
-    const categoryNavigation = screen.getByRole("navigation", {
-      name: "Admin settings sections categories",
-    });
-
-    expect(categoryNavigation).toContainElement(
-      screen.getByRole("link", { name: "Server, 4 settings sections" }),
-    );
-    expect(screen.getByRole("link", { name: "Media, 7 settings sections" })).toHaveAttribute(
-      "href",
-      "#admin-settings-index-media",
-    );
-    expect(screen.getByRole("link", { name: "Connections, 6 settings sections" })).toHaveAttribute(
-      "href",
-      "#admin-settings-index-connections",
-    );
-    expect(screen.getByRole("link", { name: "Data, 3 settings sections" })).toHaveAttribute(
-      "href",
-      "#admin-settings-index-data",
-    );
+    // The category jump bar used to repeat every group name and count directly
+    // above the headings that already carry them.
+    expect(
+      screen.queryByRole("navigation", { name: "Admin settings sections categories" }),
+    ).not.toBeInTheDocument();
+    for (const group of ["Server", "Media", "Connections", "Data"]) {
+      expect(screen.getAllByRole("heading", { name: group })).toHaveLength(1);
+      expect(
+        screen.queryByRole("link", { name: new RegExp(`^${group}, \\d+ settings`) }),
+      ).toBeNull();
+    }
   });
 
   it("uses one desktop grid and card geometry for every settings group", () => {
@@ -100,19 +92,6 @@ describe("AdminSettingsLayout", () => {
     expect(markup).not.toContain("2xl:grid-cols-3");
     expect(markup.match(/lg:h-28/g)).toHaveLength(20);
     expect(markup.match(/lg:line-clamp-3/g)).toHaveLength(20);
-  });
-
-  it("marks a selected category jump link as the current location", async () => {
-    renderInteractiveLayout();
-
-    const server = screen.getByRole("link", { name: "Server, 4 settings sections" });
-    const data = screen.getByRole("link", { name: "Data, 3 settings sections" });
-
-    expect(server).toHaveAttribute("aria-current", "location");
-    await userEvent.click(data);
-
-    expect(server).not.toHaveAttribute("aria-current");
-    expect(data).toHaveAttribute("aria-current", "location");
   });
 
   it("renders every settings tab", () => {

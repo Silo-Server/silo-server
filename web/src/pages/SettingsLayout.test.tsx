@@ -49,14 +49,59 @@ describe("SettingsLayout", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Playback" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Library & Data" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Account" })).toBeInTheDocument();
+    for (const group of ["Playback", "Appearance", "Home & Discovery", "Connections", "Account"]) {
+      expect(screen.getByRole("heading", { name: group })).toBeInTheDocument();
+    }
     expect(
-      screen.getByRole("link", { name: /Playback.*Quality, language, and skipping/ }),
+      screen.getByRole("link", { name: /Playback.*Quality, languages, skipping/ }),
     ).toHaveAttribute("href", "/settings/playback");
     expect(screen.getByRole("link", { name: /Connect Apps.*Sign-in details/ })).toBeInTheDocument();
+  });
+
+  it("names each settings group exactly once", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    // The category jump bar used to repeat every group name and count directly
+    // above the headings that already carry them.
+    expect(
+      screen.queryByRole("navigation", { name: "Settings sections categories" }),
+    ).not.toBeInTheDocument();
+    for (const group of ["Playback", "Appearance", "Home & Discovery", "Connections", "Account"]) {
+      expect(screen.getAllByRole("heading", { name: group })).toHaveLength(1);
+      expect(
+        screen.queryByRole("link", { name: new RegExp(`^${group}, \\d+ settings`) }),
+      ).toBeNull();
+    }
+  });
+
+  it("uses one desktop grid and card geometry for every settings group", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    // Five groups, seventeen sections — every card the same height so no group
+    // is visually ranked above another.
+    expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
+    expect(markup.match(/lg:h-28/g)).toHaveLength(17);
+    expect(markup).not.toContain("max-w-5xl");
+  });
+
+  it("keeps each settings section in exactly one group", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    for (const path of ["devices", "libraries", "watch-providers", "profiles"]) {
+      expect(markup.match(new RegExp(`href="/settings/${path}"`, "g"))).toHaveLength(1);
+    }
   });
 
   it("offers a clear return to the settings index from detail pages", () => {

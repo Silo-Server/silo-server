@@ -61,6 +61,13 @@ const settingIndex = (...labels: string[]) => labels.map((label) => ({ label }))
  */
 const WIDE_SETTINGS_PAGES = new Set(["devices"]);
 
+/**
+ * Grouped by the question a person arrives with, not by which service stores
+ * the value: "how does it play", "how does it look", "what do I see", "what is
+ * it wired to", "who am I". Devices sits under Playback because every setting
+ * on that screen is a playback override, and Personalize sits with Home Screen
+ * because both shape what the app puts in front of you.
+ */
 const NAV_SECTIONS: NavSection[] = [
   {
     label: "Playback",
@@ -69,7 +76,7 @@ const NAV_SECTIONS: NavSection[] = [
         path: "playback",
         label: "Playback",
         icon: Play,
-        description: "Quality, language, and skipping",
+        description: "Quality, languages, skipping, and what plays next.",
         keywords: [
           "video quality",
           "bitrate",
@@ -98,7 +105,7 @@ const NAV_SECTIONS: NavSection[] = [
         path: "subtitle-appearance",
         label: "Subtitles",
         icon: Subtitles,
-        description: "Language, behavior, and style",
+        description: "Subtitle language, when they appear, and how they look.",
         keywords: [
           "subtitle language",
           "forced subtitles",
@@ -124,215 +131,11 @@ const NAV_SECTIONS: NavSection[] = [
           "Subtitle position",
         ),
       },
-    ],
-  },
-  {
-    label: "Appearance",
-    items: [
-      {
-        path: "appearance",
-        label: "Appearance",
-        icon: Palette,
-        description: "Theme and interface tone",
-        keywords: [
-          "theme",
-          "profile theme",
-          "dark",
-          "light",
-          "custom theme",
-          "date format",
-          "time format",
-          "clock",
-          "24-hour",
-          "12-hour",
-        ],
-        settings: settingIndex(
-          "Theme",
-          "Date & time",
-          "Date format",
-          "Time format",
-          "Current selection",
-          "Reset to Cinema Dark",
-        ),
-      },
-      {
-        path: "interface",
-        label: "Navigation & Cards",
-        icon: PanelTop,
-        description: "Menus, poster size, and captions",
-        keywords: [
-          "navigation",
-          "menu",
-          "pin library",
-          "poster size",
-          "card size",
-          "hide title",
-          "hide year",
-          "artwork only",
-          "preset",
-        ],
-        settings: settingIndex(
-          "Card preset",
-          "Poster size",
-          "Caption",
-          "Title & metadata",
-          "Title only",
-          "Artwork only",
-          "Primary menu",
-          "Choose destination or shortcut",
-          "Add to menu",
-          "Reset to default",
-        ),
-      },
-      {
-        path: "theme-editor",
-        label: "Theme Editor",
-        icon: Wand2,
-        description: "Customize colors and CSS",
-        keywords: ["design tokens", "token overrides", "custom css", "community themes"],
-        settings: settingIndex("Preview", "Token Overrides", "Custom CSS", "Community Themes"),
-      },
-      {
-        path: "accessibility",
-        label: "Accessibility",
-        icon: Eye,
-        description: "Readability and contrast",
-        keywords: ["contrast", "readability", "motion", "transparency", "text"],
-        settings: settingIndex("Text size", "Text weight", "Contrast", "High Contrast", "Preview"),
-      },
-      {
-        path: "home-screen",
-        label: "Home Screen",
-        icon: LayoutDashboard,
-        description: "Sections and layout",
-        keywords: ["sections", "rows", "continue watching", "next up", "library order"],
-        settings: settingIndex(
-          "Scope",
-          "Sections",
-          "Reset section customizations",
-          "Continue Watching",
-          "Next Up",
-          "Recently Added",
-          "Library order",
-        ),
-      },
-      {
-        path: "card-overlays",
-        label: "Card Overlays",
-        icon: Layers,
-        description: "Badges on poster cards",
-        keywords: ["poster", "badges", "overlay", "accent color", "preset"],
-        settings: settingIndex(
-          "Preview",
-          "Preset",
-          "Accent color",
-          "Show icon",
-          "Position",
-          "How styling works",
-        ),
-      },
-      {
-        path: "personalize",
-        label: "Personalize",
-        icon: Sparkles,
-        description: "Re-tune your taste profile",
-        keywords: ["taste profile", "recommendations", "ratings", "likes", "dislikes"],
-        settings: settingIndex("Refine your taste profile", "Taste profile", "Recommendations"),
-      },
-    ],
-  },
-  {
-    label: "Library & Data",
-    items: [
-      {
-        path: "libraries",
-        label: "Libraries",
-        icon: Library,
-        description: "Visibility and access",
-        keywords: [
-          "library visibility",
-          "access",
-          "disabled libraries",
-          "library order",
-          "playback preferences",
-        ],
-        settings: settingIndex(
-          "Remember library pages",
-          "Library visibility",
-          "Library order",
-          "Spoken language",
-          "Subtitle language",
-          "Subtitle behavior",
-          "Forced subtitles",
-          "Playback preferences",
-        ),
-      },
-      {
-        path: "history-import",
-        label: "History Import",
-        icon: Clock,
-        description: "Emby watch history",
-        keywords: ["emby", "watched history", "import", "mapping", "sync"],
-        settings: settingIndex(
-          "New import",
-          "Import history",
-          "Fetched",
-          "Matched",
-          "Unmatched",
-          "Progress",
-          "History",
-          "Skipped",
-        ),
-      },
-      {
-        path: "webhook-sync",
-        label: "Webhook Sync",
-        icon: Server,
-        description: "Plex, Emby, and Jellyfin webhook intake",
-        keywords: ["plex", "emby", "jellyfin", "webhook", "progress", "watched"],
-        settings: settingIndex(
-          "Add a connection",
-          "Connected servers",
-          "Recent deliveries",
-          "Plex",
-          "Emby",
-          "Jellyfin",
-          "Server URL",
-          "Token",
-        ),
-      },
-      {
-        path: "watch-providers",
-        label: "Watch Providers",
-        icon: Cloud,
-        description: "Trakt watch history and scrobbling",
-        keywords: ["trakt", "import", "export", "scrobble", "favorites", "watch history"],
-        settings: settingIndex(
-          "Last imported",
-          "Last exported",
-          "Watched",
-          "Progress",
-          "Favorites",
-          "Exported",
-          "Import watched history",
-          "Import paused progress",
-          "Send watched changes",
-          "Send unwatched changes",
-          "Sync favorites",
-          "Sync favorite removals",
-          "Scrobble playback",
-        ),
-      },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
       {
         path: "devices",
         label: "Your Devices",
         icon: MonitorSmartphone,
-        description: "Settings for each device you watch on",
+        description: "Per-device quality, HDR, and audio or subtitle sync.",
         keywords: [
           "devices",
           "tv",
@@ -359,28 +162,159 @@ const NAV_SECTIONS: NavSection[] = [
           "Forget this device",
         ),
       },
+    ],
+  },
+  {
+    label: "Appearance",
+    items: [
       {
-        path: "notifications",
-        label: "Notifications",
-        icon: Bell,
-        description: "New-episode alerts and webhooks",
-        keywords: ["new episodes", "email", "discord", "browser push", "webhooks"],
+        path: "appearance",
+        label: "Appearance",
+        icon: Palette,
+        description: "Theme, interface tone, and date and time formats.",
+        keywords: [
+          "theme",
+          "profile theme",
+          "dark",
+          "light",
+          "custom theme",
+          "date format",
+          "time format",
+          "clock",
+          "24-hour",
+          "12-hour",
+        ],
         settings: settingIndex(
-          "New Episode Notifications",
-          "Email Notifications",
-          "Discord Notifications",
-          "Browser Notifications",
-          "Webhooks",
-          "Per-episode alerts",
-          "Digest",
-          "Webhook URL",
+          "Theme",
+          "Date & time",
+          "Date format",
+          "Time format",
+          "Current selection",
+          "Reset to Cinema Dark",
         ),
       },
+      {
+        path: "interface",
+        label: "Navigation & Cards",
+        icon: PanelTop,
+        description: "Your primary menu, poster size, and card captions.",
+        keywords: [
+          "navigation",
+          "menu",
+          "pin library",
+          "poster size",
+          "card size",
+          "hide title",
+          "hide year",
+          "artwork only",
+          "preset",
+        ],
+        settings: settingIndex(
+          "Card preset",
+          "Poster size",
+          "Caption",
+          "Title & metadata",
+          "Title only",
+          "Artwork only",
+          "Primary menu",
+          "Choose destination or shortcut",
+          "Add to menu",
+          "Reset to default",
+        ),
+      },
+      {
+        path: "card-overlays",
+        label: "Card Overlays",
+        icon: Layers,
+        description: "Badges drawn on poster cards, and where they sit.",
+        keywords: ["poster", "badges", "overlay", "accent color", "preset"],
+        settings: settingIndex(
+          "Preview",
+          "Preset",
+          "Accent color",
+          "Show icon",
+          "Position",
+          "How styling works",
+        ),
+      },
+      {
+        path: "accessibility",
+        label: "Accessibility",
+        icon: Eye,
+        description: "Text size, weight, and contrast for easier reading.",
+        keywords: ["contrast", "readability", "motion", "transparency", "text"],
+        settings: settingIndex("Text size", "Text weight", "Contrast", "High Contrast", "Preview"),
+      },
+      {
+        path: "theme-editor",
+        label: "Theme Editor",
+        icon: Wand2,
+        description: "Fine-tune theme colors and add your own CSS.",
+        keywords: ["design tokens", "token overrides", "custom css", "community themes"],
+        settings: settingIndex("Preview", "Token Overrides", "Custom CSS", "Community Themes"),
+      },
+    ],
+  },
+  {
+    label: "Home & Discovery",
+    items: [
+      {
+        path: "home-screen",
+        label: "Home Screen",
+        icon: LayoutDashboard,
+        description: "Which rows appear on Home, and in what order.",
+        keywords: ["sections", "rows", "continue watching", "next up", "library order"],
+        settings: settingIndex(
+          "Scope",
+          "Sections",
+          "Reset section customizations",
+          "Continue Watching",
+          "Next Up",
+          "Recently Added",
+          "Library order",
+        ),
+      },
+      {
+        path: "personalize",
+        label: "Personalize",
+        icon: Sparkles,
+        description: "Re-tune the taste profile behind your recommendations.",
+        keywords: ["taste profile", "recommendations", "ratings", "likes", "dislikes"],
+        settings: settingIndex("Refine your taste profile", "Taste profile", "Recommendations"),
+      },
+      {
+        path: "libraries",
+        label: "Libraries",
+        icon: Library,
+        description: "Which libraries you see, their order, and per-library audio.",
+        keywords: [
+          "library visibility",
+          "access",
+          "disabled libraries",
+          "library order",
+          "playback preferences",
+        ],
+        settings: settingIndex(
+          "Remember library pages",
+          "Library visibility",
+          "Library order",
+          "Spoken language",
+          "Subtitle language",
+          "Subtitle behavior",
+          "Forced subtitles",
+          "Playback preferences",
+        ),
+      },
+    ],
+  },
+  {
+    label: "Connections",
+    items: [
       {
         path: "connect-apps",
         label: "Connect Apps",
         icon: Cast,
-        description: "Sign-in details for other apps",
+        description: "Sign-in details for Silo and Jellyfin-compatible apps.",
         keywords: [
           "jellyfin",
           "infuse",
@@ -406,10 +340,71 @@ const NAV_SECTIONS: NavSection[] = [
         ),
       },
       {
+        path: "watch-providers",
+        label: "Watch Providers",
+        icon: Cloud,
+        description: "Trakt watch history, favorites, and scrobbling.",
+        keywords: ["trakt", "import", "export", "scrobble", "favorites", "watch history"],
+        settings: settingIndex(
+          "Last imported",
+          "Last exported",
+          "Watched",
+          "Progress",
+          "Favorites",
+          "Exported",
+          "Import watched history",
+          "Import paused progress",
+          "Send watched changes",
+          "Send unwatched changes",
+          "Sync favorites",
+          "Sync favorite removals",
+          "Scrobble playback",
+        ),
+      },
+      {
+        path: "webhook-sync",
+        label: "Webhook Sync",
+        icon: Server,
+        description: "Take progress from Plex, Emby, and Jellyfin webhooks.",
+        keywords: ["plex", "emby", "jellyfin", "webhook", "progress", "watched"],
+        settings: settingIndex(
+          "Add a connection",
+          "Connected servers",
+          "Recent deliveries",
+          "Plex",
+          "Emby",
+          "Jellyfin",
+          "Server URL",
+          "Token",
+        ),
+      },
+      {
+        path: "history-import",
+        label: "History Import",
+        icon: Clock,
+        description: "Bring an existing Emby watch history into Silo.",
+        keywords: ["emby", "watched history", "import", "mapping", "sync"],
+        settings: settingIndex(
+          "New import",
+          "Import history",
+          "Fetched",
+          "Matched",
+          "Unmatched",
+          "Progress",
+          "History",
+          "Skipped",
+        ),
+      },
+    ],
+  },
+  {
+    label: "Account",
+    items: [
+      {
         path: "profiles",
         label: "Profiles",
         icon: Users,
-        description: "Names, PINs, and access rules",
+        description: "Household profile names, PINs, and library access.",
         keywords: ["profile name", "pin", "access", "primary profile", "household"],
         settings: settingIndex(
           "Profile name",
@@ -421,6 +416,23 @@ const NAV_SECTIONS: NavSection[] = [
         ),
         primaryOrAdmin: true,
       },
+      {
+        path: "notifications",
+        label: "Notifications",
+        icon: Bell,
+        description: "New-episode alerts by email, Discord, push, or webhook.",
+        keywords: ["new episodes", "email", "discord", "browser push", "webhooks"],
+        settings: settingIndex(
+          "New Episode Notifications",
+          "Email Notifications",
+          "Discord Notifications",
+          "Browser Notifications",
+          "Webhooks",
+          "Per-episode alerts",
+          "Digest",
+          "Webhook URL",
+        ),
+      },
     ],
   },
 ];
@@ -428,24 +440,21 @@ const NAV_SECTIONS: NavSection[] = [
 interface SettingsOverviewProps {
   sections: readonly { label: string; items: readonly NavItem[] }[];
   profile: { name: string; avatar_url?: string } | null;
-  search: string;
-  onSearchChange: (value: string) => void;
-  resultCount: number;
-  totalCount: number;
 }
 
-function SettingsOverview({
-  sections,
-  profile,
-  search,
-  onSearchChange,
-  resultCount,
-  totalCount,
-}: SettingsOverviewProps) {
+/**
+ * The index is the same directory the admin settings index uses: category jump
+ * links, then one uniform card grid per group across the full page width.
+ *
+ * The two-column list it replaced paired groups side by side, so a short group
+ * next to a long one left a column of dead space taller than the short group
+ * itself — the exact shape of the desktop complaint.
+ */
+function SettingsOverview({ sections, profile }: SettingsOverviewProps) {
   const profileName = profile?.name ?? "Your profile";
 
   return (
-    <div className="mx-auto mt-6 w-full max-w-5xl space-y-6 sm:mt-8">
+    <div className="w-full space-y-6">
       <Link
         to="/profiles"
         aria-label={`Current profile: ${profileName}`}
@@ -464,14 +473,6 @@ function SettingsOverview({
         <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden="true" />
       </Link>
 
-      <SettingsSearchInput
-        value={search}
-        onChange={onSearchChange}
-        resultCount={resultCount}
-        totalCount={totalCount}
-        className="w-full sm:max-w-md"
-      />
-
       <SettingsOverviewNav
         groups={sections.map((section) => ({
           ...section,
@@ -485,6 +486,7 @@ function SettingsOverview({
         }))}
         ariaLabel="Settings sections"
         idPrefix="settings-index"
+        variant="directory"
       />
     </div>
   );
@@ -555,9 +557,21 @@ export default function SettingsLayout() {
               />
             </div>
 
-            <div className="mt-5 min-w-0 flex-1 lg:mt-10 lg:flex lg:gap-10">
-              <aside className="hidden lg:block lg:w-[220px] lg:shrink-0">
-                <nav aria-label="Settings sections" className="sticky top-6 space-y-5 pl-3">
+            {/* From lg up, the rail and the active page share one panel, the
+                same shell the admin settings use. Below lg the rail is hidden
+                and the page is already a stack of its own panels, so the extra
+                chrome would only nest a card inside a card — mobile keeps the
+                bare layout.
+
+                Admin scrolls its detail pane inside the panel; here the page
+                scrolls and the rail sticks, because Your Devices owns a
+                viewport-height scroller that a nested one would strand. */}
+            <div className="surface-panel-lg mt-5 flex min-w-0 flex-1 flex-col lg:mt-10 lg:min-h-[500px] lg:flex-row lg:overflow-hidden">
+              <aside className="border-border hidden lg:block lg:w-60 lg:flex-shrink-0 lg:border-r">
+                <nav
+                  aria-label="Settings sections"
+                  className="sticky top-6 space-y-5 py-5 pr-3 pl-5"
+                >
                   {filteredSections.map((section) => (
                     <SideNavSection
                       key={section.label}
@@ -581,8 +595,8 @@ export default function SettingsLayout() {
                 </nav>
               </aside>
 
-              <div className="min-w-0 flex-1 pt-8 lg:pt-0">
-                <div className={cn("mx-auto w-full", wideSetting ? "max-w-6xl" : "max-w-3xl")}>
+              <div className="min-w-0 flex-1 p-4 sm:p-6">
+                <div className={cn("w-full", wideSetting ? "max-w-none" : "max-w-3xl")}>
                   <Outlet />
                 </div>
               </div>
@@ -591,22 +605,23 @@ export default function SettingsLayout() {
         ) : (
           <>
             <PageBack to="/" preferHistory={false} floating />
-            <div className="page-header mt-10 gap-5 sm:mt-12">
+            <div className="page-header mt-10 mb-6 gap-5 sm:mt-12 sm:mb-8">
               <div className="min-w-0 space-y-3">
                 <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
                 <p className="page-subtitle text-sm sm:text-base">
                   Make Silo work the way you like.
                 </p>
               </div>
+              <SettingsSearchInput
+                value={settingsSearch}
+                onChange={setSettingsSearch}
+                resultCount={filteredSettingsCount}
+                totalCount={flatItems.length}
+                className="w-full sm:max-w-sm lg:w-[26rem] lg:max-w-none"
+                showShortcutHint
+              />
             </div>
-            <SettingsOverview
-              sections={filteredSections}
-              profile={profile}
-              search={settingsSearch}
-              onSearchChange={setSettingsSearch}
-              resultCount={filteredSettingsCount}
-              totalCount={flatItems.length}
-            />
+            <SettingsOverview sections={filteredSections} profile={profile} />
           </>
         )}
       </main>
