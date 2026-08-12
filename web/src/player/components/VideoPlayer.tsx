@@ -85,6 +85,8 @@ interface VideoPlayerProps {
   plan: PlanV3;
   /** Bumped on every adopted plan; stream-reload effects key on it. */
   planRevision: number;
+  /** Whether a newly adopted transport should begin playing immediately. */
+  shouldAutoPlay?: boolean;
   /** True while a replan is in flight, so the quality menu can show progress. */
   replanning?: boolean;
   /** Server-described replan error, if the last replan was refused. */
@@ -190,6 +192,7 @@ export function VideoPlayer({
   streamUrl,
   plan,
   planRevision,
+  shouldAutoPlay = true,
   replanning = false,
   replanError = null,
   sessionId,
@@ -1394,6 +1397,11 @@ export function VideoPlayer({
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
       autoplayStarted = true;
       cleanupStartupListeners();
+      if (!shouldAutoPlay) {
+        setAwaitingFirstFrame(false);
+        setPlaying(false);
+        return;
+      }
       video.play().catch(() => setPlaying(false));
     };
 
@@ -1539,7 +1547,7 @@ export function VideoPlayer({
         // Direct play — set video src directly.
         video.src = effectiveStreamUrl;
         video.currentTime = effectiveInitialPosition;
-        video.play().catch(() => setPlaying(false));
+        if (shouldAutoPlay) video.play().catch(() => setPlaying(false));
       }
     }
 
@@ -1570,6 +1578,7 @@ export function VideoPlayer({
     planRevision,
     plannedBitrateKbps,
     reportCurrentPlanFailure,
+    shouldAutoPlay,
   ]);
 
   // -- Video event listeners --

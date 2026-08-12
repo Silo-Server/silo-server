@@ -170,13 +170,13 @@ export function WatchPage({
     [session],
   );
 
-  const updatePlaybackPosition = session.updatePlaybackPosition;
+  const updatePlaybackState = session.updatePlaybackState;
   const handlePlaybackStateChange = useCallback(
     (state: PlayerPlaybackStateChange) => {
-      updatePlaybackPosition(state.currentTime);
+      updatePlaybackState(state.currentTime, state.playing);
       onPlaybackStateChange?.(state);
     },
-    [onPlaybackStateChange, updatePlaybackPosition],
+    [onPlaybackStateChange, updatePlaybackState],
   );
 
   /**
@@ -435,6 +435,7 @@ export function WatchPage({
       streamUrl={session.streamUrl}
       plan={session.plan}
       planRevision={session.planRevision}
+      shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
       replanError={session.error}
       sessionId={session.sessionId}

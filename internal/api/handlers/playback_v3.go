@@ -430,7 +430,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
+	if terminalAllowsAlternateFileV3(result.Terminal) && shouldTryAlternateFileV3(req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -1732,7 +1732,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	} else {
 		result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
+	if terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
@@ -2334,6 +2334,18 @@ func shouldTryAlternateFileV3(qualityPreference string) bool {
 	return !strings.EqualFold(strings.TrimSpace(qualityPreference), "original")
 }
 
+const (
+	terminalNoAlternateVersionV3      = "no_alternate_version"
+	terminalHDRTranscodeUnsupportedV3 = "hdr_transcode_unsupported"
+)
+
+func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
+	if terminal == nil {
+		return false
+	}
+	return terminal.Reason == terminalNoAlternateVersionV3 || terminal.Reason == terminalHDRTranscodeUnsupportedV3
+}
+
 func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
 	switch operation {
 	case playback.ReplanOperationFailureRecoveryV3, playback.ReplanOperationQualityChangeV3:
@@ -2354,7 +2366,7 @@ func replanAlternateFilePinnedByOriginalQualityV3(operation playback.ReplanOpera
 }
 
 func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context, terminal *playback.TerminalV3, requestedFile *models.MediaFile, alternateFilePinned bool) {
-	if !alternateFilePinned || terminal == nil || terminal.Reason != "no_alternate_version" || terminal.Message != playback.TerminalMessage4KTranscodeDisabledV3 {
+	if !alternateFilePinned || terminal == nil || terminal.Reason != terminalNoAlternateVersionV3 || terminal.Message != playback.TerminalMessage4KTranscodeDisabledV3 {
 		return
 	}
 	if alternate, err := h.findAlternateFile(ctx, requestedFile); err == nil && alternate != nil {

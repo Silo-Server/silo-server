@@ -57,6 +57,7 @@ interface PlaybackSessionState {
   durationSeconds: number | null;
   subtitleUrls: PlayerSubtitleInfo[];
   qualityPreference: string;
+  shouldAutoPlay: boolean;
   loading: boolean;
   replacing: boolean;
   replanning: boolean;
@@ -91,8 +92,8 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
   applySubtitleTrack: (track: SubtitleInventoryItemV3) => void;
-  /** Keeps the resume anchor current for output-capability restarts. */
-  updatePlaybackPosition: (positionSeconds: number) => void;
+  /** Keeps transport state current for output-capability replans. */
+  updatePlaybackState: (positionSeconds: number, playing: boolean) => void;
   /** Reports a playback route event as a diagnostic. Never affects playback. */
   reportEvent: (
     event: RouteEventNameV3,
@@ -161,6 +162,7 @@ function planToSessionState(
   playbackAttemptId: string,
   planRevision: number,
   qualityPreference: string,
+  shouldAutoPlay: boolean,
   config: PlayerConfig,
 ): PlaybackSessionState {
   return {
@@ -179,6 +181,7 @@ function planToSessionState(
       config,
     ),
     qualityPreference,
+    shouldAutoPlay,
     loading: false,
     replacing: false,
     replanning: false,
@@ -269,6 +272,7 @@ export function usePlaybackSession(
     durationSeconds: null,
     subtitleUrls: [],
     qualityPreference: qualityPreference?.trim() || "auto",
+    shouldAutoPlay: true,
     loading: true,
     replacing: false,
     replanning: false,
@@ -283,6 +287,8 @@ export function usePlaybackSession(
   const activeRequestKeyRef = useRef<string | null>(null);
   const activeCapabilityRequestKeyRef = useRef<string | null>(null);
   const playbackPositionRef = useRef(initialPosition);
+  const playbackPlayingRef = useRef(true);
+  const playbackStartedRef = useRef(false);
   const switchingRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
@@ -298,6 +304,7 @@ export function usePlaybackSession(
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
+    retireSessionOnRefusal: boolean;
   } | null>(null);
   const qualityRef = useRef(qualityPreference?.trim() || "auto");
 
@@ -366,6 +373,7 @@ export function usePlaybackSession(
           playbackAttemptIdRef.current ?? "",
           planRevisionRef.current,
           qualityRef.current,
+          playbackPlayingRef.current,
           config,
         ),
       );
@@ -412,6 +420,37 @@ export function usePlaybackSession(
       });
     },
     [config],
+  );
+
+  const retireActiveSession = useCallback(
+    (expectedSessionId: string) => {
+      if (sessionIdRef.current !== expectedSessionId) return;
+      loadSequenceRef.current += 1;
+      void stopSession(expectedSessionId).catch(() => {
+        // Best effort — stale session will time out server-side.
+      });
+      planRef.current = null;
+      sessionIdRef.current = null;
+      planAttemptIdRef.current = randomUUID();
+      setState((current) => {
+        if (current.sessionId !== expectedSessionId) return current;
+        return {
+          ...current,
+          plan: null,
+          streamUrl: null,
+          sessionId: null,
+          mediaFileId: null,
+          initialPosition: 0,
+          audioTrackIndex: 0,
+          durationSeconds: null,
+          subtitleUrls: [],
+          loading: false,
+          replacing: false,
+          replanning: false,
+        };
+      });
+    },
+    [stopSession],
   );
 
   /**
@@ -576,22 +615,20 @@ export function usePlaybackSession(
   );
 
   useEffect(() => {
-    const requestChanged = activeRequestKeyRef.current !== requestKey;
-    const capabilitiesChanged = activeCapabilityRequestKeyRef.current !== capabilityRequestKey;
-    if (!requestChanged && !capabilitiesChanged) {
+    if (activeRequestKeyRef.current === requestKey) {
       return;
     }
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
-    if (requestChanged) {
-      qualityRef.current = qualityPreference?.trim() || "auto";
-      playbackPositionRef.current = initialPosition;
-    }
+    qualityRef.current = qualityPreference?.trim() || "auto";
+    playbackPositionRef.current = initialPosition;
+    playbackPlayingRef.current = true;
+    playbackStartedRef.current = false;
 
     void loadSession({
-      preferredFileId: requestChanged ? fileId : (stateRef.current.mediaFileId ?? fileId),
-      position: requestChanged ? initialPosition : playbackPositionRef.current,
-      forceStartPosition: requestChanged ? forceInitialPosition : true,
+      preferredFileId: fileId,
+      position: initialPosition,
+      forceStartPosition: forceInitialPosition,
       allowPreserveExistingSessionOnError: false,
       replacementErrorMessage: "Failed to replace playback request",
       initialErrorMessage: "Failed to start playback",
@@ -641,7 +678,10 @@ export function usePlaybackSession(
    * means the client never asks for one.
    */
   const replan = useCallback(
-    async function issueReplan(options: ReplanOptions): Promise<boolean> {
+    async function issueReplan(
+      options: ReplanOptions,
+      retireSessionOnRefusal = false,
+    ): Promise<boolean> {
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
       const playbackAttemptId = playbackAttemptIdRef.current;
@@ -659,6 +699,7 @@ export function usePlaybackSession(
           pendingReplanRef.current = {
             options,
             loadSequence: loadSequenceRef.current,
+            retireSessionOnRefusal,
           };
         }
         return false;
@@ -730,7 +771,9 @@ export function usePlaybackSession(
           attemptCountRef.current = 1;
         }
 
-        return adoptDecision(decision);
+        const adopted = adoptDecision(decision);
+        if (!adopted && retireSessionOnRefusal) retireActiveSession(sessionId);
+        return adopted;
       } catch (err) {
         if (loadSequence !== loadSequenceRef.current) return false;
         const nextError = describePlaybackSessionError(err, "Failed to update playback");
@@ -740,6 +783,7 @@ export function usePlaybackSession(
           errorTitle: nextError.title,
           error: nextError.message,
         }));
+        if (retireSessionOnRefusal) retireActiveSession(sessionId);
         return false;
       } finally {
         replanInFlightRef.current = false;
@@ -748,12 +792,52 @@ export function usePlaybackSession(
         const pendingReplan = pendingReplanRef.current;
         pendingReplanRef.current = null;
         if (pendingReplan?.loadSequence === loadSequenceRef.current) {
-          void issueReplan(pendingReplan.options);
+          void issueReplan(pendingReplan.options, pendingReplan.retireSessionOnRefusal);
         }
       }
     },
-    [adoptDecision, clientCapabilities, clientPlaybackContext, config, maxBitrateKbps],
+    [
+      adoptDecision,
+      clientCapabilities,
+      clientPlaybackContext,
+      config,
+      maxBitrateKbps,
+      retireActiveSession,
+    ],
   );
+
+  useEffect(() => {
+    if (
+      activeRequestKeyRef.current !== requestKey ||
+      activeCapabilityRequestKeyRef.current === capabilityRequestKey
+    ) {
+      return;
+    }
+    activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+
+    const plan = planRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!plan || !sessionId) {
+      void loadSession({
+        preferredFileId: fileId,
+        position: playbackPositionRef.current,
+        forceStartPosition: true,
+        allowPreserveExistingSessionOnError: false,
+        replacementErrorMessage: "Failed to refresh playback output",
+        initialErrorMessage: "Failed to refresh playback output",
+      });
+      return;
+    }
+
+    void replan(
+      {
+        operation: "failure_recovery",
+        positionSeconds: playbackPositionRef.current,
+        failure: { classification: "output_route_changed" },
+      },
+      true,
+    );
+  }, [capabilityRequestKey, fileId, loadSession, replan, requestKey, retireActiveSession]);
 
   const switchAudioTrack = useCallback(
     (index: number, currentPosition: number) => {
@@ -863,9 +947,15 @@ export function usePlaybackSession(
     [config],
   );
 
-  const updatePlaybackPosition = useCallback((positionSeconds: number) => {
+  const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {
     if (Number.isFinite(positionSeconds) && positionSeconds >= 0) {
       playbackPositionRef.current = positionSeconds;
+    }
+    if (playing) {
+      playbackStartedRef.current = true;
+      playbackPlayingRef.current = true;
+    } else if (playbackStartedRef.current) {
+      playbackPlayingRef.current = false;
     }
   }, []);
 
@@ -906,7 +996,7 @@ export function usePlaybackSession(
     reanchorSeek,
     refreshSubtitles,
     applySubtitleTrack,
-    updatePlaybackPosition,
+    updatePlaybackState,
     reportEvent,
   };
 }

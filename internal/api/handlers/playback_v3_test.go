@@ -116,6 +116,17 @@ func TestShouldTryAlternateFileV3PinsOriginalQuality(t *testing.T) {
 	}
 }
 
+func TestTerminalAllowsAlternateFileV3IncludesHDRIncompatibility(t *testing.T) {
+	for _, reason := range []string{"no_alternate_version", "hdr_transcode_unsupported"} {
+		if !terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: reason}) {
+			t.Fatalf("terminal reason %q should permit alternate selection", reason)
+		}
+	}
+	if terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: "client_hls_unsupported"}) {
+		t.Fatal("unrelated terminal reason should not permit alternate selection")
+	}
+}
+
 func TestValidateAdvertisedTransformationsV3RejectsOldVideoRecipe(t *testing.T) {
 	plan := &playback.PlanV3{Transformations: []playback.TransformationV3{{
 		Name:          playback.TransformationVideoToH264V3,
@@ -192,6 +203,53 @@ func TestHandleStartPlaybackV3ExplainsOriginalQuality4KPinWhenAlternateExists(t 
 				t.Fatalf("terminal = %#v, want message containing %q", response.Terminal, test.wantMessage)
 			}
 		})
+	}
+}
+
+func TestHandleStartPlaybackV3TriesAlternateAfterHDRTerminal(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.CodecVideo = "hevc"
+	source.Resolution = "2160p"
+	source.Bitrate = 32_000
+	source.VideoTracks[0] = models.VideoTrack{
+		Codec: "hevc", Profile: "main 10", Level: 150, Width: 3840, Height: 2160,
+		FrameRate: "24000/1001", Bitrate: 32_000, BitDepth: 10,
+		VideoRange: "DolbyVision", VideoRangeType: "DOVIWithHDR10", DVProfile: 8, DVBLCompatID: 1,
+	}
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID = 84
+	alternate.CodecVideo = "h264"
+	alternate.Resolution = "1080p"
+	alternate.Bitrate = 8_000
+	alternate.VideoTracks = []models.VideoTrack{{
+		Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080,
+		FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR",
+	}}
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+		source.ContentID: {source, alternate},
+	}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.PlaybackConfig = playbackTestConfig("", "")
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	start := v3HandlerStartRequest()
+	start.QualityPreference = "auto"
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+	}
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+
+	var response playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &response) != nil || response.PlaybackPlan == nil {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if response.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("effective file = %d, want alternate %d", response.PlaybackPlan.EffectiveMediaFileID, alternate.ID)
 	}
 }
 

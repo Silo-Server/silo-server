@@ -140,6 +140,18 @@ describe("VideoPlayer plan failure recovery", () => {
     vi.restoreAllMocks();
   });
 
+  it("loads a replacement transport without resuming paused playback", async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { container } = renderPlayer({ shouldAutoPlay: false });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    fireEvent.canPlay(video);
+    expect(play).not.toHaveBeenCalled();
+  });
+
   it("surfaces a refused replan only for the transport-dead plan revision", async () => {
     const onPlanFailure = vi.fn();
     const { container, rerenderPlayer } = renderPlayer({ onPlanFailure });

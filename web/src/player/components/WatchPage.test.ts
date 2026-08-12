@@ -76,6 +76,7 @@ function playbackSession(
     durationSeconds: 3600,
     subtitleUrls: [],
     qualityPreference: "original",
+    shouldAutoPlay: true,
     loading: false,
     replacing: false,
     replanning: false,
@@ -89,7 +90,7 @@ function playbackSession(
     reanchorSeek: vi.fn(),
     refreshSubtitles: vi.fn(),
     applySubtitleTrack: vi.fn(),
-    updatePlaybackPosition: vi.fn(),
+    updatePlaybackState: vi.fn(),
     reportEvent: vi.fn(),
     ...overrides,
   };
@@ -144,9 +145,9 @@ describe("WatchPage playback errors", () => {
 
 describe("WatchPage playback state", () => {
   it("keeps the session resume anchor current while forwarding state", () => {
-    const updatePlaybackPosition = vi.fn();
+    const updatePlaybackState = vi.fn();
     const onPlaybackStateChange = vi.fn();
-    playbackSessionMock.mockReturnValue(playbackSession({ updatePlaybackPosition }));
+    playbackSessionMock.mockReturnValue(playbackSession({ updatePlaybackState }));
 
     render(createElement(WatchPage, { ...watchPageProps, onPlaybackStateChange }));
 
@@ -160,7 +161,7 @@ describe("WatchPage playback state", () => {
     const state = { currentTime: 321, duration: 3600, playing: true };
     props.onPlaybackStateChange?.(state);
 
-    expect(updatePlaybackPosition).toHaveBeenCalledWith(321);
+    expect(updatePlaybackState).toHaveBeenCalledWith(321, true);
     expect(onPlaybackStateChange).toHaveBeenCalledWith(state);
   });
 });
