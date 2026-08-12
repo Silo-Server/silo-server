@@ -142,6 +142,7 @@ export interface HDRCapabilitiesV3 {
   dolby_vision_profile_levels?: Array<{
     profile: number;
     max_level: number;
+    bl_compatibility_ids?: number[];
   }>;
 }
 

@@ -66,6 +66,8 @@ export interface WebCapabilityProbe {
   containers: string[];
   /** Video codec names the browser reported support for. */
   codecsVideo: string[];
+  /** Video codecs supported specifically by direct media-element playback. */
+  progressiveCodecsVideo: string[];
   /** Audio codec names the browser reported support for. */
   codecsAudio: string[];
   /** Best-effort screen-derived resolution ceiling. */
@@ -85,11 +87,12 @@ export interface WebCapabilityProbe {
  * server treats the two lists identically.
  */
 export function buildClientCapabilitiesV3(probe: WebCapabilityProbe): ClientCodecCapabilitiesV3 {
+  const codecsVideo = Array.from(new Set([...probe.codecsVideo, ...probe.progressiveCodecsVideo]));
   return {
     video_evidence: "declared",
     audio_evidence: "declared",
-    codecs_video: probe.codecsVideo,
-    codecs_video_hardware: probe.codecsVideo,
+    codecs_video: codecsVideo,
+    codecs_video_hardware: codecsVideo,
     codecs_audio: probe.codecsAudio,
     containers: probe.containers,
     max_resolution: probe.maxResolution,
@@ -143,7 +146,9 @@ export function buildDeliveriesV3(
     original_http: buildDeliveryCapability(probe, {
       hdr_details: progressiveOnlyHDRDetails,
     }),
-    progressive: buildDeliveryCapability(probe, {}),
+    progressive: buildDeliveryCapability(probe, {
+      video_codecs: probe.progressiveCodecsVideo,
+    }),
     hls: buildDeliveryCapability(probe, {
       supported_on_device: probe.hls,
       ...(probe.hls ? {} : { failure_reason: "media_source_extensions_unavailable" }),

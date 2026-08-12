@@ -57,9 +57,10 @@ describe("probeWebCapabilities", () => {
       hdr10_plus: false,
       hlg: false,
       dolby_vision_profiles: [8],
-      dolby_vision_profile_levels: [{ profile: 8, max_level: 6 }],
+      dolby_vision_profile_levels: [{ profile: 8, max_level: 6, bl_compatibility_ids: [1] }],
     });
-    expect(capabilities.codecsVideo).toContain("hevc");
+    expect(capabilities.codecsVideo).not.toContain("hevc");
+    expect(capabilities.progressiveCodecsVideo).toContain("hevc");
   });
 
   it("does not advertise a Dolby Vision decoder against an SDR output", () => {

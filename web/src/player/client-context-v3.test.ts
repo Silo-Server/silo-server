@@ -37,6 +37,7 @@ describe("buildDeliveriesV3", () => {
     const deliveries = buildDeliveriesV3({
       containers: ["mp4"],
       codecsVideo: ["h264"],
+      progressiveCodecsVideo: ["h264"],
       codecsAudio: ["aac"],
       maxResolution: "1080p",
       hdr: false,
@@ -61,6 +62,7 @@ describe("structured HDR capabilities", () => {
   const probe: WebCapabilityProbe = {
     containers: ["mp4"],
     codecsVideo: ["hevc"],
+    progressiveCodecsVideo: ["hevc"],
     codecsAudio: ["eac3"],
     maxResolution: "2160p",
     hdr: true,
@@ -69,7 +71,7 @@ describe("structured HDR capabilities", () => {
       hdr10_plus: false,
       hlg: false,
       dolby_vision_profiles: [8],
-      dolby_vision_profile_levels: [{ profile: 8, max_level: 6 }],
+      dolby_vision_profile_levels: [{ profile: 8, max_level: 6, bl_compatibility_ids: [1] }],
     },
     hls: true,
   };
@@ -89,5 +91,19 @@ describe("structured HDR capabilities", () => {
     };
     expect(deliveries.original_http?.hdr_details).toEqual(nonProgressiveHDRDetails);
     expect(deliveries.hls?.hdr_details).toEqual(nonProgressiveHDRDetails);
+  });
+
+  it("keeps media-element-only HEVC evidence out of original and HLS delivery", () => {
+    const progressiveOnlyProbe = {
+      ...probe,
+      codecsVideo: ["h264"],
+      progressiveCodecsVideo: ["h264", "hevc"],
+    };
+
+    expect(buildClientCapabilitiesV3(progressiveOnlyProbe).codecs_video).toEqual(["h264", "hevc"]);
+    const deliveries = buildDeliveriesV3(progressiveOnlyProbe);
+    expect(deliveries.original_http?.video_codecs).toEqual(["h264"]);
+    expect(deliveries.progressive?.video_codecs).toEqual(["h264", "hevc"]);
+    expect(deliveries.hls?.video_codecs).toEqual(["h264"]);
   });
 });

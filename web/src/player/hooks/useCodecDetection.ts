@@ -13,11 +13,16 @@ const VIDEO_CODEC_MAP: Record<string, string> = {
 // record under a dvhe sample entry. Probe the exact shape the browser would
 // receive instead of inferring Dolby Vision support from generic HEVC decode.
 // Level 6 covers the 2160p24 source class involved in the web regression.
-const DOLBY_VISION_PROFILE_CODEC_MAP: Record<number, string> = {
-  5: 'video/mp4; codecs="dvhe.05.06"',
-  8: 'video/mp4; codecs="dvhe.08.06"',
+const DOLBY_VISION_PROFILE_PROBES: Record<
+  number,
+  { mime: string; maxLevel: number; blCompatibilityIds?: number[] }
+> = {
+  5: { mime: 'video/mp4; codecs="dvhe.05.06"', maxLevel: 6 },
+  // The MIME codec string identifies Profile 8 but not its base-layer
+  // compatibility ID. Conservatively claim only the Profile 8.1 shape that
+  // this regression and Safari's progressive remux path exercise.
+  8: { mime: 'video/mp4; codecs="dvhe.08.06"', maxLevel: 6, blCompatibilityIds: [1] },
 };
-const DOLBY_VISION_PROBE_LEVEL = 6;
 
 const AUDIO_CODEC_MAP: Record<string, string[]> = {
   aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
@@ -147,14 +152,16 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     typeof matchMedia !== "undefined" ? (query) => matchMedia(query) : undefined,
   );
   const dolbyVisionProfiles = hdr
-    ? Object.entries(DOLBY_VISION_PROFILE_CODEC_MAP)
-        .filter(([, mime]) => testMediaElementType(mime))
+    ? Object.entries(DOLBY_VISION_PROFILE_PROBES)
+        .filter(([, probe]) => testMediaElementType(probe.mime))
         .map(([profile]) => Number(profile))
     : [];
-  if (dolbyVisionProfiles.length > 0 && !codecsVideo.includes("hevc")) {
+  const progressiveCodecsVideo = [...codecsVideo];
+  if (dolbyVisionProfiles.length > 0 && !progressiveCodecsVideo.includes("hevc")) {
     // Every Dolby Vision profile probed above uses an HEVC base layer. The
-    // planner requires the flat base-codec claim as well as the HDR profile.
-    codecsVideo.push("hevc");
+    // planner requires the flat base-codec claim as well as the HDR profile,
+    // but this media-element evidence must not leak into hls.js' MSE path.
+    progressiveCodecsVideo.push("hevc");
   }
   const hdrDetails = {
     // Generic HDR output eligibility does not prove either static HDR format.
@@ -163,15 +170,22 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     hdr10_plus: false,
     hlg: false,
     dolby_vision_profiles: dolbyVisionProfiles,
-    dolby_vision_profile_levels: dolbyVisionProfiles.map((profile) => ({
-      profile,
-      max_level: DOLBY_VISION_PROBE_LEVEL,
-    })),
+    dolby_vision_profile_levels: dolbyVisionProfiles.map((profile) => {
+      const profileProbe = DOLBY_VISION_PROFILE_PROBES[profile]!;
+      return {
+        profile,
+        max_level: profileProbe.maxLevel,
+        ...(profileProbe.blCompatibilityIds
+          ? { bl_compatibility_ids: profileProbe.blCompatibilityIds }
+          : {}),
+      };
+    }),
   };
 
   return {
     containers,
     codecsVideo,
+    progressiveCodecsVideo,
     codecsAudio,
     maxResolution,
     hdr,

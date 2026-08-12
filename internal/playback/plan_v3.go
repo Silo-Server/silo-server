@@ -772,9 +772,13 @@ func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartReques
 }
 
 func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartRequestV3) bool {
-	return source.DynamicRange == DynamicRangeDolbyVisionV3 && source.DVProfile == 7 &&
-		clientSupportsDVProfileV3(request, source, 8) &&
-		clientTransformationAvailableV3(request, ClientDV7ToDV81V3, ClientDVTransformVersionV3)
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 7 ||
+		!clientTransformationAvailableV3(request, ClientDV7ToDV81V3, ClientDVTransformVersionV3) {
+		return false
+	}
+	// The registered conversion recipe produces Profile 8.1.
+	source.DVBLCompatID = 1
+	return clientSupportsDVProfileV3(request, source, 8)
 }
 
 func canClientTransformDV7ToHDR10V3(source SourceDescriptorV3, request StartRequestV3) bool {
@@ -1193,15 +1197,14 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	case DynamicRangeHLGV3:
 		return hdr.HLG
 	case DynamicRangeDolbyVisionV3:
-		profile := plan.Source.DVProfile
+		candidate := plan.Source
 		for _, transformation := range plan.Transformations {
 			if transformation.Name == ClientDV7ToDV81V3 {
-				profile = 8
+				candidate.DVProfile = 8
+				candidate.DVBLCompatID = 1
 				break
 			}
 		}
-		candidate := plan.Source
-		candidate.DVProfile = profile
 		return hdrSupportsDolbyVisionSourceV3(hdr, candidate)
 	default:
 		return false
@@ -1212,21 +1215,28 @@ func hdrSupportsDolbyVisionSourceV3(hdr HDRCapabilitiesV3, source SourceDescript
 	if !containsIntV3(hdr.DolbyVisionProfiles, source.DVProfile) {
 		return false
 	}
-	maxLevel := 0
+	var matchedCapability DolbyVisionProfileCapabilityV3
+	foundCapability := false
 	for _, capability := range hdr.DolbyVisionProfileLevels {
-		if capability.Profile == source.DVProfile && (maxLevel == 0 || capability.MaxLevel < maxLevel) {
-			maxLevel = capability.MaxLevel
+		if capability.Profile == source.DVProfile {
+			matchedCapability = capability
+			foundCapability = true
+			break
 		}
 	}
-	if maxLevel == 0 {
+	if !foundCapability {
 		// Existing clients predate level-bounded Dolby Vision claims. Once a
 		// client sends any bounds, every advertised profile must have one.
 		return len(hdr.DolbyVisionProfileLevels) == 0
 	}
-	if source.DVLevel > 0 {
-		return source.DVLevel <= maxLevel
+	if len(matchedCapability.BLCompatibilityIDs) > 0 &&
+		!containsIntV3(matchedCapability.BLCompatibilityIDs, source.DVBLCompatID) {
+		return false
 	}
-	return dolbyVisionSourceFitsLevelV3(source, maxLevel)
+	if source.DVLevel > 0 {
+		return source.DVLevel <= matchedCapability.MaxLevel
+	}
+	return dolbyVisionSourceFitsLevelV3(source, matchedCapability.MaxLevel)
 }
 
 func dolbyVisionSourceFitsLevelV3(source SourceDescriptorV3, maxLevel int) bool {

@@ -199,8 +199,9 @@ type HDRCapabilitiesV3 struct {
 }
 
 type DolbyVisionProfileCapabilityV3 struct {
-	Profile  int `json:"profile"`
-	MaxLevel int `json:"max_level"`
+	Profile            int   `json:"profile"`
+	MaxLevel           int   `json:"max_level"`
+	BLCompatibilityIDs []int `json:"bl_compatibility_ids,omitempty"`
 }
 
 type AudioPassthroughV3 struct {
@@ -980,9 +981,27 @@ func validateHDRCapabilitiesV3(hdr *HDRCapabilitiesV3) error {
 	if len(hdr.DolbyVisionProfiles) > 16 || len(hdr.DolbyVisionProfileLevels) > 16 {
 		return errors.New("dolby vision profile list exceeds supported size")
 	}
+	seenProfiles := make(map[int]struct{}, len(hdr.DolbyVisionProfileLevels))
 	for _, capability := range hdr.DolbyVisionProfileLevels {
 		if capability.Profile <= 0 || capability.MaxLevel < 1 || capability.MaxLevel > 13 {
 			return errors.New("invalid dolby vision profile level capability")
+		}
+		if _, exists := seenProfiles[capability.Profile]; exists {
+			return errors.New("duplicate dolby vision profile level capability")
+		}
+		seenProfiles[capability.Profile] = struct{}{}
+		if len(capability.BLCompatibilityIDs) > 16 {
+			return errors.New("dolby vision base-layer compatibility list exceeds supported size")
+		}
+		seenCompatibilityIDs := make(map[int]struct{}, len(capability.BLCompatibilityIDs))
+		for _, compatibilityID := range capability.BLCompatibilityIDs {
+			if compatibilityID < 0 || compatibilityID > 15 {
+				return errors.New("invalid dolby vision base-layer compatibility id")
+			}
+			if _, exists := seenCompatibilityIDs[compatibilityID]; exists {
+				return errors.New("duplicate dolby vision base-layer compatibility id")
+			}
+			seenCompatibilityIDs[compatibilityID] = struct{}{}
 		}
 	}
 	return nil
