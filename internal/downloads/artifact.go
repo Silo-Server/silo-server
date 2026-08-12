@@ -36,6 +36,10 @@ type Artifact struct {
 	AudioTrackIndex   int
 	TargetBitrateKbps int
 	OutputPath        string
+	OriginNodeID      int
+	OriginNodeURL     string
+	OriginNodeGroup   string
+	OriginArtifactID  string
 	FileSize          int64
 	Status            string
 	ErrorMessage      string

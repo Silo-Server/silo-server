@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 )
 
@@ -110,7 +111,7 @@ func TestArtifactQueueClaimAndLeaseRecovery(t *testing.T) {
 	if err != nil || claim2.ID != row.ID || claim2.Attempts != 2 {
 		t.Fatalf("reclaim ClaimNext = (%+v, %v), want attempts=2", claim2, err)
 	}
-	if applied, err := repo.MarkReady(ctx, row.ID, "worker-2", claim2.OutputPath, 4242); err != nil || !applied {
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker-2", claim2.OutputPath, 0, "", "", "", 4242); err != nil || !applied {
 		t.Fatalf("MarkReady = (%v, %v), want (true, nil)", applied, err)
 	}
 	done, err := repo.GetByKey(ctx, fileID, "transcode", "hash-recovery")
@@ -181,7 +182,7 @@ func TestArtifactMarkFencedByOwner(t *testing.T) {
 	}
 
 	// A non-owner cannot mark the job ready or failed.
-	if applied, err := repo.MarkReady(ctx, row.ID, "owner-2", "/tmp/x.mp4", 10); err != nil || applied {
+	if applied, err := repo.MarkReady(ctx, row.ID, "owner-2", "/tmp/x.mp4", 0, "", "", "", 10); err != nil || applied {
 		t.Fatalf("MarkReady(non-owner) = (%v, %v), want (false, nil)", applied, err)
 	}
 	if _, applied, err := repo.MarkFailedOrRetry(ctx, row.ID, "owner-2", "boom", time.Second); err != nil || applied {
@@ -195,8 +196,74 @@ func TestArtifactMarkFencedByOwner(t *testing.T) {
 	}
 
 	// The real owner succeeds.
-	if applied, err := repo.MarkReady(ctx, row.ID, "owner-1", "/tmp/x.mp4", 10); err != nil || !applied {
+	if applied, err := repo.MarkReady(ctx, row.ID, "owner-1", "/tmp/x.mp4", 0, "", "", "", 10); err != nil || !applied {
 		t.Fatalf("MarkReady(owner) = (%v, %v), want (true, nil)", applied, err)
+	}
+}
+
+func TestArtifactRemoteLocatorRoundTripsAndRequeueClearsIt(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-remote-locator"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", "", 17, "http://transcode", "host-a", "artifact-opaque", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	ready, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready.OutputPath != "" || ready.OriginNodeID != 17 || ready.OriginNodeURL != "http://transcode" || ready.OriginNodeGroup != "host-a" || ready.OriginArtifactID != "artifact-opaque" || ready.FileSize != 4242 {
+		t.Fatalf("ready artifact = %+v", ready)
+	}
+	if err := repo.Requeue(ctx, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.OriginNodeID != 0 || queued.OriginNodeURL != "" || queued.OriginNodeGroup != "" || queued.OriginArtifactID != "" {
+		t.Fatalf("requeued artifact retained remote locator: %+v", queued)
+	}
+}
+
+func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-remote-size-mismatch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", row.OutputPath, 17, "http://transcode", "host-a", "artifact-truncated", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+
+	preparer := &lifecycleTestPreparer{stat: downloadprepare.Result{ArtifactID: "artifact-truncated", FileSize: 42}}
+	manager := &ArtifactManager{
+		repo:      repo,
+		downloads: NewRepository(pool),
+		preparer:  preparer,
+	}
+	manager.recover(ctx)
+
+	got, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != ArtifactQueued || got.OriginArtifactID != "" {
+		t.Fatalf("recovered artifact = %+v, want queued without remote locator", got)
+	}
+	if preparer.deleted != "artifact-truncated" {
+		t.Fatalf("deleted = %q, want artifact-truncated", preparer.deleted)
 	}
 }
 

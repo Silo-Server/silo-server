@@ -289,7 +289,7 @@ func TestReconcileLinkedDownloads(t *testing.T) {
 	if _, err := arepo.ClaimNext(ctx, "w", time.Minute); err != nil {
 		t.Fatalf("claim ready artifact: %v", err)
 	}
-	if ok, err := arepo.MarkReady(ctx, readyArt.ID, "w", "/tmp/ready.mp4", 4242); err != nil || !ok {
+	if ok, err := arepo.MarkReady(ctx, readyArt.ID, "w", "/tmp/ready.mp4", 0, "", "", "", 4242); err != nil || !ok {
 		t.Fatalf("MarkReady = (%v, %v)", ok, err)
 	}
 

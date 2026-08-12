@@ -1,25 +1,60 @@
-// Package downloadprepare defines the internal API used to execute a prepared
-// download artifact on a dedicated transcode node.
+// Package downloadprepare defines the internal API used to create and relay a
+// prepared download artifact on a dedicated transcode node.
 package downloadprepare
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
+const ArtifactDirectoryName = "download-artifacts"
+
+var (
+	artifactIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	ErrArtifactNotFound = errors.New("remote download artifact not found")
+)
+
+func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		baseTransport = &http.Transport{}
+	}
+	transport := baseTransport.Clone()
+	transport.ResponseHeaderTimeout = responseHeaderTimeout
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+var (
+	// Preparing a full file can legitimately take hours. Its lease-bound request
+	// context supplies cancellation, so imposing a response-header timeout here
+	// would abort every encode longer than that timeout before the node replies.
+	defaultPrepareHTTPClient = newHTTPClient(0)
+	defaultHTTPClient        = newHTTPClient(60 * time.Second)
+)
+
 // Request is the environment-neutral portion of a prepared-file recipe. The
-// transcode node supplies its own FFmpeg path, hardware mode, and device list.
+// transcode node supplies its own FFmpeg path, hardware mode, device list, and
+// output path. ArtifactID is an opaque handle, never a caller-selected path.
 type Request struct {
-	JobID               string  `json:"job_id"`
+	ArtifactID          string  `json:"artifact_id"`
 	InputPath           string  `json:"input_path"`
-	OutputPath          string  `json:"output_path"`
 	SourceVideoCodec    string  `json:"source_video_codec,omitempty"`
 	SourceVideoProfile  string  `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth int     `json:"source_video_bit_depth,omitempty"`
@@ -32,13 +67,21 @@ type Request struct {
 	TotalDuration       float64 `json:"total_duration,omitempty"`
 }
 
+// Result identifies a completed artifact without exposing the node's local
+// filesystem layout.
+type Result struct {
+	ArtifactID string `json:"artifact_id"`
+	FileSize   int64  `json:"file_size"`
+}
+
+func ValidArtifactID(id string) bool { return artifactIDPattern.MatchString(id) }
+
 // NewRequest freezes the byte-affecting recipe while deliberately omitting
 // environment-specific execution settings.
-func NewRequest(jobID string, opts playback.TranscodeOpts, outputPath string) Request {
+func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 	return Request{
-		JobID:               jobID,
+		ArtifactID:          artifactID,
 		InputPath:           opts.InputPath,
-		OutputPath:          outputPath,
 		SourceVideoCodec:    opts.SourceVideoCodec,
 		SourceVideoProfile:  opts.SourceVideoProfile,
 		SourceVideoBitDepth: opts.SourceVideoBitDepth,
@@ -77,43 +120,172 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 	}
 }
 
-// RemotePreparer executes one request on a selected transcode node.
+// RemotePreparer executes and manages artifacts on a selected transcode node.
 type RemotePreparer interface {
-	Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) error
+	Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) (Result, error)
+	Stat(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Result, error)
+	Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error
 }
 
-// HTTPPreparer implements RemotePreparer over the bearer-protected node API.
-// The request context is the only overall timeout because a full-file encode
-// may legitimately run for hours; artifact lease loss cancels that context.
+// HTTPPreparer implements RemotePreparer over bearer-protected node APIs. A
+// full-file prepare has no transport timeout; its caller owns cancellation.
+// Metadata and relay operations use a bounded response-header wait by default.
 type HTTPPreparer struct {
 	Client *http.Client
 }
 
-func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) error {
+func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) (Result, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("remote download prepare: marshal request: %w", err)
+		return Result{}, fmt.Errorf("remote download prepare: marshal request: %w", err)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(nodeURL, "/")+"/downloads/prepare", bytes.NewReader(body))
+	httpReq, err := p.request(ctx, http.MethodPost, nodeURL, jwtSecret, "/downloads/prepare", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("remote download prepare: build request: %w", err)
+		return Result{}, fmt.Errorf("remote download prepare: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+jwtSecret)
-
-	client := p.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(httpReq)
+	resp, err := p.prepareClient().Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("remote download prepare: request: %w", err)
+		return Result{}, fmt.Errorf("remote download prepare: request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("remote download prepare: node returned %d: %s", resp.StatusCode, strings.TrimSpace(string(message)))
+	return decodeResult(resp, "remote download prepare")
+}
+
+func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Result, error) {
+	if !ValidArtifactID(artifactID) {
+		return Result{}, fmt.Errorf("remote download artifact stat: invalid artifact id")
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	httpReq, err := p.request(ctx, http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	if err != nil {
+		return Result{}, fmt.Errorf("remote download artifact stat: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return Result{}, fmt.Errorf("remote download artifact stat: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return Result{}, ErrArtifactNotFound
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return Result{}, responseError(resp, "remote download artifact stat")
+	}
+	size, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	if err != nil || size < 0 {
+		return Result{}, fmt.Errorf("remote download artifact stat: invalid content length")
+	}
+	return Result{ArtifactID: artifactID, FileSize: size}, nil
+}
+
+func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error {
+	if !ValidArtifactID(artifactID) {
+		return fmt.Errorf("remote download artifact delete: invalid artifact id")
+	}
+	httpReq, err := p.request(ctx, http.MethodDelete, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	if err != nil {
+		return fmt.Errorf("remote download artifact delete: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("remote download artifact delete: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode != http.StatusNoContent {
+		return responseError(resp, "remote download artifact delete")
+	}
 	return nil
+}
+
+// Open returns an authenticated streaming response for a GET or HEAD relay.
+// The caller owns closing the body and copying only safe response headers.
+func (p HTTPPreparer) Open(ctx context.Context, nodeURL, jwtSecret, artifactID, method string, sourceHeader http.Header) (*http.Response, error) {
+	if !ValidArtifactID(artifactID) {
+		return nil, fmt.Errorf("remote download artifact open: invalid artifact id")
+	}
+	if method != http.MethodGet && method != http.MethodHead {
+		return nil, fmt.Errorf("remote download artifact open: unsupported method %s", method)
+	}
+	httpReq, err := p.request(ctx, method, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("remote download artifact open: %w", err)
+	}
+	for _, name := range []string{"Range", "If-Match", "If-Range", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since"} {
+		if value := sourceHeader.Get(name); value != "" {
+			httpReq.Header.Set(name, value)
+		}
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("remote download artifact open: request: %w", err)
+	}
+	return resp, nil
+}
+
+func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, path string, body io.Reader) (*http.Request, error) {
+	base, err := url.Parse(strings.TrimSpace(nodeURL))
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
+		return nil, fmt.Errorf("invalid node URL")
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + path
+	base.RawQuery = ""
+	base.Fragment = ""
+	req, err := http.NewRequestWithContext(ctx, method, base.String(), body)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+jwtSecret)
+	return req, nil
+}
+
+func (p HTTPPreparer) client() *http.Client {
+	if p.Client != nil {
+		return p.Client
+	}
+	return defaultHTTPClient
+}
+
+func (p HTTPPreparer) prepareClient() *http.Client {
+	if p.Client != nil {
+		return p.Client
+	}
+	return defaultPrepareHTTPClient
+}
+
+// CopyResponseHeaders forwards only representation/range metadata that is safe
+// across the transcode-node relay boundary.
+func CopyResponseHeaders(dst, src http.Header) {
+	for _, name := range []string{
+		"Accept-Ranges", "Content-Disposition", "Content-Length", "Content-Range",
+		"Content-Type", "ETag", "Last-Modified",
+	} {
+		if value := src.Get(name); value != "" {
+			dst.Set(name, value)
+		}
+	}
+}
+
+func decodeResult(resp *http.Response, operation string) (Result, error) {
+	if resp.StatusCode == http.StatusNotFound {
+		return Result{}, ErrArtifactNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Result{}, responseError(resp, operation)
+	}
+	var result Result
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&result); err != nil {
+		return Result{}, fmt.Errorf("%s: decode response: %w", operation, err)
+	}
+	if !ValidArtifactID(result.ArtifactID) || result.FileSize < 0 {
+		return Result{}, fmt.Errorf("%s: invalid response", operation)
+	}
+	return result, nil
+}
+
+func responseError(resp *http.Response, operation string) error {
+	message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return fmt.Errorf("%s: node returned %d: %s", operation, resp.StatusCode, strings.TrimSpace(string(message)))
 }

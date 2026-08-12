@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -21,20 +22,51 @@ const (
 	artifactMaxAttempts = 3
 )
 
-// EncodePreparer produces a single finalized file for an artifact. The default
-// implementation calls playback.PrepareFile; tests substitute a fake.
+// PreparedArtifact describes either a local prepared file or an opaque artifact
+// retained by a transcode node.
+type PreparedArtifact struct {
+	OutputPath       string
+	OriginNodeID     int
+	OriginNodeURL    string
+	OriginNodeGroup  string
+	OriginArtifactID string
+	FileSize         int64
+}
+
+func (a PreparedArtifact) Remote() bool {
+	return a.OriginNodeID > 0 && a.OriginNodeURL != "" && a.OriginArtifactID != ""
+}
+
+// EncodePreparer produces a single finalized artifact. The default
+// implementation calls playback.PrepareFile and returns a local path; pooled
+// implementations may return an opaque remote locator instead.
 type EncodePreparer interface {
-	PrepareFile(ctx context.Context, opts playback.TranscodeOpts, outputPath string) error
+	PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error)
 }
 
 type playbackPreparer struct{}
 
-func (playbackPreparer) PrepareFile(ctx context.Context, opts playback.TranscodeOpts, outputPath string) error {
-	return playback.PrepareFile(ctx, opts, outputPath)
+func (playbackPreparer) PrepareFile(ctx context.Context, _ string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+	if err := playback.PrepareFile(ctx, opts, outputPath); err != nil {
+		return PreparedArtifact{}, err
+	}
+	stat, err := os.Stat(outputPath)
+	if err != nil {
+		return PreparedArtifact{}, fmt.Errorf("stat prepared artifact: %w", err)
+	}
+	return PreparedArtifact{OutputPath: outputPath, FileSize: stat.Size()}, nil
 }
 
 // NewPlaybackPreparer returns the production EncodePreparer (ffmpeg-backed).
 func NewPlaybackPreparer() EncodePreparer { return playbackPreparer{} }
+
+// remoteArtifactLifecycle is implemented by the pooled preparer so recovery
+// and quota cleanup can manage node-local artifacts without filesystem access.
+type remoteArtifactLifecycle interface {
+	ResolveArtifact(artifact *Artifact)
+	StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error)
+	DeleteArtifact(ctx context.Context, artifact *Artifact) error
+}
 
 // ArtifactNotifier publishes an event when a linked download changes state.
 type ArtifactNotifier func(ctx context.Context, d *Download)
@@ -116,6 +148,9 @@ func (m *ArtifactManager) Ready(ctx context.Context, id string) (*Artifact, erro
 	}
 	if a.Status != ArtifactReady {
 		return nil, fmt.Errorf("artifact is %s: %w", a.Status, ErrDownloadNotActive)
+	}
+	if lifecycle, ok := m.preparer.(remoteArtifactLifecycle); ok && a.OriginArtifactID != "" {
+		lifecycle.ResolveArtifact(a)
 	}
 	_ = m.repo.TouchLastUsed(ctx, id)
 	return a, nil
@@ -260,10 +295,43 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 		return
 	}
 	for _, a := range ready {
-		if a.OutputPath == "" {
-			continue
+		missing := false
+		remote := false
+		var lifecycle remoteArtifactLifecycle
+		if a.OriginArtifactID != "" {
+			var ok bool
+			lifecycle, ok = m.preparer.(remoteArtifactLifecycle)
+			if !ok {
+				slog.WarnContext(ctx, "remote download artifact cannot be checked", "component", "downloads", "artifact_id", a.ID)
+				continue
+			}
+			remote = true
+			result, statErr := lifecycle.StatArtifact(ctx, a)
+			switch {
+			case errors.Is(statErr, downloadprepare.ErrArtifactNotFound):
+				missing = true
+			case statErr != nil:
+				// A node or network outage is not evidence that durable bytes are
+				// gone; retain the ready locator and retry the check next sweep.
+				slog.WarnContext(ctx, "remote download artifact check failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", statErr)
+				continue
+			case result.FileSize != a.FileSize:
+				missing = true
+			}
+		} else if a.OutputPath != "" {
+			_, statErr := os.Stat(a.OutputPath)
+			missing = statErr != nil
 		}
-		if _, statErr := os.Stat(a.OutputPath); statErr != nil {
+		if missing {
+			// Remove a nonzero-but-truncated artifact before requeueing. Otherwise
+			// the node's idempotent prepare endpoint would accept the same stale
+			// file and merely teach the database its incorrect size.
+			if remote {
+				if err := lifecycle.DeleteArtifact(ctx, a); err != nil {
+					slog.WarnContext(ctx, "removing invalid remote download artifact failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
+					continue
+				}
+			}
 			slog.WarnContext(ctx, "download artifact output missing, re-queuing", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
 			if err := m.repo.Requeue(ctx, a.ID); err != nil {
 				slog.WarnContext(ctx, "re-queue artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -332,7 +400,8 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	}
 
 	opts := m.buildOpts(file, a)
-	if err := m.preparer.PrepareFile(hbCtx, opts, a.OutputPath); err != nil {
+	prepared, err := m.preparer.PrepareFile(hbCtx, a.ID, opts, a.OutputPath)
+	if err != nil {
 		switch {
 		case ctx.Err() != nil:
 			// Parent shutting down: leave the job 'running'; its lease expires and
@@ -349,21 +418,24 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 		}
 	}
 
-	fi, err := os.Stat(a.OutputPath)
-	if err != nil {
-		// A remote node can report success while writing to a path that is not
-		// actually shared with the API node. Never publish that artifact: retry
-		// so another node or the local fallback can produce an observable file.
-		msg := fmt.Sprintf("prepared artifact output unavailable: %v", err)
-		slog.WarnContext(ctx, "prepared artifact output unavailable", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath, "error", err)
+	remoteFieldsPresent := prepared.OriginNodeID != 0 || prepared.OriginNodeURL != "" || prepared.OriginNodeGroup != "" || prepared.OriginArtifactID != ""
+	if prepared.FileSize < 0 || (remoteFieldsPresent && !prepared.Remote()) || (!prepared.Remote() && prepared.OutputPath == "") {
+		msg := "prepared artifact returned an invalid storage locator"
+		slog.WarnContext(ctx, "prepared artifact returned an invalid storage locator", "component", "downloads", "artifact_id", a.ID)
 		m.failJob(ctx, a, msg)
 		return
 	}
-	size := fi.Size()
+	size := prepared.FileSize
 	// Fenced on lease ownership: if we lost the lease between encode and commit,
 	// applied is false and the current owner is responsible for flipping links —
 	// do not flip them here or we would race/duplicate that owner's work.
-	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, a.OutputPath, size)
+	outputPath := prepared.OutputPath
+	if prepared.Remote() {
+		// Keep the deterministic API-local fallback path in the row so a later
+		// remote-missing requeue can safely fall back to integrated preparation.
+		outputPath = a.OutputPath
+	}
+	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size)
 	if err != nil {
 		slog.ErrorContext(ctx, "marking artifact ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
@@ -514,10 +586,8 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 		if active {
 			continue
 		}
-		if a.OutputPath != "" {
-			if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
-				slog.WarnContext(ctx, "removing evicted artifact file failed", "component", "downloads", "artifact_id", a.ID, "error", err)
-			}
+		if !m.deleteArtifactBytes(ctx, a) {
+			continue
 		}
 		if err := m.repo.DeleteArtifact(ctx, a.ID); err != nil {
 			slog.WarnContext(ctx, "deleting evicted artifact row failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -564,19 +634,41 @@ func (m *ArtifactManager) sweepStale(ctx context.Context) {
 // removeArtifact deletes an artifact's output file, its .part leftover, and
 // its row. Used by the hygiene sweep for rows nothing can serve again.
 func (m *ArtifactManager) removeArtifact(ctx context.Context, a *Artifact, reason string) {
-	if a.OutputPath != "" {
-		if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
-			slog.WarnContext(ctx, "removing swept artifact file failed", "component", "downloads", "artifact_id", a.ID, "error", err)
-		}
-		if err := os.Remove(a.OutputPath + ".part"); err != nil && !os.IsNotExist(err) {
-			slog.WarnContext(ctx, "removing swept artifact partial failed", "component", "downloads", "artifact_id", a.ID, "error", err)
-		}
+	if !m.deleteArtifactBytes(ctx, a) {
+		return
 	}
 	if err := m.repo.DeleteArtifact(ctx, a.ID); err != nil {
 		slog.WarnContext(ctx, "deleting swept artifact row failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
 	slog.InfoContext(ctx, "swept stale download artifact", "component", "downloads", "artifact_id", a.ID, "reason", reason, "bytes", a.FileSize)
+}
+
+func (m *ArtifactManager) deleteArtifactBytes(ctx context.Context, a *Artifact) bool {
+	if a.OriginArtifactID != "" {
+		lifecycle, ok := m.preparer.(remoteArtifactLifecycle)
+		if !ok {
+			slog.WarnContext(ctx, "remote artifact cleanup unavailable", "component", "downloads", "artifact_id", a.ID)
+			return false
+		}
+		if err := lifecycle.DeleteArtifact(ctx, a); err != nil {
+			slog.WarnContext(ctx, "removing remote artifact failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
+			return false
+		}
+		return true
+	}
+	if a.OutputPath == "" {
+		return true
+	}
+	if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "removing artifact file failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+		return false
+	}
+	if err := os.Remove(a.OutputPath + ".part"); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "removing artifact partial failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+		return false
+	}
+	return true
 }
 
 // backoffFor returns the retry delay for the next attempt after a failure.

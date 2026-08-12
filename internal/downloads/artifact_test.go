@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestParamsHashStableAndDistinct(t *testing.T) {
@@ -46,6 +48,37 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 	}
 	if !strings.Contains(p1, "42_transcode_") {
 		t.Fatalf("output path missing identity components: %q", p1)
+	}
+}
+
+type lifecycleTestPreparer struct {
+	deleted   string
+	stat      downloadprepare.Result
+	statError error
+	deleteErr error
+}
+
+func (*lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+	return PreparedArtifact{}, nil
+}
+func (*lifecycleTestPreparer) ResolveArtifact(*Artifact) {}
+func (p *lifecycleTestPreparer) StatArtifact(context.Context, *Artifact) (downloadprepare.Result, error) {
+	return p.stat, p.statError
+}
+func (p *lifecycleTestPreparer) DeleteArtifact(_ context.Context, artifact *Artifact) error {
+	p.deleted = artifact.OriginArtifactID
+	return p.deleteErr
+}
+
+func TestArtifactManagerDeletesRemoteBytesThroughOwningNode(t *testing.T) {
+	preparer := &lifecycleTestPreparer{}
+	m := &ArtifactManager{preparer: preparer}
+	artifact := &Artifact{ID: "row-1", OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1"}
+	if !m.deleteArtifactBytes(context.Background(), artifact) {
+		t.Fatal("remote cleanup failed")
+	}
+	if preparer.deleted != "opaque-1" {
+		t.Fatalf("deleted = %q", preparer.deleted)
 	}
 }
 

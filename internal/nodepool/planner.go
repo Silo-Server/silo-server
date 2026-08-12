@@ -26,7 +26,7 @@ type SessionPlanner interface {
 // have no predictable bitrate, so implementations must not admit them onto a
 // proxy with a configured bandwidth cap.
 type DownloadPlanner interface {
-	PlanDownload(sessionID string) Plan
+	PlanDownload(sessionID string, preferredGroup ...string) Plan
 	ReleaseSession(sessionID string)
 }
 
@@ -35,6 +35,7 @@ type DownloadPlanner interface {
 // remote operation ends or falls back locally.
 type TranscodeWorkPlanner interface {
 	ReserveTranscodeWork(workID string) (*Node, func())
+	TranscodeNode(nodeID int) *Node
 }
 
 // reservation bridges the gap between assigning a session to a node and the
@@ -108,11 +109,25 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 	return p.PlanSessionWith(sessionID, currentTranscodeURL, needsTranscode, estBitrateKbps, nil)
 }
 
+// TranscodeNode returns the current pool record for a persistent node id. It
+// lets durable artifact locators follow an administrator-edited node URL/group.
+func (p *Planner) TranscodeNode(nodeID int) *Node {
+	if p == nil || p.transcodes == nil || nodeID == 0 {
+		return nil
+	}
+	for _, node := range p.transcodes.Nodes() {
+		if node != nil && node.ID == nodeID {
+			return node
+		}
+	}
+	return nil
+}
+
 // PlanDownload picks a healthy proxy for an unbounded file transfer. A
 // configured proxy bandwidth cap cannot be reserved accurately without a known
 // transfer rate, so capped proxies are excluded instead of being oversubscribed
 // during the egress meter's convergence window.
-func (p *Planner) PlanDownload(sessionID string) Plan {
+func (p *Planner) PlanDownload(sessionID string, preferredGroup ...string) Plan {
 	if p == nil || p.proxies == nil || sessionID == "" {
 		return Plan{}
 	}
@@ -123,7 +138,11 @@ func (p *Planner) PlanDownload(sessionID string) Plan {
 	p.pruneReservations(now)
 	delete(p.reserved, sessionID)
 
-	var candidates []*Node
+	group := ""
+	if len(preferredGroup) > 0 {
+		group = preferredGroup[0]
+	}
+	var candidates, fallback []*Node
 	for _, node := range p.proxies.Nodes() {
 		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
 			continue
@@ -131,12 +150,18 @@ func (p *Planner) PlanDownload(sessionID string) Plan {
 		if node.MaxBandwidthKbps != nil && *node.MaxBandwidthKbps > 0 {
 			continue
 		}
-		candidates = append(candidates, node)
+		fallback = append(fallback, node)
+		if group != "" && node.Group != nil && *node.Group == group {
+			candidates = append(candidates, node)
+		}
+	}
+	if group == "" || len(candidates) == 0 {
+		candidates = fallback
 	}
 	if len(candidates) == 0 {
 		return Plan{}
 	}
-	const rrKey = "download"
+	rrKey := "download:" + group
 	proxy := candidates[p.rr[rrKey]%len(candidates)]
 	p.rr[rrKey]++
 	p.reserved[sessionID] = &reservation{proxyURL: proxy.URL, createdAt: now}

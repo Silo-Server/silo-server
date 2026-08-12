@@ -2,12 +2,10 @@ package downloads
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
@@ -17,7 +15,8 @@ import (
 
 // NodeAwarePreparer keeps artifact queue ownership central while executing the
 // expensive FFmpeg process on a healthy transcode node when capacity permits.
-// Integrated installations and saturated node pools fall back to local work.
+// The node retains completed bytes behind an authenticated opaque-id endpoint;
+// integrated installations and unavailable pools fall back to local work.
 type NodeAwarePreparer struct {
 	local   EncodePreparer
 	planner nodepool.TranscodeWorkPlanner
@@ -37,47 +36,109 @@ func NewNodeAwarePreparer(local EncodePreparer, planner nodepool.TranscodeWorkPl
 	}
 }
 
-func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, opts playback.TranscodeOpts, outputPath string) error {
+func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
 	cfg := p.config()
 	jwtSecret := ""
 	if cfg != nil {
 		jwtSecret = strings.TrimSpace(cfg.Auth.JWTSecret)
 	}
-	// The default artifact directory is node-local. Remote preparation is safe
-	// only when the operator has deliberately configured a shared artifact path.
-	if cfg == nil || jwtSecret == "" || p.remote == nil || p.planner == nil || strings.TrimSpace(cfg.Download.ArtifactDir) == "" {
-		return p.local.PrepareFile(ctx, opts, outputPath)
+	if cfg == nil || jwtSecret == "" || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
+		return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
 	}
-	jobID := strings.TrimSuffix(filepath.Base(outputPath), filepath.Ext(outputPath))
-	node, release := p.planner.ReserveTranscodeWork("download-prepare-" + jobID)
+	node, release := p.planner.ReserveTranscodeWork("download-prepare-" + artifactID)
 	if node == nil {
-		return p.local.PrepareFile(ctx, opts, outputPath)
+		return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
 	}
 
-	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "job_id", jobID, "node", node.URL)
-	// A remote attempt gets its own staging output. If the HTTP connection fails
-	// while the node is still winding down FFmpeg, a local fallback can safely
-	// use outputPath.part without the two processes writing the same file.
-	remoteOutputPath := outputPath + ".remote-" + uuid.NewString() + ".mp4"
-	defer func() { _ = os.Remove(remoteOutputPath) }()
-	err := p.remote.Prepare(ctx, node.URL, jwtSecret, downloadprepare.NewRequest(jobID, opts, remoteOutputPath))
+	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+	result, err := p.remote.Prepare(ctx, node.URL, jwtSecret, downloadprepare.NewRequest(artifactID, opts))
 	release()
-	// PrepareFile publishes its staging output with an atomic rename, so a
-	// visible file is complete even if the HTTP response was lost afterward.
-	if _, statErr := os.Stat(remoteOutputPath); statErr == nil {
-		if renameErr := os.Rename(remoteOutputPath, outputPath); renameErr == nil {
-			return nil
-		} else {
-			err = renameErr
-		}
-	} else if err == nil {
-		err = statErr
+	if err == nil && result.ArtifactID == artifactID {
+		return remotePreparedArtifact(node, result), nil
+	}
+	if err == nil {
+		err = fmt.Errorf("remote download prepare returned artifact id %q, want %q", result.ArtifactID, artifactID)
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return PreparedArtifact{}, ctx.Err()
 	}
-	slog.WarnContext(ctx, "remote download artifact prepare unavailable; falling back to local", "component", "downloads", "job_id", jobID, "node", node.URL, "error", err)
-	return p.local.PrepareFile(ctx, opts, outputPath)
+	// A completed encode can outlive a lost HTTP response. Probe the same opaque
+	// id before falling back so retry/recovery does not duplicate expensive work.
+	if recovered, statErr := p.remote.Stat(ctx, node.URL, jwtSecret, artifactID); statErr == nil && recovered.ArtifactID == artifactID {
+		slog.InfoContext(ctx, "recovered completed download artifact after lost response", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
+		return remotePreparedArtifact(node, recovered), nil
+	} else if statErr == nil {
+		return PreparedArtifact{}, fmt.Errorf("remote download artifact recovery returned artifact id %q, want %q", recovered.ArtifactID, artifactID)
+	} else if !errors.Is(statErr, downloadprepare.ErrArtifactNotFound) {
+		slog.WarnContext(ctx, "remote download artifact recovery probe failed", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", statErr)
+		// The POST may have completed even though its response was lost. If the
+		// follow-up probe is also indeterminate, retry the same opaque id later
+		// instead of falling back locally and orphaning completed remote bytes.
+		return PreparedArtifact{}, errors.Join(err, fmt.Errorf("remote download artifact recovery probe: %w", statErr))
+	}
+	if ctx.Err() != nil {
+		return PreparedArtifact{}, ctx.Err()
+	}
+	slog.WarnContext(ctx, "remote download artifact prepare unavailable; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
+	return p.local.PrepareFile(ctx, artifactID, opts, outputPath)
+}
+
+func remotePreparedArtifact(node *nodepool.Node, result downloadprepare.Result) PreparedArtifact {
+	group := ""
+	if node.Group != nil {
+		group = *node.Group
+	}
+	return PreparedArtifact{
+		OriginNodeID:     node.ID,
+		OriginNodeURL:    strings.TrimRight(node.URL, "/"),
+		OriginNodeGroup:  group,
+		OriginArtifactID: result.ArtifactID,
+		FileSize:         result.FileSize,
+	}
+}
+
+func (p *NodeAwarePreparer) ResolveArtifact(artifact *Artifact) {
+	if artifact == nil || artifact.OriginNodeID == 0 || p.planner == nil {
+		return
+	}
+	node := p.planner.TranscodeNode(artifact.OriginNodeID)
+	if node == nil {
+		return
+	}
+	artifact.OriginNodeURL = strings.TrimRight(node.URL, "/")
+	artifact.OriginNodeGroup = ""
+	if node.Group != nil {
+		artifact.OriginNodeGroup = *node.Group
+	}
+}
+
+func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
+	p.ResolveArtifact(artifact)
+	secret, err := p.remoteCredentials(artifact)
+	if err != nil {
+		return downloadprepare.Result{}, err
+	}
+	return p.remote.Stat(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+}
+
+func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
+	p.ResolveArtifact(artifact)
+	secret, err := p.remoteCredentials(artifact)
+	if err != nil {
+		return err
+	}
+	return p.remote.Delete(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+}
+
+func (p *NodeAwarePreparer) remoteCredentials(artifact *Artifact) (string, error) {
+	if artifact == nil || strings.TrimSpace(artifact.OriginNodeURL) == "" || !downloadprepare.ValidArtifactID(artifact.OriginArtifactID) {
+		return "", errors.New("remote artifact locator is incomplete")
+	}
+	cfg := p.config()
+	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" || p.remote == nil {
+		return "", errors.New("remote artifact credentials are unavailable")
+	}
+	return strings.TrimSpace(cfg.Auth.JWTSecret), nil
 }
 
 func (p *NodeAwarePreparer) config() *config.Config {

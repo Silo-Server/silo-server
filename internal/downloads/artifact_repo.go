@@ -11,7 +11,8 @@ import (
 )
 
 const artifactColumns = `id, media_file_id, format, params_hash, container, codec_video, codec_audio,
-	resolution, audio_track_index, target_bitrate_kbps, output_path, file_size, status, error_message,
+	resolution, audio_track_index, target_bitrate_kbps, output_path,
+	origin_node_id, origin_node_url, origin_node_group, origin_artifact_id, file_size, status, error_message,
 	attempts, max_attempts, lease_owner, lease_expires_at, next_retry_at,
 	created_at, completed_at, last_used_at`
 
@@ -31,7 +32,8 @@ func scanArtifact(row pgx.Row) (*Artifact, error) {
 	var leaseOwner *string
 	if err := row.Scan(
 		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio,
-		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.OutputPath, &a.FileSize, &a.Status, &a.ErrorMessage,
+		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.OutputPath,
+		&a.OriginNodeID, &a.OriginNodeURL, &a.OriginNodeGroup, &a.OriginArtifactID, &a.FileSize, &a.Status, &a.ErrorMessage,
 		&a.Attempts, &a.MaxAttempts, &leaseOwner, &a.LeaseExpiresAt, &a.NextRetryAt,
 		&a.CreatedAt, &a.CompletedAt, &a.LastUsedAt,
 	); err != nil {
@@ -149,14 +151,15 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 // another node — cannot flip a row it no longer owns. Returns false when the
 // fence rejected the write (the lease was lost); the caller must then NOT flip
 // linked downloads, leaving that to the current owner.
-func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, fileSize int64) (bool, error) {
+func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, originNodeID int, originNodeURL, originNodeGroup, originArtifactID string, fileSize int64) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
-		 SET status = 'ready', output_path = $2, file_size = $3, error_message = '',
+		 SET status = 'ready', output_path = $2, origin_node_id = $3, origin_node_url = $4,
+		     origin_node_group = $5, origin_artifact_id = $6, file_size = $7, error_message = '',
 		     completed_at = now(), last_used_at = now(),
 		     lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL
-		 WHERE id = $1 AND lease_owner = $4 AND status = 'running'`,
-		id, outputPath, fileSize, owner,
+		 WHERE id = $1 AND lease_owner = $8 AND status = 'running'`,
+		id, outputPath, originNodeID, originNodeURL, originNodeGroup, originArtifactID, fileSize, owner,
 	)
 	if err != nil {
 		return false, fmt.Errorf("marking artifact ready: %w", err)
@@ -237,7 +240,8 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = 'queued', attempts = 0, error_message = '', next_retry_at = NULL,
-		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
+		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
+		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
 		 WHERE id = $1`,
 		id,
 	)

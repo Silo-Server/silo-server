@@ -59,6 +59,68 @@ func TestProxyDownloadServesAuthorizedRange(t *testing.T) {
 	}
 }
 
+func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/downloads/artifacts/artifact-1" {
+			t.Fatalf("origin path = %q", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer "+secret {
+			t.Fatalf("origin Authorization = %q", auth)
+		}
+		if got := r.Header.Get("Range"); got != "bytes=2-5" {
+			t.Fatalf("origin Range = %q", got)
+		}
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Disposition", `attachment; filename="artifact-1.mp4"`)
+		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Content-Range", "bytes 2-5/10")
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = io.WriteString(w, "2345")
+	}))
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:          "download-remote-1",
+		PlayMethod:         streamtoken.PlayMethodDownload,
+		TranscodeNode:      origin.URL,
+		DownloadArtifactID: "artifact-1",
+		UserID:             7,
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
+	req.Header.Set("Range", "bytes=2-5")
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusPartialContent || rr.Body.String() != "2345" {
+		t.Fatalf("status = %d body = %q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Range"); got != "bytes 2-5/10" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+}
+
+func TestProxyDownloadRejectsRemoteArtifactWithInvalidOpaqueID(t *testing.T) {
+	const secret = "download-proxy-secret"
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:          "download-remote-invalid",
+		PlayMethod:         streamtoken.PlayMethodDownload,
+		TranscodeNode:      "http://origin.invalid",
+		DownloadArtifactID: "../escape",
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestProxyDownloadRejectsPlaybackToken(t *testing.T) {
 	const secret = "download-proxy-secret"
 	token, err := streamtoken.Sign(streamtoken.Claims{

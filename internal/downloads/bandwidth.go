@@ -78,6 +78,16 @@ func (bm *BandwidthManager) getUserLimiter(userID int) *rate.Limiter {
 // ThrottledReader wraps an io.ReadSeeker with bandwidth limiting for the given user.
 // If no limits are configured, the original reader is returned as-is.
 func (bm *BandwidthManager) ThrottledReader(ctx context.Context, r io.ReadSeeker, userID int) io.ReadSeeker {
+	limited := bm.ThrottledStreamReader(ctx, r, userID)
+	if limited == r {
+		return r
+	}
+	return &throttledReadSeeker{Reader: limited, seeker: r}
+}
+
+// ThrottledStreamReader applies the same aggregate limits to a non-seekable
+// stream, such as an authenticated response relayed from a transcode node.
+func (bm *BandwidthManager) ThrottledStreamReader(ctx context.Context, r io.Reader, userID int) io.Reader {
 	if bm == nil {
 		return r
 	}
@@ -96,10 +106,18 @@ func (bm *BandwidthManager) ThrottledReader(ctx context.Context, r io.ReadSeeker
 	}
 }
 
-// throttledReader implements io.ReadSeeker with bandwidth limiting.
-// Seek is delegated directly (not throttled), only forward reads are limited.
+type throttledReadSeeker struct {
+	io.Reader
+	seeker io.Seeker
+}
+
+func (r *throttledReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	return r.seeker.Seek(offset, whence)
+}
+
+// throttledReader applies bandwidth limiting to forward reads.
 type throttledReader struct {
-	r         io.ReadSeeker
+	r         io.Reader
 	ctx       context.Context
 	serverLim *rate.Limiter
 	userLim   *rate.Limiter
@@ -137,10 +155,6 @@ func (t *throttledReader) Read(p []byte) (int, error) {
 		}
 	}
 	return n, err
-}
-
-func (t *throttledReader) Seek(offset int64, whence int) (int64, error) {
-	return t.r.Seek(offset, whence)
 }
 
 // BytesRead returns the total bytes read through this throttled reader.

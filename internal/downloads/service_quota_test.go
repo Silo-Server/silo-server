@@ -17,8 +17,8 @@ import (
 // test never drains the queue, so it is never invoked.
 type stubQuotaPreparer struct{}
 
-func (stubQuotaPreparer) PrepareFile(_ context.Context, _ playback.TranscodeOpts, _ string) error {
-	return nil
+func (stubQuotaPreparer) PrepareFile(_ context.Context, _ string, _ playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
+	return PreparedArtifact{OutputPath: outputPath}, nil
 }
 
 // TestArtifactQuotaCheckedBeforeEnqueue pins two quota invariants for

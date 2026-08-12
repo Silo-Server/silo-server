@@ -135,11 +135,10 @@ func TestHandleDownloadPrepareWritesConfiguredSharedArtifact(t *testing.T) {
 	}
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	server.watcher.Config().Playback.HWAccel = "none"
-	outputPath := filepath.Join(artifactDir, "artifact.mp4")
+	outputPath := filepath.Join(artifactDir, "artifact-1.mp4")
 	body, err := json.Marshal(downloadprepare.Request{
-		JobID:            "artifact-1",
+		ArtifactID:       "artifact-1",
 		InputPath:        "/media/movie.mkv",
-		OutputPath:       outputPath,
 		TargetCodecVideo: "copy",
 		TargetCodecAudio: "copy",
 		AudioTrackIndex:  -1,
@@ -156,6 +155,13 @@ func TestHandleDownloadPrepareWritesConfiguredSharedArtifact(t *testing.T) {
 	}
 	if _, err := os.Stat(outputPath); err != nil {
 		t.Fatalf("prepared output: %v", err)
+	}
+	var result downloadprepare.Result
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ArtifactID != "artifact-1" || result.FileSize < 0 || strings.Contains(rr.Body.String(), artifactDir) {
+		t.Fatalf("prepare result = %+v body=%s", result, rr.Body.String())
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after prepare = %d, want 0", got)
@@ -175,9 +181,8 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	server.watcher.Config().Playback.HWAccel = "none"
 	body, err := json.Marshal(downloadprepare.Request{
-		JobID:            "artifact-tracking",
+		ArtifactID:       "artifact-tracking",
 		InputPath:        "/media/movie.mkv",
-		OutputPath:       filepath.Join(artifactDir, "artifact.mp4"),
 		TargetCodecVideo: "copy",
 		TargetCodecAudio: "copy",
 		AudioTrackIndex:  -1,
@@ -227,13 +232,12 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 	}
 }
 
-func TestHandleDownloadPrepareRejectsOutputOutsideArtifactRoot(t *testing.T) {
+func TestHandleDownloadPrepareRejectsInvalidArtifactID(t *testing.T) {
 	server := newTestServer(t)
 	server.watcher.Config().Download.ArtifactDir = t.TempDir()
 	body, err := json.Marshal(downloadprepare.Request{
-		JobID:            "artifact-2",
+		ArtifactID:       "../artifact-2",
 		InputPath:        "/media/movie.mkv",
-		OutputPath:       filepath.Join(t.TempDir(), "escape.mp4"),
 		TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac",
 	})
@@ -252,7 +256,7 @@ func TestHandleDownloadPrepareRejectsOutputOutsideArtifactRoot(t *testing.T) {
 func TestHandleDownloadPrepareRejectsUnavailableConfig(t *testing.T) {
 	server := newTestServer(t)
 	server.watcher.SetConfigForTest(nil)
-	body := []byte(`{"job_id":"artifact-3","input_path":"/media/movie.mkv","output_path":"/artifacts/movie.mp4"}`)
+	body := []byte(`{"artifact_id":"artifact-3","input_path":"/media/movie.mkv"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
@@ -282,6 +286,58 @@ func TestDownloadPrepareRouteRequiresNodeBearer(t *testing.T) {
 	server.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
+	server := newTestServer(t)
+	root := nodeDownloadArtifactRoot(server.watcher.Config())
+	if want := filepath.Join(server.watcher.Config().Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName); root != want {
+		t.Fatalf("artifact root = %q, want %q", root, want)
+	}
+	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
+		t.Fatal("artifact directory is not protected from the orphan transcode sweep")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "artifact-range.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/artifact-range", nil)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	req.Header.Set("Range", "bytes=3-6")
+	rr := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusPartialContent || rr.Body.String() != "3456" {
+		t.Fatalf("GET status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Range"); got != "bytes 3-6/10" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-range", nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+testSecret)
+	deleteRR := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status=%d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("artifact still exists: %v", err)
+	}
+}
+
+func TestDownloadArtifactRoutesRequireBearer(t *testing.T) {
+	server := newTestServer(t)
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodDelete} {
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr, httptest.NewRequest(method, "/downloads/artifacts/artifact-1", nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status=%d body=%s", method, rr.Code, rr.Body.String())
+		}
 	}
 }
 

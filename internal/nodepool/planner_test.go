@@ -590,3 +590,17 @@ func TestPlanDownloadSkipsBandwidthCappedProxiesAndReservesJobCapacity(t *testin
 		t.Fatal("download was not admitted after reservation release")
 	}
 }
+
+func TestPlanDownloadPrefersArtifactOriginGroup(t *testing.T) {
+	groupA, groupB := "host-a", "host-b"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{URL: "http://proxy-a", Group: &groupA, Enabled: true, Healthy: true},
+		{URL: "http://proxy-b", Group: &groupB, Enabled: true, Healthy: true},
+	})
+	planner := NewPlanner(proxies, NewTranscodePool())
+	plan := planner.PlanDownload("download-grouped", groupB)
+	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
+		t.Fatalf("plan = %+v, want proxy-b", plan)
+	}
+}

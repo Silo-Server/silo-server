@@ -239,9 +239,26 @@ func (s *Server) StartOrphanSweeper(ctx context.Context) {
 func (s *Server) activeSessionIDs() map[string]struct{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	active := make(map[string]struct{}, len(s.sessions))
+	active := make(map[string]struct{}, len(s.sessions)+1)
 	for id := range s.sessions {
 		active[id] = struct{}{}
+	}
+	// Node-local prepared downloads may live under the existing persistent
+	// transcode volume. They have their own lifecycle and must never be mistaken
+	// for an orphaned HLS session directory. Protect the top-level container for
+	// both the default and an explicitly nested artifact directory.
+	if s.watcher != nil {
+		cfg := s.watcher.Config()
+		if cfg == nil {
+			return active
+		}
+		if rel, err := filepath.Rel(cfg.Playback.TranscodeDir, nodeDownloadArtifactRoot(cfg)); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			if first, _, ok := strings.Cut(rel, string(filepath.Separator)); ok {
+				active[first] = struct{}{}
+			} else {
+				active[rel] = struct{}{}
+			}
+		}
 	}
 	return active
 }
@@ -409,6 +426,9 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/chapter-thumbnails/extract", s.handleChapterThumbnailExtract)
 		r.Post("/downloads/prepare", s.handleDownloadPrepare)
+		r.Head("/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact)
+		r.Get("/downloads/artifacts/{artifact_id}", s.handleDownloadArtifact)
+		r.Delete("/downloads/artifacts/{artifact_id}", s.handleDeleteDownloadArtifact)
 		r.Post("/transcode/start", s.handleStart)
 		r.Delete("/transcode/{session_id}", s.handleStop)
 		r.Get("/transcode/{session_id}/master.m3u8", s.handleManifest)
@@ -425,8 +445,8 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.JobID) == "" || strings.TrimSpace(req.InputPath) == "" || strings.TrimSpace(req.OutputPath) == "" {
-		http.Error(w, "job_id, input_path, and output_path are required", http.StatusBadRequest)
+	if !downloadprepare.ValidArtifactID(req.ArtifactID) || strings.TrimSpace(req.InputPath) == "" {
+		http.Error(w, "a valid artifact_id and input_path are required", http.StatusBadRequest)
 		return
 	}
 
@@ -438,13 +458,16 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
-	artifactRoot := config.EffectiveDownloadArtifactDir(cfg.Download.ArtifactDir, cfg.Playback.TranscodeDir)
+	artifactRoot := nodeDownloadArtifactRoot(cfg)
 	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
 		http.Error(w, "artifact directory unavailable", http.StatusInternalServerError)
 		return
 	}
-	if !pathWithinRoot(artifactRoot, req.OutputPath) || !strings.EqualFold(filepath.Ext(req.OutputPath), ".mp4") {
-		http.Error(w, "output_path must be an mp4 under the configured artifact directory", http.StatusBadRequest)
+	outputPath := filepath.Join(artifactRoot, req.ArtifactID+".mp4")
+	unlock := s.lockSessionLifecycle("download-artifact-" + req.ArtifactID)
+	defer unlock()
+	if stat, err := os.Stat(outputPath); err == nil && stat.Mode().IsRegular() && stat.Size() > 0 {
+		writeDownloadPrepareResult(w, req.ArtifactID, stat.Size())
 		return
 	}
 
@@ -453,7 +476,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	defer s.activeJobs.Add(-1)
 	if s.tracker != nil {
 		finishTracking := s.trackDownloadPrepare(jobCtx, nodesessions.SessionInfo{
-			SessionID:  "download-" + req.JobID,
+			SessionID:  "download-" + req.ArtifactID,
 			NodeURL:    s.tracker.NodeURL(),
 			NodeName:   s.tracker.NodeName(),
 			Type:       "download_prepare",
@@ -466,16 +489,90 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
-	if err := playback.PrepareFile(jobCtx, opts, req.OutputPath); err != nil {
+	if err := playback.PrepareFile(jobCtx, opts, outputPath); err != nil {
 		if jobCtx.Err() == nil {
-			slog.ErrorContext(jobCtx, "prepare download artifact", "component", "transcodenode", "job_id", req.JobID, "error", err)
+			slog.ErrorContext(jobCtx, "prepare download artifact", "component", "transcodenode", "artifact_id", req.ArtifactID, "error", err)
 		}
 		http.Error(w, "failed to prepare download artifact", http.StatusInternalServerError)
 		return
 	}
+	stat, err := os.Stat(outputPath)
+	if err != nil || !stat.Mode().IsRegular() {
+		http.Error(w, "prepared download artifact unavailable", http.StatusInternalServerError)
+		return
+	}
+	writeDownloadPrepareResult(w, req.ArtifactID, stat.Size())
+}
 
+func writeDownloadPrepareResult(w http.ResponseWriter, artifactID string, fileSize int64) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"job_id": req.JobID, "status": "ready"})
+	_ = json.NewEncoder(w).Encode(downloadprepare.Result{ArtifactID: artifactID, FileSize: fileSize})
+}
+
+func nodeDownloadArtifactRoot(cfg *config.Config) string {
+	if configured := strings.TrimSpace(cfg.Download.ArtifactDir); configured != "" {
+		return configured
+	}
+	if strings.TrimSpace(cfg.Playback.TranscodeDir) == "" {
+		return config.EffectiveDownloadArtifactDir("", "")
+	}
+	return filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
+}
+
+func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) {
+	artifactID := chi.URLParam(r, "artifact_id")
+	if !downloadprepare.ValidArtifactID(artifactID) {
+		http.NotFound(w, r)
+		return
+	}
+	cfg := s.watcher.Config()
+	if cfg == nil {
+		http.Error(w, "node not configured", http.StatusServiceUnavailable)
+		return
+	}
+	path := filepath.Join(nodeDownloadArtifactRoot(cfg), artifactID+".mp4")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "artifact unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	stat, err := f.Stat()
+	if err != nil || !stat.Mode().IsRegular() {
+		http.Error(w, "artifact unavailable", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+artifactID+`.mp4"`)
+	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
+	w.Header().Set("ETag", `"`+artifactID+`-`+strconv.FormatInt(stat.Size(), 10)+`"`)
+	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+}
+
+func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Request) {
+	artifactID := chi.URLParam(r, "artifact_id")
+	if !downloadprepare.ValidArtifactID(artifactID) {
+		http.NotFound(w, r)
+		return
+	}
+	cfg := s.watcher.Config()
+	if cfg == nil {
+		http.Error(w, "node not configured", http.StatusServiceUnavailable)
+		return
+	}
+	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
+	defer unlock()
+	path := filepath.Join(nodeDownloadArtifactRoot(cfg), artifactID+".mp4")
+	for _, candidate := range []string{path, path + ".part"} {
+		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+			http.Error(w, "failed to remove artifact", http.StatusInternalServerError)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // trackDownloadPrepare runs the monitoring lifecycle off the request path.

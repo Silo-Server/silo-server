@@ -235,7 +235,9 @@ DROP TABLE IF EXISTS public.download_artifacts;
 
 `params_hash = sha256(format | container | codec_video | codec_audio | resolution | audio_track_index | subtitle_burn_in)`.
 Two devices (or a web user and a phone) requesting the same 1080p H.264/AAC of the same source share one
-artifact. `last_used_at` drives LRU cleanup; `output_path` is on a configured artifact volume. The
+artifact. `last_used_at` drives LRU cleanup. `output_path` remains the deterministic API-local
+fallback target; distributed preparation additionally stores an opaque artifact id plus its
+transcode-node origin and group, allowing an authenticated proxy relay without a shared filesystem. The
 `attempts`/`lease_*`/`next_retry_at` columns make the table a **durable, recoverable job queue** (see the
 "Durable artifact queue" subsection) so a crash mid-encode cannot strand a download in `preparing`.
 
@@ -244,7 +246,8 @@ artifact. `last_used_at` drives LRU cleanup; `output_path` is on a configured ar
 `server_settings` is key/value, so new keys need no migration — written when an admin saves them, parsed
 in `internal/config/db_loader.go`:
 - `download.transcode_enabled` (bool, default **false**) — server gate for transcode-to-file.
-- `download.artifact_dir` (string) — artifact output volume; defaults under the existing transcode/temp root.
+- `download.artifact_dir` (string) — local artifact output volume; dedicated transcode nodes default
+  to a protected directory inside their existing transcode volume.
 - `download.max_concurrent_prepares` (int, default 2) — encode/remux worker-pool size.
 - `download.artifact_max_bytes` (int64, default 0 = unlimited) — LRU eviction budget for artifacts.
 

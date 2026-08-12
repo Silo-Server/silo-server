@@ -573,7 +573,7 @@ func (h *DownloadHandler) proxyTarget() (downloadFileResolver, string, bool) {
 }
 
 func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request, secret string, target *downloads.FileTarget, userID int, profileID string) (bool, error) {
-	if target == nil || strings.TrimSpace(target.Path) == "" {
+	if target == nil || (strings.TrimSpace(target.Path) == "" && target.OriginArtifactID == "") {
 		return false, fmt.Errorf("download target is empty")
 	}
 	if !target.ProxyEligible {
@@ -584,25 +584,35 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		reservationKey = fmt.Sprintf("direct-%d-%d", userID, target.MediaFileID)
 	}
 	sessionID := fmt.Sprintf("download-%s-%d", reservationKey, time.Now().UnixNano())
-	plan := h.nodePlanner.PlanDownload(sessionID)
+	plan := h.nodePlanner.PlanDownload(sessionID, target.OriginNodeGroup)
 	if plan.ProxyNode == nil {
 		return false, nil
 	}
 	releaseReservation := func() { h.nodePlanner.ReleaseSession(sessionID) }
+	mediaPath := target.Path
+	if target.OriginArtifactID != "" {
+		mediaPath = ""
+	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:   sessionID,
-		MediaPath:   target.Path,
-		PlayMethod:  streamtoken.PlayMethodDownload,
-		UserID:      userID,
-		ProfileID:   profileID,
-		MediaFileID: target.MediaFileID,
+		SessionID:          sessionID,
+		MediaPath:          mediaPath,
+		PlayMethod:         streamtoken.PlayMethodDownload,
+		TranscodeNode:      target.OriginNodeURL,
+		DownloadArtifactID: target.OriginArtifactID,
+		UserID:             userID,
+		ProfileID:          profileID,
+		MediaFileID:        target.MediaFileID,
 	}, secret, proxyDownloadTokenTTL)
 	if err != nil {
 		releaseReservation()
 		return false, fmt.Errorf("sign proxy download token: %w", err)
 	}
 	location := strings.TrimRight(plan.ProxyNode.URL, "/") + "/downloads/file/" + url.PathEscape(token)
-	cacheKey := strings.TrimRight(plan.ProxyNode.URL, "/") + "\x00" + target.Path
+	targetKey := target.Path
+	if target.OriginArtifactID != "" {
+		targetKey = target.OriginNodeURL + "\x00" + target.OriginArtifactID
+	}
+	cacheKey := strings.TrimRight(plan.ProxyNode.URL, "/") + "\x00" + targetKey
 	if !h.proxyCanServe(r.Context(), cacheKey, location) {
 		releaseReservation()
 		return false, nil

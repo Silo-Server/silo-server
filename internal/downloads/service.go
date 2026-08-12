@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -79,11 +80,14 @@ type Capability struct {
 // from the request-scoped resolver methods below; a path alone is never an
 // authorization grant.
 type FileTarget struct {
-	Path        string
-	DownloadID  string
-	MediaFileID int
-	// ProxyEligible is true only when the target lives on storage expected to
-	// be mounted at the same absolute path on proxy nodes.
+	Path             string
+	DownloadID       string
+	MediaFileID      int
+	OriginNodeURL    string
+	OriginNodeGroup  string
+	OriginArtifactID string
+	// ProxyEligible is true when a proxy can read the path directly or relay the
+	// opaque artifact from its owning transcode node.
 	ProxyEligible bool
 }
 
@@ -903,7 +907,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		if err != nil {
 			return err
 		}
-		return s.serveLocalFile(ctx, w, r, target.Path, userID)
+		return s.serveFileTarget(ctx, w, r, target, userID)
 	}
 
 	// Re-check policy — admin may have disabled downloads or revoked permission.
@@ -977,7 +981,7 @@ func (s *Service) ResolveManagedFile(ctx context.Context, userID int, profileID,
 		return nil, err
 	}
 	proxyEligible := proxyDeliveryAllowed(cfg)
-	return s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible && strings.TrimSpace(cfg.ArtifactDir) != "")
+	return s.resolveDownloadBytesTarget(ctx, dl, filter, proxyEligible, proxyEligible)
 }
 
 // PatchStatus lets a client confirm a managed entry's local state
@@ -1083,7 +1087,7 @@ func (s *Service) serveDownloadBytes(ctx context.Context, w http.ResponseWriter,
 	if err != nil {
 		return err
 	}
-	return s.serveLocalFile(ctx, w, r, target.Path, userID)
+	return s.serveFileTarget(ctx, w, r, target, userID)
 }
 
 func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, filter catalog.AccessFilter, sourceProxyEligible, preparedProxyEligible bool) (*FileTarget, error) {
@@ -1112,7 +1116,15 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		if !catalog.FileAllowedByAccess(&served, filter) {
 			return nil, catalog.ErrItemNotFound
 		}
-		return &FileTarget{Path: artifact.OutputPath, DownloadID: dl.ID, MediaFileID: file.ID, ProxyEligible: preparedProxyEligible}, nil
+		return &FileTarget{
+			Path:             artifact.OutputPath,
+			DownloadID:       dl.ID,
+			MediaFileID:      file.ID,
+			OriginNodeURL:    artifact.OriginNodeURL,
+			OriginNodeGroup:  artifact.OriginNodeGroup,
+			OriginArtifactID: artifact.OriginArtifactID,
+			ProxyEligible:    preparedProxyEligible,
+		}, nil
 	}
 	if file.MissingSince != nil {
 		return nil, catalog.ErrItemNotFound
@@ -1155,6 +1167,54 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
+	return nil
+}
+
+func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {
+	if target == nil {
+		return catalog.ErrItemNotFound
+	}
+	if target.OriginArtifactID == "" {
+		return s.serveLocalFile(ctx, w, r, target.Path, userID)
+	}
+	secret := ""
+	if s.artifacts != nil && s.artifacts.liveCfg != nil {
+		if cfg := s.artifacts.liveCfg(); cfg != nil {
+			secret = strings.TrimSpace(cfg.Auth.JWTSecret)
+		}
+	}
+	if secret == "" {
+		return errors.New("remote artifact credentials unavailable")
+	}
+	client := downloadprepare.HTTPPreparer{}
+	resp, err := client.Open(ctx, target.OriginNodeURL, secret, target.OriginArtifactID, r.Method, r.Header)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return catalog.ErrItemNotFound
+	}
+	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
+	}
+	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	if r.Method == http.MethodHead {
+		return nil
+	}
+	var reader io.Reader = resp.Body
+	if s.bandwidth != nil {
+		reader = s.bandwidth.ThrottledStreamReader(ctx, reader, userID)
+	}
+	if _, err := io.Copy(w, reader); err != nil {
+		// Headers and a partial body are already committed, so returning an error
+		// would make the API handler append JSON to the media response. The client
+		// detects truncation from Content-Length; retain a server-side record only.
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "remote download artifact relay interrupted", "component", "downloads", "artifact_id", target.OriginArtifactID, "error", err)
+		}
+	}
 	return nil
 }
 

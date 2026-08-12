@@ -507,6 +507,59 @@ func TestManagedFileRedirectsAuthorizedArtifactToProxy(t *testing.T) {
 	}
 }
 
+func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T) {
+	const secret = "download-proxy-secret"
+	proxyA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("wrong-group proxy was selected")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxyA.Close()
+	proxyB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Errorf("preflight method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxyB.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		managedTarget: &downloads.FileTarget{
+			DownloadID:       "dl-remote",
+			MediaFileID:      42,
+			OriginNodeURL:    "http://transcode-b.internal:8096",
+			OriginNodeGroup:  "host-b",
+			OriginArtifactID: "artifact-remote",
+			ProxyEligible:    true,
+		},
+	}
+	groupA, groupB := "host-a", "host-b"
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{
+		{URL: proxyA.URL, Group: &groupA, Enabled: true, Healthy: true},
+		{URL: proxyB.URL, Group: &groupB, Enabled: true, Healthy: true},
+	})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return secret })
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl-remote/file-proxy", nil, 7, "pA", "devA"), "dl-remote")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFileViaProxy(rec, req)
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	prefix := proxyB.URL + "/downloads/file/"
+	if !strings.HasPrefix(location, prefix) {
+		t.Fatalf("Location = %q, want proxy-b", location)
+	}
+	claims, err := streamtoken.Verify(strings.TrimPrefix(location, prefix), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.MediaPath != "" || claims.TranscodeNode != "http://transcode-b.internal:8096" || claims.DownloadArtifactID != "artifact-remote" {
+		t.Fatalf("claims = %+v", claims)
+	}
+}
+
 func TestManagedListThreadsIdentity(t *testing.T) {
 	svc := &fakeDownloadService{}
 	h := NewDownloadHandler(svc)
