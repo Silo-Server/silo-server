@@ -560,10 +560,19 @@ func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
 		t.Fatalf("MarkReady = (%v, %v)", applied, err)
 	}
 	manager := NewArtifactManager(repo, nil, nil, nil, "proxy-test", nil, nil)
+	stillReady, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := *stillReady
+	stale.OriginNodeURL = "http://transcode-stale"
+	if applied, err := manager.requeueRemoteArtifactExactNow(ctx, &stale, "stale API miss"); err != nil || applied {
+		t.Fatalf("stale exact requeue = (%v, %v), want false, nil", applied, err)
+	}
 	if err := manager.ReportRemoteArtifactMissing(ctx, row.ID, "http://transcode-stale", "artifact-missing"); err != nil {
 		t.Fatal(err)
 	}
-	stillReady, err := repo.GetByID(ctx, row.ID)
+	stillReady, err = repo.GetByID(ctx, row.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,6 +598,43 @@ func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
+}
+
+func TestRemoteCleanupBudgetBoundsUnreachableOrigins(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-cleanup-budget-%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := time.Now().UnixNano()
+	originArtifactID := fmt.Sprintf("artifact-blocked-%d", suffix)
+	originURL := fmt.Sprintf("http://unreachable-%d", suffix)
+	if err := repo.EnqueueRemoteOrphan(ctx, row.ID, 31, originURL, originArtifactID); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	preparer := &lifecycleTestPreparer{deleteStarted: started, deleteWait: true}
+	manager := &ArtifactManager{repo: repo, preparer: preparer, remoteCleanupBudget: 50 * time.Millisecond}
+	begin := time.Now()
+	manager.cleanupRemoteOrphans(ctx)
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("cleanup elapsed = %s, want bounded return", elapsed)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("remote deletion was not attempted")
+	}
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, orphan := range orphans {
+		if orphan.DownloadArtifactID == row.ID {
+			t.Fatalf("timed-out orphan remained immediately due: %+v", orphan)
+		}
+	}
 }
 
 func TestListRemoteOrphansDueIsFairAcrossOrigins(t *testing.T) {

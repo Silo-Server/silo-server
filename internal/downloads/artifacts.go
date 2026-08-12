@@ -78,13 +78,14 @@ type ArtifactNotifier func(ctx context.Context, d *Download)
 // jobs, drains them through a bounded worker pool with leased heartbeats, and
 // recovers stranded jobs on startup.
 type ArtifactManager struct {
-	repo      *ArtifactRepository
-	downloads *Repository
-	fileRepo  FileResolver
-	preparer  EncodePreparer
-	owner     string
-	liveCfg   func() *config.Config
-	notify    ArtifactNotifier
+	repo                *ArtifactRepository
+	downloads           *Repository
+	fileRepo            FileResolver
+	preparer            EncodePreparer
+	owner               string
+	liveCfg             func() *config.Config
+	notify              ArtifactNotifier
+	remoteCleanupBudget time.Duration
 
 	mu             sync.Mutex
 	kick           func()
@@ -452,10 +453,25 @@ func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact
 // cleanup. Request paths use the returned error so a failed state transition is
 // never disguised as an ordinary missing catalog item.
 func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
+	return m.requeueRemoteArtifactWithFence(ctx, a, reason, false)
+}
+
+func (m *ArtifactManager) requeueRemoteArtifactExactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
+	return m.requeueRemoteArtifactWithFence(ctx, a, reason, true)
+}
+
+func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a *Artifact, reason string, exactURL bool) (bool, error) {
 	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID <= 0 || a.OriginArtifactID == "" {
 		return false, errors.New("remote artifact locator unavailable for requeue")
 	}
-	linked, applied, err := m.repo.RequeueRemote(ctx, a)
+	var linked []*Download
+	var applied bool
+	var err error
+	if exactURL {
+		linked, applied, err = m.repo.RequeueRemoteExactLocator(ctx, a)
+	} else {
+		linked, applied, err = m.repo.RequeueRemote(ctx, a)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -739,6 +755,7 @@ const (
 	failedArtifactRetention    = 24 * time.Hour
 	unlinkedArtifactRetention  = 30 * 24 * time.Hour
 	ephemeralDownloadRetention = 7 * 24 * time.Hour
+	defaultRemoteCleanupBudget = 15 * time.Second
 )
 
 // Cleanup runs the hygiene sweep, then evicts ready artifacts (LRU first) once
@@ -793,7 +810,13 @@ func (m *ArtifactManager) cleanupRemoteOrphans(ctx context.Context) {
 	if !ok {
 		return
 	}
-	orphans, err := m.repo.ListRemoteOrphansDue(ctx, 100)
+	budget := m.remoteCleanupBudget
+	if budget <= 0 {
+		budget = defaultRemoteCleanupBudget
+	}
+	cleanupCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	orphans, err := m.repo.ListRemoteOrphansDue(cleanupCtx, 100)
 	if err != nil {
 		slog.WarnContext(ctx, "listing abandoned remote artifacts failed", "component", "downloads", "error", err)
 		return
@@ -814,11 +837,11 @@ func (m *ArtifactManager) cleanupRemoteOrphans(ctx context.Context) {
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
-			case <-ctx.Done():
+			case <-cleanupCtx.Done():
 				return
 			}
 			for _, orphan := range group {
-				owned, claimed, err := m.repo.PrepareRemoteOrphanCleanup(ctx, orphan)
+				owned, claimed, err := m.repo.PrepareRemoteOrphanCleanup(cleanupCtx, orphan)
 				if err != nil {
 					slog.WarnContext(ctx, "claiming abandoned remote artifact cleanup failed; skipping remaining origin batch", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "error", err)
 					return
@@ -830,11 +853,11 @@ func (m *ArtifactManager) cleanupRemoteOrphans(ctx context.Context) {
 					OriginNodeID: orphan.OriginNodeID, OriginNodeURL: orphan.OriginNodeURL,
 					OriginArtifactID: orphan.OriginArtifactID,
 				}
-				if err := lifecycle.DeleteArtifact(ctx, artifact); err != nil {
+				if err := lifecycle.DeleteArtifact(cleanupCtx, artifact); err != nil {
 					slog.WarnContext(ctx, "abandoned remote artifact cleanup failed; skipping remaining origin batch", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "node", orphan.OriginNodeURL, "error", err)
 					return
 				}
-				if err := m.repo.DeleteRemoteOrphan(ctx, orphan.ID); err != nil {
+				if err := m.repo.DeleteRemoteOrphan(cleanupCtx, orphan.ID); err != nil {
 					slog.WarnContext(ctx, "clearing abandoned remote artifact cleanup row failed", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "error", err)
 					return
 				}

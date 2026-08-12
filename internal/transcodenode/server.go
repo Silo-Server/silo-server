@@ -533,6 +533,10 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// Serialize with preparation and deletion. A recovery HEAD must not report
+	// a definitive 404 while PrepareFile is still publishing this artifact.
+	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
+	defer unlock()
 	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	f, err := os.Open(path)
 	if err != nil {

@@ -62,6 +62,8 @@ type lifecycleTestPreparer struct {
 	statError     error
 	statIDs       []string
 	deleteErr     error
+	deleteStarted chan struct{}
+	deleteWait    bool
 }
 
 func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
@@ -81,8 +83,15 @@ func (p *lifecycleTestPreparer) StatArtifact(_ context.Context, artifact *Artifa
 	p.statIDs = append(p.statIDs, artifact.ID)
 	return p.stat, p.statError
 }
-func (p *lifecycleTestPreparer) DeleteArtifact(_ context.Context, artifact *Artifact) error {
+func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
 	p.deleted = artifact.OriginArtifactID
+	if p.deleteStarted != nil {
+		close(p.deleteStarted)
+	}
+	if p.deleteWait {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return p.deleteErr
 }
 

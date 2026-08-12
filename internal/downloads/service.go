@@ -1208,7 +1208,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 			OriginNodeGroup:  target.OriginNodeGroup,
 			OriginArtifactID: target.OriginArtifactID,
 		}
-		if _, err := s.artifacts.requeueRemoteArtifactNow(ctx, artifact, "remote output missing"); err != nil {
+		if _, err := s.artifacts.requeueRemoteArtifactExactNow(ctx, artifact, "remote output missing"); err != nil {
 			return err
 		}
 		return fmt.Errorf("remote artifact was missing and preparation was requeued: %w", ErrDownloadNotActive)

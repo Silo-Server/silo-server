@@ -414,6 +414,47 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	}
 }
 
+func TestDownloadArtifactHeadWaitsForInFlightPrepare(t *testing.T) {
+	server := newTestServer(t)
+	const artifactID = "artifact-in-flight"
+	unlocks := server.lockSessionLifecycle("download-artifact-" + artifactID)
+	req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
+	req.SetPathValue("artifact_id", artifactID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("artifact_id", artifactID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleDownloadArtifact(rr, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+		unlocks()
+		t.Fatal("HEAD reported a result while preparation held the artifact lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	path := filepath.Join(server.artifactRoot, artifactID+".mp4")
+	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
+		unlocks()
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("ready"), 0o600); err != nil {
+		unlocks()
+		t.Fatal(err)
+	}
+	unlocks()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HEAD did not resume after preparation published the artifact")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestDownloadArtifactRoutesRequireBearer(t *testing.T) {
 	server := newTestServer(t)
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodDelete} {
