@@ -116,13 +116,15 @@ describe("probeWebCapabilities", () => {
     expect(capabilities.progressiveCodecsVideo).toContain("hevc");
   });
 
-  it("accepts the dvhe sample entry from browsers that answer for it", () => {
+  // The preserve remux tags its output dvh1; a browser that answers only for
+  // dvhe has given no evidence for that file and must not earn the claim.
+  it("does not promote a dvhe-only answer to a Dolby Vision claim", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
       mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : "",
     );
 
-    expect(probeWebCapabilities().hdrDetails.dolby_vision_profiles).toEqual([8]);
+    expect(probeWebCapabilities().hdrDetails.dolby_vision_profiles).toEqual([]);
   });
 
   // The generic media query describes the output, not the decoder. Safari 26

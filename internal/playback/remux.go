@@ -118,11 +118,11 @@ const (
 // the RPUs would dangle — stripping yields a clean HDR10 base layer (the
 // Apple-parity fallback for devices without a P7 decoder). Profile 8 RPUs
 // stay: the base layer is self-contained and DV clients can render it.
-func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry, audioOnly bool) []string {
-	return buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagDVSampleEntry, audioOnly, 0, 0)
+func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool) []string {
+	return buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, 0, 0)
 }
 
-func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagDVSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) []string {
+func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -174,7 +174,16 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 
 	if dvProfile == 7 {
 		args = append(args, "-bsf:v", "dovi_rpu=strip=1")
-	} else if (dvProfile == 5 || dvProfile == 8) && tagDVSampleEntry {
+		if tagSampleEntry {
+			// The explicit v3 strip recipe promised the client plain HDR10.
+			// Safari's media element only answers "probably" for hvc1 — the
+			// sample entry Apple's HLS authoring spec requires — so relabel
+			// FFmpeg's default hev1 to match the evidence the web probe
+			// collects. Stripped output carries no DOVI record, so no -strict
+			// relaxation is needed. Legacy/auto strips keep hev1.
+			args = append(args, "-tag:v", "hvc1")
+		}
+	} else if (dvProfile == 5 || dvProfile == 8) && tagSampleEntry {
 		// FFmpeg carries the DOVI configuration record into MP4 but otherwise
 		// labels copied HEVC as hev1. Media3 keys decoder selection from the
 		// sample entry, and Safari's media element only answers "probably" for
@@ -243,7 +252,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 
 	bin := ResolveFFmpegPath(ffmpegPath)
 	effectiveProfile := dvProfile
-	tagDVSampleEntry := false
+	tagSampleEntry := false
 	switch mode {
 	case "", RemuxDVLegacyAutoV3:
 		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter(bin) &&
@@ -270,7 +279,11 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		}
 		// buildRemuxArgs uses profile 7 as the explicit strip sentinel; the
 		// filter is equally required for a compatible profile 8 base layer.
+		// The explicit recipe also labels the output hvc1: the web HDR10
+		// probe collects evidence for that sample entry, and the plan must
+		// deliver the shape it validated. Legacy/auto strips keep hev1.
 		effectiveProfile = 7
+		tagSampleEntry = true
 	case RemuxDVPreserveV3:
 		if dvProfile == 7 {
 			// The remux maps only the base-layer stream, so dual-layer P7
@@ -279,7 +292,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 			cancel()
 			return nil, fmt.Errorf("Dolby Vision profile 7 cannot be preserved in a progressive remux")
 		}
-		tagDVSampleEntry = true
+		tagSampleEntry = true
 	case RemuxDVRejectP7V3:
 		if dvProfile == 7 {
 			cancel()
@@ -289,7 +302,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		cancel()
 		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
 	}
-	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagDVSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps)
+	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()

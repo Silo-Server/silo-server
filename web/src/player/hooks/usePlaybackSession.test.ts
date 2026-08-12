@@ -366,7 +366,7 @@ describe("usePlaybackSession output capability changes", () => {
     // Decode answers are probed independently of the media query, so move the
     // simulated decoder along with the output this fixture switches between.
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
-      hdr && mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : "",
+      hdr && mime === 'video/mp4; codecs="dvh1.08.06"' ? "probably" : "",
     );
     return (nextHDR: boolean) => {
       hdr = nextHDR;

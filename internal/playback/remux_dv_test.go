@@ -85,22 +85,38 @@ func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 // Media3 keys decoder selection from it, but legacy web/jellycompat consumers
 // rely on the pre-v3 hev1 labeling their demuxers accept.
 func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
-	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, true, false)
-	if !argsContainPair(args, "-tag:v", "dvh1") {
-		t.Fatalf("preserved Dolby Vision must retain a DV sample entry, args=%v", strings.Join(args, " "))
+	for _, profile := range []int{5, 8} {
+		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, true, false)
+		if !argsContainPair(args, "-tag:v", "dvh1") {
+			t.Fatalf("preserved profile %d must retain a DV sample entry, args=%v", profile, strings.Join(args, " "))
+		}
+		// Without -strict unofficial FFmpeg drops the dvvC configuration record
+		// and the output is an untagged HEVC stream no DV decoder will select.
+		if !argsContainPair(args, "-strict", "unofficial") {
+			t.Fatalf("preserved profile %d must allow the dvvC box, args=%v", profile, strings.Join(args, " "))
+		}
+		legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false, false)
+		if argsContainPair(legacy, "-tag:v", "dvh1") || argsContainPair(legacy, "-strict", "unofficial") {
+			t.Fatalf("legacy profile %d remux must keep hev1 labeling, args=%v", profile, strings.Join(legacy, " "))
+		}
 	}
-	// Without -strict unofficial FFmpeg drops the dvvC configuration record and
-	// the output is an untagged HEVC stream no DV decoder will select.
-	if !argsContainPair(args, "-strict", "unofficial") {
-		t.Fatalf("preserved Dolby Vision must allow the dvvC box, args=%v", strings.Join(args, " "))
+}
+
+// The explicit v3 strip recipe labels its HDR10 output hvc1 — the sample entry
+// the web probe collected evidence for — while the legacy/auto strip keeps
+// ffmpeg's default hev1 for pre-v3 consumers. Neither carries a DOVI record,
+// so neither needs the -strict relaxation.
+func TestBuildRemuxArgsTagsStrippedHDR10OnlyWhenRequested(t *testing.T) {
+	tagged := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, true, false)
+	if !argsContainPair(tagged, "-bsf:v", "dovi_rpu=strip=1") || !argsContainPair(tagged, "-tag:v", "hvc1") {
+		t.Fatalf("explicit strip must emit an hvc1-labeled HDR10 stream, args=%v", strings.Join(tagged, " "))
 	}
-	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false, false)
-	if argsContainPair(legacy, "-tag:v", "dvh1") || argsContainPair(legacy, "-strict", "unofficial") {
-		t.Fatalf("legacy remux consumers must keep hev1 labeling, args=%v", strings.Join(legacy, " "))
+	if argsContainPair(tagged, "-tag:v", "dvh1") || argsContainPair(tagged, "-strict", "unofficial") {
+		t.Fatalf("stripped output must not carry DV signaling, args=%v", strings.Join(tagged, " "))
 	}
-	stripped := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
-	if argsContainPair(stripped, "-tag:v", "dvh1") || argsContainPair(stripped, "-strict", "unofficial") {
-		t.Fatalf("HDR10 fallback must not retain a DV sample entry, args=%v", strings.Join(stripped, " "))
+	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
+	if argsContainPair(legacy, "-tag:v", "hvc1") || argsContainPair(legacy, "-tag:v", "dvh1") {
+		t.Fatalf("legacy strip consumers must keep hev1 labeling, args=%v", strings.Join(legacy, " "))
 	}
 }
 
@@ -149,6 +165,72 @@ func writeProbeAwareFFmpeg(t *testing.T) (bin, argLog string) {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return bin, argLog
+}
+
+// writeRecordingFFmpeg stands in for an ffmpeg whose dovi_rpu probe succeeds,
+// recording the arguments of every non-probe invocation so tests can assert
+// what the remux mode actually mapped onto the command line.
+func writeRecordingFFmpeg(t *testing.T) (bin, argLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin = filepath.Join(dir, "ffmpeg")
+	argLog = filepath.Join(dir, "args")
+	script := "#!/bin/sh\n" +
+		"case \"$*\" in\n" +
+		"  *-bsfs*) echo dovi_rpu; exit 0;;\n" +
+		"  *'-f null'*) exit 0;;\n" +
+		"esac\n" +
+		"echo \"$*\" >> " + argLog + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	return bin, argLog
+}
+
+func recordedRemuxArgs(t *testing.T, session *RemuxSession, argLog string) string {
+	t.Helper()
+	_, _ = io.ReadAll(session)
+	_ = session.Close()
+	recorded, err := os.ReadFile(argLog)
+	if err != nil {
+		t.Fatalf("the remux never ran: %v", err)
+	}
+	return string(recorded)
+}
+
+// The preserve mode, not the caller, decides the sample-entry tagging:
+// buildRemuxArgs cannot be handed the flag directly by production code, so the
+// mapping from RemuxDVPreserveV3 must be exercised through the mode switch.
+func TestPreserveModeTagsTheSampleEntry(t *testing.T) {
+	for _, profile := range []int{5, 8} {
+		bin, argLog := writeRecordingFFmpeg(t)
+		session, err := StartRemuxWithDVMode(t.Context(), remuxSourceFile(t), "mp4", 0, false, -1, profile, RemuxDVPreserveV3, bin)
+		if err != nil {
+			t.Fatalf("preserve remux refused profile %d: %v", profile, err)
+		}
+		recorded := recordedRemuxArgs(t, session, argLog)
+		if !strings.Contains(recorded, "-tag:v dvh1") || !strings.Contains(recorded, "-strict unofficial") {
+			t.Fatalf("preserve mode must map to dvh1 + -strict unofficial for profile %d: %s", profile, recorded)
+		}
+	}
+}
+
+func TestExplicitStripModeTagsHVC1(t *testing.T) {
+	for _, profile := range []int{7, 8} {
+		bin, argLog := writeRecordingFFmpeg(t)
+		session, err := StartRemuxWithDVMode(t.Context(), remuxSourceFile(t), "mp4", 0, false, -1, profile, RemuxDVStripToHDR10V3, bin)
+		if err != nil {
+			t.Fatalf("strip remux refused profile %d: %v", profile, err)
+		}
+		recorded := recordedRemuxArgs(t, session, argLog)
+		if !strings.Contains(recorded, "dovi_rpu=strip=1") || !strings.Contains(recorded, "-tag:v hvc1") {
+			t.Fatalf("explicit strip must map to dovi_rpu + hvc1 for profile %d: %s", profile, recorded)
+		}
+		if strings.Contains(recorded, "dvh1") || strings.Contains(recorded, "-strict unofficial") {
+			t.Fatalf("stripped output must not carry DV signaling for profile %d: %s", profile, recorded)
+		}
+	}
 }
 
 func remuxSourceFile(t *testing.T) string {

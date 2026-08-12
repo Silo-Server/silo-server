@@ -10,24 +10,21 @@ const VIDEO_CODEC_MAP: Record<string, string> = {
 };
 
 // Silo's native Dolby Vision remux recipe preserves the DOVI configuration
-// record under a dvh1 sample entry. Probe the exact shape the browser would
-// receive instead of inferring Dolby Vision support from generic HEVC decode.
-// Safari answers "" for dvhe and "probably" only for dvh1, so probe both sample
-// entries per profile and claim the profile when either is definitive.
+// record under a dvh1 sample entry — the one Apple's HLS authoring spec calls
+// for, and the only one Safari answers "probably" for. Probe exactly that
+// shape: a browser that recognizes only dvhe could accept a claim here and
+// then reject the dvh1 file the remux delivers, so a dvhe-only answer earns no
+// claim and that browser keeps the validated HDR10 fallback instead.
 // Level 6 covers the 2160p24 source class involved in the web regression.
 const DOLBY_VISION_PROFILE_PROBES: Record<
   number,
-  { mimes: string[]; maxLevel: number; blCompatibilityIds?: number[] }
+  { mime: string; maxLevel: number; blCompatibilityIds?: number[] }
 > = {
-  5: { mimes: ['video/mp4; codecs="dvh1.05.06"', 'video/mp4; codecs="dvhe.05.06"'], maxLevel: 6 },
+  5: { mime: 'video/mp4; codecs="dvh1.05.06"', maxLevel: 6 },
   // The MIME codec string identifies Profile 8 but not its base-layer
   // compatibility ID. Conservatively claim only the Profile 8.1 shape that
   // this regression and Safari's progressive remux path exercise.
-  8: {
-    mimes: ['video/mp4; codecs="dvh1.08.06"', 'video/mp4; codecs="dvhe.08.06"'],
-    maxLevel: 6,
-    blCompatibilityIds: [1],
-  },
+  8: { mime: 'video/mp4; codecs="dvh1.08.06"', maxLevel: 6, blCompatibilityIds: [1] },
 };
 
 // Silo's Profile 7 fallback strips Dolby Vision metadata into a progressive
@@ -35,7 +32,9 @@ const DOLBY_VISION_PROFILE_PROBES: Record<
 // can query the codec, transfer function, gamut, and static metadata together,
 // avoiding the old mistake of treating a generic HDR output query as proof of
 // every HDR format.
-// Safari answers for hvc1 and rejects hev1, so probe both sample entries.
+// Safari answers for hvc1 and rejects hev1, so probe both sample entries:
+// either one proves the same HEVC Main10 HDR10 decode, and the strip remux
+// labels its output hvc1, which every hev1-capable MP4 demuxer recognizes.
 const HDR10_PROGRESSIVE_CONFIGURATIONS = [
   'video/mp4; codecs="hvc1.2.4.L153.B0"',
   'video/mp4; codecs="hev1.2.4.L153.B0"',
@@ -219,7 +218,7 @@ export function probeWebCapabilities(): WebCapabilityProbe {
   // the sample-entry probes run unconditionally and `hdr` stays a best-effort
   // output signal only.
   const dolbyVisionProfiles = Object.entries(DOLBY_VISION_PROFILE_PROBES)
-    .filter(([, probe]) => probe.mimes.some(testMediaElementType))
+    .filter(([, probe]) => testMediaElementType(probe.mime))
     .map(([profile]) => Number(profile));
   const progressiveCodecsVideo = [...codecsVideo];
   if (dolbyVisionProfiles.length > 0 && !progressiveCodecsVideo.includes("hevc")) {

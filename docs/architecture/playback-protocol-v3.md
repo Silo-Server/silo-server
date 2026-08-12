@@ -386,13 +386,14 @@ format claim, and it does not gate format claims on it either. Decoder capabilit
 and active-output HDR are separate facts — browsers tone-map HDR content onto SDR
 outputs, and Safari 26 reports `dynamic-range: standard` even on an XDR display —
 so the media query survives only as the best-effort `hdr` output boolean. Format
-claims come from exact shape probes: Media Capabilities support for Silo's
-progressive 2160p HEVC Main10, Rec. 2020, PQ, SMPTE ST 2086 shape (probed under
-both the `hvc1` and `hev1` sample entries) before advertising HDR10, and a
-definitive media-element answer for the `dvh1.05.06`/`dvhe.05.06` or
-`dvh1.08.06`/`dvhe.08.06` sample entry before advertising Dolby Vision — Safari
-answers only for `hvc1`/`dvh1`, other browsers only for `hev1`/`dvhe`, so either
-definitive answer earns the claim. Both claims are scoped to `progressive`: they
+claims come from exact shape probes matched to the bytes the remux delivers:
+HDR10 requires Media Capabilities support for Silo's progressive 2160p HEVC
+Main10, Rec. 2020, PQ, SMPTE ST 2086 shape, probed under both the `hvc1` and
+`hev1` sample entries because either proves the same decode and the strip remux
+labels its output `hvc1`. Dolby Vision requires a definitive media-element
+answer for exactly `dvh1.05.06` or `dvh1.08.06`, because the preserve remux
+tags its output `dvh1`; a `dvhe`-only answer is evidence for a file Silo never
+sends and earns no claim. Both claims are scoped to `progressive`: they
 are cleared from `original_http` and `hls` because those delivery paths were not
 tested by the same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
 `hdr10_max_frame_rate`, and `hdr10_max_bitrate_kbps`; these ceilings keep a
