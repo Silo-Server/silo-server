@@ -94,6 +94,11 @@ func TestServiceRequeuesReadyArtifactWhenRemoteFileIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM download_artifact_orphans
+			 WHERE download_artifact_id = $1 AND origin_node_id = $2 AND origin_artifact_id = $3`,
+			artifact.ID, originNodeID, originArtifactID,
+		)
 		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})

@@ -1218,7 +1218,9 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	}
 	// Preserve an origin-provided disposition, but supply the same sanitized
 	// attachment filename as local delivery when the node omits one.
-	w.Header().Set("Content-Disposition", attachmentDisposition(target.Path))
+	if strings.TrimSpace(target.Path) != "" {
+		w.Header().Set("Content-Disposition", attachmentDisposition(target.Path))
+	}
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	if r.Method == http.MethodHead {

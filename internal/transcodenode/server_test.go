@@ -85,6 +85,7 @@ func newTestServer(t *testing.T) *Server {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = testSecret
 	cfg.Playback.TranscodeDir = t.TempDir()
+	cfg.Download.ArtifactDir = filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
 	w.SetConfigForTest(cfg)
 	return &Server{
 		watcher:      w,
@@ -92,6 +93,19 @@ func newTestServer(t *testing.T) *Server {
 		transcodeDir: cfg.Playback.TranscodeDir,
 		artifactRoot: filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
 		sessions:     make(map[string]*playback.TranscodeSession),
+	}
+}
+
+func TestNewServerUsesConfiguredDownloadArtifactDir(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
+	cfg.Download.ArtifactDir = filepath.Join(t.TempDir(), "prepared-downloads")
+	w.SetConfigForTest(cfg)
+
+	server := NewServer(w, nil)
+	if server.artifactRoot != cfg.Download.ArtifactDir {
+		t.Fatalf("artifact root = %q, want configured %q", server.artifactRoot, cfg.Download.ArtifactDir)
 	}
 }
 
@@ -160,12 +174,13 @@ func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T)
 	if err != nil {
 		t.Fatalf("prepared output: %v", err)
 	}
+	responseBody := rr.Body.String()
 	var result downloadprepare.Result
-	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(rr.Body.String(), artifactDir) {
-		t.Fatalf("prepare result = %+v body=%s", result, rr.Body.String())
+	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(responseBody, artifactDir) {
+		t.Fatalf("prepare result = %+v body=%s", result, responseBody)
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after prepare = %d, want 0", got)

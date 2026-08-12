@@ -200,16 +200,20 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		trackerImpl = tracker
 	}
 	transcodeDir := config.DefaultTranscodeDir
+	artifactDir := ""
 	if watcher != nil {
-		if cfg := watcher.Config(); cfg != nil && strings.TrimSpace(cfg.Playback.TranscodeDir) != "" {
-			transcodeDir = cfg.Playback.TranscodeDir
+		if cfg := watcher.Config(); cfg != nil {
+			if strings.TrimSpace(cfg.Playback.TranscodeDir) != "" {
+				transcodeDir = cfg.Playback.TranscodeDir
+			}
+			artifactDir = cfg.Download.ArtifactDir
 		}
 	}
 	s := &Server{
 		watcher:      watcher,
 		tracker:      trackerImpl,
 		transcodeDir: transcodeDir,
-		artifactRoot: filepath.Join(transcodeDir, downloadprepare.ArtifactDirectoryName),
+		artifactRoot: config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir),
 		sessions:     make(map[string]*playback.TranscodeSession),
 		lastAccess:   make(map[string]time.Time),
 	}
