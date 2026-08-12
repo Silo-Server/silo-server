@@ -176,6 +176,12 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 		t.Fatalf("quality change without a failure classification: %v", err)
 	}
 
+	request.Operation = ReplanOperationOutputChangeV3
+	request.QualityPreference = ""
+	if err := request.Validate(); err != nil {
+		t.Fatalf("output change without a failure classification: %v", err)
+	}
+
 	request.Operation = "future_operation"
 	if err := request.Validate(); err == nil {
 		t.Fatal("unknown replan operation was accepted")
@@ -297,7 +303,7 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 	}
 	for _, required := range []string{
 		"evidence_tier_gating", "deliveries_negotiation", "attempt_key_echo_and_loop",
-		"track_change_replan", "quality_change_replan", "idempotent_replan",
+		"track_change_replan", "quality_change_replan", "output_change_replan", "idempotent_replan",
 		"concurrent_replan", "mid_seek_replan", "available_qualities",
 		"audio_only_planning", "output_context_invalidation", "legacy_426",
 		"hdr_dv_matrix", "audio_matrix", "subtitle_matrix", "recovery_matrix",

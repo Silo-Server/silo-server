@@ -261,6 +261,7 @@ func TestReplanAllowsAlternateFileV3PinsSeekOperations(t *testing.T) {
 		want      bool
 	}{
 		{name: "ordinary failure may use another version", operation: playback.ReplanOperationFailureRecoveryV3, quality: "auto", want: true},
+		{name: "output change may use another version", operation: playback.ReplanOperationOutputChangeV3, quality: "auto", want: true},
 		{name: "original quality remains pinned", operation: playback.ReplanOperationFailureRecoveryV3, quality: "original", want: false},
 		{name: "exact seek reanchor pins current version", operation: playback.ReplanOperationSeekReanchorV3, quality: "auto", want: false},
 		{name: "failed seek recovery pins current version", operation: playback.ReplanOperationSeekFailureRecoveryV3, quality: "auto", want: false},
@@ -1737,10 +1738,10 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		t.Fatal(err)
 	}
 	outputContext := current.NormalizedRequest.ClientPlaybackContext
-	outputContext.Output.OutputContextID = "route-2"
 	currentKey = playback.PlanAttemptKeyV3(current.CurrentPlan, current.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 	ordinary := playback.ReplanRequestV3{
 		ProtocolVersion:       playback.ProtocolV3,
+		Operation:             playback.ReplanOperationOutputChangeV3,
 		PlaybackAttemptID:     current.PlaybackAttemptID,
 		ReplanRequestID:       "ordinary-missing-requested-0001",
 		FailedPlanID:          current.CurrentPlanID,
@@ -1751,7 +1752,7 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		QualityPreference:     current.NormalizedRequest.QualityPreference,
 		PositionSeconds:       320,
 		SelectedTracks:        current.CurrentPlan.SelectedTracks,
-		Failure:               playback.FailureV3{Classification: "output_route_changed"},
+		Failure:               playback.FailureV3{},
 		Capabilities:          current.NormalizedRequest.Capabilities,
 		ClientPlaybackContext: outputContext,
 	}

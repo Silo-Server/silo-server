@@ -662,6 +662,10 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	qualityChange.ReplanRequestID = "replan-quality-change-0001"
 	qualityChange.Failure = playback.FailureV3{}
 	qualityChange.QualityPreference = resolutionHD
+	outputChange := goldenReplanRequest()
+	outputChange.Operation = playback.ReplanOperationOutputChangeV3
+	outputChange.ReplanRequestID = "replan-output-change-0001"
+	outputChange.Failure = playback.FailureV3{}
 	seekReanchor := goldenReplanRequest()
 	seekReanchor.Operation = playback.ReplanOperationSeekReanchorV3
 	seekReanchor.ReplanRequestID = "replan-seek-reanchor-0001"
@@ -685,6 +689,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	replans := []playback.ReplanScenarioV3{
 		{Name: "track_change", Category: "track_change_replan", Request: trackChange, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PreserveUnmodifiedTracks: true}},
 		{Name: "quality_change", Category: "quality_change_replan", Request: qualityChange, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, SelectedQuality: resolutionHD}},
+		{Name: "output_change", Category: "output_change_replan", Request: outputChange, Expected: playback.ReplanExpectationV3{HTTPStatus: http.StatusOK, PreserveUnmodifiedTracks: true}},
 		{Name: "track_change_idempotent_duplicate", Category: "idempotent_replan", Request: trackDuplicate, Expected: playback.ReplanExpectationV3{SameRequestAndBodyStatus: http.StatusOK, ResponseReplayedVerbatim: true, ChangedBodyStatus: http.StatusConflict, ChangedBodyError: "idempotency_key_reused"}},
 		{Name: "quality_change_idempotent_duplicate", Category: "idempotent_replan", Request: qualityDuplicate, Expected: playback.ReplanExpectationV3{SameRequestAndBodyStatus: http.StatusOK, ResponseReplayedVerbatim: true, ChangedBodyStatus: http.StatusConflict, ChangedBodyError: "idempotency_key_reused"}},
 		{Name: "track_change_concurrent_duplicate", Category: "concurrent_replan", Request: trackConcurrent, Expected: playback.ReplanExpectationV3{WhileFirstLeaseActiveStatus: http.StatusConflict, ConcurrentError: "replan_in_progress", AfterCompletionStatus: http.StatusOK, ResponseReplayedVerbatim: true}},

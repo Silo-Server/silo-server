@@ -306,6 +306,9 @@ export function usePlaybackSession(
     loadSequence: number;
     retireSessionOnRefusal: boolean;
   } | null>(null);
+  const issueReplanRef = useRef<
+    (options: ReplanOptions, retireSessionOnRefusal?: boolean) => Promise<boolean>
+  >(async () => false);
   const qualityRef = useRef(qualityPreference?.trim() || "auto");
 
   useEffect(() => {
@@ -689,12 +692,17 @@ export function usePlaybackSession(
       if (replanInFlightRef.current) {
         const isPendingFailureRecovery =
           options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
+        const isPendingOutputChange = options.operation === "output_change";
         const queuedOperation = pendingReplanRef.current?.options.operation;
         const hasQueuedFailureRecovery =
           queuedOperation === "failure_recovery" || queuedOperation === "seek_failure_recovery";
+        const hasQueuedOutputChange = queuedOperation === "output_change";
         if (
           isPendingFailureRecovery ||
-          (options.operation === "seek_reanchor" && !hasQueuedFailureRecovery)
+          (isPendingOutputChange && !hasQueuedFailureRecovery) ||
+          (options.operation === "seek_reanchor" &&
+            !hasQueuedFailureRecovery &&
+            !hasQueuedOutputChange)
         ) {
           pendingReplanRef.current = {
             options,
@@ -717,8 +725,8 @@ export function usePlaybackSession(
         return false;
       }
 
-      // On a track or quality change nothing failed, so the previous route
-      // stays eligible: the loop guard and the recovery counter reset. Only a
+      // On an intent change nothing failed, so the previous route stays
+      // eligible: the loop guard and the recovery counter reset. Only a
       // recovery accumulates them.
       const attemptedPlanKeys = isFailureRecovery
         ? [...attemptedPlanKeysRef.current, plan.plan_attempt_key].slice(
@@ -792,7 +800,10 @@ export function usePlaybackSession(
         const pendingReplan = pendingReplanRef.current;
         pendingReplanRef.current = null;
         if (pendingReplan?.loadSequence === loadSequenceRef.current) {
-          void issueReplan(pendingReplan.options, pendingReplan.retireSessionOnRefusal);
+          // A capability change can queue behind a replan created by an older
+          // render. Dispatch through the latest callback so its request carries
+          // the current output evidence rather than the closed-over snapshot.
+          void issueReplanRef.current(pendingReplan.options, pendingReplan.retireSessionOnRefusal);
         }
       }
     },
@@ -805,6 +816,7 @@ export function usePlaybackSession(
       retireActiveSession,
     ],
   );
+  issueReplanRef.current = replan;
 
   useEffect(() => {
     if (
@@ -831,9 +843,8 @@ export function usePlaybackSession(
 
     void replan(
       {
-        operation: "failure_recovery",
+        operation: "output_change",
         positionSeconds: playbackPositionRef.current,
-        failure: { classification: "output_route_changed" },
       },
       true,
     );

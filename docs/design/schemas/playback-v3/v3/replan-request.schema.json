@@ -31,7 +31,8 @@
         "seek_reanchor",
         "seek_failure_recovery",
         "track_change",
-        "quality_change"
+        "quality_change",
+        "output_change"
       ],
       "maxLength": 32
     },
@@ -152,7 +153,7 @@
     },
     "failure": {
       "type": "object",
-      "description": "Required for failure_recovery and seek_failure_recovery: both need a non-empty classification. A track_change or quality_change carries no failure.",
+      "description": "Required for failure_recovery and seek_failure_recovery: both need a non-empty classification. Intent operations carry no failure.",
       "properties": {
         "classification": {
           "type": "string",

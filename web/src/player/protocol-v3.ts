@@ -67,13 +67,14 @@ export function deliveryClassV3(delivery: DeliveryV3): DeliveryClassV3 {
  */
 export type CapabilityEvidenceV3 = "exact" | "platform_attested" | "declared";
 
-/** Which of the five replan intents a replan request expresses. */
+/** Which replan intent a replan request expresses. */
 export type ReplanOperationV3 =
   | "failure_recovery"
   | "seek_reanchor"
   | "seek_failure_recovery"
   | "track_change"
-  | "quality_change";
+  | "quality_change"
+  | "output_change";
 
 /** Transport protocol of a plan's stream URL. */
 export type StreamProtocolV3 = "http_progressive" | "hls";

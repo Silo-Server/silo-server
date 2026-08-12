@@ -1521,10 +1521,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
 	trackChange := operation == playback.ReplanOperationTrackChangeV3
 	qualityChange := operation == playback.ReplanOperationQualityChangeV3
+	outputChange := operation == playback.ReplanOperationOutputChangeV3
 	// User-intent operations replace the legacy audio PATCH and client-recipe
 	// transcode start. Nothing failed, so their previous route stays eligible:
 	// neither attempted-key history nor the failed-plan exclusion applies.
-	userIntentOperation := trackChange || qualityChange
+	userIntentOperation := trackChange || qualityChange || outputChange
 	intentChange := false
 	if seekScopedRecovery {
 		if err := validateSeekRecoveryRequestV3(record, req); err != nil {
@@ -1559,6 +1560,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		case qualityChange:
 			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
 			intentChange = nextQuality != start.QualityPreference
+		case outputChange:
+			intentChange = true
 		default:
 			switch req.Failure.Classification {
 			case "quality_changed":
@@ -2348,10 +2351,10 @@ func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 
 func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
 	switch operation {
-	case playback.ReplanOperationFailureRecoveryV3, playback.ReplanOperationQualityChangeV3:
-		// A quality change carries the same "another version may fit better"
-		// semantics its legacy quality_changed failure classification had; seek
-		// operations and track changes stay pinned to the mounted source.
+	case playback.ReplanOperationFailureRecoveryV3, playback.ReplanOperationQualityChangeV3, playback.ReplanOperationOutputChangeV3:
+		// Quality and output changes both carry "another version may fit better"
+		// semantics; seek operations and track changes stay pinned to the mounted
+		// source.
 		return shouldTryAlternateFileV3(qualityPreference)
 	default:
 		return false
@@ -2362,7 +2365,7 @@ func replanAlternateFilePinnedByOriginalQualityV3(operation playback.ReplanOpera
 	if shouldTryAlternateFileV3(qualityPreference) {
 		return false
 	}
-	return operation == playback.ReplanOperationFailureRecoveryV3 || operation == playback.ReplanOperationQualityChangeV3
+	return operation == playback.ReplanOperationFailureRecoveryV3 || operation == playback.ReplanOperationQualityChangeV3 || operation == playback.ReplanOperationOutputChangeV3
 }
 
 func (h *PlaybackHandler) clarifyOriginalQuality4KTerminalV3(ctx context.Context, terminal *playback.TerminalV3, requestedFile *models.MediaFile, alternateFilePinned bool) {

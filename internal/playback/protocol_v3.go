@@ -395,6 +395,9 @@ const (
 	// legacy transcode start: the client sends a quality_preference chosen from
 	// the plan's available_qualities and no failure classification.
 	ReplanOperationQualityChangeV3 ReplanOperationV3 = "quality_change"
+	// ReplanOperationOutputChangeV3 refreshes output capabilities without
+	// declaring the active route failed, so an unchanged route stays eligible.
+	ReplanOperationOutputChangeV3 ReplanOperationV3 = "output_change"
 )
 
 type ReplanRequestV3 struct {
@@ -825,6 +828,8 @@ func (r ReplanRequestV3) Validate() error {
 		if strings.TrimSpace(r.QualityPreference) == "" {
 			return errors.New("quality_change requires a quality_preference")
 		}
+	case ReplanOperationOutputChangeV3:
+		// Output capability refreshes are intent changes, not route failures.
 	default:
 		return errors.New("invalid replan operation")
 	}
