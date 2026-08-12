@@ -36,6 +36,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -346,6 +347,121 @@ describe("usePlaybackSession quality changes", () => {
       .map(([, init]) => JSON.parse(String(init?.body)) as { quality_preference: string });
     expect(replanBodies.map((body) => body.quality_preference)).toEqual(["720p", "original"]);
 
+    unmount();
+  });
+});
+
+describe("usePlaybackSession output capability changes", () => {
+  function outputProbe(initialHDR: boolean) {
+    let hdr = initialHDR;
+    const listeners = new Set<() => void>();
+    const query = {
+      get matches() {
+        return hdr;
+      },
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
+    vi.stubGlobal("matchMedia", () => query);
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === 'video/mp4; codecs="dvhe.08.06"' ? "probably" : "",
+    );
+    return (nextHDR: boolean) => {
+      hdr = nextHDR;
+      for (const listener of listeners) listener();
+    };
+  }
+
+  it("retries a terminal start when the window moves onto an HDR output", async () => {
+    const setHDR = outputProbe(false);
+    const startBodies: Array<{
+      client_capabilities: { hdr_details?: { dolby_vision_profiles: number[] } };
+    }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as (typeof startBodies)[number];
+        startBodies.push(body);
+        if (startBodies.length === 1) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "terminal",
+            terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+          });
+        }
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({ session_id: "session-hdr" }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+
+    act(() => setHDR(true));
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+    expect(startBodies).toHaveLength(2);
+    expect(startBodies[0]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([]);
+    expect(startBodies[1]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([8]);
+    unmount();
+  });
+
+  it("replaces an active HDR plan at the latest position after moving to SDR", async () => {
+    const setHDR = outputProbe(true);
+    const startBodies: Array<{ start_position?: number; client_capabilities: { hdr: boolean } }> =
+      [];
+    const stoppedSessions: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as (typeof startBodies)[number];
+        startBodies.push(body);
+        const sessionId = startBodies.length === 1 ? "session-hdr" : "session-sdr";
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: sessionId,
+          playback_plan: fixturePlanV3({ session_id: sessionId }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") {
+        stoppedSessions.push(url);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+    act(() => result.current.updatePlaybackPosition(321));
+
+    act(() => setHDR(false));
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-sdr"));
+    expect(startBodies[1]).toMatchObject({
+      start_position: 321,
+      client_capabilities: { hdr: false },
+    });
+    await waitFor(() => expect(stoppedSessions).toContain("/api/v1/playback/session-hdr"));
     unmount();
   });
 });

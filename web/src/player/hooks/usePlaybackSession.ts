@@ -91,6 +91,8 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   refreshSubtitles: (currentPosition: number) => void;
   /** Folds a realtime-delivered inventory entry in without a server round trip. */
   applySubtitleTrack: (track: SubtitleInventoryItemV3) => void;
+  /** Keeps the resume anchor current for output-capability restarts. */
+  updatePlaybackPosition: (positionSeconds: number) => void;
   /** Reports a playback route event as a diagnostic. Never affects playback. */
   reportEvent: (
     event: RouteEventNameV3,
@@ -250,6 +252,10 @@ export function usePlaybackSession(
   const probe = useCodecDetection();
   const clientCapabilities = useMemo(() => buildClientCapabilitiesV3(probe), [probe]);
   const clientPlaybackContext = useMemo(() => buildClientPlaybackContextV3(probe), [probe]);
+  const capabilityRequestKey = useMemo(
+    () => JSON.stringify([clientCapabilities, clientPlaybackContext]),
+    [clientCapabilities, clientPlaybackContext],
+  );
 
   const [state, setState] = useState<PlaybackSessionState>({
     plan: null,
@@ -275,6 +281,8 @@ export function usePlaybackSession(
   const planRevisionRef = useRef(0);
   const stateRef = useRef(state);
   const activeRequestKeyRef = useRef<string | null>(null);
+  const activeCapabilityRequestKeyRef = useRef<string | null>(null);
+  const playbackPositionRef = useRef(initialPosition);
   const switchingRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
@@ -568,21 +576,35 @@ export function usePlaybackSession(
   );
 
   useEffect(() => {
-    if (activeRequestKeyRef.current === requestKey) {
+    const requestChanged = activeRequestKeyRef.current !== requestKey;
+    const capabilitiesChanged = activeCapabilityRequestKeyRef.current !== capabilityRequestKey;
+    if (!requestChanged && !capabilitiesChanged) {
       return;
     }
     activeRequestKeyRef.current = requestKey;
-    qualityRef.current = qualityPreference?.trim() || "auto";
+    activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+    if (requestChanged) {
+      qualityRef.current = qualityPreference?.trim() || "auto";
+      playbackPositionRef.current = initialPosition;
+    }
 
     void loadSession({
-      preferredFileId: fileId,
-      position: initialPosition,
-      forceStartPosition: forceInitialPosition,
+      preferredFileId: requestChanged ? fileId : (stateRef.current.mediaFileId ?? fileId),
+      position: requestChanged ? initialPosition : playbackPositionRef.current,
+      forceStartPosition: requestChanged ? forceInitialPosition : true,
       allowPreserveExistingSessionOnError: false,
       replacementErrorMessage: "Failed to replace playback request",
       initialErrorMessage: "Failed to start playback",
     });
-  }, [fileId, forceInitialPosition, initialPosition, loadSession, qualityPreference, requestKey]);
+  }, [
+    capabilityRequestKey,
+    fileId,
+    forceInitialPosition,
+    initialPosition,
+    loadSession,
+    qualityPreference,
+    requestKey,
+  ]);
 
   // Clean up session on unmount.
   useEffect(() => {
@@ -841,6 +863,12 @@ export function usePlaybackSession(
     [config],
   );
 
+  const updatePlaybackPosition = useCallback((positionSeconds: number) => {
+    if (Number.isFinite(positionSeconds) && positionSeconds >= 0) {
+      playbackPositionRef.current = positionSeconds;
+    }
+  }, []);
+
   const switchVersion = useCallback(
     (newFileId: number, currentPosition: number) => {
       if (switchingRef.current) return;
@@ -878,6 +906,7 @@ export function usePlaybackSession(
     reanchorSeek,
     refreshSubtitles,
     applySubtitleTrack,
+    updatePlaybackPosition,
     reportEvent,
   };
 }
