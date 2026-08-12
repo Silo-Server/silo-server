@@ -177,6 +177,22 @@
         "hlg": {
           "type": "boolean"
         },
+        "hdr10_max_width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hdr10_max_height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hdr10_max_frame_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "hdr10_max_bitrate_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
         "dolby_vision_profiles": {
           "type": "array",
           "maxItems": 16,
@@ -218,6 +234,22 @@
           }
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["hdr10_max_width"] },
+              { "required": ["hdr10_max_height"] },
+              { "required": ["hdr10_max_frame_rate"] },
+              { "required": ["hdr10_max_bitrate_kbps"] }
+            ]
+          },
+          "then": {
+            "required": ["hdr10"],
+            "properties": { "hdr10": { "const": true } }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "audio_passthrough": {

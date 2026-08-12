@@ -7,6 +7,7 @@ import {
   detectHLSSupport,
   type WebCapabilityProbe,
 } from "./client-context-v3";
+import type { HDRCapabilitiesV3 } from "./protocol-v3";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -70,6 +71,10 @@ describe("structured HDR capabilities", () => {
       hdr10: true,
       hdr10_plus: false,
       hlg: false,
+      hdr10_max_width: 3840,
+      hdr10_max_height: 2160,
+      hdr10_max_frame_rate: 24,
+      hdr10_max_bitrate_kbps: 80_000,
       dolby_vision_profiles: [8],
       dolby_vision_profile_levels: [{ profile: 8, max_level: 6, bl_compatibility_ids: [1] }],
     },
@@ -84,12 +89,16 @@ describe("structured HDR capabilities", () => {
   it("scopes normalized HDR sample entries to progressive delivery", () => {
     const deliveries = buildDeliveriesV3(probe);
     expect(deliveries.progressive?.hdr_details).toEqual(probe.hdrDetails);
-    const nonProgressiveHDRDetails = {
+    const nonProgressiveHDRDetails: HDRCapabilitiesV3 = {
       ...probe.hdrDetails,
       hdr10: false,
       dolby_vision_profiles: [],
       dolby_vision_profile_levels: [],
     };
+    delete nonProgressiveHDRDetails.hdr10_max_width;
+    delete nonProgressiveHDRDetails.hdr10_max_height;
+    delete nonProgressiveHDRDetails.hdr10_max_frame_rate;
+    delete nonProgressiveHDRDetails.hdr10_max_bitrate_kbps;
     expect(deliveries.original_http?.hdr_details).toEqual(nonProgressiveHDRDetails);
     expect(deliveries.hls?.hdr_details).toEqual(nonProgressiveHDRDetails);
   });

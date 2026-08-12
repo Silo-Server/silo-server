@@ -387,7 +387,9 @@ SMPTE ST 2086 shape before advertising HDR10. Dolby Vision likewise requires a
 definitive media-element answer for the exact `dvhe.05.06` or `dvhe.08.06`
 sample entry. Both claims are scoped to `progressive`: they are cleared from
 `original_http` and `hls` because those delivery paths were not tested by the
-same probe.
+same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
+`hdr10_max_frame_rate`, and `hdr10_max_bitrate_kbps`; these ceilings keep a
+successful format probe from admitting an untested stream class.
 
 ---
 

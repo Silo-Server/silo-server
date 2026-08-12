@@ -256,7 +256,14 @@ export function useCodecDetection(): WebCapabilityProbe {
         if (disposed || generation !== probeGeneration || !hdr10) return;
         setCapabilities((current) => ({
           ...current,
-          hdrDetails: { ...current.hdrDetails, hdr10: true },
+          hdrDetails: {
+            ...current.hdrDetails,
+            hdr10: true,
+            hdr10_max_width: 3840,
+            hdr10_max_height: 2160,
+            hdr10_max_frame_rate: 24,
+            hdr10_max_bitrate_kbps: 80_000,
+          },
         }));
       });
     };

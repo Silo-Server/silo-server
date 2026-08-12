@@ -143,6 +143,10 @@ export function buildDeliveriesV3(
     dolby_vision_profiles: [],
     dolby_vision_profile_levels: [],
   };
+  delete nonProgressiveHDRDetails.hdr10_max_width;
+  delete nonProgressiveHDRDetails.hdr10_max_height;
+  delete nonProgressiveHDRDetails.hdr10_max_frame_rate;
+  delete nonProgressiveHDRDetails.hdr10_max_bitrate_kbps;
   return {
     original_http: buildDeliveryCapability(probe, {
       hdr_details: nonProgressiveHDRDetails,

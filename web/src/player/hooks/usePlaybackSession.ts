@@ -311,6 +311,7 @@ export function usePlaybackSession(
     options: ReplanOptions;
     loadSequence: number;
     retireSessionOnRefusal: boolean;
+    resolve: (adopted: boolean) => void;
   } | null>(null);
   const issueReplanRef = useRef<
     (options: ReplanOptions, retireSessionOnRefusal?: boolean) => Promise<boolean>
@@ -737,18 +738,28 @@ export function usePlaybackSession(
           };
           return false;
         }
-        if (
+        const isPendingUserIntent =
+          options.operation === "track_change" || options.operation === "quality_change";
+        const hasQueuedUserIntent =
+          queuedOperation === "track_change" || queuedOperation === "quality_change";
+        const shouldQueue =
           isPendingFailureRecovery ||
-          (isPendingOutputChange && !hasQueuedFailureRecovery) ||
+          (isPendingUserIntent && !hasQueuedFailureRecovery) ||
+          (isPendingOutputChange && !hasQueuedFailureRecovery && !hasQueuedUserIntent) ||
           (options.operation === "seek_reanchor" &&
             !hasQueuedFailureRecovery &&
-            !hasQueuedOutputChange)
-        ) {
-          pendingReplanRef.current = {
-            options,
-            loadSequence: loadSequenceRef.current,
-            retireSessionOnRefusal,
-          };
+            !hasQueuedOutputChange &&
+            !hasQueuedUserIntent);
+        if (shouldQueue) {
+          pendingReplanRef.current?.resolve(false);
+          return new Promise<boolean>((resolve) => {
+            pendingReplanRef.current = {
+              options,
+              loadSequence: loadSequenceRef.current,
+              retireSessionOnRefusal,
+              resolve,
+            };
+          });
         }
         return false;
       }
@@ -792,11 +803,9 @@ export function usePlaybackSession(
       });
 
       const loadSequence = loadSequenceRef.current;
-      const hasPendingOutputRefresh = () => {
+      const hasPendingReplan = () => {
         const pending = pendingReplanRef.current;
-        return (
-          pending?.loadSequence === loadSequence && pending.options.operation === "output_change"
-        );
+        return pending?.loadSequence === loadSequence;
       };
       replanInFlightRef.current = true;
       setState((current) => ({
@@ -826,12 +835,16 @@ export function usePlaybackSession(
         }
 
         const adopted = adoptDecision(decision);
-        if (!adopted && retireSessionOnRefusal && !hasPendingOutputRefresh()) {
+        if (!adopted && retireSessionOnRefusal && !hasPendingReplan()) {
           retireActiveSession(sessionId);
         }
         return adopted;
       } catch (err) {
         if (loadSequence !== loadSequenceRef.current) return false;
+        if (retireSessionOnRefusal) {
+          console.error("Failed to refresh playback output", err);
+          return false;
+        }
         const nextError = describePlaybackSessionError(err, "Failed to update playback");
         setState((current) => ({
           ...current,
@@ -839,7 +852,6 @@ export function usePlaybackSession(
           errorTitle: nextError.title,
           error: nextError.message,
         }));
-        if (retireSessionOnRefusal && !hasPendingOutputRefresh()) retireActiveSession(sessionId);
         return false;
       } finally {
         replanInFlightRef.current = false;
@@ -851,7 +863,11 @@ export function usePlaybackSession(
           // A capability change can queue behind a replan created by an older
           // render. Dispatch through the latest callback so its request carries
           // the current output evidence rather than the closed-over snapshot.
-          void issueReplanRef.current(pendingReplan.options, pendingReplan.retireSessionOnRefusal);
+          void issueReplanRef
+            .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
+            .then(pendingReplan.resolve);
+        } else {
+          pendingReplan?.resolve(false);
         }
       }
     },

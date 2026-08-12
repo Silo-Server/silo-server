@@ -226,6 +226,22 @@
         "hlg": {
           "type": "boolean"
         },
+        "hdr10_max_width": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hdr10_max_height": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hdr10_max_frame_rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "hdr10_max_bitrate_kbps": {
+          "type": "integer",
+          "minimum": 0
+        },
         "dolby_vision_profiles": {
           "type": "array",
           "maxItems": 16,
@@ -267,6 +283,22 @@
           }
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["hdr10_max_width"] },
+              { "required": ["hdr10_max_height"] },
+              { "required": ["hdr10_max_frame_rate"] },
+              { "required": ["hdr10_max_bitrate_kbps"] }
+            ]
+          },
+          "then": {
+            "required": ["hdr10"],
+            "properties": { "hdr10": { "const": true } }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "audio_passthrough": {
@@ -689,6 +721,30 @@
             "minLength": 1,
             "pattern": "\\S"
           }
+        }
+      }
+    },
+    {
+      "$comment": "Intent-only replans describe a user or output change and must not carry route-failure evidence.",
+      "if": {
+        "properties": {
+          "operation": {
+            "enum": [
+              "track_change",
+              "quality_change",
+              "output_change"
+            ]
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "failure"
+          ]
         }
       }
     }

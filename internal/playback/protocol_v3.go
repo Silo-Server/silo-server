@@ -194,6 +194,10 @@ type HDRCapabilitiesV3 struct {
 	HDR10                    bool                             `json:"hdr10"`
 	HDR10Plus                bool                             `json:"hdr10_plus"`
 	HLG                      bool                             `json:"hlg"`
+	HDR10MaxWidth            int                              `json:"hdr10_max_width,omitempty"`
+	HDR10MaxHeight           int                              `json:"hdr10_max_height,omitempty"`
+	HDR10MaxFrameRate        float64                          `json:"hdr10_max_frame_rate,omitempty"`
+	HDR10MaxBitrateKbps      int                              `json:"hdr10_max_bitrate_kbps,omitempty"`
 	DolbyVisionProfiles      []int                            `json:"dolby_vision_profiles"`
 	DolbyVisionProfileLevels []DolbyVisionProfileCapabilityV3 `json:"dolby_vision_profile_levels,omitempty"`
 }
@@ -820,6 +824,9 @@ func (r ReplanRequestV3) Validate() error {
 		// and never selects seek semantics.
 	case ReplanOperationTrackChangeV3:
 		// A user track change is not a failure; no classification is required.
+		if r.Failure != (FailureV3{}) {
+			return errors.New("track_change must not include failure")
+		}
 	case ReplanOperationQualityChangeV3:
 		// A user quality change is not a failure either, but it must actually
 		// name the wanted rung: an empty preference would silently mean "auto",
@@ -828,8 +835,14 @@ func (r ReplanRequestV3) Validate() error {
 		if strings.TrimSpace(r.QualityPreference) == "" {
 			return errors.New("quality_change requires a quality_preference")
 		}
+		if r.Failure != (FailureV3{}) {
+			return errors.New("quality_change must not include failure")
+		}
 	case ReplanOperationOutputChangeV3:
 		// Output capability refreshes are intent changes, not route failures.
+		if r.Failure != (FailureV3{}) {
+			return errors.New("output_change must not include failure")
+		}
 	default:
 		return errors.New("invalid replan operation")
 	}
@@ -982,6 +995,12 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 func validateHDRCapabilitiesV3(hdr *HDRCapabilitiesV3) error {
 	if hdr == nil {
 		return nil
+	}
+	if hdr.HDR10MaxWidth < 0 || hdr.HDR10MaxHeight < 0 || hdr.HDR10MaxFrameRate < 0 || hdr.HDR10MaxBitrateKbps < 0 {
+		return errors.New("invalid hdr10 capability limit")
+	}
+	if !hdr.HDR10 && (hdr.HDR10MaxWidth > 0 || hdr.HDR10MaxHeight > 0 || hdr.HDR10MaxFrameRate > 0 || hdr.HDR10MaxBitrateKbps > 0) {
+		return errors.New("hdr10 capability limits require hdr10 support")
 	}
 	if len(hdr.DolbyVisionProfiles) > 16 || len(hdr.DolbyVisionProfileLevels) > 16 {
 		return errors.New("dolby vision profile list exceeds supported size")

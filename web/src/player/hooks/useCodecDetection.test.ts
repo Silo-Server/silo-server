@@ -167,7 +167,13 @@ describe("probeWebCapabilities", () => {
     const { result, unmount } = renderHook(() => useCodecDetection());
     expect(result.current.hdrDetails.hdr10).toBe(false);
     await act(async () => Promise.resolve());
-    expect(result.current.hdrDetails.hdr10).toBe(true);
+    expect(result.current.hdrDetails).toMatchObject({
+      hdr10: true,
+      hdr10_max_width: 3840,
+      hdr10_max_height: 2160,
+      hdr10_max_frame_rate: 24,
+      hdr10_max_bitrate_kbps: 80_000,
+    });
     unmount();
   });
 

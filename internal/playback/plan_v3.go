@@ -1191,7 +1191,7 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	case "", DynamicRangeSDRV3:
 		return true
 	case DynamicRangeHDR10V3, "hdr_unknown":
-		return hdr.HDR10
+		return hdr.HDR10 && hdr10LimitsSupportPlanV3(hdr, plan)
 	case DynamicRangeHDR10PlusV3:
 		return hdr.HDR10Plus
 	case DynamicRangeHLGV3:
@@ -1209,6 +1209,13 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	default:
 		return false
 	}
+}
+
+func hdr10LimitsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
+	return !(hdr.HDR10MaxWidth > 0 && (plan.EffectiveRecipe.Width == nil || *plan.EffectiveRecipe.Width > hdr.HDR10MaxWidth) ||
+		hdr.HDR10MaxHeight > 0 && (plan.EffectiveRecipe.Height == nil || *plan.EffectiveRecipe.Height > hdr.HDR10MaxHeight) ||
+		hdr.HDR10MaxFrameRate > 0 && (plan.EffectiveRecipe.FrameRate == nil || *plan.EffectiveRecipe.FrameRate > hdr.HDR10MaxFrameRate) ||
+		hdr.HDR10MaxBitrateKbps > 0 && (plan.EffectiveRecipe.BitrateKbps == nil || *plan.EffectiveRecipe.BitrateKbps > hdr.HDR10MaxBitrateKbps))
 }
 
 func hdrSupportsDolbyVisionSourceV3(hdr HDRCapabilitiesV3, source SourceDescriptorV3) bool {

@@ -165,6 +165,19 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	if err := request.Validate(); err != nil {
 		t.Fatalf("track change without a failure classification: %v", err)
 	}
+	for _, operation := range []ReplanOperationV3{
+		ReplanOperationTrackChangeV3,
+		ReplanOperationQualityChangeV3,
+		ReplanOperationOutputChangeV3,
+	} {
+		request.Operation = operation
+		request.QualityPreference = "720p"
+		request.Failure = FailureV3{Classification: "decoder_failure"}
+		if err := request.Validate(); err == nil {
+			t.Fatalf("%s with failure was accepted", operation)
+		}
+	}
+	request.Failure = FailureV3{}
 
 	request.Operation = ReplanOperationQualityChangeV3
 	request.QualityPreference = ""
@@ -185,6 +198,26 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	request.Operation = "future_operation"
 	if err := request.Validate(); err == nil {
 		t.Fatal("unknown replan operation was accepted")
+	}
+}
+
+func TestHDR10CapabilityLimitsBoundTheClaimedStreamClass(t *testing.T) {
+	width, height, frameRate, bitrate := 3840, 2160, 24.0, 80_000
+	plan := PlanV3{EffectiveRecipe: EffectiveRecipeV3{
+		VideoCodec: "hevc", Width: &width, Height: &height, FrameRate: &frameRate,
+		BitrateKbps: &bitrate, DynamicRange: DynamicRangeHDR10V3,
+	}}
+	hdr := HDRCapabilitiesV3{
+		HDR10: true, HDR10MaxWidth: 3840, HDR10MaxHeight: 2160,
+		HDR10MaxFrameRate: 24, HDR10MaxBitrateKbps: 80_000,
+	}
+	if !hdrDetailsSupportPlanV3(hdr, plan) {
+		t.Fatal("the exactly probed HDR10 stream class was rejected")
+	}
+	tooFast := 60.0
+	plan.EffectiveRecipe.FrameRate = &tooFast
+	if hdrDetailsSupportPlanV3(hdr, plan) {
+		t.Fatal("an HDR10 stream above the probed frame-rate ceiling was accepted")
 	}
 }
 

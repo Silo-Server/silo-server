@@ -161,6 +161,25 @@ func TestClientProgressPersistenceRequiresExplicitStartPosition(t *testing.T) {
 	}
 }
 
+func TestIntentOnlyReplansRejectFailureEvidence(t *testing.T) {
+	schemas := compileSchemasV3(t)
+	for _, operation := range []playback.ReplanOperationV3{
+		playback.ReplanOperationTrackChangeV3,
+		playback.ReplanOperationQualityChangeV3,
+		playback.ReplanOperationOutputChangeV3,
+	} {
+		t.Run(string(operation), func(t *testing.T) {
+			request := decodeJSONValue(t, mustReadFile(t, filepath.Join(goldenRootV3, "replan_request.json"))).(map[string]any)
+			request["operation"] = string(operation)
+			request["quality_preference"] = "720p"
+			request["failure"] = map[string]any{"classification": "decoder_failure"}
+			if err := schemas["replan-request.schema.json"].Validate(request); err == nil {
+				t.Fatal("intent-only replan with failure satisfied the schema")
+			}
+		})
+	}
+}
+
 // TestGoldenFixturesSatisfyTheSchemas closes the loop the schemas exist for: a
 // schema that no longer accepts what cmd/playbackfixtures emits is a schema
 // that describes a server nobody runs.

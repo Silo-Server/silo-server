@@ -139,6 +139,10 @@ export interface HDRCapabilitiesV3 {
   hdr10: boolean;
   hdr10_plus: boolean;
   hlg: boolean;
+  hdr10_max_width?: number;
+  hdr10_max_height?: number;
+  hdr10_max_frame_rate?: number;
+  hdr10_max_bitrate_kbps?: number;
   dolby_vision_profiles: number[];
   dolby_vision_profile_levels?: Array<{
     profile: number;
