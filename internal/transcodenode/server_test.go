@@ -182,6 +182,48 @@ func TestSessionOutputDirKeepsStartupPathAcrossReload(t *testing.T) {
 	}
 }
 
+func TestHandleStartWaitsForForceReloadGate(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	body, err := json.Marshal(TranscodeStartRequest{
+		SessionID: "reload-gated-start", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, RequireReady: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	server.reloadMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			server.reloadMu.Unlock()
+		}
+	}()
+	go func() {
+		server.handleStart(rr, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("start completed while force-reload gate was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+	server.reloadMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("start did not resume after force-reload gate was released")
+	}
+}
+
 func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testing.T) {
 	server := newTestServer(t)
 	tracker := newBlockingSessionTracker()

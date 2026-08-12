@@ -1161,8 +1161,7 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 		return fmt.Errorf("stat file: %w", err)
 	}
 
-	filename := sanitizeFilename(filepath.Base(path))
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Disposition", attachmentDisposition(path))
 	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
 
 	var reader io.ReadSeeker = f
@@ -1172,6 +1171,11 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), reader)
 	return nil
+}
+
+func attachmentDisposition(path string) string {
+	filename := sanitizeFilename(filepath.Base(path))
+	return fmt.Sprintf(`attachment; filename="%s"`, filename)
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {
@@ -1212,6 +1216,9 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
 	}
+	// Preserve an origin-provided disposition, but supply the same sanitized
+	// attachment filename as local delivery when the node omits one.
+	w.Header().Set("Content-Disposition", attachmentDisposition(target.Path))
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	if r.Method == http.MethodHead {

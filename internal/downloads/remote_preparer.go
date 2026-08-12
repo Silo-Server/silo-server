@@ -79,7 +79,8 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		slog.InfoContext(ctx, "recovered completed download artifact after lost response", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 		return remotePreparedArtifact(node, recovered), nil
 	} else if statErr == nil {
-		return PreparedArtifact{}, fmt.Errorf("remote download artifact recovery returned artifact id %q, want %q", recovered.ArtifactID, artifactID)
+		return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}),
+			fmt.Errorf("remote download artifact recovery returned artifact id %q, want %q", recovered.ArtifactID, artifactID)
 	} else if !errors.Is(statErr, downloadprepare.ErrArtifactNotFound) {
 		slog.WarnContext(ctx, "remote download artifact recovery probe failed", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", statErr)
 		// The POST may have completed even though its response was lost. If the

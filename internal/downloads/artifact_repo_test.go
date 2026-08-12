@@ -313,6 +313,56 @@ func TestArtifactReadyMapsRemovedOriginToInactiveWhenRequeueLosesFence(t *testin
 	}
 }
 
+func TestArtifactRecoveryContinuesAfterStaleLocatorRefresh(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	ready := make([]*Artifact, 0, 2)
+	for i := range 2 {
+		row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-stale-locator-batch-%d", i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if applied, err := repo.MarkReady(ctx, row.ID, "worker", "", 17, "http://old-url", "host-a", fmt.Sprintf("artifact-%d", i), 4242); err != nil || !applied {
+			t.Fatalf("MarkReady(%d) = (%v, %v)", i, applied, err)
+		}
+		artifact, err := repo.GetByID(ctx, row.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ready = append(ready, artifact)
+	}
+
+	// Simulate another worker replacing the first locator after this recovery
+	// pass read it. Its refresh must lose the fence without suppressing checks
+	// for the remaining artifacts on the still-healthy origin.
+	if _, err := pool.Exec(ctx,
+		`UPDATE download_artifacts SET origin_artifact_id = 'artifact-replaced' WHERE id = $1`,
+		ready[0].ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	preparer := &lifecycleTestPreparer{
+		resolvedURL: "http://new-url", resolvedGroup: "host-new",
+		stat: downloadprepare.Result{FileSize: 4242},
+	}
+	manager := &ArtifactManager{repo: repo, preparer: preparer}
+	manager.probeRemoteArtifactGroup(ctx, preparer, ready)
+
+	if len(preparer.statIDs) != 1 || preparer.statIDs[0] != ready[1].ID {
+		t.Fatalf("probed artifacts = %v, want only continuing artifact %s", preparer.statIDs, ready[1].ID)
+	}
+	persisted, err := repo.GetByID(ctx, ready[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.OriginNodeURL != "http://new-url" || persisted.OriginNodeGroup != "host-new" {
+		t.Fatalf("continued artifact locator = %+v", persisted)
+	}
+}
+
 func TestArtifactInvalidRemoteResultQueuesCleanup(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()

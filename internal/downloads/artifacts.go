@@ -365,6 +365,10 @@ func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycl
 				m.requeueRemoteArtifact(ctx, a, "origin node removed")
 				continue
 			}
+			if errors.Is(err, ErrDownloadNotActive) {
+				// The row changed concurrently; the origin itself is still healthy.
+				continue
+			}
 			slog.WarnContext(ctx, "remote download artifact resolution failed; skipping remaining origin batch", "component", "downloads", "artifact_id", a.ID, "error", err)
 			return
 		}

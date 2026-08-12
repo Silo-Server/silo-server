@@ -40,14 +40,16 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	req.Header.Set("Range", "bytes=1-3")
 	rr := httptest.NewRecorder()
 	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
+		Path:             `/artifacts/Movie "Final".mp4`,
 		OriginNodeURL:    origin.URL,
 		OriginArtifactID: "artifact-1",
 	}, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rr.Code != http.StatusPartialContent || rr.Body.String() != "123" || rr.Header().Get("Content-Range") != "bytes 1-3/5" {
-		t.Fatalf("response status=%d body=%q range=%q", rr.Code, rr.Body.String(), rr.Header().Get("Content-Range"))
+	if rr.Code != http.StatusPartialContent || rr.Body.String() != "123" || rr.Header().Get("Content-Range") != "bytes 1-3/5" ||
+		rr.Header().Get("Content-Disposition") != `attachment; filename="Movie _Final_.mp4"` {
+		t.Fatalf("response status=%d body=%q range=%q disposition=%q", rr.Code, rr.Body.String(), rr.Header().Get("Content-Range"), rr.Header().Get("Content-Disposition"))
 	}
 }
 

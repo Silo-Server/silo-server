@@ -109,6 +109,9 @@ type Server struct {
 	lastAccess map[string]time.Time
 	reaperOnce sync.Once
 	mu         sync.RWMutex
+	// reloadMu keeps force-reload teardown atomic with session creation and
+	// reconstruction. It is always acquired before lifecycleMu or mu.
+	reloadMu   sync.RWMutex
 	activeJobs atomic.Int32
 
 	// reconstructGroup single-flights node-side session reconstruction per session
@@ -687,6 +690,8 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
+	s.reloadMu.RLock()
+	defer s.reloadMu.RUnlock()
 
 	cfg := s.watcher.Config()
 	if cfg == nil {
@@ -930,6 +935,8 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil
 	}
 	defer release()
+	s.reloadMu.RLock()
+	defer s.reloadMu.RUnlock()
 
 	// Serialize against a concurrent fresh /transcode/start for this session so the
 	// two never run ffmpeg writers against the same dir. Re-check under the lock and
@@ -1253,6 +1260,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
 	if err := s.watcher.ForceReload(r.Context()); err != nil {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return

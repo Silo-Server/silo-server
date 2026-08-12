@@ -81,6 +81,18 @@ func (indeterminateRemotePreparer) Stat(context.Context, string, string, string)
 }
 func (indeterminateRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
 
+type mismatchedRecoveryRemotePreparer struct{}
+
+func (mismatchedRecoveryRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
+	return downloadprepare.Result{}, context.DeadlineExceeded
+}
+func (mismatchedRecoveryRemotePreparer) Stat(context.Context, string, string, string) (downloadprepare.Result, error) {
+	return downloadprepare.Result{ArtifactID: "unexpected-artifact", FileSize: 55}, nil
+}
+func (mismatchedRecoveryRemotePreparer) Delete(context.Context, string, string, string) error {
+	return nil
+}
+
 func TestNodeAwarePreparerUsesLeastLoadedHealthyNode(t *testing.T) {
 	group := "host-a"
 	pool := nodepool.NewTranscodePool()
@@ -175,6 +187,27 @@ func TestNodeAwarePreparerFallsBackLocallyWithoutEligibleCapacity(t *testing.T) 
 	prepared, err := p.PrepareFile(context.Background(), "artifact-2", playback.TranscodeOpts{}, "/artifacts/job-2.mp4")
 	if err != nil || prepared.OutputPath == "" || local.calls != 1 {
 		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
+	}
+}
+
+func TestNodeAwarePreparerRetainsRequestedLocatorAfterMismatchedRecovery(t *testing.T) {
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://idle", Enabled: true, Healthy: true}})
+	local := &recordingEncodePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.remote = mismatchedRecoveryRemotePreparer{}
+
+	prepared, err := p.PrepareFile(context.Background(), "artifact-requested", playback.TranscodeOpts{}, "/local/job.mp4")
+	if err == nil {
+		t.Fatal("expected mismatched recovery error")
+	}
+	if !prepared.Remote() || prepared.OriginArtifactID != "artifact-requested" || prepared.FileSize != 0 {
+		t.Fatalf("prepared locator = %+v, want requested remote artifact", prepared)
+	}
+	if local.calls != 0 {
+		t.Fatalf("local calls = %d, want no fallback after indeterminate remote result", local.calls)
 	}
 }
 

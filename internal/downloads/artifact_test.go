@@ -60,6 +60,7 @@ type lifecycleTestPreparer struct {
 	resolvedGroup string
 	stat          downloadprepare.Result
 	statError     error
+	statIDs       []string
 	deleteErr     error
 }
 
@@ -76,7 +77,8 @@ func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Art
 	}
 	return p.resolveErr
 }
-func (p *lifecycleTestPreparer) StatArtifact(context.Context, *Artifact) (downloadprepare.Result, error) {
+func (p *lifecycleTestPreparer) StatArtifact(_ context.Context, artifact *Artifact) (downloadprepare.Result, error) {
+	p.statIDs = append(p.statIDs, artifact.ID)
 	return p.stat, p.statError
 }
 func (p *lifecycleTestPreparer) DeleteArtifact(_ context.Context, artifact *Artifact) error {
