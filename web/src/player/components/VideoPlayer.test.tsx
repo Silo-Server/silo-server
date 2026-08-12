@@ -6,6 +6,7 @@ import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfig
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import type { PlayerSubtitleInfo } from "../types";
+import { HLS_STARTUP_TIMEOUT_MS } from "../utils/hlsStartupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 
 const realtimeOptions = vi.hoisted(() => ({
@@ -150,6 +151,38 @@ describe("VideoPlayer plan failure recovery", () => {
     Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
     fireEvent.canPlay(video);
     expect(play).not.toHaveBeenCalled();
+  });
+
+  it("does not report a startup timeout while HLS is intentionally paused", () => {
+    vi.useFakeTimers();
+    try {
+      const onPlanFailure = vi.fn();
+      const hlsPlan = fixturePlanV3({
+        delivery: "server_remux_hls",
+        stream: {
+          url: "/stream/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      });
+      const { container } = renderPlayer({
+        plan: hlsPlan,
+        shouldAutoPlay: false,
+        onPlanFailure,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+
+      Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+      fireEvent.canPlay(video);
+      act(() => vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS));
+
+      expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+      expect(onPlanFailure).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("surfaces a refused replan only for the transport-dead plan revision", async () => {

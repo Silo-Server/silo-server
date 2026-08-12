@@ -1398,6 +1398,7 @@ export function VideoPlayer({
       autoplayStarted = true;
       cleanupStartupListeners();
       if (!shouldAutoPlay) {
+        hlsStartupGuardRef.current?.markPlaybackStarted();
         setAwaitingFirstFrame(false);
         setPlaying(false);
         return;
