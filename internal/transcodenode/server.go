@@ -95,11 +95,13 @@ type sessionTracker interface {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher    *nodeconfig.Watcher
-	tracker    sessionTracker
-	ffmpegSink playback.FFmpegLogSink
-	inputPaths InputPathAuthorizer
-	sessions   map[string]*playback.TranscodeSession
+	watcher      *nodeconfig.Watcher
+	tracker      sessionTracker
+	ffmpegSink   playback.FFmpegLogSink
+	inputPaths   InputPathAuthorizer
+	transcodeDir string
+	artifactRoot string
+	sessions     map[string]*playback.TranscodeSession
 	// lastAccess records, per registered session id, when a manifest or segment
 	// request last touched the job (registration counts as the first access).
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
@@ -194,11 +196,19 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	if tracker != nil {
 		trackerImpl = tracker
 	}
+	transcodeDir := config.DefaultTranscodeDir
+	if watcher != nil {
+		if cfg := watcher.Config(); cfg != nil && strings.TrimSpace(cfg.Playback.TranscodeDir) != "" {
+			transcodeDir = cfg.Playback.TranscodeDir
+		}
+	}
 	s := &Server{
-		watcher:    watcher,
-		tracker:    trackerImpl,
-		sessions:   make(map[string]*playback.TranscodeSession),
-		lastAccess: make(map[string]time.Time),
+		watcher:      watcher,
+		tracker:      trackerImpl,
+		transcodeDir: transcodeDir,
+		artifactRoot: filepath.Join(transcodeDir, downloadprepare.ArtifactDirectoryName),
+		sessions:     make(map[string]*playback.TranscodeSession),
+		lastAccess:   make(map[string]time.Time),
 	}
 	return s
 }
@@ -214,22 +224,14 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 // writing into TranscodeDir/<sessionID>: a dir younger than the max token
 // lifetime may still be reused, while older dirs are never reconstructable.
 func (s *Server) StartOrphanSweeper(ctx context.Context) {
-	dir := ""
-	if cfg := s.watcher.Config(); cfg != nil {
-		dir = cfg.Playback.TranscodeDir
-	}
+	dir := s.transcodeDir
 	playback.StartPeriodicOrphanCleanup(ctx, "transcodenode", dir, func() (int, error) {
-		// Re-read config each run so a hot-reloaded TranscodeDir is honored.
-		cfg := s.watcher.Config()
-		if cfg == nil {
-			return 0, nil
-		}
 		// Spare the live registered jobs by id, not by age alone: now that the
 		// sweep runs during live traffic, a long-lived session that re-serves
 		// already-written segments stops advancing its dir mtime, so the age
 		// guard could misclassify it as orphaned. The live set is authoritative
 		// (in-flight reconstructs are covered by their fresh writes + age guard).
-		return playback.CleanupOrphanedTranscodeDirs(cfg.Playback.TranscodeDir, s.activeSessionIDs(), playback.MaxTokenTTL)
+		return playback.CleanupOrphanedTranscodeDirs(dir, s.activeSessionIDs(), playback.MaxTokenTTL)
 	}, playback.OrphanCleanupInterval)
 }
 
@@ -247,12 +249,8 @@ func (s *Server) activeSessionIDs() map[string]struct{} {
 	// transcode volume. They have their own lifecycle and must never be mistaken
 	// for an orphaned HLS session directory. Protect the top-level container for
 	// both the default and an explicitly nested artifact directory.
-	if s.watcher != nil {
-		cfg := s.watcher.Config()
-		if cfg == nil {
-			return active
-		}
-		if rel, err := filepath.Rel(cfg.Playback.TranscodeDir, nodeDownloadArtifactRoot(cfg)); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if s.transcodeDir != "" && s.artifactRoot != "" {
+		if rel, err := filepath.Rel(s.transcodeDir, s.artifactRoot); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			if first, _, ok := strings.Cut(rel, string(filepath.Separator)); ok {
 				active[first] = struct{}{}
 			} else {
@@ -458,7 +456,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
-	artifactRoot := nodeDownloadArtifactRoot(cfg)
+	artifactRoot := s.artifactRoot
 	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
 		http.Error(w, "artifact directory unavailable", http.StatusInternalServerError)
 		return
@@ -510,11 +508,8 @@ func writeDownloadPrepareResult(w http.ResponseWriter, artifactID string, fileSi
 }
 
 func nodeDownloadArtifactRoot(cfg *config.Config) string {
-	if configured := strings.TrimSpace(cfg.Download.ArtifactDir); configured != "" {
-		return configured
-	}
 	if strings.TrimSpace(cfg.Playback.TranscodeDir) == "" {
-		return config.EffectiveDownloadArtifactDir("", "")
+		return filepath.Join(config.DefaultTranscodeDir, downloadprepare.ArtifactDirectoryName)
 	}
 	return filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
 }
@@ -530,7 +525,7 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "node not configured", http.StatusServiceUnavailable)
 		return
 	}
-	path := filepath.Join(nodeDownloadArtifactRoot(cfg), artifactID+".mp4")
+	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -565,7 +560,7 @@ func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Req
 	}
 	unlock := s.lockSessionLifecycle("download-artifact-" + artifactID)
 	defer unlock()
-	path := filepath.Join(nodeDownloadArtifactRoot(cfg), artifactID+".mp4")
+	path := filepath.Join(s.artifactRoot, artifactID+".mp4")
 	for _, candidate := range []string{path, path + ".part"} {
 		if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
 			http.Error(w, "failed to remove artifact", http.StatusInternalServerError)

@@ -35,7 +35,7 @@ type DownloadPlanner interface {
 // remote operation ends or falls back locally.
 type TranscodeWorkPlanner interface {
 	ReserveTranscodeWork(workID string) (*Node, func())
-	TranscodeNode(nodeID int) *Node
+	TranscodeNode(nodeID int) (*Node, bool)
 }
 
 // reservation bridges the gap between assigning a session to a node and the
@@ -111,16 +111,16 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 
 // TranscodeNode returns the current pool record for a persistent node id. It
 // lets durable artifact locators follow an administrator-edited node URL/group.
-func (p *Planner) TranscodeNode(nodeID int) *Node {
+func (p *Planner) TranscodeNode(nodeID int) (*Node, bool) {
 	if p == nil || p.transcodes == nil || nodeID == 0 {
-		return nil
+		return nil, false
 	}
 	for _, node := range p.transcodes.Nodes() {
-		if node != nil && node.ID == nodeID {
-			return node
+		if node != nil && node.ID == nodeID && node.Enabled {
+			return node, true
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // PlanDownload picks a healthy proxy for an unbounded file transfer. A

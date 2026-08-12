@@ -103,6 +103,35 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 	}
 }
 
+func TestProxyDownloadRelaysNodeLocalArtifactPreconditionFailure(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("If-Match"); got != `"old-etag"` {
+			t.Fatalf("origin If-Match = %q", got)
+		}
+		w.Header().Set("ETag", `"new-etag"`)
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:          "download-remote-412",
+		PlayMethod:         streamtoken.PlayMethodDownload,
+		TranscodeNode:      origin.URL,
+		DownloadArtifactID: "artifact-1",
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
+	req.Header.Set("If-Match", `"old-etag"`)
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusPreconditionFailed || rr.Header().Get("ETag") != `"new-etag"` {
+		t.Fatalf("status=%d etag=%q body=%q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
+	}
+}
+
 func TestProxyDownloadRejectsRemoteArtifactWithInvalidOpaqueID(t *testing.T) {
 	const secret = "download-proxy-secret"
 	token, err := streamtoken.Sign(streamtoken.Claims{

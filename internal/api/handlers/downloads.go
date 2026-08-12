@@ -471,6 +471,9 @@ func (h *DownloadHandler) handleDownloadFile(w http.ResponseWriter, r *http.Requ
 	// the write deadline with progress instead.
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	if err := h.svc.ServeFile(r.Context(), sw, r, userID, profileID, deviceID, id, filter); err != nil {
+		if errors.Is(err, downloads.ErrResponseCommitted) {
+			return
+		}
 		h.writeDownloadFileError(w, r, id, err)
 	}
 }

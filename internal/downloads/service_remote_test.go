@@ -1,6 +1,7 @@
 package downloads
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -56,13 +57,41 @@ func TestServiceDoesNotAppendAPIErrorAfterRemoteBodyIsCommitted(t *testing.T) {
 	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	rr := httptest.NewRecorder()
+	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
+		OriginNodeURL:    origin.URL,
+		OriginArtifactID: "artifact-1",
+	}, 7)
+	if !errors.Is(err, ErrResponseCommitted) {
+		t.Fatalf("serveFileTarget error = %v, want ErrResponseCommitted", err)
+	}
+	if rr.Code != http.StatusOK || rr.Body.String() != "123" {
+		t.Fatalf("response status=%d body=%q", rr.Code, rr.Body.String())
+	}
+}
+
+func TestServiceRelaysRemotePreconditionFailure(t *testing.T) {
+	const secret = "artifact-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("If-Match"); got != `"old-etag"` {
+			t.Fatalf("origin If-Match = %q", got)
+		}
+		w.Header().Set("ETag", `"new-etag"`)
+		w.WriteHeader(http.StatusPreconditionFailed)
+	}))
+	defer origin.Close()
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = secret
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
+	req.Header.Set("If-Match", `"old-etag"`)
+	rr := httptest.NewRecorder()
 	if err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
 		OriginNodeURL:    origin.URL,
 		OriginArtifactID: "artifact-1",
 	}, 7); err != nil {
-		t.Fatalf("serveFileTarget returned after committing response: %v", err)
+		t.Fatal(err)
 	}
-	if rr.Code != http.StatusOK || rr.Body.String() != "123" {
-		t.Fatalf("response status=%d body=%q", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusPreconditionFailed || rr.Header().Get("ETag") != `"new-etag"` {
+		t.Fatalf("response status=%d etag=%q body=%q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
 	}
 }

@@ -243,7 +243,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		http.NotFound(w, r)
 		return
 	}
-	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		http.Error(w, "download unavailable", http.StatusBadGateway)
 		return
 	}

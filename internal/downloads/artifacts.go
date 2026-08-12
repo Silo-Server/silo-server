@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -63,7 +65,7 @@ func NewPlaybackPreparer() EncodePreparer { return playbackPreparer{} }
 // remoteArtifactLifecycle is implemented by the pooled preparer so recovery
 // and quota cleanup can manage node-local artifacts without filesystem access.
 type remoteArtifactLifecycle interface {
-	ResolveArtifact(artifact *Artifact)
+	ResolveArtifact(artifact *Artifact) error
 	StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error)
 	DeleteArtifact(ctx context.Context, artifact *Artifact) error
 }
@@ -150,7 +152,12 @@ func (m *ArtifactManager) Ready(ctx context.Context, id string) (*Artifact, erro
 		return nil, fmt.Errorf("artifact is %s: %w", a.Status, ErrDownloadNotActive)
 	}
 	if lifecycle, ok := m.preparer.(remoteArtifactLifecycle); ok && a.OriginArtifactID != "" {
-		lifecycle.ResolveArtifact(a)
+		if err := lifecycle.ResolveArtifact(a); err != nil {
+			if !errors.Is(err, ErrArtifactOriginRemoved) || !m.requeueRemoteArtifact(ctx, a, "origin node removed") {
+				return nil, err
+			}
+			return nil, fmt.Errorf("artifact origin was removed and preparation was requeued: %w", ErrDownloadNotActive)
+		}
 	}
 	_ = m.repo.TouchLastUsed(ctx, id)
 	return a, nil
@@ -249,20 +256,26 @@ func (m *ArtifactManager) triggerDrain() {
 	}
 }
 
-// RunOnce performs a startup-safe recovery sweep and then drains the queue
-// until empty. It is safe to call concurrently across nodes; FOR UPDATE SKIP
-// LOCKED prevents double-encoding.
+// RunOnce repairs queue state and drains pending work before probing ready
+// remote artifacts. Network health checks therefore never block newly queued
+// downloads at startup; any artifacts requeued by the bounded probe pass are
+// drained in the second pass.
 func (m *ArtifactManager) RunOnce(ctx context.Context) error {
-	m.recover(ctx)
+	m.recoverQueueState(ctx)
+	if err := m.drain(ctx); err != nil {
+		return err
+	}
+	m.recoverReadyArtifacts(ctx)
 	return m.drain(ctx)
 }
 
-// recover repairs state a crash or lost lease can leave behind: it reclaims
-// expired-lease running rows (back to queued, or failed when attempts are
-// exhausted), reconciles linked downloads against terminal artifact states, and
-// re-queues ready artifacts whose output file is missing on disk. Safe to run
-// repeatedly (each step is idempotent).
+// recover is retained as the focused recovery entrypoint used by tests.
 func (m *ArtifactManager) recover(ctx context.Context) {
+	m.recoverQueueState(ctx)
+	m.recoverReadyArtifacts(ctx)
+}
+
+func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 	if _, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
 		slog.WarnContext(ctx, "download artifact lease reclaim failed", "component", "downloads", "error", err)
 	}
@@ -284,8 +297,13 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 		}
 	}
 
-	// Disk-presence sweep: stats every ready file, so it runs on the startup
-	// pass and then hourly rather than on every tick.
+}
+
+// recoverReadyArtifacts checks local paths directly and groups remote probes
+// by origin. Origins run concurrently, but each origin is short-circuited after
+// its first transient failure so one blackholed node costs one bounded timeout,
+// never one timeout per artifact.
+func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 	if !m.maintenanceDue(&m.lastDiskSweep) {
 		return
 	}
@@ -294,52 +312,80 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 		slog.WarnContext(ctx, "download artifact ready scan failed", "component", "downloads", "error", err)
 		return
 	}
+	remoteGroups := make(map[string][]*Artifact)
 	for _, a := range ready {
-		missing := false
-		remote := false
-		var lifecycle remoteArtifactLifecycle
 		if a.OriginArtifactID != "" {
-			var ok bool
-			lifecycle, ok = m.preparer.(remoteArtifactLifecycle)
-			if !ok {
-				slog.WarnContext(ctx, "remote download artifact cannot be checked", "component", "downloads", "artifact_id", a.ID)
-				continue
-			}
-			remote = true
-			result, statErr := lifecycle.StatArtifact(ctx, a)
-			switch {
-			case errors.Is(statErr, downloadprepare.ErrArtifactNotFound):
-				missing = true
-			case statErr != nil:
-				// A node or network outage is not evidence that durable bytes are
-				// gone; retain the ready locator and retry the check next sweep.
-				slog.WarnContext(ctx, "remote download artifact check failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", statErr)
-				continue
-			case result.FileSize != a.FileSize:
-				missing = true
-			}
-		} else if a.OutputPath != "" {
-			_, statErr := os.Stat(a.OutputPath)
-			missing = statErr != nil
+			key := fmt.Sprintf("%d\x00%s", a.OriginNodeID, a.OriginNodeURL)
+			remoteGroups[key] = append(remoteGroups[key], a)
+			continue
 		}
-		if missing {
-			// Remove a nonzero-but-truncated artifact before requeueing. Otherwise
-			// the node's idempotent prepare endpoint would accept the same stale
-			// file and merely teach the database its incorrect size.
-			if remote {
-				if err := lifecycle.DeleteArtifact(ctx, a); err != nil {
-					slog.WarnContext(ctx, "removing invalid remote download artifact failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
-					continue
+		if a.OutputPath != "" {
+			if _, statErr := os.Stat(a.OutputPath); statErr != nil {
+				slog.WarnContext(ctx, "download artifact output missing, re-queuing", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
+				if err := m.repo.Requeue(ctx, a.ID); err != nil {
+					slog.WarnContext(ctx, "re-queue artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 				}
 			}
-			slog.WarnContext(ctx, "download artifact output missing, re-queuing", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
-			if err := m.repo.Requeue(ctx, a.ID); err != nil {
-				slog.WarnContext(ctx, "re-queue artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
-				continue
-			}
-			m.triggerDrain()
 		}
 	}
+	if len(remoteGroups) == 0 {
+		return
+	}
+	lifecycle, ok := m.preparer.(remoteArtifactLifecycle)
+	if !ok {
+		slog.WarnContext(ctx, "remote download artifacts cannot be checked", "component", "downloads")
+		return
+	}
+	const maxConcurrentOriginProbes = 4
+	sem := make(chan struct{}, maxConcurrentOriginProbes)
+	var wg sync.WaitGroup
+	for _, artifacts := range remoteGroups {
+		artifacts := artifacts
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			m.probeRemoteArtifactGroup(ctx, lifecycle, artifacts)
+		}()
+	}
+	wg.Wait()
+}
+
+func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycle remoteArtifactLifecycle, artifacts []*Artifact) {
+	for _, a := range artifacts {
+		result, err := lifecycle.StatArtifact(ctx, a)
+		switch {
+		case errors.Is(err, ErrArtifactOriginRemoved):
+			m.requeueRemoteArtifact(ctx, a, "origin node removed")
+		case errors.Is(err, downloadprepare.ErrArtifactNotFound):
+			m.requeueRemoteArtifact(ctx, a, "remote output missing")
+		case err != nil:
+			// One node-level failure suppresses the rest of this origin's batch.
+			slog.WarnContext(ctx, "remote download artifact check failed; skipping remaining origin batch", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
+			return
+		case result.FileSize != a.FileSize:
+			m.requeueRemoteArtifact(ctx, a, "remote output size mismatch")
+		}
+	}
+}
+
+func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) bool {
+	applied, err := m.repo.RequeueRemote(ctx, a)
+	if err != nil {
+		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+		return false
+	}
+	if !applied {
+		return false
+	}
+	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
+	m.triggerDrain()
+	return true
 }
 
 // drain claims and encodes jobs through a bounded worker pool until the queue is
@@ -400,8 +446,15 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	}
 
 	opts := m.buildOpts(file, a)
-	prepared, err := m.preparer.PrepareFile(hbCtx, a.ID, opts, a.OutputPath)
+	// Each lease attempt owns a distinct node-local object. A worker that loses
+	// the readiness fence can therefore queue its object for deletion without
+	// racing the replacement worker's output on the same node.
+	remoteAttemptID := a.ID + "-" + uuid.NewString()
+	prepared, err := m.preparer.PrepareFile(hbCtx, remoteAttemptID, opts, a.OutputPath)
 	if err != nil {
+		if prepared.Remote() {
+			m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
+		}
 		switch {
 		case ctx.Err() != nil:
 			// Parent shutting down: leave the job 'running'; its lease expires and
@@ -438,10 +491,12 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, outputPath, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginNodeGroup, prepared.OriginArtifactID, size)
 	if err != nil {
 		slog.ErrorContext(ctx, "marking artifact ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+		m.cleanupRejectedPrepared(ctx, a.ID, prepared)
 		return
 	}
 	if !applied {
 		slog.WarnContext(ctx, "download artifact ready skipped; lease lost", "component", "downloads", "artifact_id", a.ID)
+		m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
 		return
 	}
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
@@ -452,6 +507,54 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	for _, d := range flipped {
 		m.publish(ctx, d)
 	}
+}
+
+func (m *ArtifactManager) cleanupRejectedPrepared(ctx context.Context, artifactID string, prepared PreparedArtifact) {
+	if !prepared.Remote() {
+		return
+	}
+	// Exec can report a transport error after PostgreSQL committed. Re-read the
+	// row before classifying this attempt as abandoned so cleanup never deletes
+	// the locator that actually won the readiness fence.
+	current, err := m.repo.GetByID(ctx, artifactID)
+	if err == nil {
+		if current.Status == ArtifactReady &&
+			current.OriginNodeID == prepared.OriginNodeID &&
+			current.OriginArtifactID == prepared.OriginArtifactID {
+			return
+		}
+	}
+	// A successful reread (or a definitively missing row) proves this locator
+	// lost. Other database errors leave MarkReady's outcome indeterminate, so a
+	// failed queue write must not fall back to deleting potentially-owned bytes.
+	safeImmediateDelete := err == nil || errors.Is(err, ErrNotFound)
+	m.enqueueRemoteCleanup(ctx, artifactID, prepared, safeImmediateDelete)
+}
+
+func (m *ArtifactManager) enqueueRemoteCleanup(ctx context.Context, artifactID string, prepared PreparedArtifact, safeImmediateDelete bool) bool {
+	if !prepared.Remote() {
+		return true
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := m.repo.EnqueueRemoteOrphan(cleanupCtx, artifactID, prepared.OriginNodeID, prepared.OriginNodeURL, prepared.OriginArtifactID); err != nil {
+		slog.WarnContext(ctx, "persisting abandoned remote artifact failed", "component", "downloads", "artifact_id", prepared.OriginArtifactID, "node", prepared.OriginNodeURL, "error", err)
+		// A unique attempt ID permits best-effort immediate deletion when the
+		// caller knows the readiness write did not commit. An indeterminate write
+		// must retain the bytes if the verification queue is unavailable.
+		if safeImmediateDelete {
+			lifecycle, ok := m.preparer.(remoteArtifactLifecycle)
+			if !ok {
+				return false
+			}
+			artifact := &Artifact{OriginNodeID: prepared.OriginNodeID, OriginNodeURL: prepared.OriginNodeURL, OriginNodeGroup: prepared.OriginNodeGroup, OriginArtifactID: prepared.OriginArtifactID}
+			if deleteErr := lifecycle.DeleteArtifact(cleanupCtx, artifact); deleteErr == nil {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
 
 func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) {
@@ -558,6 +661,7 @@ const (
 // active download row (managed or ephemeral) — only artifacts whose links are
 // all terminal are evictable.
 func (m *ArtifactManager) Cleanup(ctx context.Context) error {
+	m.cleanupRemoteOrphans(ctx)
 	m.sweepStale(ctx)
 	budget := m.downloadConfig().ArtifactMaxBytes
 	if budget <= 0 {
@@ -597,6 +701,62 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 		total -= a.FileSize
 	}
 	return nil
+}
+
+func (m *ArtifactManager) cleanupRemoteOrphans(ctx context.Context) {
+	lifecycle, ok := m.preparer.(remoteArtifactLifecycle)
+	if !ok {
+		return
+	}
+	orphans, err := m.repo.ListRemoteOrphansDue(ctx, 100)
+	if err != nil {
+		slog.WarnContext(ctx, "listing abandoned remote artifacts failed", "component", "downloads", "error", err)
+		return
+	}
+	groups := make(map[string][]RemoteArtifactOrphan)
+	for _, orphan := range orphans {
+		key := fmt.Sprintf("%d\x00%s", orphan.OriginNodeID, orphan.OriginNodeURL)
+		groups[key] = append(groups[key], orphan)
+	}
+	const maxConcurrentOriginDeletes = 4
+	sem := make(chan struct{}, maxConcurrentOriginDeletes)
+	var wg sync.WaitGroup
+	for _, group := range groups {
+		group := group
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			for _, orphan := range group {
+				owned, claimed, err := m.repo.PrepareRemoteOrphanCleanup(ctx, orphan)
+				if err != nil {
+					slog.WarnContext(ctx, "claiming abandoned remote artifact cleanup failed; skipping remaining origin batch", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "error", err)
+					return
+				}
+				if !claimed || owned {
+					continue
+				}
+				artifact := &Artifact{
+					OriginNodeID: orphan.OriginNodeID, OriginNodeURL: orphan.OriginNodeURL,
+					OriginArtifactID: orphan.OriginArtifactID,
+				}
+				if err := lifecycle.DeleteArtifact(ctx, artifact); err != nil {
+					slog.WarnContext(ctx, "abandoned remote artifact cleanup failed; skipping remaining origin batch", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "node", orphan.OriginNodeURL, "error", err)
+					return
+				}
+				if err := m.repo.DeleteRemoteOrphan(ctx, orphan.ID); err != nil {
+					slog.WarnContext(ctx, "clearing abandoned remote artifact cleanup row failed", "component", "downloads", "artifact_id", orphan.OriginArtifactID, "error", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // sweepStale is the age-based hygiene pass: cold terminally-failed artifacts

@@ -79,6 +79,13 @@ var (
 	ErrInvalidSubtitleRef     = errors.New("invalid subtitle reference")
 	ErrAssetNotFound          = errors.New("download asset not found")
 	ErrFormatUnavailable      = errors.New("requested download format is not available")
+	// ErrResponseCommitted reports a transfer failure after response headers
+	// were written. Handlers must not append an API error body, while service
+	// lifecycle code must still treat the transfer as incomplete.
+	ErrResponseCommitted = errors.New("download response already committed")
+	// ErrArtifactOriginRemoved means a durable remote locator points at a node
+	// no longer present in the enabled transcode pool.
+	ErrArtifactOriginRemoved = errors.New("download artifact origin node was removed")
 	// ErrQualityUnavailable means the requested quality is valid and permitted in
 	// principle but cannot be fulfilled by the current server wiring.
 	ErrQualityUnavailable = errors.New("requested download quality is not available")

@@ -138,9 +138,10 @@ file connected to the deployment's shared PostgreSQL and Redis services.
 Proxy nodes serve source downloads from the same absolute media paths used by direct playback.
 Prepared-download work can also run on transcode nodes. Each selected transcode node retains its
 result on node-local storage and exposes it only through Silo's authenticated internal artifact API;
-the paired proxy relays those bytes, so no shared artifact mount is required. `download.artifact_dir`
-still controls the local artifact location on each process when explicitly configured; otherwise a
-transcode node uses a protected directory inside its existing transcode volume. Downloads with a
+the paired proxy relays those bytes, so no shared artifact mount is required. Dedicated transcode
+nodes always retain prepared downloads in a protected directory inside the transcode volume captured
+at process startup; changing `playback.transcode_dir` therefore requires a node restart.
+`download.artifact_dir` controls only the integrated/API-local fallback location. Downloads with a
 configured server-wide or per-user bandwidth limit remain API-local so those aggregate limits stay exact.
 Clients discover distributed delivery through `proxy_delivery` on the download capability response.
 When it is true, they may opt into `GET` or `HEAD /api/v1/downloads/{id}/file-proxy` and

@@ -268,6 +268,15 @@ func CopyResponseHeaders(dst, src http.Header) {
 	}
 }
 
+// RelayStatusAllowed identifies the complete set of normal ServeContent
+// outcomes that an internal relay must preserve unchanged.
+func RelayStatusAllowed(status int) bool {
+	return status >= http.StatusOK && status < http.StatusMultipleChoices ||
+		status == http.StatusNotModified ||
+		status == http.StatusPreconditionFailed ||
+		status == http.StatusRequestedRangeNotSatisfiable
+}
+
 func decodeResult(resp *http.Response, operation string) (Result, error) {
 	if resp.StatusCode == http.StatusNotFound {
 		return Result{}, ErrArtifactNotFound

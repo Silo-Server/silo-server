@@ -87,9 +87,11 @@ func newTestServer(t *testing.T) *Server {
 	cfg.Playback.TranscodeDir = t.TempDir()
 	w.SetConfigForTest(cfg)
 	return &Server{
-		watcher:    w,
-		inputPaths: allowInputPaths{},
-		sessions:   make(map[string]*playback.TranscodeSession),
+		watcher:      w,
+		inputPaths:   allowInputPaths{},
+		transcodeDir: cfg.Playback.TranscodeDir,
+		artifactRoot: nodeDownloadArtifactRoot(cfg),
+		sessions:     make(map[string]*playback.TranscodeSession),
 	}
 }
 
@@ -125,10 +127,11 @@ func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
 	}
 }
 
-func TestHandleDownloadPrepareWritesConfiguredSharedArtifact(t *testing.T) {
+func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T) {
 	server := newTestServer(t)
-	artifactDir := t.TempDir()
-	server.watcher.Config().Download.ArtifactDir = artifactDir
+	artifactDir := server.artifactRoot
+	server.watcher.Config().Download.ArtifactDir = t.TempDir()
+	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
 	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -172,8 +175,6 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 	server := newTestServer(t)
 	tracker := newBlockingSessionTracker()
 	server.tracker = tracker
-	artifactDir := t.TempDir()
-	server.watcher.Config().Download.ArtifactDir = artifactDir
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
 	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -234,7 +235,6 @@ func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testin
 
 func TestHandleDownloadPrepareRejectsInvalidArtifactID(t *testing.T) {
 	server := newTestServer(t)
-	server.watcher.Config().Download.ArtifactDir = t.TempDir()
 	body, err := json.Marshal(downloadprepare.Request{
 		ArtifactID:       "../artifact-2",
 		InputPath:        "/media/movie.mkv",
@@ -291,7 +291,7 @@ func TestDownloadPrepareRouteRequiresNodeBearer(t *testing.T) {
 
 func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	server := newTestServer(t)
-	root := nodeDownloadArtifactRoot(server.watcher.Config())
+	root := server.artifactRoot
 	if want := filepath.Join(server.watcher.Config().Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName); root != want {
 		t.Fatalf("artifact root = %q, want %q", root, want)
 	}

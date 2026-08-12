@@ -92,3 +92,22 @@ func TestDefaultPrepareClientHasNoResponseHeaderDeadline(t *testing.T) {
 		t.Fatalf("prepare response header timeout = %s, want none", transport.ResponseHeaderTimeout)
 	}
 }
+
+func TestRelayStatusAllowedPreservesServeContentOutcomes(t *testing.T) {
+	for _, status := range []int{
+		http.StatusOK,
+		http.StatusPartialContent,
+		http.StatusNotModified,
+		http.StatusPreconditionFailed,
+		http.StatusRequestedRangeNotSatisfiable,
+	} {
+		if !RelayStatusAllowed(status) {
+			t.Errorf("status %d should be relayed", status)
+		}
+	}
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusBadRequest, http.StatusInternalServerError} {
+		if RelayStatusAllowed(status) {
+			t.Errorf("status %d should be rejected", status)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,7 @@ type fakeDownloadService struct {
 	deleteErr      error
 	patchErr       error
 	serveErr       error
+	serveBody      string
 	directErr      error
 	manifest       *downloads.OfflineManifest
 	batchManifests []*downloads.OfflineManifest
@@ -184,6 +186,9 @@ func (f *fakeDownloadService) ServeDirect(_ context.Context, w http.ResponseWrit
 
 func (f *fakeDownloadService) ServeFile(_ context.Context, w http.ResponseWriter, _ *http.Request, userID int, profileID, deviceID, downloadID string, _ catalog.AccessFilter) error {
 	f.gotServe = identityCall{userID, profileID, deviceID, downloadID}
+	if f.serveBody != "" {
+		_, _ = w.Write([]byte(f.serveBody))
+	}
 	if f.serveErr != nil {
 		return f.serveErr
 	}
@@ -463,6 +468,21 @@ func TestManagedFileThreadsIdentity(t *testing.T) {
 	}
 	if svc.gotServe != (identityCall{7, "pA", "devA", "dl1"}) {
 		t.Fatalf("serve identity = %+v, want {7 pA devA dl1}", svc.gotServe)
+	}
+}
+
+func TestManagedFileDoesNotAppendJSONAfterRelayResponseCommitted(t *testing.T) {
+	svc := &fakeDownloadService{
+		serveBody: "partial",
+		serveErr:  fmt.Errorf("remote relay failed: %w", downloads.ErrResponseCommitted),
+	}
+	h := NewDownloadHandler(svc)
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl1/file", nil, 7, "pA", "devA"), "dl1")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFile(rec, req)
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "partial" {
+		t.Fatalf("response status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 

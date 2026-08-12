@@ -61,7 +61,7 @@ type lifecycleTestPreparer struct {
 func (*lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return PreparedArtifact{}, nil
 }
-func (*lifecycleTestPreparer) ResolveArtifact(*Artifact) {}
+func (*lifecycleTestPreparer) ResolveArtifact(*Artifact) error { return nil }
 func (p *lifecycleTestPreparer) StatArtifact(context.Context, *Artifact) (downloadprepare.Result, error) {
 	return p.stat, p.statError
 }

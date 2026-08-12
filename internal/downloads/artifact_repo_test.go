@@ -24,6 +24,12 @@ func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int)
 	if present == nil {
 		t.Skip("download_artifacts migration has not been applied")
 	}
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.download_artifact_orphans')::text`).Scan(&present); err != nil {
+		t.Fatalf("check download_artifact_orphans: %v", err)
+	}
+	if present == nil {
+		t.Skip("download_artifact_orphans migration has not been applied")
+	}
 
 	suffix := time.Now().UnixNano()
 	var folderID int
@@ -262,8 +268,81 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	if got.Status != ArtifactQueued || got.OriginArtifactID != "" {
 		t.Fatalf("recovered artifact = %+v, want queued without remote locator", got)
 	}
-	if preparer.deleted != "artifact-truncated" {
-		t.Fatalf("deleted = %q, want artifact-truncated", preparer.deleted)
+	orchans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orchans) != 1 || orchans[0].OriginNodeID != 17 || orchans[0].OriginArtifactID != "artifact-truncated" {
+		t.Fatalf("remote cleanup queue = %+v", orchans)
+	}
+	if preparer.deleted != "" {
+		t.Fatalf("remote bytes were deleted before durable requeue committed: %q", preparer.deleted)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orchans[0].ID) })
+}
+
+func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-remote-atomic-requeue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", row.OutputPath, 23, "http://transcode-old", "host-a", "artifact-abandoned", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	ready, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An indeterminate MarkReady result may enqueue the locator even though its
+	// database write committed. Cleanup must recognize the winning locator and
+	// remove only the stale queue row, never the node-local bytes.
+	if err := repo.EnqueueRemoteOrphan(ctx, row.ID, ready.OriginNodeID, ready.OriginNodeURL, ready.OriginArtifactID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE download_artifact_orphans SET next_retry_at = NULL WHERE origin_node_id = $1 AND origin_artifact_id = $2`, ready.OriginNodeID, ready.OriginArtifactID); err != nil {
+		t.Fatal(err)
+	}
+	orchans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	if err != nil || len(orchans) != 1 {
+		t.Fatalf("uncertain cleanup queue = %+v (%v)", orchans, err)
+	}
+	owned, claimed, err := repo.PrepareRemoteOrphanCleanup(ctx, orchans[0])
+	if err != nil || !claimed || !owned {
+		t.Fatalf("PrepareRemoteOrphanCleanup = (owned=%v claimed=%v err=%v)", owned, claimed, err)
+	}
+	if left, err := repo.ListRemoteOrphansDue(ctx, 10); err != nil || len(left) != 0 {
+		t.Fatalf("owned cleanup rows left = %+v (%v)", left, err)
+	}
+	// The in-memory URL may already have followed an administrative edit; the
+	// transaction deliberately matches stable node/id fields and stores the
+	// refreshed URL as the cleanup target.
+	ready.OriginNodeURL = "http://transcode-new"
+	if applied, err := repo.RequeueRemote(ctx, ready); err != nil || !applied {
+		t.Fatalf("RequeueRemote = (%v, %v)", applied, err)
+	}
+	queued, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != ArtifactQueued || queued.OriginArtifactID != "" {
+		t.Fatalf("queued artifact = %+v", queued)
+	}
+	orchans, err = repo.ListRemoteOrphansDue(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orchans) != 1 || orchans[0].DownloadArtifactID != row.ID || orchans[0].OriginNodeURL != "http://transcode-new" || orchans[0].OriginArtifactID != "artifact-abandoned" {
+		t.Fatalf("remote cleanup queue = %+v", orchans)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orchans[0].ID) })
+	// A stale caller cannot enqueue a second cleanup after the row changed.
+	if applied, err := repo.RequeueRemote(ctx, ready); err != nil || applied {
+		t.Fatalf("stale RequeueRemote = (%v, %v), want false, nil", applied, err)
 	}
 }
 

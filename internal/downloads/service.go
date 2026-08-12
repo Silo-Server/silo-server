@@ -1195,7 +1195,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if resp.StatusCode == http.StatusNotFound {
 		return catalog.ErrItemNotFound
 	}
-	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
 	}
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
@@ -1209,11 +1209,13 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	}
 	if _, err := io.Copy(w, reader); err != nil {
 		// Headers and a partial body are already committed, so returning an error
-		// would make the API handler append JSON to the media response. The client
-		// detects truncation from Content-Length; retain a server-side record only.
+		// normally makes an API handler append JSON to the media response. Return a
+		// committed-response sentinel so lifecycle state records the failed transfer
+		// while the handler leaves the partial media response untouched.
 		if ctx.Err() == nil {
 			slog.WarnContext(ctx, "remote download artifact relay interrupted", "component", "downloads", "artifact_id", target.OriginArtifactID, "error", err)
 		}
+		return fmt.Errorf("%w: relaying remote artifact: %v", ErrResponseCommitted, err)
 	}
 	return nil
 }

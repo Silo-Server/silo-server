@@ -60,7 +60,7 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		err = fmt.Errorf("remote download prepare returned artifact id %q, want %q", result.ArtifactID, artifactID)
 	}
 	if ctx.Err() != nil {
-		return PreparedArtifact{}, ctx.Err()
+		return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}), ctx.Err()
 	}
 	// A completed encode can outlive a lost HTTP response. Probe the same opaque
 	// id before falling back so retry/recovery does not duplicate expensive work.
@@ -74,7 +74,7 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		// The POST may have completed even though its response was lost. If the
 		// follow-up probe is also indeterminate, retry the same opaque id later
 		// instead of falling back locally and orphaning completed remote bytes.
-		return PreparedArtifact{}, errors.Join(err, fmt.Errorf("remote download artifact recovery probe: %w", statErr))
+		return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}), errors.Join(err, fmt.Errorf("remote download artifact recovery probe: %w", statErr))
 	}
 	if ctx.Err() != nil {
 		return PreparedArtifact{}, ctx.Err()
@@ -97,23 +97,26 @@ func remotePreparedArtifact(node *nodepool.Node, result downloadprepare.Result) 
 	}
 }
 
-func (p *NodeAwarePreparer) ResolveArtifact(artifact *Artifact) {
+func (p *NodeAwarePreparer) ResolveArtifact(artifact *Artifact) error {
 	if artifact == nil || artifact.OriginNodeID == 0 || p.planner == nil {
-		return
+		return ErrArtifactOriginRemoved
 	}
-	node := p.planner.TranscodeNode(artifact.OriginNodeID)
-	if node == nil {
-		return
+	node, ok := p.planner.TranscodeNode(artifact.OriginNodeID)
+	if !ok || node == nil {
+		return ErrArtifactOriginRemoved
 	}
 	artifact.OriginNodeURL = strings.TrimRight(node.URL, "/")
 	artifact.OriginNodeGroup = ""
 	if node.Group != nil {
 		artifact.OriginNodeGroup = *node.Group
 	}
+	return nil
 }
 
 func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
-	p.ResolveArtifact(artifact)
+	if err := p.ResolveArtifact(artifact); err != nil {
+		return downloadprepare.Result{}, err
+	}
 	secret, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return downloadprepare.Result{}, err
@@ -122,7 +125,9 @@ func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact
 }
 
 func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
-	p.ResolveArtifact(artifact)
+	// Prefer the current URL for an enabled node, but retain the persisted URL
+	// as a best-effort cleanup target after the node is disabled or removed.
+	_ = p.ResolveArtifact(artifact)
 	secret, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return err

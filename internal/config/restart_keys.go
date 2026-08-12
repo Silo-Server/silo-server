@@ -34,11 +34,13 @@ var restartRequiredKeys = map[string]bool{
 	// ffmpeg path and hwaccel live (new transcode sessions), but several
 	// startup-built consumers still freeze them (scanner ffprobe, chapter
 	// thumbnails, audiobook enricher) — keep restart-required until those
-	// convert. transcode_dir is fully live (only the playback handler reads
-	// it). The chapter-thumbnail worker pool is sized at construction.
+	// convert. transcode_dir is also captured by dedicated transcode nodes for
+	// session and prepared-download storage. The chapter-thumbnail worker pool
+	// is sized at construction.
 	"playback.ffmpeg_path":               true,
 	"playback.hw_accel":                  true,
 	"playback.hw_device":                 true,
+	"playback.transcode_dir":             true,
 	"playback.chapter_thumbnail_workers": true,
 
 	// Scanner / matcher toggles captured at construction. Worker counts,

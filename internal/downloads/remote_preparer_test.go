@@ -107,9 +107,21 @@ func TestNodeAwarePreparerRefreshesDurableArtifactNodeURL(t *testing.T) {
 	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://new-url", Group: &group, Enabled: true, Healthy: true}})
 	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://old-url", OriginNodeGroup: "host-old", OriginArtifactID: "artifact-1"}
-	p.ResolveArtifact(artifact)
+	if err := p.ResolveArtifact(artifact); err != nil {
+		t.Fatal(err)
+	}
 	if artifact.OriginNodeURL != "http://new-url" || artifact.OriginNodeGroup != group {
 		t.Fatalf("artifact = %+v", artifact)
+	}
+}
+
+func TestNodeAwarePreparerReportsRemovedArtifactOrigin(t *testing.T) {
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://disabled", Enabled: false, Healthy: true}})
+	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
+	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://removed", OriginArtifactID: "artifact-1"}
+	if err := p.ResolveArtifact(artifact); !errors.Is(err, ErrArtifactOriginRemoved) {
+		t.Fatalf("ResolveArtifact error = %v, want ErrArtifactOriginRemoved", err)
 	}
 }
 
