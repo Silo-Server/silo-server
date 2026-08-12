@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -603,8 +605,12 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	if artifactMaxBytes < 0 {
 		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
 	}
+	artifactDir := strings.TrimSpace(stringOr(m, "download.artifact_dir", ""))
+	if artifactDir != "" && !filepath.IsAbs(artifactDir) {
+		return nil, fmt.Errorf("invalid value for %q: must be an absolute path", "download.artifact_dir")
+	}
 	cfg.Download.TranscodeEnabled = downloadTranscodeEnabled
-	cfg.Download.ArtifactDir = stringOr(m, "download.artifact_dir", "")
+	cfg.Download.ArtifactDir = artifactDir
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
 

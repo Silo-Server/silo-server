@@ -539,3 +539,54 @@ func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 	releaseSecond()
 	releaseThird()
 }
+
+func TestReserveTranscodeWorkOverlappingAttemptsReleaseOnlyTheirOwnReservation(t *testing.T) {
+	capTwo := 2
+	transcodes := NewTranscodePool()
+	transcodes.SetNodes([]*Node{{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capTwo}})
+	planner := NewPlanner(NewProxyPool(), transcodes)
+
+	first, releaseFirst := planner.ReserveTranscodeWork("same-artifact")
+	second, releaseSecond := planner.ReserveTranscodeWork("same-artifact")
+	if first == nil || second == nil {
+		t.Fatalf("overlapping reservations = first %+v second %+v", first, second)
+	}
+	if third, _ := planner.ReserveTranscodeWork("third-attempt"); third != nil {
+		t.Fatalf("third reservation = %+v, want full node", third)
+	}
+
+	releaseFirst()
+	third, releaseThird := planner.ReserveTranscodeWork("third-attempt")
+	if third == nil {
+		t.Fatal("first release did not free its own reservation")
+	}
+	if fourth, _ := planner.ReserveTranscodeWork("fourth-attempt"); fourth != nil {
+		t.Fatalf("second overlapping reservation was lost: fourth = %+v", fourth)
+	}
+
+	releaseSecond()
+	releaseThird()
+}
+
+func TestPlanDownloadSkipsBandwidthCappedProxiesAndReservesJobCapacity(t *testing.T) {
+	bandwidthCap := 100_000
+	jobCap := 1
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{URL: "http://bandwidth-capped", Enabled: true, Healthy: true, MaxBandwidthKbps: &bandwidthCap},
+		{URL: "http://uncapped", Enabled: true, Healthy: true, MaxJobs: &jobCap},
+	})
+	planner := NewPlanner(proxies, NewTranscodePool())
+
+	first := planner.PlanDownload("download-1")
+	if first.ProxyNode == nil || first.ProxyNode.URL != "http://uncapped" {
+		t.Fatalf("first plan = %+v", first)
+	}
+	if second := planner.PlanDownload("download-2"); second.ProxyNode != nil {
+		t.Fatalf("second plan = %+v, want job-cap rejection", second)
+	}
+	planner.ReleaseSession("download-1")
+	if second := planner.PlanDownload("download-2"); second.ProxyNode == nil {
+		t.Fatal("download was not admitted after reservation release")
+	}
+}

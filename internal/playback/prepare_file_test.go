@@ -66,7 +66,7 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 			name:      "qsv keeps hardware encode with software decode upload",
 			hwAccel:   "qsv",
 			want:      []string{"-c:v h264_qsv", "format=nv12,hwupload,hwmap=derive_device=qsv"},
-			forbidden: []string{"-hwaccel vaapi"},
+			forbidden: []string{"-hwaccel qsv", "-hwaccel vaapi"},
 		},
 		{
 			name:      "vaapi keeps hardware encode with software decode upload",

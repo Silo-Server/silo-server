@@ -24,6 +24,12 @@ import (
 
 const testSecret = "node-reconstruct-test-secret"
 
+type allowInputPaths struct{}
+
+func (allowInputPaths) Allowed(context.Context, string) (bool, error) {
+	return true, nil
+}
+
 // newTestServer builds a transcode Server whose config carries a known JWT secret
 // so reconstructFromToken can verify forwarded stream tokens. The tracker is left
 // nil: the guard-rejection cases never reach the spawn/track path.
@@ -35,8 +41,9 @@ func newTestServer(t *testing.T) *Server {
 	cfg.Playback.TranscodeDir = t.TempDir()
 	w.SetConfigForTest(cfg)
 	return &Server{
-		watcher:  w,
-		sessions: make(map[string]*playback.TranscodeSession),
+		watcher:    w,
+		inputPaths: allowInputPaths{},
+		sessions:   make(map[string]*playback.TranscodeSession),
 	}
 }
 
@@ -126,6 +133,32 @@ func TestHandleDownloadPrepareRejectsOutputOutsideArtifactRoot(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	server.handleDownloadPrepare(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDownloadPrepareRejectsUnavailableConfig(t *testing.T) {
+	server := newTestServer(t)
+	server.watcher.SetConfigForTest(nil)
+	body := []byte(`{"job_id":"artifact-3","input_path":"/media/movie.mkv","output_path":"/artifacts/movie.mp4"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleDownloadPrepare(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleStartRejectsUnapprovedInputPath(t *testing.T) {
+	server := newTestServer(t)
+	server.inputPaths = NewMediaRootAuthorizer(staticMediaFolders{})
+	body := []byte(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}

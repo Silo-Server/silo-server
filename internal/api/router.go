@@ -1671,13 +1671,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
-		downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
-			cfg := deps.CurrentConfig()
-			if cfg == nil {
-				return ""
-			}
-			return cfg.Auth.JWTSecret
-		})
+		if deps.NodePlanner != nil {
+			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
+				cfg := deps.CurrentConfig()
+				if cfg == nil {
+					return ""
+				}
+				return cfg.Auth.JWTSecret
+			})
+		}
 		if profileHandler != nil {
 			// Profiles may live outside Postgres (sqlite userdb backend), so
 			// deleting one cannot FK-cascade the shared user_devices table;
@@ -2679,12 +2681,16 @@ func NewRouter(deps Dependencies) chi.Router {
 					// HEAD natively.
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
 					r.Head("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Get("/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy)
+					r.Head("/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy)
 					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
 					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
 					r.Get("/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle)
 				})
 				r.Get("/direct-download", downloadHandler.HandleDirectDownload)
 				r.Head("/direct-download", downloadHandler.HandleDirectDownload)
+				r.Get("/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy)
+				r.Head("/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy)
 
 				// Recipe gallery catalog (no profile required — purely static metadata).
 				recipeHandler := &handlers.RecipeHandler{}

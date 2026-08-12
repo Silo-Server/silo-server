@@ -177,7 +177,10 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.tracker != nil {
+	// HEAD is a capability/path preflight, not an active transfer. Counting it
+	// would briefly consume job capacity and could make a health report retire
+	// the API's reservation before the client starts its GET.
+	if s.tracker != nil && r.Method != http.MethodHead {
 		info := sessionInfo(s.tracker, claims, "download")
 		s.tracker.Track(r.Context(), info)
 		defer s.tracker.Remove(context.WithoutCancel(r.Context()), claims.SessionID)

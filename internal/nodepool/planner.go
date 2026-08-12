@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Plan is the result of a node selection for one playback session.
@@ -18,6 +20,14 @@ type Plan struct {
 // without a real pool.
 type SessionPlanner interface {
 	PlanSession(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int) Plan
+}
+
+// DownloadPlanner selects proxy nodes for unbounded file delivery. Downloads
+// have no predictable bitrate, so implementations must not admit them onto a
+// proxy with a configured bandwidth cap.
+type DownloadPlanner interface {
+	PlanDownload(sessionID string) Plan
+	ReleaseSession(sessionID string)
 }
 
 // TranscodeWorkPlanner reserves capacity for non-streaming GPU work such as a
@@ -96,6 +106,41 @@ func NewPlanner(proxies *ProxyPool, transcodes *TranscodePool) *Planner {
 // reservation, so quality switches don't double-count.
 func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int) Plan {
 	return p.PlanSessionWith(sessionID, currentTranscodeURL, needsTranscode, estBitrateKbps, nil)
+}
+
+// PlanDownload picks a healthy proxy for an unbounded file transfer. A
+// configured proxy bandwidth cap cannot be reserved accurately without a known
+// transfer rate, so capped proxies are excluded instead of being oversubscribed
+// during the egress meter's convergence window.
+func (p *Planner) PlanDownload(sessionID string) Plan {
+	if p == nil || p.proxies == nil || sessionID == "" {
+		return Plan{}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := p.now()
+	p.pruneReservations(now)
+	delete(p.reserved, sessionID)
+
+	var candidates []*Node
+	for _, node := range p.proxies.Nodes() {
+		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+			continue
+		}
+		if node.MaxBandwidthKbps != nil && *node.MaxBandwidthKbps > 0 {
+			continue
+		}
+		candidates = append(candidates, node)
+	}
+	if len(candidates) == 0 {
+		return Plan{}
+	}
+	const rrKey = "download"
+	proxy := candidates[p.rr[rrKey]%len(candidates)]
+	p.rr[rrKey]++
+	p.reserved[sessionID] = &reservation{proxyURL: proxy.URL, createdAt: now}
+	return Plan{ProxyNode: proxy}
 }
 
 // PlanSessionWith behaves like PlanSession but restricts transcode-node
@@ -198,7 +243,7 @@ func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
 	p.mu.Lock()
 	now := p.now()
 	p.pruneReservations(now)
-	delete(p.reserved, workID)
+	reservationID := workID + "-" + uuid.NewString()
 
 	var best *Node
 	for _, node := range p.transcodes.Nodes() {
@@ -210,7 +255,7 @@ func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
 		}
 	}
 	if best != nil {
-		p.reserved[workID] = &reservation{transcodeURL: best.URL, createdAt: now}
+		p.reserved[reservationID] = &reservation{transcodeURL: best.URL, createdAt: now}
 	}
 	p.mu.Unlock()
 	if best == nil {
@@ -219,7 +264,7 @@ func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
 
 	var once sync.Once
 	return best, func() {
-		once.Do(func() { p.ReleaseSession(workID) })
+		once.Do(func() { p.ReleaseSession(reservationID) })
 	}
 }
 

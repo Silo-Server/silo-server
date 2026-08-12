@@ -141,6 +141,11 @@ proxy node when `download.artifact_dir` is explicitly configured. Mount that dir
 absolute path on the API, transcode, and proxy nodes. With the default node-local artifact directory,
 Silo keeps preparation and prepared-file delivery on the API node. Downloads with a configured
 server-wide or per-user bandwidth limit also remain API-local so those aggregate limits stay exact.
+Clients discover distributed delivery through `proxy_delivery` on the download capability response.
+When it is true, they may opt into `GET` or `HEAD /api/v1/downloads/{id}/file-proxy` and
+`/api/v1/direct-download-proxy`; those routes may return a temporary redirect to a proxy node. The
+established `/file` and `/direct-download` routes keep serving bytes directly with their existing
+status-code contract.
 
 ### Deployment Notes
 

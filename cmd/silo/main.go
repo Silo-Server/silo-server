@@ -721,6 +721,7 @@ func main() {
 			handler = srv.Handler()
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
+			srv.SetInputPathAuthorizer(transcodenode.NewMediaRootAuthorizer(catalog.NewFolderRepository(pool)))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
 			// start, so this node can rebuild a Jellyfin transcode after its own
@@ -2068,7 +2069,11 @@ func main() {
 				}
 				return deps.Config
 			}
-			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), deps.NodePlanner, liveDownloadConfig)
+			var downloadWorkPlanner nodepool.TranscodeWorkPlanner
+			if deps.NodePlanner != nil {
+				downloadWorkPlanner = deps.NodePlanner
+			}
+			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), downloadWorkPlanner, liveDownloadConfig)
 			artifactMgr := downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(deps.DB),
 				downloads.NewRepository(deps.DB),

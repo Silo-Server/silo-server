@@ -97,3 +97,22 @@ func TestProxyDownloadRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestProxyDownloadReturnsNotFoundForMissingFile(t *testing.T) {
+	const secret = "download-proxy-secret"
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:  "download-missing",
+		MediaPath:  filepath.Join(t.TempDir(), "gone.mp4"),
+		PlayMethod: streamtoken.PlayMethodDownload,
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
