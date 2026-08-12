@@ -921,11 +921,11 @@ func main() {
 		proxyPool := nodepool.NewProxyPool()
 		transcodePool := nodepool.NewTranscodePool()
 
-		proxyNodes, err := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
+		proxyNodes, err := nodeRepo.ListEnabled(appCtx, nodepool.NodeTypeProxy)
 		if err != nil {
 			log.Fatalf("load enabled proxy nodes: %v", err)
 		}
-		transcodeNodes, err := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
+		transcodeNodes, err := nodeRepo.ListEnabled(appCtx, nodepool.NodeTypeTranscode)
 		if err != nil {
 			log.Fatalf("load enabled transcode nodes: %v", err)
 		}

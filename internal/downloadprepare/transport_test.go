@@ -80,6 +80,28 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}
 }
 
+func TestHTTPPreparerDeleteStopsStalledErrorBodyRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	started := time.Now()
+	err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Delete(
+		context.Background(), server.URL, "secret", "artifact-stalled-delete",
+	)
+	if !errors.Is(err, ErrRelayReadIdle) {
+		t.Fatalf("Delete error = %v, want ErrRelayReadIdle", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled delete response took %s, want a bounded failure", elapsed)
+	}
+}
+
 func TestHTTPPreparerRejectsArtifactPathTraversal(t *testing.T) {
 	if _, err := (HTTPPreparer{}).Stat(context.Background(), "http://node", "secret", "../escape"); err == nil {
 		t.Fatal("expected invalid artifact id error")

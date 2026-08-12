@@ -153,10 +153,13 @@ func (m *ArtifactManager) Ready(ctx context.Context, id string) (*Artifact, erro
 	}
 	if lifecycle, ok := m.preparer.(remoteArtifactLifecycle); ok && a.OriginArtifactID != "" {
 		if err := m.resolveRemoteArtifact(ctx, lifecycle, a); err != nil {
-			if !errors.Is(err, ErrArtifactOriginRemoved) || !m.requeueRemoteArtifact(ctx, a, "origin node removed") {
+			if !errors.Is(err, ErrArtifactOriginRemoved) {
 				return nil, err
 			}
-			return nil, fmt.Errorf("artifact origin was removed and preparation was requeued: %w", ErrDownloadNotActive)
+			if m.requeueRemoteArtifact(ctx, a, "origin node removed") {
+				return nil, fmt.Errorf("artifact origin was removed and preparation was requeued: %w", ErrDownloadNotActive)
+			}
+			return nil, fmt.Errorf("artifact origin was removed: %w", errors.Join(ErrDownloadNotActive, err))
 		}
 	}
 	_ = m.repo.TouchLastUsed(ctx, id)
@@ -296,7 +299,6 @@ func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
 			m.publish(ctx, d)
 		}
 	}
-
 }
 
 // recoverReadyArtifacts checks local paths directly and groups remote probes
@@ -414,7 +416,7 @@ func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact
 // cleanup. Request paths use the returned error so a failed state transition is
 // never disguised as an ordinary missing catalog item.
 func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
-	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID == 0 || a.OriginArtifactID == "" {
+	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID <= 0 || a.OriginArtifactID == "" {
 		return false, errors.New("remote artifact locator unavailable for requeue")
 	}
 	linked, applied, err := m.repo.RequeueRemote(ctx, a)
@@ -519,6 +521,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	if prepared.FileSize <= 0 || (remoteFieldsPresent && !prepared.Remote()) || (!prepared.Remote() && prepared.OutputPath == "") {
 		msg := "prepared artifact returned an invalid storage locator"
 		slog.WarnContext(ctx, "prepared artifact returned an invalid storage locator", "component", "downloads", "artifact_id", a.ID)
+		if prepared.Remote() {
+			m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
+		}
 		m.failJob(ctx, a, msg)
 		return
 	}

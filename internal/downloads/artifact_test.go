@@ -53,6 +53,9 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 
 type lifecycleTestPreparer struct {
 	deleted       string
+	prepared      PreparedArtifact
+	resolveErr    error
+	resolvedNode  int
 	resolvedURL   string
 	resolvedGroup string
 	stat          downloadprepare.Result
@@ -60,15 +63,18 @@ type lifecycleTestPreparer struct {
 	deleteErr     error
 }
 
-func (*lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
-	return PreparedArtifact{}, nil
+func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+	return p.prepared, nil
 }
 func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {
+	if p.resolvedNode != 0 {
+		artifact.OriginNodeID = p.resolvedNode
+	}
 	if p.resolvedURL != "" {
 		artifact.OriginNodeURL = p.resolvedURL
 		artifact.OriginNodeGroup = p.resolvedGroup
 	}
-	return nil
+	return p.resolveErr
 }
 func (p *lifecycleTestPreparer) StatArtifact(context.Context, *Artifact) (downloadprepare.Result, error) {
 	return p.stat, p.statError
@@ -87,6 +93,16 @@ func TestArtifactManagerDeletesRemoteBytesThroughOwningNode(t *testing.T) {
 	}
 	if preparer.deleted != "opaque-1" {
 		t.Fatalf("deleted = %q", preparer.deleted)
+	}
+}
+
+func TestRemoteArtifactRequeueRejectsNonPositiveNodeID(t *testing.T) {
+	manager := &ArtifactManager{repo: &ArtifactRepository{}}
+	_, err := manager.requeueRemoteArtifactNow(context.Background(), &Artifact{
+		ID: "row-1", OriginNodeID: -1, OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1",
+	}, "invalid node")
+	if err == nil {
+		t.Fatal("expected invalid remote locator error")
 	}
 }
 

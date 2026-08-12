@@ -195,14 +195,18 @@ func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID
 	if !ValidArtifactID(artifactID) {
 		return fmt.Errorf("remote download artifact delete: invalid artifact id")
 	}
-	httpReq, err := p.request(ctx, http.MethodDelete, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	deleteCtx, cancel := context.WithCancel(ctx)
+	httpReq, err := p.request(deleteCtx, http.MethodDelete, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("remote download artifact delete: %w", err)
 	}
 	resp, err := p.client().Do(httpReq)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("remote download artifact delete: request: %w", err)
 	}
+	resp.Body = newIdleReadCloser(resp.Body, p.readIdleTimeout(), cancel)
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return nil
@@ -424,6 +428,9 @@ func decodeResult(resp *http.Response, operation string) (Result, error) {
 }
 
 func responseError(resp *http.Response, operation string) error {
-	message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	message, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return fmt.Errorf("%s: read node error response: %w", operation, err)
+	}
 	return fmt.Errorf("%s: node returned %d: %s", operation, resp.StatusCode, strings.TrimSpace(string(message)))
 }

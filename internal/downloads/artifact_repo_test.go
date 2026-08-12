@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/idgen"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int) {
@@ -286,6 +287,71 @@ func TestArtifactReadyPersistsRefreshedOriginLocator(t *testing.T) {
 	}
 }
 
+func TestArtifactReadyMapsRemovedOriginToInactiveWhenRequeueLosesFence(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-removed-origin-stale-fence"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", "", 17, "http://removed", "host-a", "artifact-removed", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	manager := &ArtifactManager{
+		repo: repo,
+		preparer: &lifecycleTestPreparer{
+			resolvedNode: 18,
+			resolveErr:   ErrArtifactOriginRemoved,
+		},
+	}
+	_, err = manager.Ready(ctx, row.ID)
+	if !errors.Is(err, ErrDownloadNotActive) || !errors.Is(err, ErrArtifactOriginRemoved) {
+		t.Fatalf("Ready error = %v, want inactive removed-origin error", err)
+	}
+}
+
+func TestArtifactInvalidRemoteResultQueuesCleanup(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-invalid-remote-result"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimNext(ctx, "worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparer := &lifecycleTestPreparer{prepared: PreparedArtifact{
+		OriginNodeID: 17, OriginNodeURL: "http://transcode", OriginNodeGroup: "host-a",
+		OriginArtifactID: "artifact-zero-byte", FileSize: 0,
+	}}
+	manager := &ArtifactManager{
+		repo: repo, owner: "worker", fileRepo: fakeFileResolver{file: &models.MediaFile{ID: fileID, FilePath: "/media/movie.mkv"}},
+		preparer: preparer,
+	}
+	manager.encodeOne(ctx, claimed)
+
+	queued, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Status != ArtifactQueued {
+		t.Fatalf("artifact status = %q, want queued retry", queued.Status)
+	}
+	var orphanID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM download_artifact_orphans
+		 WHERE download_artifact_id = $1 AND origin_node_id = 17 AND origin_artifact_id = 'artifact-zero-byte'`,
+		row.ID,
+	).Scan(&orphanID); err != nil {
+		t.Fatalf("remote cleanup row: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphanID) })
+}
+
 func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
@@ -315,17 +381,17 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	if got.Status != ArtifactQueued || got.OriginArtifactID != "" {
 		t.Fatalf("recovered artifact = %+v, want queued without remote locator", got)
 	}
-	orchans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(orchans) != 1 || orchans[0].OriginNodeID != 17 || orchans[0].OriginArtifactID != "artifact-truncated" {
-		t.Fatalf("remote cleanup queue = %+v", orchans)
+	if len(orphans) != 1 || orphans[0].OriginNodeID != 17 || orphans[0].OriginArtifactID != "artifact-truncated" {
+		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
 	if preparer.deleted != "" {
 		t.Fatalf("remote bytes were deleted before durable requeue committed: %q", preparer.deleted)
 	}
-	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orchans[0].ID) })
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
 }
 
 func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
@@ -374,11 +440,11 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE download_artifact_orphans SET next_retry_at = NULL WHERE origin_node_id = $1 AND origin_artifact_id = $2`, ready.OriginNodeID, ready.OriginArtifactID); err != nil {
 		t.Fatal(err)
 	}
-	orchans, err := repo.ListRemoteOrphansDue(ctx, 10)
-	if err != nil || len(orchans) != 1 {
-		t.Fatalf("uncertain cleanup queue = %+v (%v)", orchans, err)
+	orphans, err := repo.ListRemoteOrphansDue(ctx, 10)
+	if err != nil || len(orphans) != 1 {
+		t.Fatalf("uncertain cleanup queue = %+v (%v)", orphans, err)
 	}
-	owned, claimed, err := repo.PrepareRemoteOrphanCleanup(ctx, orchans[0])
+	owned, claimed, err := repo.PrepareRemoteOrphanCleanup(ctx, orphans[0])
 	if err != nil || !claimed || !owned {
 		t.Fatalf("PrepareRemoteOrphanCleanup = (owned=%v claimed=%v err=%v)", owned, claimed, err)
 	}
@@ -403,14 +469,14 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	if queued.Status != ArtifactQueued || queued.OriginArtifactID != "" {
 		t.Fatalf("queued artifact = %+v", queued)
 	}
-	orchans, err = repo.ListRemoteOrphansDue(ctx, 10)
+	orphans, err = repo.ListRemoteOrphansDue(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(orchans) != 1 || orchans[0].DownloadArtifactID != row.ID || orchans[0].OriginNodeURL != "http://transcode-new" || orchans[0].OriginArtifactID != "artifact-abandoned" {
-		t.Fatalf("remote cleanup queue = %+v", orchans)
+	if len(orphans) != 1 || orphans[0].DownloadArtifactID != row.ID || orphans[0].OriginNodeURL != "http://transcode-new" || orphans[0].OriginArtifactID != "artifact-abandoned" {
+		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
-	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orchans[0].ID) })
+	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
 	// A stale caller cannot enqueue a second cleanup after the row changed.
 	if _, applied, err := repo.RequeueRemote(ctx, ready); err != nil || applied {
 		t.Fatalf("stale RequeueRemote = (%v, %v), want false, nil", applied, err)
@@ -445,7 +511,9 @@ func TestListRemoteOrphansDueIsFairAcrossOrigins(t *testing.T) {
 		_, _ = pool.Exec(ctx, `DELETE FROM download_artifact_orphans WHERE origin_artifact_id = ANY($1)`, artifactIDs)
 	})
 	if _, err := pool.Exec(ctx,
-		`UPDATE download_artifact_orphans SET next_retry_at = NULL WHERE origin_artifact_id = ANY($1)`,
+		`UPDATE download_artifact_orphans
+		 SET next_retry_at = NULL, created_at = '-infinity'
+		 WHERE origin_artifact_id = ANY($1)`,
 		artifactIDs,
 	); err != nil {
 		t.Fatal(err)
