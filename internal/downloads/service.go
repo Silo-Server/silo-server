@@ -1215,7 +1215,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 		if ctx.Err() == nil {
 			slog.WarnContext(ctx, "remote download artifact relay interrupted", "component", "downloads", "artifact_id", target.OriginArtifactID, "error", err)
 		}
-		return fmt.Errorf("%w: relaying remote artifact: %v", ErrResponseCommitted, err)
+		return fmt.Errorf("%w: relaying remote artifact: %w", ErrResponseCommitted, err)
 	}
 	return nil
 }

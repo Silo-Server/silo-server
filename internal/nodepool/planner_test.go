@@ -604,3 +604,14 @@ func TestPlanDownloadPrefersArtifactOriginGroup(t *testing.T) {
 		t.Fatalf("plan = %+v, want proxy-b", plan)
 	}
 }
+
+func TestPlanDownloadFallsBackWhenOriginGroupHasNoProxy(t *testing.T) {
+	group := "host-a"
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{URL: "http://proxy-a", Group: &group, Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, NewTranscodePool())
+	plan := planner.PlanDownload("download-fallback", "host-missing")
+	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
+		t.Fatalf("plan = %+v, want proxy-a fallback", plan)
+	}
+}

@@ -50,7 +50,7 @@ var adminSettingDefaults = map[string]string{
 	"markers.lazy_playback": "false",
 
 	"playback.ffmpeg_path":                     "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-	"playback.transcode_dir":                   DefaultTranscodeDir,
+	playbackTranscodeDirSettingKey:             DefaultTranscodeDir,
 	"playback.hw_accel":                        "auto",
 	"playback.transcode_enabled":               "true",
 	"playback.local_transcode_fallback":        "true",

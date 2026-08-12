@@ -580,6 +580,27 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 	}
 }
 
+func TestManagedFileFallsBackWhenRemoteLocatorHasNoOriginURL(t *testing.T) {
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		managedTarget: &downloads.FileTarget{
+			DownloadID:       "dl-incomplete",
+			OriginArtifactID: "artifact-without-origin",
+			ProxyEligible:    true,
+		},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: "http://proxy.invalid", Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl-incomplete/file-proxy", nil, 7, "pA", "devA"), "dl-incomplete")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFileViaProxy(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "served" {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
 func TestManagedListThreadsIdentity(t *testing.T) {
 	svc := &fakeDownloadService{}
 	h := NewDownloadHandler(svc)

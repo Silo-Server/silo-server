@@ -63,13 +63,19 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 	const secret = "download-proxy-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/downloads/artifacts/artifact-1" {
-			t.Fatalf("origin path = %q", r.URL.Path)
+			t.Errorf("origin path = %q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusBadRequest)
+			return
 		}
 		if auth := r.Header.Get("Authorization"); auth != "Bearer "+secret {
-			t.Fatalf("origin Authorization = %q", auth)
+			t.Errorf("origin Authorization = %q", auth)
+			http.Error(w, "unexpected authorization", http.StatusBadRequest)
+			return
 		}
 		if got := r.Header.Get("Range"); got != "bytes=2-5" {
-			t.Fatalf("origin Range = %q", got)
+			t.Errorf("origin Range = %q", got)
+			http.Error(w, "unexpected range", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Accept-Ranges", "bytes")
 		w.Header().Set("Content-Disposition", `attachment; filename="artifact-1.mp4"`)
@@ -107,7 +113,9 @@ func TestProxyDownloadRelaysNodeLocalArtifactPreconditionFailure(t *testing.T) {
 	const secret = "download-proxy-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("If-Match"); got != `"old-etag"` {
-			t.Fatalf("origin If-Match = %q", got)
+			t.Errorf("origin If-Match = %q", got)
+			http.Error(w, "unexpected condition", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("ETag", `"new-etag"`)
 		w.WriteHeader(http.StatusPreconditionFailed)

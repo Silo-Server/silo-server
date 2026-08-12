@@ -375,13 +375,16 @@ func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycl
 }
 
 func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) bool {
-	applied, err := m.repo.RequeueRemote(ctx, a)
+	linked, applied, err := m.repo.RequeueRemote(ctx, a)
 	if err != nil {
 		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return false
 	}
 	if !applied {
 		return false
+	}
+	for _, download := range linked {
+		m.publish(ctx, download)
 	}
 	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
 	m.triggerDrain()
@@ -472,7 +475,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	}
 
 	remoteFieldsPresent := prepared.OriginNodeID != 0 || prepared.OriginNodeURL != "" || prepared.OriginNodeGroup != "" || prepared.OriginArtifactID != ""
-	if prepared.FileSize < 0 || (remoteFieldsPresent && !prepared.Remote()) || (!prepared.Remote() && prepared.OutputPath == "") {
+	if prepared.FileSize <= 0 || (remoteFieldsPresent && !prepared.Remote()) || (!prepared.Remote() && prepared.OutputPath == "") {
 		msg := "prepared artifact returned an invalid storage locator"
 		slog.WarnContext(ctx, "prepared artifact returned an invalid storage locator", "component", "downloads", "artifact_id", a.ID)
 		m.failJob(ctx, a, msg)

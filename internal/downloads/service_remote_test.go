@@ -14,10 +14,14 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	const secret = "artifact-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/downloads/artifacts/artifact-1" || r.Header.Get("Authorization") != "Bearer "+secret {
-			t.Fatalf("origin request = %s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+			t.Errorf("origin request = %s %s auth=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+			http.Error(w, "unexpected origin request", http.StatusBadRequest)
+			return
 		}
 		if r.Header.Get("Range") != "bytes=1-3" {
-			t.Fatalf("Range = %q", r.Header.Get("Range"))
+			t.Errorf("Range = %q", r.Header.Get("Range"))
+			http.Error(w, "unexpected range", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Content-Length", "3")
 		w.Header().Set("Content-Range", "bytes 1-3/5")
@@ -73,7 +77,9 @@ func TestServiceRelaysRemotePreconditionFailure(t *testing.T) {
 	const secret = "artifact-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("If-Match"); got != `"old-etag"` {
-			t.Fatalf("origin If-Match = %q", got)
+			t.Errorf("origin If-Match = %q", got)
+			http.Error(w, "unexpected condition", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("ETag", `"new-etag"`)
 		w.WriteHeader(http.StatusPreconditionFailed)

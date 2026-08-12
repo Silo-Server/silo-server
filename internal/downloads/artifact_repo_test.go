@@ -298,6 +298,26 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("requeue-user-%d", time.Now().UnixNano()),
+	).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	downloadID := fmt.Sprintf("requeue-download-%d", time.Now().UnixNano())
+	if err := NewRepository(pool).Create(ctx, &Download{
+		ID: downloadID, UserID: userID, MediaFileID: fileID,
+		ContentID: "requeue-content", Kind: KindQueued, Status: StatusCompleted,
+		Format: FormatTranscode, ArtifactID: row.ID, FileSize: ready.FileSize,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, downloadID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
 	// An indeterminate MarkReady result may enqueue the locator even though its
 	// database write committed. Cleanup must recognize the winning locator and
 	// remove only the stale queue row, never the node-local bytes.
@@ -322,8 +342,12 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	// transaction deliberately matches stable node/id fields and stores the
 	// refreshed URL as the cleanup target.
 	ready.OriginNodeURL = "http://transcode-new"
-	if applied, err := repo.RequeueRemote(ctx, ready); err != nil || !applied {
+	linked, applied, err := repo.RequeueRemote(ctx, ready)
+	if err != nil || !applied {
 		t.Fatalf("RequeueRemote = (%v, %v)", applied, err)
+	}
+	if len(linked) != 1 || linked[0].ID != downloadID || linked[0].Status != StatusPreparing {
+		t.Fatalf("reset linked downloads = %+v", linked)
 	}
 	queued, err := repo.GetByID(ctx, row.ID)
 	if err != nil {
@@ -341,8 +365,57 @@ func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orchans[0].ID) })
 	// A stale caller cannot enqueue a second cleanup after the row changed.
-	if applied, err := repo.RequeueRemote(ctx, ready); err != nil || applied {
+	if _, applied, err := repo.RequeueRemote(ctx, ready); err != nil || applied {
 		t.Fatalf("stale RequeueRemote = (%v, %v), want false, nil", applied, err)
+	}
+}
+
+func TestListRemoteOrphansDueIsFairAcrossOrigins(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-orphan-fairness-%d", time.Now().UnixNano())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := time.Now().UnixNano()
+	artifactIDs := []string{
+		fmt.Sprintf("fair-origin-a-first-%d", suffix),
+		fmt.Sprintf("fair-origin-a-second-%d", suffix),
+		fmt.Sprintf("fair-origin-b-%d", suffix),
+	}
+	for i, artifactID := range artifactIDs {
+		nodeID := 31001
+		nodeURL := "http://origin-a"
+		if i == 2 {
+			nodeID = 31002
+			nodeURL = "http://origin-b"
+		}
+		if err := repo.EnqueueRemoteOrphan(ctx, row.ID, nodeID, nodeURL, artifactID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM download_artifact_orphans WHERE origin_artifact_id = ANY($1)`, artifactIDs)
+	})
+	if _, err := pool.Exec(ctx,
+		`UPDATE download_artifact_orphans SET next_retry_at = NULL WHERE origin_artifact_id = ANY($1)`,
+		artifactIDs,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	due, err := repo.ListRemoteOrphansDue(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[int]int)
+	for _, orphan := range due {
+		if orphan.OriginNodeID == 31001 || orphan.OriginNodeID == 31002 {
+			seen[orphan.OriginNodeID]++
+		}
+	}
+	if seen[31001] != 1 || seen[31002] != 1 {
+		t.Fatalf("due candidates by origin = %+v, want one candidate for each origin", seen)
 	}
 }
 

@@ -40,7 +40,7 @@ var restartRequiredKeys = map[string]bool{
 	"playback.ffmpeg_path":               true,
 	"playback.hw_accel":                  true,
 	"playback.hw_device":                 true,
-	"playback.transcode_dir":             true,
+	playbackTranscodeDirSettingKey:       true,
 	"playback.chapter_thumbnail_workers": true,
 
 	// Scanner / matcher toggles captured at construction. Worker counts,

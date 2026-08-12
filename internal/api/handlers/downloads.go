@@ -579,6 +579,9 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 	if target == nil || (strings.TrimSpace(target.Path) == "" && target.OriginArtifactID == "") {
 		return false, fmt.Errorf("download target is empty")
 	}
+	if target.OriginArtifactID != "" && strings.TrimSpace(target.OriginNodeURL) == "" {
+		return false, nil
+	}
 	if !target.ProxyEligible {
 		return false, nil
 	}

@@ -270,13 +270,13 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 // queue and clears it from the artifact row. The locator can therefore never
 // be deleted while the row still advertises it if either database write fails.
 // applied is false when the row changed concurrently or no longer exists.
-func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (applied bool, err error) {
+func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
 	if artifact == nil {
-		return false, nil
+		return nil, false, nil
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("beginning remote artifact requeue: %w", err)
+		return nil, false, fmt.Errorf("beginning remote artifact requeue: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	tag, err := tx.Exec(ctx,
@@ -288,10 +288,26 @@ func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifa
 		artifact.ID, artifact.OriginNodeID, artifact.OriginArtifactID,
 	)
 	if err != nil {
-		return false, fmt.Errorf("requeuing remote artifact: %w", err)
+		return nil, false, fmt.Errorf("requeuing remote artifact: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return false, nil
+		return nil, false, nil
+	}
+	rows, err := tx.Query(ctx,
+		`UPDATE downloads
+		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
+		     error_message = '', updated_at = now()
+		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
+		 RETURNING `+downloadColumns,
+		artifact.ID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("resetting linked downloads for remote artifact requeue: %w", err)
+	}
+	linked, err = scanDownloads(rows)
+	rows.Close()
+	if err != nil {
+		return nil, false, fmt.Errorf("scanning reset downloads for remote artifact requeue: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO download_artifact_orphans (download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id)
@@ -301,12 +317,12 @@ func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifa
 		     origin_node_url = EXCLUDED.origin_node_url, next_retry_at = NULL`,
 		artifact.ID, artifact.OriginNodeID, artifact.OriginNodeURL, artifact.OriginArtifactID,
 	); err != nil {
-		return false, fmt.Errorf("enqueueing remote artifact cleanup during requeue: %w", err)
+		return nil, false, fmt.Errorf("enqueueing remote artifact cleanup during requeue: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("committing remote artifact requeue: %w", err)
+		return nil, false, fmt.Errorf("committing remote artifact requeue: %w", err)
 	}
-	return true, nil
+	return linked, true, nil
 }
 
 // TouchLastUsed bumps last_used_at for LRU accounting (called on serve).
@@ -424,16 +440,27 @@ func (r *ArtifactRepository) EnqueueRemoteOrphan(ctx context.Context, downloadAr
 	return nil
 }
 
-// ListRemoteOrphansDue returns a bounded cleanup batch in retry order.
+// ListRemoteOrphansDue interleaves due candidates across origins so a large
+// unreachable-node backlog cannot starve cleanup for healthy origins while a
+// single healthy origin can still use the full batch.
 func (r *ArtifactRepository) ListRemoteOrphansDue(ctx context.Context, limit int) ([]RemoteArtifactOrphan, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, attempts
-		 FROM download_artifact_orphans
-		 WHERE next_retry_at IS NULL OR next_retry_at <= now()
-		 ORDER BY created_at, id
+		`WITH due AS (
+		    SELECT id, download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, attempts,
+		           row_number() OVER (
+		               PARTITION BY origin_node_id, origin_node_url
+		               ORDER BY attempts, created_at, id
+		           ) AS origin_rank,
+		           created_at
+		    FROM download_artifact_orphans
+		    WHERE next_retry_at IS NULL OR next_retry_at <= now()
+		 )
+		 SELECT id, download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, attempts
+		 FROM due
+		 ORDER BY origin_rank, attempts, created_at, id
 		 LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing remote artifact cleanup queue: %w", err)

@@ -133,7 +133,7 @@ func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T)
 	server.watcher.Config().Download.ArtifactDir = t.TempDir()
 	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
 	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
@@ -156,14 +156,15 @@ func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
 	}
-	if _, err := os.Stat(outputPath); err != nil {
+	info, err := os.Stat(outputPath)
+	if err != nil {
 		t.Fatalf("prepared output: %v", err)
 	}
 	var result downloadprepare.Result
 	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if result.ArtifactID != "artifact-1" || result.FileSize < 0 || strings.Contains(rr.Body.String(), artifactDir) {
+	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(rr.Body.String(), artifactDir) {
 		t.Fatalf("prepare result = %+v body=%s", result, rr.Body.String())
 	}
 	if got := server.activeJobs.Load(); got != 0 {
