@@ -380,6 +380,15 @@ HDR10, and the plan carries the `hdr_range_assumed_hdr10` degradation warning.
 Refusing to play those outright would be worse than an assumption the client is
 told about.
 
+The web client does not promote the generic high-dynamic-range media query to a
+format claim by itself. It combines that active-output signal with Media
+Capabilities support for Silo's progressive 2160p HEVC Main10, Rec. 2020, PQ,
+SMPTE ST 2086 shape before advertising HDR10. Dolby Vision likewise requires a
+definitive media-element answer for the exact `dvhe.05.06` or `dvhe.08.06`
+sample entry. Both claims are scoped to `progressive`: they are cleared from
+`original_http` and `hls` because those delivery paths were not tested by the
+same probe.
+
 ---
 
 ## 4. Deliveries

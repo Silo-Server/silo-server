@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectHDRFromMatchMedia,
   detectMaxResolutionFromScreen,
+  probeHDR10PlaybackSupport,
   probeWebCapabilities,
   useCodecDetection,
 } from "./useCodecDetection";
@@ -44,6 +45,39 @@ describe("detectHDRFromMatchMedia", () => {
 });
 
 describe("probeWebCapabilities", () => {
+  it("advertises HDR10 only after the exact progressive Media Capabilities probe", async () => {
+    const decodingInfo = vi.fn().mockResolvedValue({
+      supported: true,
+      smooth: true,
+      powerEfficient: true,
+      keySystemAccess: null,
+    });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
+    expect(decodingInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "file",
+        video: expect.objectContaining({
+          contentType: 'video/mp4; codecs="hev1.2.4.L153.B0"',
+          colorGamut: "rec2020",
+          transferFunction: "pq",
+          hdrMetadataType: "smpteSt2086",
+        }),
+      }),
+    );
+  });
+
+  it("does not probe HDR10 decoding against an SDR output", async () => {
+    const decodingInfo = vi.fn();
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
+    expect(decodingInfo).not.toHaveBeenCalled();
+  });
+
   it("advertises native Dolby Vision Profile 8 only on an HDR output", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
@@ -108,6 +142,32 @@ describe("probeWebCapabilities", () => {
       for (const listener of listeners) listener();
     });
     expect(result.current.hdrDetails.dolby_vision_profiles).toEqual([8]);
+    unmount();
+  });
+
+  it("refreshes the active capabilities after the async HDR10 probe", async () => {
+    const listeners = new Set<() => void>();
+    const query = {
+      matches: true,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    };
+    vi.stubGlobal("matchMedia", () => query);
+    vi.stubGlobal("navigator", {
+      mediaCapabilities: {
+        decodingInfo: vi.fn().mockResolvedValue({
+          supported: true,
+          smooth: true,
+          powerEfficient: true,
+          keySystemAccess: null,
+        }),
+      },
+    });
+
+    const { result, unmount } = renderHook(() => useCodecDetection());
+    expect(result.current.hdrDetails.hdr10).toBe(false);
+    await act(async () => Promise.resolve());
+    expect(result.current.hdrDetails.hdr10).toBe(true);
     unmount();
   });
 

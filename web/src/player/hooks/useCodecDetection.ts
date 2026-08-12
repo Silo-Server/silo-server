@@ -24,6 +24,25 @@ const DOLBY_VISION_PROFILE_PROBES: Record<
   8: { mime: 'video/mp4; codecs="dvhe.08.06"', maxLevel: 6, blCompatibilityIds: [1] },
 };
 
+// Silo's Profile 7 fallback strips Dolby Vision metadata into a progressive
+// MP4 whose video is a 2160p HEVC Main10 HDR10 base layer. Media Capabilities
+// can query the codec, transfer function, gamut, and static metadata together,
+// avoiding the old mistake of treating a generic HDR output query as proof of
+// every HDR format.
+const HDR10_PROGRESSIVE_CONFIGURATION = {
+  type: "file",
+  video: {
+    contentType: 'video/mp4; codecs="hev1.2.4.L153.B0"',
+    width: 3840,
+    height: 2160,
+    bitrate: 80_000_000,
+    framerate: 24,
+    colorGamut: "rec2020",
+    transferFunction: "pq",
+    hdrMetadataType: "smpteSt2086",
+  },
+} satisfies MediaDecodingConfiguration;
+
 const AUDIO_CODEC_MAP: Record<string, string[]> = {
   aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
   mp3: ["audio/mpeg"],
@@ -72,6 +91,23 @@ export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefi
     matchMediaFn("(dynamic-range: high)").matches ||
     matchMediaFn("(video-dynamic-range: high)").matches
   );
+}
+
+/** Probes the exact HDR10 progressive shape produced by Silo's remux path. */
+export async function probeHDR10PlaybackSupport(): Promise<boolean> {
+  const hdrOutput = detectHDRFromMatchMedia(
+    typeof matchMedia !== "undefined" ? (query) => matchMedia(query) : undefined,
+  );
+  if (!hdrOutput || typeof navigator === "undefined" || !navigator.mediaCapabilities) {
+    return false;
+  }
+
+  try {
+    const result = await navigator.mediaCapabilities.decodingInfo(HDR10_PROGRESSIVE_CONFIGURATION);
+    return result.supported && result.smooth;
+  } catch {
+    return false;
+  }
 }
 
 function testMediaType(mime: string): boolean {
@@ -204,16 +240,33 @@ export function useCodecDetection(): WebCapabilityProbe {
 
   useEffect(() => {
     if (typeof matchMedia === "undefined") return;
+    let disposed = false;
+    let probeGeneration = 0;
     const queries = [
       matchMedia("(dynamic-range: high)"),
       matchMedia("(video-dynamic-range: high)"),
     ];
-    const refresh = () => setCapabilities(probeWebCapabilities());
+    const refresh = () => {
+      const generation = ++probeGeneration;
+      const next = probeWebCapabilities();
+      setCapabilities(next);
+      if (!next.hdr) return;
+
+      void probeHDR10PlaybackSupport().then((hdr10) => {
+        if (disposed || generation !== probeGeneration || !hdr10) return;
+        setCapabilities((current) => ({
+          ...current,
+          hdrDetails: { ...current.hdrDetails, hdr10: true },
+        }));
+      });
+    };
+    refresh();
     for (const query of queries) {
       if (typeof query.addEventListener === "function") query.addEventListener("change", refresh);
       else query.addListener?.(refresh);
     }
     return () => {
+      disposed = true;
       for (const query of queries) {
         if (typeof query.removeEventListener === "function")
           query.removeEventListener("change", refresh);

@@ -67,7 +67,7 @@ describe("structured HDR capabilities", () => {
     maxResolution: "2160p",
     hdr: true,
     hdrDetails: {
-      hdr10: false,
+      hdr10: true,
       hdr10_plus: false,
       hlg: false,
       dolby_vision_profiles: [8],
@@ -81,11 +81,12 @@ describe("structured HDR capabilities", () => {
     expect(buildClientPlaybackContextV3(probe).output.hdr_details).toEqual(probe.hdrDetails);
   });
 
-  it("scopes the normalized Dolby Vision sample entry to progressive delivery", () => {
+  it("scopes normalized HDR sample entries to progressive delivery", () => {
     const deliveries = buildDeliveriesV3(probe);
     expect(deliveries.progressive?.hdr_details).toEqual(probe.hdrDetails);
     const nonProgressiveHDRDetails = {
       ...probe.hdrDetails,
+      hdr10: false,
       dolby_vision_profiles: [],
       dolby_vision_profile_levels: [],
     };
