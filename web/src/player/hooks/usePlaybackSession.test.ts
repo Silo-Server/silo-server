@@ -375,6 +375,7 @@ describe("usePlaybackSession output capability changes", () => {
   it("retries a terminal start when the window moves onto an HDR output", async () => {
     const setHDR = outputProbe(false);
     const startBodies: Array<{
+      start_position?: number;
       client_capabilities: { hdr_details?: { dolby_vision_profiles: number[] } };
     }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -414,6 +415,8 @@ describe("usePlaybackSession output capability changes", () => {
 
     await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
     expect(startBodies).toHaveLength(2);
+    expect(startBodies[0]).not.toHaveProperty("start_position");
+    expect(startBodies[1]).not.toHaveProperty("start_position");
     expect(startBodies[0]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([]);
     expect(startBodies[1]?.client_capabilities.hdr_details?.dolby_vision_profiles).toEqual([8]);
     unmount();
@@ -493,6 +496,61 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("seeds an early output replan from the server-resolved source position", async () => {
+    const setHDR = outputProbe(true);
+    const resumedPlan = fixturePlanV3({ session_id: "session-hdr" });
+    resumedPlan.timeline = {
+      ...resumedPlan.timeline,
+      source_start_seconds: 275,
+      player_start_seconds: 5,
+      timeline_offset_seconds: 270,
+    };
+    const replanBodies: Array<{ position_seconds: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: resumedPlan,
+        });
+      }
+      if (url.endsWith("/playback/session-hdr/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as { position_seconds: number });
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({
+            session_id: "session-hdr",
+            plan_id: "plan:resumedoutput001",
+            plan_attempt_key: "v3:resumedoutput001",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    act(() => result.current.updatePlaybackState(0, false));
+    act(() => setHDR(false));
+
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    expect(replanBodies[0]?.position_seconds).toBe(275);
+    unmount();
+  });
+
   it("retires an active plan when the refreshed output has no playable route", async () => {
     const setHDR = outputProbe(true);
     const stoppedSessions: string[] = [];
@@ -545,7 +603,11 @@ describe("usePlaybackSession output capability changes", () => {
     const firstReplanResponse = new Promise<Response>((resolve) => {
       resolveFirstReplan = resolve;
     });
-    const replanBodies: Array<{ operation: string; client_capabilities: { hdr: boolean } }> = [];
+    const replanBodies: Array<{
+      operation: string;
+      position_seconds: number;
+      client_capabilities: { hdr: boolean };
+    }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/playback/start")) {
@@ -587,6 +649,7 @@ describe("usePlaybackSession output capability changes", () => {
     act(() => result.current.refreshSubtitles(120));
     await waitFor(() => expect(replanBodies).toHaveLength(1));
     act(() => setHDR(false));
+    act(() => result.current.reanchorSeek(555));
     expect(replanBodies).toHaveLength(1);
 
     await act(async () => {
@@ -609,8 +672,83 @@ describe("usePlaybackSession output capability changes", () => {
     await waitFor(() => expect(replanBodies).toHaveLength(2));
     expect(replanBodies[1]).toMatchObject({
       operation: "output_change",
+      position_seconds: 555,
       client_capabilities: { hdr: false },
     });
+    unmount();
+  });
+
+  it("runs the latest output refresh before retiring a terminal replan", async () => {
+    const setHDR = outputProbe(true);
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    const replanBodies: Array<{ client_capabilities: { hdr: boolean } }> = [];
+    const stoppedSessions: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({ session_id: "session-hdr" }),
+        });
+      }
+      if (url.endsWith("/playback/session-hdr/replan")) {
+        replanBodies.push(
+          JSON.parse(String(init?.body)) as { client_capabilities: { hdr: boolean } },
+        );
+        if (replanBodies.length === 1) return firstReplanResponse;
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-hdr",
+          playback_plan: fixturePlanV3({
+            session_id: "session-hdr",
+            plan_id: "plan:latestoutput0001",
+            plan_attempt_key: "v3:latestoutput0001",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") {
+        stoppedSessions.push(url);
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    act(() => setHDR(false));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => setHDR(true));
+
+    await act(async () => {
+      resolveFirstReplan?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          terminal: { reason: "hdr_transcode_unsupported", message: "HDR unsupported" },
+        }),
+      );
+      await firstReplanResponse;
+    });
+
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:latestoutput0001"));
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[1]).toMatchObject({ client_capabilities: { hdr: true } });
+    expect(stoppedSessions).toEqual([]);
     unmount();
   });
 });

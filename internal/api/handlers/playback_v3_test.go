@@ -2916,6 +2916,7 @@ func TestHandleReplanPlaybackV3TrackChangeStaysOnEffectiveAlternate(t *testing.T
 	alternate.VideoTracks[0].Level, alternate.VideoTracks[0].Bitrate = 41, 8_000
 	alternate.AudioTracks = append([]models.AudioTrack(nil), source.AudioTracks...)
 	alternate.AudioTracks = append(alternate.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
+	alternate.ExternalSubtitles = []models.ExternalSubtitle{{Path: writePlaybackTestMediaFile(t, "alternate.eng.ass"), Language: "eng", Format: "ass"}}
 
 	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
 	manager := playback.NewSessionManager(0, 0)
@@ -2948,6 +2949,45 @@ func TestHandleReplanPlaybackV3TrackChangeStaysOnEffectiveAlternate(t *testing.T
 	}
 	if response.PlaybackPlan.SelectedTracks.Audio == nil || response.PlaybackPlan.SelectedTracks.Audio.Index == nil || *response.PlaybackPlan.SelectedTracks.Audio.Index != audioIndex {
 		t.Fatalf("alternate audio selection = %#v", response.PlaybackPlan.SelectedTracks.Audio)
+	}
+
+	subtitleIndex := 0
+	withSubtitle := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "alternate-subtitle-change-0001",
+		FailedPlanID: response.PlaybackPlan.PlanID, PlanAttemptID: "alternate-subtitle-attempt-0001",
+		PlanAttemptKey: response.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 31,
+		SelectedTracks: playback.SelectedTracksV3{
+			Audio:    response.PlaybackPlan.SelectedTracks.Audio,
+			Subtitle: &playback.TrackIdentityV3{Index: &subtitleIndex},
+		},
+		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if withSubtitle.PlaybackPlan == nil || withSubtitle.PlaybackPlan.EffectiveMediaFileID != alternate.ID || withSubtitle.PlaybackPlan.SelectedTracks.Subtitle == nil {
+		t.Fatalf("alternate subtitle selection failed: %#v", withSubtitle)
+	}
+
+	upgradedCapabilities := startRequest.Capabilities
+	upgradedCapabilities.MaxResolution = "2160p"
+	upgradedCapabilities.VideoDecode = append([]playback.VideoDecodeCapabilityV3(nil), startRequest.Capabilities.VideoDecode...)
+	upgradedCapabilities.VideoDecode[0].Levels = []int{51}
+	upgradedCapabilities.VideoDecode[0].MaxWidth = 3840
+	upgradedCapabilities.VideoDecode[0].MaxHeight = 2160
+	upgradedCapabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	outputResponse := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "alternate-output-change-0001",
+		FailedPlanID: withSubtitle.PlaybackPlan.PlanID, PlanAttemptID: "alternate-output-attempt-0001",
+		PlanAttemptKey: withSubtitle.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 32,
+		SelectedTracks:        withSubtitle.PlaybackPlan.SelectedTracks,
+		Capabilities:          upgradedCapabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if outputResponse.PlaybackPlan == nil || outputResponse.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("output change abandoned alternate-only subtitle: %#v", outputResponse)
+	}
+	if outputResponse.PlaybackPlan.SelectedTracks.Subtitle == nil || !strings.HasPrefix(outputResponse.PlaybackPlan.SelectedTracks.Subtitle.ID, "file:84:subtitle:") {
+		t.Fatalf("output change lost alternate subtitle: %#v", outputResponse.PlaybackPlan.SelectedTracks.Subtitle)
 	}
 }
 

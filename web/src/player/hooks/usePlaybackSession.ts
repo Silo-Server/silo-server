@@ -287,6 +287,12 @@ export function usePlaybackSession(
   const activeRequestKeyRef = useRef<string | null>(null);
   const activeCapabilityRequestKeyRef = useRef<string | null>(null);
   const playbackPositionRef = useRef(initialPosition);
+  const startIntentRef = useRef({
+    position: initialPosition,
+    forceStartPosition: forceInitialPosition,
+  });
+  const hasAdoptedPlanRef = useRef(false);
+  const awaitingInitialPlayerPositionRef = useRef(false);
   const playbackPlayingRef = useRef(true);
   const playbackStartedRef = useRef(false);
   const switchingRef = useRef(false);
@@ -368,6 +374,17 @@ export function usePlaybackSession(
       planRef.current = plan;
       sessionIdRef.current = sessionId ?? null;
       planRevisionRef.current += 1;
+      hasAdoptedPlanRef.current = true;
+      if (
+        Number.isFinite(plan.timeline.source_start_seconds) &&
+        plan.timeline.source_start_seconds >= 0
+      ) {
+        // Replan positions use the source timeline. Seed it immediately so an
+        // output refresh before the first timeupdate preserves server-resolved
+        // resume state instead of falling back to the caller's default zero.
+        playbackPositionRef.current = plan.timeline.source_start_seconds;
+        awaitingInitialPlayerPositionRef.current = plan.timeline.source_start_seconds > 0;
+      }
 
       setState(
         planToSessionState(
@@ -625,6 +642,12 @@ export function usePlaybackSession(
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
     qualityRef.current = qualityPreference?.trim() || "auto";
     playbackPositionRef.current = initialPosition;
+    startIntentRef.current = {
+      position: initialPosition,
+      forceStartPosition: forceInitialPosition,
+    };
+    hasAdoptedPlanRef.current = false;
+    awaitingInitialPlayerPositionRef.current = false;
     playbackPlayingRef.current = true;
     playbackStartedRef.current = false;
 
@@ -698,6 +721,23 @@ export function usePlaybackSession(
           queuedOperation === "failure_recovery" || queuedOperation === "seek_failure_recovery";
         const hasQueuedOutputChange = queuedOperation === "output_change";
         if (
+          options.operation === "seek_reanchor" &&
+          hasQueuedOutputChange &&
+          pendingReplanRef.current
+        ) {
+          // The output refresh will open a fresh route at its position anyway;
+          // fold a later seek into that queued intent rather than silently
+          // dropping the viewer's newest target.
+          pendingReplanRef.current = {
+            ...pendingReplanRef.current,
+            options: {
+              ...pendingReplanRef.current.options,
+              positionSeconds: options.positionSeconds,
+            },
+          };
+          return false;
+        }
+        if (
           isPendingFailureRecovery ||
           (isPendingOutputChange && !hasQueuedFailureRecovery) ||
           (options.operation === "seek_reanchor" &&
@@ -752,6 +792,12 @@ export function usePlaybackSession(
       });
 
       const loadSequence = loadSequenceRef.current;
+      const hasPendingOutputRefresh = () => {
+        const pending = pendingReplanRef.current;
+        return (
+          pending?.loadSequence === loadSequence && pending.options.operation === "output_change"
+        );
+      };
       replanInFlightRef.current = true;
       setState((current) => ({
         ...current,
@@ -780,7 +826,9 @@ export function usePlaybackSession(
         }
 
         const adopted = adoptDecision(decision);
-        if (!adopted && retireSessionOnRefusal) retireActiveSession(sessionId);
+        if (!adopted && retireSessionOnRefusal && !hasPendingOutputRefresh()) {
+          retireActiveSession(sessionId);
+        }
         return adopted;
       } catch (err) {
         if (loadSequence !== loadSequenceRef.current) return false;
@@ -791,7 +839,7 @@ export function usePlaybackSession(
           errorTitle: nextError.title,
           error: nextError.message,
         }));
-        if (retireSessionOnRefusal) retireActiveSession(sessionId);
+        if (retireSessionOnRefusal && !hasPendingOutputRefresh()) retireActiveSession(sessionId);
         return false;
       } finally {
         replanInFlightRef.current = false;
@@ -830,10 +878,12 @@ export function usePlaybackSession(
     const plan = planRef.current;
     const sessionId = sessionIdRef.current;
     if (!plan || !sessionId) {
+      const startIntent = startIntentRef.current;
+      const resumeFromAdoptedPlan = hasAdoptedPlanRef.current;
       void loadSession({
         preferredFileId: fileId,
-        position: playbackPositionRef.current,
-        forceStartPosition: true,
+        position: resumeFromAdoptedPlan ? playbackPositionRef.current : startIntent.position,
+        forceStartPosition: resumeFromAdoptedPlan ? true : startIntent.forceStartPosition,
         allowPreserveExistingSessionOnError: false,
         replacementErrorMessage: "Failed to refresh playback output",
         initialErrorMessage: "Failed to refresh playback output",
@@ -913,6 +963,8 @@ export function usePlaybackSession(
 
   const reanchorSeek = useCallback(
     (positionSeconds: number) => {
+      playbackPositionRef.current = positionSeconds;
+      awaitingInitialPlayerPositionRef.current = false;
       reportEvent("seek_reanchor_requested");
       void replan({ operation: "seek_reanchor", positionSeconds });
     },
@@ -960,7 +1012,15 @@ export function usePlaybackSession(
 
   const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {
     if (Number.isFinite(positionSeconds) && positionSeconds >= 0) {
-      playbackPositionRef.current = positionSeconds;
+      const isUninitializedPlayerZero =
+        awaitingInitialPlayerPositionRef.current &&
+        !playing &&
+        positionSeconds === 0 &&
+        playbackPositionRef.current > 0;
+      if (!isUninitializedPlayerZero) {
+        playbackPositionRef.current = positionSeconds;
+        awaitingInitialPlayerPositionRef.current = false;
+      }
     }
     if (playing) {
       playbackStartedRef.current = true;

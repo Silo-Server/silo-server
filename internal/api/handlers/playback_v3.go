@@ -1654,13 +1654,20 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// from an eng/ac3 commentary track to the identically-shaped main
 		// track on a quality change.
 		if currentEffectiveFile.ID != effectiveFile.ID {
-			if err := remapAudioSelectionV3(currentEffectiveFile, effectiveFile, &start); err != nil {
-				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
+			candidateStart := start
+			remapErr := remapAudioSelectionV3(currentEffectiveFile, effectiveFile, &candidateStart)
+			if remapErr == nil && (candidateStart.SubtitleTrackIndex != nil || candidateStart.SubtitleTrackID != "") {
+				remapErr = h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &candidateStart)
 			}
-			if start.SubtitleTrackIndex != nil || start.SubtitleTrackID != "" {
-				if err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
-					return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
-				}
+			if remapErr != nil && outputChange {
+				// An output refresh may make the requested edition viable again,
+				// but it must not retire a healthy active alternate merely because
+				// the viewer selected a track unique to that alternate.
+				effectiveFile = currentEffectiveFile
+			} else if remapErr != nil {
+				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: remapErr.Error()}
+			} else {
+				start = candidateStart
 			}
 		}
 	}
