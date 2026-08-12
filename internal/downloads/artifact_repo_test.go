@@ -227,6 +227,18 @@ func TestArtifactRemoteLocatorRoundTripsAndRequeueClearsIt(t *testing.T) {
 	if ready.OutputPath != "" || ready.OriginNodeID != 17 || ready.OriginNodeURL != "http://transcode" || ready.OriginNodeGroup != "host-a" || ready.OriginArtifactID != "artifact-opaque" || ready.FileSize != 4242 {
 		t.Fatalf("ready artifact = %+v", ready)
 	}
+	ready.OriginNodeURL = "http://transcode-new"
+	ready.OriginNodeGroup = "host-new"
+	if applied, err := repo.RefreshRemoteLocator(ctx, ready); err != nil || !applied {
+		t.Fatalf("RefreshRemoteLocator = (%v, %v)", applied, err)
+	}
+	refreshed, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.OriginNodeURL != "http://transcode-new" || refreshed.OriginNodeGroup != "host-new" {
+		t.Fatalf("refreshed artifact = %+v", refreshed)
+	}
 	if err := repo.Requeue(ctx, row.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +248,41 @@ func TestArtifactRemoteLocatorRoundTripsAndRequeueClearsIt(t *testing.T) {
 	}
 	if queued.OriginNodeID != 0 || queued.OriginNodeURL != "" || queued.OriginNodeGroup != "" || queued.OriginArtifactID != "" {
 		t.Fatalf("requeued artifact retained remote locator: %+v", queued)
+	}
+}
+
+func TestArtifactReadyPersistsRefreshedOriginLocator(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-refresh-origin-locator"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker", "", 17, "http://old-url", "old-group", "artifact-refresh", 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v)", applied, err)
+	}
+	manager := &ArtifactManager{
+		repo: repo,
+		preparer: &lifecycleTestPreparer{
+			resolvedURL: "http://new-url", resolvedGroup: "new-group",
+		},
+	}
+	resolved, err := manager.Ready(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.OriginNodeURL != "http://new-url" || resolved.OriginNodeGroup != "new-group" {
+		t.Fatalf("resolved artifact = %+v", resolved)
+	}
+	persisted, err := repo.GetByID(ctx, row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.OriginNodeURL != "http://new-url" || persisted.OriginNodeGroup != "new-group" {
+		t.Fatalf("persisted artifact = %+v", persisted)
 	}
 }
 

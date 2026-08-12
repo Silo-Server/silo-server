@@ -3,9 +3,12 @@ package downloadprepare
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestHTTPPreparerSendsAuthenticatedRecipe(t *testing.T) {
@@ -109,5 +112,62 @@ func TestRelayStatusAllowedPreservesServeContentOutcomes(t *testing.T) {
 		if RelayStatusAllowed(status) {
 			t.Errorf("status %d should be rejected", status)
 		}
+	}
+}
+
+func TestHTTPPreparerOpenStopsStalledBodyRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	resp, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Open(
+		context.Background(), server.URL, "secret", "artifact-stalled", http.MethodGet, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	started := time.Now()
+	_, err = io.ReadAll(resp.Body)
+	if !errors.Is(err, ErrRelayReadIdle) {
+		t.Fatalf("ReadAll error = %v, want ErrRelayReadIdle", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("stalled read took %s, want a bounded failure", elapsed)
+	}
+}
+
+func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		for _, chunk := range []string{"one", "two", "three"} {
+			_, _ = io.WriteString(w, chunk)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+
+	resp, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Open(
+		context.Background(), server.URL, "secret", "artifact-progress", http.MethodGet, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "onetwothree" {
+		t.Fatalf("body = %q", body)
 	}
 }

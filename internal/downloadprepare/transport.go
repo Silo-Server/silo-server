@@ -14,16 +14,22 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-const ArtifactDirectoryName = "download-artifacts"
+const (
+	ArtifactDirectoryName = "download-artifacts"
+	RelayReadIdleTimeout  = 2 * time.Minute
+)
 
 var (
 	artifactIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 	ErrArtifactNotFound = errors.New("remote download artifact not found")
+	ErrRelayReadIdle    = errors.New("remote download artifact read stalled")
 )
 
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -131,7 +137,8 @@ type RemotePreparer interface {
 // full-file prepare has no transport timeout; its caller owns cancellation.
 // Metadata and relay operations use a bounded response-header wait by default.
 type HTTPPreparer struct {
-	Client *http.Client
+	Client          *http.Client
+	ReadIdleTimeout time.Duration
 }
 
 func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) (Result, error) {
@@ -209,8 +216,10 @@ func (p HTTPPreparer) Open(ctx context.Context, nodeURL, jwtSecret, artifactID, 
 	if method != http.MethodGet && method != http.MethodHead {
 		return nil, fmt.Errorf("remote download artifact open: unsupported method %s", method)
 	}
-	httpReq, err := p.request(ctx, method, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	relayCtx, cancel := context.WithCancel(ctx)
+	httpReq, err := p.request(relayCtx, method, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("remote download artifact open: %w", err)
 	}
 	for _, name := range []string{"Range", "If-Match", "If-Range", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since"} {
@@ -220,9 +229,116 @@ func (p HTTPPreparer) Open(ctx context.Context, nodeURL, jwtSecret, artifactID, 
 	}
 	resp, err := p.client().Do(httpReq)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("remote download artifact open: request: %w", err)
 	}
+	resp.Body = newIdleReadCloser(resp.Body, p.readIdleTimeout(), cancel)
 	return resp, nil
+}
+
+// idleReadCloser bounds only time spent blocked in an upstream Read. Time
+// between reads is deliberately ignored so local bandwidth throttling and slow
+// clients cannot be mistaken for a stalled origin.
+type idleReadCloser struct {
+	source    io.ReadCloser
+	timeout   time.Duration
+	readStart chan struct{}
+	readDone  chan struct{}
+	stop      chan struct{}
+	stopped   chan struct{}
+	closeOnce sync.Once
+	timedOut  atomic.Bool
+	cancel    context.CancelFunc
+}
+
+func newIdleReadCloser(source io.ReadCloser, timeout time.Duration, cancel context.CancelFunc) io.ReadCloser {
+	if source == nil || timeout <= 0 {
+		return source
+	}
+	r := &idleReadCloser{
+		source:    source,
+		timeout:   timeout,
+		readStart: make(chan struct{}),
+		readDone:  make(chan struct{}),
+		stop:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		cancel:    cancel,
+	}
+	go r.watch()
+	return r
+}
+
+func (r *idleReadCloser) Read(p []byte) (int, error) {
+	if r.timedOut.Load() {
+		return 0, ErrRelayReadIdle
+	}
+	select {
+	case r.readStart <- struct{}{}:
+	case <-r.stop:
+		return 0, io.ErrClosedPipe
+	}
+	n, err := r.source.Read(p)
+	select {
+	case r.readDone <- struct{}{}:
+	case <-r.stop:
+	}
+	if r.timedOut.Load() {
+		return n, ErrRelayReadIdle
+	}
+	return n, err
+}
+
+func (r *idleReadCloser) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.stop)
+		if r.cancel != nil {
+			r.cancel()
+		}
+		_ = r.source.Close()
+		<-r.stopped
+	})
+	return nil
+}
+
+func (r *idleReadCloser) watch() {
+	defer close(r.stopped)
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	reading := false
+	for {
+		select {
+		case <-r.readStart:
+			timer.Reset(r.timeout)
+			reading = true
+		case <-r.readDone:
+			if reading && !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			reading = false
+		case <-timer.C:
+			if reading {
+				r.timedOut.Store(true)
+				if r.cancel != nil {
+					r.cancel()
+				}
+				_ = r.source.Close()
+				reading = false
+			}
+		case <-r.stop:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
+	}
 }
 
 func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, path string, body io.Reader) (*http.Request, error) {
@@ -253,6 +369,13 @@ func (p HTTPPreparer) prepareClient() *http.Client {
 		return p.Client
 	}
 	return defaultPrepareHTTPClient
+}
+
+func (p HTTPPreparer) readIdleTimeout() time.Duration {
+	if p.ReadIdleTimeout > 0 {
+		return p.ReadIdleTimeout
+	}
+	return RelayReadIdleTimeout
 }
 
 // CopyResponseHeaders forwards only representation/range metadata that is safe

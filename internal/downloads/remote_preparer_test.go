@@ -20,10 +20,11 @@ func (p *recordingEncodePreparer) PrepareFile(_ context.Context, _ string, _ pla
 }
 
 type recordingRemotePreparer struct {
-	nodeURL string
-	secret  string
-	request downloadprepare.Request
-	deleted string
+	nodeURL   string
+	secret    string
+	request   downloadprepare.Request
+	deleted   string
+	deleteURL string
 }
 
 func (p *recordingRemotePreparer) Prepare(_ context.Context, nodeURL, secret string, req downloadprepare.Request) (downloadprepare.Result, error) {
@@ -35,9 +36,19 @@ func (p *recordingRemotePreparer) Stat(_ context.Context, _, _ string, artifactI
 	return downloadprepare.Result{ArtifactID: artifactID, FileSize: 1234}, nil
 }
 
-func (p *recordingRemotePreparer) Delete(_ context.Context, _, _ string, artifactID string) error {
+func (p *recordingRemotePreparer) Delete(_ context.Context, nodeURL, _ string, artifactID string) error {
 	p.deleted = artifactID
+	p.deleteURL = nodeURL
 	return nil
+}
+
+type staticArtifactOriginLookup struct {
+	node *nodepool.Node
+	err  error
+}
+
+func (l staticArtifactOriginLookup) GetByID(context.Context, int) (*nodepool.Node, error) {
+	return l.node, l.err
 }
 
 type unavailableRemotePreparer struct{}
@@ -101,17 +112,43 @@ func TestNodeAwarePreparerUsesLeastLoadedHealthyNode(t *testing.T) {
 	}
 }
 
-func TestNodeAwarePreparerRefreshesDurableArtifactNodeURL(t *testing.T) {
+func TestNodeAwarePreparerResolvesCurrentArtifactNodeURL(t *testing.T) {
 	group := "host-new"
 	pool := nodepool.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://new-url", Group: &group, Enabled: true, Healthy: true}})
 	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://old-url", OriginNodeGroup: "host-old", OriginArtifactID: "artifact-1"}
-	if err := p.ResolveArtifact(artifact); err != nil {
+	if err := p.ResolveArtifact(context.Background(), artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact.OriginNodeURL != "http://new-url" || artifact.OriginNodeGroup != group {
 		t.Fatalf("artifact = %+v", artifact)
+	}
+}
+
+func TestNodeAwarePreparerUsesCurrentDisabledNodeURLForCleanup(t *testing.T) {
+	group := "host-new"
+	pool := nodepool.NewTranscodePool()
+	remote := &recordingRemotePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.remote = remote
+	p.SetOriginLookup(staticArtifactOriginLookup{node: &nodepool.Node{
+		ID: 17, Type: nodepool.NodeTypeTranscode, URL: "http://new-url", Group: &group, Enabled: false,
+	}})
+	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://old-url", OriginNodeGroup: "host-old", OriginArtifactID: "artifact-1"}
+	if err := p.ResolveArtifact(context.Background(), artifact); !errors.Is(err, ErrArtifactOriginRemoved) {
+		t.Fatalf("ResolveArtifact error = %v, want ErrArtifactOriginRemoved", err)
+	}
+	if artifact.OriginNodeURL != "http://new-url" || artifact.OriginNodeGroup != group {
+		t.Fatalf("refreshed artifact = %+v", artifact)
+	}
+	if err := p.DeleteArtifact(context.Background(), artifact); err != nil {
+		t.Fatal(err)
+	}
+	if remote.deleteURL != "http://new-url" || remote.deleted != "artifact-1" {
+		t.Fatalf("cleanup target = %q %q", remote.deleteURL, remote.deleted)
 	}
 }
 
@@ -120,7 +157,7 @@ func TestNodeAwarePreparerReportsRemovedArtifactOrigin(t *testing.T) {
 	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://disabled", Enabled: false, Healthy: true}})
 	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://removed", OriginArtifactID: "artifact-1"}
-	if err := p.ResolveArtifact(artifact); !errors.Is(err, ErrArtifactOriginRemoved) {
+	if err := p.ResolveArtifact(context.Background(), artifact); !errors.Is(err, ErrArtifactOriginRemoved) {
 		t.Fatalf("ResolveArtifact error = %v, want ErrArtifactOriginRemoved", err)
 	}
 }

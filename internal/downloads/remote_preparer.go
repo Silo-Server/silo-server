@@ -18,10 +18,15 @@ import (
 // The node retains completed bytes behind an authenticated opaque-id endpoint;
 // integrated installations and unavailable pools fall back to local work.
 type NodeAwarePreparer struct {
-	local   EncodePreparer
-	planner nodepool.TranscodeWorkPlanner
-	liveCfg func() *config.Config
-	remote  downloadprepare.RemotePreparer
+	local        EncodePreparer
+	planner      nodepool.TranscodeWorkPlanner
+	liveCfg      func() *config.Config
+	remote       downloadprepare.RemotePreparer
+	originLookup artifactOriginLookup
+}
+
+type artifactOriginLookup interface {
+	GetByID(ctx context.Context, id int) (*nodepool.Node, error)
 }
 
 func NewNodeAwarePreparer(local EncodePreparer, planner nodepool.TranscodeWorkPlanner, liveCfg func() *config.Config) *NodeAwarePreparer {
@@ -34,6 +39,12 @@ func NewNodeAwarePreparer(local EncodePreparer, planner nodepool.TranscodeWorkPl
 		liveCfg: liveCfg,
 		remote:  downloadprepare.HTTPPreparer{},
 	}
+}
+
+// SetOriginLookup supplies the authoritative node record used to recover a
+// changed URL even after the node has been disabled and left the active pool.
+func (p *NodeAwarePreparer) SetOriginLookup(lookup artifactOriginLookup) {
+	p.originLookup = lookup
 }
 
 func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
@@ -97,24 +108,37 @@ func remotePreparedArtifact(node *nodepool.Node, result downloadprepare.Result) 
 	}
 }
 
-func (p *NodeAwarePreparer) ResolveArtifact(artifact *Artifact) error {
+func (p *NodeAwarePreparer) ResolveArtifact(ctx context.Context, artifact *Artifact) error {
 	if artifact == nil || artifact.OriginNodeID == 0 || p.planner == nil {
 		return ErrArtifactOriginRemoved
 	}
 	node, ok := p.planner.TranscodeNode(artifact.OriginNodeID)
 	if !ok || node == nil {
+		if p.originLookup != nil {
+			configured, err := p.originLookup.GetByID(ctx, artifact.OriginNodeID)
+			switch {
+			case err == nil && configured != nil && configured.Type == nodepool.NodeTypeTranscode:
+				applyArtifactOrigin(artifact, configured)
+			case err != nil && !errors.Is(err, nodepool.ErrNodeNotFound):
+				return fmt.Errorf("looking up artifact origin node: %w", err)
+			}
+		}
 		return ErrArtifactOriginRemoved
 	}
+	applyArtifactOrigin(artifact, node)
+	return nil
+}
+
+func applyArtifactOrigin(artifact *Artifact, node *nodepool.Node) {
 	artifact.OriginNodeURL = strings.TrimRight(node.URL, "/")
 	artifact.OriginNodeGroup = ""
 	if node.Group != nil {
 		artifact.OriginNodeGroup = *node.Group
 	}
-	return nil
 }
 
 func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
-	if err := p.ResolveArtifact(artifact); err != nil {
+	if err := p.ResolveArtifact(ctx, artifact); err != nil {
 		return downloadprepare.Result{}, err
 	}
 	secret, err := p.remoteCredentials(artifact)
@@ -125,9 +149,10 @@ func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact
 }
 
 func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
-	// Prefer the current URL for an enabled node, but retain the persisted URL
-	// as a best-effort cleanup target after the node is disabled or removed.
-	_ = p.ResolveArtifact(artifact)
+	// Prefer the authoritative current URL, including for a disabled node. A
+	// deleted node has no newer record, so retain the last persisted URL as the
+	// best-effort cleanup target.
+	_ = p.ResolveArtifact(ctx, artifact)
 	secret, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return err

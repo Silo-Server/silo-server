@@ -65,7 +65,7 @@ func NewPlaybackPreparer() EncodePreparer { return playbackPreparer{} }
 // remoteArtifactLifecycle is implemented by the pooled preparer so recovery
 // and quota cleanup can manage node-local artifacts without filesystem access.
 type remoteArtifactLifecycle interface {
-	ResolveArtifact(artifact *Artifact) error
+	ResolveArtifact(ctx context.Context, artifact *Artifact) error
 	StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error)
 	DeleteArtifact(ctx context.Context, artifact *Artifact) error
 }
@@ -152,7 +152,7 @@ func (m *ArtifactManager) Ready(ctx context.Context, id string) (*Artifact, erro
 		return nil, fmt.Errorf("artifact is %s: %w", a.Status, ErrDownloadNotActive)
 	}
 	if lifecycle, ok := m.preparer.(remoteArtifactLifecycle); ok && a.OriginArtifactID != "" {
-		if err := lifecycle.ResolveArtifact(a); err != nil {
+		if err := m.resolveRemoteArtifact(ctx, lifecycle, a); err != nil {
 			if !errors.Is(err, ErrArtifactOriginRemoved) || !m.requeueRemoteArtifact(ctx, a, "origin node removed") {
 				return nil, err
 			}
@@ -358,6 +358,14 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 
 func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycle remoteArtifactLifecycle, artifacts []*Artifact) {
 	for _, a := range artifacts {
+		if err := m.resolveRemoteArtifact(ctx, lifecycle, a); err != nil {
+			if errors.Is(err, ErrArtifactOriginRemoved) {
+				m.requeueRemoteArtifact(ctx, a, "origin node removed")
+				continue
+			}
+			slog.WarnContext(ctx, "remote download artifact resolution failed; skipping remaining origin batch", "component", "downloads", "artifact_id", a.ID, "error", err)
+			return
+		}
 		result, err := lifecycle.StatArtifact(ctx, a)
 		switch {
 		case errors.Is(err, ErrArtifactOriginRemoved):
@@ -372,6 +380,24 @@ func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycl
 			m.requeueRemoteArtifact(ctx, a, "remote output size mismatch")
 		}
 	}
+}
+
+func (m *ArtifactManager) resolveRemoteArtifact(ctx context.Context, lifecycle remoteArtifactLifecycle, artifact *Artifact) error {
+	oldURL, oldGroup := artifact.OriginNodeURL, artifact.OriginNodeGroup
+	if err := lifecycle.ResolveArtifact(ctx, artifact); err != nil {
+		return err
+	}
+	if artifact.OriginNodeURL == oldURL && artifact.OriginNodeGroup == oldGroup {
+		return nil
+	}
+	applied, err := m.repo.RefreshRemoteLocator(ctx, artifact)
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return fmt.Errorf("remote artifact changed while refreshing its origin: %w", ErrDownloadNotActive)
+	}
+	return nil
 }
 
 func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact, reason string) bool {

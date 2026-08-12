@@ -334,6 +334,26 @@ func (r *ArtifactRepository) TouchLastUsed(ctx context.Context, id string) error
 	return nil
 }
 
+// RefreshRemoteLocator persists an enabled node's current URL/group while
+// fencing against a concurrent requeue or replacement locator.
+func (r *ArtifactRepository) RefreshRemoteLocator(ctx context.Context, artifact *Artifact) (bool, error) {
+	if artifact == nil {
+		return false, nil
+	}
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET origin_node_url = $2, origin_node_group = $3
+		 WHERE id = $1 AND status = 'ready'
+		   AND origin_node_id = $4 AND origin_artifact_id = $5`,
+		artifact.ID, artifact.OriginNodeURL, artifact.OriginNodeGroup,
+		artifact.OriginNodeID, artifact.OriginArtifactID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("refreshing remote artifact locator: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // ListReady returns ready artifacts ordered by least-recently-used first.
 func (r *ArtifactRepository) ListReady(ctx context.Context) ([]*Artifact, error) {
 	rows, err := r.pool.Query(ctx,

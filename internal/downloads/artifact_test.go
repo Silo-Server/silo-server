@@ -52,16 +52,24 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 }
 
 type lifecycleTestPreparer struct {
-	deleted   string
-	stat      downloadprepare.Result
-	statError error
-	deleteErr error
+	deleted       string
+	resolvedURL   string
+	resolvedGroup string
+	stat          downloadprepare.Result
+	statError     error
+	deleteErr     error
 }
 
 func (*lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return PreparedArtifact{}, nil
 }
-func (*lifecycleTestPreparer) ResolveArtifact(*Artifact) error { return nil }
+func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {
+	if p.resolvedURL != "" {
+		artifact.OriginNodeURL = p.resolvedURL
+		artifact.OriginNodeGroup = p.resolvedGroup
+	}
+	return nil
+}
 func (p *lifecycleTestPreparer) StatArtifact(context.Context, *Artifact) (downloadprepare.Result, error) {
 	return p.stat, p.statError
 }
