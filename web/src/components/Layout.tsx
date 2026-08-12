@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Menu, Search } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -267,11 +268,19 @@ export default function Layout({ children }: LayoutProps) {
             {showAdminActivity && <ServerActivity hideWhenEmpty />}
             <Link
               to="/settings"
-              className="bg-primary text-primary-foreground flex h-9 w-9 items-center justify-center rounded-xl text-xs font-bold shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]"
+              aria-label={`${profile?.name ?? user?.username ?? "User"} settings`}
+              className="flex h-9 w-9 items-center justify-center rounded-full transition-transform active:scale-[0.98]"
             >
-              {profile?.name?.charAt(0).toUpperCase() ??
-                user?.username?.charAt(0).toUpperCase() ??
-                "?"}
+              <Avatar className="h-9 w-9 shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]">
+                {profile?.avatar_url ? (
+                  <AvatarImage src={profile.avatar_url} alt={profile.name} />
+                ) : null}
+                <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
+                  {profile?.name?.charAt(0).toUpperCase() ??
+                    user?.username?.charAt(0).toUpperCase() ??
+                    "?"}
+                </AvatarFallback>
+              </Avatar>
             </Link>
           </div>
         </div>

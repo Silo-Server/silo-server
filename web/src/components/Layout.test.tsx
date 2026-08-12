@@ -11,6 +11,10 @@ const mocks = vi.hoisted(() => ({
   prefetchQuery: vi.fn(),
   renderSurface: true,
   beginResult: undefined as boolean | undefined,
+  profile: {
+    name: "Admin",
+    avatar_url: "https://example.com/admin-avatar.webp",
+  } as { name: string; avatar_url?: string },
 }));
 
 vi.mock("react-router", async () => {
@@ -30,7 +34,7 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { username: "Admin" } }) }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
-  useCurrentProfile: () => ({ profile: { name: "Admin" } }),
+  useCurrentProfile: () => ({ profile: mocks.profile }),
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => false }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
@@ -43,6 +47,11 @@ vi.mock("@/hooks/queries/catalogRead", () => ({ fetchCatalogItemDetail: vi.fn() 
 vi.mock("@/components/GlobalSearch", () => ({ GlobalSearch: () => null }));
 vi.mock("@/components/ServerActivity", () => ({ default: () => null }));
 vi.mock("@/components/SiloBrand", () => ({ SiloBrand: () => <span>Silo</span> }));
+vi.mock("@/components/ui/avatar", () => ({
+  Avatar: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AvatarImage: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
+  AvatarFallback: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+}));
 vi.mock("@/components/ViewTransitionLink", () => ({
   default: ({ children }: { children: ReactNode }) => <a href="/">{children}</a>,
 }));
@@ -121,6 +130,10 @@ beforeEach(() => {
   mocks.prefetchQuery.mockReset();
   mocks.renderSurface = true;
   mocks.beginResult = undefined;
+  mocks.profile = {
+    name: "Admin",
+    avatar_url: "https://example.com/admin-avatar.webp",
+  };
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query === "(min-width: 64rem)",
     media: query,
@@ -138,6 +151,18 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("Layout mobile profile", () => {
+  it("renders the current profile avatar in the settings link", () => {
+    renderLayout();
+
+    const settingsLink = screen.getByRole("link", { name: "Admin settings" });
+    const avatar = screen.getByRole("img", { name: "Admin" });
+
+    expect(settingsLink).toContainElement(avatar);
+    expect(avatar).toHaveAttribute("src", "https://example.com/admin-avatar.webp");
+  });
 });
 
 describe("Layout item navigation", () => {
