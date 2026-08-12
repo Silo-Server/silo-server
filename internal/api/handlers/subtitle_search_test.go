@@ -235,6 +235,109 @@ func TestHandleDeleteRequiresAccessToMediaFile(t *testing.T) {
 	}
 }
 
+// stubSubtitleProvider is a registerable no-op provider; only its name matters
+// to the capability probe.
+type stubSubtitleProvider struct {
+	name string
+}
+
+func (s stubSubtitleProvider) Name() string { return s.name }
+
+func (s stubSubtitleProvider) Search(context.Context, subtitles.SearchRequest) ([]subtitles.SubtitleResult, error) {
+	return nil, nil
+}
+
+func (s stubSubtitleProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
+	return nil, subtitles.FormatSRT, nil
+}
+
+func decodeProviderStatus(t *testing.T, rr *httptest.ResponseRecorder) struct {
+	SchemaVersion int      `json:"schema_version"`
+	Enabled       bool     `json:"enabled"`
+	Providers     []string `json:"providers"`
+} {
+	t.Helper()
+
+	var resp struct {
+		SchemaVersion int      `json:"schema_version"`
+		Enabled       bool     `json:"enabled"`
+		Providers     []string `json:"providers"`
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.SchemaVersion != 1 {
+		t.Fatalf("schema_version = %d, want 1", resp.SchemaVersion)
+	}
+	return resp
+}
+
+func TestHandleProviderStatusWithoutProviders(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
+
+	rr := httptest.NewRecorder()
+	handler.HandleProviderStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
+
+	resp := decodeProviderStatus(t, rr)
+	if resp.Enabled {
+		t.Fatal("enabled = true, want false with no providers registered")
+	}
+	if len(resp.Providers) != 0 {
+		t.Fatalf("providers = %v, want empty", resp.Providers)
+	}
+	// The empty list must reach the wire as [] — a null would read to a
+	// client as a missing field rather than "no providers here".
+	if !bytes.Contains(rr.Body.Bytes(), []byte(`"providers":[]`)) {
+		t.Fatalf("body = %s, want providers serialized as []", rr.Body.String())
+	}
+}
+
+func TestHandleProviderStatusWithProviders(t *testing.T) {
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockS3ClientForHandler(), "test-bucket")
+	manager.RegisterProvider(stubSubtitleProvider{name: "subdl"})
+	manager.RegisterProvider(stubSubtitleProvider{name: "opensubtitles"})
+	handler := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{})
+
+	rr := httptest.NewRecorder()
+	handler.HandleProviderStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
+
+	resp := decodeProviderStatus(t, rr)
+	if !resp.Enabled {
+		t.Fatal("enabled = false, want true with providers registered")
+	}
+	want := []string{"opensubtitles", "subdl"}
+	if len(resp.Providers) != len(want) {
+		t.Fatalf("providers = %v, want %v", resp.Providers, want)
+	}
+	for i, name := range want {
+		if resp.Providers[i] != name {
+			t.Fatalf("providers = %v, want %v (sorted)", resp.Providers, want)
+		}
+	}
+}
+
+func TestWriteSubtitleProvidersDisabledStatus(t *testing.T) {
+	rr := httptest.NewRecorder()
+	WriteSubtitleProvidersDisabledStatus(rr, newSubtitleAuthRequest(http.MethodGet, "/subtitles/providers/status", nil))
+
+	resp := decodeProviderStatus(t, rr)
+	if resp.Enabled {
+		t.Fatal("enabled = true, want false from the disabled fallback")
+	}
+	if len(resp.Providers) != 0 {
+		t.Fatalf("providers = %v, want empty", resp.Providers)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte(`"providers":[]`)) {
+		t.Fatalf("body = %s, want providers serialized as []", rr.Body.String())
+	}
+}
+
 type handlerMockSubtitleRepo struct {
 	subtitles map[int]*subtitles.DownloadedSubtitle
 	nextID    int

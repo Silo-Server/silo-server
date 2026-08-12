@@ -2575,6 +2575,11 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 					}
 					r.Route("/subtitles", func(r chi.Router) {
+						// Capability probe for external subtitle search. Two
+						// segments on purpose: a bare /providers would shadow
+						// the /{media_file_id} route below, while
+						// /providers/status never competes with it in chi.
+						r.Get("/providers/status", subtitleSearchHandler.HandleProviderStatus)
 						r.Post("/search", subtitleSearchHandler.HandleSearch)
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
 						r.Post("/upload", subtitleSearchHandler.HandleUpload)
@@ -2594,6 +2599,17 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+					})
+				} else {
+					// The whole group above is conditional (it needs the DB,
+					// S3 and the subtitle repo), so on a storage-less
+					// deployment the capability probe would 404 — leaving a
+					// client to interpret the same ambiguous status the probe
+					// exists to replace. Mount the probe alone, answering
+					// enabled:false, so feature detection always gets a real
+					// answer.
+					r.Route("/subtitles", func(r chi.Router) {
+						r.Get("/providers/status", handlers.WriteSubtitleProvidersDisabledStatus)
 					})
 				}
 
