@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +62,8 @@ type lifecycleTestPreparer struct {
 	stat          downloadprepare.Result
 	statError     error
 	statIDs       []string
+	statStarted   atomic.Int32
+	statWait      bool
 	deleteErr     error
 	deleteStarted chan struct{}
 	deleteWait    bool
@@ -79,7 +82,16 @@ func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Art
 	}
 	return p.resolveErr
 }
-func (p *lifecycleTestPreparer) StatArtifact(_ context.Context, artifact *Artifact) (downloadprepare.Result, error) {
+func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
+	if p.statWait {
+		p.statStarted.Add(1)
+		select {
+		case <-ctx.Done():
+			return downloadprepare.Result{}, ctx.Err()
+		case <-time.After(2 * time.Second):
+			return downloadprepare.Result{}, context.DeadlineExceeded
+		}
+	}
 	p.statIDs = append(p.statIDs, artifact.ID)
 	return p.stat, p.statError
 }

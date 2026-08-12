@@ -41,8 +41,9 @@ func NewNodeAwarePreparer(local EncodePreparer, planner nodepool.TranscodeWorkPl
 	}
 }
 
-// SetOriginLookup supplies the authoritative node record used to recover a
-// changed URL even after the node has been disabled and left the active pool.
+// SetOriginLookup supplies the authoritative node record used when the active
+// pool temporarily misses an enabled node, and to recover a changed URL after
+// a disabled node has left that pool.
 func (p *NodeAwarePreparer) SetOriginLookup(lookup artifactOriginLookup) {
 	p.originLookup = lookup
 }
@@ -120,6 +121,9 @@ func (p *NodeAwarePreparer) ResolveArtifact(ctx context.Context, artifact *Artif
 			switch {
 			case err == nil && configured != nil && configured.Type == nodepool.NodeTypeTranscode:
 				applyArtifactOrigin(artifact, configured)
+				if configured.Enabled {
+					return nil
+				}
 			case err != nil && !errors.Is(err, nodepool.ErrNodeNotFound):
 				return fmt.Errorf("looking up artifact origin node: %w", err)
 			}

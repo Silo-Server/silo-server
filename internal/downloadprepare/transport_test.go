@@ -160,6 +160,22 @@ func TestRelayStatusAllowedPreservesServeContentOutcomes(t *testing.T) {
 	}
 }
 
+func TestCopyResponseHeadersDoesNotExposeOriginArtifactFilename(t *testing.T) {
+	src := http.Header{
+		"Content-Disposition": {`attachment; filename="opaque-artifact.mp4"`},
+		"Content-Type":        {"video/mp4"},
+		"Content-Length":      {"42"},
+	}
+	dst := make(http.Header)
+	CopyResponseHeaders(dst, src)
+	if got := dst.Get("Content-Disposition"); got != "" {
+		t.Fatalf("Content-Disposition = %q, want omitted", got)
+	}
+	if dst.Get("Content-Type") != "video/mp4" || dst.Get("Content-Length") != "42" {
+		t.Fatalf("copied headers = %v", dst)
+	}
+}
+
 func TestHTTPPreparerOpenStopsStalledBodyRead(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")

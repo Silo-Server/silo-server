@@ -29,6 +29,7 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 		w.Header().Set("Content-Length", "3")
 		w.Header().Set("Content-Range", "bytes 1-3/5")
 		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", `attachment; filename="artifact-1.mp4"`)
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write([]byte("123"))
 	}))

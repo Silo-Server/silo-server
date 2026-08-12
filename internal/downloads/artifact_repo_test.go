@@ -449,10 +449,40 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	if len(orphans) != 1 || orphans[0].OriginNodeID != 17 || orphans[0].OriginArtifactID != "artifact-truncated" {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
-	if preparer.deleted != "" {
-		t.Fatalf("remote bytes were deleted before durable requeue committed: %q", preparer.deleted)
+	if preparer.deleted != "artifact-truncated" {
+		t.Fatalf("deleted remote artifact = %q, want artifact-truncated", preparer.deleted)
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
+}
+
+func TestRemoteRecoveryBudgetBoundsUnreachableOrigins(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+	for i := range 5 {
+		row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-recovery-budget-%d-%d", time.Now().UnixNano(), i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx,
+			`UPDATE download_artifacts
+			 SET status = 'ready', file_size = 42, completed_at = now(),
+			     origin_node_id = $2, origin_node_url = $3, origin_artifact_id = $4
+			 WHERE id = $1`,
+			row.ID, 32000+i, fmt.Sprintf("http://unreachable-recovery-%d", i), fmt.Sprintf("artifact-blocked-%d", i),
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preparer := &lifecycleTestPreparer{statWait: true}
+	manager := &ArtifactManager{repo: repo, preparer: preparer, remoteRecoveryBudget: 50 * time.Millisecond}
+	begin := time.Now()
+	manager.recoverReadyArtifacts(ctx)
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("recovery elapsed = %s, want bounded return", elapsed)
+	}
+	if started := preparer.statStarted.Load(); started == 0 || started > 4 {
+		t.Fatalf("started probes = %d, want one bounded wave of at most four", started)
+	}
 }
 
 func TestArtifactRemoteRequeueAtomicallyQueuesCleanup(t *testing.T) {

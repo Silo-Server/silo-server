@@ -392,7 +392,7 @@ func (p HTTPPreparer) readIdleTimeout() time.Duration {
 // across the transcode-node relay boundary.
 func CopyResponseHeaders(dst, src http.Header) {
 	for _, name := range []string{
-		"Accept-Ranges", "Content-Disposition", "Content-Length", "Content-Range",
+		"Accept-Ranges", "Content-Length", "Content-Range",
 		"Content-Type", "ETag", "Last-Modified",
 	} {
 		if value := src.Get(name); value != "" {

@@ -105,6 +105,7 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 		PlayMethod:         streamtoken.PlayMethodDownload,
 		TranscodeNode:      origin.URL,
 		DownloadArtifactID: "artifact-1",
+		DownloadFilename:   "Movie Final.mp4",
 		UserID:             7,
 	}, secret, time.Minute)
 	if err != nil {
@@ -120,6 +121,27 @@ func TestProxyDownloadRelaysNodeLocalArtifactRange(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Range"); got != "bytes 2-5/10" {
 		t.Fatalf("Content-Range = %q", got)
+	}
+	if got := rr.Header().Get("Content-Disposition"); !strings.Contains(got, "Movie Final.mp4") || strings.Contains(got, "artifact-1.mp4") {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+}
+
+func TestProxyDownloadCORSAllowsConditionalHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/downloads/file/token", nil)
+	req.Header.Set("Origin", "https://web.example")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "Range, If-Range, If-None-Match, If-Modified-Since, If-Match, If-Unmodified-Since")
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, "download-proxy-secret").Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	allowed := strings.ToLower(rr.Header().Get("Access-Control-Allow-Headers"))
+	for _, name := range []string{"range", "if-range", "if-none-match", "if-modified-since", "if-match", "if-unmodified-since"} {
+		if !strings.Contains(allowed, name) {
+			t.Errorf("Access-Control-Allow-Headers = %q, missing %s", allowed, name)
+		}
 	}
 }
 

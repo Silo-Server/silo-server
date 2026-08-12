@@ -99,8 +99,11 @@ func (s *Server) Handler() http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
-		AllowedHeaders: []string{"Accept", "Authorization", "Content-Type", "Range"},
-		MaxAge:         86400,
+		AllowedHeaders: []string{
+			"Accept", "Authorization", "Content-Type", "Range",
+			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
+		},
+		MaxAge: 86400,
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
 	r.Group(func(r chi.Router) {
@@ -270,6 +273,11 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	downloadprepare.CopyResponseHeaders(w.Header(), resp.Header)
+	if filename := filepath.Base(strings.TrimSpace(claims.DownloadFilename)); filename != "" && filename != "." {
+		if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
+			w.Header().Set("Content-Disposition", disposition)
+		}
+	}
 	w.WriteHeader(resp.StatusCode)
 	if r.Method == http.MethodHead {
 		return

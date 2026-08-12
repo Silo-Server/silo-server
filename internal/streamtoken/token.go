@@ -56,6 +56,9 @@ type Claims struct {
 	// DownloadArtifactRowID identifies the authoritative database row so a
 	// proxy can fence and requeue a signed remote locator that returns 404.
 	DownloadArtifactRowID string `json:"darid,omitempty"`
+	// DownloadFilename is the client-facing attachment name. Remote artifact
+	// ids are internal attempt handles and must never become saved filenames.
+	DownloadFilename string `json:"dfn,omitempty"`
 
 	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct

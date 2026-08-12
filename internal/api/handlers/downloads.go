@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -596,8 +597,12 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 	}
 	releaseReservation := func() { h.nodePlanner.ReleaseSession(sessionID) }
 	mediaPath := target.Path
+	downloadFilename := ""
 	if target.OriginArtifactID != "" {
 		mediaPath = ""
+		if strings.TrimSpace(target.Path) != "" {
+			downloadFilename = filepath.Base(target.Path)
+		}
 	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
 		SessionID:             sessionID,
@@ -606,6 +611,7 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 		TranscodeNode:         target.OriginNodeURL,
 		DownloadArtifactID:    target.OriginArtifactID,
 		DownloadArtifactRowID: target.ArtifactID,
+		DownloadFilename:      downloadFilename,
 		UserID:                userID,
 		ProfileID:             profileID,
 		MediaFileID:           target.MediaFileID,

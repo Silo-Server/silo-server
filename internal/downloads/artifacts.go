@@ -78,14 +78,15 @@ type ArtifactNotifier func(ctx context.Context, d *Download)
 // jobs, drains them through a bounded worker pool with leased heartbeats, and
 // recovers stranded jobs on startup.
 type ArtifactManager struct {
-	repo                *ArtifactRepository
-	downloads           *Repository
-	fileRepo            FileResolver
-	preparer            EncodePreparer
-	owner               string
-	liveCfg             func() *config.Config
-	notify              ArtifactNotifier
-	remoteCleanupBudget time.Duration
+	repo                 *ArtifactRepository
+	downloads            *Repository
+	fileRepo             FileResolver
+	preparer             EncodePreparer
+	owner                string
+	liveCfg              func() *config.Config
+	notify               ArtifactNotifier
+	remoteRecoveryBudget time.Duration
+	remoteCleanupBudget  time.Duration
 
 	mu             sync.Mutex
 	kick           func()
@@ -371,6 +372,12 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 		slog.WarnContext(ctx, "remote download artifacts cannot be checked", "component", "downloads")
 		return
 	}
+	budget := m.remoteRecoveryBudget
+	if budget <= 0 {
+		budget = defaultRemoteRecoveryBudget
+	}
+	recoveryCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
 	const maxConcurrentOriginProbes = 4
 	sem := make(chan struct{}, maxConcurrentOriginProbes)
 	var wg sync.WaitGroup
@@ -382,10 +389,10 @@ func (m *ArtifactManager) recoverReadyArtifacts(ctx context.Context) {
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
-			case <-ctx.Done():
+			case <-recoveryCtx.Done():
 				return
 			}
-			m.probeRemoteArtifactGroup(ctx, lifecycle, artifacts)
+			m.probeRemoteArtifactGroup(recoveryCtx, lifecycle, artifacts)
 		}()
 	}
 	wg.Wait()
@@ -416,9 +423,28 @@ func (m *ArtifactManager) probeRemoteArtifactGroup(ctx context.Context, lifecycl
 			slog.WarnContext(ctx, "remote download artifact check failed; skipping remaining origin batch", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
 			return
 		case result.FileSize != a.FileSize:
-			m.requeueRemoteArtifact(ctx, a, "remote output size mismatch")
+			m.requeueWrongSizedRemoteArtifact(ctx, lifecycle, a)
 		}
 	}
+}
+
+// requeueWrongSizedRemoteArtifact commits the durable fence before deleting
+// bytes, but delays replacement work until the known-invalid locator has been
+// quarantined. If deletion fails, the transaction's orphan row retains the
+// exact locator for the regular retrying cleanup pass.
+func (m *ArtifactManager) requeueWrongSizedRemoteArtifact(ctx context.Context, lifecycle remoteArtifactLifecycle, a *Artifact) {
+	applied, err := m.requeueRemoteArtifactWithFence(ctx, a, "remote output size mismatch", false, false)
+	if err != nil {
+		slog.WarnContext(ctx, "re-queue remote artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
+		return
+	}
+	if !applied {
+		return
+	}
+	if err := lifecycle.DeleteArtifact(ctx, a); err != nil {
+		slog.WarnContext(ctx, "deleting rejected remote artifact failed", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "error", err)
+	}
+	m.triggerDrain()
 }
 
 func (m *ArtifactManager) resolveRemoteArtifact(ctx context.Context, lifecycle remoteArtifactLifecycle, artifact *Artifact) error {
@@ -453,14 +479,14 @@ func (m *ArtifactManager) requeueRemoteArtifact(ctx context.Context, a *Artifact
 // cleanup. Request paths use the returned error so a failed state transition is
 // never disguised as an ordinary missing catalog item.
 func (m *ArtifactManager) requeueRemoteArtifactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
-	return m.requeueRemoteArtifactWithFence(ctx, a, reason, false)
+	return m.requeueRemoteArtifactWithFence(ctx, a, reason, false, true)
 }
 
 func (m *ArtifactManager) requeueRemoteArtifactExactNow(ctx context.Context, a *Artifact, reason string) (bool, error) {
-	return m.requeueRemoteArtifactWithFence(ctx, a, reason, true)
+	return m.requeueRemoteArtifactWithFence(ctx, a, reason, true, true)
 }
 
-func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a *Artifact, reason string, exactURL bool) (bool, error) {
+func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a *Artifact, reason string, exactURL, triggerDrain bool) (bool, error) {
 	if m == nil || m.repo == nil || a == nil || a.ID == "" || a.OriginNodeID <= 0 || a.OriginArtifactID == "" {
 		return false, errors.New("remote artifact locator unavailable for requeue")
 	}
@@ -482,7 +508,9 @@ func (m *ArtifactManager) requeueRemoteArtifactWithFence(ctx context.Context, a 
 		m.publish(ctx, download)
 	}
 	slog.WarnContext(ctx, "remote download artifact re-queued", "component", "downloads", "artifact_id", a.ID, "node", a.OriginNodeURL, "reason", reason)
-	m.triggerDrain()
+	if triggerDrain {
+		m.triggerDrain()
+	}
 	return true, nil
 }
 
@@ -752,10 +780,11 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 // The server-disk *quota* is download.artifact_max_bytes (see the download
 // limits & restrictions design); this sweep is not a quota.
 const (
-	failedArtifactRetention    = 24 * time.Hour
-	unlinkedArtifactRetention  = 30 * 24 * time.Hour
-	ephemeralDownloadRetention = 7 * 24 * time.Hour
-	defaultRemoteCleanupBudget = 15 * time.Second
+	failedArtifactRetention     = 24 * time.Hour
+	unlinkedArtifactRetention   = 30 * 24 * time.Hour
+	ephemeralDownloadRetention  = 7 * 24 * time.Hour
+	defaultRemoteRecoveryBudget = 15 * time.Second
+	defaultRemoteCleanupBudget  = 15 * time.Second
 )
 
 // Cleanup runs the hygiene sweep, then evicts ready artifacts (LRU first) once

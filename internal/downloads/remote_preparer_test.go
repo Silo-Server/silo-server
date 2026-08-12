@@ -164,6 +164,22 @@ func TestNodeAwarePreparerUsesCurrentDisabledNodeURLForCleanup(t *testing.T) {
 	}
 }
 
+func TestNodeAwarePreparerRecoversEnabledOriginMissingFromPool(t *testing.T) {
+	group := "host-new"
+	pool := nodepool.NewTranscodePool()
+	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
+	p.SetOriginLookup(staticArtifactOriginLookup{node: &nodepool.Node{
+		ID: 17, Type: nodepool.NodeTypeTranscode, URL: "http://new-url", Group: &group, Enabled: true,
+	}})
+	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://old-url", OriginNodeGroup: "host-old", OriginArtifactID: "artifact-1"}
+	if err := p.ResolveArtifact(context.Background(), artifact); err != nil {
+		t.Fatalf("ResolveArtifact error = %v", err)
+	}
+	if artifact.OriginNodeURL != "http://new-url" || artifact.OriginNodeGroup != group {
+		t.Fatalf("refreshed artifact = %+v", artifact)
+	}
+}
+
 func TestNodeAwarePreparerReportsRemovedArtifactOrigin(t *testing.T) {
 	pool := nodepool.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://disabled", Enabled: false, Healthy: true}})
