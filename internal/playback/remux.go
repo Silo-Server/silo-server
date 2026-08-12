@@ -177,11 +177,15 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 	} else if (dvProfile == 5 || dvProfile == 8) && tagDVSampleEntry {
 		// FFmpeg carries the DOVI configuration record into MP4 but otherwise
 		// labels copied HEVC as hev1. Media3 keys decoder selection from the
-		// sample entry, so retain an explicit Dolby Vision tag as well.
-		// dvhe keeps FFmpeg's dvvC box; forcing dvh1 makes FFmpeg 7.1 omit it.
-		// Only the explicit v3 preserve recipe opts in: legacy web/jellycompat
-		// consumers keep the pre-v3 hev1 labeling their demuxers accept.
-		args = append(args, "-tag:v", "dvhe")
+		// sample entry, and Safari's media element only answers "probably" for
+		// dvh1 — the sample entry Apple's HLS authoring spec calls for — so tag
+		// dvh1. FFmpeg refuses to write the dvvC configuration record box under
+		// either tag without -strict unofficial; dvh1 plus -strict unofficial is
+		// verified (7.1.4) to retain the full record. Media3 accepts both sample
+		// entries, so Android preserve consumers are unaffected. Only the
+		// explicit v3 preserve recipe opts in: legacy web/jellycompat consumers
+		// keep the pre-v3 hev1 labeling their demuxers accept.
+		args = append(args, "-tag:v", "dvh1", "-strict", "unofficial")
 	}
 
 	if transcodeAudio {

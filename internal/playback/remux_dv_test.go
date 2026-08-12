@@ -86,15 +86,20 @@ func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 // rely on the pre-v3 hev1 labeling their demuxers accept.
 func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
 	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, true, false)
-	if !argsContainPair(args, "-tag:v", "dvhe") {
+	if !argsContainPair(args, "-tag:v", "dvh1") {
 		t.Fatalf("preserved Dolby Vision must retain a DV sample entry, args=%v", strings.Join(args, " "))
 	}
+	// Without -strict unofficial FFmpeg drops the dvvC configuration record and
+	// the output is an untagged HEVC stream no DV decoder will select.
+	if !argsContainPair(args, "-strict", "unofficial") {
+		t.Fatalf("preserved Dolby Vision must allow the dvvC box, args=%v", strings.Join(args, " "))
+	}
 	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8, false, false)
-	if argsContainPair(legacy, "-tag:v", "dvhe") {
+	if argsContainPair(legacy, "-tag:v", "dvh1") || argsContainPair(legacy, "-strict", "unofficial") {
 		t.Fatalf("legacy remux consumers must keep hev1 labeling, args=%v", strings.Join(legacy, " "))
 	}
 	stripped := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
-	if argsContainPair(stripped, "-tag:v", "dvhe") {
+	if argsContainPair(stripped, "-tag:v", "dvh1") || argsContainPair(stripped, "-strict", "unofficial") {
 		t.Fatalf("HDR10 fallback must not retain a DV sample entry, args=%v", strings.Join(stripped, " "))
 	}
 }

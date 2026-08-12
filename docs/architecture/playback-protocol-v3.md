@@ -382,13 +382,19 @@ Refusing to play those outright would be worse than an assumption the client is
 told about.
 
 The web client does not promote the generic high-dynamic-range media query to a
-format claim by itself. It combines that active-output signal with Media
-Capabilities support for Silo's progressive 2160p HEVC Main10, Rec. 2020, PQ,
-SMPTE ST 2086 shape before advertising HDR10. Dolby Vision likewise requires a
-definitive media-element answer for the exact `dvhe.05.06` or `dvhe.08.06`
-sample entry. Both claims are scoped to `progressive`: they are cleared from
-`original_http` and `hls` because those delivery paths were not tested by the
-same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
+format claim, and it does not gate format claims on it either. Decoder capability
+and active-output HDR are separate facts — browsers tone-map HDR content onto SDR
+outputs, and Safari 26 reports `dynamic-range: standard` even on an XDR display —
+so the media query survives only as the best-effort `hdr` output boolean. Format
+claims come from exact shape probes: Media Capabilities support for Silo's
+progressive 2160p HEVC Main10, Rec. 2020, PQ, SMPTE ST 2086 shape (probed under
+both the `hvc1` and `hev1` sample entries) before advertising HDR10, and a
+definitive media-element answer for the `dvh1.05.06`/`dvhe.05.06` or
+`dvh1.08.06`/`dvhe.08.06` sample entry before advertising Dolby Vision — Safari
+answers only for `hvc1`/`dvh1`, other browsers only for `hev1`/`dvhe`, so either
+definitive answer earns the claim. Both claims are scoped to `progressive`: they
+are cleared from `original_http` and `hls` because those delivery paths were not
+tested by the same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
 `hdr10_max_frame_rate`, and `hdr10_max_bitrate_kbps`; these ceilings keep a
 successful format probe from admitting an untested stream class.
 
