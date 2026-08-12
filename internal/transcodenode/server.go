@@ -1065,7 +1065,9 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 
-	os.RemoveAll(s.sessionOutputDir(sessionID))
+	if err := os.RemoveAll(s.sessionOutputDir(sessionID)); err != nil {
+		slog.WarnContext(r.Context(), "remove transcode session directory", "component", "transcodenode", "session", sessionID, "error", err)
+	}
 
 	// Drop the recipe so a buffered/retrying request after a node restart cannot
 	// reconstruct a new ffmpeg for this now-stopped session. Best-effort: a stop
@@ -1259,7 +1261,9 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	stopped := make([]string, 0, len(s.sessions))
 	for id, session := range s.sessions {
 		session.Close()
-		os.RemoveAll(s.sessionOutputDir(id))
+		if err := os.RemoveAll(s.sessionOutputDir(id)); err != nil {
+			slog.WarnContext(r.Context(), "remove transcode session directory during reload", "component", "transcodenode", "session", id, "error", err)
+		}
 		delete(s.sessions, id)
 		delete(s.lastAccess, id)
 		stopped = append(stopped, id)
