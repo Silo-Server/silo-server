@@ -3,6 +3,7 @@ package literaryworks
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -81,6 +82,70 @@ func TestListMatchCandidateIDsMatchesBySeriesPosition(t *testing.T) {
 
 	if len(ids) != 1 || ids[0] != "cand-hit" {
 		t.Fatalf("ids = %v, want [cand-hit] matched on series despite differing titles", ids)
+	}
+}
+
+func seedProviderID(t *testing.T, pool *pgxpool.Pool, contentID, provider, providerID, itemType string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
+		VALUES ($1, $2, $3, $4)
+	`, contentID, provider, providerID, itemType); err != nil {
+		t.Fatalf("seed provider id for %s: %v", contentID, err)
+	}
+}
+
+func TestListMatchCandidateIDsMatchesBySharedProviderID(t *testing.T) {
+	pool := newLiteraryWorksTestPool(t)
+	folderID, _ := seedCandidateFixture(t, pool)
+	repo := NewRepository(pool)
+
+	// Titles differ and neither side has series data, so a shared provider ID
+	// is the only signal that can produce a match.
+	seedLiteraryMediaItem(t, pool, "cand-src", FormatEbook, "Golden Margins", folderID)
+	seedLiteraryMediaItem(t, pool, "cand-hit", FormatAudiobook, "Totally Unrelated Title", folderID)
+	seedLiteraryMediaItem(t, pool, "cand-miss", FormatAudiobook, "Another Unrelated Title", folderID)
+	seedProviderID(t, pool, "cand-hit", "openlibrary", "OL1618W", FormatAudiobook)
+
+	ids, err := repo.listMatchCandidateIDs(context.Background(), MatchItem{
+		ContentID:   "cand-src",
+		Type:        FormatEbook,
+		Title:       "Golden Margins",
+		ExternalIDs: map[string]string{"openlibrary": "OL1618W"},
+	}, 20)
+	if err != nil {
+		t.Fatalf("listMatchCandidateIDs: %v", err)
+	}
+
+	want := []string{"cand-hit"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("ids = %v, want %v (provider-ID branch is the only possible match)", ids, want)
+	}
+}
+
+func TestListMatchCandidateIDsIgnoresASINProviderID(t *testing.T) {
+	pool := newLiteraryWorksTestPool(t)
+	folderID, _ := seedCandidateFixture(t, pool)
+	repo := NewRepository(pool)
+
+	// ASIN identifies an edition rather than a work, so it must never be
+	// promoted into a candidate branch.
+	seedLiteraryMediaItem(t, pool, "cand-src", FormatEbook, "Golden Margins", folderID)
+	seedLiteraryMediaItem(t, pool, "cand-hit", FormatAudiobook, "Totally Unrelated Title", folderID)
+	seedProviderID(t, pool, "cand-hit", "asin", "B0FIXTURE1", FormatAudiobook)
+
+	ids, err := repo.listMatchCandidateIDs(context.Background(), MatchItem{
+		ContentID:   "cand-src",
+		Type:        FormatEbook,
+		Title:       "Golden Margins",
+		ExternalIDs: map[string]string{"asin": "B0FIXTURE1"},
+	}, 20)
+	if err != nil {
+		t.Fatalf("listMatchCandidateIDs: %v", err)
+	}
+
+	if len(ids) != 0 {
+		t.Fatalf("ids = %v, want empty: a shared ASIN must not match on its own", ids)
 	}
 }
 
@@ -200,12 +265,11 @@ func TestListMatchCandidateIDsOrdersByTitleAndHonoursLimit(t *testing.T) {
 		t.Fatalf("listMatchCandidateIDs: %v", err)
 	}
 
-	if len(ids) != 2 {
-		t.Fatalf("ids = %v, want exactly 2 rows for limit=2", ids)
-	}
-	for _, id := range ids {
-		if strings.Contains(id, "src") {
-			t.Fatalf("ids = %v, must never contain the source item itself", ids)
-		}
+	// Titles tie, so content_id breaks the tie: cand-a, cand-b, cand-c. The
+	// limit keeps the first two, and cand-a appears once despite also matching
+	// the series branch.
+	want := []string{"cand-a", "cand-b"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
 	}
 }
