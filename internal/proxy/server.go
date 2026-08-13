@@ -185,7 +185,12 @@ func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
-	http.ServeFile(w, r, claims.MediaPath)
+	// Serve through the same path the integrated server uses rather than a bare
+	// http.ServeFile: direct_stream_resume_v1 requires the strong ETag that
+	// ServeDirectPlay sets before ServeContent (ServeFile sets none, so
+	// If-Range never validates and a resumed range silently restarts at 200),
+	// and it carries the rolling write deadline and stream metrics with it.
+	_ = playback.ServeDirectPlay(w, r, claims.MediaPath)
 }
 
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {

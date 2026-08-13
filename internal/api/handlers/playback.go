@@ -396,12 +396,20 @@ const streamTokenParam = "st"
 // reconstruction recipe. Returns "" when no signing secret is configured
 // (reconstruct effectively disabled, e.g. in tests).
 func (h *PlaybackHandler) signSessionToken(card playback.RecipeCard) string {
+	return h.signStreamClaims(card.ToClaims())
+}
+
+// signStreamClaims mints a stream token from claims that are already assembled.
+// Callers serving a session from another node use it to add the claims a
+// RecipeCard does not model (the file's Dolby Vision profile, audio-only flag),
+// which a remote executor cannot look up for itself.
+func (h *PlaybackHandler) signStreamClaims(claims streamtoken.Claims) string {
 	if h.JWTSecret == "" {
 		return ""
 	}
-	token, err := streamtoken.Sign(card.ToClaims(), h.JWTSecret, playback.MaxTokenTTL)
+	token, err := streamtoken.Sign(claims, h.JWTSecret, playback.MaxTokenTTL)
 	if err != nil {
-		slog.Warn("sign stream token failed", "error", err, "session", card.SessionID, "playback_session_id", card.SessionID)
+		slog.Warn("sign stream token failed", "error", err, "session", claims.SessionID, "playback_session_id", claims.SessionID)
 		return ""
 	}
 	return token
