@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/dbtest"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -18,16 +19,7 @@ import (
 // --migrate-down-to — actually restores them, and that it reaches the Go
 // migrations the standalone goose CLI cannot see.
 func TestMigrateDownToRestoresLegacyDisplayPrefs(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer pool.Close()
+	ctx, pool := newRehearsalDatabase(t)
 
 	if err := RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
 		t.Fatalf("migrate up: %v", err)
@@ -83,4 +75,36 @@ ON CONFLICT (username) DO UPDATE SET email=EXCLUDED.email RETURNING id`).Scan(&u
 	}
 
 	_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID)
+}
+
+// newRehearsalDatabase returns a pool on a database this test owns.
+//
+// MigrateDownTo rolls public back past columns other packages are querying, and
+// `go test ./...` runs package binaries concurrently against one database, so
+// rehearsing the rollback in the shared database turns unrelated packages red
+// at random — internal/markers loses marker_contributions.claim_active mid-run.
+func newRehearsalDatabase(t *testing.T) (context.Context, *pgxpool.Pool) {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+
+	// The rehearsal migrates up itself, so hand Provision a no-op.
+	config, drop, err := dbtest.Provision(ctx, dsn, "silo_migrate_rehearsal",
+		func(context.Context, *pgxpool.Pool) error { return nil })
+	if err != nil {
+		t.Fatalf("provision rehearsal database: %v", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, config.Copy())
+	if err != nil {
+		drop()
+		t.Fatalf("connect rehearsal database: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Close()
+		drop()
+	})
+	return ctx, pool
 }
