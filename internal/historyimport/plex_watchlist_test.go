@@ -218,7 +218,8 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 
 func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
 	ctx := context.Background()
-	pool := newPlexWatchlistImportTestPool(t)
+	fixture := newHistoryImportFixture(t)
+	pool := fixture.pool
 	repo := NewRepository(pool, nil)
 	service := &Service{
 		repo:         repo,
@@ -232,14 +233,14 @@ func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, year, tmdb_id, status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
-		"movie-693134", KindMovie, "Dune: Part Two", 2024, "693134", "matched",
+		fixture.id("movie-693134"), KindMovie, "Dune: Part Two", 2024, "693134", "matched",
 	); err != nil {
 		t.Fatalf("seed media item: %v", err)
 	}
 	run, err := repo.CreateRun(ctx, Run{
-		ID:               "plex-watchlist-duplicate-run",
-		UserID:           42,
-		ProfileID:        "profile-1",
+		ID:               fixture.id("plex-watchlist-duplicate-run"),
+		UserID:           fixture.userID,
+		ProfileID:        fixture.profileID,
 		SourceType:       SourceTypePlex,
 		ConnectionMode:   ConnectionModePlexOAuth,
 		Status:           RunStatusQueued,
@@ -261,7 +262,7 @@ func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
 	}
 	service.executeRun(run, staticWatchlistProvider{records: []Record{record, record}})
 
-	completed, err := repo.GetRunForUser(ctx, 42, run.ID)
+	completed, err := repo.GetRunForUser(ctx, fixture.userID, run.ID)
 	if err != nil {
 		t.Fatalf("GetRunForUser: %v", err)
 	}
@@ -276,7 +277,7 @@ func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
 		SELECT COUNT(*)
 		FROM user_watchlist
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		42, "profile-1", "movie-693134",
+		fixture.userID, fixture.profileID, fixture.id("movie-693134"),
 	).Scan(&rows); err != nil {
 		t.Fatalf("count watchlist rows: %v", err)
 	}
@@ -293,78 +294,64 @@ func (p staticWatchlistProvider) Fetch(context.Context) ([]Record, []string, err
 	return p.records, nil, nil
 }
 
-func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
+func newHistoryImportFixture(t *testing.T) historyImportFixture {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse db config: %v", err)
-	}
-	config.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
 	t.Cleanup(pool.Close)
 
-	for _, stmt := range []string{
-		`CREATE TEMP TABLE media_items (
-			content_id text PRIMARY KEY,
-			type text NOT NULL,
-			title text NOT NULL,
-			year integer,
-			imdb_id text,
-			tmdb_id text,
-			tvdb_id text,
-			status text NOT NULL DEFAULT 'matched'
-		) ON COMMIT PRESERVE ROWS`,
-		`CREATE TEMP TABLE user_watchlist (
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			media_item_id text NOT NULL,
-			added_at timestamptz NOT NULL DEFAULT now(),
-			sort_index integer,
-			PRIMARY KEY (user_id, profile_id, media_item_id)
-		) ON COMMIT PRESERVE ROWS`,
-		`CREATE TEMP TABLE history_import_runs (
-			id text PRIMARY KEY,
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			source_type text NOT NULL,
-			connection_mode text NOT NULL,
-			status text NOT NULL,
-			mapping_id integer,
-			fetched integer NOT NULL DEFAULT 0,
-			matched integer NOT NULL DEFAULT 0,
-			unmatched integer NOT NULL DEFAULT 0,
-			progress_updated integer NOT NULL DEFAULT 0,
-			history_created integer NOT NULL DEFAULT 0,
-			watchlist_added integer NOT NULL DEFAULT 0,
-			favorites_imported integer NOT NULL DEFAULT 0,
-			skipped integer NOT NULL DEFAULT 0,
-			warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
-			unmatched_samples jsonb NOT NULL DEFAULT '[]'::jsonb,
-			error_message text,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			started_at timestamptz,
-			completed_at timestamptz,
-			last_heartbeat_at timestamptz
-		) ON COMMIT PRESERVE ROWS`,
-		`CREATE TEMP TABLE user_favorites (
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			media_item_id text NOT NULL,
-			added_at timestamptz NOT NULL DEFAULT now(),
-			PRIMARY KEY (user_id, profile_id, media_item_id)
-		) ON COMMIT PRESERVE ROWS`,
-	} {
-		if _, err := pool.Exec(ctx, stmt); err != nil {
-			t.Fatalf("create temp test table: %v", err)
-		}
+	// history_import_runs is keyed on (user_id, profile_id) against
+	// user_profiles, so the import path needs a real account behind it.
+	fixture := historyImportFixture{pool: pool, suffix: fmt.Sprintf("%d", time.Now().UnixNano())}
+	fixture.profileID = fixture.id("profile")
+
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO users (username, email, password_hash, role)
+		VALUES ($1, $2, 'x', 'user')
+		RETURNING id`,
+		fixture.id("history-import-test"),
+		fixture.id("history-import-test")+"@example.test",
+	).Scan(&fixture.userID); err != nil {
+		t.Fatalf("seed user: %v", err)
 	}
-	return pool
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		// user_profiles, user_watchlist, user_favorites and
+		// history_import_runs all cascade from the user.
+		if _, err := pool.Exec(cleanupCtx,
+			`DELETE FROM users WHERE id = $1`, fixture.userID); err != nil {
+			t.Errorf("clean up user: %v", err)
+		}
+		if _, err := pool.Exec(cleanupCtx,
+			`DELETE FROM media_items WHERE content_id LIKE '%-' || $1`, fixture.suffix); err != nil {
+			t.Errorf("clean up media items: %v", err)
+		}
+	})
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, $3)`,
+		fixture.profileID, fixture.userID, "History Import Test",
+	); err != nil {
+		t.Fatalf("seed user profile: %v", err)
+	}
+	return fixture
 }
+
+// historyImportFixture holds the account an import test runs as. Identifiers
+// derived from it carry a nanosecond suffix so binaries sharing one database
+// stay off each other's rows, and so the fixture can clean up by suffix.
+type historyImportFixture struct {
+	pool      *pgxpool.Pool
+	suffix    string
+	userID    int
+	profileID string
+}
+
+func (f historyImportFixture) id(name string) string { return name + "-" + f.suffix }

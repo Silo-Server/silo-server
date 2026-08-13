@@ -30,7 +30,8 @@ func TestAddFavoriteUsesAtomicInsertResult(t *testing.T) {
 
 func TestEmbyFavoriteOnlyRecordAddsFavoriteWithoutProgress(t *testing.T) {
 	ctx := context.Background()
-	pool := newPlexWatchlistImportTestPool(t)
+	fixture := newHistoryImportFixture(t)
+	pool := fixture.pool
 	repo := NewRepository(pool, nil)
 	service := &Service{
 		repo:         repo,
@@ -44,14 +45,14 @@ func TestEmbyFavoriteOnlyRecordAddsFavoriteWithoutProgress(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, year, tvdb_id, status)
 		VALUES ($1, $2, $3, $4, $5, $6)`,
-		"series-371980", KindSeries, "Severance", 2022, "371980", "matched",
+		fixture.id("series-371980"), KindSeries, "Severance", 2022, "371980", "matched",
 	); err != nil {
 		t.Fatalf("seed media item: %v", err)
 	}
 	run, err := repo.CreateRun(ctx, Run{
-		ID:               "emby-favorites-run",
-		UserID:           42,
-		ProfileID:        "profile-1",
+		ID:               fixture.id("emby-favorites-run"),
+		UserID:           fixture.userID,
+		ProfileID:        fixture.profileID,
 		SourceType:       SourceTypeEmby,
 		ConnectionMode:   ConnectionModeCustom,
 		Status:           RunStatusQueued,
@@ -73,7 +74,7 @@ func TestEmbyFavoriteOnlyRecordAddsFavoriteWithoutProgress(t *testing.T) {
 	}
 	service.executeRun(run, staticWatchlistProvider{records: []Record{record, record}})
 
-	completed, err := repo.GetRunForUser(ctx, 42, run.ID)
+	completed, err := repo.GetRunForUser(ctx, fixture.userID, run.ID)
 	if err != nil {
 		t.Fatalf("GetRunForUser: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestEmbyFavoriteOnlyRecordAddsFavoriteWithoutProgress(t *testing.T) {
 	if err := pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM user_favorites
 		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		42, "profile-1", "series-371980",
+		fixture.userID, fixture.profileID, fixture.id("series-371980"),
 	).Scan(&rows); err != nil {
 		t.Fatalf("count favorite rows: %v", err)
 	}
