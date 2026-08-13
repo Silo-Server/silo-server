@@ -84,12 +84,31 @@ database URL should be read from a non-default env file.
 ## Running Tests
 
 ```sh
-# Go tests (uses testcontainers — Docker must be running)
+# Go tests
 go test ./...
 
 # Frontend tests
 cd web && pnpm test
 ```
+
+### Database-backed Go tests
+
+Tests that need PostgreSQL read `SILO_TEST_DATABASE_URL` and **skip themselves when
+it is unset**. `go test` prints nothing for a skip, so a run without it is green
+while several hundred tests never execute — point it at a migrated database to
+actually run them:
+
+```sh
+docker compose up -d postgres
+go run ./cmd/silo/ --migrate-only            # applies migrations
+SILO_TEST_DATABASE_URL="$DATABASE_URL" go test ./...
+```
+
+The database must be `pgvector/pgvector:pg18` or equivalent — the migrations
+`CREATE EXTENSION vector`, `citext` and `pg_trgm`, and stock `postgres` images
+ship only the last two. A few tests provision a throwaway database of their own
+on the same server (see `internal/dbtest`); they drop it on exit, but a test
+killed with SIGKILL can leave one behind.
 
 ## Linting
 
