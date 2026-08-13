@@ -290,6 +290,8 @@ type pushDeviceFixture struct {
 	suffix string
 }
 
+// id returns name scoped to this fixture's run, so identifiers are unique
+// across binaries sharing one database.
 func (f pushDeviceFixture) id(name string) string { return name + "-" + f.suffix }
 
 // newPushDeviceTestRepo connects to SILO_TEST_DATABASE_URL (skipping when

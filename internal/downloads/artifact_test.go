@@ -91,9 +91,12 @@ func (p *lifecycleTestPreparer) probedIDs() []string {
 	return slices.Clone(p.statIDs)
 }
 
+// PrepareFile returns the canned PreparedArtifact the test configured.
 func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return p.prepared, nil
 }
+
+// ResolveArtifact stamps the origin locator the test configured onto artifact.
 func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {
 	if p.resolvedNode != 0 {
 		artifact.OriginNodeID = p.resolvedNode
@@ -104,6 +107,10 @@ func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Art
 	}
 	return p.resolveErr
 }
+
+// StatArtifact records the artifact it was asked about and returns the canned
+// result. With statWait set it blocks until the context ends, standing in for an
+// origin that never answers.
 func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
 	if p.statWait {
 		p.statStarted.Add(1)
@@ -120,6 +127,10 @@ func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Arti
 	p.mu.Unlock()
 	return stat, statErr
 }
+
+// DeleteArtifact records the delete and signals deleteStarted on the first call.
+// With deleteWait set it then blocks until the context ends, which is how the
+// budget tests observe a delete that outlives its deadline.
 func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
 	p.mu.Lock()
 	p.deleted = artifact.OriginArtifactID

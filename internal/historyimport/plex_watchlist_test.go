@@ -294,6 +294,8 @@ func (p staticWatchlistProvider) Fetch(context.Context) ([]Record, []string, err
 	return p.records, nil, nil
 }
 
+// newHistoryImportFixture connects to SILO_TEST_DATABASE_URL (skipping when
+// unset) and seeds the account an import test runs as, removing it on cleanup.
 func newHistoryImportFixture(t *testing.T) historyImportFixture {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -354,4 +356,6 @@ type historyImportFixture struct {
 	profileID string
 }
 
+// id returns name scoped to this fixture's run, so identifiers are unique
+// across binaries sharing one database.
 func (f historyImportFixture) id(name string) string { return name + "-" + f.suffix }
