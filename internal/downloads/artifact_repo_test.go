@@ -48,6 +48,14 @@ func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int)
 		t.Fatalf("seed media file: %v", err)
 	}
 	t.Cleanup(func() {
+		// Orphans first, and by subquery: download_artifact_id carries no
+		// foreign key, so an orphan outlives the artifact it names and nothing
+		// ever collects it. They accumulate across runs until they crowd out
+		// ListRemoteOrphansDue's 100-row window, at which point tests stop
+		// finding the orphan they just enqueued.
+		_, _ = pool.Exec(ctx, `
+			DELETE FROM download_artifact_orphans
+			WHERE download_artifact_id IN (SELECT id FROM download_artifacts WHERE media_file_id = $1)`, fileID)
 		_, _ = pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fileID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
@@ -361,8 +369,8 @@ func TestArtifactRecoveryContinuesAfterStaleLocatorRefresh(t *testing.T) {
 	manager := &ArtifactManager{repo: repo, preparer: preparer}
 	manager.probeRemoteArtifactGroup(ctx, preparer, ready)
 
-	if len(preparer.statIDs) != 1 || preparer.statIDs[0] != ready[1].ID {
-		t.Fatalf("probed artifacts = %v, want only continuing artifact %s", preparer.statIDs, ready[1].ID)
+	if probed := preparer.probedIDs(); len(probed) != 1 || probed[0] != ready[1].ID {
+		t.Fatalf("probed artifacts = %v, want only continuing artifact %s", probed, ready[1].ID)
 	}
 	persisted, err := repo.GetByID(ctx, ready[1].ID)
 	if err != nil {
@@ -449,8 +457,8 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 	if len(orphans) != 1 || orphans[0].OriginNodeID != 17 || orphans[0].OriginArtifactID != "artifact-truncated" {
 		t.Fatalf("remote cleanup queue = %+v", orphans)
 	}
-	if preparer.deleted != "artifact-truncated" {
-		t.Fatalf("deleted remote artifact = %q, want artifact-truncated", preparer.deleted)
+	if preparer.lastDeleted() != "artifact-truncated" {
+		t.Fatalf("deleted remote artifact = %q, want artifact-truncated", preparer.lastDeleted())
 	}
 	t.Cleanup(func() { _ = repo.DeleteRemoteOrphan(ctx, orphans[0].ID) })
 }
@@ -631,7 +639,7 @@ func TestProxyMissingReportFencesCompleteRemoteLocator(t *testing.T) {
 }
 
 func TestRemoteCleanupBudgetBoundsUnreachableOrigins(t *testing.T) {
-	repo, _, fileID := newArtifactTestRepo(t)
+	repo, pool, fileID := newArtifactTestRepo(t)
 	ctx := context.Background()
 	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, fmt.Sprintf("hash-cleanup-budget-%d", time.Now().UnixNano())))
 	if err != nil {
@@ -642,6 +650,15 @@ func TestRemoteCleanupBudgetBoundsUnreachableOrigins(t *testing.T) {
 	originURL := fmt.Sprintf("http://unreachable-%d", suffix)
 	if err := repo.EnqueueRemoteOrphan(ctx, row.ID, 31, originURL, originArtifactID); err != nil {
 		t.Fatal(err)
+	}
+	// EnqueueRemoteOrphan backs the first attempt off by 30 seconds, so the row
+	// it just wrote is not due and cleanupRemoteOrphans will not see it. Without
+	// this the test only ever passed on orphans left behind by earlier runs,
+	// which is why it went red the moment the queue was cleaned up.
+	if _, err := pool.Exec(ctx,
+		`UPDATE download_artifact_orphans SET next_retry_at = NULL
+		 WHERE origin_node_id = $1 AND origin_artifact_id = $2`, 31, originArtifactID); err != nil {
+		t.Fatalf("make orphan due: %v", err)
 	}
 	started := make(chan struct{})
 	preparer := &lifecycleTestPreparer{deleteStarted: started, deleteWait: true}
