@@ -69,8 +69,9 @@ describe("probeWebCapabilities", () => {
     );
   });
 
-  // Safari rejects the hev1 sample entry outright; only hvc1 gets an answer.
-  it("accepts HDR10 decode evidence from either HEVC sample entry", async () => {
+  // The strip remux delivers an hvc1-labeled file; support reported only for
+  // hev1 is evidence for bytes Silo never sends and must not earn the claim.
+  it("does not promote an hev1-only answer to an HDR10 claim", async () => {
     const decodingInfo = vi.fn().mockImplementation((configuration: MediaDecodingConfiguration) => {
       const supported = configuration.video?.contentType.includes("hev1") ?? false;
       return Promise.resolve({ supported, smooth: supported, powerEfficient: supported });
@@ -78,7 +79,7 @@ describe("probeWebCapabilities", () => {
     vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
 
-    await expect(probeHDR10PlaybackSupport()).resolves.toBe(true);
+    await expect(probeHDR10PlaybackSupport()).resolves.toBe(false);
   });
 
   // Safari 26 reports `dynamic-range: standard` on XDR panels, and browsers

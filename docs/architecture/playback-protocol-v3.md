@@ -388,12 +388,13 @@ outputs, and Safari 26 reports `dynamic-range: standard` even on an XDR display 
 so the media query survives only as the best-effort `hdr` output boolean. Format
 claims come from exact shape probes matched to the bytes the remux delivers:
 HDR10 requires Media Capabilities support for Silo's progressive 2160p HEVC
-Main10, Rec. 2020, PQ, SMPTE ST 2086 shape, probed under both the `hvc1` and
-`hev1` sample entries because either proves the same decode and the strip remux
-labels its output `hvc1`. Dolby Vision requires a definitive media-element
-answer for exactly `dvh1.05.06` or `dvh1.08.06`, because the preserve remux
-tags its output `dvh1`; a `dvhe`-only answer is evidence for a file Silo never
-sends and earns no claim. Both claims are scoped to `progressive`: they
+Main10, Rec. 2020, PQ, SMPTE ST 2086 shape, probed under exactly the `hvc1`
+sample entry because the explicit v3 HDR10 strip remux labels its output `hvc1`
+(legacy and automatic strip paths retain FFmpeg's default `hev1`). Dolby Vision
+requires a definitive media-element answer for exactly `dvh1.05.06` or
+`dvh1.08.06`, because the preserve remux tags its output `dvh1`. An answer only
+for the other spelling (`hev1`/`dvhe`) is evidence for a file Silo never sends
+and earns no claim. Both claims are scoped to `progressive`: they
 are cleared from `original_http` and `hls` because those delivery paths were not
 tested by the same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
 `hdr10_max_frame_rate`, and `hdr10_max_bitrate_kbps`; these ceilings keep a

@@ -32,28 +32,22 @@ const DOLBY_VISION_PROFILE_PROBES: Record<
 // can query the codec, transfer function, gamut, and static metadata together,
 // avoiding the old mistake of treating a generic HDR output query as proof of
 // every HDR format.
-// Safari answers for hvc1 and rejects hev1, so probe both sample entries:
-// either one proves the same HEVC Main10 HDR10 decode, and the strip remux
-// labels its output hvc1, which every hev1-capable MP4 demuxer recognizes.
-const HDR10_PROGRESSIVE_CONFIGURATIONS = [
-  'video/mp4; codecs="hvc1.2.4.L153.B0"',
-  'video/mp4; codecs="hev1.2.4.L153.B0"',
-].map(
-  (contentType) =>
-    ({
-      type: "file",
-      video: {
-        contentType,
-        width: 3840,
-        height: 2160,
-        bitrate: 80_000_000,
-        framerate: 24,
-        colorGamut: "rec2020",
-        transferFunction: "pq",
-        hdrMetadataType: "smpteSt2086",
-      },
-    }) satisfies MediaDecodingConfiguration,
-);
+// The strip remux labels its output hvc1 — the sample entry Apple requires and
+// the one Safari answers for — so that is the only entry probed: an hev1-only
+// answer is evidence for a file Silo never sends and earns no claim.
+const HDR10_PROGRESSIVE_CONFIGURATION = {
+  type: "file",
+  video: {
+    contentType: 'video/mp4; codecs="hvc1.2.4.L153.B0"',
+    width: 3840,
+    height: 2160,
+    bitrate: 80_000_000,
+    framerate: 24,
+    colorGamut: "rec2020",
+    transferFunction: "pq",
+    hdrMetadataType: "smpteSt2086",
+  },
+} satisfies MediaDecodingConfiguration;
 
 const AUDIO_CODEC_MAP: Record<string, string[]> = {
   aac: ['audio/mp4; codecs="mp4a.40.2"', 'video/mp4; codecs="mp4a.40.2"'],
@@ -114,15 +108,12 @@ export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefi
 export async function probeHDR10PlaybackSupport(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaCapabilities) return false;
 
-  for (const configuration of HDR10_PROGRESSIVE_CONFIGURATIONS) {
-    try {
-      const result = await navigator.mediaCapabilities.decodingInfo(configuration);
-      if (result.supported && result.smooth) return true;
-    } catch {
-      // Try the next sample entry.
-    }
+  try {
+    const result = await navigator.mediaCapabilities.decodingInfo(HDR10_PROGRESSIVE_CONFIGURATION);
+    return result.supported && result.smooth;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 function testMediaType(mime: string): boolean {

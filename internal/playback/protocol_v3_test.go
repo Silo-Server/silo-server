@@ -1023,6 +1023,26 @@ func TestPlanPlaybackV3KeepsTheHDRTerminalWhenTheRangeIsAlsoUnsupported(t *testi
 	}
 }
 
+// With transcoding disabled, the subtitle policy itself terminals a bitmap
+// selection (burn-in is never offered), so the reason names the subtitle
+// before the planner ever weighs range or quality causes. The selection is
+// genuinely undeliverable, so that attribution is accurate for every cause mix.
+func TestPlanPlaybackV3DisabledTranscodeStillNamesAnUndeliverableSubtitle(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := pgsBurnRequestV3(file)
+	req.Capabilities.HDRDetails = nil
+	req.ClientPlaybackContext.Output.HDRDetails = nil
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, AudioTrackIndex: 0,
+		EffectiveFile: file,
+		Settings:      PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3NamesTheSubtitleOverThe4KPolicy(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
