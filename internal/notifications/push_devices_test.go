@@ -401,9 +401,9 @@ func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
 		t.Fatalf("register under first profile: %v", err)
 	}
 
-	// A different install on another profile must be untouched by the purge.
+	// A second install on the same profile must survive the purge below: the
+	// purge keys on device_id, so only the reassigned install is removed.
 	other := registration
-	other.ProfileID = fixture.id("profile-parent")
 	other.DeviceID = fixture.id("other-phone")
 	if _, err := repo.UpsertApple(ctx, other, cipher); err != nil {
 		t.Fatalf("register unrelated device: %v", err)

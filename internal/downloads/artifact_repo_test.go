@@ -48,17 +48,30 @@ func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int)
 		t.Fatalf("seed media file: %v", err)
 	}
 	t.Cleanup(func() {
+		// Report failures rather than discarding them: a cleanup that silently
+		// half-ran leaves rows behind, and every table below is read by
+		// whole-table queries, so the next run fails somewhere unrelated.
+		//
 		// Orphans first, and by subquery: download_artifact_id carries no
 		// foreign key, so an orphan outlives the artifact it names and nothing
 		// ever collects it. They accumulate across runs until they crowd out
 		// ListRemoteOrphansDue's 100-row window, at which point tests stop
 		// finding the orphan they just enqueued.
-		_, _ = pool.Exec(ctx, `
-			DELETE FROM download_artifact_orphans
-			WHERE download_artifact_id IN (SELECT id FROM download_artifacts WHERE media_file_id = $1)`, fileID)
-		_, _ = pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fileID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+		for _, step := range []struct {
+			what  string
+			query string
+			arg   int
+		}{
+			{"remote orphans", `DELETE FROM download_artifact_orphans
+				WHERE download_artifact_id IN (SELECT id FROM download_artifacts WHERE media_file_id = $1)`, fileID},
+			{"artifacts", `DELETE FROM download_artifacts WHERE media_file_id = $1`, fileID},
+			{"media file", `DELETE FROM media_files WHERE id = $1`, fileID},
+			{"media folder", `DELETE FROM media_folders WHERE id = $1`, folderID},
+		} {
+			if _, err := pool.Exec(ctx, step.query, step.arg); err != nil {
+				t.Errorf("clean up %s: %v", step.what, err)
+			}
+		}
 	})
 	return NewArtifactRepository(pool), pool, fileID
 }

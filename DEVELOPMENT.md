@@ -100,8 +100,15 @@ actually run them:
 
 ```sh
 docker compose up -d postgres
-go run ./cmd/silo/ --migrate-only            # applies migrations
-SILO_TEST_DATABASE_URL="$DATABASE_URL" go test ./...
+go run ./cmd/silo/ --migrate-only    # reads DATABASE_URL from .env
+
+# .env is read by the server, not by your shell, so name the database again
+# here. This is the URL the Local Development step above wrote into .env.
+export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo?sslmode=disable'
+go test ./...
+
+# Confirm they really ran rather than skipped — this should print nothing:
+go test ./... -count=1 -v 2>&1 | grep 'SILO_TEST_DATABASE_URL is not set'
 ```
 
 The database must be `pgvector/pgvector:pg18` or equivalent — the migrations

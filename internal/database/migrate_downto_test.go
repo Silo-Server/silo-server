@@ -99,12 +99,14 @@ func newRehearsalDatabase(t *testing.T) (context.Context, *pgxpool.Pool) {
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, config.Copy())
 	if err != nil {
-		drop()
+		_ = drop()
 		t.Fatalf("connect rehearsal database: %v", err)
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		drop()
+		if err := drop(); err != nil {
+			t.Errorf("clean up rehearsal database: %v", err)
+		}
 	})
 	return ctx, pool
 }

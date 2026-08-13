@@ -25,14 +25,18 @@ type Migrate func(ctx context.Context, pool *pgxpool.Pool) error
 
 // Provision creates a uniquely-named database on the server that dsn points at,
 // applies migrate to it, and returns a config connected to it together with a
-// function that drops it. The returned drop function is safe to call once.
+// function that drops it.
+//
+// The drop function returns its error rather than swallowing it: a drop that
+// fails silently leaves a whole database behind, and the next run has no way to
+// tell that from a clean one.
 //
 // Callers get a *pgxpool.Config rather than a connection string on purpose:
 // ConnConfig.ConnString reports the string it was parsed from and does not
 // reflect a later change to ConnConfig.Database, so round-tripping through a
 // string silently hands the caller the shared database back while the
 // migrations run somewhere else.
-func Provision(ctx context.Context, dsn, prefix string, migrate Migrate) (*pgxpool.Config, func(), error) {
+func Provision(ctx context.Context, dsn, prefix string, migrate Migrate) (*pgxpool.Config, func() error, error) {
 	admin, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to provision %s database: %w", prefix, err)
@@ -46,20 +50,24 @@ func Provision(ctx context.Context, dsn, prefix string, migrate Migrate) (*pgxpo
 		return nil, nil, fmt.Errorf("create %s database: %w", prefix, err)
 	}
 
-	drop := func() {
-		dropper, err := pgxpool.New(context.WithoutCancel(ctx), dsn)
+	drop := func() error {
+		dropCtx := context.WithoutCancel(ctx)
+		dropper, err := pgxpool.New(dropCtx, dsn)
 		if err != nil {
-			return
+			return fmt.Errorf("reconnect to drop %s: %w", quoted, err)
 		}
 		defer dropper.Close()
 		// FORCE terminates connections the caller left behind; without it a
 		// straggler keeps the database alive and it survives into the next run.
-		_, _ = dropper.Exec(context.WithoutCancel(ctx), `DROP DATABASE IF EXISTS `+quoted+` WITH (FORCE)`)
+		if _, err := dropper.Exec(dropCtx, `DROP DATABASE IF EXISTS `+quoted+` WITH (FORCE)`); err != nil {
+			return fmt.Errorf("drop %s: %w", quoted, err)
+		}
+		return nil
 	}
 
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		drop()
+		_ = drop()
 		return nil, nil, fmt.Errorf("parse dsn: %w", err)
 	}
 	config.ConnConfig.Database = strings.Trim(quoted, `"`)
@@ -68,13 +76,13 @@ func Provision(ctx context.Context, dsn, prefix string, migrate Migrate) (*pgxpo
 	// returned to the caller as a template.
 	pool, err := pgxpool.NewWithConfig(ctx, config.Copy())
 	if err != nil {
-		drop()
+		_ = drop()
 		return nil, nil, fmt.Errorf("connect to %s database: %w", prefix, err)
 	}
 	err = migrate(ctx, pool)
 	pool.Close()
 	if err != nil {
-		drop()
+		_ = drop()
 		return nil, nil, fmt.Errorf("migrate %s database: %w", prefix, err)
 	}
 	return config, drop, nil

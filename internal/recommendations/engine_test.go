@@ -50,7 +50,12 @@ func TestMain(m *testing.M) {
 	ownedTestConfig = config
 
 	code := m.Run()
-	drop()
+	if err := drop(); err != nil {
+		// Report but do not fail the run: the tests already passed or failed on
+		// their own merits, and a leaked database is a cleanup problem, not a
+		// verdict on the code under test.
+		fmt.Fprintf(os.Stderr, "recommendations tests: %v\n", err)
+	}
 	os.Exit(code)
 }
 
