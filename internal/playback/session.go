@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -161,6 +162,22 @@ type ClientInfo struct {
 	Channel   string
 	UserAgent string
 	IsCompat  bool
+}
+
+// Normalized returns the identity with every field trimmed and clamped to the
+// bound published for it (docs/settings-api.md, and maxLength in the v3 request
+// schemas). This is the single definition of those bounds, and callers apply it
+// at the request boundary: a session stamps normalized values, but the decision
+// logs and playback_route_events are written straight from the resolved
+// identity, so clamping only at session creation would let a client's oversized
+// header through to both.
+func (c ClientInfo) Normalized() ClientInfo {
+	c.Name = normalizeClientMetadataValue(c.Name, 128)
+	c.Version = normalizeClientMetadataValue(c.Version, 64)
+	c.Build = normalizeClientMetadataValue(c.Build, 64)
+	c.Channel = normalizeClientMetadataValue(c.Channel, 32)
+	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, 512)
+	return c
 }
 
 // LogAttrs renders the app identity as slog key/value pairs, skipping the
@@ -352,13 +369,27 @@ func (m *SessionManager) SetExpirationHook(fn func(*Session)) {
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
+	// Header values are raw bytes, and a text column will not take invalid
+	// UTF-8: Postgres rejects the whole statement, and the per-node session
+	// upserts share one transaction, so one malformed client string would fail
+	// that entire node's sync rather than a single row.
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "")
+	}
 	value = strings.TrimSpace(value)
-	if maxLen > 0 && len(value) > maxLen {
-		// Clamp on a rune boundary. Header values may carry multi-byte UTF-8, and
-		// a mid-rune byte slice produces a string Postgres refuses outright — the
-		// per-node session upserts share one transaction, so a single malformed
-		// client string would fail that whole node's sync rather than one row.
-		value = strings.ToValidUTF8(value[:maxLen], "")
+	if maxLen <= 0 || len(value) <= maxLen {
+		return value
+	}
+	// Clamp by runes, not bytes. These bounds are published to clients as JSON
+	// Schema maxLength, which counts characters — a byte clamp would silently
+	// cut a value the contract calls valid, and cutting mid-rune would produce
+	// exactly the invalid UTF-8 scrubbed above.
+	runes := 0
+	for offset := range value {
+		if runes == maxLen {
+			return value[:offset]
+		}
+		runes++
 	}
 	return value
 }
@@ -493,7 +524,10 @@ func newSession(
 	transcodeAudio bool,
 ) *Session {
 	now := time.Now()
-	clientInfo := ClientInfoFromContext(ctx)
+	// Normalize here as well as at the request boundary: identities also reach
+	// the manager from the Jellyfin and Audiobookshelf compat surfaces, which
+	// build a ClientInfo from their own header vocabularies.
+	clientInfo := ClientInfoFromContext(ctx).Normalized()
 	return &Session{
 		ID:                   uuid.New().String(),
 		UserID:               userID,
@@ -505,11 +539,11 @@ func newSession(
 		TranscodeAudio:       transcodeAudio,
 		Position:             0,
 		IsPaused:             false,
-		ClientName:           normalizeClientMetadataValue(clientInfo.Name, 128),
-		ClientVersion:        normalizeClientMetadataValue(clientInfo.Version, 64),
-		ClientBuild:          normalizeClientMetadataValue(clientInfo.Build, 64),
-		ClientChannel:        normalizeClientMetadataValue(clientInfo.Channel, 32),
-		ClientUserAgent:      normalizeClientMetadataValue(clientInfo.UserAgent, 512),
+		ClientName:           clientInfo.Name,
+		ClientVersion:        clientInfo.Version,
+		ClientBuild:          clientInfo.Build,
+		ClientChannel:        clientInfo.Channel,
+		ClientUserAgent:      clientInfo.UserAgent,
 		IsJellyfinCompat:     clientInfo.IsCompat,
 		StartedAt:            now,
 		UpdatedAt:            now,

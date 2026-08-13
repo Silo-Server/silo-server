@@ -551,7 +551,9 @@ func playbackClientInfoForStartV3(r *http.Request, clientContext playback.Client
 	if info.Channel == "" {
 		info.Channel = strings.TrimSpace(clientContext.AppChannel)
 	}
-	return info
+	// The header half is already normalized; body-sourced values have to be
+	// clamped too before they reach the decision log and the route event.
+	return info.Normalized()
 }
 
 // playbackClientInfoWithSessionFallbackV3 completes a header-derived identity

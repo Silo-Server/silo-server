@@ -1078,15 +1078,18 @@ func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 	if r == nil {
 		return playback.ClientInfo{}
 	}
-	// Build and channel are opaque: they are trimmed and length-clamped when the
-	// session stamps them, never parsed or validated against an enum here.
+	// Clamped here, at the boundary, rather than only where the session stamps
+	// them: the decision logs and playback_route_events are written from this
+	// value directly, so a client sending a header-sized build would otherwise
+	// reach both despite the published bound. Values stay opaque — trimmed and
+	// length-clamped, never parsed or validated against an enum.
 	return playback.ClientInfo{
-		Name:      strings.TrimSpace(r.Header.Get("X-Silo-Client")),
-		Version:   strings.TrimSpace(r.Header.Get("X-Silo-Client-Version")),
-		Build:     strings.TrimSpace(r.Header.Get("X-Silo-Client-Build")),
-		Channel:   strings.TrimSpace(r.Header.Get("X-Silo-Client-Channel")),
+		Name:      r.Header.Get("X-Silo-Client"),
+		Version:   r.Header.Get("X-Silo-Client-Version"),
+		Build:     r.Header.Get("X-Silo-Client-Build"),
+		Channel:   r.Header.Get("X-Silo-Client-Channel"),
 		UserAgent: r.UserAgent(),
-	}
+	}.Normalized()
 }
 
 // HandleUpdateProgress handles POST /playback/{session_id}/progress.

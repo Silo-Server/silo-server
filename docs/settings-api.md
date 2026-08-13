@@ -64,7 +64,10 @@ carry them so a report can be tied to an exact build.
 | `X-Silo-Client-Channel` | 32    | Opaque distribution channel: `release`, `beta`, `sideload`, `dev`. Stored verbatim; `release` is not displayed.  |
 
 Values are trimmed and truncated to the clamp above — never rejected, on either
-route, because an identity label must not be able to fail a playback start.
+route, because an identity label must not be able to fail a playback start. The
+clamp counts characters, not bytes, matching `maxLength` in the v3 request
+schemas, and is applied where the request is read rather than where the session
+is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
 

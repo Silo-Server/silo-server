@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -394,6 +396,57 @@ func TestPlaybackClientInfoForStartV3(t *testing.T) {
 				t.Fatalf("playbackClientInfoForStartV3() = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPlaybackClientInfoFromRequestClampsHeaders pins the bound at the request
+// boundary rather than at session creation. The resolved identity is written
+// straight to the plan-decision log and to playback_route_events, so a client
+// sending a header-sized build would reach both if the clamp only happened
+// where the session stamps its fields.
+func TestPlaybackClientInfoFromRequestClampsHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+	req.Header.Set("X-Silo-Client", "  "+strings.Repeat("N", 200)+"  ")
+	req.Header.Set("X-Silo-Client-Version", strings.Repeat("v", 100))
+	req.Header.Set("X-Silo-Client-Build", strings.Repeat("b", 100))
+	req.Header.Set("X-Silo-Client-Channel", strings.Repeat("c", 100))
+
+	got := playbackClientInfoFromRequest(req)
+
+	for _, tc := range []struct {
+		field string
+		value string
+		want  int
+	}{
+		{"Name", got.Name, 128},
+		{"Version", got.Version, 64},
+		{"Build", got.Build, 64},
+		{"Channel", got.Channel, 32},
+	} {
+		if len(tc.value) != tc.want {
+			t.Errorf("%s length = %d, want %d", tc.field, len(tc.value), tc.want)
+		}
+	}
+}
+
+// TestNormalizeClientMetadataCountsRunes guards the two ways a clamp can go
+// wrong on a client-supplied header: the published bound is JSON Schema
+// maxLength, which counts characters, and a byte-wise cut through a multi-byte
+// rune yields invalid UTF-8 that Postgres refuses — failing the whole per-node
+// session-sync transaction, not just the offending row.
+func TestNormalizeClientMetadataCountsRunes(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+	// 40 three-byte runes: within the 64-character channel bound as the schema
+	// counts it, well past it as bytes.
+	req.Header.Set("X-Silo-Client-Channel", strings.Repeat("δ", 40))
+
+	got := playbackClientInfoFromRequest(req)
+
+	if runes := utf8.RuneCountInString(got.Channel); runes != 32 {
+		t.Errorf("Channel runes = %d, want the 32-character bound", runes)
+	}
+	if !utf8.ValidString(got.Channel) {
+		t.Errorf("Channel = %q is not valid UTF-8; a text column would reject it", got.Channel)
 	}
 }
 
