@@ -245,14 +245,20 @@ func restoreAuthDefaultAccessGroup(t *testing.T, ctx context.Context, pool *pgxp
 	setAuthDefaultAccessGroup(t, ctx, pool, seedID)
 }
 
+// insertAuthAccessGroupTestUser seeds a row shaped like one UserRepository.Create
+// writes. email and password_hash are nullable in the schema but every
+// production create path populates them, and scanUser reads both into plain
+// strings — so omitting them here produced a row the repository cannot scan,
+// which is a fixture artifact rather than a defect this test is about.
 func insertAuthAccessGroupTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) int {
 	t.Helper()
 	var id int
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO users (username, role, enabled)
-		VALUES ($1, 'user', true)
+		INSERT INTO users (username, email, password_hash, role, enabled)
+		VALUES ($1, $2, 'x', 'user', true)
 		RETURNING id`,
 		"auth-access-group-test-"+suffix,
+		"auth-access-group-test-"+suffix+"@example.test",
 	).Scan(&id); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
