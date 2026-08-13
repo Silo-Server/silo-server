@@ -7,6 +7,7 @@
     "playback_route_diagnostics",
     "device_quirks_v1",
     "seek_reanchor_v1",
+    "output_change_v1",
     "direct_stream_resume_v1",
     "plan_source_duration_v1"
   ],
