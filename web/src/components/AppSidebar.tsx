@@ -476,7 +476,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
       <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
         {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
           variant outright would pop at the very start of the collapse. */}
-        <div className="sidebar-logo relative flex h-24 items-center">
+        <ViewTransitionLink
+          to="/"
+          onClick={onNavigate}
+          aria-label="Go to home"
+          className="sidebar-logo focus-visible:ring-ring/50 relative flex h-24 items-center transition-opacity hover:opacity-85 focus-visible:ring-[3px] focus-visible:outline-none"
+        >
           <span
             aria-hidden={!showLabels}
             className={`sidebar-fade absolute left-5 ${showLabels ? "opacity-100" : "opacity-0"}`}
@@ -489,7 +494,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           >
             <SiloBrand variant="mark" className="h-9 w-9" />
           </span>
-        </div>
+        </ViewTransitionLink>
 
         {/* Main nav */}
         <nav
