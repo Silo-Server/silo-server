@@ -43,6 +43,11 @@ import (
 type SessionManagerInterface interface {
 	StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 	StartSessionWithFiles(userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
+	// StartSessionWithFilesContext is required rather than probed for at run
+	// time: the context is how the reporting client's identity reaches the new
+	// session, so an implementation without it would start sessions that
+	// silently carry no client name, version, build or channel.
+	StartSessionWithFilesContext(ctx context.Context, userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 	UpdateProgress(sessionID string, position float64, isPaused bool) error
 	UpdateAudioTrack(sessionID string, audioTrackIndex int, method playback.PlayMethod) error
 	UpdateStreamState(sessionID string, state playback.SessionStreamState) error
@@ -61,10 +66,6 @@ type SessionManagerInterface interface {
 	SetProgressPersistenceDisabled(sessionID string, disabled bool) error
 	StopSession(sessionID string) error
 	GetSession(sessionID string) (*playback.Session, error)
-}
-
-type sessionStarterWithFilesContext interface {
-	StartSessionWithFilesContext(ctx context.Context, userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 }
 
 type transcodePermissionChecker interface {

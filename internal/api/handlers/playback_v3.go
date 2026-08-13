@@ -622,13 +622,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		}
 	}
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
-	var session *playback.Session
-	var err error
-	if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
-		session, err = starter.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
-	} else {
-		session, err = h.sessionMgr.StartSessionWithFiles(userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
-	}
+	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
 		return playback.DecisionResponseV3{}, sessionStartErrorV3(err)
 	}
