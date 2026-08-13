@@ -2995,9 +2995,6 @@ func TestHandleReplanPlaybackV3BitmapSubtitleFallsBackFromHDRToSDRVersion(t *tes
 		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
 	})
 	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
-		if replanned.Terminal != nil {
-			t.Fatalf("subtitle replan TERMINAL reason=%q message=%q", replanned.Terminal.Reason, replanned.Terminal.Message)
-		}
 		t.Fatalf("subtitle replan = %#v", replanned)
 	}
 	if replanned.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
@@ -4129,5 +4126,27 @@ func TestPrepareTransportV3ClearsRemoteTransportMarkWhenServingLocally(t *testin
 
 	if expired := manager.CleanInactive(time.Nanosecond, time.Nanosecond); len(expired) != 1 {
 		t.Fatalf("expired %d sessions, want the locally-served session to lose its widened grace", len(expired))
+	}
+}
+
+// A burn-in requirement that only an SDR alternate can satisfy must still reach
+// the alternate-version fallback. The planner reports that refusal in terms of
+// the subtitle rather than the HDR pipeline, so a gate listing only the HDR and
+// version reasons silently retires the fallback and refuses playback outright.
+func TestTerminalAllowsAlternateFileV3CoversSubtitleForcedRefusals(t *testing.T) {
+	for _, reason := range []string{
+		terminalNoAlternateVersionV3,
+		terminalHDRTranscodeUnsupportedV3,
+		terminalSubtitleConversionUnsupportedV3,
+	} {
+		if !terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: reason}) {
+			t.Fatalf("terminal %q must allow an alternate-version retry", reason)
+		}
+	}
+	if terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: "client_hls_unsupported"}) {
+		t.Fatal("a client-route refusal must not trigger an alternate-version retry")
+	}
+	if terminalAllowsAlternateFileV3(nil) {
+		t.Fatal("a nil terminal must not trigger an alternate-version retry")
 	}
 }

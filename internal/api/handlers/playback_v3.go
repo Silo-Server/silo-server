@@ -2542,15 +2542,32 @@ func shouldTryAlternateFileV3(qualityPreference string) bool {
 }
 
 const (
-	terminalNoAlternateVersionV3      = "no_alternate_version"
-	terminalHDRTranscodeUnsupportedV3 = "hdr_transcode_unsupported"
+	terminalNoAlternateVersionV3            = "no_alternate_version"
+	terminalHDRTranscodeUnsupportedV3       = "hdr_transcode_unsupported"
+	terminalSubtitleConversionUnsupportedV3 = "subtitle_conversion_unsupported"
 )
 
+// terminalAllowsAlternateFileV3 reports whether a refusal is the kind another
+// version of the same item could satisfy.
+//
+// subtitle_conversion_unsupported belongs here because it is not only a
+// subtitle-format refusal: when a burn-in requirement is the sole trigger of an
+// adaptation the source cannot take, the planner reports the blocker in terms
+// of the subtitle rather than the HDR pipeline or the 4K policy. Those cases
+// used to surface as hdr_transcode_unsupported / no_alternate_version and were
+// the exact reason this gate exists — a bitmap subtitle needing burn-in that an
+// HDR source cannot support while an SDR alternate can. Leaving the new reason
+// out silently retired that fallback and refused playback outright.
 func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 	if terminal == nil {
 		return false
 	}
-	return terminal.Reason == terminalNoAlternateVersionV3 || terminal.Reason == terminalHDRTranscodeUnsupportedV3
+	switch terminal.Reason {
+	case terminalNoAlternateVersionV3, terminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
+		return true
+	default:
+		return false
+	}
 }
 
 func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
