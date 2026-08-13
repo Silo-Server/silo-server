@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -447,6 +448,40 @@ func TestNormalizeClientMetadataCountsRunes(t *testing.T) {
 	}
 	if !utf8.ValidString(got.Channel) {
 		t.Errorf("Channel = %q is not valid UTF-8; a text column would reject it", got.Channel)
+	}
+}
+
+// TestPlaybackClientInfoStripsControlCharacters guards the one malformed value
+// that reaches a text column looking perfectly well-formed. A JSON NUL escape in a
+// v3 start body decodes to a real NUL, which is valid UTF-8 — so the UTF-8
+// repair above leaves it and TrimSpace does not consider it whitespace — but
+// Postgres refuses NUL in text. The per-node session upserts share one
+// transaction, so one such start would stop every live session on that node
+// from reconciling. Headers cannot carry it (net/http rejects bytes below
+// 0x20), which is exactly why the body path needs its own guard.
+func TestPlaybackClientInfoStripsControlCharacters(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+	req.Header.Set("X-Silo-Client", "Silo Android TV")
+
+	got := playbackClientInfoForStartV3(req, playback.ClientPlaybackContextV3{
+		AppVersion: "1.0\x00.0",
+		AppBuild:   "5\x00",
+		AppChannel: "de\nv",
+	})
+
+	if want := "1.0.0"; got.Version != want {
+		t.Errorf("Version = %q, want %q", got.Version, want)
+	}
+	if want := "5"; got.Build != want {
+		t.Errorf("Build = %q, want %q", got.Build, want)
+	}
+	if want := "dev"; got.Channel != want {
+		t.Errorf("Channel = %q, want %q", got.Channel, want)
+	}
+	for _, field := range []string{got.Name, got.Version, got.Build, got.Channel} {
+		if strings.ContainsFunc(field, unicode.IsControl) {
+			t.Errorf("%q still carries a control character; a text column would reject it", field)
+		}
 	}
 }
 

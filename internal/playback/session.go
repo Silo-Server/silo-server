@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -369,12 +370,26 @@ func (m *SessionManager) SetExpirationHook(fn func(*Session)) {
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
-	// Header values are raw bytes, and a text column will not take invalid
-	// UTF-8: Postgres rejects the whole statement, and the per-node session
-	// upserts share one transaction, so one malformed client string would fail
-	// that entire node's sync rather than a single row.
+	// A text column takes neither invalid UTF-8 nor a NUL, and Postgres refuses
+	// the whole statement for either. The per-node session upserts share one
+	// transaction, so a single malformed client string would stop that entire
+	// node from reconciling — not just its own row — until the session goes
+	// away. Both scrubs are needed: NUL is perfectly valid UTF-8, so
+	// ToValidUTF8 leaves it, and a v3 start body can carry one as the JSON
+	// escape (headers cannot — net/http rejects bytes below 0x20).
+	// Control characters are stripped wholesale rather than just NUL: none of
+	// them belong in an identity label rendered in the admin UI and written to
+	// structured logs.
 	if !utf8.ValidString(value) {
 		value = strings.ToValidUTF8(value, "")
+	}
+	if strings.ContainsFunc(value, unicode.IsControl) {
+		value = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, value)
 	}
 	value = strings.TrimSpace(value)
 	if maxLen <= 0 || len(value) <= maxLen {
