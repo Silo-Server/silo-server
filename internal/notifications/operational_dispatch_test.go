@@ -2,9 +2,11 @@ package notifications
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -16,94 +18,59 @@ func TestDispatchOperationalEnqueuesApplePushAttempts(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse db config: %v", err)
-	}
-	config.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := pool.Exec(ctx, `
-		CREATE TEMP TABLE notification_deliveries (
-			id text PRIMARY KEY,
-			release_event_id text,
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			library_id integer,
-			series_id text,
-			episode_id text,
-			type text NOT NULL,
-			reason_flags jsonb NOT NULL DEFAULT '{}'::jsonb,
-			status text NOT NULL DEFAULT 'delivered',
-			read_at timestamptz,
-			delivered_at timestamptz,
-			created_at timestamptz NOT NULL DEFAULT now()
-		) ON COMMIT PRESERVE ROWS;
+	// Every identifier carries the same nanosecond suffix so binaries sharing
+	// one database stay out of each other's rows.
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	id := func(name string) string { return name + "-" + suffix }
+	primaryProfile, otherProfile := id("profile-1"), id("profile-2")
+	privateDevice := id("device-private")
+	deliveryID := id("delivery-request")
 
-		CREATE TEMP TABLE push_devices (
-			id text PRIMARY KEY,
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			device_id varchar(128) NOT NULL,
-			platform text NOT NULL,
-			provider text NOT NULL,
-			apns_environment text,
-			apns_topic text,
-			apns_token_ciphertext text,
-			apns_token_hash text,
-			server_device_id text NOT NULL,
-			push_mode text NOT NULL DEFAULT 'private_push',
-			enabled boolean NOT NULL DEFAULT true,
-			last_seen_at timestamptz,
-			last_success_at timestamptz,
-			last_failure_at timestamptz,
-			last_failure_code text,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			updated_at timestamptz NOT NULL DEFAULT now()
-		) ON COMMIT PRESERVE ROWS;
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		// push_delivery_attempts cascades from both parents.
+		if _, err := pool.Exec(cleanupCtx,
+			`DELETE FROM notification_deliveries WHERE profile_id LIKE '%-' || $1`, suffix); err != nil {
+			t.Errorf("clean up notification deliveries: %v", err)
+		}
+		if _, err := pool.Exec(cleanupCtx,
+			`DELETE FROM push_devices WHERE profile_id LIKE '%-' || $1`, suffix); err != nil {
+			t.Errorf("clean up push devices: %v", err)
+		}
+	})
 
-		CREATE TEMP TABLE push_delivery_attempts (
-			id text PRIMARY KEY,
-			notification_delivery_id text,
-			push_device_id text NOT NULL,
-			trigger_type text NOT NULL,
-			provider text NOT NULL,
-			platform text NOT NULL,
-			attempt_number integer NOT NULL DEFAULT 0,
-			attempted_at timestamptz,
-			next_retry_at timestamptz,
-			outcome text NOT NULL DEFAULT 'pending',
-			relay_request_id text,
-			upstream_status integer,
-			upstream_reason text,
-			failure_message text,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			updated_at timestamptz NOT NULL DEFAULT now(),
-			UNIQUE (notification_delivery_id, push_device_id, trigger_type)
-		) ON COMMIT PRESERVE ROWS;
-	`); err != nil {
-		t.Fatalf("create temp notification push tables: %v", err)
+	seedDevices := []struct {
+		deviceRowID string
+		profileID   string
+		installID   string
+		pushMode    string
+		enabled     bool
+	}{
+		{privateDevice, primaryProfile, id("local-private"), PushModePrivatePush, true},
+		{id("device-in-app"), primaryProfile, id("local-in-app"), PushModeInAppOnly, true},
+		{id("device-disabled"), primaryProfile, id("local-disabled"), PushModePrivatePush, false},
+		{id("device-other-profile"), otherProfile, id("local-other"), PushModePrivatePush, true},
 	}
-
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO push_devices
-			(id, user_id, profile_id, device_id, platform, provider, apns_environment, apns_topic,
-			 apns_token_ciphertext, apns_token_hash, server_device_id, push_mode, enabled)
-		VALUES
-			('device-private', 42, 'profile-1', 'local-private', 'apple', 'silo_relay', 'sandbox',
-			 'org.siloserver.silo', 'ciphertext', 'hash-1', 'server-private', 'private_push', true),
-			('device-in-app', 42, 'profile-1', 'local-in-app', 'apple', 'silo_relay', 'sandbox',
-			 'org.siloserver.silo', 'ciphertext', 'hash-2', 'server-in-app', 'in_app_only', true),
-			('device-disabled', 42, 'profile-1', 'local-disabled', 'apple', 'silo_relay', 'sandbox',
-			 'org.siloserver.silo', 'ciphertext', 'hash-3', 'server-disabled', 'private_push', false),
-			('device-other-profile', 42, 'profile-2', 'local-other', 'apple', 'silo_relay', 'sandbox',
-			 'org.siloserver.silo', 'ciphertext', 'hash-4', 'server-other', 'private_push', true)
-	`); err != nil {
-		t.Fatalf("seed push devices: %v", err)
+	for _, device := range seedDevices {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO push_devices
+				(id, user_id, profile_id, device_id, platform, provider, apns_environment,
+				 apns_topic, apns_token_ciphertext, apns_token_hash, server_device_id,
+				 push_mode, enabled)
+			VALUES ($1, 42, $2, $3, 'apple', 'silo_relay', 'sandbox',
+				'org.siloserver.silo', 'ciphertext', $4, $5, $6, $7)`,
+			device.deviceRowID, device.profileID, device.installID,
+			"hash-"+device.deviceRowID, "server-"+device.deviceRowID,
+			device.pushMode, device.enabled,
+		); err != nil {
+			t.Fatalf("seed push device %s: %v", device.deviceRowID, err)
+		}
 	}
 
 	system := &System{
@@ -116,38 +83,44 @@ func TestDispatchOperationalEnqueuesApplePushAttempts(t *testing.T) {
 	}
 
 	inserted, err := system.DispatchOperational(ctx, Delivery{
-		ID:          "delivery-request-1",
+		ID:          deliveryID,
 		UserID:      42,
-		ProfileID:   "profile-1",
+		ProfileID:   primaryProfile,
 		Type:        DeliveryTypeRequestFulfilled,
 		ReasonFlags: []byte(`{}`),
 	}, OperationalDispatch{})
 	if err != nil {
 		t.Fatalf("dispatch operational: %v", err)
 	}
-	if inserted == nil || inserted.ID != "delivery-request-1" {
+	if inserted == nil || inserted.ID != deliveryID {
 		t.Fatalf("inserted = %+v", inserted)
 	}
 
-	var deliveryID, pushDeviceID, triggerType, provider, platform, outcome string
+	var gotDeliveryID, pushDeviceID, triggerType, provider, platform, outcome string
 	if err := pool.QueryRow(ctx, `
 		SELECT notification_delivery_id, push_device_id, trigger_type, provider, platform, outcome
 		FROM push_delivery_attempts
-	`).Scan(&deliveryID, &pushDeviceID, &triggerType, &provider, &platform, &outcome); err != nil {
+		WHERE notification_delivery_id = $1
+	`, inserted.ID).Scan(&gotDeliveryID, &pushDeviceID, &triggerType, &provider, &platform, &outcome); err != nil {
 		t.Fatalf("query push attempt: %v", err)
 	}
-	if deliveryID != inserted.ID ||
-		pushDeviceID != "device-private" ||
+	if gotDeliveryID != inserted.ID ||
+		pushDeviceID != privateDevice ||
 		triggerType != PushTriggerDelivery ||
 		provider != PushProviderSiloRelay ||
 		platform != PushPlatformApple ||
 		outcome != PushOutcomePending {
 		t.Fatalf("unexpected push attempt: delivery=%q device=%q trigger=%q provider=%q platform=%q outcome=%q",
-			deliveryID, pushDeviceID, triggerType, provider, platform, outcome)
+			gotDeliveryID, pushDeviceID, triggerType, provider, platform, outcome)
 	}
 
+	// Only the private-push device on the target profile is attempted: the
+	// in-app-only and disabled installs and the other profile's device are not.
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM push_delivery_attempts`).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM push_delivery_attempts
+		WHERE push_device_id IN (SELECT id FROM push_devices WHERE profile_id LIKE '%-' || $1)
+	`, suffix).Scan(&count); err != nil {
 		t.Fatalf("count push attempts: %v", err)
 	}
 	if count != 1 {
