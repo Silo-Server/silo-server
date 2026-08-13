@@ -57,6 +57,10 @@ type RouteEventRecordV3 struct {
 	ProfileID     string
 	ClientName    string
 	ClientVersion string
+	// ClientBuild and ClientChannel are opaque client-reported identifiers,
+	// recorded so a route decision can be attributed to an exact app build.
+	ClientBuild   string
+	ClientChannel string
 	ClientModel   string
 }
 

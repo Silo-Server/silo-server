@@ -65,8 +65,8 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode capabilities: %v", err)
 	}
-	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient {
-		t.Fatalf("capabilities must advertise both fields: %+v", resp)
+	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.ClientBuild || !resp.ClientChannel {
+		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
 	}
 	want := []string{"direct", "remux", "transcode", "audio"}
 	if len(resp.EffectivePlayMethodValues) != len(want) {
@@ -208,6 +208,115 @@ func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
 			got := playbackClientDisplayName("", "", tc.userAgent)
 			if got != tc.want {
 				t.Fatalf("playbackClientDisplayName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlaybackClientDisplayNameKeepsNamedClientVersionExact(t *testing.T) {
+	cases := []struct {
+		name          string
+		clientName    string
+		clientVersion string
+		want          string
+	}{
+		{name: "patch version survives", clientName: "Silo Android TV", clientVersion: "1.0.0", want: "Silo Android TV 1.0.0"},
+		{name: "prerelease suffix survives", clientName: "Silo iOS", clientVersion: "2.1.0-rc.3", want: "Silo iOS 2.1.0-rc.3"},
+		{name: "no version", clientName: "Silo Android TV", clientVersion: "", want: "Silo Android TV"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := playbackClientDisplayName(tc.clientName, tc.clientVersion, "")
+			if got != tc.want {
+				t.Fatalf("playbackClientDisplayName(%q, %q, \"\") = %q, want %q", tc.clientName, tc.clientVersion, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlaybackClientFullDisplayName(t *testing.T) {
+	cases := []struct {
+		name      string
+		client    string
+		version   string
+		build     string
+		channel   string
+		userAgent string
+		want      string
+	}{
+		{
+			name:    "version build and channel",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			build:   "5",
+			channel: "dev",
+			want:    "Silo Android TV 1.0.0 (build 5, dev)",
+		},
+		{
+			name:    "release channel omitted",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			build:   "5",
+			channel: "release",
+			want:    "Silo Android TV 1.0.0 (build 5)",
+		},
+		{
+			name:    "release channel omitted case insensitively",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			build:   "5",
+			channel: "Release",
+			want:    "Silo Android TV 1.0.0 (build 5)",
+		},
+		{
+			name:    "empty channel omitted",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			build:   "5",
+			want:    "Silo Android TV 1.0.0 (build 5)",
+		},
+		{
+			name:    "channel without build",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			channel: "dev",
+			want:    "Silo Android TV 1.0.0 (dev)",
+		},
+		{
+			name:    "build and channel empty",
+			client:  "Silo Android TV",
+			version: "1.0.0",
+			want:    "Silo Android TV 1.0.0",
+		},
+		{
+			name:   "version empty",
+			client: "Silo Android TV",
+			want:   "Silo Android TV",
+		},
+		{
+			name:    "opaque build is not parsed",
+			client:  "Silo tvOS",
+			version: "1.0.0",
+			build:   "2026.08.13-abcdef",
+			want:    "Silo tvOS 1.0.0 (build 2026.08.13-abcdef)",
+		},
+		{
+			name:      "no client name falls back to user agent label",
+			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
+			build:     "5",
+			channel:   "dev",
+			want:      "Chrome 120",
+		},
+		{
+			name: "no client name and no user agent",
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := playbackClientFullDisplayName(tc.client, tc.version, tc.build, tc.channel, tc.userAgent)
+			if got != tc.want {
+				t.Fatalf("playbackClientFullDisplayName() = %q, want %q", got, tc.want)
 			}
 		})
 	}

@@ -952,7 +952,9 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	}
 	sessionCopy := *session
 	go func() {
-		slog.Info("expired inactive playback session", "session", sessionCopy.ID, "playback_session_id", sessionCopy.ID)
+		slog.Info("expired inactive playback session", "session", sessionCopy.ID, "playback_session_id", sessionCopy.ID,
+			"client_name", sessionCopy.ClientName, "client_version", sessionCopy.ClientVersion,
+			"client_build", sessionCopy.ClientBuild, "client_channel", sessionCopy.ClientChannel)
 		// Expiry is a liveness reap, not a user stop — keep the recipe card so a
 		// resume reconstructs under the same id (the card's own TTL reaps it if
 		// the session is truly abandoned).
@@ -1076,9 +1078,13 @@ func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 	if r == nil {
 		return playback.ClientInfo{}
 	}
+	// Build and channel are opaque: they are trimmed and length-clamped when the
+	// session stamps them, never parsed or validated against an enum here.
 	return playback.ClientInfo{
 		Name:      strings.TrimSpace(r.Header.Get("X-Silo-Client")),
 		Version:   strings.TrimSpace(r.Header.Get("X-Silo-Client-Version")),
+		Build:     strings.TrimSpace(r.Header.Get("X-Silo-Client-Build")),
+		Channel:   strings.TrimSpace(r.Header.Get("X-Silo-Client-Channel")),
 		UserAgent: r.UserAgent(),
 	}
 }

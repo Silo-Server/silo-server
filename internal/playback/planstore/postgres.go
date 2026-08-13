@@ -360,13 +360,16 @@ func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEv
 		INSERT INTO playback_route_events (
 			playback_attempt_id, session_id, plan_id, plan_attempt_id, plan_attempt_key,
 			event, failure_classification, fallback_reason, output_context_id,
-			diagnostics, user_id, profile_id, client_name, client_version, client_model
+			diagnostics, user_id, profile_id, client_name, client_version, client_build,
+			client_channel, client_model
 		) VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''),
 		          $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10, $11, $12,
-		          NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''))`,
+		          NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
+		          NULLIF($17, ''))`,
 		record.PlaybackAttemptID, record.SessionID, record.PlanID, record.PlanAttemptID, record.PlanAttemptKey,
 		record.Event, record.FailureClassification, record.FallbackReason, record.OutputContextID,
-		diagnostics, record.UserID, record.ProfileID, record.ClientName, record.ClientVersion, record.ClientModel)
+		diagnostics, record.UserID, record.ProfileID, record.ClientName, record.ClientVersion,
+		record.ClientBuild, record.ClientChannel, record.ClientModel)
 	return err
 }
 

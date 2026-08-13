@@ -331,12 +331,17 @@ type DeliveryCapabilityV3 struct {
 // advertisement lives exclusively in the request's top-level client_features
 // list; there is deliberately no second features location here.
 type ClientPlaybackContextV3 struct {
-	ProtocolVersion int                             `json:"protocol_version"`
-	FormFactor      string                          `json:"form_factor"`
-	AppVersion      string                          `json:"app_version"`
-	Device          DeviceContextV3                 `json:"device"`
-	Output          OutputContextV3                 `json:"output"`
-	Deliveries      map[string]DeliveryCapabilityV3 `json:"deliveries"`
+	ProtocolVersion int    `json:"protocol_version"`
+	FormFactor      string `json:"form_factor"`
+	AppVersion      string `json:"app_version"`
+	// AppBuild and AppChannel are the request-body fallback for the
+	// X-Silo-Client-Build / X-Silo-Client-Channel headers. Both are opaque
+	// strings the server stores verbatim.
+	AppBuild   string                          `json:"app_build,omitempty"`
+	AppChannel string                          `json:"app_channel,omitempty"`
+	Device     DeviceContextV3                 `json:"device"`
+	Output     OutputContextV3                 `json:"output"`
+	Deliveries map[string]DeliveryCapabilityV3 `json:"deliveries"`
 }
 
 type StartRequestV3 struct {
@@ -887,7 +892,7 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 	if !validCapabilityEvidenceV3(c.AudioEvidence) {
 		return errors.New("audio_evidence is required and must be exact, platform_attested, or declared")
 	}
-	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 || len(ctx.AppBuild) > 64 || len(ctx.AppChannel) > 32 {
 		return errors.New("capability list exceeds supported size")
 	}
 	deviceValues := []string{

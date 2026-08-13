@@ -531,6 +531,14 @@
           "type": "string",
           "maxLength": 64
         },
+        "app_build": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "app_channel": {
+          "type": "string",
+          "maxLength": 32
+        },
         "device": {
           "type": "object",
           "description": "Manufacturer and model stay first-class because the device-quirk registry matches on them. Everything platform-specific travels in platform_details as opaque bounded strings.",

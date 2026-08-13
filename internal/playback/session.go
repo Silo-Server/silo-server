@@ -26,6 +26,8 @@ type Session struct {
 	ClientIP             string // resolved client IP for the playback session
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
+	ClientBuild          string // opaque reported client build identifier, when available
+	ClientChannel        string // opaque reported client distribution channel, when available
 	ClientUserAgent      string // trimmed request user agent for the playback session
 	IsJellyfinCompat     bool   // immutable origin identity for Jellyfin compatibility sessions
 
@@ -147,8 +149,16 @@ type clientInfoContextKey struct{}
 // ClientInfo carries best-effort client metadata from request handling into
 // the playback session manager.
 type ClientInfo struct {
-	Name      string
-	Version   string
+	Name    string
+	Version string
+	// Build is the client's opaque per-platform build identifier (Android
+	// versionCode, Apple CFBundleVersion, …). The server never parses or
+	// compares it; it exists so an admin can name the exact build.
+	Build string
+	// Channel is the client's opaque distribution channel ("release", "beta",
+	// "sideload", "dev", …). Stored verbatim — deliberately not validated
+	// against an enum so a new channel needs no server change.
+	Channel   string
 	UserAgent string
 	IsCompat  bool
 }
@@ -453,6 +463,8 @@ func newSession(
 		IsPaused:             false,
 		ClientName:           normalizeClientMetadataValue(clientInfo.Name, 128),
 		ClientVersion:        normalizeClientMetadataValue(clientInfo.Version, 64),
+		ClientBuild:          normalizeClientMetadataValue(clientInfo.Build, 64),
+		ClientChannel:        normalizeClientMetadataValue(clientInfo.Channel, 32),
 		ClientUserAgent:      normalizeClientMetadataValue(clientInfo.UserAgent, 512),
 		IsJellyfinCompat:     clientInfo.IsCompat,
 		StartedAt:            now,

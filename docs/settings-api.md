@@ -48,6 +48,28 @@ the other. Send the exact lower-case family:
 | macOS                   | `desktop` |
 | Browser                 | `web`     |
 
+### App identity headers
+
+Separately from the family, every first-party client should send its own app
+identity on playback requests. These are server-wide contextual headers, not
+settings-specific: the playback session stores them, the admin Activity page
+renders them ("Silo Android TV 1.0.0 (build 5)"), and playback decision logs
+carry them so a report can be tied to an exact build.
+
+| Header                  | Clamp | Meaning                                                                                                       |
+| ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------- |
+| `X-Silo-Client`         | 128   | Product name, e.g. `Silo Android TV`, `Silo iOS`.                                                             |
+| `X-Silo-Client-Version` | 64    | Marketing version, e.g. `1.0.0`. Sent verbatim and displayed verbatim — do not pre-shorten it.                 |
+| `X-Silo-Client-Build`   | 64    | Opaque per-platform build identifier (Android `versionCode`, Apple `CFBundleVersion`). Never parsed or compared. |
+| `X-Silo-Client-Channel` | 32    | Opaque distribution channel: `release`, `beta`, `sideload`, `dev`. Stored verbatim; `release` is not displayed.  |
+
+Values are trimmed and truncated to the clamp above; nothing is validated
+against an enum, so a client may introduce a new channel without a server
+change. Protocol-v3 `POST /playback/start` accepts
+`client_playback_context.app_version`, `.app_build`, and `.app_channel` as a
+body-level fallback for clients that cannot set the headers on every request;
+the headers win when both are present.
+
 ## Remote scopes
 
 Every stored value has exactly one identity. Context fields not named by the
