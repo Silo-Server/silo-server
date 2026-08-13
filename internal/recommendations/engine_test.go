@@ -2,12 +2,16 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/dbtest"
+	"github.com/Silo-Server/silo-server/migrations"
 )
 
 // Compile-time assertions that *Engine satisfies both catalog provider
@@ -19,17 +23,47 @@ var (
 	_ catalog.CatalogSemanticModelProvider = (*Engine)(nil)
 )
 
-// newEngineTestPool mirrors internal/catalog/display_query_filter_test.go: it
-// skips when SILO_TEST_DATABASE_URL is unset and verifies the base schema is
-// present before returning a usable pool.
-func newEngineTestPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
+// ownedTestConfig points at the database TestMain provisioned for this binary.
+// It is nil when SILO_TEST_DATABASE_URL is unset, which makes every DB-backed
+// test in the package skip as before.
+var ownedTestConfig *pgxpool.Config
+
+// TestMain gives this package its own database.
+//
+// EmbedAll walks every embed-eligible row in media_items, so its tests can only
+// assert "nothing needed embedding" while no other writer exists. Prefix-scoping
+// inside the test cannot fix that — the operation under test is global.
+func TestMain(m *testing.M) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
+		os.Exit(m.Run())
+	}
+
+	config, drop, err := dbtest.Provision(context.Background(), dsn, "silo_recommendations",
+		func(ctx context.Context, pool *pgxpool.Pool) error {
+			return database.RunMigrations(ctx, pool, migrations.FS, "sql")
+		})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "recommendations tests: %v\n", err)
+		os.Exit(1)
+	}
+	ownedTestConfig = config
+
+	code := m.Run()
+	drop()
+	os.Exit(code)
+}
+
+// newEngineTestPool returns a pool on the database TestMain provisioned for
+// this binary, skipping when SILO_TEST_DATABASE_URL is unset.
+func newEngineTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	if ownedTestConfig == nil {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	// Copy: a *pgxpool.Config may not back more than one pool.
+	pool, err := pgxpool.NewWithConfig(ctx, ownedTestConfig.Copy())
 	if err != nil {
 		t.Fatalf("connect test database: %v", err)
 	}
