@@ -76,7 +76,7 @@ Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`
 set the headers on every request. The headers win field by field when both are
 present, and the fallback applies **only to a client that sent `X-Silo-Client`**:
 `client_playback_context` carries no app name, so nothing in the body can
-identify a client that did not name itself — such a session is labelled from its
+identify a client that did not name itself — such a session is labeled from its
 user agent, and its `app_version` is a free-form platform string rather than the
 marketing version `client_version` promises.
 

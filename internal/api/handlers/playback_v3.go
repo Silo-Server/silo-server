@@ -463,7 +463,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	clientInfo := playbackClientInfoForStartV3(r, req.ClientPlaybackContext)
 	if result.Terminal != nil {
 		slog.InfoContext(r.Context(), "playback plan decided", append([]any{
-			"component", "playback",
+			logComponentKey, "playback",
 			"outcome", "terminal",
 			"reason", result.Terminal.Reason,
 			"file_id", effectiveFile.ID,
@@ -484,7 +484,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	// server logs alone (finding a mis-planned route previously required
 	// correlating client logcat, ffmpeg commands, and session rows).
 	slog.InfoContext(r.Context(), "playback plan decided", append([]any{
-		"component", "playback",
+		logComponentKey, "playback",
 		"outcome", "plan",
 		"decision_reason", result.Plan.DecisionReason,
 		"delivery", result.Plan.Delivery,
@@ -532,7 +532,7 @@ type playbackStartRequestDigestsV3 struct {
 //
 // The fallback applies only to a client that named itself. client_playback_context
 // carries no app name, so nothing in the body can identify a nameless client
-// anyway — it is labelled from its user agent, and its app_version is a
+// anyway — it is labeled from its user agent, and its app_version is a
 // free-form platform string rather than the marketing version client_version
 // promises. The web player, for one, reports the literal "web" there; taking it
 // unconditionally would write "web" into the one field that is contractually
