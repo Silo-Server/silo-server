@@ -281,7 +281,12 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			// resulting terminal.
 			reasonOverride = EvidenceInsufficientForDirectV3
 		}
-		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride)
+		// True when the burn requirement is the sole disjunct that fired: every
+		// other route condition still permits a source-preserving delivery.
+		subtitleForcedAdaptation := !quality.RequiresTranscode && videoOK &&
+			(rangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+			subtitle.RequiresBurn && !remuxSubtitleOK && !hlsRemuxSubtitleOK
+		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride, subtitleForcedAdaptation)
 	}
 
 	// Profile 7 is normalized on the client against the original range-capable
@@ -472,7 +477,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 	}
 	if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) {
-		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "copy_routes_exhausted")
+		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "copy_routes_exhausted", false)
 	}
 
 	return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
@@ -685,7 +690,13 @@ func applyAudioOnlyAACConversionV3(plan *PlanV3, targetChannels, targetBitrateKb
 
 // planVideoTranscodeV3 always executes on the HLS delivery, so the caller must
 // pass the subtitle policy resolved against DeliveryClassHLSV3.
-func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescriptorV3, quality QualityResultV3, subtitle SubtitlePolicyResultV3, reasonOverride string) PlannerResultV3 {
+//
+// subtitleForcedAdaptation marks the case where only the subtitle burn
+// requirement forced this adaptation. Deselecting the subtitle then restores
+// playback, so a refusal must name the subtitle: an HDR or version reason
+// sends the user chasing a problem that is not blocking them. Retryable
+// infrastructure failures and the client-route terminal keep their own reasons.
+func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescriptorV3, quality QualityResultV3, subtitle SubtitlePolicyResultV3, reasonOverride string, subtitleForcedAdaptation bool) PlannerResultV3 {
 	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) {
 		return terminalPlannerResultV3("client_hls_unsupported", "The client cannot execute the required HLS adaptation route.", false)
 	}
@@ -693,16 +704,21 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 	}
 	if !input.Settings.TranscodeEnabled {
-		reason := "transcoding_disabled"
 		if subtitle.RequiresBurn {
-			reason = "subtitle_conversion_unsupported"
+			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but transcoding is unavailable.", false)
 		}
-		return terminalPlannerResultV3(reason, "The source requires video adaptation, but transcoding is unavailable.", false)
+		return terminalPlannerResultV3("transcoding_disabled", "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
 	if hdrTranscodeUnavailableV3(source) {
+		if subtitleForcedAdaptation {
+			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded.", false)
+		}
 		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
+		if subtitleForcedAdaptation {
+			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but 4K transcoding is disabled.", false)
+		}
 		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
 	if !input.hlsRegistry().Available(TransformationVideoToH264V3) || !input.hlsRegistry().Available(TransformationAudioToAACV3) {

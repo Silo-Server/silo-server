@@ -438,6 +438,7 @@ export function WatchPage({
       shouldAutoPlay={session.shouldAutoPlay}
       replanning={session.replanning}
       replanError={session.error}
+      replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
       versions={playbackVersions}

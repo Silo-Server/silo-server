@@ -91,6 +91,8 @@ interface VideoPlayerProps {
   replanning?: boolean;
   /** Server-described replan error, if the last replan was refused. */
   replanError?: string | null;
+  /** Title for the replan error, used when surfacing the refusal as a toast. */
+  replanErrorTitle?: string | null;
   sessionId: string;
   selectedVersion?: PlayerFileVersion;
   versions?: PlayerFileVersion[];
@@ -195,6 +197,7 @@ export function VideoPlayer({
   shouldAutoPlay = true,
   replanning = false,
   replanError = null,
+  replanErrorTitle = null,
   sessionId,
   selectedVersion,
   versions = [],
@@ -1948,13 +1951,19 @@ export function VideoPlayer({
   // unchanged selection instead of retrying. Pin the accepted selection just
   // like a manual choice so auto-selection does not immediately request the
   // rejected track again; a later user choice can still retry it explicitly.
+  // The rollback is silent otherwise: the refusal is only rendered inside the
+  // quality menu, which the user has no reason to open after picking a
+  // subtitle. Clearing the request ref keeps this to one toast per refusal.
   useEffect(() => {
     if (requestedSubtitleTrackChangeRef.current && replanError && !replanning) {
       subtitleSelectionWasManualRef.current = true;
       setActiveSubtitleIndex(plan.selected_tracks.subtitle?.index ?? null);
       requestedSubtitleTrackChangeRef.current = null;
+      toast.error(replanErrorTitle ?? "That subtitle track can't be used", {
+        description: replanError,
+      });
     }
-  }, [plan.selected_tracks.subtitle?.index, replanError, replanning]);
+  }, [plan.selected_tracks.subtitle?.index, replanError, replanErrorTitle, replanning]);
 
   // A refusal pin belongs only to the session that rejected the automatic
   // selection. Clear it before the auto-selection effect evaluates a new

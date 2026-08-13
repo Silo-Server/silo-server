@@ -100,7 +100,10 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
     case "subtitle_artifact_unavailable":
       return {
         title: "That subtitle track can't be used",
+        // The server names the specific blocker (burn-in required, source
+        // unsupported); the generic sentence only covers a missing message.
         message:
+          terminal.message?.trim() ||
           "Silo couldn't prepare the selected subtitles for this device. Try a different track.",
       };
     default:

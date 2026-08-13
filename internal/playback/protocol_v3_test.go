@@ -973,6 +973,75 @@ func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testi
 	}
 }
 
+// pgsBurnRequestV3 selects the single embedded PGS track on a client that
+// cannot render bitmap subtitles anywhere, so every route but a burn-in
+// transcode is closed by the subtitle alone.
+func pgsBurnRequestV3(file *models.MediaFile) StartRequestV3 {
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 0, Codec: "hdmv_pgs_subtitle"}}
+	req := validStartRequestV3()
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	selected := 0
+	req.SubtitleTrackIndex = &selected
+	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", selected)
+	return req
+}
+
+// A user who just picked a bitmap subtitle can undo that choice; an HDR or 4K
+// reason points them at a problem that is not blocking them.
+func TestPlanPlaybackV3NamesTheSubtitleWhenItAloneForcedTheTranscode(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := pgsBurnRequestV3(file)
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
+		t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
+	}
+}
+
+// The subtitle only owns the terminal when it is the sole blocker: a client
+// that cannot take the source range at all still gets the range cause.
+func TestPlanPlaybackV3KeepsTheHDRTerminalWhenTheRangeIsAlsoUnsupported(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := pgsBurnRequestV3(file)
+	req.Capabilities.HDRDetails = nil
+	req.ClientPlaybackContext.Output.HDRDetails = nil
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3NamesTheSubtitleOverThe4KPolicy(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	req := pgsBurnRequestV3(file)
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false},
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "subtitle_conversion_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if !strings.Contains(strings.ToLower(result.Terminal.Message), "subtitle") {
+		t.Errorf("terminal message = %q, want the subtitle named", result.Terminal.Message)
+	}
+}
+
 func TestPlanPlaybackV3NeverClaimsUnimplementedHDRTranscode(t *testing.T) {
 	file := detailedFixtureFileV3()
 	req := validStartRequestV3()

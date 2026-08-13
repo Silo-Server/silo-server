@@ -619,7 +619,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `source_metadata_incomplete`, `source_unavailable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`.
+`subtitle_conversion_unsupported`. When a video adaptation is forced solely by a
+subtitle burn-in requirement and cannot execute, the terminal is
+`subtitle_conversion_unsupported` naming the subtitle rather than the underlying
+HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playback.
 
 *Subtitle policy:* `subtitle_burn_in_source_unsupported`,
 `subtitle_codec_unsupported`, `subtitle_track_invalid`,

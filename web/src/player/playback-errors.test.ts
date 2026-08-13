@@ -31,6 +31,35 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("keeps the server's explanation of why a subtitle cannot be used", () => {
+    expect(
+      describePlanTerminal({
+        reason: "subtitle_conversion_unsupported",
+        message:
+          "The selected subtitle must be burned into the video, but 4K transcoding is disabled.",
+        retryable: false,
+      }),
+    ).toEqual({
+      title: "That subtitle track can't be used",
+      message:
+        "The selected subtitle must be burned into the video, but 4K transcoding is disabled.",
+    });
+  });
+
+  it("falls back to a generic subtitle sentence when the server sends no message", () => {
+    expect(
+      describePlanTerminal({
+        reason: "subtitle_codec_unsupported",
+        message: "  ",
+        retryable: false,
+      }),
+    ).toEqual({
+      title: "That subtitle track can't be used",
+      message:
+        "Silo couldn't prepare the selected subtitles for this device. Try a different track.",
+    });
+  });
+
   it("falls back to the server's own message for reasons it does not name", () => {
     expect(
       describePlanTerminal({
