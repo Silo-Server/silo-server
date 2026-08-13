@@ -21,6 +21,7 @@ const (
 
 	KindMovie   = "movie"
 	KindSeries  = "series"
+	KindSeason  = "season"
 	KindEpisode = "episode"
 )
 

@@ -42,6 +42,10 @@ type mediaMatcher interface {
 	Match(ctx context.Context, record historyimport.Record) (*historyimport.Match, string, error)
 }
 
+type watchedLeafMatcher interface {
+	MatchLeaves(ctx context.Context, record historyimport.Record) ([]historyimport.Match, string, error)
+}
+
 type watchStateImporter interface {
 	RecordImportedWatchIfNewerWithSource(ctx context.Context, userID int, profileID, targetID string, duration, position float64, completed bool, updatedAt time.Time, watchedAt *time.Time, source userstore.WatchHistorySource) (bool, error)
 }
@@ -1020,6 +1024,11 @@ type ImportWatchedResult struct {
 	Warnings  []string
 }
 
+type matchedWatchedLeaf struct {
+	match     historyimport.Match
+	watchedAt time.Time
+}
+
 func (s *Service) ImportWatched(
 	ctx context.Context,
 	conn Connection,
@@ -1038,12 +1047,13 @@ func (s *Service) ImportWatched(
 	}
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	matchedLeaves := make(map[string]matchedWatchedLeaf)
 	for _, row := range rows {
-		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
+		matches, reason, err := s.matchWatchedLeaves(ctx, row)
 		if err != nil {
 			return result, err
 		}
-		if match == nil {
+		if len(matches) == 0 {
 			result.Unmatched++
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
@@ -1053,17 +1063,35 @@ func (s *Service) ImportWatched(
 		if row.LastWatchedAt == nil {
 			continue
 		}
-		duration, _ := s.mediaDuration(ctx, match.MediaItemID)
+		for _, match := range matches {
+			existing, ok := matchedLeaves[match.MediaItemID]
+			if !ok || row.LastWatchedAt.After(existing.watchedAt) {
+				matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{
+					match:     match,
+					watchedAt: *row.LastWatchedAt,
+				}
+			}
+		}
+	}
+	mediaItemIDs := make([]string, 0, len(matchedLeaves))
+	for mediaItemID := range matchedLeaves {
+		mediaItemIDs = append(mediaItemIDs, mediaItemID)
+	}
+	sort.Strings(mediaItemIDs)
+	for _, mediaItemID := range mediaItemIDs {
+		leaf := matchedLeaves[mediaItemID]
+		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
+		watchedAt := leaf.watchedAt
 		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
 			conn.ProfileID,
-			match.MediaItemID,
+			leaf.match.MediaItemID,
 			duration,
 			0,
 			true,
-			*row.LastWatchedAt,
-			row.LastWatchedAt,
+			watchedAt,
+			&watchedAt,
 			historySourceForProvider(importer),
 		)
 		if err != nil {
@@ -1081,6 +1109,22 @@ func (s *Service) ImportWatched(
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch) ([]historyimport.Match, string, error) {
+	record := row.HistoryRecord()
+	if row.Kind == historyimport.KindSeries || row.Kind == historyimport.KindSeason {
+		matcher, ok := s.matcher.(watchedLeafMatcher)
+		if !ok {
+			return nil, "watch provider matcher cannot expand aggregate watched state", nil
+		}
+		return matcher.MatchLeaves(ctx, record)
+	}
+	match, reason, err := s.matcher.Match(ctx, record)
+	if err != nil || match == nil {
+		return nil, reason, err
+	}
+	return []historyimport.Match{*match}, "", nil
 }
 
 func fetchWatchedImportBatch(

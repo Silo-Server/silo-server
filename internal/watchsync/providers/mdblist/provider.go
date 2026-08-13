@@ -136,7 +136,7 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 		}
 		pageRows := watchedRowsFromPayload(p.Key(), payload)
 		rows = append(rows, pageRows...)
-		fetched := len(payload.Movies) + len(payload.Episodes)
+		fetched := len(payload.Movies) + len(payload.Shows) + len(payload.Seasons) + len(payload.Episodes)
 		done, err := page.advance(payload.Pagination, fetched)
 		if err != nil {
 			return nil, fmt.Errorf("mdblist watched pagination: %w", err)
@@ -149,9 +149,9 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 }
 
 func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) []watchsync.RemoteWatch {
-	rows := make([]watchsync.RemoteWatch, 0, len(payload.Movies)+len(payload.Episodes))
+	rows := make([]watchsync.RemoteWatch, 0, len(payload.Movies)+len(payload.Shows)+len(payload.Seasons)+len(payload.Episodes))
 	for _, movie := range payload.Movies {
-		watchedAt := movie.WatchedAt
+		watchedAt := movie.LastWatchedAt
 		if watchedAt == nil {
 			continue
 		}
@@ -172,8 +172,55 @@ func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) 
 			LastWatchedAt:   watchedAt,
 		})
 	}
+	for _, show := range payload.Shows {
+		watchedAt := show.LastWatchedAt
+		if watchedAt == nil {
+			continue
+		}
+		key := showKey(show.Show.IDs)
+		if key == "" {
+			continue
+		}
+		rows = append(rows, watchsync.RemoteWatch{
+			Provider:        providerKey,
+			ProviderItemKey: "show:" + key,
+			Kind:            historyimport.KindSeries,
+			Title:           show.Show.Title,
+			Year:            show.Show.Year,
+			IMDbID:          show.Show.IDs.IMDb,
+			TMDBID:          intString(show.Show.IDs.TMDB),
+			TVDBID:          intString(show.Show.IDs.TVDB),
+			PlayCount:       1,
+			LastWatchedAt:   watchedAt,
+		})
+	}
+	for _, season := range payload.Seasons {
+		watchedAt := season.LastWatchedAt
+		if watchedAt == nil {
+			continue
+		}
+		key := showKey(season.Season.Show.IDs)
+		if key == "" {
+			continue
+		}
+		rows = append(rows, watchsync.RemoteWatch{
+			Provider:        providerKey,
+			ProviderItemKey: fmt.Sprintf("show:%s:s%d", key, season.Season.Number),
+			Kind:            historyimport.KindSeason,
+			Title:           season.Season.Name,
+			TMDBID:          intString(season.Season.IDs.TMDB),
+			SeriesTitle:     season.Season.Show.Title,
+			SeriesYear:      season.Season.Show.Year,
+			SeriesIMDbID:    season.Season.Show.IDs.IMDb,
+			SeriesTMDBID:    intString(season.Season.Show.IDs.TMDB),
+			SeriesTVDBID:    intString(season.Season.Show.IDs.TVDB),
+			SeasonNumber:    season.Season.Number,
+			PlayCount:       1,
+			LastWatchedAt:   watchedAt,
+		})
+	}
 	for _, episode := range payload.Episodes {
-		watchedAt := episode.WatchedAt
+		watchedAt := episode.LastWatchedAt
 		if watchedAt == nil {
 			continue
 		}
@@ -703,42 +750,76 @@ type mdblistShow struct {
 }
 
 type mdblistEpisode struct {
-	Title  string     `json:"title"`
-	Season int        `json:"season"`
-	Number int        `json:"number"`
-	IDs    mdblistIDs `json:"ids"`
+	Title  string      `json:"title"`
+	Name   string      `json:"name"`
+	Season int         `json:"season"`
+	Number int         `json:"number"`
+	IDs    mdblistIDs  `json:"ids"`
+	Show   mdblistShow `json:"show"`
 }
 
 type mdblistWatchedMovie struct {
-	WatchedAt *time.Time   `json:"watched_at"`
-	Movie     mdblistMovie `json:"movie"`
+	LastWatchedAt *time.Time   `json:"last_watched_at"`
+	Movie         mdblistMovie `json:"movie"`
+}
+
+func (m *mdblistWatchedMovie) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		LastWatchedAt *time.Time   `json:"last_watched_at"`
+		WatchedAt     *time.Time   `json:"watched_at"`
+		Movie         mdblistMovie `json:"movie"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.LastWatchedAt = firstTimestamp(raw.LastWatchedAt, raw.WatchedAt)
+	m.Movie = raw.Movie
+	return nil
+}
+
+type mdblistWatchedShow struct {
+	LastWatchedAt *time.Time  `json:"last_watched_at"`
+	Show          mdblistShow `json:"show"`
+}
+
+type mdblistSeason struct {
+	Number int         `json:"number"`
+	Name   string      `json:"name"`
+	IDs    mdblistIDs  `json:"ids"`
+	Show   mdblistShow `json:"show"`
+}
+
+type mdblistWatchedSeason struct {
+	LastWatchedAt *time.Time    `json:"last_watched_at"`
+	Season        mdblistSeason `json:"season"`
 }
 
 // mdblistWatchedEpisode tolerates both shapes MDBList uses for episode rows:
 // season/number inlined on the row, or nested under an `episode` object.
 type mdblistWatchedEpisode struct {
-	WatchedAt *time.Time  `json:"watched_at"`
-	Season    int         `json:"season"`
-	Number    int         `json:"number"`
-	Title     string      `json:"title"`
-	IDs       mdblistIDs  `json:"ids"`
-	Show      mdblistShow `json:"show"`
+	LastWatchedAt *time.Time
+	Season        int
+	Number        int
+	Title         string
+	IDs           mdblistIDs
+	Show          mdblistShow
 }
 
 func (e *mdblistWatchedEpisode) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		WatchedAt *time.Time      `json:"watched_at"`
-		Season    int             `json:"season"`
-		Number    int             `json:"number"`
-		Title     string          `json:"title"`
-		IDs       mdblistIDs      `json:"ids"`
-		Show      mdblistShow     `json:"show"`
-		Episode   *mdblistEpisode `json:"episode"`
+		LastWatchedAt *time.Time      `json:"last_watched_at"`
+		WatchedAt     *time.Time      `json:"watched_at"`
+		Season        int             `json:"season"`
+		Number        int             `json:"number"`
+		Title         string          `json:"title"`
+		IDs           mdblistIDs      `json:"ids"`
+		Show          mdblistShow     `json:"show"`
+		Episode       *mdblistEpisode `json:"episode"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	e.WatchedAt = raw.WatchedAt
+	e.LastWatchedAt = firstTimestamp(raw.LastWatchedAt, raw.WatchedAt)
 	e.Season = raw.Season
 	e.Number = raw.Number
 	e.Title = raw.Title
@@ -753,16 +834,31 @@ func (e *mdblistWatchedEpisode) UnmarshalJSON(data []byte) error {
 		}
 		if e.Title == "" {
 			e.Title = raw.Episode.Title
+			if e.Title == "" {
+				e.Title = raw.Episode.Name
+			}
 		}
 		if e.IDs == (mdblistIDs{}) {
 			e.IDs = raw.Episode.IDs
+		}
+		if e.Show == (mdblistShow{}) {
+			e.Show = raw.Episode.Show
 		}
 	}
 	return nil
 }
 
+func firstTimestamp(preferred, fallback *time.Time) *time.Time {
+	if preferred != nil {
+		return preferred
+	}
+	return fallback
+}
+
 type mdblistWatchedResponse struct {
 	Movies     []mdblistWatchedMovie   `json:"movies"`
+	Shows      []mdblistWatchedShow    `json:"shows"`
+	Seasons    []mdblistWatchedSeason  `json:"seasons"`
 	Episodes   []mdblistWatchedEpisode `json:"episodes"`
 	Pagination *mdblistPagination      `json:"pagination"`
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1060,6 +1061,18 @@ func (m matchedMatcherStub) Match(context.Context, historyimport.Record) (*histo
 	return &historyimport.Match{MediaItemID: m.mediaItemID}, "", nil
 }
 
+type watchedLeafMatcherStub struct {
+	matches []historyimport.Match
+}
+
+func (m watchedLeafMatcherStub) Match(context.Context, historyimport.Record) (*historyimport.Match, string, error) {
+	return nil, "unexpected single-item match", nil
+}
+
+func (m watchedLeafMatcherStub) MatchLeaves(context.Context, historyimport.Record) ([]historyimport.Match, string, error) {
+	return m.matches, "", nil
+}
+
 type noOpWatchState struct{}
 
 func (noOpWatchState) RecordImportedHistoryWithSource(
@@ -1679,6 +1692,78 @@ func TestServiceImportWatchedUsesProviderHistorySource(t *testing.T) {
 	}
 	if len(watchState.watchedAt) != 1 || watchState.watchedAt[0] == nil || !watchState.watchedAt[0].Equal(watchedAt) {
 		t.Fatalf("recorded watched_at = %+v, want %v", watchState.watchedAt, watchedAt)
+	}
+}
+
+func TestServiceImportWatchedExpandsAggregateMarkerToEpisodeLeaves(t *testing.T) {
+	repo := newServiceFakeRepo()
+	watchedAt := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+	provider := watchedImporterStub{
+		key:    "mdblist",
+		source: userstore.WatchHistorySourceMDBList,
+		rows: []RemoteWatch{{
+			Provider: "mdblist", Kind: historyimport.KindSeries, Title: "Breaking Bad", LastWatchedAt: &watchedAt,
+		}},
+	}
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(watchedLeafMatcherStub{matches: []historyimport.Match{
+			{MediaItemID: "episode-1", Kind: historyimport.KindEpisode},
+			{MediaItemID: "episode-2", Kind: historyimport.KindEpisode},
+		}}).
+		WithWatchState(watchState)
+
+	result, err := service.ImportWatched(context.Background(), Connection{
+		ID: "conn-1", Provider: "mdblist", UserID: 7, ProfileID: "profile-1",
+	}, ServerConfig{}, provider)
+	if err != nil {
+		t.Fatalf("ImportWatched: %v", err)
+	}
+	if result.Found != 1 || result.Imported != 2 || result.Unmatched != 0 {
+		t.Fatalf("result = %+v, want one aggregate found and two leaves imported", result)
+	}
+	if !reflect.DeepEqual(watchState.targetIDs, []string{"episode-1", "episode-2"}) {
+		t.Fatalf("recorded target ids = %+v", watchState.targetIDs)
+	}
+	if !reflect.DeepEqual(watchState.sources, []userstore.WatchHistorySource{
+		userstore.WatchHistorySourceMDBList,
+		userstore.WatchHistorySourceMDBList,
+	}) {
+		t.Fatalf("recorded sources = %+v", watchState.sources)
+	}
+}
+
+func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *testing.T) {
+	repo := newServiceFakeRepo()
+	olderWatchedAt := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	newerWatchedAt := olderWatchedAt.Add(24 * time.Hour)
+	provider := watchedImporterStub{
+		key:    "mdblist",
+		source: userstore.WatchHistorySourceMDBList,
+		rows: []RemoteWatch{
+			{Provider: "mdblist", Kind: historyimport.KindMovie, Title: "Inception", LastWatchedAt: &olderWatchedAt},
+			{Provider: "mdblist", Kind: historyimport.KindMovie, Title: "Inception", LastWatchedAt: &newerWatchedAt},
+		},
+	}
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithWatchState(watchState)
+
+	result, err := service.ImportWatched(context.Background(), Connection{
+		ID: "conn-1", Provider: "mdblist", UserID: 7, ProfileID: "profile-1",
+	}, ServerConfig{}, provider)
+	if err != nil {
+		t.Fatalf("ImportWatched: %v", err)
+	}
+	if result.Found != 2 || result.Imported != 1 || result.Unmatched != 0 {
+		t.Fatalf("result = %+v, want two provider markers and one imported leaf", result)
+	}
+	if !reflect.DeepEqual(watchState.targetIDs, []string{testMovieMediaID}) {
+		t.Fatalf("recorded target ids = %+v", watchState.targetIDs)
+	}
+	if len(watchState.watchedAt) != 1 || watchState.watchedAt[0] == nil || !watchState.watchedAt[0].Equal(newerWatchedAt) {
+		t.Fatalf("recorded watched_at = %+v, want %v", watchState.watchedAt, newerWatchedAt)
 	}
 }
 
