@@ -63,12 +63,19 @@ carry them so a report can be tied to an exact build.
 | `X-Silo-Client-Build`   | 64    | Opaque per-platform build identifier (Android `versionCode`, Apple `CFBundleVersion`). Never parsed or compared. |
 | `X-Silo-Client-Channel` | 32    | Opaque distribution channel: `release`, `beta`, `sideload`, `dev`. Stored verbatim; `release` is not displayed.  |
 
-Values are trimmed and truncated to the clamp above; nothing is validated
-against an enum, so a client may introduce a new channel without a server
-change. Protocol-v3 `POST /playback/start` accepts
-`client_playback_context.app_version`, `.app_build`, and `.app_channel` as a
-body-level fallback for clients that cannot set the headers on every request;
-the headers win when both are present.
+Values are trimmed and truncated to the clamp above — never rejected, on either
+route, because an identity label must not be able to fail a playback start.
+Nothing is validated against an enum either, so a client may introduce a new
+channel without a server change.
+
+Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
+`.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
+set the headers on every request. The headers win field by field when both are
+present, and the fallback applies **only to a client that sent `X-Silo-Client`**:
+`client_playback_context` carries no app name, so nothing in the body can
+identify a client that did not name itself — such a session is labelled from its
+user agent, and its `app_version` is a free-form platform string rather than the
+marketing version `client_version` promises.
 
 ## Remote scopes
 

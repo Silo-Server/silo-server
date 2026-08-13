@@ -266,7 +266,13 @@ func (l *PlaybackSessionsLoader) Load(
 		s.SourceBitrateKbps = sourceBitrateKbps
 		s.SourceAudioChannels = sourceAudioChannels
 		s.ClientLabel = playbackClientDisplayName(s.ClientName, s.ClientVersion, s.ClientUserAgent)
-		s.ClientLabelFull = playbackClientFullDisplayName(s.ClientName, s.ClientVersion, s.ClientBuild, s.ClientChannel, s.ClientUserAgent)
+		// Only worth the bytes when it says more than the compact label — which
+		// it does not for any client without a build or a non-release channel,
+		// i.e. most of a 200-row page. Clients read client_label when
+		// client_label_full is absent, so omitting the duplicate costs nothing.
+		if full := playbackClientFullDisplayName(s.ClientName, s.ClientVersion, s.ClientBuild, s.ClientChannel, s.ClientUserAgent); full != s.ClientLabel {
+			s.ClientLabelFull = full
+		}
 		enrichPlaybackSessionRow(&s, audioTracksJSON)
 		sessions = append(sessions, s)
 	}
@@ -463,17 +469,14 @@ func firstNonEmptyValue(values ...string) string {
 
 // playbackClientFullDisplayName renders the client's exact identity — version,
 // opaque build, and non-default channel — for surfaces that can afford the
-// width (expanded session details, tooltips). Clients that report no name fall
-// back to the compact user-agent label, which is all that can be derived there.
+// width (expanded session details, tooltips). The name-and-version half is
+// whatever the compact label resolved, so a client identified only by its user
+// agent still gets its build named: a client that bothered to report a build
+// has earned having it displayed, whether or not it also named itself.
 func playbackClientFullDisplayName(name, version, build, channel, userAgent string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return playbackClientDisplayName(name, version, userAgent)
-	}
-
-	label := name
-	if version = strings.TrimSpace(version); version != "" {
-		label += " " + version
+	label := playbackClientDisplayName(name, version, userAgent)
+	if label == "" {
+		return ""
 	}
 
 	build = strings.TrimSpace(build)

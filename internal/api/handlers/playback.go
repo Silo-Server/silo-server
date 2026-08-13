@@ -952,9 +952,9 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	}
 	sessionCopy := *session
 	go func() {
-		slog.Info("expired inactive playback session", "session", sessionCopy.ID, "playback_session_id", sessionCopy.ID,
-			"client_name", sessionCopy.ClientName, "client_version", sessionCopy.ClientVersion,
-			"client_build", sessionCopy.ClientBuild, "client_channel", sessionCopy.ClientChannel)
+		slog.Info("expired inactive playback session", append([]any{
+			"session", sessionCopy.ID, "playback_session_id", sessionCopy.ID,
+		}, sessionCopy.ClientInfo().LogAttrs()...)...)
 		// Expiry is a liveness reap, not a user stop — keep the recipe card so a
 		// resume reconstructs under the same id (the card's own TTL reaps it if
 		// the session is truly abandoned).

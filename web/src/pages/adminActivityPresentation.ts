@@ -252,22 +252,9 @@ export function getSessionClientLabel(session: AdminSession): string {
  * replace it in a fixed-width row.
  */
 export function getSessionClientLabelFull(session: AdminSession): string {
-  const fullLabel = session.client_label_full?.trim();
-  if (fullLabel) {
-    return fullLabel;
-  }
-
-  const label = session.client_label?.trim();
-  if (label) {
-    return label;
-  }
-
-  const clientName = session.client_name?.trim();
-  const clientVersion = session.client_version?.trim();
-  if (clientName && clientVersion) {
-    return `${clientName} ${clientVersion}`;
-  }
-  return clientName || "";
+  // The server omits client_label_full when it would repeat client_label, and
+  // older servers never send it at all — both degrade to the compact label.
+  return session.client_label_full?.trim() || getSessionClientLabel(session);
 }
 
 export function formatSourceContainerSummary(session: AdminSession): string {

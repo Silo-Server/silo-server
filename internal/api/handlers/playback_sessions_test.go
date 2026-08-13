@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestSessionComponentDecisionLabelsCopiedAudioDuringHLSAsRemux(t *testing.T) {
@@ -301,10 +303,18 @@ func TestPlaybackClientFullDisplayName(t *testing.T) {
 			want:    "Silo tvOS 1.0.0 (build 2026.08.13-abcdef)",
 		},
 		{
-			name:      "no client name falls back to user agent label",
+			// A client that reports a build but not a name is still named by its
+			// build: the user-agent label supplies the product half, and dropping
+			// the qualifiers would hide the exact field this surface exists for.
+			name:      "no client name keeps build and channel on the user agent label",
 			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
 			build:     "5",
 			channel:   "dev",
+			want:      "Chrome 120 (build 5, dev)",
+		},
+		{
+			name:      "no client name and no qualifiers keeps the plain user agent label",
+			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
 			want:      "Chrome 120",
 		},
 		{
@@ -317,6 +327,71 @@ func TestPlaybackClientFullDisplayName(t *testing.T) {
 			got := playbackClientFullDisplayName(tc.client, tc.version, tc.build, tc.channel, tc.userAgent)
 			if got != tc.want {
 				t.Fatalf("playbackClientFullDisplayName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlaybackClientInfoForStartV3(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers map[string]string
+		context playback.ClientPlaybackContextV3
+		want    playback.ClientInfo
+	}{
+		{
+			name:    "headers win over the body",
+			headers: map[string]string{"X-Silo-Client": "Silo iOS", "X-Silo-Client-Version": "2.1.0", "X-Silo-Client-Build": "9", "X-Silo-Client-Channel": "beta"},
+			context: playback.ClientPlaybackContextV3{AppVersion: "1.0.0", AppBuild: "1", AppChannel: "release"},
+			want:    playback.ClientInfo{Name: "Silo iOS", Version: "2.1.0", Build: "9", Channel: "beta"},
+		},
+		{
+			// The fallback is per field, not per struct: a client may set the
+			// name and version headers on every request and still report the
+			// build it only knows at start time in the body.
+			name:    "body fills only the fields the headers omit",
+			headers: map[string]string{"X-Silo-Client": "Silo tvOS", "X-Silo-Client-Version": "2.1.0"},
+			context: playback.ClientPlaybackContextV3{AppVersion: "1.0.0", AppBuild: "77", AppChannel: "sideload"},
+			want:    playback.ClientInfo{Name: "Silo tvOS", Version: "2.1.0", Build: "77", Channel: "sideload"},
+		},
+		{
+			name:    "body supplies everything but the name",
+			headers: map[string]string{"X-Silo-Client": "Silo Android TV"},
+			context: playback.ClientPlaybackContextV3{AppVersion: "1.0.0", AppBuild: "5", AppChannel: "dev"},
+			want:    playback.ClientInfo{Name: "Silo Android TV", Version: "1.0.0", Build: "5", Channel: "dev"},
+		},
+		{
+			// The regression this guards: the web player reports the literal
+			// "web" as its app_version and sends no X-Silo-Client. Taking the
+			// body anyway would stamp "web" onto client_version — the one field
+			// the contract promises is a marketing version — for every browser
+			// session, and onto every route event and decision log with it.
+			name:    "nameless client keeps the body out of client_version",
+			context: playback.ClientPlaybackContextV3{AppVersion: "web"},
+			want:    playback.ClientInfo{},
+		},
+		{
+			name:    "nameless client takes no build or channel either",
+			context: playback.ClientPlaybackContextV3{AppVersion: "web", AppBuild: "5", AppChannel: "dev"},
+			want:    playback.ClientInfo{},
+		},
+		{
+			name:    "whitespace-only header falls through to the body",
+			headers: map[string]string{"X-Silo-Client": "Silo iOS", "X-Silo-Client-Build": "   "},
+			context: playback.ClientPlaybackContextV3{AppBuild: " 42 "},
+			want:    playback.ClientInfo{Name: "Silo iOS", Build: "42"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+			for name, value := range tc.headers {
+				req.Header.Set(name, value)
+			}
+			got := playbackClientInfoForStartV3(req, tc.context)
+			got.UserAgent = ""
+			if got != tc.want {
+				t.Fatalf("playbackClientInfoForStartV3() = %+v, want %+v", got, tc.want)
 			}
 		})
 	}

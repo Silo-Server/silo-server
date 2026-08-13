@@ -163,6 +163,46 @@ type ClientInfo struct {
 	IsCompat  bool
 }
 
+// LogAttrs renders the app identity as slog key/value pairs, skipping the
+// fields the client did not report. This is the single definition of those log
+// keys — every playback decision and the session-expiry line share it, so a
+// rename cannot leave one surface keyed differently from another. Skipping
+// empty values matters as much: browsers and Jellyfin-ecosystem clients report
+// none of them, and opslog persists the attrs it is handed, so emitting four
+// empty keys per decision would grow /admin/logs for no diagnostic value.
+func (c ClientInfo) LogAttrs() []any {
+	attrs := make([]any, 0, 8)
+	for _, pair := range [...]struct{ key, value string }{
+		{"client_name", c.Name},
+		{"client_version", c.Version},
+		{"client_build", c.Build},
+		{"client_channel", c.Channel},
+	} {
+		if pair.value != "" {
+			attrs = append(attrs, pair.key, pair.value)
+		}
+	}
+	return attrs
+}
+
+// ClientInfo returns the app identity stamped on the session when it was
+// created. Surfaces that only hold a session — expiry logging, route events
+// posted out of band — recover the reporting client through this instead of
+// re-reading request headers that may no longer be present.
+func (s *Session) ClientInfo() ClientInfo {
+	if s == nil {
+		return ClientInfo{}
+	}
+	return ClientInfo{
+		Name:      s.ClientName,
+		Version:   s.ClientVersion,
+		Build:     s.ClientBuild,
+		Channel:   s.ClientChannel,
+		UserAgent: s.ClientUserAgent,
+		IsCompat:  s.IsJellyfinCompat,
+	}
+}
+
 // WithClientInfo stores playback client metadata on a context.
 func WithClientInfo(ctx context.Context, info ClientInfo) context.Context {
 	if ctx == nil {
@@ -314,7 +354,11 @@ func (m *SessionManager) SetExpirationHook(fn func(*Session)) {
 func normalizeClientMetadataValue(value string, maxLen int) string {
 	value = strings.TrimSpace(value)
 	if maxLen > 0 && len(value) > maxLen {
-		value = value[:maxLen]
+		// Clamp on a rune boundary. Header values may carry multi-byte UTF-8, and
+		// a mid-rune byte slice produces a string Postgres refuses outright — the
+		// per-node session upserts share one transaction, so a single malformed
+		// client string would fail that whole node's sync rather than one row.
+		value = strings.ToValidUTF8(value[:maxLen], "")
 	}
 	return value
 }

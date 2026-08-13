@@ -150,7 +150,10 @@ export default function AdminActivity() {
           s.media_title?.toLowerCase().includes(q) ||
           s.series_name?.toLowerCase().includes(q) ||
           s.episode_name?.toLowerCase().includes(q) ||
-          getSessionClientLabel(s).toLowerCase().includes(q) ||
+          // Search the exact label, not the compact one: "which sessions are on
+          // build 5?" is the question this identity exists to answer, and the
+          // compact label deliberately omits the build.
+          getSessionClientLabelFull(s).toLowerCase().includes(q) ||
           s.client_user_agent?.toLowerCase().includes(q) ||
           s.client_ip?.toLowerCase().includes(q),
       );

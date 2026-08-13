@@ -892,9 +892,16 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 	if !validCapabilityEvidenceV3(c.AudioEvidence) {
 		return errors.New("audio_evidence is required and must be exact, platform_attested, or declared")
 	}
-	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 || len(ctx.AppBuild) > 64 || len(ctx.AppChannel) > 32 {
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Deliveries) > 16 || len(ctx.Device.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
 		return errors.New("capability list exceeds supported size")
 	}
+	// Build and channel are opaque diagnostic labels, so an over-long value is
+	// worth clamping and never worth refusing playback over. The header route
+	// (X-Silo-Client-Build / -Channel) clamps with the same helper; rejecting
+	// here would mean the same string plays from a header and 400s from the
+	// body.
+	ctx.AppBuild = normalizeClientMetadataValue(ctx.AppBuild, 64)
+	ctx.AppChannel = normalizeClientMetadataValue(ctx.AppChannel, 32)
 	deviceValues := []string{
 		ctx.Device.OSVersion, ctx.Device.Manufacturer, ctx.Device.Model,
 		ctx.Output.CurrentSink, ctx.Output.SinkType, ctx.Output.OutputContextID,

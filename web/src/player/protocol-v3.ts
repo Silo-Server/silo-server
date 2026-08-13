@@ -252,6 +252,14 @@ export interface ClientPlaybackContextV3 {
   protocol_version: number;
   form_factor: string;
   app_version: string;
+  /**
+   * Opaque per-platform build identifier and distribution channel — the
+   * body-level fallback for the `X-Silo-Client-Build` / `X-Silo-Client-Channel`
+   * headers. The server stores both verbatim and never parses or compares
+   * them. The web player has no build concept and omits them.
+   */
+  app_build?: string;
+  app_channel?: string;
   device: DeviceContextV3;
   output: OutputContextV3;
   /**

@@ -512,6 +512,34 @@ func TestRequestSchemaRequiredFieldsMatchValidators(t *testing.T) {
 	assertStringsEqual(t, "route_event.required", schemaStrings(t, routeEvent, "required"), []string{"protocol_version", "playback_attempt_id", "event"})
 }
 
+// TestRequestSchemasShareIdenticalDefs pins the one thing two copies of a
+// definition can never be trusted to keep on their own. Start and replan
+// deserialize the *same* Go types — ClientCodecCapabilitiesV3 and
+// ClientPlaybackContextV3 — through the same validator, so any $def they both
+// declare must be byte-identical. Adding a field to one schema and not the
+// other compiles, validates, and ships a contract that lies about one of the
+// two endpoints; this is what catches it.
+func TestRequestSchemasShareIdenticalDefs(t *testing.T) {
+	start := schemaValue(t, mustReadObject(t, filepath.Join(schemaRootV3, "v3", "start-request.schema.json")), "$defs").(map[string]any)
+	replan := schemaValue(t, mustReadObject(t, filepath.Join(schemaRootV3, "v3", "replan-request.schema.json")), "$defs").(map[string]any)
+
+	shared := make([]string, 0, len(start))
+	for name := range start {
+		if _, ok := replan[name]; ok {
+			shared = append(shared, name)
+		}
+	}
+	sort.Strings(shared)
+	if !slices.Contains(shared, "client_playback_context") || !slices.Contains(shared, "client_capabilities") {
+		t.Fatalf("shared $defs = %v, want the client contract definitions in both request schemas", shared)
+	}
+	for _, name := range shared {
+		if !reflect.DeepEqual(start[name], replan[name]) {
+			t.Errorf("$defs.%s differs between start-request and replan-request; both deserialize the same Go type", name)
+		}
+	}
+}
+
 func compileSchemasV3(t *testing.T) map[string]*jsonschema.Schema {
 	t.Helper()
 
