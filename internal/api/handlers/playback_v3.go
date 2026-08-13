@@ -198,6 +198,12 @@ type transcodeNodeEnumeratorV3 interface {
 	TranscodeNodeURLs() []string
 }
 
+// proxyNodeEnumeratorV3 is the proxy-pool counterpart, letting identity
+// planning narrow selection to proxies that can execute the plan's recipe.
+type proxyNodeEnumeratorV3 interface {
+	ProxyNodeURLs() []string
+}
+
 // hlsPlanningRegistryV3 returns the registry HLS deliveries plan against: the
 // local probe plus every pooled transcode node's advertised transformations.
 // Only availability of locally-defined specs widens (name and recipe version
@@ -829,16 +835,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			if previousNodeURL != "" {
 				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 			}
-			// A proxy serves these bytes directly to the client, so this server
-			// never sees a transport request for them. Mark the session so the
-			// idle reaper does not mistake "no local transport" for "abandoned"
-			// and kill a healthy stream. Always set it — a re-plan that moves a
-			// session back onto the API must clear a stale mark.
-			if err := h.sessionMgr.SetRemoteTransport(session.ID, servedByProxy); err != nil &&
-				!errors.Is(err, playback.ErrSessionNotFound) {
-				slog.WarnContext(r.Context(), "failed to mark proxy transport",
-					"component", "api", "playback_session_id", session.ID, "error", err)
-			}
+			h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
 			unlock()
 		},
 		rollback: func() {
@@ -875,44 +872,66 @@ func (h *PlaybackHandler) planIdentityProxyV3(r *http.Request, sessionID string,
 	// Reserve against the session id the rest of the transport uses, so a
 	// re-plan replaces its own reservation instead of double-counting, and the
 	// rollback path can release it.
-	plan := h.NodePlanner.PlanSession(sessionID, "", false, identityStreamBitrateKbpsV3(result))
+	plan := h.planIdentityProxySessionV3(r.Context(), sessionID, result)
 	if plan.ProxyNode == nil {
-		return nil, h.refuseLocalIdentityWorkV3(r, result)
-	}
-	if err := h.proxyCanExecutePlanV3(r.Context(), plan.ProxyNode.URL, result); err != nil {
-		slog.WarnContext(r.Context(), "protocol v3 proxy capability mismatch",
-			"component", "api", "node", plan.ProxyNode.URL, "error", err)
-		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-			releaser.ReleaseSession(sessionID)
-		}
 		return nil, h.refuseLocalIdentityWorkV3(r, result)
 	}
 	return plan.ProxyNode, nil
 }
 
-// proxyCanExecutePlanV3 verifies the selected proxy advertises every
-// server-executed transformation the plan froze.
+// applyRemoteTransportMarkV3 records whether the committed route's media bytes
+// leave this server or another node.
 //
-// Direct play copies bytes, so any healthy proxy can serve it and no capability
-// fetch is paid. A progressive remux is different: the proxy runs ffmpeg to
-// convert audio or strip a Dolby Vision RPU, and a proxy carrying a different
-// ffmpeg build (rolling upgrade, custom image) would fail at stream time —
-// a missing aac encoder 500s, a missing dovi_rpu filter is refused outright by
-// the remux itself. Validating here turns that into a selection-time decision
-// that falls back to a node which can do the work.
+// Every committed transition calls it, including the ones that serve locally:
+// a session replanned from a proxy onto the integrated transcoder would
+// otherwise keep a stale mark, and the widened idle grace it grants would hold
+// that session's stream and transcode slots for five minutes after the local
+// stream disconnected without an explicit stop.
+func (h *PlaybackHandler) applyRemoteTransportMarkV3(ctx context.Context, sessionID string, remote bool) {
+	if err := h.sessionMgr.SetRemoteTransport(sessionID, remote); err != nil &&
+		!errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to record transport locality",
+			"component", "api", "playback_session_id", sessionID, "remote", remote, "error", err)
+	}
+}
+
+// planIdentityProxySessionV3 asks the planner for a proxy, narrowing selection
+// to proxies that can execute the plan's frozen recipe when one is required.
 //
-// A proxy that does not answer the capability probe at all is treated as
-// incapable rather than assumed good: an older proxy predating the endpoint is
-// exactly the mismatched build this check exists to catch.
-func (h *PlaybackHandler) proxyCanExecutePlanV3(ctx context.Context, proxyURL string, result playback.PlannerResultV3) error {
-	if !planRequiresServerTransformationsV3(result.Plan) {
-		return nil
+// The narrowing happens before selection rather than after, mirroring how HLS
+// filters transcode nodes: rejecting a single round-robin pick would abandon
+// the whole pool, so a capable sibling with free capacity would sit unused
+// while playback fell back to the API — or was refused outright when local
+// fallback is disabled.
+//
+// Direct play copies bytes and needs no recipe, so it skips the probe entirely
+// and any healthy proxy serves it.
+func (h *PlaybackHandler) planIdentityProxySessionV3(ctx context.Context, sessionID string, result playback.PlannerResultV3) nodepool.Plan {
+	estBitrate := identityStreamBitrateKbpsV3(result)
+	selector, selectable := h.NodePlanner.(capabilitySessionPlannerV3)
+	enumerator, enumerable := h.NodePlanner.(proxyNodeEnumeratorV3)
+	if !selectable || !enumerable || !planRequiresServerTransformationsV3(result.Plan) {
+		return h.NodePlanner.PlanSession(sessionID, "", false, estBitrate)
 	}
-	transformations, err := h.remoteTransformationsV3(ctx, proxyURL)
-	if err != nil {
-		return err
+
+	capable := make(map[string]struct{})
+	for nodeURL, advertised := range h.pooledNodeTransformationsV3(ctx, enumerator.ProxyNodeURLs()) {
+		if validateAdvertisedTransformationsV3(result.Plan, advertised) == nil {
+			capable[nodeURL] = struct{}{}
+		}
 	}
-	return validateAdvertisedTransformationsV3(result.Plan, transformations)
+	if len(capable) == 0 {
+		slog.WarnContext(ctx, "protocol v3 no proxy advertises the planned recipe",
+			"component", "api", "delivery", result.Plan.Delivery)
+	}
+	// The predicate runs under the planner lock: a set lookup only.
+	return selector.PlanSessionWith(sessionID, "", false, estBitrate, func(node *nodepool.Node) bool {
+		if node == nil {
+			return false
+		}
+		_, ok := capable[node.URL]
+		return ok
+	})
 }
 
 // refuseLocalIdentityWorkV3 enforces playback.local_transcode_fallback for the
@@ -1186,6 +1205,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			}
 			committed = true
 			previous := h.tm.SwapTranscodeSession(session.ID, ts)
+			h.applyRemoteTransportMarkV3(r.Context(), session.ID, false)
 			unlock()
 			if previous != nil && previous != ts {
 				_ = previous.Close()
@@ -1244,6 +1264,10 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
 	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, node.URL, playback.TranscodeOpts{InputPath: req.InputPath, SessionID: session.ID, TranscodeTransportID: transportID, SourceVideoCodec: req.SourceVideoCodec, SourceVideoProfile: req.SourceVideoProfile, SourceVideoBitDepth: req.SourceVideoBitDepth, SoftwareVideoDecode: req.SoftwareVideoDecode, VideoBitstreamFilter: req.VideoBitstreamFilter, SeekSeconds: req.SeekSeconds, StreamOriginSeconds: req.StreamOriginSeconds, CopySeekAnchorResolved: req.CopySeekAnchorResolved, StartSegmentNumber: req.StartSegmentNumber, TargetResolution: req.TargetResolution, TargetCodecVideo: req.TargetCodecVideo, TargetCodecAudio: req.TargetCodecAudio, TargetAudioChannels: req.TargetAudioChannels, TargetAudioBitrateKbps: req.TargetAudioBitrateKbps, TargetBitrateKbps: req.TargetBitrateKbps, SegmentDuration: req.SegmentDuration, HWAccel: hw, AudioTrackIndex: req.AudioTrackIndex, SubtitleTrackIndex: req.SubtitleTrackIndex, SubtitleBurnIn: req.SubtitleBurnIn, SubtitleCodec: req.SubtitleCodec, TotalDuration: req.TotalDuration})
 	url := h.buildProxyManifestURL(card, nodePlan.ProxyNode)
+	// buildProxyManifestURL only returns an absolute proxy URL when a proxy was
+	// planned and the token could be signed; otherwise the client fetches the
+	// manifest from this server and the local liveness path applies.
+	servedByProxy := nodePlan.ProxyNode != nil && strings.HasPrefix(url, "http")
 	committed := false
 	previousNodeURL := session.TranscodeNodeURL
 	previousTransportID := remoteTransportID(session)
@@ -1257,6 +1281,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		if previousNodeURL != "" {
 			h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 		}
+		h.applyRemoteTransportMarkV3(r.Context(), session.ID, servedByProxy)
 		unlock()
 	}, rollback: func() {
 		if committed {

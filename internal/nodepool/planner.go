@@ -193,24 +193,27 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 	}
 	proxies := p.proxies.Nodes()
 	transcodes := p.transcodes.Nodes()
+	// Group health is computed over the full pool before any narrowing:
+	// eligibility restricts what may be selected, not co-location semantics.
 	groupHealthy := groupHealth(proxies, transcodes)
-	if eligible != nil {
-		filtered := make([]*Node, 0, len(transcodes))
-		for _, node := range transcodes {
-			if eligible(node) {
-				filtered = append(filtered, node)
-			}
-		}
-		transcodes = filtered
-	}
 
 	var plan Plan
 	if needsTranscode {
+		if eligible != nil {
+			transcodes = filterNodes(transcodes, eligible)
+		}
 		plan.TranscodeNode = p.pickTranscode(transcodes, proxies, groupHealthy, currentTranscodeURL, estBitrateKbps, now)
 		if plan.TranscodeNode != nil {
 			plan.ProxyNode = p.pickProxy(proxies, groupHealthy, plan.TranscodeNode.Group, estBitrateKbps, now)
 		}
 	} else {
+		// A proxy-only plan has no transcode node, so the predicate applies to
+		// the proxy: it is the node that will execute the recipe. Filtering
+		// before selection means a capability mismatch skips to a capable
+		// sibling instead of abandoning the pool after one round-robin pick.
+		if eligible != nil {
+			proxies = filterNodes(proxies, eligible)
+		}
 		plan.ProxyNode = p.pickProxy(proxies, groupHealthy, nil, estBitrateKbps, now)
 	}
 
@@ -226,6 +229,36 @@ func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTr
 		p.reserved[sessionID] = res
 	}
 	return plan
+}
+
+// filterNodes returns the nodes accepted by keep, preserving pool order so
+// round-robin cursors stay meaningful across selections.
+func filterNodes(nodes []*Node, keep func(*Node) bool) []*Node {
+	filtered := make([]*Node, 0, len(nodes))
+	for _, node := range nodes {
+		if keep(node) {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+
+// ProxyNodeURLs lists the URLs of every enabled pooled proxy node, healthy or
+// not, mirroring TranscodeNodeURLs. Capability planning wants the deployment's
+// toolchain; an unreachable node excludes itself when its capability fetch
+// fails.
+func (p *Planner) ProxyNodeURLs() []string {
+	if p == nil || p.proxies == nil {
+		return nil
+	}
+	nodes := p.proxies.Nodes()
+	urls := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node != nil && node.URL != "" {
+			urls = append(urls, node.URL)
+		}
+	}
+	return urls
 }
 
 // TranscodeNodeURLs lists the URLs of every enabled pooled transcode node,

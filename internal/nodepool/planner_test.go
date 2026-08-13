@@ -1,6 +1,7 @@
 package nodepool
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -613,5 +614,60 @@ func TestPlanDownloadFallsBackWhenOriginGroupHasNoProxy(t *testing.T) {
 	plan := planner.PlanDownload("download-fallback", "host-missing")
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
 		t.Fatalf("plan = %+v, want proxy-a fallback", plan)
+	}
+}
+
+// A proxy-only plan applies the eligibility predicate to the proxy: it is the
+// node that executes the recipe. Without this, one incapable round-robin pick
+// would abandon a pool that still holds a capable sibling.
+func TestPlanSessionWithFiltersProxiesForProxyOnlyPlans(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
+		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
+	})
+	planner := NewPlanner(proxies, NewTranscodePool())
+
+	// Only the upgraded proxy can run the recipe; every selection must land
+	// there regardless of where the round-robin cursor happens to be.
+	for i := 0; i < 4; i++ {
+		plan := planner.PlanSessionWith("session-"+strconv.Itoa(i), "", false, 0, func(n *Node) bool {
+			return n.URL == "http://proxy-new"
+		})
+		if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-new" {
+			t.Fatalf("selection %d = %#v, want the capable proxy", i, plan.ProxyNode)
+		}
+	}
+}
+
+func TestPlanSessionWithReturnsNoProxyWhenNoneAreCapable(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true}})
+	planner := NewPlanner(proxies, NewTranscodePool())
+
+	plan := planner.PlanSessionWith("session-none", "", false, 0, func(*Node) bool { return false })
+	if plan.ProxyNode != nil {
+		t.Fatalf("proxy = %#v, want none when the pool cannot execute the recipe", plan.ProxyNode)
+	}
+	// An empty plan must not leave a reservation pinning capacity.
+	if _, reserved := planner.reserved["session-none"]; reserved {
+		t.Fatal("an unsatisfiable plan left a reservation behind")
+	}
+}
+
+func TestProxyNodeURLsListsEnabledProxies(t *testing.T) {
+	proxies := NewProxyPool()
+	proxies.SetNodes([]*Node{
+		{ID: 1, URL: "http://proxy-1", Enabled: true, Healthy: true},
+		{ID: 2, URL: "http://proxy-2", Enabled: true, Healthy: false},
+	})
+	planner := NewPlanner(proxies, NewTranscodePool())
+
+	// Unhealthy nodes are still listed: capability planning wants the
+	// deployment's toolchain, and an unreachable node excludes itself when its
+	// capability fetch fails.
+	urls := planner.ProxyNodeURLs()
+	if len(urls) != 2 {
+		t.Fatalf("proxy urls = %v, want both pooled proxies", urls)
 	}
 }

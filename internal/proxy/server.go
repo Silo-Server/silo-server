@@ -103,6 +103,17 @@ func (s *Server) Handler() http.Handler {
 			"Accept", "Authorization", "Content-Type", "Range",
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
+		// direct_stream_resume_v1 has the client re-request a byte range with
+		// If-Range against the entity tag it stored. Cross-origin JavaScript
+		// can only read a response header that is explicitly exposed, so
+		// without these the client can send the conditional request headers
+		// above but never learn the values to put in them — the resume
+		// contract silently degrades to a full restart on a proxy that is on a
+		// different origin than the web app, which is the normal deployment.
+		ExposedHeaders: []string{
+			"Accept-Ranges", "Content-Encoding", "Content-Length", "Content-Range",
+			"ETag", "Last-Modified",
+		},
 		MaxAge: 86400,
 	}))
 	r.Get("/api/v1/health", s.handleHealth)
