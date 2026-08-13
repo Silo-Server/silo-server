@@ -62,6 +62,10 @@ type Session struct {
 	activeTransportCount       int
 	replacementPlayMethod      PlayMethod
 	streamRevision             uint64
+	// remoteTransport marks a session whose media bytes are served by another
+	// node, so this server never sees the transport request that would
+	// otherwise keep it alive. See SetRemoteTransport.
+	remoteTransport bool
 }
 
 // SessionStreamState stores the mutable stream-specific details that can
@@ -230,6 +234,12 @@ const (
 	// DefaultActiveSessionGrace is how long an unpaused session may go without
 	// observed playback activity before it stops counting toward limits.
 	DefaultActiveSessionGrace = 45 * time.Second
+
+	// remoteTransportIdleGrace is the floor on the idle windows for a session
+	// whose media is served by another node. See remoteTransportGrace: it must
+	// outlast a heartbeat gap on an otherwise healthy proxy stream, while still
+	// reaping a session whose client vanished without stopping.
+	remoteTransportIdleGrace = 5 * time.Minute
 
 	// DefaultPausedSessionGrace is the longer grace period for paused
 	// sessions. It must comfortably cover an intentional pause (dinner
@@ -1095,6 +1105,34 @@ func (m *SessionManager) BeginTransport(sessionID string) error {
 	return nil
 }
 
+// SetRemoteTransport records whether this session's media bytes are served by
+// another node (a proxy), rather than by a transport request this server
+// handles itself.
+//
+// A locally-served stream is protected from the idle reaper by
+// BeginTransport/EndTransport around the serve call. A proxy-served stream
+// never enters that path: the client talks to the proxy directly, so from this
+// server's point of view a healthy multi-hour stream looks identical to an
+// abandoned session, and a heartbeat gap longer than the active grace would
+// reap it mid-playback — after which progress, stop, and replan all fail with
+// session-not-found while bytes are still flowing.
+//
+// This marks the session as remotely transported for its whole lifetime rather
+// than per-request, because there is no request to bracket. Progress
+// heartbeats still drive UI liveness; this only prevents reaping.
+func (m *SessionManager) SetRemoteTransport(sessionID string, remote bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.remoteTransport = remote
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // EndTransport decrements the count of in-flight media transport requests for
 // the session and refreshes its activity timestamp.
 func (m *SessionManager) EndTransport(sessionID string) error {
@@ -1275,6 +1313,7 @@ func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*
 		if s.activeTransportCount > 0 {
 			continue
 		}
+		activeIdle, pausedIdle := remoteTransportGrace(s, activeIdle, pausedIdle)
 		if m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle) {
 			cp := *s
 			expired = append(expired, &cp)
@@ -1305,7 +1344,32 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	return !m.sessionIsInactiveLocked(s, now, m.activeGrace, m.pausedGrace)
+	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace)
+}
+
+// remoteTransportGrace widens the idle windows for a session whose bytes are
+// served by another node.
+//
+// A locally-served stream is held open by an in-flight transport request. A
+// proxy-served one has no such request here, so it is protected only by the
+// client's progress heartbeats — and a gap longer than the active grace would
+// reap it while media is still flowing. The windows are widened rather than
+// made infinite: there is no absolute session lifetime cap in this manager, so
+// unconditional immunity would leak a session forever whenever a client
+// disappears without stopping. A client that has gone quiet for this long has
+// genuinely stopped watching.
+func remoteTransportGrace(s *Session, activeIdle, pausedIdle time.Duration) (time.Duration, time.Duration) {
+	if s == nil || !s.remoteTransport {
+		return activeIdle, pausedIdle
+	}
+	if activeIdle > 0 && activeIdle < remoteTransportIdleGrace {
+		activeIdle = remoteTransportIdleGrace
+	}
+	if pausedIdle > 0 && pausedIdle < remoteTransportIdleGrace {
+		pausedIdle = remoteTransportIdleGrace
+	}
+	return activeIdle, pausedIdle
 }
 
 func (m *SessionManager) sessionIsInactiveLocked(s *Session, now time.Time, activeIdle, pausedIdle time.Duration) bool {

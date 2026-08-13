@@ -3716,12 +3716,13 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
 	stubCopySeekAnchorV3(handler)
-	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: "http://proxy-1/"}}}
+	proxy := capableProxyStubV3(t)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL + "/"}}}
 
 	file := v3HandlerFixtureFile(t)
 	file.VideoTracks[0].DVProfile = 7
 
-	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"})
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"})
 	plan.Timeline = playback.TimelineV3{SourceStartSeconds: 39.5}
 
 	transport, transportErr := handler.prepareTransportV3(
@@ -3735,13 +3736,14 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 	}
 	defer transport.rollback()
 
-	if !strings.HasPrefix(transport.url, "http://proxy-1/stream/remux/") {
+	remuxPrefix := proxy.URL + "/stream/remux/"
+	if !strings.HasPrefix(transport.url, remuxPrefix) {
 		t.Fatalf("remux stream url = %q, want a proxy /stream/remux URL", transport.url)
 	}
 	if !strings.Contains(transport.url, "seek=39.5") {
 		t.Fatalf("remux stream url = %q, want the resolved seek preserved", transport.url)
 	}
-	token := strings.TrimSuffix(strings.TrimPrefix(transport.url, "http://proxy-1/stream/remux/"), "?seek=39.5")
+	token := strings.TrimSuffix(strings.TrimPrefix(transport.url, remuxPrefix), "?seek=39.5")
 	claims, err := streamtoken.Verify(token, handler.JWTSecret)
 	if err != nil {
 		t.Fatalf("verify proxy stream token: %v", err)
@@ -3787,7 +3789,7 @@ func TestPrepareTransportV3RefusesLocalRemuxWhenFallbackDisabled(t *testing.T) {
 		&playback.Session{ID: "session-remux-refused", UserID: 7, ProfileID: "profile-1"},
 		v3HandlerFixtureFile(t),
 		playback.PlannerResultV3{
-			Plan:           identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}),
+			Plan:           identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"}),
 			PlayMethod:     playback.PlayRemux,
 			TranscodeAudio: true,
 		},
@@ -3836,5 +3838,145 @@ func TestPrepareTransportV3ReleasesProxyReservationOnRollback(t *testing.T) {
 
 	if len(planner.released) != 1 || planner.released[0] != "session-rollback" {
 		t.Fatalf("released reservations = %v, want the session released once", planner.released)
+	}
+}
+
+// capableProxyStubV3 is a proxy that advertises the audio_to_aac and DV strip
+// recipes, mirroring the /hw-capabilities endpoint a real proxy now serves.
+func capableProxyStubV3(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hw-capabilities" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
+			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+		}})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestPrepareTransportV3KeepsRemuxLocalWhenProxyLacksTheRecipe(t *testing.T) {
+	// A proxy on an older ffmpeg build advertises no aac encoder. Sending the
+	// remux there would 500 at stream time, so selection must reject it.
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
+			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: "2"},
+		}})
+	}))
+	defer proxy.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	planner := &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
+	handler.NodePlanner = planner
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-incapable-proxy", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{
+			Plan:           identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"}),
+			PlayMethod:     playback.PlayRemux,
+			TranscodeAudio: true,
+		},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if strings.HasPrefix(transport.url, proxy.URL) {
+		t.Fatalf("stream url = %q, want local fallback when the proxy lacks the recipe", transport.url)
+	}
+	if len(planner.released) != 1 {
+		t.Fatalf("released = %v, want the rejected proxy's reservation released", planner.released)
+	}
+}
+
+func TestPrepareTransportV3DirectPlaySkipsProxyCapabilityProbe(t *testing.T) {
+	// Direct play copies bytes and needs no recipe, so it must not pay a
+	// capability fetch nor be rejected by one.
+	probes := 0
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probes++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer proxy.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-direct-noprobe", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryOriginalHTTPV3), PlayMethod: playback.PlayDirect},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if !strings.HasPrefix(transport.url, proxy.URL+"/stream/direct/") {
+		t.Fatalf("stream url = %q, want the proxy direct URL", transport.url)
+	}
+	if probes != 0 {
+		t.Fatalf("capability probes = %d, want none for direct play", probes)
+	}
+}
+
+func TestIdentityStreamBitrateKbpsV3PrefersEffectiveRecipe(t *testing.T) {
+	// A downmixing remux egresses less than the source, so the effective
+	// recipe — not the source descriptor — is what a capped proxy admits on.
+	effective := 1_200
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3)
+	plan.EffectiveRecipe.BitrateKbps = &effective
+
+	if got := identityStreamBitrateKbpsV3(playback.PlannerResultV3{Plan: plan}); got != effective {
+		t.Fatalf("bitrate estimate = %d, want the effective recipe value %d", got, effective)
+	}
+
+	plan.EffectiveRecipe.BitrateKbps = nil
+	if got := identityStreamBitrateKbpsV3(playback.PlannerResultV3{Plan: plan}); got != 5_673 {
+		t.Fatalf("bitrate estimate = %d, want the source fallback 5673", got)
+	}
+}
+
+func TestPrepareTransportV3MarksProxySessionsAsRemotelyTransported(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager)
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: "http://proxy-1"}}}
+
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		session,
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryOriginalHTTPV3), PlayMethod: playback.PlayDirect},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	transport.commit()
+
+	// The client talks to the proxy, so this server sees no transport request.
+	// Without the remote-transport mark the idle sweep would reap a healthy
+	// stream as soon as heartbeats lapsed.
+	if expired := manager.CleanInactive(time.Nanosecond, time.Nanosecond); len(expired) != 0 {
+		t.Fatalf("expired %d proxy-served sessions, want them preserved", len(expired))
+	}
+	if _, err := manager.GetSession(session.ID); err != nil {
+		t.Fatalf("proxy-served session was reaped: %v", err)
 	}
 }

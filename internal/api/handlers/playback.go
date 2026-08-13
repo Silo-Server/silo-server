@@ -49,6 +49,7 @@ type SessionManagerInterface interface {
 	TouchActivity(sessionID string) error
 	BeginTransport(sessionID string) error
 	EndTransport(sessionID string) error
+	SetRemoteTransport(sessionID string, remote bool) error
 	SetEffectiveMediaFileID(sessionID string, fileID int) error
 	SetTranscodeNodeURL(sessionID, url string) error
 	SetTranscodeRoute(sessionID string, route playback.TranscodeRoute) error

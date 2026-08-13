@@ -125,10 +125,32 @@ func (s *Server) Handler() http.Handler {
 	// Admin routes — bearer-auth protected.
 	r.Group(func(r chi.Router) {
 		r.Use(s.requireBearer)
+		r.Get("/hw-capabilities", s.handleHWCapabilities)
 		r.Post("/admin/force-reload", s.handleForceReload)
 		r.Get("/status", s.handleStatus)
 	})
 	return r
+}
+
+// handleHWCapabilities advertises what this proxy's ffmpeg can actually do, in
+// the same shape and at the same path as a transcode node.
+//
+// A proxy executes recipes too: /stream/remux runs ffmpeg to convert audio or
+// strip a Dolby Vision RPU. Without this endpoint the API has no way to tell
+// whether the proxy it just picked can run the transformations a plan froze, so
+// a pool whose proxies carry a different ffmpeg build (a rolling upgrade, a
+// custom image) would fail at stream time rather than at selection time.
+func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
+	ffmpegPath := ""
+	if cfg := s.watcher.Config(); cfg != nil {
+		ffmpegPath = cfg.Playback.FFmpegPath
+	}
+	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
+	info.Transformations = playback.ProbeTransformationRegistryV3(r.Context(), ffmpegPath).Advertised()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(info); err != nil {
+		slog.WarnContext(r.Context(), "encode proxy capabilities", "component", "proxy", "error", err)
+	}
 }
 
 type healthResponse struct {

@@ -181,6 +181,8 @@ func (failingSessionManager) BeginTransport(string) error { return nil }
 
 func (failingSessionManager) EndTransport(string) error { return nil }
 
+func (failingSessionManager) SetRemoteTransport(string, bool) error { return nil }
+
 func (failingSessionManager) SetEffectiveMediaFileID(string, int) error { return nil }
 
 func (failingSessionManager) SetTranscodeNodeURL(string, string) error { return nil }

@@ -829,6 +829,16 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			if previousNodeURL != "" {
 				h.tm.StopRemoteTranscode(previousTransportID, previousNodeURL)
 			}
+			// A proxy serves these bytes directly to the client, so this server
+			// never sees a transport request for them. Mark the session so the
+			// idle reaper does not mistake "no local transport" for "abandoned"
+			// and kill a healthy stream. Always set it — a re-plan that moves a
+			// session back onto the API must clear a stale mark.
+			if err := h.sessionMgr.SetRemoteTransport(session.ID, servedByProxy); err != nil &&
+				!errors.Is(err, playback.ErrSessionNotFound) {
+				slog.WarnContext(r.Context(), "failed to mark proxy transport",
+					"component", "api", "playback_session_id", session.ID, "error", err)
+			}
 			unlock()
 		},
 		rollback: func() {
@@ -869,7 +879,40 @@ func (h *PlaybackHandler) planIdentityProxyV3(r *http.Request, sessionID string,
 	if plan.ProxyNode == nil {
 		return nil, h.refuseLocalIdentityWorkV3(r, result)
 	}
+	if err := h.proxyCanExecutePlanV3(r.Context(), plan.ProxyNode.URL, result); err != nil {
+		slog.WarnContext(r.Context(), "protocol v3 proxy capability mismatch",
+			"component", "api", "node", plan.ProxyNode.URL, "error", err)
+		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+			releaser.ReleaseSession(sessionID)
+		}
+		return nil, h.refuseLocalIdentityWorkV3(r, result)
+	}
 	return plan.ProxyNode, nil
+}
+
+// proxyCanExecutePlanV3 verifies the selected proxy advertises every
+// server-executed transformation the plan froze.
+//
+// Direct play copies bytes, so any healthy proxy can serve it and no capability
+// fetch is paid. A progressive remux is different: the proxy runs ffmpeg to
+// convert audio or strip a Dolby Vision RPU, and a proxy carrying a different
+// ffmpeg build (rolling upgrade, custom image) would fail at stream time —
+// a missing aac encoder 500s, a missing dovi_rpu filter is refused outright by
+// the remux itself. Validating here turns that into a selection-time decision
+// that falls back to a node which can do the work.
+//
+// A proxy that does not answer the capability probe at all is treated as
+// incapable rather than assumed good: an older proxy predating the endpoint is
+// exactly the mismatched build this check exists to catch.
+func (h *PlaybackHandler) proxyCanExecutePlanV3(ctx context.Context, proxyURL string, result playback.PlannerResultV3) error {
+	if !planRequiresServerTransformationsV3(result.Plan) {
+		return nil
+	}
+	transformations, err := h.remoteTransformationsV3(ctx, proxyURL)
+	if err != nil {
+		return err
+	}
+	return validateAdvertisedTransformationsV3(result.Plan, transformations)
 }
 
 // refuseLocalIdentityWorkV3 enforces playback.local_transcode_fallback for the
