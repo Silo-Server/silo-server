@@ -400,6 +400,17 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			name:                    "five digit episode number is not truncated",
+			path:                    "/tv/Long Running Show/Long Running Show S23E11620.mkv",
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Long Running Show",
+			wantTitle:               "Long Running Show",
+			wantEpisodePattern:      false,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "mixed season dir stays series",
 			path:                    "/mixed/Show Name/Season 01/Show Name S01E03.mkv",
 			libraryType:             "mixed",
