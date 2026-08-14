@@ -42,6 +42,13 @@ func TestSQLiteJellycompatDisplayPrefs(t *testing.T) {
 	storetest.RunJellycompatDisplayPrefs(t, newConformanceStore)
 }
 
+// TestSQLiteDeviceRegistry runs the device-registry conformance tests —
+// custom-name rename semantics included — against the per-user SQLite backend;
+// the Postgres backend runs the same suite in internal/userstore/pgstore.
+func TestSQLiteDeviceRegistry(t *testing.T) {
+	storetest.RunDeviceRegistry(t, newConformanceStore)
+}
+
 func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
 	ctx := context.Background()
 	store := newConformanceStore(t)

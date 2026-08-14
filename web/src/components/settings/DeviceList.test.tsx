@@ -174,6 +174,36 @@ describe("DeviceList", () => {
     const [onlyItem] = items;
     expect(within(onlyItem!).getByText("Living Room")).toBeInTheDocument();
   });
+
+  it("shows the chosen name over the reported one", () => {
+    renderList([device({ device_id: "tv", device_name: "Apple TV", custom_name: "Bedroom TV" })]);
+
+    expect(screen.getByText("Bedroom TV")).toBeInTheDocument();
+    expect(screen.queryByText("Apple TV")).not.toBeInTheDocument();
+  });
+
+  // The reported name stays searchable after a rename: it is still what the
+  // device calls itself in its own settings screens.
+  it("finds a renamed device by either name", () => {
+    const devices = [
+      device({ device_id: "tv", device_name: "Apple TV", custom_name: "Bedroom TV" }),
+      device({ device_id: "web", device_name: "Chrome" }),
+    ];
+    const props = {
+      devices,
+      selectedDeviceId: null,
+      onSelect: vi.fn(),
+      onSearchChange: vi.fn(),
+      now: NOW,
+    };
+    const { rerender } = render(<DeviceList {...props} search="bedroom" />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Bedroom TV")).toBeInTheDocument();
+
+    rerender(<DeviceList {...props} search="apple" />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Bedroom TV")).toBeInTheDocument();
+  });
 });
 
 describe("DeviceList at scale", () => {

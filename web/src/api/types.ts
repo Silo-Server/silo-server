@@ -2999,8 +2999,11 @@ export interface AdminDeviceProfileSummary {
 /** One device the signed-in viewer watches on. */
 export interface UserDevice {
   device_id: string;
+  /** The client-reported name; registration keeps it current. */
   device_name: string;
   device_platform: string;
+  /** The name this profile chose; absent until set. Render custom_name || device_name. */
+  custom_name?: string;
   last_seen_at: string;
   profile_id: string;
   profile_name: string;

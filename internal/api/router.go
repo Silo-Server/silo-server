@@ -2212,6 +2212,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Route("/devices", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", deviceHandler.HandleListDevices)
+						r.Patch("/{device_id}", deviceHandler.HandleRenameDevice)
 						r.Delete("/{device_id}", deviceHandler.HandleForgetDevice)
 						r.Delete("/{device_id}/settings", deviceHandler.HandleClearDeviceSettings)
 					})

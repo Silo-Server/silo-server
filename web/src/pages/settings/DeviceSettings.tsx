@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Info, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import type { UserDevice } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   classifyPlatform,
@@ -13,7 +14,13 @@ import {
 import { DeviceList, lastSeenLabel } from "@/components/settings/DeviceList";
 import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
-import { useClearDeviceSettings, useForgetDevice, useMyDevices } from "@/hooks/queries/devices";
+import {
+  deviceDisplayName,
+  useClearDeviceSettings,
+  useForgetDevice,
+  useMyDevices,
+  useRenameDevice,
+} from "@/hooks/queries/devices";
 import {
   settingsCapabilitiesSupportKey,
   useSettingsCapabilities,
@@ -264,6 +271,28 @@ function DeviceDetail({
   const clearValue = useClearSettingValue();
   const clearDevice = useClearDeviceSettings();
   const forgetDevice = useForgetDevice();
+  const renameDevice = useRenameDevice();
+
+  // Renaming edits in place where the name is shown. The draft starts from the
+  // custom name only: the reported name sits in the placeholder, so an empty
+  // save reads as what it is — going back to what the device calls itself.
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const displayName = deviceDisplayName(device) || "Unknown device";
+
+  const submitRename = () => {
+    const name = draftName.trim();
+    renameDevice.mutate(
+      { deviceId: device.device_id, profileId: targetProfileId, name },
+      {
+        onSuccess: () => {
+          toast.success(name ? "Device renamed" : "Back to the device's own name");
+          setRenaming(false);
+        },
+        onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't rename"),
+      },
+    );
+  };
 
   const identity = {
     scope: "profile_device" as const,
@@ -299,23 +328,81 @@ function DeviceDetail({
             <PlatformIcon kind={kind} className="h-5 w-5" />
           </span>
           <div className="min-w-0 flex-1">
-            {/* Wraps rather than truncating: on a phone the name is the whole
-                subject of the screen, and "Living Room Apple…" is not it. */}
-            <h3 className="text-lg leading-tight font-semibold tracking-tight">
-              {device.device_name || "Unknown device"}
-            </h3>
+            {renaming ? (
+              <form
+                className="flex flex-col gap-2 sm:flex-row sm:items-center"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitRename();
+                }}
+              >
+                <Input
+                  value={draftName}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  placeholder={device.device_name || "Device name"}
+                  aria-label="Device name"
+                  // The server clamps to the same 120 characters a reported
+                  // name may carry.
+                  maxLength={120}
+                  autoFocus
+                  className="h-11 text-base sm:h-9 sm:text-sm"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    disabled={renameDevice.isPending}
+                    className="min-h-11 sm:h-9 sm:min-h-0 sm:px-3 sm:text-sm"
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setRenaming(false)}
+                    className="text-muted-foreground min-h-11 sm:h-9 sm:min-h-0 sm:px-3 sm:text-sm"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              /* Wraps rather than truncating: on a phone the name is the whole
+                 subject of the screen, and "Living Room Apple…" is not it. */
+              <h3 className="text-lg leading-tight font-semibold tracking-tight">{displayName}</h3>
+            )}
             <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
               {[
+                // With three renamed Apple TVs, the reported name is how you
+                // check you renamed the right one.
+                device.custom_name && device.device_name
+                  ? `reports as “${device.device_name}”`
+                  : null,
                 platformKindLabel(kind),
                 device.is_current_device ? "using now" : lastSeenLabel(device.last_seen_at, now),
                 changedCount > 0
                   ? `${changedCount} ${changedCount === 1 ? "thing" : "things"} set differently`
                   : "nothing changed here",
-              ].join(" · ")}
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           </div>
         </div>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          {!renaming ? (
+            <Button
+              variant="outline"
+              className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
+              onClick={() => {
+                setDraftName(device.custom_name ?? "");
+                setRenaming(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Rename
+            </Button>
+          ) : null}
           {changedCount > 0 ? (
             <Button
               variant="outline"
@@ -324,7 +411,7 @@ function DeviceDetail({
               onClick={() => {
                 if (
                   !window.confirm(
-                    `Clear all ${changedCount} ${changedCount === 1 ? "change" : "changes"} on ${device.device_name}?`,
+                    `Clear all ${changedCount} ${changedCount === 1 ? "change" : "changes"} on ${displayName}?`,
                   )
                 ) {
                   return;
@@ -350,7 +437,7 @@ function DeviceDetail({
               onClick={() => {
                 if (
                   !window.confirm(
-                    `Forget ${device.device_name}? Its settings are removed and it disappears from this list until it's used again.`,
+                    `Forget ${displayName}? Its settings are removed and it disappears from this list until it's used again.`,
                   )
                 ) {
                   return;
@@ -482,7 +569,7 @@ function DeviceDetail({
           setAppearanceOpen(false);
         }}
         resetLabel={`Use ${ownerLabel} style`}
-        eyebrow={device.device_name || "This device"}
+        eyebrow={deviceDisplayName(device) || "This device"}
         status={setValue.isPending ? "Saving…" : "Changes saved automatically"}
       />
 

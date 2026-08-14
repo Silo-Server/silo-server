@@ -243,4 +243,9 @@ type DeviceRegistry interface {
 	// are deleted separately through the scoped setting deletes, so forgetting
 	// a device shared by two profiles leaves the other profile's row intact.
 	ForgetDevice(ctx context.Context, profileID, deviceID string) error
+	// RenameDevice sets one profile's custom name for a device; an empty name
+	// clears it, returning the device to its reported name. It updates only an
+	// existing registry row — naming a device the profile never registered is
+	// an authorization question for the caller, not a reason to invent a row.
+	RenameDevice(ctx context.Context, profileID, deviceID, customName string) error
 }

@@ -66,6 +66,31 @@ export function useClearDeviceSettings() {
 }
 
 /**
+ * Set the profile's own name for a device, or clear it with an empty name so
+ * the device shows its reported name again. Renaming moves no settings, so
+ * only the device list needs invalidating.
+ */
+export function useRenameDevice() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ deviceId, profileId, name }: DeviceTarget & { name: string }) =>
+      api(`/devices/${encodeURIComponent(deviceId)}${targetQuery({ deviceId, profileId })}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: deviceKeys.all });
+    },
+  });
+}
+
+/** What to call a device: the name its owner chose, else what it reports. */
+export function deviceDisplayName(device: UserDevice): string {
+  return device.custom_name || device.device_name;
+}
+
+/**
  * Devices grouped the way the list reads them: by how recently they were used,
  * because that is how someone identifies a device they own.
  */

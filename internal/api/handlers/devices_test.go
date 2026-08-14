@@ -303,6 +303,175 @@ func TestClearDeviceSettings_KeepsRegistryRow(t *testing.T) {
 	}
 }
 
+// --- Rename ---
+
+func renameDevice(
+	t *testing.T, h *DeviceHandler, target, deviceID, profileID, body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, target, strings.NewReader(body))
+	req.Header.Set(deviceIDHeader, "device-1")
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1})
+	req = req.WithContext(apimw.SetProfileID(ctx, profileID))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("device_id", deviceID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	h.HandleRenameDevice(rec, req)
+	return rec
+}
+
+// customNameFor reads a device's stored custom name straight from the
+// registry, so a test can check another profile's row without going through
+// the handler's own profile filtering.
+func customNameFor(t *testing.T, store userstore.UserStore, profileID, deviceID string) string {
+	t.Helper()
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		t.Fatal("store does not implement DeviceRegistry")
+	}
+	devices, err := registry.ListDevices(context.Background())
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	for _, device := range devices {
+		if device.ProfileID == profileID && device.DeviceID == deviceID {
+			return device.CustomName
+		}
+	}
+	t.Fatalf("device %s/%s is not registered", profileID, deviceID)
+	return ""
+}
+
+func TestRenameDevice_SetsCustomNameInListResponse(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
+
+	rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": "Bedroom TV"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	body := listDevices(t, handler, "", "profile-1")
+	if len(body.Devices) != 1 {
+		t.Fatalf("returned %d devices, want 1: %+v", len(body.Devices), body.Devices)
+	}
+	if body.Devices[0].CustomName != "Bedroom TV" {
+		t.Errorf("custom_name = %q, want Bedroom TV", body.Devices[0].CustomName)
+	}
+	// The reported name is what the device calls itself; a rename must not
+	// overwrite it.
+	if body.Devices[0].DeviceName != "Apple TV" {
+		t.Errorf("device_name = %q, want the reported Apple TV", body.Devices[0].DeviceName)
+	}
+}
+
+func TestRenameDevice_EmptyNameClears(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
+
+	if rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": "Bedroom TV"}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("set PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": ""}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("clear PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if got := customNameFor(t, store, "profile-1", "device-2"); got != "" {
+		t.Errorf("custom name = %q after clearing, want empty", got)
+	}
+}
+
+// A custom name gets the same trim-and-clamp the reported X-Device-Name does,
+// so it can never carry more than the reported name may.
+func TestRenameDevice_TrimsAndClampsTheName(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
+
+	long := strings.Repeat("n", 200)
+	rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": "  `+long+`  "}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := customNameFor(t, store, "profile-1", "device-2"); got != strings.Repeat("n", 120) {
+		t.Errorf("custom name has %d chars, want the 120-char clamp", len(got))
+	}
+}
+
+// A JSON body can carry control runes a header cannot — and NUL is stored by
+// SQLite but refused by Postgres TEXT, so without stripping, the same request
+// would 500 on one backend and succeed on the other.
+func TestRenameDevice_StripsControlRunes(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-1", "device-2", "Apple TV")
+
+	rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": "Bed\u0000room\tTV"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("PATCH = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := customNameFor(t, store, "profile-1", "device-2"); got != "BedroomTV" {
+		t.Errorf("custom name = %q, want the control runes stripped (BedroomTV)", got)
+	}
+}
+
+func TestRenameDevice_UnknownDeviceIsNotFound(t *testing.T) {
+	handler, _ := newDevicesTestHandler(t)
+
+	rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1",
+		`{"name": "Bedroom TV"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH unknown device = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Another profile's device takes the same 404 as one that never existed, for
+// the anti-enumeration reasons removeDevice documents.
+func TestRenameDevice_RejectsOtherProfilesDevice(t *testing.T) {
+	handler, store := newDevicesTestHandler(t)
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	rec := renameDevice(t, handler, "/devices/device-9", "device-9", "profile-1",
+		`{"name": "Mine now"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH another profile's device = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if got := customNameFor(t, store, "profile-2", "device-9"); got != "" {
+		t.Errorf("another profile's device was renamed to %q", got)
+	}
+}
+
+func TestRenameDevice_RejectsMalformedBodies(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"missing name", `{}`},
+		{"unknown field", `{"label": "Bedroom TV"}`},
+		{"second document", `{"name": "Bedroom TV"}{"name": "again"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, store := newDevicesTestHandler(t)
+			seedDevice(t, store, "profile-1", "device-2", "Apple TV")
+
+			rec := renameDevice(t, handler, "/devices/device-2", "device-2", "profile-1", tc.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("PATCH = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if got := customNameFor(t, store, "profile-1", "device-2"); got != "" {
+				t.Errorf("malformed body still renamed the device to %q", got)
+			}
+		})
+	}
+}
+
 // --- Household scope ---
 
 func householdDevicesHandler(t *testing.T) (*DeviceHandler, userstore.UserStore) {
@@ -380,6 +549,35 @@ func TestForgetDevice_PrimaryMayForgetHouseholdDevice(t *testing.T) {
 	}
 	if exists {
 		t.Error("device survived the household forget")
+	}
+}
+
+func TestRenameDevice_PrimaryMayRenameHouseholdDevice(t *testing.T) {
+	handler, store := householdDevicesHandler(t)
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	rec := renameDevice(t, handler, "/devices/device-9?profile_id=profile-2",
+		"device-9", "profile-1", `{"name": "Robin's school iPad"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("primary renaming a household device = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := customNameFor(t, store, "profile-2", "device-9"); got != "Robin's school iPad" {
+		t.Errorf("custom name = %q, want Robin's school iPad", got)
+	}
+}
+
+func TestRenameDevice_NonPrimaryCannotRenameSiblingsDevice(t *testing.T) {
+	handler, store := householdDevicesHandler(t)
+	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
+
+	rec := renameDevice(t, handler, "/devices/device-1?profile_id=profile-1",
+		"device-1", "profile-2", `{"name": "Not yours"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-primary renaming a sibling's device = %d, want 403: %s",
+			rec.Code, rec.Body.String())
+	}
+	if got := customNameFor(t, store, "profile-1", "device-1"); got != "" {
+		t.Errorf("a non-primary profile renamed a sibling's device to %q", got)
 	}
 }
 

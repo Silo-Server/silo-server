@@ -171,3 +171,45 @@ func TestPostgresJellycompatDisplayPrefs(t *testing.T) {
 		return newStore(pool, userID)
 	})
 }
+
+// TestPostgresDeviceRegistry runs the device-registry conformance tests —
+// custom-name rename semantics included — against the Postgres backend; the
+// per-user SQLite backend runs the same suite in internal/userdb. Skips unless
+// SILO_TEST_DATABASE_URL is set and the migration is applied.
+func TestPostgresDeviceRegistry(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var col *string
+	err = pool.QueryRow(ctx, `SELECT column_name FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'user_devices' AND column_name = 'custom_name'`).Scan(&col)
+	if errors.Is(err, pgx.ErrNoRows) || col == nil {
+		t.Skip("user_devices custom-name migration has not been applied")
+	}
+	if err != nil {
+		t.Fatalf("check migration: %v", err)
+	}
+
+	storetest.RunDeviceRegistry(t, func(t *testing.T) userstore.UserStore {
+		var userID int
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-devices-%d", time.Now().UnixNano()),
+		).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		// user_devices cascades from users; assert it, as above.
+		t.Cleanup(func() {
+			deleteUserAssertingCascade(t, pool, userID, "user_devices", "user_profiles")
+		})
+		return newStore(pool, userID)
+	})
+}

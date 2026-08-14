@@ -111,7 +111,7 @@ func RegisterDevice(db *sql.DB, entry userstore.DeviceEntry) error {
 
 func ListDevices(db *sql.DB) ([]userstore.DeviceEntry, error) {
 	rows, err := db.Query(
-		`SELECT profile_id, device_id, device_name, device_platform, last_seen_at
+		`SELECT profile_id, device_id, device_name, device_platform, COALESCE(custom_name, ''), last_seen_at
 		 FROM user_devices
 		 ORDER BY last_seen_at DESC, profile_id ASC, device_name ASC, device_id ASC`,
 	)
@@ -123,7 +123,7 @@ func ListDevices(db *sql.DB) ([]userstore.DeviceEntry, error) {
 	var entries []userstore.DeviceEntry
 	for rows.Next() {
 		var entry userstore.DeviceEntry
-		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.LastSeenAt); err != nil {
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.CustomName, &entry.LastSeenAt); err != nil {
 			return nil, fmt.Errorf("scanning device: %w", err)
 		}
 		entries = append(entries, entry)
@@ -148,6 +148,22 @@ func DeviceExists(db *sql.DB, profileID, deviceID string) (bool, error) {
 		return false, fmt.Errorf("checking device %q: %w", deviceID, err)
 	}
 	return exists, nil
+}
+
+func RenameDevice(db *sql.DB, profileID, deviceID, customName string) error {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return nil
+	}
+	_, err := db.Exec(
+		`UPDATE user_devices
+		 SET custom_name = NULLIF(?, '')
+		 WHERE profile_id = ? AND device_id = ?`,
+		customName, profileID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("renaming device %q: %w", deviceID, err)
+	}
+	return nil
 }
 
 func ForgetDevice(db *sql.DB, profileID, deviceID string) error {

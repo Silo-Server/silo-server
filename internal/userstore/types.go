@@ -47,7 +47,12 @@ type DeviceEntry struct {
 	DeviceID       string
 	DeviceName     string
 	DevicePlatform string
-	LastSeenAt     string
+	// CustomName is the name the profile chose for this device; empty means
+	// none is set and clients fall back to the reported DeviceName. It is
+	// written only by RenameDevice — registration keeps updating DeviceName
+	// and never touches this.
+	CustomName string
+	LastSeenAt string
 }
 
 // UpdateProfileInput holds optional fields for updating a profile.

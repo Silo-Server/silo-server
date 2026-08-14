@@ -9,6 +9,7 @@ import type { SettingsCapabilities } from "@/hooks/queries/settingValues";
 const mocks = vi.hoisted(() => ({
   refetchCapabilities: vi.fn(),
   useEffectiveSettings: vi.fn(),
+  renameDevice: vi.fn(),
   capabilities: {
     data: undefined as SettingsCapabilities | undefined,
     isLoading: false,
@@ -17,25 +18,30 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/hooks/queries/devices", () => ({
-  useMyDevices: () => ({
-    data: [
-      {
-        device_id: "living-room",
-        device_name: "Living Room TV",
-        device_platform: "tvOS",
-        last_seen_at: "2026-08-04T00:00:00Z",
-        profile_id: "profile-1",
-        profile_name: "Taylor",
-        is_current_device: true,
-        changed_count: 0,
-      },
-    ],
-    isLoading: false,
-  }),
-  useClearDeviceSettings: () => ({ mutate: vi.fn(), isPending: false }),
-  useForgetDevice: () => ({ mutate: vi.fn(), isPending: false }),
-}));
+vi.mock("@/hooks/queries/devices", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/queries/devices")>();
+  return {
+    ...actual,
+    useMyDevices: () => ({
+      data: [
+        {
+          device_id: "living-room",
+          device_name: "Living Room TV",
+          device_platform: "tvOS",
+          last_seen_at: "2026-08-04T00:00:00Z",
+          profile_id: "profile-1",
+          profile_name: "Taylor",
+          is_current_device: true,
+          changed_count: 0,
+        },
+      ],
+      isLoading: false,
+    }),
+    useClearDeviceSettings: () => ({ mutate: vi.fn(), isPending: false }),
+    useForgetDevice: () => ({ mutate: vi.fn(), isPending: false }),
+    useRenameDevice: () => ({ mutate: mocks.renameDevice, isPending: false }),
+  };
+});
 
 vi.mock("@/hooks/queries/settingValues", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/queries/settingValues")>();
@@ -149,5 +155,60 @@ describe("DeviceSettings capability discovery", () => {
     );
     expect(screen.getByText("Editable device defaults")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("DeviceSettings rename", () => {
+  beforeEach(() => {
+    mocks.renameDevice.mockReset();
+    mocks.useEffectiveSettings.mockReset();
+    mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
+    mocks.capabilities.data = undefined;
+    mocks.capabilities.isLoading = false;
+    mocks.capabilities.isError = true;
+    mocks.capabilities.isFetching = false;
+  });
+
+  it("renames the device through the header affordance", async () => {
+    const user = userEvent.setup();
+    render(<DeviceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+    const input = screen.getByLabelText("Device name");
+    // The reported name sits in the placeholder, so an empty save reads as
+    // returning to it.
+    expect(input).toHaveAttribute("placeholder", "Living Room TV");
+    await user.type(input, "Den TV");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.renameDevice).toHaveBeenCalledWith(
+      { deviceId: "living-room", profileId: undefined, name: "Den TV" },
+      expect.anything(),
+    );
+  });
+
+  it("clears the custom name by saving an empty field", async () => {
+    const user = userEvent.setup();
+    render(<DeviceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.renameDevice).toHaveBeenCalledWith(
+      { deviceId: "living-room", profileId: undefined, name: "" },
+      expect.anything(),
+    );
+  });
+
+  it("abandons the edit on cancel", async () => {
+    const user = userEvent.setup();
+    render(<DeviceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+    await user.type(screen.getByLabelText("Device name"), "Den TV");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mocks.renameDevice).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Living Room TV" })).toBeInTheDocument();
   });
 });

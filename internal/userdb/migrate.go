@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 18
+const schemaVersion = 19
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -178,7 +178,30 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 19 {
+		if err := migrateToV19(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 19"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 19: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV19 adds the nullable user_devices.custom_name column: the name the
+// profile chose for a device. NULL means none is set and clients fall back to
+// the reported device_name, which registration keeps updating and must never
+// clobber this column.
+func migrateToV19(tx *sql.Tx) error {
+	if columnExists(tx, "user_devices", "custom_name") {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE user_devices ADD COLUMN custom_name TEXT"); err != nil {
+		return fmt.Errorf("adding user_devices.custom_name: %w", err)
+	}
+	return nil
 }
 
 // migrateToV18 seeds the family-neutral navigation shortcut catalog from the

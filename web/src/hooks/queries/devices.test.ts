@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UserDevice } from "@/api/types";
-import { deviceRecencyGroup } from "@/hooks/queries/devices";
+import { deviceDisplayName, deviceRecencyGroup } from "@/hooks/queries/devices";
 import { effectiveSettingsQueryKey } from "@/hooks/queries/settingValues";
 
 const NOW = Date.parse("2026-07-31T12:00:00Z");
@@ -38,6 +38,17 @@ describe("deviceRecencyGroup", () => {
 
   it("treats an unparseable timestamp as old rather than throwing", () => {
     expect(deviceRecencyGroup(device({ last_seen_at: "nonsense" }), NOW)).toBe("earlier");
+  });
+});
+
+describe("deviceDisplayName", () => {
+  it("prefers the chosen name", () => {
+    expect(deviceDisplayName(device({ custom_name: "Bedroom TV" }))).toBe("Bedroom TV");
+  });
+
+  it("falls back to the reported name when none is chosen", () => {
+    expect(deviceDisplayName(device())).toBe("Chrome");
+    expect(deviceDisplayName(device({ custom_name: "" }))).toBe("Chrome");
   });
 });
 

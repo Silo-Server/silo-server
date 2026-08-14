@@ -354,6 +354,10 @@ func (s *SQLiteUserStore) ForgetDevice(_ context.Context, profileID, deviceID st
 	return ForgetDevice(s.db, profileID, deviceID)
 }
 
+func (s *SQLiteUserStore) RenameDevice(_ context.Context, profileID, deviceID, customName string) error {
+	return RenameDevice(s.db, profileID, deviceID, customName)
+}
+
 func (s *SQLiteUserStore) SetDeviceSetting(_ context.Context, entry userstore.DeviceSettingEntry) error {
 	return SetDeviceSetting(s.db, entry)
 }

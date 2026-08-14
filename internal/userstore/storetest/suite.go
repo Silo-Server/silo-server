@@ -80,6 +80,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	t.Run("SettingValues", func(t *testing.T) {
 		RunSettingValues(t, newStore)
 	})
+	t.Run("DeviceRegistry", func(t *testing.T) {
+		RunDeviceRegistry(t, newStore)
+	})
 	t.Run("JellycompatDisplayPrefs", func(t *testing.T) {
 		RunJellycompatDisplayPrefs(t, newStore)
 	})

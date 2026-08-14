@@ -114,7 +114,7 @@ func (s *PostgresUserStore) RegisterDevice(ctx context.Context, entry userstore.
 
 func (s *PostgresUserStore) ListDevices(ctx context.Context) ([]userstore.DeviceEntry, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT profile_id, device_id, device_name, device_platform, last_seen_at::text
+		`SELECT profile_id, device_id, device_name, device_platform, COALESCE(custom_name, ''), last_seen_at::text
 		 FROM user_devices
 		 WHERE user_id = $1
 		 ORDER BY last_seen_at DESC, profile_id ASC, device_name ASC, device_id ASC`,
@@ -128,7 +128,7 @@ func (s *PostgresUserStore) ListDevices(ctx context.Context) ([]userstore.Device
 	var entries []userstore.DeviceEntry
 	for rows.Next() {
 		var entry userstore.DeviceEntry
-		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.LastSeenAt); err != nil {
+		if err := rows.Scan(&entry.ProfileID, &entry.DeviceID, &entry.DeviceName, &entry.DevicePlatform, &entry.CustomName, &entry.LastSeenAt); err != nil {
 			return nil, fmt.Errorf("scanning device: %w", err)
 		}
 		entries = append(entries, entry)
@@ -150,6 +150,22 @@ func (s *PostgresUserStore) DeviceExists(ctx context.Context, profileID, deviceI
 		return false, fmt.Errorf("checking device %q: %w", deviceID, err)
 	}
 	return exists, nil
+}
+
+func (s *PostgresUserStore) RenameDevice(ctx context.Context, profileID, deviceID, customName string) error {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`UPDATE user_devices
+		 SET custom_name = NULLIF($4, '')
+		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3`,
+		s.userID, profileID, deviceID, customName,
+	)
+	if err != nil {
+		return fmt.Errorf("renaming device %q: %w", deviceID, err)
+	}
+	return nil
 }
 
 func (s *PostgresUserStore) ForgetDevice(ctx context.Context, profileID, deviceID string) error {
