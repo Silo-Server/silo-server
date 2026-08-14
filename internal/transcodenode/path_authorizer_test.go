@@ -7,41 +7,63 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-type staticMediaFolders struct {
-	folders []*models.MediaFolder
-	err     error
+type staticCatalogPaths struct {
+	active map[string]bool
+	err    error
 }
 
-func (s staticMediaFolders) List(context.Context) ([]*models.MediaFolder, error) {
-	return s.folders, s.err
+func (s staticCatalogPaths) IsActivePath(_ context.Context, path string) (bool, error) {
+	return s.active[path], s.err
 }
 
-func TestMediaRootAuthorizerAllowsOnlyExistingFilesWithinLibraryRoots(t *testing.T) {
-	root := t.TempDir()
-	mediaPath := filepath.Join(root, "movie.mkv")
+func TestCatalogPathAuthorizerAllowsCataloguedRegularFilesAndSymlinks(t *testing.T) {
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("media"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	authorizer := NewMediaRootAuthorizer(staticMediaFolders{
-		folders: []*models.MediaFolder{{Paths: []string{root}}},
-	})
-
-	allowed, err := authorizer.Allowed(context.Background(), mediaPath)
-	if err != nil || !allowed {
-		t.Fatalf("approved media path: allowed = %v, err = %v", allowed, err)
+	target := filepath.Join(t.TempDir(), "outside.mkv")
+	if err := os.WriteFile(target, []byte("media"), 0o600); err != nil {
+		t.Fatal(err)
 	}
+	link := filepath.Join(t.TempDir(), "linked.mkv")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks not supported on this platform: %v", err)
+	}
+	authorizer := NewCatalogPathAuthorizer(staticCatalogPaths{active: map[string]bool{
+		mediaPath: true,
+		link:      true,
+	}})
+
+	for _, path := range []string{mediaPath, link} {
+		allowed, err := authorizer.Allowed(context.Background(), path)
+		if err != nil || !allowed {
+			t.Fatalf("approved media path %q: allowed = %v, err = %v", path, allowed, err)
+		}
+	}
+}
+
+func TestCatalogPathAuthorizerRejectsUnsafeOrUncataloguedInputs(t *testing.T) {
+	existingUncatalogued := filepath.Join(t.TempDir(), "outside.mkv")
+	if err := os.WriteFile(existingUncatalogued, []byte("media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missingCatalogued := filepath.Join(t.TempDir(), "missing.mkv")
+	directoryCatalogued := t.TempDir()
+	authorizer := NewCatalogPathAuthorizer(staticCatalogPaths{active: map[string]bool{
+		missingCatalogued:   true,
+		directoryCatalogued: true,
+	}})
 
 	for _, candidate := range []string{
 		"relative/movie.mkv",
 		"http://example.test/movie.mkv",
-		"file:" + mediaPath,
-		"concat:" + mediaPath + "|" + mediaPath,
-		filepath.Join(t.TempDir(), "outside.mkv"),
-		filepath.Join(root, "missing.mkv"),
+		"file:" + existingUncatalogued,
+		"concat:" + existingUncatalogued + "|" + existingUncatalogued,
+		existingUncatalogued,
+		missingCatalogued,
+		directoryCatalogued,
 	} {
 		allowed, err := authorizer.Allowed(context.Background(), candidate)
 		if err != nil {
@@ -53,35 +75,9 @@ func TestMediaRootAuthorizerAllowsOnlyExistingFilesWithinLibraryRoots(t *testing
 	}
 }
 
-func TestMediaRootAuthorizerRejectsSymlinkEscape(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink semantics differ on Windows")
-	}
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "outside.mkv")
-	if err := os.WriteFile(outside, []byte("media"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(root, "linked.mkv")
-	if err := os.Symlink(outside, link); err != nil {
-		t.Fatal(err)
-	}
-	authorizer := NewMediaRootAuthorizer(staticMediaFolders{
-		folders: []*models.MediaFolder{{Paths: []string{root}}},
-	})
-
-	allowed, err := authorizer.Allowed(context.Background(), link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if allowed {
-		t.Fatal("symlink escape was allowed")
-	}
-}
-
-func TestMediaRootAuthorizerPropagatesRepositoryErrors(t *testing.T) {
+func TestCatalogPathAuthorizerPropagatesRepositoryErrors(t *testing.T) {
 	wantErr := errors.New("database unavailable")
-	authorizer := NewMediaRootAuthorizer(staticMediaFolders{err: wantErr})
+	authorizer := NewCatalogPathAuthorizer(staticCatalogPaths{err: wantErr})
 	allowed, err := authorizer.Allowed(context.Background(), "/media/movie.mkv")
 	if allowed || !errors.Is(err, wantErr) {
 		t.Fatalf("allowed = %v, err = %v", allowed, err)

@@ -5,78 +5,55 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // InputPathAuthorizer approves a local media input before a node passes it to
-// FFmpeg. Implementations must reject protocol URLs and paths outside managed
-// library roots.
+// FFmpeg. Implementations must reject protocol URLs and paths outside the
+// authoritative media catalog.
 type InputPathAuthorizer interface {
 	Allowed(ctx context.Context, path string) (bool, error)
 }
 
-type mediaFolderSource interface {
-	List(ctx context.Context) ([]*models.MediaFolder, error)
+type catalogPathSource interface {
+	IsActivePath(ctx context.Context, path string) (bool, error)
 }
 
-// MediaRootAuthorizer resolves the deployment's current library roots and
-// permits only existing, absolute filesystem paths contained by those roots.
-type MediaRootAuthorizer struct {
-	folders mediaFolderSource
+// CatalogPathAuthorizer permits only existing regular files whose exact
+// logical path is active in the media catalog. The scanner deliberately keeps
+// logical paths for readable symlinks, so catalog membership is the correct
+// authority: resolving the target and requiring it to remain under the logical
+// library root would reject media layouts the scanner explicitly supports.
+type CatalogPathAuthorizer struct {
+	paths catalogPathSource
 }
 
-// NewMediaRootAuthorizer creates an FFmpeg input authorizer backed by the
-// authoritative media-folder repository.
-func NewMediaRootAuthorizer(folders mediaFolderSource) *MediaRootAuthorizer {
-	return &MediaRootAuthorizer{folders: folders}
+// NewCatalogPathAuthorizer creates an FFmpeg input authorizer backed by the
+// authoritative media-file catalog.
+func NewCatalogPathAuthorizer(paths catalogPathSource) *CatalogPathAuthorizer {
+	return &CatalogPathAuthorizer{paths: paths}
 }
 
-// Allowed reports whether path resolves inside one of the configured media
-// roots. Symlinks are resolved on both sides so a link cannot escape a root.
-func (a *MediaRootAuthorizer) Allowed(ctx context.Context, path string) (bool, error) {
-	if a == nil || a.folders == nil || !plainAbsolutePath(path) {
+// Allowed reports whether path is an active catalog entry that resolves to a
+// regular file on this node. os.Stat follows scanner-approved symlinks while
+// rejecting dangling links, directories, and other non-regular inputs.
+func (a *CatalogPathAuthorizer) Allowed(ctx context.Context, path string) (bool, error) {
+	if a == nil || a.paths == nil || !plainAbsolutePath(path) {
 		return false, nil
 	}
-	folders, err := a.folders.List(ctx)
+	active, err := a.paths.IsActivePath(ctx, path)
 	if err != nil {
 		return false, err
 	}
-	for _, folder := range folders {
-		if folder == nil {
-			continue
-		}
-		for _, root := range folder.Paths {
-			if existingPathWithinRoot(root, path) {
-				return true, nil
-			}
-		}
+	if !active {
+		return false, nil
 	}
-	return false, nil
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular(), nil
 }
 
 func plainAbsolutePath(path string) bool {
 	path = strings.TrimSpace(path)
 	return path != "" && !strings.ContainsRune(path, '\x00') && filepath.IsAbs(path)
-}
-
-func existingPathWithinRoot(root, target string) bool {
-	if !plainAbsolutePath(root) || !plainAbsolutePath(target) {
-		return false
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
-	if err != nil {
-		return false
-	}
-	resolvedTarget, err := filepath.EvalSymlinks(filepath.Clean(target))
-	if err != nil {
-		return false
-	}
-	info, err := os.Stat(resolvedTarget)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	return resolvedPathContained(resolvedRoot, resolvedTarget)
 }
 
 // pathWithinRoot validates a not-yet-created output by resolving the root and

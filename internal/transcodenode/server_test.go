@@ -375,7 +375,7 @@ func TestHandleDownloadPrepareRejectsUnavailableConfig(t *testing.T) {
 
 func TestHandleStartRejectsUnapprovedInputPath(t *testing.T) {
 	server := newTestServer(t)
-	server.inputPaths = NewMediaRootAuthorizer(staticMediaFolders{})
+	server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
 	body := []byte(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)
 
 	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
