@@ -278,8 +278,8 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 	}, true
 }
 
-// MDBList exposes a watched snapshot rather than a per-play history, so each
-// watched record surfaces once with its last_watched_at as the play timestamp.
+// FetchWatched requests MDBList's per-play history, so preserve each returned
+// movie or episode play and its watched timestamp for exact export reconciliation.
 func (p *Provider) FetchHistory(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemotePlay, error) {
 	rows, err := p.FetchWatched(ctx, cfg, conn)
 	if err != nil {
