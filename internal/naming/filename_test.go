@@ -119,6 +119,15 @@ func TestParseFilename(t *testing.T) {
 			wantEp:     1,
 		},
 		{
+			name:        "four digit episode number",
+			path:        "/tv/Long Running Show/Season 23/Long Running Show S23E1162.mkv",
+			libraryType: "series",
+			wantTitle:   "Long Running Show",
+			wantType:    "series",
+			wantSeason:  23,
+			wantEp:      1162,
+		},
+		{
 			name:       "extras maps to season zero",
 			path:       "/tv/Show Name/Extras/Show.Name.S00E01.mkv",
 			wantTitle:  "Show Name",
