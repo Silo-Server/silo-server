@@ -75,9 +75,12 @@ func TestConnectWithAPIKeyRejectsEmpty(t *testing.T) {
 	}
 }
 
-func TestFetchWatchedParsesCurrentMoviesShowsSeasonsAndEpisodes(t *testing.T) {
+func TestFetchWatchedImportsPlayableLeavesWithoutExpandingAggregateRows(t *testing.T) {
 	watched := time.Date(2025, time.October, 21, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("plays"); got != "all" {
+			t.Fatalf("plays query = %q, want all", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"movies": []map[string]any{{
@@ -91,9 +94,9 @@ func TestFetchWatchedParsesCurrentMoviesShowsSeasonsAndEpisodes(t *testing.T) {
 			"shows": []map[string]any{{
 				"last_watched_at": watched.Format(time.RFC3339),
 				"show": map[string]any{
-					"title": "The Expanse",
-					"year":  2015,
-					"ids":   map[string]any{"tvdb": 280619, "tmdb": 63639},
+					"title": "Breaking Bad",
+					"year":  2008,
+					"ids":   map[string]any{"tvdb": 81189, "tmdb": 1396},
 				},
 			}},
 			"seasons": []map[string]any{{
@@ -133,23 +136,17 @@ func TestFetchWatchedParsesCurrentMoviesShowsSeasonsAndEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch watched: %v", err)
 	}
-	if len(rows) != 4 {
-		t.Fatalf("got %d rows, want 4", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
 	}
 	if rows[0].Kind != historyimport.KindMovie || rows[0].ProviderItemKey != "imdb:tt2049403" {
 		t.Fatalf("unexpected movie row: %#v", rows[0])
 	}
-	if rows[1].Kind != historyimport.KindSeries || rows[1].ProviderItemKey != "show:tvdb:280619" {
-		t.Fatalf("unexpected show row: %#v", rows[1])
+	if rows[1].Kind != historyimport.KindEpisode || rows[1].SeasonNumber != 1 || rows[1].EpisodeNumber != 2 {
+		t.Fatalf("unexpected episode row: %#v", rows[1])
 	}
-	if rows[2].Kind != historyimport.KindSeason || rows[2].SeasonNumber != 2 || rows[2].SeriesTMDBID != "1396" {
-		t.Fatalf("unexpected season row: %#v", rows[2])
-	}
-	if rows[3].Kind != historyimport.KindEpisode || rows[3].SeasonNumber != 1 || rows[3].EpisodeNumber != 2 {
-		t.Fatalf("unexpected episode row: %#v", rows[3])
-	}
-	if rows[3].Title != "Cat's in the Bag..." || rows[3].SeriesIMDbID != "tt0903747" {
-		t.Fatalf("expected nested episode/show fields propagated, got %#v", rows[3])
+	if rows[1].Title != "Cat's in the Bag..." || rows[1].SeriesIMDbID != "tt0903747" {
+		t.Fatalf("expected nested episode/show fields propagated, got %#v", rows[1])
 	}
 	for i, row := range rows {
 		if row.LastWatchedAt == nil || !row.LastWatchedAt.Equal(watched) {
@@ -255,8 +252,8 @@ func TestFetchWatchedOffsetCountsAggregateRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch watched: %v", err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("got %d rows, want 2", len(rows))
+	if len(rows) != 0 {
+		t.Fatalf("got %d rows, want aggregate rows excluded", len(rows))
 	}
 	if len(offsets) != 2 || offsets[0] != "" || offsets[1] != "2" {
 		t.Fatalf("unexpected offsets: %#v", offsets)

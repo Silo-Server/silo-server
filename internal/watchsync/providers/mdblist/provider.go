@@ -130,7 +130,9 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 	page := mdblistPageState{}
 	for {
 		var payload mdblistWatchedResponse
-		path := page.path("/sync/watched")
+		// Request concrete play history. MDBList documents plays=all as returning
+		// movie and episode leaves only, avoiding ambiguous show/season rollups.
+		path := page.path("/sync/watched") + "&plays=all"
 		if err := p.do(ctx, http.MethodGet, path, conn.AccessToken, nil, &payload); err != nil {
 			return nil, err
 		}
@@ -149,7 +151,11 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 }
 
 func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) []watchsync.RemoteWatch {
-	rows := make([]watchsync.RemoteWatch, 0, len(payload.Movies)+len(payload.Shows)+len(payload.Seasons)+len(payload.Episodes))
+	// The shows and seasons arrays are rollups of episode watched state, not
+	// independent proof that every episode in that scope was watched. Import
+	// only the playable leaves; Silo derives season and series completion from
+	// their episode state.
+	rows := make([]watchsync.RemoteWatch, 0, len(payload.Movies)+len(payload.Episodes))
 	for _, movie := range payload.Movies {
 		watchedAt := movie.LastWatchedAt
 		if watchedAt == nil {
@@ -168,53 +174,6 @@ func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) 
 			IMDbID:          movie.Movie.IDs.IMDb,
 			TMDBID:          intString(movie.Movie.IDs.TMDB),
 			TVDBID:          intString(movie.Movie.IDs.TVDB),
-			PlayCount:       1,
-			LastWatchedAt:   watchedAt,
-		})
-	}
-	for _, show := range payload.Shows {
-		watchedAt := show.LastWatchedAt
-		if watchedAt == nil {
-			continue
-		}
-		key := showKey(show.Show.IDs)
-		if key == "" {
-			continue
-		}
-		rows = append(rows, watchsync.RemoteWatch{
-			Provider:        providerKey,
-			ProviderItemKey: "show:" + key,
-			Kind:            historyimport.KindSeries,
-			Title:           show.Show.Title,
-			Year:            show.Show.Year,
-			IMDbID:          show.Show.IDs.IMDb,
-			TMDBID:          intString(show.Show.IDs.TMDB),
-			TVDBID:          intString(show.Show.IDs.TVDB),
-			PlayCount:       1,
-			LastWatchedAt:   watchedAt,
-		})
-	}
-	for _, season := range payload.Seasons {
-		watchedAt := season.LastWatchedAt
-		if watchedAt == nil {
-			continue
-		}
-		key := showKey(season.Season.Show.IDs)
-		if key == "" {
-			continue
-		}
-		rows = append(rows, watchsync.RemoteWatch{
-			Provider:        providerKey,
-			ProviderItemKey: fmt.Sprintf("show:%s:s%d", key, season.Season.Number),
-			Kind:            historyimport.KindSeason,
-			Title:           season.Season.Name,
-			TMDBID:          intString(season.Season.IDs.TMDB),
-			SeriesTitle:     season.Season.Show.Title,
-			SeriesYear:      season.Season.Show.Year,
-			SeriesIMDbID:    season.Season.Show.IDs.IMDb,
-			SeriesTMDBID:    intString(season.Season.Show.IDs.TMDB),
-			SeriesTVDBID:    intString(season.Season.Show.IDs.TVDB),
-			SeasonNumber:    season.Season.Number,
 			PlayCount:       1,
 			LastWatchedAt:   watchedAt,
 		})
