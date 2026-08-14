@@ -23,6 +23,11 @@ import (
 // Migrate applies a schema to a freshly created database.
 type Migrate func(ctx context.Context, pool *pgxpool.Pool) error
 
+// dropTimeout bounds the teardown. DROP DATABASE ... WITH (FORCE) is fast when
+// the server answers at all, so this only has to be long enough to outlast a
+// slow connect.
+const dropTimeout = 30 * time.Second
+
 // Provision creates a uniquely-named database on the server that dsn points at,
 // applies migrate to it, and returns a config connected to it together with a
 // function that drops it.
@@ -51,7 +56,13 @@ func Provision(ctx context.Context, dsn, prefix string, migrate Migrate) (*pgxpo
 	}
 
 	drop := func() error {
-		dropCtx := context.WithoutCancel(ctx)
+		// WithoutCancel so the drop still runs when the caller's context is
+		// already done — cleanup usually happens after the work it belongs to.
+		// WithTimeout because WithoutCancel drops the deadline too, and an
+		// unbounded drop against an unreachable server hangs the test binary
+		// until `go test -timeout` kills it, with nothing to point at.
+		dropCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dropTimeout)
+		defer cancel()
 		dropper, err := pgxpool.New(dropCtx, dsn)
 		if err != nil {
 			return fmt.Errorf("reconnect to drop %s: %w", quoted, err)
