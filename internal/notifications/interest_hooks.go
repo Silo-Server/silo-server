@@ -39,11 +39,27 @@ func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (use
 		return store, err
 	}
 	tracked := &interestTrackingStore{UserStore: store, userID: userID, system: p.system, updater: p.system.Interest}
-	// Preserve the DeviceRegistry interface upgrade some callers probe for.
-	if registry, ok := store.(userstore.DeviceRegistry); ok {
+	// Preserve the interface upgrades callers probe for. Both are conditional
+	// on the backing store: advertising a capability it does not have would
+	// send callers down a fast path that can only fail.
+	registry, hasDevices := store.(userstore.DeviceRegistry)
+	rollup, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
+	switch {
+	case hasDevices && hasRollup:
+		return &interestTrackingStoreWithDevicesAndRollup{
+			interestTrackingStore:    tracked,
+			DeviceRegistry:           registry,
+			SeriesEpisodeRollupStore: rollup,
+		}, nil
+	case hasDevices:
 		return &interestTrackingStoreWithDevices{
 			interestTrackingStore: tracked,
 			DeviceRegistry:        registry,
+		}, nil
+	case hasRollup:
+		return &interestTrackingStoreWithRollup{
+			interestTrackingStore:    tracked,
+			SeriesEpisodeRollupStore: rollup,
 		}, nil
 	}
 	return tracked, nil
@@ -65,6 +81,25 @@ type interestTrackingStoreWithDevices struct {
 	userstore.DeviceRegistry
 }
 
+// interestTrackingStoreWithRollup adds the series-rollup capability only when
+// the backing store actually has it. Unlike the other capabilities, this one
+// cannot be forwarded unconditionally: the per-user SQLite backend has no
+// catalog tables and genuinely cannot answer the query, and callers treat
+// "implements the interface" as "can do this". Advertising it anyway would
+// send every jellycompat series request down the fast path to fail, logging a
+// warning each time before falling back — turning an expected capability
+// absence into recurring noise on successful requests.
+type interestTrackingStoreWithRollup struct {
+	*interestTrackingStore
+	userstore.SeriesEpisodeRollupStore
+}
+
+type interestTrackingStoreWithDevicesAndRollup struct {
+	*interestTrackingStore
+	userstore.DeviceRegistry
+	userstore.SeriesEpisodeRollupStore
+}
+
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStore)(nil)
 var _ userstore.SettingMutationTransactioner = (*interestTrackingStore)(nil)
 var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStoreWithDevices)(nil)
@@ -74,14 +109,19 @@ var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevice
 // UserStore interface promotes only that interface's methods, so each of these
 // needs an explicit forward below; the assertions make a missing one a compile
 // error instead of a silent production slowdown.
+//
+// SeriesEpisodeRollupStore is deliberately absent here: it is conditional on
+// the backing store, so it lives on the wrapper types above rather than being
+// forwarded unconditionally.
 var _ userstore.WatchedBatchWriter = (*interestTrackingStore)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStore)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStore)(nil)
-var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStore)(nil)
 var _ userstore.WatchedBatchWriter = (*interestTrackingStoreWithDevices)(nil)
 var _ userstore.VisibleHistoryAdder = (*interestTrackingStoreWithDevices)(nil)
 var _ userstore.HistoryVisibilityStore = (*interestTrackingStoreWithDevices)(nil)
-var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithRollup)(nil)
+var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevicesAndRollup)(nil)
+var _ userstore.DeviceRegistry = (*interestTrackingStoreWithDevicesAndRollup)(nil)
 
 // WithPreferenceSettingsTransaction preserves the optional atomic-settings
 // capability of the wrapped store. Preference writes do not affect interest
@@ -387,20 +427,6 @@ func (s *interestTrackingStore) VisibleHistoryTimestamps(ctx context.Context, pr
 		return userstore.VisibleHistoryTimestamps(ctx, s.UserStore, profileID, mediaItemIDs, at)
 	}
 	return visibility.VisibleHistoryTimestamps(ctx, profileID, mediaItemIDs, at)
-}
-
-// SeriesEpisodeWatchCounts forwards the SQL-side series rollup used by
-// jellycompat; without it that path materializes every episode of every
-// series. Stores that lack the capability (the per-user SQLite backend has no
-// catalog tables) return an error, which every caller already treats as
-// "use the per-episode fallback" — the same outcome as before this forward
-// existed.
-func (s *interestTrackingStore) SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
-	rollup, ok := s.UserStore.(userstore.SeriesEpisodeRollupStore)
-	if !ok {
-		return nil, fmt.Errorf("series episode rollup is not supported by this store")
-	}
-	return rollup.SeriesEpisodeWatchCounts(ctx, profileID, seriesIDs)
 }
 
 func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {
