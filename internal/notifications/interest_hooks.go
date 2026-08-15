@@ -333,9 +333,19 @@ func (s *interestTrackingStore) MarkWatchedBatch(
 ) ([]userstore.WatchHistoryEntry, error) {
 	writer, ok := s.UserStore.(userstore.WatchedBatchWriter)
 	if !ok {
-		return userstore.MarkWatchedBatch(ctx, s.UserStore, profileID, targets, entries)
+		// The helper runs against the inner store, so this decorator's own
+		// MarkWatched hook never fires; queue here or the recompute is lost.
+		// A mid-loop error still leaves earlier targets written, so queue
+		// regardless of err — a redundant queue only costs one recompute,
+		// while a missing one leaves profile_series_interest stale until some
+		// unrelated mutation or the rebuild task touches the series.
+		written, err := userstore.MarkWatchedBatch(ctx, s.UserStore, profileID, targets, entries)
+		s.queueTargetMutations(profileID, targets)
+		return written, err
 	}
 	written, err := writer.MarkWatchedBatch(ctx, profileID, targets, entries)
+	// The batch write is one transaction: on error nothing landed, so there is
+	// nothing to recompute.
 	if err == nil {
 		s.queueItemMutations(profileID, written)
 	}
@@ -347,6 +357,14 @@ func (s *interestTrackingStore) MarkWatchedBatch(
 func (s *interestTrackingStore) queueItemMutations(profileID string, entries []userstore.WatchHistoryEntry) {
 	for _, entry := range entries {
 		s.updater.QueueItemMutation(s.userID, profileID, entry.MediaItemID)
+	}
+}
+
+// queueTargetMutations queues by requested target rather than written entry,
+// for the non-transactional path where a partial write may have occurred.
+func (s *interestTrackingStore) queueTargetMutations(profileID string, targets []userstore.MarkWatchedTarget) {
+	for _, target := range targets {
+		s.updater.QueueItemMutation(s.userID, profileID, target.MediaItemID)
 	}
 }
 

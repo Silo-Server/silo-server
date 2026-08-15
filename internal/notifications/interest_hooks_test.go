@@ -189,3 +189,70 @@ func TestInterestTrackingStorePreservesWatchStateCapabilities(t *testing.T) {
 		}
 	}
 }
+
+// storeWithoutBatchWriter wraps a UserStore and hides the WatchedBatchWriter
+// capability, standing in for a backend that has not implemented it.
+type storeWithoutBatchWriter struct {
+	userstore.UserStore
+}
+
+// TestInterestTrackingStoreQueuesMutationsOnBatchFallback covers the branch
+// taken when the backing store lacks WatchedBatchWriter. The decorator hands
+// the work to the generic helper against s.UserStore — the *inner* store — so
+// the decorator's own MarkWatched hook never runs and nothing queues an
+// interest recompute. Without this, marking a series watched on such a backend
+// updates progress and history but leaves profile_series_interest stale until
+// some unrelated mutation or the rebuild task happens to touch the series.
+func TestInterestTrackingStoreQueuesMutationsOnBatchFallback(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	inner := storeWithoutBatchWriter{UserStore: userdb.NewSQLiteUserStore(db)}
+	if _, ok := userstore.UserStore(inner).(userstore.WatchedBatchWriter); ok {
+		t.Fatal("test setup: inner store must not implement WatchedBatchWriter")
+	}
+
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	store := &interestTrackingStore{
+		UserStore: inner,
+		userID:    1,
+		system:    &System{},
+		updater:   updater,
+	}
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	watchedAt := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if _, err := store.MarkWatchedBatch(context.Background(), "p1",
+		[]userstore.MarkWatchedTarget{
+			{MediaItemID: "ep-1", DurationSeconds: 1200},
+			{MediaItemID: "ep-2", DurationSeconds: 1500},
+		},
+		[]userstore.WatchHistoryEntry{
+			{ProfileID: "p1", MediaItemID: "ep-1", WatchedAt: watchedAt, DurationSeconds: 1200, Completed: true, Source: userstore.WatchHistorySourceManual},
+			{ProfileID: "p1", MediaItemID: "ep-2", WatchedAt: watchedAt, DurationSeconds: 1500, Completed: true, Source: userstore.WatchHistorySourceManual},
+		},
+	); err != nil {
+		t.Fatalf("MarkWatchedBatch (fallback path): %v", err)
+	}
+
+	updater.mu.Lock()
+	queued := make(map[string]struct{}, len(updater.pending))
+	for mutation := range updater.pending {
+		queued[mutation.itemID] = struct{}{}
+	}
+	updater.mu.Unlock()
+
+	for _, itemID := range []string{"ep-1", "ep-2"} {
+		if _, ok := queued[itemID]; !ok {
+			t.Errorf("no interest mutation queued for %s on the batch fallback path; interest goes stale", itemID)
+		}
+	}
+}
