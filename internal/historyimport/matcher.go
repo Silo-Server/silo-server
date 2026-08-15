@@ -11,6 +11,7 @@ type matcherRepository interface {
 	MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error)
 	MatchMediaByTitleYear(ctx context.Context, kind, title string, year int) ([]mediaLookupRow, error)
 	MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error)
+	MatchEpisodeBySeriesExternalID(ctx context.Context, column, value string, seasonNumber, episodeNumber int) ([]mediaLookupRow, error)
 	MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error)
 	MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error)
 }
@@ -135,6 +136,44 @@ func (m *Matcher) matchEpisode(ctx context.Context, record Record) (*Match, stri
 	if record.EpisodeNumber <= 0 {
 		attempts = append(attempts, "missing season or episode number")
 		return nil, strings.Join(attempts, "; "), nil
+	}
+
+	for _, candidate := range []struct {
+		column string
+		value  string
+		label  string
+	}{
+		{column: "tvdb_id", value: record.SeriesTVDBID, label: "series tvdb_id"},
+		{column: "tmdb_id", value: record.SeriesTMDBID, label: "series tmdb_id"},
+		{column: "imdb_id", value: record.SeriesIMDbID, label: "series imdb_id"},
+	} {
+		if candidate.value == "" {
+			continue
+		}
+		rows, err := m.repo.MatchEpisodeBySeriesExternalID(
+			ctx, candidate.column, candidate.value, record.SeasonNumber, record.EpisodeNumber,
+		)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(rows) == 1 {
+			return &Match{
+				MediaItemID: rows[0].ContentID,
+				Kind:        KindEpisode,
+				Title:       rows[0].Title,
+				Year:        rows[0].Year,
+			}, "", nil
+		}
+		if len(rows) > 1 {
+			return nil, fmt.Sprintf(
+				"ambiguous episode %s match for %q S%02dE%02d (%d rows)",
+				candidate.label, candidate.value, record.SeasonNumber, record.EpisodeNumber, len(rows),
+			), nil
+		}
+		attempts = append(attempts, fmt.Sprintf(
+			"no episode %s match for %q S%02dE%02d",
+			candidate.label, candidate.value, record.SeasonNumber, record.EpisodeNumber,
+		))
 	}
 
 	seriesRecord := Record{

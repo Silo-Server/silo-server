@@ -37,6 +37,10 @@ func (s *matcherRepoStub) MatchEpisodeByExternalID(_ context.Context, column, va
 	return s.episodeByExternal[column+":"+value], nil
 }
 
+func (s *matcherRepoStub) MatchEpisodeBySeriesExternalID(_ context.Context, column, value string, seasonNumber, episodeNumber int) ([]mediaLookupRow, error) {
+	return s.episodeByExternal[fmt.Sprintf("series:%s:%s:%d:%d", column, value, seasonNumber, episodeNumber)], nil
+}
+
 func (s *matcherRepoStub) MatchEpisodeBySeries(_ context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
 	s.episodeBySeriesCalls++
 	s.episodeBySeriesID = seriesID
@@ -187,6 +191,41 @@ func TestMatcherMatchEpisode_AllowsSeasonZeroSpecials(t *testing.T) {
 	if repo.episodeBySeriesID != "series-1" || repo.episodeBySeriesSeason != 0 || repo.episodeBySeriesEpisode != 1 {
 		t.Fatalf("MatchEpisodeBySeries called with (%q, %d, %d), want (series-1, 0, 1)",
 			repo.episodeBySeriesID, repo.episodeBySeriesSeason, repo.episodeBySeriesEpisode)
+	}
+}
+
+func TestMatcherMatchEpisode_UsesCoordinatesBeforeAmbiguousSeriesRows(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{
+		mediaByExternal: map[string][]mediaLookupRow{
+			"series:tvdb_id:296188": {
+				{ContentID: "angie-library-a", Title: "Angie Tribeca", Year: 2016},
+				{ContentID: "angie-library-b", Title: "Angie Tribeca", Year: 2016},
+			},
+		},
+		episodeByExternal: map[string][]mediaLookupRow{
+			"series:tvdb_id:296188:1:8": {{ContentID: "angie-s01e08", Title: "Murder in the First Class", Year: 2016}},
+		},
+	}
+	matcher := NewMatcher(repo)
+
+	match, reason, err := matcher.Match(context.Background(), Record{
+		Kind:          KindEpisode,
+		SeriesTitle:   "Angie Tribeca",
+		SeriesYear:    2016,
+		SeriesTVDBID:  "296188",
+		SeasonNumber:  1,
+		EpisodeNumber: 8,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want empty string", reason)
+	}
+	if match == nil || match.MediaItemID != "angie-s01e08" {
+		t.Fatalf("match = %+v, want angie-s01e08", match)
 	}
 }
 
