@@ -100,3 +100,92 @@ func TestInterestTrackingStorePreservesSettingCapabilities(t *testing.T) {
 		t.Fatalf("wrapped receipt = %+v (%v)", receipt, err)
 	}
 }
+
+// TestInterestTrackingStorePreservesWatchStateCapabilities pins the optional
+// watch-state capabilities through the wrapper. These are type-asserted at
+// their call sites (userstore.MarkWatchedBatch, AddVisibleHistory,
+// VisibleHistoryTimestamps, jellycompat's rollup), and the decorator embeds
+// the UserStore *interface* — which promotes only the methods in that
+// interface. A capability the decorator does not forward explicitly is
+// therefore invisible in production, and the caller silently degrades to its
+// slow per-item fallback with no error and no test failure.
+func TestInterestTrackingStorePreservesWatchStateCapabilities(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+
+	inner := userdb.NewSQLiteUserStore(db)
+	provider := WrapUserStoreProvider(
+		preferenceTransactionTestProvider{store: inner},
+		&System{},
+	)
+	wrapped, err := provider.ForUser(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ForUser: %v", err)
+	}
+
+	// Every capability the bare store advertises must survive wrapping,
+	// otherwise the wrapped store is a silent performance downgrade.
+	for _, capability := range []struct {
+		name string
+		has  func(userstore.UserStore) bool
+	}{
+		{"WatchedBatchWriter", func(s userstore.UserStore) bool {
+			_, ok := s.(userstore.WatchedBatchWriter)
+			return ok
+		}},
+		{"VisibleHistoryAdder", func(s userstore.UserStore) bool {
+			_, ok := s.(userstore.VisibleHistoryAdder)
+			return ok
+		}},
+		{"HistoryVisibilityStore", func(s userstore.UserStore) bool {
+			_, ok := s.(userstore.HistoryVisibilityStore)
+			return ok
+		}},
+	} {
+		if !capability.has(inner) {
+			t.Fatalf("test setup: bare store does not implement %s", capability.name)
+		}
+		if !capability.has(wrapped) {
+			t.Errorf("interest-tracking wrapper dropped %s; callers silently fall back to the per-item path",
+				capability.name)
+		}
+	}
+
+	// The forwarded batch write must actually reach the backing store.
+	writer, ok := wrapped.(userstore.WatchedBatchWriter)
+	if !ok {
+		t.Fatal("wrapper dropped WatchedBatchWriter; cannot verify pass-through")
+	}
+	if err := wrapped.CreateProfile(context.Background(), userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	watchedAt := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	written, err := writer.MarkWatchedBatch(context.Background(), "p1",
+		[]userstore.MarkWatchedTarget{
+			{MediaItemID: "ep-1", DurationSeconds: 1200},
+			{MediaItemID: "ep-2", DurationSeconds: 1500},
+		},
+		[]userstore.WatchHistoryEntry{
+			{ProfileID: "p1", MediaItemID: "ep-1", WatchedAt: watchedAt, DurationSeconds: 1200, Completed: true, Source: userstore.WatchHistorySourceManual},
+			{ProfileID: "p1", MediaItemID: "ep-2", WatchedAt: watchedAt, DurationSeconds: 1500, Completed: true, Source: userstore.WatchHistorySourceManual},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MarkWatchedBatch through wrapper: %v", err)
+	}
+	if len(written) != 2 {
+		t.Fatalf("MarkWatchedBatch returned %d entries, want 2", len(written))
+	}
+	for _, id := range []string{"ep-1", "ep-2"} {
+		progress, err := wrapped.GetProgress(context.Background(), "p1", id)
+		if err != nil || progress == nil || !progress.Completed {
+			t.Fatalf("GetProgress(%s) = %+v (%v), want completed", id, progress, err)
+		}
+	}
+}
