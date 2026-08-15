@@ -2264,15 +2264,40 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 	}}, nil
 }
 
+// episodeTargets resolves the watched leaf targets for a season or series.
+// Durations come from one batched file lookup rather than a query per episode:
+// marking a long series used to issue one GetByEpisodeID per episode before it
+// wrote anything.
 func (h *ItemsHandler) episodeTargets(ctx context.Context, episodes []*models.Episode) []watchedLeafTarget {
+	episodeIDs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		episodeIDs = append(episodeIDs, episode.ContentID)
+	}
+	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
+
 	targets := make([]watchedLeafTarget, 0, len(episodes))
 	for _, episode := range episodes {
 		targets = append(targets, watchedLeafTarget{
 			ContentID:       episode.ContentID,
-			DurationSeconds: h.contentDurationSeconds(ctx, "", episode.ContentID, episode.Runtime),
+			DurationSeconds: mediaFileDurationSeconds(filesByEpisode[episode.ContentID], episode.Runtime),
 		})
 	}
 	return targets
+}
+
+// mediaFileDurationSeconds picks a playable duration from an item's files,
+// falling back to the catalog runtime. Mirrors contentDurationSeconds's
+// preference order so the batched and single-item paths agree.
+func mediaFileDurationSeconds(files []*models.MediaFile, fallbackRuntimeMinutes int) float64 {
+	for _, file := range files {
+		if file != nil && file.Duration > 0 {
+			return float64(file.Duration)
+		}
+	}
+	if fallbackRuntimeMinutes > 0 {
+		return float64(fallbackRuntimeMinutes * 60)
+	}
+	return 0
 }
 
 func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, episodeID string, fallbackRuntimeMinutes int) float64 {
@@ -2294,18 +2319,10 @@ func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, ep
 	case contentID != "":
 		files, err = h.fileRepo.GetByContentID(ctx, contentID)
 	}
-	if err == nil {
-		for _, file := range files {
-			if file != nil && file.Duration > 0 {
-				return float64(file.Duration)
-			}
-		}
+	if err != nil {
+		files = nil
 	}
-
-	if fallbackRuntimeMinutes > 0 {
-		return float64(fallbackRuntimeMinutes * 60)
-	}
-	return 0
+	return mediaFileDurationSeconds(files, fallbackRuntimeMinutes)
 }
 
 // isNotFound checks if an error is a "not found" sentinel.

@@ -325,12 +325,22 @@ func (s *Service) recordMarkWatched(
 	if watchedAt.IsZero() {
 		watchedAt = time.Now().UTC()
 	}
-	result := ManualMarkResult{Entries: make([]userstore.WatchHistoryEntry, 0, len(targets))}
+	// Resolve every identity up front: one episode query plus one provider-ID
+	// query per distinct series, instead of two lookups per episode.
+	completedIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		if err := store.MarkWatched(ctx, profileID, target.MediaItemID, target.DurationSeconds); err != nil {
-			return result, err
-		}
-		histEntry := userstore.WatchHistoryEntry{
+		completedIDs = append(completedIDs, target.MediaItemID)
+	}
+	identities := s.resolveStableIdentities(ctx, completedIDs)
+
+	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targets))
+	entries := make([]userstore.WatchHistoryEntry, 0, len(targets))
+	for _, target := range targets {
+		batchTargets = append(batchTargets, userstore.MarkWatchedTarget{
+			MediaItemID:     target.MediaItemID,
+			DurationSeconds: target.DurationSeconds,
+		})
+		entries = append(entries, userstore.WatchHistoryEntry{
 			ID:              uuid.NewString(),
 			ProfileID:       profileID,
 			MediaItemID:     target.MediaItemID,
@@ -338,17 +348,16 @@ func (s *Service) recordMarkWatched(
 			DurationSeconds: target.DurationSeconds,
 			Completed:       true,
 			Source:          source,
-		}
-		s.applyStableIdentity(ctx, &histEntry)
-		histEntry, err = userstore.AddVisibleHistory(ctx, store, histEntry)
-		if err != nil {
-			return result, err
-		}
-		result.Entries = append(result.Entries, histEntry)
+			Identity:        identities[target.MediaItemID],
+		})
 	}
-	completedIDs := make([]string, 0, len(targets))
-	for _, target := range targets {
-		completedIDs = append(completedIDs, target.MediaItemID)
+
+	// One transaction for the whole set: a canceled request rolls back to
+	// "nothing marked" rather than leaving a series partially watched.
+	written, err := userstore.MarkWatchedBatch(ctx, store, profileID, batchTargets, entries)
+	result := ManualMarkResult{Entries: written}
+	if err != nil {
+		return result, err
 	}
 	s.notifyWatchedCompleted(ctx, userID, profileID, completedIDs)
 	return result, nil
@@ -445,24 +454,28 @@ func (s *Service) recordMarkWatchedBatch(
 	if watchedAt.IsZero() {
 		watchedAt = time.Now().UTC()
 	}
-	if err := store.MarkProgressBatch(ctx, profileID, targetIDs, watchedAt); err != nil {
-		return err
-	}
-	// Strategy A (audit 2026-05-01 §2.7): batch the progress upsert because it
-	// powers hot Continue-Watching queries. History inserts stay per-target so
-	// per-episode stable-identity resolution still applies.
+	// Shares recordMarkWatched's transactional store path (audit 2026-05-01
+	// §2.7 kept the progress upsert batched; this extends the same treatment
+	// to history so the whole mark commits or rolls back as one). Identities
+	// still resolve per episode, now in a single bulk lookup. No durations are
+	// available here, and the store leaves a known duration in place when a
+	// target supplies zero.
+	identities := s.resolveStableIdentities(ctx, targetIDs)
+	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
+	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
-		histEntry := userstore.WatchHistoryEntry{
+		batchTargets = append(batchTargets, userstore.MarkWatchedTarget{MediaItemID: targetID})
+		entries = append(entries, userstore.WatchHistoryEntry{
 			ProfileID:   profileID,
 			MediaItemID: targetID,
 			WatchedAt:   formatWatchedAt(watchedAt),
 			Completed:   true,
 			Source:      source,
-		}
-		s.applyStableIdentity(ctx, &histEntry)
-		if _, err := userstore.AddVisibleHistory(ctx, store, histEntry); err != nil {
-			return err
-		}
+			Identity:    identities[targetID],
+		})
+	}
+	if _, err := userstore.MarkWatchedBatch(ctx, store, profileID, batchTargets, entries); err != nil {
+		return err
 	}
 	s.notifyWatchedCompleted(ctx, userID, profileID, targetIDs)
 	return nil
@@ -534,6 +547,15 @@ func (s *Service) addImportedHistoryIfMissingWithSource(
 	}
 	s.applyStableIdentity(ctx, &entry)
 	return store.AddHistoryIfMissing(ctx, entry)
+}
+
+// resolveStableIdentities resolves identities for many media items in one go,
+// returning an empty map when no resolver is configured.
+func (s *Service) resolveStableIdentities(ctx context.Context, mediaItemIDs []string) map[string]userstore.WatchIdentity {
+	if s == nil || s.identity == nil || len(mediaItemIDs) == 0 {
+		return nil
+	}
+	return s.identity.ResolveHistoryIdentities(ctx, mediaItemIDs)
 }
 
 func (s *Service) applyStableIdentity(ctx context.Context, entry *userstore.WatchHistoryEntry) {

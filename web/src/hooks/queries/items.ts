@@ -20,7 +20,11 @@ import {
   getCachedWatchedInvalidationKeys,
   getWatchedToastMessage,
 } from "@/pages/ItemDetail/watchedState";
-import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import {
+  invalidateMediaSurfaceQueries,
+  isItemDetailQueryKey,
+  updateCatalogItemDetail,
+} from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 function itemPathID(id: string): string {
@@ -267,8 +271,38 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
     mutationFn: (nextPlayed: boolean) =>
       api(`/watched/${itemPathID(item.content_id)}`, {
         method: nextPlayed ? "POST" : "DELETE",
+        // Marking a series expands to every episode server-side. keepalive
+        // lets the browser finish the request after a navigation or tab close,
+        // so a large series no longer depends on the user staying on the page.
+        // The server applies the mark in one transaction, so a request that
+        // never arrives leaves nothing marked rather than a partial subset.
+        keepalive: true,
       }),
-    onError: (err) => {
+    onMutate: async (nextPlayed: boolean) => {
+      // Cancel and snapshot over the same predicate: an in-flight detail query
+      // on either key shape would otherwise land after the optimistic write
+      // and revert the button.
+      const itemDetailQueries = {
+        predicate: (query: { queryKey: unknown }) =>
+          isItemDetailQueryKey(query.queryKey, item.content_id),
+      };
+      await queryClient.cancelQueries(itemDetailQueries);
+      const previous = queryClient.getQueriesData(itemDetailQueries);
+      updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
+        ...detail,
+        ...(detail.user_data ? { user_data: { ...detail.user_data, played: nextPlayed } } : {}),
+        user_state: {
+          played: nextPlayed,
+          is_favorite: detail.user_state?.is_favorite ?? false,
+          in_watchlist: detail.user_state?.in_watchlist ?? false,
+        },
+      }));
+      return { previous };
+    },
+    onError: (err, _nextPlayed, context) => {
+      for (const [queryKey, value] of context?.previous ?? []) {
+        queryClient.setQueryData(queryKey, value);
+      }
       toast.error(err instanceof Error ? err.message : "Failed to update watched state");
     },
     onSuccess: (_data, nextPlayed) => {

@@ -27,6 +27,14 @@ func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
 }
 
+// TestSQLiteMarkWatchedBatch runs the batch mark-watched conformance test
+// (series/season mark-watched) against the real SQLite backend. The Postgres
+// backend runs the same suite in internal/userstore/pgstore, which is what
+// keeps the two transactional implementations from drifting.
+func TestSQLiteMarkWatchedBatch(t *testing.T) {
+	storetest.RunMarkWatchedBatch(t, newConformanceStore)
+}
+
 // TestSQLiteSettingValues runs the canonical settings-contract storage
 // conformance tests against the per-user SQLite backend. The Postgres backend
 // runs the same suite in internal/userstore/pgstore, which is what keeps the two

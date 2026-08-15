@@ -24,6 +24,7 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 // Compile-time interface check.
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
 var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
+var _ userstore.WatchedBatchWriter = (*SQLiteUserStore)(nil)
 
 // --- Profiles ---
 
@@ -79,6 +80,12 @@ func (s *SQLiteUserStore) MarkWatched(_ context.Context, profileID, mediaItemID 
 
 func (s *SQLiteUserStore) ClearProgress(_ context.Context, profileID, mediaItemID string) error {
 	return ClearProgress(s.db, profileID, mediaItemID)
+}
+
+// MarkWatchedBatch is one of the few paths here that forwards ctx: the write
+// is transactional precisely so a canceled request marks nothing.
+func (s *SQLiteUserStore) MarkWatchedBatch(ctx context.Context, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
+	return MarkWatchedBatch(ctx, s.db, profileID, targets, entries)
 }
 
 func (s *SQLiteUserStore) MarkProgressBatch(_ context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
