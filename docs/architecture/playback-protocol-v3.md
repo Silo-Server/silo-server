@@ -785,6 +785,7 @@ A transformation is a named, versioned media operation with claims attached.
 | `audio_to_aac` | `server` | `1` | — | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
 | `server_dv7_to_hdr10` | `server` | `1` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_hevc_resume_leading_picture_drop` | `server` | `1` | — | `resume_leading_pictures_removed` |
 
 They are advertised only if the installed FFmpeg actually has the required
 capability, probed once at startup:
@@ -792,6 +793,7 @@ capability, probed once at startup:
 | Transformation | Probe |
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` |
+| `server_hevc_resume_leading_picture_drop` | `ffmpeg -bsfs` contains the exact `noise` filter and `ffmpeg -h bsf=noise` exposes the expression-based `drop` option |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 
@@ -800,10 +802,21 @@ pooled transcode nodes may still plan an HLS route using a transformation those
 nodes advertise but the local FFmpeg lacks, so the capability list is a floor,
 not a ceiling — one more reason a client must not precompute routes from it.
 
-An unavailable transformation is not silently skipped at plan time: it produces
-its own terminal reason (`dv_conversion_unsupported`,
+An unavailable conversion transformation is not silently skipped at plan time:
+it produces its own terminal reason (`dv_conversion_unsupported`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`) so the client
-learns which conversion was missing rather than seeing a generic refusal.
+learns which conversion was missing rather than seeing a generic refusal. The
+HEVC resume transformation instead makes the unsafe progressive-copy candidate
+ineligible, allowing the existing HLS or encoded fallback policy to continue.
+
+`server_hevc_resume_leading_picture_drop` is frozen on macOS Firefox HEVC
+progressive-remux plans even when playback starts at zero. Its FFmpeg filter is
+executed only after a non-zero server seek, where it removes non-key open-GOP
+pictures presented before the resumed copy's first packet. The browser still
+applies `timeline.player_start_seconds`, preserving exact resume position.
+These plans use the version-fenced `/stream/remux-v3/` route on both integrated
+and proxy servers; older binaries do not mount that path and therefore cannot
+silently serve the same signed session without its frozen recipe.
 
 A client may advertise its *own* transformations in a delivery's
 `transformations[]` with `executor: "client"` — Dolby Vision profile 7 → 8.1

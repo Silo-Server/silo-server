@@ -44,6 +44,77 @@ func TestBuildRemuxArgsHonorsPlannedAACOutput(t *testing.T) {
 	}
 }
 
+func TestBuildRemuxArgsAppliesHEVCResumeFilterOnlyAfterASeek(t *testing.T) {
+	initial := buildRemuxArgsWithVideoBitstreamFilterV3("/movie.mkv", "mp4", 0, false, -1, 0, false, false, 0, 0, HEVCResumeLeadingPictureBitstreamFilter)
+	if argsContainPair(initial, "-bsf:v", HEVCResumeLeadingPictureBitstreamFilter) {
+		t.Fatalf("zero-start remux unexpectedly changed its HEVC packets: %s", strings.Join(initial, " "))
+	}
+
+	resumed := buildRemuxArgsWithVideoBitstreamFilterV3("/movie.mkv", "mp4", 731.25, false, -1, 0, false, false, 0, 0, HEVCResumeLeadingPictureBitstreamFilter)
+	if !argsContainPair(resumed, "-bsf:v", HEVCResumeLeadingPictureBitstreamFilter) {
+		t.Fatalf("seeked remux did not normalize its HEVC resume boundary: %s", strings.Join(resumed, " "))
+	}
+
+	withDV := buildRemuxArgsWithVideoBitstreamFilterV3("/movie.mkv", "mp4", 731.25, false, -1, 7, true, false, 0, 0, HEVCResumeLeadingPictureBitstreamFilter)
+	wantCombined := HEVCResumeLeadingPictureBitstreamFilter + "," + DV7ToHDR10BitstreamFilter
+	if !argsContainPair(withDV, "-bsf:v", wantCombined) {
+		t.Fatalf("combined resume/DV recipe = %s, want one ordered -bsf:v value %q", strings.Join(withDV, " "), wantCombined)
+	}
+}
+
+func TestValidateRemuxVideoBitstreamFilterRecipe(t *testing.T) {
+	valid := RemuxServeOptions{
+		VideoBitstreamFilter: HEVCResumeLeadingPictureBitstreamFilter,
+		VideoFilterVersion:   TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+		SourceVideoCodec:     "hevc",
+	}
+	if err := validateRemuxVideoBitstreamFilterV3(valid); err != nil {
+		t.Fatalf("current HEVC resume recipe rejected: %v", err)
+	}
+	alias := valid
+	alias.SourceVideoCodec = "h265"
+	if err := validateRemuxVideoBitstreamFilterV3(alias); err != nil {
+		t.Fatalf("normalized HEVC codec alias rejected: %v", err)
+	}
+	if err := validateRemuxVideoBitstreamFilterV3(RemuxServeOptions{}); err != nil {
+		t.Fatalf("legacy empty recipe rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*RemuxServeOptions){
+		"unknown expression": func(opts *RemuxServeOptions) { opts.VideoBitstreamFilter = "noise=drop=1" },
+		"wrong version":      func(opts *RemuxServeOptions) { opts.VideoFilterVersion = "0" },
+		"wrong codec":        func(opts *RemuxServeOptions) { opts.SourceVideoCodec = "h264" },
+		"audio only":         func(opts *RemuxServeOptions) { opts.AudioOnly = true },
+		"version only": func(opts *RemuxServeOptions) {
+			opts.VideoBitstreamFilter = ""
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts := valid
+			mutate(&opts)
+			if err := validateRemuxVideoBitstreamFilterV3(opts); err == nil {
+				t.Fatalf("invalid recipe accepted: %#v", opts)
+			}
+		})
+	}
+}
+
+func TestStartRemuxRejectsLegacyNoiseFilterBeforeServing(t *testing.T) {
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\ncase \"$2\" in\n-h) echo '-dropamount <int>'; exit 0 ;;\n*) exit 99 ;;\nesac\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := startRemuxWithOptions(context.Background(), "/unused.mkv", "mp4", 30, false, -1, 0, RemuxServeOptions{
+		VideoBitstreamFilter: HEVCResumeLeadingPictureBitstreamFilter,
+		VideoFilterVersion:   TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+		SourceVideoCodec:     "hevc",
+		FFmpegPath:           ffmpeg,
+	})
+	if err == nil || !strings.Contains(err.Error(), "expression-based noise") {
+		t.Fatalf("legacy noise filter error = %v", err)
+	}
+}
+
 func TestBuildRemuxArgsRequiresVideoForVideoPlans(t *testing.T) {
 	args := buildRemuxArgs("/movie.mkv", "mp4", 0, false, -1, 0, false, false)
 	if !argsContainPair(args, "-map", "0:V:0") || argsContainPair(args, "-map", "0:V:0?") {

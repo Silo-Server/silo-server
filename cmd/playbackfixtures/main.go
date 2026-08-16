@@ -336,6 +336,7 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 		Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{playback.ClaimAudioDecodeV3}},
 			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: playback.DV7ToHDR10ClaimsV3()},
+			{Name: playback.TransformationServerHEVCResumeLeadingPictureDropV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3, ValidatedClaims: []string{playback.ClaimResumeLeadingPicturesRemovedV3}},
 			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{playback.ClaimH264DecodeV3}},
 		},
 	}

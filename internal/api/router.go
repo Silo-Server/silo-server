@@ -2680,6 +2680,8 @@ func NewRouter(deps Dependencies) chi.Router {
 				if streamHandler != nil {
 					r.Get("/stream/{session_id}", streamHandler.HandleStream)
 					r.Head("/stream/{session_id}", streamHandler.HandleStream)
+					r.Get(playback.RemuxRecipeStreamPathV3+"{session_id}", streamHandler.HandleStream)
+					r.Head(playback.RemuxRecipeStreamPathV3+"{session_id}", streamHandler.HandleStream)
 					r.Get("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
 					r.Head("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
 					r.Get("/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts)

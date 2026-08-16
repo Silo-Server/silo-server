@@ -398,17 +398,27 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		if !dvStrip {
 			applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		}
-		// The progressive remux executes on this process's ffmpeg, so its
-		// server transformations must be locally available; when only pooled
-		// nodes carry them, the HLS remux below ships the same recipe on a
-		// node-offloadable delivery instead.
-		progressiveExecutable := (!transcodeAudio || localAudioConvertOK) && (!dvStrip || dvStripEligibleLocal)
+		firefoxResumeRequired := requiresFirefoxMacOSHEVCResumeNormalizationV3(source, input.Request)
+		firefoxResumeAvailableLocal := !firefoxResumeRequired || input.Registry.AvailableRecipe(TransformationServerHEVCResumeLeadingPictureDropV3, TransformationServerHEVCResumeLeadingPictureDropVersionV3)
+		// Form the progressive candidate only when this process can execute its
+		// server recipes; proxy selection later checks the same recipe against
+		// the selected node. The HLS branch builds its own independently scoped
+		// candidate against the node-aware HLS registry.
+		progressiveExecutable := (!transcodeAudio || localAudioConvertOK) && (!dvStrip || dvStripEligibleLocal) && firefoxResumeAvailableLocal
 		if remuxSubtitleOK && progressiveExecutable {
-			applySubtitleDecisionV3(&plan, remuxSubtitle.Decision)
-			plan.Claims.Subtitles = remuxSubtitle.Claims
-			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
-			if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, plan) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}
+			progressivePlan := plan
+			if firefoxResumeRequired {
+				progressivePlan.Transformations = append(progressivePlan.Transformations, TransformationV3{
+					Name: TransformationServerHEVCResumeLeadingPictureDropV3, Executor: ExecutorServerV3,
+					RecipeVersion:   TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+					ValidatedClaims: []string{ClaimResumeLeadingPicturesRemovedV3},
+				})
+			}
+			applySubtitleDecisionV3(&progressivePlan, remuxSubtitle.Decision)
+			progressivePlan.Claims.Subtitles = remuxSubtitle.Claims
+			finalizePlanIdentityV3(&progressivePlan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+			if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, progressivePlan) && !planAttemptedV3(progressivePlan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+				return PlannerResultV3{Plan: &progressivePlan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: progressivePlan.EffectiveRecipe.AudioCodec, TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}
 			}
 		}
 		if deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK {

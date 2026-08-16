@@ -1390,17 +1390,22 @@ func TestLegacyStreamUpdateKeepsReplacementReservation(t *testing.T) {
 	}
 }
 
-// A full v3 route description owns RemuxDVMode: a replan that lands on a
-// non-DV source must clear a stale strip mode, while legacy partial updates
-// must not clobber one.
-func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
+// A full v3 route description owns every remux recipe: a replan that lands on
+// an ordinary source must clear stale DV and HEVC-resume behavior, while
+// legacy partial updates must not clobber either one.
+func TestUpdateStreamStateClearsRemuxRecipesOnRouteSet(t *testing.T) {
 	sm := playback.NewSessionManager(5, 2)
 
 	session, err := sm.StartSession(1, "profile-1", 100, playback.PlayRemux, false)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3, TranscodeRouteSet: true}); err != nil {
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{
+		RemuxDVMode:        playback.RemuxDVStripToHDR10V3,
+		RemuxFilter:        playback.HEVCResumeLeadingPictureBitstreamFilter,
+		RemuxFilterVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+		TranscodeRouteSet:  true,
+	}); err != nil {
 		t.Fatalf("UpdateStreamState(set): %v", err)
 	}
 
@@ -1415,6 +1420,9 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	if got.RemuxDVMode != playback.RemuxDVStripToHDR10V3 {
 		t.Fatalf("RemuxDVMode after legacy update = %q, want strip_to_hdr10", got.RemuxDVMode)
 	}
+	if got.RemuxFilter != playback.HEVCResumeLeadingPictureBitstreamFilter || got.RemuxFilterVersion != playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3 {
+		t.Fatalf("HEVC resume recipe after legacy update = %q@%q", got.RemuxFilter, got.RemuxFilterVersion)
+	}
 
 	// v3 route-set update for a non-DV source: mode clears.
 	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
@@ -1426,5 +1434,8 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	}
 	if got.RemuxDVMode != "" {
 		t.Fatalf("RemuxDVMode after route-set update = %q, want cleared", got.RemuxDVMode)
+	}
+	if got.RemuxFilter != "" || got.RemuxFilterVersion != "" {
+		t.Fatalf("HEVC resume recipe after route-set update = %q@%q, want cleared", got.RemuxFilter, got.RemuxFilterVersion)
 	}
 }

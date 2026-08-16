@@ -97,6 +97,29 @@ func TestRecipeCardPlayMethodConstructors(t *testing.T) {
 	}
 }
 
+func TestRemuxRecipeCardPreservesHEVCResumeRecipe(t *testing.T) {
+	card := NewRemuxRecipeCard("resume", 7, "profile-1", 42, false, 0)
+	card.SourceVideoCodec = "hevc"
+	card.VideoBitstreamFilter = HEVCResumeLeadingPictureBitstreamFilter
+	card.RemuxFilterVersion = TransformationServerHEVCResumeLeadingPictureDropVersionV3
+
+	raw, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded RecipeCard
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	claims := decoded.ToClaims()
+	got := RecipeCardFromClaims(&claims)
+	if got.VideoBitstreamFilter != HEVCResumeLeadingPictureBitstreamFilter ||
+		got.RemuxFilterVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 ||
+		got.SourceVideoCodec != "hevc" {
+		t.Fatalf("remux recipe round trip = %#v", got)
+	}
+}
+
 // A transcode card must record whether audio is actually re-encoded so the
 // reconstructed session classifies correctly in admin views: only an explicit
 // "copy" leaves the audio untouched (an empty codec runs ffmpeg's aac default).

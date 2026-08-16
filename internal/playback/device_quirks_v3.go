@@ -34,6 +34,23 @@ func high10DecodeOverrideV3(source SourceDescriptorV3, request StartRequestV3) (
 	return nil, false
 }
 
+// requiresFirefoxMacOSHEVCResumeNormalizationV3 identifies the evidenced
+// browser path where a server-reanchored progressive HEVC remux can expose
+// open-GOP leading pictures that Firefox's macOS decoder was observed to
+// reject. This is a server recipe, not a client-executed device quirk.
+func requiresFirefoxMacOSHEVCResumeNormalizationV3(source SourceDescriptorV3, request StartRequestV3) bool {
+	device := request.ClientPlaybackContext.Device
+	if !strings.EqualFold(device.Platform, "web") || !strings.EqualFold(source.VideoCodec, codecHEVCV3) {
+		return false
+	}
+	userAgent := strings.ToLower(strings.TrimSpace(device.PlatformDetails["user_agent"]))
+	if !strings.Contains(userAgent, "firefox/") || strings.Contains(userAgent, "seamonkey/") ||
+		(!strings.Contains(userAgent, "macintosh") && !strings.Contains(userAgent, "mac os x")) {
+		return false
+	}
+	return true
+}
+
 func hlsEAC3AudioCorrectionV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
 	if !deviceQuirkProtocolAvailableV3(request) || !isAmazonModelV3(request, "AFTKRT") ||
 		!strings.EqualFold(source.AudioCodec, "eac3") || source.AudioChannels != 8 {

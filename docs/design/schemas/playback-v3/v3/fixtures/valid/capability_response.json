@@ -40,6 +40,14 @@
       ]
     },
     {
+      "name": "server_hevc_resume_leading_picture_drop",
+      "executor": "server",
+      "recipe_version": "1",
+      "validated_claims": [
+        "resume_leading_pictures_removed"
+      ]
+    },
+    {
       "name": "video_to_h264",
       "executor": "server",
       "recipe_version": "2",

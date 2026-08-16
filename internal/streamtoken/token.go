@@ -43,6 +43,9 @@ type Claims struct {
 	// RemuxDVMode freezes whether a Profile 7 remux preserves or strips DV
 	// metadata. Empty is the legacy auto behavior for old tokens.
 	RemuxDVMode string `json:"dvm,omitempty"`
+	// RemuxFilterVersion identifies the signed remux-only
+	// recipe carried in VideoBitstreamFilter. Both must match exactly.
+	RemuxFilterVersion string `json:"rfv,omitempty"`
 
 	// Ownership / authorization lookup keys (re-resolved at reconstruct).
 	// Not trust assertions.
@@ -60,9 +63,9 @@ type Claims struct {
 	// ids are internal attempt handles and must never become saved filenames.
 	DownloadFilename string `json:"dfn,omitempty"`
 
-	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
-	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct
-	// from identity alone plus the client-supplied position.
+	// Reconstruction recipe — the byte-affecting parameters that mirror the
+	// former playback.RecipeCard. Direct tokens leave them zero; remux tokens use
+	// the source codec and versioned bitstream filter fields when required.
 	SourceVideoCodec       string  `json:"svc,omitempty"`
 	SourceVideoProfile     string  `json:"svp,omitempty"`
 	SourceVideoBitDepth    int     `json:"svb,omitempty"`

@@ -33,6 +33,9 @@ type RecipeCard struct {
 	// re-encode vs repackage).
 	TranscodeAudio bool        `json:"transcode_audio,omitempty"`
 	RemuxDVMode    RemuxDVMode `json:"remux_dv_mode,omitempty"`
+	// RemuxFilterVersion pins the remux-only filter recipe
+	// carried in VideoBitstreamFilter across restart and proxy reconstruction.
+	RemuxFilterVersion string `json:"remux_filter_version,omitempty"`
 
 	// Client metadata mirrored from the session so admin views (client label,
 	// Jellyfin pill) survive reconstruction. Carried only by stored cards —
@@ -44,8 +47,8 @@ type RecipeCard struct {
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
-	// Direct cards leave them zero; remux cards use the audio targets when the
-	// selected stream must be converted.
+	// Direct cards leave them zero; remux cards use the audio targets and
+	// versioned video-filter fields when the selected stream requires them.
 	InputPath              string  `json:"input_path"`
 	OutputSubdir           string  `json:"output_subdir,omitempty"`
 	SourceVideoCodec       string  `json:"source_video_codec,omitempty"`
@@ -215,6 +218,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		PlayMethod:             string(c.PlayMethod),
 		TranscodeAudio:         c.TranscodeAudio,
 		RemuxDVMode:            string(c.RemuxDVMode),
+		RemuxFilterVersion:     c.RemuxFilterVersion,
 		TranscodeNode:          c.TranscodeNodeURL,
 		TranscodeTransportID:   c.TranscodeTransportID,
 		TargetCodec:            c.TargetCodecVideo,
@@ -267,6 +271,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		PlayMethod:             method,
 		TranscodeAudio:         c.TranscodeAudio,
 		RemuxDVMode:            RemuxDVMode(c.RemuxDVMode),
+		RemuxFilterVersion:     c.RemuxFilterVersion,
 		InputPath:              c.MediaPath,
 		OutputSubdir:           c.OutputSubdir,
 		SourceVideoCodec:       c.SourceVideoCodec,

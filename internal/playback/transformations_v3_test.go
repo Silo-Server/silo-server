@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
@@ -47,4 +48,63 @@ func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *tes
 		}
 	}
 	t.Fatal("video_to_h264 was not advertised")
+}
+
+func TestProbeTransformationRegistryV3AdvertisesExactNoiseBitstreamFilter(t *testing.T) {
+	cases := []struct {
+		name      string
+		listing   string
+		help      string
+		bsfsExit  string
+		helpExit  string
+		available bool
+	}{
+		{name: "exact recipe", listing: "noise", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: true},
+		{name: "among filters", listing: "dovi_rpu noise filter_units", help: "-amount <string> -drop <string> -dropamount <int>", bsfsExit: "0", helpExit: "0", available: true},
+		{name: "legacy integer option", listing: "noise", help: "-dropamount <int>", bsfsExit: "0", helpExit: "0", available: false},
+		{name: "substring only", listing: "noise_reduction", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: false},
+		{name: "missing", listing: "dovi_rpu", help: "-drop <string>", bsfsExit: "0", helpExit: "0", available: false},
+		{name: "partial BSF output on failure", listing: "noise", help: "-drop <string>", bsfsExit: "1", helpExit: "0", available: false},
+		{name: "partial help output on failure", listing: "noise", help: "-drop <string>", bsfsExit: "0", helpExit: "1", available: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) printf '%s\\n' '" + test.listing + "'; exit " + test.bsfsExit + " ;;\n-h) printf '%s\\n' '" + test.help + "'; exit " + test.helpExit + " ;;\n-encoders) : ;;\nesac\n"
+			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
+			if got := registry.Available(TransformationServerHEVCResumeLeadingPictureDropV3); got != test.available {
+				t.Fatalf("resume transformation available = %v, want %v", got, test.available)
+			}
+			advertised := false
+			for _, transformation := range registry.Advertised() {
+				if transformation.Name == TransformationServerHEVCResumeLeadingPictureDropV3 &&
+					(transformation.RecipeVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 || len(transformation.ValidatedClaims) != 1 || transformation.ValidatedClaims[0] != ClaimResumeLeadingPicturesRemovedV3) {
+					t.Fatalf("resume transformation = %#v", transformation)
+				}
+				if transformation.Name == TransformationServerHEVCResumeLeadingPictureDropV3 {
+					advertised = true
+				}
+			}
+			if advertised != test.available {
+				t.Fatalf("resume transformation advertised = %v, want %v", advertised, test.available)
+			}
+		})
+	}
+}
+
+func TestSupportsHEVCResumeLeadingPictureRecipeRejectsPartialHelpOnTimeout(t *testing.T) {
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\nprintf '%s\\n' '-drop <string>'\nexec sleep 1\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if supportsHEVCResumeLeadingPictureRecipeV3(ctx, ffmpeg) {
+		t.Fatal("timed-out help probe accepted partial output")
+	}
 }

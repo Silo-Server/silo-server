@@ -2654,6 +2654,36 @@ func TestRemuxDVModeForPlanV3ExecutesProfile8Strip(t *testing.T) {
 	}
 }
 
+func TestRemuxVideoBitstreamFilterForPlanV3RequiresCurrentRecipe(t *testing.T) {
+	current := playback.TransformationV3{
+		Name:          playback.TransformationServerHEVCResumeLeadingPictureDropV3,
+		Executor:      playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+	}
+	plan := &playback.PlanV3{Delivery: playback.DeliveryRemuxProgressiveV3, Source: playback.SourceDescriptorV3{VideoCodec: "hevc"}, Transformations: []playback.TransformationV3{current}}
+	filter, version, err := remuxVideoBitstreamFilterForPlanV3(plan)
+	if err != nil || filter != playback.HEVCResumeLeadingPictureBitstreamFilter || version != playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3 {
+		t.Fatalf("current recipe = %q@%q, err=%v", filter, version, err)
+	}
+
+	for name, mutate := range map[string]func(*playback.PlanV3){
+		"wrong version":   func(plan *playback.PlanV3) { plan.Transformations[0].RecipeVersion = "0" },
+		"client executor": func(plan *playback.PlanV3) { plan.Transformations[0].Executor = playback.ExecutorClientV3 },
+		"wrong delivery":  func(plan *playback.PlanV3) { plan.Delivery = playback.DeliveryRemuxHLSV3 },
+		"wrong codec":     func(plan *playback.PlanV3) { plan.Source.VideoCodec = "h264" },
+		"duplicate":       func(plan *playback.PlanV3) { plan.Transformations = append(plan.Transformations, current) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := *plan
+			candidate.Transformations = append([]playback.TransformationV3(nil), plan.Transformations...)
+			mutate(&candidate)
+			if _, _, err := remuxVideoBitstreamFilterForPlanV3(&candidate); err == nil {
+				t.Fatalf("invalid transformation accepted: %#v", candidate)
+			}
+		})
+	}
+}
+
 func TestHandlePlaybackRouteEventV3RejectsMalformedEvents(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/route-events", strings.NewReader(`{}`)).WithContext(newAuthorizedPlaybackContext())
@@ -3784,6 +3814,96 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 	}
 }
 
+func TestPrepareTransportV3CarriesHEVCResumeRecipeToProxy(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxy := capableProxyStubV3(t)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
+
+	file := v3HandlerFixtureFile(t)
+	// The primary track is authoritative when a legacy aggregate row is stale.
+	file.CodecVideo = "h264"
+	file.VideoTracks[0].Codec = "hevc"
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{
+		Name:          playback.TransformationServerHEVCResumeLeadingPictureDropV3,
+		Executor:      playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+	})
+	plan.Source.VideoCodec = "hevc"
+	plan.Timeline = playback.TimelineV3{SourceStartSeconds: 39.5, PlayerStartSeconds: 39.5}
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-hevc-resume-proxy", UserID: 7, ProfileID: "profile-1"},
+		file,
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	prefix := proxy.URL + playback.RemuxRecipeStreamPathV3
+	if !strings.HasPrefix(transport.url, prefix) || !strings.Contains(transport.url, "seek=39.5") {
+		t.Fatalf("remux stream url = %q", transport.url)
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(transport.url, prefix), "?seek=39.5")
+	claims, err := streamtoken.Verify(token, handler.JWTSecret)
+	if err != nil {
+		t.Fatalf("verify proxy stream token: %v", err)
+	}
+	if claims.SourceVideoCodec != "hevc" || claims.VideoBitstreamFilter != playback.HEVCResumeLeadingPictureBitstreamFilter ||
+		claims.RemuxFilterVersion != playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3 {
+		t.Fatalf("token HEVC resume recipe = codec %q, %q@%q", claims.SourceVideoCodec, claims.VideoBitstreamFilter, claims.RemuxFilterVersion)
+	}
+}
+
+func TestPlaybackStreamURLFencesVersionedRemuxRecipe(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	session := &playback.Session{
+		ID:                 "session-hevc-resume-local",
+		PlayMethod:         playback.PlayRemux,
+		RemuxFilter:        playback.HEVCResumeLeadingPictureBitstreamFilter,
+		RemuxFilterVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3,
+	}
+	got := handler.playbackStreamURL(session)
+	wantPrefix := playback.RemuxRecipeStreamPathV3 + session.ID + "?st="
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Fatalf("versioned local remux URL = %q, want prefix %q", got, wantPrefix)
+	}
+
+	legacy := *session
+	legacy.ID = "session-legacy-remux"
+	legacy.RemuxFilter = ""
+	legacy.RemuxFilterVersion = ""
+	if got := handler.playbackStreamURL(&legacy); !strings.HasPrefix(got, "/stream/"+legacy.ID+"?st=") {
+		t.Fatalf("legacy remux URL = %q", got)
+	}
+}
+
+func TestPrepareTransportV3RejectsStaleHEVCResumeRecipe(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{
+		Name:          playback.TransformationServerHEVCResumeLeadingPictureDropV3,
+		Executor:      playback.ExecutorServerV3,
+		RecipeVersion: "0",
+	})
+	plan.Source.VideoCodec = "hevc"
+
+	_, transportErr := handler.prepareIdentityTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-stale-recipe"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux},
+		preparedTimelineV3{},
+	)
+	if transportErr == nil || transportErr.reason != "transformation_recipe_unavailable" {
+		t.Fatalf("transport error = %#v, want transformation_recipe_unavailable", transportErr)
+	}
+}
+
 func TestPrepareTransportV3FallsBackLocallyWithoutEligibleProxy(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
@@ -3881,6 +4001,7 @@ func capableProxyStubV3(t *testing.T) *httptest.Server {
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
 			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+			{Name: playback.TransformationServerHEVCResumeLeadingPictureDropV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3},
 		}})
 	}))
 	t.Cleanup(server.Close)

@@ -121,12 +121,17 @@ func TestLoadOrReconstructSession(t *testing.T) {
 		reg := &fakeSessionRegistry{}
 		m := newMgr(reg)
 		card := NewRemuxRecipeCard("s", 5, "p", 77, true, 2)
+		card.VideoBitstreamFilter = HEVCResumeLeadingPictureBitstreamFilter
+		card.RemuxFilterVersion = TransformationServerHEVCResumeLeadingPictureDropVersionV3
 		got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, cardPtr(card))
 		if status != SessionLoaded || got == nil {
 			t.Fatalf("status=%v session=%+v", status, got)
 		}
 		if got.PlayMethod != PlayRemux || got.MediaFileID != 77 || !got.TranscodeAudio || got.AudioTrackIndex != 2 {
 			t.Fatalf("reconstructed remux session wrong: %+v", got)
+		}
+		if got.RemuxFilter != HEVCResumeLeadingPictureBitstreamFilter || got.RemuxFilterVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 {
+			t.Fatalf("reconstructed remux recipe wrong: %+v", got)
 		}
 		if _, err := reg.GetSession("s"); err != nil {
 			t.Fatalf("reconstructed session not registered: %v", err)
