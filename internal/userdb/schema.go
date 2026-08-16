@@ -415,7 +415,60 @@ func InitSchema(db *sql.DB) error {
 	if err := migratePlaybackSettingsToDeviceScope(db); err != nil {
 		return err
 	}
+	if err := migrateAutoSkipIntroToIntroSkipMode(db); err != nil {
+		return err
+	}
 	return backfillUserDevices(db)
+}
+
+// migrateAutoSkipIntroToIntroSkipMode is this backend's half of the revision-7
+// intro-skip cutover, matching the Goose migration that does the same for
+// PostgreSQL's user_setting_values.
+//
+// Only already-canonical rows are its business. A store whose legacy tables
+// have not been converted yet gets its companion rows from
+// settingsmigrate.Planner when migrateSettingsToCanonical runs, which is where
+// both backends share the conversion rules; this covers the rows a previous
+// open already wrote, which that pass will never look at again.
+//
+// The NOT EXISTS guard, not just INSERT OR IGNORE, is what makes a re-run cheap
+// and — more importantly — keeps it from ever contradicting an enum a client
+// wrote itself. Nobody can hold "never" yet, so no choice is lost on the way in.
+func migrateAutoSkipIntroToIntroSkipMode(db *sql.DB) error {
+	_, err := db.Exec(`
+		INSERT OR IGNORE INTO user_setting_values (
+			key, scope, profile_id, client_family, device_id, library_id, series_id,
+			value, revision, created_at, updated_at
+		)
+		SELECT
+			'playback.intro_skip_mode',
+			legacy.scope,
+			legacy.profile_id,
+			legacy.client_family,
+			legacy.device_id,
+			legacy.library_id,
+			legacy.series_id,
+			CASE WHEN json(legacy.value) = json('true') THEN '"always"' ELSE '"ask"' END,
+			1,
+			legacy.created_at,
+			legacy.updated_at
+		FROM user_setting_values AS legacy
+		WHERE legacy.key = 'playback.auto_skip_intro'
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_setting_values AS existing
+			WHERE existing.key = 'playback.intro_skip_mode'
+			  AND existing.scope = legacy.scope
+			  AND existing.profile_id IS legacy.profile_id
+			  AND existing.client_family IS legacy.client_family
+			  AND existing.device_id IS legacy.device_id
+			  AND existing.library_id IS legacy.library_id
+			  AND existing.series_id IS legacy.series_id
+		  )`)
+	if err != nil {
+		return fmt.Errorf("backfilling playback.intro_skip_mode from playback.auto_skip_intro: %w", err)
+	}
+	return nil
 }
 
 // ensureSettingValuesClientFamily upgrades the canonical settings table before

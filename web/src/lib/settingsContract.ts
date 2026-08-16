@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 6;
+export const SETTINGS_REVISION = 7;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -181,6 +181,8 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Skip intros */
+  PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
   PLAYBACK_MAX_BITRATE_KBPS: "playback.max_bitrate_kbps",
   /** Next up prompt */
@@ -534,6 +536,27 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: 'Skip "previously on" recaps automatically when Silo can detect them.',
     category: "playback",
     control: "switch",
+  },
+  "playback.intro_skip_mode": {
+    key: "playback.intro_skip_mode",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 7,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [7, 7],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "ask",
+    label: "Skip intros",
+    description:
+      "What Silo does when an intro starts: leave it alone, offer a Skip Intro button, or skip it and offer an undo.",
+    category: "playback",
+    control: "select",
+    values: [
+      { value: "never", label: "Never", introducedIn: 7 },
+      { value: "ask", label: "Ask to skip", introducedIn: 7 },
+      { value: "always", label: "Skip automatically", introducedIn: 7 },
+    ],
   },
   "playback.max_bitrate_kbps": {
     key: "playback.max_bitrate_kbps",

@@ -111,6 +111,20 @@ SELECT COUNT(*) FROM user_setting_values
 		}
 	})
 
+	t.Run("auto_skip_intro carries its revision-7 replacement", func(t *testing.T) {
+		var value string
+		err := pool.QueryRow(ctx, `
+SELECT value::text FROM user_setting_values
+ WHERE key = 'playback.intro_skip_mode' AND scope = 'profile' AND profile_id = 'mp1'`).
+			Scan(&value)
+		if err != nil {
+			t.Fatalf("reading migrated intro_skip_mode: %v", err)
+		}
+		if value != `"always"` {
+			t.Errorf("intro_skip_mode = %s, want \"always\"", value)
+		}
+	})
+
 	t.Run("metadata language migrates from the postgres-only column", func(t *testing.T) {
 		var value string
 		err := pool.QueryRow(ctx, `

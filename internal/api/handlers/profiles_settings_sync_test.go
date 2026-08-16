@@ -170,6 +170,10 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 		settingskeys.PlaybackAutoSkipCredits:     `true`,
 		settingskeys.PlaybackAutoSkipRecap:       `true`,
 		settingskeys.PlaybackAutoPlayNextPreview: `false`,
+		// auto_skip_intro carries its revision-7 replacement with it, so a
+		// client still using the legacy route does not leave a current client
+		// resolving the contract default.
+		settingskeys.PlaybackIntroSkipMode: `"always"`,
 	} {
 		value := storedProfileSetting(t, store, key, "profile-1")
 		if value == nil {
@@ -194,6 +198,40 @@ func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
 			t.Errorf("an omitted field wrote %s", value.Value)
 		}
 	})
+}
+
+// TestUpdateProfileSyncsIntroSkipMode covers both directions of the legacy
+// switch, including the one an untouched-looking false has to produce: "ask" is
+// the mode that reproduces what auto_skip_intro=false always did, and a profile
+// route that wrote only the boolean would leave the enum saying something else.
+func TestUpdateProfileSyncsIntroSkipMode(t *testing.T) {
+	for _, tc := range []struct{ body, wantMode, wantBool string }{
+		{`{"auto_skip_intro":true}`, `"always"`, `true`},
+		{`{"auto_skip_intro":false}`, `"ask"`, `false`},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			store := newProfileTestStore(t)
+			handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+			if rr := updateProfileVia(t, handler, "profile-1", tc.body); rr.Code != http.StatusOK {
+				t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+			}
+
+			for key, want := range map[string]string{
+				settingskeys.PlaybackIntroSkipMode: tc.wantMode,
+				settingskeys.PlaybackAutoSkipIntro: tc.wantBool,
+			} {
+				value := storedProfileSetting(t, store, key, "profile-1")
+				if value == nil {
+					t.Errorf("no canonical %s row after the profile update", key)
+					continue
+				}
+				if string(value.Value) != want {
+					t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
+				}
+			}
+		})
+	}
 }
 
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical

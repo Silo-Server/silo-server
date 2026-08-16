@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 6,
+  "revision": 7,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -305,7 +305,30 @@
       "category": "playback",
       "label": "Auto-skip intros",
       "description": "Jump past intros automatically when Silo can detect them.",
-      "recommended_control": "switch"
+      "recommended_control": "switch",
+      "deprecated": true,
+      "notes": "Superseded by playback.intro_skip_mode in revision 7: true is \"always\", false is \"ask\". The boolean cannot express \"never\" (no prompt at all), which is the mode this setting was missing. It stays in the manifest because every shipped client reads it and the profile DTO carries it as a NOT NULL column, and the server mirrors the two keys at write time for one release so a preference set on an old client shows up correctly on a new one. Removing it is a follow-up, once Android, Apple and web all read the enum."
+    },
+    {
+      "key": "playback.intro_skip_mode",
+      "introduced_in": 7,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "never", "label": "Never" },
+          { "value": "ask", "label": "Ask to skip" },
+          { "value": "always", "label": "Skip automatically" }
+        ]
+      },
+      "default_value": "ask",
+      "category": "playback",
+      "label": "Skip intros",
+      "description": "What Silo does when an intro starts: leave it alone, offer a Skip Intro button, or skip it and offer an undo.",
+      "recommended_control": "select",
+      "notes": "The replacement for playback.auto_skip_intro, which could only say \"prompt\" or \"count down then skip\" and had no way to turn the prompt off. The default is \"ask\", which is exactly what auto_skip_intro=false did, so an untouched profile behaves identically across the cutover. The schema has no segmented control, so this is a select; clients that have a segmented control should use it. See docs/design/2026-08-16-intro-skip-mode.md."
     },
     {
       "key": "playback.auto_skip_credits",

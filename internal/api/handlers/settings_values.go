@@ -813,6 +813,21 @@ func (h *SettingValuesHandler) setValueAt(
 		return
 	}
 
+	// A deprecated key and its replacement are one preference stored twice
+	// while old clients are in the field, so a write to either lands on both.
+	// The value is already normalized, so a conversion failure here is a defect
+	// in the pairing rather than bad input — refuse the request rather than
+	// store half of it.
+	mirror, hasMirror, err := settingscontract.MirrorWrite(identity.Key, normalized)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "settings mirror could not convert a normalized value",
+			"component", "api", "key", identity.Key, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
+		return
+	}
+	mirrorIdentity := identity
+	mirrorIdentity.Key = mirror.Key
+
 	// Idempotency: a client that retries a write after a dropped response must
 	// not double-apply it, and must be able to tell "already done" from "that
 	// id means something else".
@@ -821,12 +836,30 @@ func (h *SettingValuesHandler) setValueAt(
 	var idempotentResult json.RawMessage
 	if mutationID == "" {
 		stored, err = store.UpsertSettingValue(r.Context(), identity, normalized)
+		if err == nil && hasMirror {
+			// No transaction on this path — the store's plain write API has
+			// none — so the companion write is a second statement. Its failure
+			// is the caller's failure: a request that reported success while
+			// leaving the pair disagreeing is the exact drift the mirror
+			// exists to prevent, and both writes are upserts, so the retry a
+			// 500 provokes is safe.
+			_, err = store.UpsertSettingValue(r.Context(), mirrorIdentity, mirror.Value)
+		}
 	} else {
 		outcome, mutationErr := runIdempotentSettingMutation(
 			r.Context(), store, mutationID, hashMutationRequest(identity, normalized),
 			func(writer userstore.SettingMutationWriter) (*userstore.SettingValue, bool, error) {
 				value, err := writer.UpsertSettingValue(r.Context(), identity, normalized)
-				return value, true, err
+				if err != nil || !hasMirror {
+					return value, true, err
+				}
+				// Same transaction as the primary write and the replay
+				// receipt, so a replay re-serves the receipt without
+				// re-applying either row.
+				if _, err := writer.UpsertSettingValue(r.Context(), mirrorIdentity, mirror.Value); err != nil {
+					return nil, false, err
+				}
+				return value, true, nil
 			},
 		)
 		if errors.Is(mutationErr, errMutationIDConflict) {
@@ -852,6 +885,13 @@ func (h *SettingValuesHandler) setValueAt(
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
+		return
+	}
+
+	// GET /profiles still serves auto_skip_intro from the legacy column, so a
+	// profile-scope choice made through the new key has to reach it or the
+	// profile DTO keeps reporting the preference the household abandoned.
+	if !h.syncLegacyIntroSkipColumn(r, w, store, identity, mirror, hasMirror) {
 		return
 	}
 
@@ -889,6 +929,52 @@ func (h *SettingValuesHandler) setValueAt(
 	} else {
 		writeJSON(w, http.StatusOK, response)
 	}
+}
+
+// syncLegacyIntroSkipColumn mirrors a profile-scope playback.intro_skip_mode
+// write into user_profiles.auto_skip_intro, and reports whether the request may
+// continue.
+//
+// It is deliberately one-directional. The canonical write path does not
+// otherwise touch the legacy preference columns — the cutover direction is that
+// the profile DTO stops reading them, which it already has for the language and
+// subtitle fields — so this is not a general dual-write, only the narrow repair
+// that keeps the one DTO field still served from its column truthful while the
+// key that replaced it is the one clients write. A write of the deprecated
+// boolean itself is left alone, exactly as it is today.
+//
+// A failure fails the request for the same reason the companion row write does:
+// the caller asked for one preference change, and reporting success while half
+// of it landed is what makes the two halves drift.
+func (h *SettingValuesHandler) syncLegacyIntroSkipColumn(
+	r *http.Request,
+	w http.ResponseWriter,
+	store userstore.UserStore,
+	identity userstore.SettingIdentity,
+	mirror settingscontract.MirroredWrite,
+	hasMirror bool,
+) bool {
+	if !hasMirror ||
+		identity.Key != settingskeys.PlaybackIntroSkipMode ||
+		identity.Scope != settingscontract.ScopeProfile {
+		return true
+	}
+
+	var enabled bool
+	if err := json.Unmarshal(mirror.Value, &enabled); err != nil {
+		slog.ErrorContext(r.Context(), "settings mirror produced a non-boolean auto_skip_intro",
+			"component", "api", "profile_id", identity.ProfileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
+		return false
+	}
+	if err := store.UpdateProfile(r.Context(), identity.ProfileID,
+		userstore.UpdateProfileInput{AutoSkipIntro: &enabled}); err != nil {
+		slog.ErrorContext(r.Context(), "failed to mirror intro skip mode into the profile column",
+			"component", "api", "profile_id", identity.ProfileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
+		return false
+	}
+	return true
 }
 
 // registerWritingDevice refreshes the device registry from the request's
@@ -964,6 +1050,22 @@ func (h *SettingValuesHandler) deleteValueAt(
 	if !removed {
 		writeError(w, http.StatusNotFound, "not_found", "No value is set at this scope")
 		return
+	}
+	// Clearing one half of a mirrored pair clears both: a surviving companion
+	// row would go on resolving as an explicit choice at a scope the caller
+	// just said it wanted to inherit at. Only attempted once the primary row
+	// really went away, so a 404 for "nothing set here" still means nothing was
+	// touched. A companion that was already absent removes nothing, which is
+	// success.
+	if mirrorKey, ok := settingscontract.MirrorKey(identity.Key); ok {
+		mirrorIdentity := identity
+		mirrorIdentity.Key = mirrorKey
+		if _, err := store.DeleteSettingValue(r.Context(), mirrorIdentity); err != nil {
+			slog.ErrorContext(r.Context(), "failed to clear the mirrored setting",
+				"component", "api", "key", identity.Key, "mirror_key", mirrorKey, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear the setting")
+			return
+		}
 	}
 	auditSettingsForOther(r.Context(), settingsAuditRecord{
 		Action:          "clear",

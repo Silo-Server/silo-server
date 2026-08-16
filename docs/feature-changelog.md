@@ -1,5 +1,13 @@
 # Feature Changelog
 
+## 2026-08-16
+
+### Let viewers turn the intro prompt off
+Skipping intros stops being a switch and becomes a choice of three: leave intros alone, offer a Skip Intro button, or skip automatically and offer an undo.
+- Adds `playback.intro_skip_mode` (`never` / `ask` / `always`, default `ask`) at contract revision 7 and deprecates `playback.auto_skip_intro`, which could not express "never".
+- Migrates every stored auto-skip-intro preference onto the new key, on both the PostgreSQL and per-user SQLite backends, so nobody's existing choice changes.
+- Mirrors the two keys at write time for one release, so a preference set on an older phone, TV, or browser still shows up correctly on an updated one.
+
 ## 2026-04-09
 
 Covers commits from 2026-04-08 22:32 EDT through 2026-04-09 20:02 EDT.

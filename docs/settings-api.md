@@ -131,6 +131,42 @@ Content-Type: application/json
 Stored-value responses include `client_family` when the source or explicit row
 is at `profile_client`.
 
+### Superseded keys and the write mirror
+
+A definition may be marked `deprecated: true` in the manifest. It is still
+served, still readable and still writable — old clients depend on it — but new
+clients should read and write its replacement.
+
+Revision 7 deprecates `playback.auto_skip_intro` in favor of
+`playback.intro_skip_mode`, whose three members say what the boolean could not:
+`never` (no prompt at all), `ask` (offer a Skip Intro button, what the boolean's
+`false` always did) and `always` (skip it and offer an undo). The default is
+`ask`, so an untouched profile behaves identically across the cutover.
+
+For one release the server keeps the pair in step, so a preference set on any
+client shows up correctly on the others:
+
+| Request                                | Server also does                                              |
+| -------------------------------------- | ------------------------------------------------------------- |
+| `PUT` of `playback.auto_skip_intro`    | writes `playback.intro_skip_mode` at the same identity: `true → "always"`, `false → "ask"` |
+| `PUT` of `playback.intro_skip_mode`    | writes `playback.auto_skip_intro` at the same identity: `"always" → true`, otherwise `false` |
+| `DELETE` of either                     | removes the other at the same identity                         |
+| `PUT`/`POST /profiles` with `auto_skip_intro` | writes both keys at `profile` scope                     |
+| `PUT`/`DELETE` of the legacy `/settings/{key}` or `/settings/device/{key}` for `playback.auto_skip_intro` | writes or clears both keys at the scope that route owns |
+| `playback.intro_skip_mode` at `profile` scope | updates `user_profiles.auto_skip_intro`, so the profile DTO stays truthful for clients that read it |
+
+Both rows commit together on the idempotent write path, and a replayed
+mutation id re-serves its receipt without writing either again. The response is
+always the stored value of the key the request addressed; the companion row is
+not reported. Only the addressed key raises a `user_settings.changed` event and
+an audit record.
+
+The boolean direction is lossy on purpose: a client that only understands the
+switch sees `never` as `false` and shows the button. Such a client that then
+flips the switch overwrites `never`, which is accepted for the overlap window
+and is why the mirror is temporary. Once every client reads the enum, a
+follow-up removes the mirror. Design: `docs/design/2026-08-16-intro-skip-mode.md`.
+
 ### Atomic navigation shortcuts
 
 `nav.shortcuts` is a profile-wide catalog shared by TV, mobile, desktop, and

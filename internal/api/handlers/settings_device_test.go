@@ -1070,3 +1070,66 @@ func withRouteParams(req *http.Request, params map[string]string) *http.Request 
 	}
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
+
+// TestLegacyDeviceSettingCarriesIntroSkipMode closes the third write path onto
+// the intro-skip pair. The shipped apps save this switch through the legacy
+// generic route, not through /settings/values, so without the mirror in the
+// runtime plan an updated client would resolve the contract default while the
+// household's own device said otherwise.
+func TestLegacyDeviceSettingCarriesIntroSkipMode(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	send := func(method string, body []byte) *httptest.ResponseRecorder {
+		key := "playback.auto_skip_intro"
+		req := httptest.NewRequest(method, "/settings/device/"+key, bytes.NewReader(body))
+		req = withRouteParams(req, map[string]string{"key": key})
+		req.Header.Set(deviceIDHeader, "living-room")
+		req = req.WithContext(apimw.SetProfileID(
+			apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+		rec := httptest.NewRecorder()
+		if method == http.MethodPut {
+			handler.HandleSetDeviceSetting(rec, req)
+		} else {
+			handler.HandleDeleteDeviceSetting(rec, req)
+		}
+		return rec
+	}
+	canonical := func(key string) *userstore.SettingValue {
+		t.Helper()
+		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+			Key: key, Scope: settingscontract.ScopeProfileDevice,
+			ProfileID: "profile-1", DeviceID: "living-room",
+		})
+		if err != nil {
+			t.Fatalf("GetSettingValue(%s): %v", key, err)
+		}
+		return value
+	}
+
+	for _, tc := range []struct{ body, wantBool, wantMode string }{
+		{`{"value":"true"}`, `true`, `"always"`},
+		{`{"value":"false"}`, `false`, `"ask"`},
+	} {
+		if rec := send(http.MethodPut, []byte(tc.body)); rec.Code != http.StatusNoContent {
+			t.Fatalf("PUT %s = %d: %s", tc.body, rec.Code, rec.Body.String())
+		}
+		if value := canonical("playback.auto_skip_intro"); value == nil || string(value.Value) != tc.wantBool {
+			t.Fatalf("canonical auto_skip_intro after %s = %+v, want %s", tc.body, value, tc.wantBool)
+		}
+		if value := canonical("playback.intro_skip_mode"); value == nil || string(value.Value) != tc.wantMode {
+			t.Fatalf("canonical intro_skip_mode after %s = %+v, want %s", tc.body, value, tc.wantMode)
+		}
+	}
+
+	// Clearing through the same route has to reach both rows, or the companion
+	// would go on overriding at a scope the device just gave up.
+	if rec := send(http.MethodDelete, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, key := range []string{"playback.auto_skip_intro", "playback.intro_skip_mode"} {
+		if value := canonical(key); value != nil {
+			t.Errorf("%s survived the legacy delete: %+v", key, value)
+		}
+	}
+}
