@@ -14,7 +14,7 @@ func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "1"},
 		{Name: "video_to_h264", RecipeVersion: "2"},
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 	})
 	if got := registry.WithAdvertised(nil); got != registry {
 		t.Fatal("empty advertisement must return the receiver unchanged")
@@ -158,21 +158,21 @@ func TestPlanPlaybackV3NodeToolchainDoesNotMaskTerminalForProgressiveOnlyClient(
 }
 
 // The Profile 7 HDR10 strip must ride the HLS remux when only pooled nodes
-// carry the dovi_rpu filter: the progressive remux executes locally and is
-// not eligible without the local filter.
+// carry both required bitstream filters: the progressive remux executes
+// locally and is not eligible without the local recipe.
 func TestPlanPlaybackV3Profile7StripOffloadsToHLSRemux(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7
 	file.VideoTracks[0].DVBLCompatID = 6
-	file.VideoTracks[0].DVELPresent = false
-	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].DVELPresent = true
+	file.VideoTracks[0].DVEnhancementLayer = string(EnhancementFELV3)
 	file.VideoTracks[0].VideoRange = "DolbyVision"
 	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", RecipeVersion: "1"}})
+	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3}})
 	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 
 	withoutNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local})
@@ -180,12 +180,20 @@ func TestPlanPlaybackV3Profile7StripOffloadsToHLSRemux(t *testing.T) {
 		t.Fatalf("without nodes = %s", ExplainPlannerResultV3(withoutNodes))
 	}
 
-	union := local.WithAdvertised([]TransformationV3{{Name: "server_dv7_to_hdr10", Executor: "server", RecipeVersion: "1"}})
+	staleUnion := local.WithAdvertised([]TransformationV3{{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1"}})
+	if staleUnion.Available(TransformationServerDV7HDR10V3) {
+		t.Fatal("a node advertising the incomplete v1 DV7 recipe must not widen availability")
+	}
+
+	union := local.WithAdvertised([]TransformationV3{{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3}})
 	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if offloaded.Plan == nil || offloaded.Plan.Delivery != DeliveryRemuxHLSV3 || offloaded.TargetVideoCodec != "copy" {
 		t.Fatalf("with nodes = %s", ExplainPlannerResultV3(offloaded))
 	}
-	if len(offloaded.Plan.Transformations) != 1 || offloaded.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
+	if len(offloaded.Plan.Transformations) != 1 ||
+		offloaded.Plan.Transformations[0].Name != TransformationServerDV7HDR10V3 ||
+		offloaded.Plan.Transformations[0].Executor != ExecutorServerV3 ||
+		offloaded.Plan.Transformations[0].RecipeVersion != TransformationServerDV7HDR10RecipeVersionV3 {
 		t.Fatalf("transformations = %#v", offloaded.Plan.Transformations)
 	}
 	if offloaded.Plan.EffectiveRecipe.DynamicRange != "hdr10" || !offloaded.Plan.Claims.Video.HDR10 {

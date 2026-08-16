@@ -825,21 +825,21 @@ func TestPlanPlaybackV3Profile7FallsBackToHDR10WithoutNativeP7(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7
 	file.VideoTracks[0].DVBLCompatID = 6
-	file.VideoTracks[0].DVELPresent = false
-	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].DVELPresent = true
+	file.VideoTracks[0].DVEnhancementLayer = string(EnhancementFELV3)
 	file.VideoTracks[0].VideoRange = "DolbyVision"
 	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true}})
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Claims.Video.HDR10 || result.Plan.Claims.Video.DolbyVision {
 		t.Fatalf("result = %#v", result)
 	}
-	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
+	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationServerDV7HDR10V3 || result.Plan.Transformations[0].Executor != ExecutorServerV3 || result.Plan.Transformations[0].RecipeVersion != TransformationServerDV7HDR10RecipeVersionV3 {
 		t.Fatalf("transformations = %#v", result.Plan.Transformations)
 	}
 }
@@ -1181,9 +1181,9 @@ func TestPlanPlaybackV3Profile8CompatibleBaseLayerStripsToHDR10(t *testing.T) {
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true}})
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.DynamicRange != "hdr10" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.DynamicRange != "hdr10" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationServerDV7HDR10V3 || result.Plan.Transformations[0].Executor != ExecutorServerV3 || result.Plan.Transformations[0].RecipeVersion != TransformationServerDV7HDR10RecipeVersionV3 {
 		t.Fatalf("result = %#v", result)
 	}
 }

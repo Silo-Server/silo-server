@@ -147,10 +147,11 @@ func (s *Server) Handler() http.Handler {
 // the same shape and at the same path as a transcode node.
 //
 // A proxy executes recipes too: /stream/remux runs ffmpeg to convert audio or
-// strip a Dolby Vision RPU. Without this endpoint the API has no way to tell
-// whether the proxy it just picked can run the transformations a plan froze, so
-// a pool whose proxies carry a different ffmpeg build (a rolling upgrade, a
-// custom image) would fail at stream time rather than at selection time.
+// isolate a Dolby Vision Profile 7 HDR10 base layer. Without this endpoint the
+// API has no way to tell whether the proxy it just picked can run the
+// transformations a plan froze, so a pool whose proxies carry a different
+// ffmpeg build (a rolling upgrade, a custom image) would fail at stream time
+// rather than at selection time.
 func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 	ffmpegPath := ""
 	if cfg := s.watcher.Config(); cfg != nil {
@@ -367,6 +368,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// server's stream handler serves the same claims.
 	_ = playback.ServeRemuxWithOptions(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode:                 playback.RemuxDVMode(claims.RemuxDVMode),
+		DVRecipeVersion:        claims.RemuxDVRecipeVersion,
 		FFmpegPath:             s.watcher.Config().Playback.FFmpegPath,
 		ContentType:            playback.RemuxContentType(claims.AudioOnly),
 		AudioOnly:              claims.AudioOnly,

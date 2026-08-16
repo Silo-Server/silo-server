@@ -36,13 +36,18 @@ type Claims struct {
 	AudioChannels        int    `json:"ach,omitempty"`
 	AudioTrackIndex      int    `json:"ati,omitempty"`
 	AudioOnly            bool   `json:"ao,omitempty"`
-	// DVProfile is the file's Dolby Vision profile (0 = none); remux nodes
-	// use it to strip dangling profile 7 RPUs. Absent in older tokens, which
-	// decodes as 0 (no strip — the pre-existing behavior).
+	// DVProfile is the file's Dolby Vision profile (0 = none); remux nodes use
+	// it to select the validated Dolby Vision byte-level recipe. Absent in older
+	// tokens, which decodes as 0 (the pre-existing behavior).
 	DVProfile int `json:"dvp,omitempty"`
-	// RemuxDVMode freezes whether a Profile 7 remux preserves or strips DV
-	// metadata. Empty is the legacy auto behavior for old tokens.
+	// RemuxDVMode freezes whether a Profile 7 remux preserves Dolby Vision or
+	// isolates its HDR10 base layer. Empty is the legacy auto behavior for old
+	// tokens.
 	RemuxDVMode string `json:"dvm,omitempty"`
+	// RemuxDVRecipeVersion pins the byte-level remux operation selected by the
+	// plan. A strip mode without the current version fails closed after an
+	// update.
+	RemuxDVRecipeVersion string `json:"dvrv,omitempty"`
 
 	// Ownership / authorization lookup keys (re-resolved at reconstruct).
 	// Not trust assertions.

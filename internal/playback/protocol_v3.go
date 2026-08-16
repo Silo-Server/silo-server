@@ -133,7 +133,8 @@ const (
 	TransformationVideoToH264V3    = "video_to_h264"
 	TransformationServerDV7HDR10V3 = "server_dv7_to_hdr10"
 
-	TransformationVideoToH264RecipeVersionV3 = "2"
+	TransformationVideoToH264RecipeVersionV3    = "2"
+	TransformationServerDV7HDR10RecipeVersionV3 = "2"
 )
 
 // Transformation executors: who runs the transformation. A "server"

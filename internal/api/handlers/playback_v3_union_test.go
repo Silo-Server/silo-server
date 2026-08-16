@@ -44,7 +44,7 @@ func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "audio_to_aac", RecipeVersion: "1"},
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1"},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3},
 	}))
 	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
 

@@ -335,7 +335,7 @@ func goldenCapabilityResponse() playback.CapabilityResponseV3 {
 		// fixture pins the full set so a client sees every shape it must parse.
 		Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{playback.ClaimAudioDecodeV3}},
-			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: playback.DV7ToHDR10ClaimsV3()},
+			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: playback.DV7ToHDR10ClaimsV3()},
 			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{playback.ClaimH264DecodeV3}},
 		},
 	}
@@ -573,7 +573,7 @@ func goldenConformanceMatrix() playback.ConformanceMatrixV3 {
 	dv7File.VideoTracks[0].VideoRangeType = "DOVIWithEL"
 	dv7Request := conformanceHDRRequest()
 	dv7Request.PlaybackAttemptID = "attempt-dv7-hdr10"
-	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true}})
+	dv7Registry := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true}})
 	planner = append(planner, makePlannerScenario("dolby_vision_7_hdr10_fallback", "hdr_dv_matrix", dv7Request, dv7File, nil, settings, dv7Registry))
 
 	audioAdaptFile := conformanceHDRFile()
@@ -858,6 +858,6 @@ func conformanceRegistry() *playback.TransformationRegistryV3 {
 	return playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: playback.TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
 		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "1", Available: true},
-		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 	})
 }

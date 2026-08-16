@@ -509,6 +509,7 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	switch s.PlayMethod {
 	case playback.PlayRemux:
 		card := playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
+		card.RemuxDVRecipeVersion = s.RemuxDVRecipeVersion
 		card.TargetCodecAudio = s.TargetAudioCodec
 		card.TargetAudioChannels = s.TargetAudioChannels
 		card.TargetAudioBitrateKbps = s.TargetAudioBitrateKbps

@@ -1334,7 +1334,7 @@ func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T)
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "1", Available: true},
 		{Name: "video_to_h264", RecipeVersion: "2", Available: true},
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
+		{Name: playback.TransformationServerDV7HDR10V3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, Available: true},
 	}))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1998,7 +1998,7 @@ func TestFrozenSeekReanchorResultV3PreservesRouteMatrix(t *testing.T) {
 		}},
 		{name: "Dolby Vision transformation", mutate: func(plan *playback.PlanV3, _ *playback.PlannerResultV3) {
 			plan.EffectiveRecipe.DynamicRange = "hdr10"
-			plan.Transformations = []playback.TransformationV3{{Name: "server_dv7_to_hdr10", Executor: "server", RecipeVersion: "1"}}
+			plan.Transformations = []playback.TransformationV3{{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3}}
 		}},
 		{name: "pooled node only transformation", mutate: func(plan *playback.PlanV3, result *playback.PlannerResultV3) {
 			plan.Delivery = playback.DeliveryTranscodeHLSV3
@@ -2648,9 +2648,52 @@ func TestTransportGenerationV3IsUniqueAndSessionScoped(t *testing.T) {
 }
 
 func TestRemuxDVModeForPlanV3ExecutesProfile8Strip(t *testing.T) {
-	plan := &playback.PlanV3{Source: playback.SourceDescriptorV3{DVProfile: 8}, Transformations: []playback.TransformationV3{{Name: "server_dv7_to_hdr10"}}}
+	plan := &playback.PlanV3{Source: playback.SourceDescriptorV3{DVProfile: 8}, Transformations: []playback.TransformationV3{{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3}}}
 	if got := remuxDVModeForPlanV3(plan); got != playback.RemuxDVStripToHDR10V3 {
 		t.Fatalf("mode = %q", got)
+	}
+}
+
+func TestDV7ToHDR10ExecutionRequiresCurrentServerRecipe(t *testing.T) {
+	current := playback.TransformationV3{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3}
+	currentPlan := &playback.PlanV3{Source: playback.SourceDescriptorV3{DVProfile: 7}, Transformations: []playback.TransformationV3{current}}
+	if got := remuxDVModeForPlanV3(currentPlan); got != playback.RemuxDVStripToHDR10V3 {
+		t.Fatalf("current recipe remux mode = %q, want %q", got, playback.RemuxDVStripToHDR10V3)
+	}
+	if got := videoBitstreamFilterForPlanV3(currentPlan); got != playback.DV7ToHDR10BitstreamFilter {
+		t.Fatalf("current recipe bitstream filter = %q, want %q", got, playback.DV7ToHDR10BitstreamFilter)
+	}
+	if got := remuxDVRecipeVersionForPlanV3(currentPlan); got != playback.TransformationServerDV7HDR10RecipeVersionV3 {
+		t.Fatalf("current remux recipe version = %q, want %q", got, playback.TransformationServerDV7HDR10RecipeVersionV3)
+	}
+
+	invalid := []struct {
+		name           string
+		transformation playback.TransformationV3
+	}{
+		{name: "stale version", transformation: playback.TransformationV3{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"}},
+		{name: "client executor", transformation: playback.TransformationV3{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorClientV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3}},
+		{name: "wrong transformation", transformation: playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3}},
+	}
+	for _, tt := range invalid {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := &playback.PlanV3{Source: playback.SourceDescriptorV3{DVProfile: 7}, Transformations: []playback.TransformationV3{tt.transformation}}
+			if got := remuxDVModeForPlanV3(plan); got != playback.RemuxDVRejectP7V3 {
+				t.Fatalf("remux mode = %q, want %q", got, playback.RemuxDVRejectP7V3)
+			}
+			if got := videoBitstreamFilterForPlanV3(plan); got != "" {
+				t.Fatalf("selected bitstream filter %q", got)
+			}
+			if got := remuxDVRecipeVersionForPlanV3(plan); got != "" {
+				t.Fatalf("selected remux recipe version %q", got)
+			}
+		})
+	}
+	if got := videoBitstreamFilterForPlanV3(nil); got != "" {
+		t.Fatalf("nil plan selected bitstream filter %q", got)
+	}
+	if got := remuxDVRecipeVersionForPlanV3(nil); got != "" {
+		t.Fatalf("nil plan selected remux recipe version %q", got)
 	}
 }
 
@@ -3750,7 +3793,11 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 	file := v3HandlerFixtureFile(t)
 	file.VideoTracks[0].DVProfile = 7
 
-	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"})
+	plan := identityProxyPlanV3(
+		playback.DeliveryRemuxProgressiveV3,
+		playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+		playback.TransformationV3{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3},
+	)
 	plan.Timeline = playback.TimelineV3{SourceStartSeconds: 39.5}
 
 	transport, transportErr := handler.prepareTransportV3(
@@ -3777,7 +3824,10 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 		t.Fatalf("verify proxy stream token: %v", err)
 	}
 	if claims.DVProfile != 7 {
-		t.Fatalf("token DV profile = %d, want 7 so the proxy strips the dangling RPU", claims.DVProfile)
+		t.Fatalf("token DV profile = %d, want 7 so the proxy applies the planned HDR10 filter chain", claims.DVProfile)
+	}
+	if claims.RemuxDVMode != string(playback.RemuxDVStripToHDR10V3) || claims.RemuxDVRecipeVersion != playback.TransformationServerDV7HDR10RecipeVersionV3 {
+		t.Fatalf("token DV recipe = %q@%q, want %q@%q", claims.RemuxDVMode, claims.RemuxDVRecipeVersion, playback.RemuxDVStripToHDR10V3, playback.TransformationServerDV7HDR10RecipeVersionV3)
 	}
 	if !claims.TranscodeAudio {
 		t.Fatal("token must tell the proxy to convert audio")
@@ -3880,7 +3930,7 @@ func capableProxyStubV3(t *testing.T) *httptest.Server {
 		}
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
 			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
-			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3},
 		}})
 	}))
 	t.Cleanup(server.Close)

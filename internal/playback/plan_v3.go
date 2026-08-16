@@ -390,7 +390,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 		dvStrip := dvStripEligible && (source.DVProfile == 7 || !rangeOK)
 		if dvStrip {
-			plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: DV7ToHDR10ClaimsV3()})
+			plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: DV7ToHDR10ClaimsV3()})
 			plan.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
 			plan.Claims.Video = VideoClaimsV3{HDR10: true}
 			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})

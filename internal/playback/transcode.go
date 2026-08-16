@@ -43,7 +43,7 @@ type TranscodeOpts struct {
 	SourceVideoCodec     string
 	SourceVideoProfile   string
 	SourceVideoBitDepth  int
-	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
+	VideoBitstreamFilter string // validated copy-mode BSF selected by a server transformation
 	SeekSeconds          float64
 	// StreamOriginSeconds is the keyframe timestamp at which a copy-video
 	// stream actually begins. SeekSeconds remains the client-requested -ss so
@@ -94,9 +94,11 @@ type TranscodeOpts struct {
 	FFmpegLogSink          FFmpegLogSink
 }
 
-// DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
-// copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
-const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
+// DV7ToHDR10BitstreamFilter turns a single-track, dual-layer Profile 7 stream
+// into its plain HDR10 base layer during a copy-mode remux. dovi_rpu removes
+// the Dolby Vision configuration/RPUs; filter_units removes the interleaved
+// UNSPEC63 enhancement-layer NAL units that stream mapping cannot separate.
+const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
 
 const (
 	transcodeCodecH264 = "h264"

@@ -141,19 +141,20 @@ func TestBuildFFmpegArgs_CopyVideoFromStartUsesZeroBasedTimestamps(t *testing.T)
 	}
 }
 
-func TestBuildFFmpegArgs_CopyVideoAppliesValidatedBitstreamFilter(t *testing.T) {
+func TestBuildFFmpegArgs_CopyVideoAppliesValidatedDV7FilterChain(t *testing.T) {
+	const wantFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:            "/media/movie.mkv",
 		OutputDir:            "/tmp/out",
 		SessionID:            "session-dv7",
 		TargetCodecVideo:     "copy",
 		TargetCodecAudio:     "copy",
-		VideoBitstreamFilter: DV7ToHDR10BitstreamFilter,
+		VideoBitstreamFilter: wantFilter,
 		SegmentDuration:      2,
 	})
 
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-c:v copy -bsf:v dovi_rpu=strip=1") {
+	if !strings.Contains(joined, "-c:v copy -bsf:v "+wantFilter) {
 		t.Fatalf("copy-video args should apply the validated DV bitstream filter: %s", joined)
 	}
 }

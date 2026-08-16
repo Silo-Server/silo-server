@@ -23,12 +23,13 @@ import (
 //	    Invalid data found ... Invalid SEI message: payload_size too large
 //
 // Whether a given file survives the strip is a property of that file, not of
-// ffmpeg, so it cannot be answered by supportsDoviRPUFilter. It can be answered
-// in about a second by asking ffmpeg to strip a couple of seconds to nowhere.
+// ffmpeg, so it cannot be answered by supportsDV7HDR10FilterChain. It can be
+// answered in about a second by asking ffmpeg to strip a couple of seconds to
+// nowhere.
 //
 // The probe is a planning input, not a transport patch: a source that fails it
 // must not be planned onto a strip route at all, because the plan's HDR10
-// promise and the durable session's RemuxDVMode are both derived from that
+// promise and the durable session's remux recipe are both derived from that
 // decision and are re-read on every later restart.
 const (
 	// Enough packets to reach the RPU. This catches the observed failure, in
@@ -88,9 +89,9 @@ func NewDVRPUProbe() *DVRPUProbe {
 }
 
 // sharedDVRPUProbe backs DVRPUStrippable. One cache per process, like
-// doviRPUCache: the planner, the progressive remux and the restart endpoints
-// all ask the same question about the same files and must agree, and none of
-// them should pay for a probe another already ran.
+// dv7HDR10FilterSupportCache: the planner, progressive remux, and restart
+// endpoints all ask the same question about the same files and must agree, and
+// none of them should pay for a probe another already ran.
 var sharedDVRPUProbe = NewDVRPUProbe()
 
 // DVRPUStrippable reports whether the RPU strip should be attempted for this

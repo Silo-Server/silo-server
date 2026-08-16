@@ -784,14 +784,14 @@ A transformation is a named, versioned media operation with claims attached.
 | --- | --- | --- | --- | --- |
 | `audio_to_aac` | `server` | `1` | — | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
-| `server_dv7_to_hdr10` | `server` | `1` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
 They are advertised only if the installed FFmpeg actually has the required
 capability, probed once at startup:
 
 | Transformation | Probe |
 | --- | --- |
-| `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` |
+| `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 

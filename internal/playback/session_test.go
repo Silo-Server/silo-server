@@ -1390,9 +1390,9 @@ func TestLegacyStreamUpdateKeepsReplacementReservation(t *testing.T) {
 	}
 }
 
-// A full v3 route description owns RemuxDVMode: a replan that lands on a
-// non-DV source must clear a stale strip mode, while legacy partial updates
-// must not clobber one.
+// A full v3 route description owns the complete remux DV recipe: a replan that
+// lands on a non-DV source must clear stale mode and version state, while legacy
+// partial updates must not clobber either.
 func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	sm := playback.NewSessionManager(5, 2)
 
@@ -1400,7 +1400,7 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3, TranscodeRouteSet: true}); err != nil {
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3, RemuxDVRecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3, TranscodeRouteSet: true}); err != nil {
 		t.Fatalf("UpdateStreamState(set): %v", err)
 	}
 
@@ -1415,6 +1415,19 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	if got.RemuxDVMode != playback.RemuxDVStripToHDR10V3 {
 		t.Fatalf("RemuxDVMode after legacy update = %q, want strip_to_hdr10", got.RemuxDVMode)
 	}
+	if got.RemuxDVRecipeVersion != playback.TransformationServerDV7HDR10RecipeVersionV3 {
+		t.Fatalf("RemuxDVRecipeVersion after legacy update = %q, want %q", got.RemuxDVRecipeVersion, playback.TransformationServerDV7HDR10RecipeVersionV3)
+	}
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3}); err != nil {
+		t.Fatalf("UpdateStreamState(partial DV mode): %v", err)
+	}
+	got, err = sm.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetSession after partial DV mode update: %v", err)
+	}
+	if got.RemuxDVRecipeVersion != playback.TransformationServerDV7HDR10RecipeVersionV3 {
+		t.Fatalf("RemuxDVRecipeVersion after partial DV mode update = %q, want %q", got.RemuxDVRecipeVersion, playback.TransformationServerDV7HDR10RecipeVersionV3)
+	}
 
 	// v3 route-set update for a non-DV source: mode clears.
 	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
@@ -1426,5 +1439,8 @@ func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
 	}
 	if got.RemuxDVMode != "" {
 		t.Fatalf("RemuxDVMode after route-set update = %q, want cleared", got.RemuxDVMode)
+	}
+	if got.RemuxDVRecipeVersion != "" {
+		t.Fatalf("RemuxDVRecipeVersion after route-set update = %q, want cleared", got.RemuxDVRecipeVersion)
 	}
 }

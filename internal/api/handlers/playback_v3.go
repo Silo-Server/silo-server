@@ -857,6 +857,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	routeSession.TargetAudioChannels = result.TargetAudioChannels
 	routeSession.TargetAudioBitrateKbps = result.TargetAudioBitrateKbps
 	routeSession.RemuxDVMode = remuxDVModeForPlanV3(result.Plan)
+	routeSession.RemuxDVRecipeVersion = remuxDVRecipeVersionForPlanV3(result.Plan)
 
 	proxyNode, proxyErr := h.planIdentityProxyV3(r, session.ID, result)
 	if proxyErr != nil {
@@ -1034,9 +1035,10 @@ func identityStreamBitrateKbpsV3(result playback.PlannerResultV3) int {
 //
 // The proxy serves from the token alone, so the token has to carry everything
 // the API-local path would have read from the session and the file record: the
-// media path it opens, and the Dolby Vision profile its remux needs to strip a
-// dangling Profile 7 RPU. Omitting either would not fail loudly — the proxy
-// would serve a subtly different stream than the plan promised.
+// media path it opens, plus the Dolby Vision profile, mode, and recipe version
+// its remux needs for the complete Profile 7-to-HDR10 filter chain. Omitting
+// any of them would not fail loudly — the proxy would serve a subtly different
+// stream than the plan promised.
 //
 // The bool reports whether the returned URL is actually a proxy URL, so the
 // caller can release the planner reservation when it is not.
@@ -1386,7 +1388,7 @@ func sourceVideoTranscodeFactsV3(file *models.MediaFile, result playback.Planner
 }
 
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) playback.SessionStreamState {
-	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
+	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), RemuxDVRecipeVersion: remuxDVRecipeVersionForPlanV3(result.Plan), TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
 	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
 		state.SegmentDuration = 2
 	}
@@ -3207,7 +3209,7 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 		return ""
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Name == playback.TransformationServerDV7HDR10V3 {
+		if isCurrentServerDV7ToHDR10TransformationV3(transformation) {
 			return playback.RemuxDVStripToHDR10V3
 		}
 	}
@@ -3215,8 +3217,8 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 		return ""
 	}
 	if plan.Source.DVProfile == 7 {
-		// Without the strip transformation a P7 remux would drop the
-		// enhancement layer and leave dangling RPUs. A P7 plan claiming Dolby
+		// Without the strip transformation a P7 remux would preserve both the
+		// interleaved enhancement layer and its RPUs. A P7 plan claiming Dolby
 		// Vision is a client-side transform of the original bytes, so any
 		// remux attempt against this session must still be rejected.
 		return playback.RemuxDVRejectP7V3
@@ -3227,13 +3229,31 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 	return ""
 }
 
+func isCurrentServerDV7ToHDR10TransformationV3(transformation playback.TransformationV3) bool {
+	return transformation.Executor == playback.ExecutorServerV3 &&
+		transformation.Name == playback.TransformationServerDV7HDR10V3 &&
+		transformation.RecipeVersion == playback.TransformationServerDV7HDR10RecipeVersionV3
+}
+
 func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 	if plan == nil {
 		return ""
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 && transformation.RecipeVersion == "1" {
+		if isCurrentServerDV7ToHDR10TransformationV3(transformation) {
 			return playback.DV7ToHDR10BitstreamFilter
+		}
+	}
+	return ""
+}
+
+func remuxDVRecipeVersionForPlanV3(plan *playback.PlanV3) string {
+	if plan == nil {
+		return ""
+	}
+	for _, transformation := range plan.Transformations {
+		if isCurrentServerDV7ToHDR10TransformationV3(transformation) {
+			return transformation.RecipeVersion
 		}
 	}
 	return ""
@@ -3244,7 +3264,7 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 // genuinely on the table; every other start never touches it.
 //
 // The probe belongs to planning, not to the transport: the plan's HDR10 promise
-// and the durable session's RemuxDVMode are both derived from the strip
+// and the durable session's remux mode/version are both derived from the strip
 // decision and are re-read by the restart and audio-switch paths, so
 // suppressing the filter downstream would leave those claims describing a
 // stream the server is no longer producing.

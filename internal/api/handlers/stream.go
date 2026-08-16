@@ -171,6 +171,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// response has to keep the same promise the plan made.
 		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
 			DVMode:                 session.RemuxDVMode,
+			DVRecipeVersion:        session.RemuxDVRecipeVersion,
 			FFmpegPath:             h.ffmpegPath(),
 			ContentType:            playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:              file.IsAudioOnly(),

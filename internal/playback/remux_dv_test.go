@@ -3,10 +3,13 @@ package playback
 import (
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func argsContainPair(args []string, a, b string) bool {
@@ -18,14 +21,17 @@ func argsContainPair(args []string, a, b string) bool {
 	return false
 }
 
-// Profile 7 remuxes drop the enhancement-layer track (-map 0:v:0 keeps only
-// the base layer), which leaves dangling dual-layer RPU metadata on the BL.
-// Stripping the RPUs yields a clean HDR10 stream — both a correctness fix and
-// the Apple-parity fallback presentation for devices without a P7 decoder.
-func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
+// Profile 7 remuxes must remove both the DV metadata and the enhancement-layer
+// NAL units interleaved in the same video track. The result is a clean HDR10
+// base layer for devices without a P7 decoder.
+func TestBuildRemuxArgsIsolatesProfile7HDR10BaseLayer(t *testing.T) {
+	const wantFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
+	if DV7ToHDR10BitstreamFilter != wantFilter {
+		t.Fatalf("DV7 HDR10 filter = %q, want %q", DV7ToHDR10BitstreamFilter, wantFilter)
+	}
 	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
-	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
-		t.Fatalf("profile 7 remux must strip DV RPUs from the base layer, args=%v", strings.Join(args, " "))
+	if !argsContainPair(args, "-bsf:v", wantFilter) {
+		t.Fatalf("profile 7 remux must isolate the HDR10 base layer, args=%v", strings.Join(args, " "))
 	}
 }
 
@@ -51,10 +57,10 @@ func TestBuildRemuxArgsRequiresVideoForVideoPlans(t *testing.T) {
 	}
 }
 
-// An ffmpeg without the dovi_rpu bitstream filter (pre-7.1) would abort on
-// the unknown filter before producing any output. The profile must be
-// neutralized so the remux still starts, keeping the pre-strip behavior.
-func TestRemuxDVProfileFallsBackWithoutFilterSupport(t *testing.T) {
+// An ffmpeg without either required bitstream filter would abort before
+// producing output. The profile must be neutralized so the remux still starts,
+// keeping the pre-strip behavior.
+func TestRemuxDVProfileFallsBackWithoutDV7FilterChainSupport(t *testing.T) {
 	if got := remuxDVProfile(7, false); got != 0 {
 		t.Errorf("remuxDVProfile(7, false) = %d, want 0 (no strip without filter support)", got)
 	}
@@ -70,12 +76,37 @@ func TestRemuxDVProfileFallsBackWithoutFilterSupport(t *testing.T) {
 	}
 }
 
+func TestSupportsDV7HDR10FilterChainRequiresBothBitstreamFilters(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\nif [ \"$2\" = \"-bsfs\" ]; then echo dovi_rpu; fi\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	if supportsDV7HDR10FilterChain(bin) {
+		t.Fatal("Profile 7 HDR10 fallback was advertised without filter_units")
+	}
+}
+
+func TestSupportsDV7HDR10FilterChainTimesOut(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+	started := time.Now()
+	if supportsDV7HDR10FilterChain(bin) {
+		t.Fatal("stalled FFmpeg capability probe reported filter support")
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("FFmpeg capability probe took %v, want a bounded timeout", elapsed)
+	}
+}
+
 // Profile 8 base layers are self-contained: the RPU stays valid without an
 // enhancement layer and DV-capable clients can render it. Never strip.
 func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 8} {
 		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false, false)
-		if argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
+		if argsContainPair(args, "-bsf:v", DV7ToHDR10BitstreamFilter) {
 			t.Fatalf("profile %d remux must not strip DV RPUs, args=%v", profile, strings.Join(args, " "))
 		}
 	}
@@ -108,7 +139,7 @@ func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
 // so neither needs the -strict relaxation.
 func TestBuildRemuxArgsTagsStrippedHDR10OnlyWhenRequested(t *testing.T) {
 	tagged := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, true, false)
-	if !argsContainPair(tagged, "-bsf:v", "dovi_rpu=strip=1") || !argsContainPair(tagged, "-tag:v", "hvc1") {
+	if !argsContainPair(tagged, "-bsf:v", DV7ToHDR10BitstreamFilter) || !argsContainPair(tagged, "-tag:v", "hvc1") {
 		t.Fatalf("explicit strip must emit an hvc1-labeled HDR10 stream, args=%v", strings.Join(tagged, " "))
 	}
 	if argsContainPair(tagged, "-tag:v", "dvh1") || argsContainPair(tagged, "-strict", "unofficial") {
@@ -120,9 +151,8 @@ func TestBuildRemuxArgsTagsStrippedHDR10OnlyWhenRequested(t *testing.T) {
 	}
 }
 
-// Dual-layer Profile 7 cannot be preserved by a base-layer-only remux; the
-// explicit preserve recipe must fail fast instead of emitting a stream with
-// dangling RPUs and no enhancement layer.
+// Profile 7 preservation is not a validated remux recipe. The explicit
+// preserve mode must fail fast instead of emitting unpromised bytes.
 func TestStartRemuxRejectsPreservedProfile7(t *testing.T) {
 	if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, 7, RemuxDVPreserveV3, ""); err == nil {
 		t.Fatal("preserve mode accepted a profile 7 source")
@@ -135,6 +165,38 @@ func TestStartRemuxRejectsUnknownModeForAllProfiles(t *testing.T) {
 		if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, profile, RemuxDVMode("bogus"), ""); err == nil {
 			t.Fatalf("unknown remux DV mode accepted for profile %d", profile)
 		}
+	}
+}
+
+func TestServeRemuxPinsDV7RecipeVersion(t *testing.T) {
+	tests := []struct {
+		name       string
+		version    string
+		wantStatus int
+		wantStale  bool
+	}{
+		{name: "missing recipe", version: "", wantStatus: http.StatusConflict, wantStale: true},
+		{name: "stale recipe", version: "1", wantStatus: http.StatusConflict, wantStale: true},
+		{name: "current recipe", version: TransformationServerDV7HDR10RecipeVersionV3, wantStatus: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/stream/remux", nil)
+			err := ServeRemuxWithOptions(recorder, request, "/missing-dv7.mkv", "mp4", 0, false, -1, 7, RemuxServeOptions{
+				DVMode:          RemuxDVStripToHDR10V3,
+				DVRecipeVersion: tt.version,
+			})
+			if err == nil {
+				t.Fatal("expected remux error")
+			}
+			if stale := strings.Contains(err.Error(), "unsupported Dolby Vision HDR10 remux recipe version"); stale != tt.wantStale {
+				t.Fatalf("stale recipe error = %v, want %v (error=%v)", stale, tt.wantStale, err)
+			}
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+		})
 	}
 }
 
@@ -156,7 +218,7 @@ func writeProbeAwareFFmpeg(t *testing.T) (bin, argLog string) {
 	argLog = filepath.Join(dir, "args")
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
-		"  *-bsfs*) echo dovi_rpu; exit 0;;\n" +
+		"  *-bsfs*) echo dovi_rpu; echo filter_units; exit 0;;\n" +
 		"  *'-f null'*) echo '[dovi_rpu @ 0x55] Failed to read unit 1 (type 39).' >&2; exit 0;;\n" +
 		"esac\n" +
 		"echo \"$*\" >> " + argLog + "\n" +
@@ -177,7 +239,7 @@ func writeRecordingFFmpeg(t *testing.T) (bin, argLog string) {
 	argLog = filepath.Join(dir, "args")
 	script := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
-		"  *-bsfs*) echo dovi_rpu; exit 0;;\n" +
+		"  *-bsfs*) echo dovi_rpu; echo filter_units; exit 0;;\n" +
 		"  *'-f null'*) exit 0;;\n" +
 		"esac\n" +
 		"echo \"$*\" >> " + argLog + "\n" +
@@ -224,8 +286,8 @@ func TestExplicitStripModeTagsHVC1(t *testing.T) {
 			t.Fatalf("strip remux refused profile %d: %v", profile, err)
 		}
 		recorded := recordedRemuxArgs(t, session, argLog)
-		if !strings.Contains(recorded, "dovi_rpu=strip=1") || !strings.Contains(recorded, "-tag:v hvc1") {
-			t.Fatalf("explicit strip must map to dovi_rpu + hvc1 for profile %d: %s", profile, recorded)
+		if !strings.Contains(recorded, DV7ToHDR10BitstreamFilter) || !strings.Contains(recorded, "-tag:v hvc1") {
+			t.Fatalf("explicit strip must map to the base-layer filter + hvc1 for profile %d: %s", profile, recorded)
 		}
 		if strings.Contains(recorded, "dvh1") || strings.Contains(recorded, "-strict unofficial") {
 			t.Fatalf("stripped output must not carry DV signaling for profile %d: %s", profile, recorded)
@@ -245,7 +307,7 @@ func remuxSourceFile(t *testing.T) string {
 // The legacy/auto mode derives the strip from the profile alone, with no plan
 // to consult — the web player, jellycompat and pre-v3 stream tokens all arrive
 // here. An unparseable RPU has to neutralize the profile the same way a missing
-// dovi_rpu filter does, or the filter rejects every packet and the response
+// DV7 filter chain does, or the filter rejects every packet and the response
 // never produces a byte.
 func TestLegacyRemuxDropsTheStripForAnUnstrippableSource(t *testing.T) {
 	bin, argLog := writeProbeAwareFFmpeg(t)

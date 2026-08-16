@@ -25,6 +25,7 @@ type Session struct {
 	BasePlayMethod       PlayMethod
 	TranscodeAudio       bool // when true, remux should transcode audio to AAC
 	RemuxDVMode          RemuxDVMode
+	RemuxDVRecipeVersion string
 	ClientIP             string // resolved client IP for the playback session
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
@@ -81,6 +82,7 @@ type SessionStreamState struct {
 	AudioTrackIndex        int
 	TranscodeAudio         bool
 	RemuxDVMode            RemuxDVMode
+	RemuxDVRecipeVersion   string
 	ClientIP               string
 	ClientName             string
 	ClientVersion          string
@@ -871,8 +873,12 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 		// later remux request fails the profile check. Legacy partial updates
 		// never carry a mode and must not clobber one.
 		s.RemuxDVMode = state.RemuxDVMode
+		s.RemuxDVRecipeVersion = state.RemuxDVRecipeVersion
 	} else if state.RemuxDVMode != "" {
 		s.RemuxDVMode = state.RemuxDVMode
+		if state.RemuxDVRecipeVersion != "" {
+			s.RemuxDVRecipeVersion = state.RemuxDVRecipeVersion
+		}
 	}
 	s.ClientIP = state.ClientIP
 	if value := normalizeClientMetadataValue(state.ClientName, 128); value != "" {
@@ -914,6 +920,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		AudioTrackIndex:        s.AudioTrackIndex,
 		TranscodeAudio:         s.TranscodeAudio,
 		RemuxDVMode:            s.RemuxDVMode,
+		RemuxDVRecipeVersion:   s.RemuxDVRecipeVersion,
 		ClientIP:               s.ClientIP,
 		ClientName:             s.ClientName,
 		ClientVersion:          s.ClientVersion,
@@ -941,6 +948,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.AudioTrackIndex = state.AudioTrackIndex
 	s.TranscodeAudio = state.TranscodeAudio
 	s.RemuxDVMode = state.RemuxDVMode
+	s.RemuxDVRecipeVersion = state.RemuxDVRecipeVersion
 	s.ClientIP = state.ClientIP
 	s.ClientName = state.ClientName
 	s.ClientVersion = state.ClientVersion

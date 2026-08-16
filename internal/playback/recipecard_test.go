@@ -16,7 +16,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		SourceVideoProfile:     "Main 10",
 		SourceVideoBitDepth:    10,
 		SoftwareVideoDecode:    true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
 		CopySeekAnchorResolved: true,
@@ -69,7 +69,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.TargetAudioChannels != 1 || got.TargetAudioBitrateKbps != 96 {
 		t.Errorf("audio encode params wrong: %+v", got)
 	}
-	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
+	if got.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
 	if !got.SoftwareVideoDecode {
@@ -92,8 +92,15 @@ func TestRecipeCardPlayMethodConstructors(t *testing.T) {
 		t.Errorf("direct card wrong: %+v", d)
 	}
 	r := NewRemuxRecipeCard("r", 1, "p", 2, true, 3)
+	r.RemuxDVMode = RemuxDVStripToHDR10V3
+	r.RemuxDVRecipeVersion = TransformationServerDV7HDR10RecipeVersionV3
 	if r.PlayMethod != PlayRemux || !r.TranscodeAudio || r.AudioTrackIndex != 3 {
 		t.Errorf("remux card wrong: %+v", r)
+	}
+	claims := r.ToClaims()
+	back := RecipeCardFromClaims(&claims)
+	if back.RemuxDVMode != RemuxDVStripToHDR10V3 || back.RemuxDVRecipeVersion != TransformationServerDV7HDR10RecipeVersionV3 {
+		t.Errorf("remux DV recipe lost in token round trip: %+v", back)
 	}
 }
 
@@ -221,7 +228,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		SourceVideoProfile:     "Main 10",
 		SourceVideoBitDepth:    10,
 		SoftwareVideoDecode:    true,
-		VideoBitstreamFilter:   "dovi_rpu=strip=1",
+		VideoBitstreamFilter:   DV7ToHDR10BitstreamFilter,
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
 		CopySeekAnchorResolved: true,
