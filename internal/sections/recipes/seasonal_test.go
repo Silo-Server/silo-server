@@ -294,16 +294,39 @@ func TestSeasonalTitleOverridePicksActiveThemeTitle(t *testing.T) {
 	}
 }
 
-// TestSeasonalTitleOverrideHandlesMissingEntry returns empty when the active
-// theme has no title configured (the section's saved Title is the fallback).
-func TestSeasonalTitleOverrideHandlesMissingEntry(t *testing.T) {
+// TestSeasonalTitleOverrideUsesDefaultTitle verifies that an active theme with
+// no custom title uses the same label advertised by the section editor.
+func TestSeasonalTitleOverrideUsesDefaultTitle(t *testing.T) {
+	tests := []struct {
+		theme string
+		now   time.Time
+		want  string
+	}{
+		{theme: "valentines", now: time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC), want: "Valentine's Day"},
+		{theme: "st_patricks", now: time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC), want: "St. Patrick's Day"},
+		{theme: "thanksgiving", now: time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC), want: "Thanksgiving"},
+		{theme: "christmas", now: time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), want: "Christmas"},
+		{theme: "halloween", now: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), want: "Halloween"},
+		{theme: "saturday_morning", now: time.Date(2026, 3, 7, 10, 0, 0, 0, time.UTC), want: "Saturday Morning Cartoons"},
+		{theme: "family_movie_night", now: time.Date(2026, 4, 10, 19, 0, 0, 0, time.UTC), want: "Family Movie Night"},
+		{theme: "summer_blockbuster", now: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), want: "Summer Blockbusters"},
+		{theme: "summer", now: time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), want: "Summer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.theme, func(t *testing.T) {
+			p := SeasonalThemedParams{EnabledThemes: []string{tt.theme}}
+			if got := SeasonalTitleOverride(p, tt.now, nil); got != tt.want {
+				t.Errorf("SeasonalTitleOverride() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
 	p := SeasonalThemedParams{
-		EnabledThemes: []string{"halloween", "christmas"},
+		EnabledThemes: []string{"christmas"},
 		ThemeTitles:   map[string]string{"christmas": "Festive Films"},
 	}
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
-	if got != "" {
-		t.Errorf("halloween active but no entry → %q, want empty (caller falls back to section Title)", got)
+	if got := SeasonalTitleOverride(p, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), nil); got != "Festive Films" {
+		t.Errorf("custom title = %q, want Festive Films", got)
 	}
 }
 
