@@ -2,6 +2,8 @@ package catalog
 
 import "testing"
 
+const variantW1280 = "w1280"
+
 func TestImageTypeFromCachedPath(t *testing.T) {
 	tests := []struct {
 		name string
@@ -35,7 +37,7 @@ func TestBackdropVariantPath(t *testing.T) {
 		{
 			name:    "real backdrop keeps requested w1280",
 			path:    "tmdb/movies/550/backdrop/original.webp",
-			desired: "w1280",
+			desired: variantW1280,
 			want:    "tmdb/movies/550/backdrop/w1280.webp",
 		},
 		{
@@ -47,7 +49,7 @@ func TestBackdropVariantPath(t *testing.T) {
 		{
 			name:    "episode still clamps to w780 (largest generated still variant)",
 			path:    "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
-			desired: "w1280",
+			desired: variantW1280,
 			want:    "tvdb/series/73141/seasons/22/episodes/9/still/w780.webp",
 		},
 		{
@@ -59,19 +61,19 @@ func TestBackdropVariantPath(t *testing.T) {
 		{
 			name:    "http url passes through",
 			path:    "https://images.example.com/backdrop/original.jpg",
-			desired: "w1280",
+			desired: variantW1280,
 			want:    "https://images.example.com/backdrop/original.jpg",
 		},
 		{
 			name:    "plugin path passes through",
 			path:    "plugin://tmdb/backdrop/original.jpg",
-			desired: "w1280",
+			desired: variantW1280,
 			want:    "plugin://tmdb/backdrop/original.jpg",
 		},
 		{
 			name:    "path without original segment passes through",
 			path:    "tmdb/movies/550/backdrop/w300.webp",
-			desired: "w1280",
+			desired: variantW1280,
 			want:    "tmdb/movies/550/backdrop/w300.webp",
 		},
 	}
