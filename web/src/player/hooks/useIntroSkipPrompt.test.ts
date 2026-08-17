@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import type { IntroSkipMode } from "../types";
 import {
@@ -19,7 +19,7 @@ interface Props {
 
 describe("useIntroSkipPrompt", () => {
   const intro = { start: 10, end: 20 };
-  let onSeek: ReturnType<typeof vi.fn>;
+  let onSeek: Mock<(seconds: number) => boolean>;
 
   beforeEach(() => {
     vi.useFakeTimers();
