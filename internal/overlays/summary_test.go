@@ -69,11 +69,11 @@ func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
 		{
 			name: "E-AC-3 title",
 			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
-				Title:   "Atmos",
+				Title:   audioLabelAtmos,
 				Codec:   "eac3",
 				Default: true,
 			}}},
-			want: "DD+ Atmos",
+			want: audioLabelDDPlusAtmos,
 		},
 		{
 			name: "scanner profile",
@@ -83,7 +83,7 @@ func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
 				Profile: "Dolby Digital Plus + Dolby Atmos",
 				Default: true,
 			}}},
-			want: "DD+ Atmos",
+			want: audioLabelDDPlusAtmos,
 		},
 		{
 			name: "TrueHD profile",
@@ -93,15 +93,15 @@ func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
 				Profile: "Dolby TrueHD + Dolby Atmos",
 				Default: true,
 			}}},
-			want: "TrueHD Atmos",
+			want: audioLabelTrueHDAtmos,
 		},
 		{
 			name: "unknown carrier",
 			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
-				Title:   "Atmos",
+				Title:   audioLabelAtmos,
 				Default: true,
 			}}},
-			want: "Atmos",
+			want: audioLabelAtmos,
 		},
 		{
 			name: "default track wins",
@@ -109,7 +109,7 @@ func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
 				{Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos"},
 				{Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Default: true},
 			}},
-			want: "DD+ Atmos",
+			want: audioLabelDDPlusAtmos,
 		},
 		{
 			name: "non-Atmos E-AC-3 unchanged",
@@ -511,7 +511,7 @@ func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 			AspectRatio: "16:9",
 		}},
 		AudioTracks: []models.AudioTrack{
-			{Language: "eng", Channels: 8, Default: true, Title: "Atmos"},
+			{Language: "eng", Channels: 8, Default: true, Title: audioLabelAtmos},
 			{Language: "spa", Channels: 6},
 		},
 		SubtitleTracks: []models.SubtitleTrack{{Language: "eng"}},
@@ -535,8 +535,8 @@ func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 	if got.AspectRatio != "16:9" {
 		t.Errorf("AspectRatio = %q, want %q", got.AspectRatio, "16:9")
 	}
-	if got.Audio != "Atmos" {
-		t.Errorf("Audio = %q, want %q", got.Audio, "Atmos")
+	if got.Audio != audioLabelAtmos {
+		t.Errorf("Audio = %q, want %q", got.Audio, audioLabelAtmos)
 	}
 	if !got.MultiAudio {
 		t.Error("MultiAudio = false, want true")

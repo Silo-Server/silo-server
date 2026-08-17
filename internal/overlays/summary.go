@@ -13,6 +13,12 @@ import (
 // Summary reuses the API-facing overlay summary shape.
 type Summary = models.OverlaySummary
 
+const (
+	audioLabelAtmos       = "Atmos"
+	audioLabelDDPlusAtmos = "DD+ Atmos"
+	audioLabelTrueHDAtmos = "TrueHD Atmos"
+)
+
 // BuildSummary derives a compact overlay summary from the best available file.
 func BuildSummary(files []*models.MediaFile) *Summary {
 	best := bestFile(files)
@@ -207,15 +213,15 @@ func normalizeAudioTrack(track models.AudioTrack) string {
 		codec := strings.ToLower(strings.TrimSpace(track.Codec))
 		switch {
 		case isEAC3(codec):
-			return "DD+ Atmos"
+			return audioLabelDDPlusAtmos
 		case strings.Contains(codec, "truehd"):
-			return "TrueHD Atmos"
+			return audioLabelTrueHDAtmos
 		case strings.Contains(details, "truehd"):
-			return "TrueHD Atmos"
+			return audioLabelTrueHDAtmos
 		case isEAC3(details), strings.Contains(details, "dolby digital plus"):
-			return "DD+ Atmos"
+			return audioLabelDDPlusAtmos
 		default:
-			return "Atmos"
+			return audioLabelAtmos
 		}
 	}
 
@@ -236,7 +242,7 @@ func normalizeAudioCandidates(candidates []string) string {
 		case lower == "":
 			continue
 		case strings.Contains(lower, "atmos"):
-			return "Atmos"
+			return audioLabelAtmos
 		case strings.Contains(lower, "truehd"):
 			return "TrueHD"
 		case strings.Contains(lower, "dts-hd"), strings.Contains(lower, "dts:x"), strings.Contains(lower, "dtsx"):
