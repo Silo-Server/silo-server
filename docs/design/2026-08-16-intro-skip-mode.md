@@ -144,7 +144,7 @@ on the timeline where the client already does so.
 
 | Event | Outcome |
 | --- | --- |
-| Enter intro (not resolved) | **Seek to `end` immediately.** Show pill **"Intro Skipped · Play Intro"** with timer running. Focus as in `ask`. |
+| Enter intro (not resolved) | **Seek to `end` immediately.** Show the undo pill — caption **"Intro skipped"** over the action **"Watch Intro"** — with timer running. Focus as in `ask`. |
 | Timer runs out | Pill hides. Playback continues past the intro. Intro resolved. |
 | Select | Seek to `start`. Intro resolved (so re-entering the range does not skip again). Pill hides. Focus lands on transport. |
 | Back | Pill hides. Playback continues. Intro resolved. Press consumed. |
@@ -192,7 +192,7 @@ resolve the intro: the viewer was told it was skipped and let it go.
 - Fill creeps left → right and reaches full exactly when the timer ends
   (`ask`: pill hides; `always`: pill hides). Same colour language everywhere:
   dimmed when unfocused, lit when focused, solid on press.
-- Copy: **"Skip Intro"** / **"Intro Skipped · Play Intro"**. Localised via
+- Copy: `ask` is a single action **"Skip Intro"**. `always` is two lines: a small muted caption **"Intro skipped"** (the confirmation) above the action **"Watch Intro"** (the undo). The confirmation and the action are never one phrase — "Intro Skipped · Play Intro" reads as one instruction and was rejected. On very tight layouts the caption may drop and the pill degrades to the action alone. Localised via
   each client's normal string tables; the semantics are fixed.
 - Disappears instantly on Select/Back; fades on timeout.
 

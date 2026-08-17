@@ -94,7 +94,8 @@ describe("useIntroSkipPrompt", () => {
 
     rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
     expect(onSeek).toHaveBeenCalledWith(20);
-    expect(result.current.prompt?.label).toBe("Intro Skipped · Play Intro");
+    expect(result.current.prompt?.label).toBe("Watch Intro");
+    expect(result.current.prompt?.caption).toBe("Intro skipped");
 
     act(() => expect(result.current.select()).toBe(true));
     expect(onSeek).toHaveBeenLastCalledWith(10);

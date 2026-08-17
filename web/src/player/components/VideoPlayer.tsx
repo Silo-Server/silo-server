@@ -2714,6 +2714,7 @@ export function VideoPlayer({
         <IntroSkipButton
           onSkip={selectIntroPrompt}
           label={activeIntroPrompt.label}
+          caption={activeIntroPrompt.caption}
           timer={activeIntroPrompt}
           controlsVisible={controlsVisible}
           focusOnMount={focusIntroPromptOnMount}

@@ -383,7 +383,7 @@ describe("VideoPlayer intro skip prompt", () => {
   it("renders the undo action after an automatic skip", async () => {
     await enterIntro("always");
     const undo = await screen.findByRole("button", {
-      name: "Intro Skipped · Play Intro",
+      name: "Watch Intro",
     });
 
     fireEvent.click(undo);

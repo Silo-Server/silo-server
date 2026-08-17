@@ -9,7 +9,9 @@ const INTRO_PROMPT_MS = INTRO_PROMPT_SECONDS * 1_000;
 
 export interface IntroSkipPrompt {
   kind: "skip" | "undo";
-  label: "Skip Intro" | "Intro Skipped · Play Intro";
+  label: "Skip Intro" | "Watch Intro";
+  /** Confirmation shown above the action for the `always` undo; absent for the `ask` offer. */
+  caption?: "Intro skipped";
   durationMs: number;
   deadlineMs: number | null;
   remainingMs: number;
@@ -256,7 +258,8 @@ export function useIntroSkipPrompt({
   const prompt: IntroSkipPrompt | null = activePrompt
     ? {
         kind: activePrompt.kind,
-        label: activePrompt.kind === "skip" ? "Skip Intro" : "Intro Skipped · Play Intro",
+        label: activePrompt.kind === "skip" ? "Skip Intro" : "Watch Intro",
+        caption: activePrompt.kind === "skip" ? undefined : "Intro skipped",
         durationMs: INTRO_PROMPT_MS,
         deadlineMs: activePrompt.deadlineMs,
         remainingMs: activePrompt.remainingMs,
