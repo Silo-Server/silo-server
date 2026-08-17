@@ -5,6 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerStorageStep } from "./ServerStorageStep";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
+
 const useSettingsFormMock = vi.fn();
 const useWizardContextMock = vi.fn();
 const useCheckAdminSettingsConnectionMock = vi.fn();
