@@ -184,3 +184,12 @@ var ClientLocal = []string{
 	PlayerResumeRewindSeconds,
 	SubtitleMatchesDevice,
 }
+
+// Deprecated lists keys another definition has superseded. They still resolve
+// and still have to be readable — shipped clients write them — but a client
+// must not offer one as a second control beside its replacement: the server
+// mirrors the pair at write time, so editing either would silently rewrite the
+// other.
+var Deprecated = []string{
+	PlaybackAutoSkipIntro,
+}

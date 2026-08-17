@@ -69,10 +69,6 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * screen, which already edits them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
- *
- * `playback.auto_skip_intro` is superseded by the three-way mode. The server
- * mirrors it for older clients, but rendering both controls here would let one
- * visible choice silently rewrite the other.
  */
 const HIDDEN_KEYS = new Set<string>([
   "ui.theme",
@@ -83,8 +79,34 @@ const HIDDEN_KEYS = new Set<string>([
   "ui.remember_library_page_state",
   "nav.primary_menu",
   "ui.card_presentation",
-  "playback.auto_skip_intro",
 ]);
+
+/**
+ * Deprecated keys and the key that takes over from them.
+ *
+ * A deprecated control is hidden only where its replacement is actually on
+ * offer. Against a server that predates the replacement's revision the old
+ * control is the only way to express the preference at all, and hiding it
+ * unconditionally would additionally strand an existing per-device override
+ * with nothing on screen to see or clear it with. Where both exist, only the
+ * replacement is shown: the server keeps the pair in step, so two controls
+ * would let one visible choice silently rewrite the other.
+ */
+const SUPERSEDED_BY: Partial<Record<SettingKey, SettingKey>> = {
+  "playback.auto_skip_intro": "playback.intro_skip_mode",
+};
+
+/**
+ * Whether [key] is deprecated *and* the server offers what replaces it.
+ *
+ * Gated on the manifest's own `deprecated` flag so the rule is contract-driven:
+ * a key that stops being deprecated stops being hidden without an edit here.
+ */
+function isSupersededOnServer(key: SettingKey, supportedKeys: readonly SettingKey[]): boolean {
+  if (!SETTING_DEFINITIONS[key]?.deprecated) return false;
+  const replacement = SUPERSEDED_BY[key];
+  return replacement !== undefined && supportedKeys.includes(replacement);
+}
 
 /**
  * The manifest's platform identifiers, as `platforms` uses them.
@@ -131,8 +153,17 @@ export function settingAppliesToPlatform(
   return platforms.includes(platform);
 }
 
-export function groupForDeviceSetting(key: SettingKey): DeviceSettingGroupId | null {
-  if (HIDDEN_KEYS.has(key)) return null;
+/**
+ * [supportedKeys] is what the connected server can store, which decides whether
+ * a deprecated key still earns a control. It defaults to this client's own
+ * contract — the newest server this build knows about — so callers that are
+ * not editing a specific server's settings keep the current-contract answer.
+ */
+export function groupForDeviceSetting(
+  key: SettingKey,
+  supportedKeys: readonly SettingKey[] = ALL_DEVICE_SETTING_KEYS,
+): DeviceSettingGroupId | null {
+  if (HIDDEN_KEYS.has(key) || isSupersededOnServer(key, supportedKeys)) return null;
   const explicit = EXPLICIT_GROUPS[key];
   if (explicit) return explicit;
 
@@ -171,7 +202,9 @@ export function groupDeviceSettings(
     ) {
       continue;
     }
-    const group = groupForDeviceSetting(key);
+    // The key list this screen was given is exactly the set the connected
+    // server supports, so it is also the answer to "is the replacement here".
+    const group = groupForDeviceSetting(key, keys);
     if (!group) continue;
     const existing = byGroup.get(group);
     if (existing) {
@@ -189,7 +222,15 @@ export function groupDeviceSettings(
   }));
 }
 
-/** Every device-scoped key this screen deliberately does not show. */
-export function hiddenDeviceSettingKeys(): SettingKey[] {
-  return ALL_DEVICE_SETTING_KEYS.filter((key) => HIDDEN_KEYS.has(key));
+/**
+ * Every device-scoped key this screen deliberately does not show against a
+ * server supporting [supportedKeys]. A deprecated key is only among them while
+ * its replacement is available, which is the same rule the grouping applies.
+ */
+export function hiddenDeviceSettingKeys(
+  supportedKeys: readonly SettingKey[] = ALL_DEVICE_SETTING_KEYS,
+): SettingKey[] {
+  return ALL_DEVICE_SETTING_KEYS.filter(
+    (key) => HIDDEN_KEYS.has(key) || isSupersededOnServer(key, supportedKeys),
+  );
 }

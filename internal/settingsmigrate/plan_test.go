@@ -574,17 +574,38 @@ func TestAutoSkipIntroCarriesItsReplacement(t *testing.T) {
 // TestAnExplicitlyStoredModeOutranksTheDerivedOne. Once a client writes the
 // enum through the legacy device route, the boolean beside it is the older
 // answer, and the backfill must not overwrite the newer one with it.
+//
+// The stale boolean must not survive either: leaving "never" beside true would
+// hand a shipped client and an updated one opposite behavior from the
+// migration's very first run, which is precisely what the mirror exists to
+// prevent. Both orderings are covered because the input order of two legacy
+// rows is not something the migration gets to choose.
 func TestAnExplicitlyStoredModeOutranksTheDerivedOne(t *testing.T) {
-	res := planner(t).Plan(Input{
-		Profiles: []LegacyProfile{{ID: "p1"}},
-		DeviceSettings: []LegacyDeviceSetting{
+	for name, rows := range map[string][]LegacyDeviceSetting{
+		"mode first": {
 			{ProfileID: "p1", DeviceID: "d1", Key: "playback.intro_skip_mode", Value: "never"},
 			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "true"},
 		},
-	})
-	row := find(t, res, "playback.intro_skip_mode", nil)
-	if string(row.Value) != `"never"` {
-		t.Errorf("intro_skip_mode = %s, want the explicitly stored \"never\"", row.Value)
+		"boolean first": {
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "true"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.intro_skip_mode", Value: "never"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := planner(t).Plan(Input{
+				Profiles:       []LegacyProfile{{ID: "p1"}},
+				DeviceSettings: rows,
+			})
+			row := find(t, res, "playback.intro_skip_mode", nil)
+			if string(row.Value) != `"never"` {
+				t.Errorf("intro_skip_mode = %s, want the explicitly stored \"never\"", row.Value)
+			}
+			boolean := find(t, res, "playback.auto_skip_intro", nil)
+			if string(boolean.Value) != `false` {
+				t.Errorf("auto_skip_intro = %s, want false to match the authoritative \"never\"",
+					boolean.Value)
+			}
+		})
 	}
 }
 

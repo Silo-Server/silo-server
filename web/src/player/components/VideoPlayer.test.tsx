@@ -396,6 +396,47 @@ describe("VideoPlayer intro skip prompt", () => {
 
     expect(screen.queryByRole("button", { name: /Intro/ })).not.toBeInTheDocument();
   });
+
+  it("prompts for nothing while the intro mode is still unknown", async () => {
+    const rendered = renderPlayer({ intro: { start: 10, end: 20 }, introSkipMode: null });
+    const video = rendered.container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    video.currentTime = 12;
+    fireEvent.timeUpdate(video);
+    await act(async () => Promise.resolve());
+
+    expect(screen.queryByRole("button", { name: /Intro/ })).not.toBeInTheDocument();
+    // Nothing was skipped either: an unknown mode must not act like "always".
+    expect(video.currentTime).toBe(12);
+  });
+
+  // Space belongs to whatever control has focus. Consuming it at the document
+  // both skipped the intro and swallowed the press meant for Play/Pause.
+  it("leaves Select to the focused transport control", async () => {
+    const rendered = await enterIntro("ask");
+    const prompt = await screen.findByRole("button", { name: "Skip Intro" });
+
+    const transport = document.createElement("button");
+    transport.textContent = "Play";
+    rendered.container.firstElementChild?.appendChild(transport);
+    transport.focus();
+
+    const notPrevented = fireEvent.keyDown(transport, { key: " " });
+
+    expect(notPrevented).toBe(true);
+    expect(prompt).toBeInTheDocument();
+  });
+
+  it("acts on Select while the pill itself is focused", async () => {
+    await enterIntro("ask");
+    const prompt = await screen.findByRole("button", { name: "Skip Intro" });
+    prompt.focus();
+
+    fireEvent.keyDown(prompt, { key: " " });
+
+    await waitFor(() => expect(prompt).not.toBeInTheDocument());
+  });
 });
 
 describe("VideoPlayer native HLS timeline", () => {

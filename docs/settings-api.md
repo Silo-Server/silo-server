@@ -135,7 +135,12 @@ is at `profile_client`.
 
 A definition may be marked `deprecated: true` in the manifest. It is still
 served, still readable and still writable — old clients depend on it — but new
-clients should read and write its replacement.
+clients should read and write its replacement. The generated bindings carry the
+flag (`deprecated` on the TypeScript `SettingDefinition`, a `Deprecated` /
+`DEPRECATED` list in the Go, Kotlin and Swift bindings), so a client can hide a
+superseded control without a hand-kept list of key names. A client that offers
+both spellings as separate controls gives one preference two homes, and the
+mirror below means editing either silently rewrites the other.
 
 Revision 7 deprecates `playback.auto_skip_intro` in favor of
 `playback.intro_skip_mode`, whose three members say what the boolean could not:
@@ -155,11 +160,26 @@ client shows up correctly on the others:
 | `PUT`/`DELETE` of the legacy `/settings/{key}` or `/settings/device/{key}` for `playback.auto_skip_intro` | writes or clears both keys at the scope that route owns |
 | `PUT` or `DELETE` of either key at `profile` scope | sets `user_profiles.auto_skip_intro` to what the pair now resolves to — the written value, or the contract default once the row is cleared — so the profile DTO stays truthful for clients that read it |
 
-Both rows commit together on the idempotent write path, and a replayed
-mutation id re-serves its receipt without writing either again. The response is
-always the stored value of the key the request addressed; the companion row is
-not reported. Only the addressed key raises a `user_settings.changed` event and
-an audit record.
+Everything in that table commits as one transaction — both rows, the legacy
+profile column, and the idempotency receipt when the request carries an
+`X-Silo-Mutation-Id` — on the keyed and unkeyed paths alike, and on `DELETE` as
+well as `PUT`. A request that fails changes nothing, and a replayed mutation id
+re-serves its receipt without writing anything again. The response is always the
+stored value of the key the request addressed; the companion row is not
+reported. Only the addressed key raises a `user_settings.changed` event and an
+audit record.
+
+`DELETE` still answers `404 not_found` when the key it names has no value at
+that scope. If a companion is nonetheless found there — a state only a partial
+failure predating the transactional path could produce — it is cleared anyway,
+because a stray companion goes on resolving as an explicit choice that no retry
+can reach.
+
+Surfaces that count stored overrides — the device list's `changed_count`, the
+admin device summaries' `override_count` — count the pair once. It is one
+preference held in two spellings, so counting rows would both overstate a
+device's customization and drop by one, fleet-wide, on the day the mirror is
+retired.
 
 The boolean direction is lossy on purpose: a client that only understands the
 switch sees `never` as `false` and shows the button. Such a client that then

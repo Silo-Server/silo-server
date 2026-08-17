@@ -7,6 +7,36 @@ export const PLAYBACK_PAUSE_GRACE_MS = 1_500;
 
 const INTRO_PROMPT_MS = INTRO_PROMPT_SECONDS * 1_000;
 
+/**
+ * Runs [then] with the seek's verdict, synchronously when the caller answered
+ * synchronously.
+ *
+ * The synchronous path matters: a click on the pill must resolve within the
+ * same task, or a re-render can land between the seek and the resolution and
+ * offer the prompt a second time. A rejected promise counts as a refusal — the
+ * prompt stays, which is the safe way to be wrong.
+ */
+function settleSeek(outcome: boolean | Promise<boolean>, then: (accepted: boolean) => void) {
+  if (typeof outcome === "boolean") {
+    then(outcome);
+    return;
+  }
+  void outcome.then(then, () => then(false));
+}
+
+/**
+ * Whether the prompt an async seek was started for is still the one on screen.
+ * Compared by identity of intro and kind rather than by object, because the
+ * countdown replaces the state object whenever it is rescheduled.
+ */
+function promptStillActive(
+  current: ActivePrompt | null,
+  key: string,
+  kind: ActivePrompt["kind"],
+): boolean {
+  return current !== null && current.key === key && current.kind === kind;
+}
+
 export interface IntroSkipPrompt {
   kind: "skip" | "undo";
   label: "Skip Intro" | "Watch Intro";
@@ -31,7 +61,15 @@ interface UseIntroSkipPromptOptions {
   currentTime: number;
   playing: boolean;
   enabled: boolean;
-  onSeek: (seconds: number) => void;
+  /**
+   * Moves playback and reports whether the seek was accepted.
+   *
+   * A seek can be refused without anything moving — a watch-together room that
+   * declines the transport request, a timeline that cannot be reanchored. The
+   * prompt is the viewer's only handle on the intro, so it may only be resolved
+   * and hidden once the seek that resolves it actually took.
+   */
+  onSeek: (seconds: number) => boolean | Promise<boolean>;
 }
 
 /**
@@ -58,6 +96,8 @@ export function useIntroSkipPrompt({
   const onSeekRef = useRef(onSeek);
   const deadlineRef = useRef(0);
   const pausedRemainingRef = useRef<number | null>(null);
+  /** What the clock had left when playback stopped, before the grace window ran. */
+  const remainingAtEdgeRef = useRef<number | null>(null);
   const expiryTimerRef = useRef<number | null>(null);
   const pauseGraceTimerRef = useRef<number | null>(null);
   const expirePromptRef = useRef<() => void>(() => {});
@@ -94,6 +134,7 @@ export function useIntroSkipPrompt({
     clearPauseGraceTimer();
     deadlineRef.current = 0;
     pausedRemainingRef.current = null;
+    remainingAtEdgeRef.current = null;
     replacePrompt(null);
   }, [clearCountdownTimers, clearPauseGraceTimer, replacePrompt]);
 
@@ -132,6 +173,7 @@ export function useIntroSkipPrompt({
     (kind: ActivePrompt["kind"], key: string) => {
       clearCountdownTimers();
       clearPauseGraceTimer();
+      remainingAtEdgeRef.current = null;
       const next = { key, kind, deadlineMs: null, remainingMs: INTRO_PROMPT_MS };
       replacePrompt(next);
       if (playingRef.current) {
@@ -158,8 +200,18 @@ export function useIntroSkipPrompt({
       clearPauseGraceTimer();
       const pausedRemaining = pausedRemainingRef.current;
       if (pausedRemaining !== null) {
+        // Resuming from a confirmed pause: the clock restarts from the value it
+        // was frozen at, so the pause cost the viewer nothing.
         pausedRemainingRef.current = null;
+        remainingAtEdgeRef.current = null;
         scheduleCountdown(pausedRemaining);
+      } else if (remainingAtEdgeRef.current !== null) {
+        // Playback came back inside the grace window, so this was a rebuffer
+        // and not a pause. The deadline never moved; re-arm the expiry against
+        // it, which fires immediately when the buffer stall outlasted the
+        // countdown.
+        remainingAtEdgeRef.current = null;
+        scheduleCountdown(deadlineRef.current - Date.now());
       }
       return;
     }
@@ -168,11 +220,20 @@ export function useIntroSkipPrompt({
       return;
     }
 
+    // The false edge. What the clock has left is captured here rather than when
+    // the grace timer fires, or every real pause would silently eat the grace
+    // window. The expiry is disarmed for the same reason it is not recomputed:
+    // playback is stopped, so a prompt with less than 1.5 s left must not run
+    // out while the picture is frozen. deadlineRef is deliberately untouched —
+    // a rebuffer resumes against the original deadline.
+    remainingAtEdgeRef.current = Math.max(0, deadlineRef.current - Date.now());
+    clearCountdownTimers();
+
     pauseGraceTimerRef.current = window.setTimeout(() => {
       pauseGraceTimerRef.current = null;
       if (playingRef.current || !activePromptRef.current) return;
-      const remaining = Math.max(0, deadlineRef.current - Date.now());
-      clearCountdownTimers();
+      const remaining = remainingAtEdgeRef.current ?? 0;
+      remainingAtEdgeRef.current = null;
       pausedRemainingRef.current = remaining;
       replacePrompt({ ...activePromptRef.current, deadlineMs: null, remainingMs: remaining });
     }, PLAYBACK_PAUSE_GRACE_MS);
@@ -226,7 +287,14 @@ export function useIntroSkipPrompt({
     // Start the undo clock before seeking. The resulting position update is
     // outside the range, but the undo prompt must remain available.
     startPrompt("undo", introKey);
-    onSeekRef.current(intro.end);
+    settleSeek(onSeekRef.current(intro.end), (accepted) => {
+      if (accepted) return;
+      // Nothing moved, so there is no skip to undo and "Intro skipped" would be
+      // a lie. The intro stays unresolved: whatever refused the seek may not
+      // refuse the next one.
+      if (!promptStillActive(activePromptRef.current, introKey, "undo")) return;
+      clearPrompt();
+    });
   }, [clearPrompt, currentTime, enabled, intro, introKey, mode, startPrompt]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -238,12 +306,23 @@ export function useIntroSkipPrompt({
     [clearCountdownTimers, clearPauseGraceTimer],
   );
 
+  /**
+   * Acts on the visible prompt, reporting only whether there was one to act on.
+   *
+   * The return value is what the caller uses to consume the key press, so it
+   * stays synchronous. Resolution waits for the seek: if the seek is refused
+   * the prompt stays up and unresolved, because a viewer left sitting inside
+   * the intro needs to be able to press it again.
+   */
   const select = useCallback(() => {
     const current = activePromptRef.current;
     if (!current || !intro) return false;
-    resolvedKeysRef.current.add(current.key);
-    clearPrompt();
-    onSeekRef.current(current.kind === "skip" ? intro.end : intro.start);
+    settleSeek(onSeekRef.current(current.kind === "skip" ? intro.end : intro.start), (accepted) => {
+      if (!accepted) return;
+      if (!promptStillActive(activePromptRef.current, current.key, current.kind)) return;
+      resolvedKeysRef.current.add(current.key);
+      clearPrompt();
+    });
     return true;
   }, [clearPrompt, intro]);
 

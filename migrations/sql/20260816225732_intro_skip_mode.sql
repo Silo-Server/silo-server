@@ -11,6 +11,11 @@
 -- ON CONFLICT DO NOTHING covers the partial unique index on each scope, which
 -- makes a re-run a no-op and, more importantly, never overwrites an enum a
 -- client wrote itself. See docs/design/2026-08-16-intro-skip-mode.md.
+--
+-- The timestamps come from the source row rather than defaulting to now(): the
+-- admin device surfaces sort and label devices by the canonical row's
+-- updated_at, so stamping every backfilled row with the deployment time would
+-- make the whole fleet look freshly reconfigured the moment this ran.
 
 -- +goose Up
 -- +goose StatementBegin
@@ -23,7 +28,9 @@ INSERT INTO public.user_setting_values (
     device_id,
     library_id,
     series_id,
-    value
+    value,
+    created_at,
+    updated_at
 )
 SELECT
     legacy.user_id,
@@ -37,7 +44,9 @@ SELECT
     CASE WHEN legacy.value = 'true'::jsonb
          THEN '"always"'::jsonb
          ELSE '"ask"'::jsonb
-    END
+    END,
+    legacy.created_at,
+    legacy.updated_at
 FROM public.user_setting_values AS legacy
 WHERE legacy.key = 'playback.auto_skip_intro'
 ON CONFLICT DO NOTHING;
@@ -45,6 +54,13 @@ ON CONFLICT DO NOTHING;
 
 -- +goose Down
 -- +goose StatementBegin
-DELETE FROM public.user_setting_values
-WHERE key = 'playback.intro_skip_mode';
+-- Deliberately empty: the canonical rows stay.
+--
+-- This migration records nothing about which rows it created, and by the time
+-- anyone rolls back it cannot tell a backfilled row from one a client wrote
+-- afterwards. Deleting every playback.intro_skip_mode row would therefore erase
+-- explicit "never" and "ask" choices that were never this migration's to make.
+-- The rows are harmless to an older server: it does not define the key, so
+-- resolution never reaches them, and rolling forward again finds them intact.
+SELECT 1;
 -- +goose StatementEnd

@@ -51,6 +51,27 @@ func MirrorKey(key string) (string, bool) {
 	}
 }
 
+// LogicalKey collapses a mirrored pair onto one name, so surfaces that count or
+// summarize stored rows describe preferences rather than storage.
+//
+// A mirrored pair is one preference the server keeps in two spellings for the
+// duration of the overlap window. Anything that answers "how many settings does
+// this device override" has to say one, or every fleet total, count filter and
+// changed-settings badge doubles the moment a household touches the intro
+// prompt — and un-doubles again when the mirror is retired, which looks like a
+// fleet-wide change nobody made.
+//
+// Which of the two names survives is arbitrary and never reaches a user; it
+// only has to be stable and to agree for both halves, so the pair lands in one
+// bucket. Keys with no mirror are returned unchanged.
+func LogicalKey(key string) string {
+	mirror, ok := MirrorKey(key)
+	if !ok || key < mirror {
+		return key
+	}
+	return mirror
+}
+
 // MirrorWrite converts a value written at key into the companion row that must
 // be written alongside it.
 //
@@ -70,15 +91,20 @@ func MirrorWrite(key string, value json.RawMessage) (MirroredWrite, bool, error)
 		return MirroredWrite{}, false, nil
 	}
 
+	// Both directions decode into a pointer so JSON null is rejected rather than
+	// silently mirrored. encoding/json treats null as "not present" and leaves a
+	// bool or string variable at its zero value, which would turn a null body
+	// into a stored "ask" — a preference nobody expressed, written on behalf of
+	// a request that was malformed.
 	switch key {
 	case settingskeys.PlaybackAutoSkipIntro:
-		var enabled bool
-		if err := json.Unmarshal(value, &enabled); err != nil {
+		var enabled *bool
+		if err := json.Unmarshal(value, &enabled); err != nil || enabled == nil {
 			return MirroredWrite{}, false, fmt.Errorf(
 				"%s: mirroring to %s needs a boolean, got %s", key, mirror, value)
 		}
 		mode := IntroSkipModeAsk
-		if enabled {
+		if *enabled {
 			mode = IntroSkipModeAlways
 		}
 		encoded, err := json.Marshal(mode)
@@ -88,19 +114,19 @@ func MirrorWrite(key string, value json.RawMessage) (MirroredWrite, bool, error)
 		return MirroredWrite{Key: mirror, Value: encoded}, true, nil
 
 	case settingskeys.PlaybackIntroSkipMode:
-		var mode string
-		if err := json.Unmarshal(value, &mode); err != nil {
+		var mode *string
+		if err := json.Unmarshal(value, &mode); err != nil || mode == nil {
 			return MirroredWrite{}, false, fmt.Errorf(
 				"%s: mirroring to %s needs a string, got %s", key, mirror, value)
 		}
-		switch mode {
+		switch *mode {
 		case IntroSkipModeNever, IntroSkipModeAsk, IntroSkipModeAlways:
 		default:
 			return MirroredWrite{}, false, fmt.Errorf(
-				"%s: %q is not an intro skip mode", key, mode)
+				"%s: %q is not an intro skip mode", key, *mode)
 		}
 		encoded := json.RawMessage("false")
-		if mode == IntroSkipModeAlways {
+		if *mode == IntroSkipModeAlways {
 			encoded = json.RawMessage("true")
 		}
 		return MirroredWrite{Key: mirror, Value: encoded}, true, nil

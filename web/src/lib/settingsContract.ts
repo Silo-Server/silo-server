@@ -275,6 +275,11 @@ export interface SettingDefinition {
    * hide definitions, scopes, enum members and widened bounds introduced
    * after that revision — the server would reject them. */
   introducedIn: number;
+  /** Superseded by another definition. The key still resolves and still
+   * has to be readable, but a client must not offer it as a second control
+   * beside its replacement — editing one would silently rewrite the other
+   * through the server's compatibility mirror. */
+  deprecated?: boolean;
   scopes: readonly string[];
   /** Revision each scope became writable at, aligned with scopes. */
   scopeIntroducedIn: readonly number[];
@@ -513,6 +518,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     nullable: false,
     persistence: "remote",
     introducedIn: 1,
+    deprecated: true,
     scopes: ["profile", "profile_device"],
     scopeIntroducedIn: [1, 1],
     resolutionOrder: ["profile_device", "profile", "default"],

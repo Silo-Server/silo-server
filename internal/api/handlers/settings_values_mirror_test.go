@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -385,5 +386,177 @@ func TestDeviceScopeEnumWriteLeavesTheProfileColumnAlone(t *testing.T) {
 	}
 	if profile.AutoSkipIntro {
 		t.Error("a device-scope write moved the profile-wide column")
+	}
+}
+
+// --- Atomicity ---
+//
+// A mirrored write is three writes: the addressed row, its companion, and (at
+// profile scope) the legacy column GET /profiles serves. Landing some of them
+// is worse than landing none. The pair disagreeing is exactly the drift the
+// mirror exists to prevent, and the client has no way to notice, let alone
+// repair it — a 500 tells it the write failed while a preference it never chose
+// is now stored.
+
+// failingMirrorStore injects a failure into one write inside the mutation
+// transaction, standing in for a store that dies partway through it.
+type failingMirrorStore struct {
+	userstore.UserStore
+	failUpsertKey  string
+	failProfileCol bool
+}
+
+func (s failingMirrorStore) WithSettingMutationTransaction(
+	ctx context.Context,
+	mutationID string,
+	fn func(userstore.SettingMutationWriter) error,
+) error {
+	transactioner, ok := s.UserStore.(userstore.SettingMutationTransactioner)
+	if !ok {
+		return errors.New("wrapped store does not support setting mutation transactions")
+	}
+	return transactioner.WithSettingMutationTransaction(ctx, mutationID,
+		func(writer userstore.SettingMutationWriter) error {
+			return fn(failingMirrorWriter{
+				SettingMutationWriter: writer,
+				failUpsertKey:         s.failUpsertKey,
+				failProfileCol:        s.failProfileCol,
+			})
+		})
+}
+
+type failingMirrorWriter struct {
+	userstore.SettingMutationWriter
+	failUpsertKey  string
+	failProfileCol bool
+}
+
+func (w failingMirrorWriter) UpsertSettingValue(
+	ctx context.Context, id userstore.SettingIdentity, value json.RawMessage,
+) (*userstore.SettingValue, error) {
+	if w.failUpsertKey != "" && id.Key == w.failUpsertKey {
+		return nil, errors.New("storage unavailable")
+	}
+	return w.SettingMutationWriter.UpsertSettingValue(ctx, id, value)
+}
+
+func (w failingMirrorWriter) UpdateProfile(
+	ctx context.Context, id string, u userstore.UpdateProfileInput,
+) error {
+	if w.failProfileCol {
+		return errors.New("profile storage unavailable")
+	}
+	return w.SettingMutationWriter.UpdateProfile(ctx, id, u)
+}
+
+func handlerOverStore(t *testing.T, store userstore.UserStore) *SettingValuesHandler {
+	t.Helper()
+	contract, err := settingscontract.Load()
+	if err != nil {
+		t.Fatalf("loading contract: %v", err)
+	}
+	return NewSettingValuesHandler(testUserStoreProvider{store: store}, contract)
+}
+
+// TestAFailedHalfRollsBackTheWholeMirroredWrite covers the path with no
+// idempotency key, which is the one shipped clients take: without a receipt to
+// replay, a half-applied write is not repaired by any retry the client makes.
+func TestAFailedHalfRollsBackTheWholeMirroredWrite(t *testing.T) {
+	for name, failure := range map[string]failingMirrorStore{
+		// The pair is written in key order, so failing the enum fails the
+		// second row and proves the first one was rolled back rather than
+		// merely never attempted.
+		"the addressed row fails after its companion landed": {
+			failUpsertKey: settingskeys.PlaybackIntroSkipMode,
+		},
+		"the companion row fails": {
+			failUpsertKey: settingskeys.PlaybackAutoSkipIntro,
+		},
+		"the legacy profile column fails": {failProfileCol: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, store := newValuesTestHandler(t)
+			failure.UserStore = store
+			handler := handlerOverStore(t, failure)
+
+			rec := routeValues(t, handler, http.MethodPut,
+				settingskeys.PlaybackIntroSkipMode, "scope=profile", []byte(`{"value":"always"}`))
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
+			}
+
+			for _, key := range []string{
+				settingskeys.PlaybackIntroSkipMode,
+				settingskeys.PlaybackAutoSkipIntro,
+			} {
+				if value := storedValueAt(t, store, profileIdentity(key)); value != nil {
+					t.Errorf("%s survived a failed write: %s", key, value.Value)
+				}
+			}
+			requireColumn(t, store, false, "after a failed write")
+		})
+	}
+}
+
+// TestAFailedHalfRollsBackAnIdempotentMirroredWrite. The receipt has to roll
+// back with the rows it describes: a recorded receipt for a write that did not
+// land turns the client's retry into a replay of a success that never happened.
+func TestAFailedHalfRollsBackAnIdempotentMirroredWrite(t *testing.T) {
+	_, store := newValuesTestHandler(t)
+	handler := handlerOverStore(t, failingMirrorStore{
+		UserStore: store, failUpsertKey: settingskeys.PlaybackIntroSkipMode,
+	})
+
+	req := valuesRequest(http.MethodPut,
+		"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
+		[]byte(`{"value":"always"}`))
+	req.Header.Set(mutationIDHeader, "mut-partial")
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	rec := httptest.NewRecorder()
+	handler.HandleSetValue(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+
+	receipt, err := store.GetSettingMutation(context.Background(), "mut-partial")
+	if err != nil {
+		t.Fatalf("reading the mutation receipt: %v", err)
+	}
+	if receipt != nil {
+		t.Fatalf("a receipt survived the rolled-back write: %s", receipt.Result)
+	}
+
+	// The same mutation id must now apply for real rather than replay.
+	if rec := routeValues(t, handlerOverStore(t, store), http.MethodPut,
+		settingskeys.PlaybackIntroSkipMode, "scope=profile",
+		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("retry = %d: %s", rec.Code, rec.Body.String())
+	}
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
+}
+
+// TestClearingSweepsUpAStrayCompanion. A companion with no addressed row beside
+// it is only reachable through a partial failure from before this path was
+// transactional. Leaving it standing makes that state permanent: every retry
+// answers 404 for the row the caller named without ever touching the one that
+// is still resolving. The 404 stays — the caller asked about a row that is not
+// there — but the stray goes.
+func TestClearingSweepsUpAStrayCompanion(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	if _, err := store.UpsertSettingValue(context.Background(),
+		profileIdentity(settingskeys.PlaybackAutoSkipIntro), json.RawMessage(`true`)); err != nil {
+		t.Fatalf("seeding the stray companion: %v", err)
+	}
+
+	rec := routeValues(t, handler, http.MethodDelete,
+		settingskeys.PlaybackIntroSkipMode, "scope=profile", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("DELETE = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if value := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro)); value != nil {
+		t.Errorf("the stray companion survived: %s", value.Value)
 	}
 }

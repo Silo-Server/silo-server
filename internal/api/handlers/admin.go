@@ -1749,12 +1749,13 @@ func buildAdminDeviceSummaries(
 		if current == nil {
 			continue
 		}
-		if profileID != "" && value.Key != "" {
-			current.keys[profileID+":"+value.Key] = struct{}{}
+		key := canonicalAdminDeviceSettingKey(value.Key)
+		if profileID != "" && key != "" {
+			current.keys[profileID+":"+key] = struct{}{}
 		}
 		profile := ensureProfile(current, profileID, value.UpdatedAt)
-		if profile != nil && value.Key != "" {
-			profile.keys[value.Key] = struct{}{}
+		if profile != nil && key != "" {
+			profile.keys[key] = struct{}{}
 		}
 	}
 
@@ -1787,11 +1788,18 @@ func buildAdminDeviceSummaries(
 	return devices
 }
 
-// canonicalAdminDeviceSettingKey uses the migration's rename table so fleet
-// counts describe logical overrides and every legacy/canonical pair counts
-// once, including pre-cutover appearance rows left in the legacy table.
+// canonicalAdminDeviceSettingKey reduces a stored key to the preference it
+// expresses, so fleet counts describe overrides rather than rows.
+//
+// Two reductions, because a key can be spelled twice for two different reasons.
+// The migration's rename table folds a pre-cutover spelling onto its contract
+// name, which is what makes an appearance row left in the legacy table count
+// once. The mirror then folds a deprecated key onto its replacement, which is
+// what keeps a household's single intro-skip choice from raising this device's
+// override count — and the anomaly thresholds and count filters built on it —
+// by two for the length of the overlap window.
 func canonicalAdminDeviceSettingKey(key string) string {
-	return settingsmigrate.CanonicalKey(strings.TrimSpace(key))
+	return settingscontract.LogicalKey(settingsmigrate.CanonicalKey(strings.TrimSpace(key)))
 }
 
 func listProfileNamesByID(ctx context.Context, store userstore.UserStore) (map[string]string, error) {

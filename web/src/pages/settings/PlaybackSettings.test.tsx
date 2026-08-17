@@ -37,7 +37,9 @@ const mocks = vi.hoisted(() => ({
     contract_etag: "revision-seven",
     supports_batched_effective: true,
     supports_idempotent_writes: true,
-  } as SettingsCapabilities,
+  } as SettingsCapabilities | undefined,
+  /** Whether the capability check has answered; false covers pending and failed. */
+  capabilitiesSettled: true,
 }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {
@@ -50,11 +52,25 @@ vi.mock("@/hooks/queries/settingValues", async () => {
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
     useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
     useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
-    useSettingsCapabilities: () => ({ data: mocks.capabilities, isLoading: false }),
+    useSettingsCapabilities: () => ({
+      data: mocks.capabilities,
+      isLoading: false,
+      isSuccess: mocks.capabilitiesSettled,
+    }),
   };
 });
 
 import PlaybackSettings from "./PlaybackSettings";
+
+function capabilitiesAtRevision(revision: number): SettingsCapabilities {
+  return {
+    api_version: 1,
+    revision,
+    contract_etag: `revision-${revision}`,
+    supports_batched_effective: true,
+    supports_idempotent_writes: true,
+  };
+}
 
 function resolved(
   key: SettingKey,
@@ -73,7 +89,8 @@ describe("PlaybackSettings", () => {
     mocks.useEffectiveSettings.mockReset();
     mocks.useSetSettingValue.mockReset();
     mocks.useClearSettingValue.mockReset();
-    mocks.capabilities.revision = 7;
+    mocks.capabilities = capabilitiesAtRevision(7);
+    mocks.capabilitiesSettled = true;
     mutate = vi.fn();
     mutateAsync = vi.fn().mockResolvedValue(undefined);
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
@@ -129,12 +146,26 @@ describe("PlaybackSettings", () => {
   });
 
   it("keeps the legacy switch when the connected server predates revision 7", () => {
-    mocks.capabilities.revision = 6;
+    mocks.capabilities = capabilitiesAtRevision(6);
 
     render(<PlaybackSettings />);
 
     expect(screen.getByLabelText("Auto-skip intros")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Skip intros" })).not.toBeInTheDocument();
+  });
+
+  // The deprecated boolean cannot represent "never": writing it against a
+  // revision-7 server turns a deliberate "never" into "ask" through the
+  // compatibility mirror. So an unanswered capability check — pending or
+  // failed, which look the same from here — must not render the switch.
+  it("offers no writable intro control while the capability check is unresolved", () => {
+    mocks.capabilities = undefined;
+    mocks.capabilitiesSettled = false;
+
+    render(<PlaybackSettings />);
+
+    expect(screen.queryByLabelText("Auto-skip intros")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Skip intros" })).toBeDisabled();
   });
 
   it("reads a stored value in preference to the contract default", () => {

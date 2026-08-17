@@ -1063,6 +1063,43 @@ func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
 	}
 }
 
+// TestAdminDeviceSummaryCountsAMirroredPairOnce. The mirrored pair is one
+// preference stored twice for the length of the overlap window, and every fleet
+// number built on this — override totals, the count filters, the anomaly
+// thresholds that flag a device as unusually customized — is describing
+// preferences. A device whose only override is the intro prompt must not look
+// twice as configured as one whose only override is HDR.
+func TestAdminDeviceSummaryCountsAMirroredPairOnce(t *testing.T) {
+	summaries := buildAdminDeviceSummaries(7, "user", "user@example.com", nil,
+		[]userstore.SettingValue{
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.PlaybackIntroSkipMode, Scope: settingscontract.ScopeProfileDevice,
+					ProfileID: "profile-1", DeviceID: "living-room",
+				},
+				UpdatedAt: "2026-08-16T01:00:00Z",
+			},
+			{
+				SettingIdentity: userstore.SettingIdentity{
+					Key: settingskeys.PlaybackAutoSkipIntro, Scope: settingscontract.ScopeProfileDevice,
+					ProfileID: "profile-1", DeviceID: "living-room",
+				},
+				UpdatedAt: "2026-08-16T01:00:00Z",
+			},
+		}, nil, map[string]string{"profile-1": "Main"})
+
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %#v, want one device", summaries)
+	}
+	if summaries[0].OverrideCount != 1 {
+		t.Errorf("override_count = %d, want 1: the mirrored intro pair is one preference",
+			summaries[0].OverrideCount)
+	}
+	if len(summaries[0].Profiles) != 1 || summaries[0].Profiles[0].OverrideCount != 1 {
+		t.Errorf("per-profile summary = %#v, want one override", summaries[0].Profiles)
+	}
+}
+
 func withRouteParams(req *http.Request, params map[string]string) *http.Request {
 	routeCtx := chi.NewRouteContext()
 	for key, value := range params {

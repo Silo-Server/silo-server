@@ -192,6 +192,22 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
   );
+  /**
+   * Which intro control this server can honestly show.
+   *
+   * The legacy switch is not a safe default while the answer is unknown. On a
+   * revision-7 server a profile set to `never` is mirrored into the deprecated
+   * boolean as false; touching the switch would write that key, and the
+   * server's mirror would turn a deliberate `never` into `ask` or `always`
+   * with no way back. So the fallback is only reached once a successful
+   * capabilities response has proved the enum is genuinely unavailable — a
+   * failed request means unknown, not old.
+   */
+  const introSkipControl: "mode" | "legacy" | "unknown" = supportsIntroSkipMode
+    ? "mode"
+    : capabilities.isSuccess
+      ? "legacy"
+      : "unknown";
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
@@ -312,7 +328,7 @@ export default function PlaybackSettings() {
           onOverridesChange={saveMetadataOverrides}
         />
 
-        {supportsIntroSkipMode ? (
+        {introSkipControl === "mode" ? (
           <SettingRow
             label="Skip intros"
             description="Leave intros alone, offer a Skip Intro button, or skip automatically with an undo."
@@ -324,6 +340,28 @@ export default function PlaybackSettings() {
               >
                 <SelectTrigger id={id} className="w-full sm:w-[220px]">
                   <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INTRO_SKIP_MODES.map((mode) => (
+                    <SelectItem key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        ) : introSkipControl === "unknown" ? (
+          // Neither control can be rendered truthfully yet, so the row keeps
+          // its place and asserts no value at all rather than showing a switch
+          // whose position would be a guess the user could act on.
+          <SettingRow
+            label="Skip intros"
+            description="Available once Silo has checked what this server supports."
+            control={(id) => (
+              <Select disabled>
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue placeholder="Unavailable" />
                 </SelectTrigger>
                 <SelectContent>
                   {INTRO_SKIP_MODES.map((mode) => (

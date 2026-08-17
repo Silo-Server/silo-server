@@ -108,6 +108,11 @@ func TestMirrorWriteRefusesValuesItCannotConvert(t *testing.T) {
 		"enum key given a non-member": {
 			settingskeys.PlaybackIntroSkipMode, `"sideways"`,
 		},
+		// encoding/json reads null as "not present" and leaves a bool or string
+		// at its zero value, so an unguarded decode would mirror null onto
+		// "ask" — a stored preference invented from a malformed request.
+		"boolean key given null": {settingskeys.PlaybackAutoSkipIntro, `null`},
+		"enum key given null":    {settingskeys.PlaybackIntroSkipMode, `null`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, ok, err := MirrorWrite(tc.key, json.RawMessage(tc.value)); err == nil || ok {

@@ -145,9 +145,29 @@ func generateGo(contract *settingscontract.Manifest, pkg string) ([]byte, error)
 			fmt.Fprintf(&out, "\t%s,\n", identifierFor(def.Key))
 		}
 	}
+	out.WriteString("}\n\n")
+
+	out.WriteString(deprecatedListDoc)
+	out.WriteString("var Deprecated = []string{\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.Deprecated {
+			fmt.Fprintf(&out, "\t%s,\n", identifierFor(def.Key))
+		}
+	}
 	out.WriteString("}\n")
 	return out.Bytes(), nil
 }
+
+// deprecatedListDoc explains the generated Deprecated list. Every generator
+// emits the same list under its own spelling, because "this key was superseded"
+// is a contract fact and a client that has to work it out from the label is a
+// client that will get it wrong.
+const deprecatedListDoc = `// Deprecated lists keys another definition has superseded. They still resolve
+// and still have to be readable — shipped clients write them — but a client
+// must not offer one as a second control beside its replacement: the server
+// mirrors the pair at write time, so editing either would silently rewrite the
+// other.
+`
 
 func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	var out bytes.Buffer
@@ -204,6 +224,11 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("   * hide definitions, scopes, enum members and widened bounds introduced\n")
 	out.WriteString("   * after that revision — the server would reject them. */\n")
 	out.WriteString("  introducedIn: number;\n")
+	out.WriteString("  /** Superseded by another definition. The key still resolves and still\n")
+	out.WriteString("   * has to be readable, but a client must not offer it as a second control\n")
+	out.WriteString("   * beside its replacement — editing one would silently rewrite the other\n")
+	out.WriteString("   * through the server's compatibility mirror. */\n")
+	out.WriteString("  deprecated?: boolean;\n")
 	out.WriteString("  scopes: readonly string[];\n")
 	out.WriteString("  /** Revision each scope became writable at, aligned with scopes. */\n")
 	out.WriteString("  scopeIntroducedIn: readonly number[];\n")
@@ -246,6 +271,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		fmt.Fprintf(&out, "    nullable: %t,\n", def.ValueSchema.Nullable)
 		fmt.Fprintf(&out, "    persistence: %q,\n", def.Persistence)
 		fmt.Fprintf(&out, "    introducedIn: %d,\n", def.IntroducedIn)
+		if def.Deprecated {
+			out.WriteString("    deprecated: true,\n")
+		}
 		fmt.Fprintf(&out, "    scopes: [%s],\n", quotedScopes(def))
 		fmt.Fprintf(&out, "    scopeIntroducedIn: [%s],\n", scopeRevisions(def))
 		fmt.Fprintf(&out, "    resolutionOrder: [%s],\n", quotedResolution(def))
@@ -350,6 +378,17 @@ func generateKotlin(contract *settingscontract.Manifest, pkg string) ([]byte, er
 	out.WriteString("    val CLIENT_LOCAL: List<String> = listOf(\n")
 	for _, def := range sortedDefinitions(contract) {
 		if !def.IsRemote() {
+			fmt.Fprintf(&out, "        %s,\n", screamingCase(def.Key))
+		}
+	}
+	out.WriteString("    )\n\n")
+
+	out.WriteString("    /** Keys another definition supersedes. Still readable, never offered\n")
+	out.WriteString("     * as a second control beside their replacement: the server mirrors the\n")
+	out.WriteString("     * pair at write time, so editing either would rewrite the other. */\n")
+	out.WriteString("    val DEPRECATED: Set<String> = setOf(\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.Deprecated {
 			fmt.Fprintf(&out, "        %s,\n", screamingCase(def.Key))
 		}
 	}
@@ -470,6 +509,17 @@ func generateSwift(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("    static let clientLocal: [SettingKey] = [\n")
 	for _, def := range sortedDefinitions(contract) {
 		if !def.IsRemote() {
+			fmt.Fprintf(&out, "        .%s,\n", lowerFirst(identifierFor(def.Key)))
+		}
+	}
+	out.WriteString("    ]\n\n")
+
+	out.WriteString("    /// Keys another definition supersedes. Still readable, never offered as\n")
+	out.WriteString("    /// a second control beside their replacement: the server mirrors the pair\n")
+	out.WriteString("    /// at write time, so editing either would rewrite the other.\n")
+	out.WriteString("    static let deprecated: Set<SettingKey> = [\n")
+	for _, def := range sortedDefinitions(contract) {
+		if def.Deprecated {
 			fmt.Fprintf(&out, "        .%s,\n", lowerFirst(identifierFor(def.Key)))
 		}
 	}

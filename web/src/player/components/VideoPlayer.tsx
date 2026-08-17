@@ -117,7 +117,12 @@ interface VideoPlayerProps {
   showForcedSubtitles?: boolean;
   profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
-  introSkipMode?: IntroSkipMode;
+  /**
+   * null means the connected server's answer is not in yet, which is not the
+   * same as "ask": prompting on a guess can skip an intro the viewer told the
+   * server to leave alone.
+   */
+  introSkipMode?: IntroSkipMode | null;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
@@ -277,7 +282,7 @@ export function VideoPlayer({
   const compatibilityFallbackKeyRef = useRef<string | null>(null);
   const lastRoomCommandIdRef = useRef<string | null>(null);
   const roomCommandTimerRef = useRef<number | null>(null);
-  const performPlayerSeekRef = useRef<(seconds: number) => void>(() => {});
+  const performPlayerSeekRef = useRef<(seconds: number) => boolean>(() => false);
   const reportRoomReadyRef = useRef<
     (positionSeconds?: number, isPaused?: boolean) => { ok: boolean }
   >(() => ({ ok: false }));
@@ -701,10 +706,13 @@ export function VideoPlayer({
   // against the plan's timeline below.
   const { handleSeek } = useRemuxSeeking(videoRef);
 
+  // Reports whether the seek was taken up, which callers that show an
+  // affordance for it (the intro prompt) need in order to know whether the
+  // affordance did anything.
   const performPlayerSeek = useCallback(
-    (seconds: number) => {
+    (seconds: number): boolean => {
       const video = videoRef.current;
-      if (!video) return;
+      if (!video) return false;
 
       setPendingSeekTime(seconds);
       setCurrentTime(seconds);
@@ -713,7 +721,7 @@ export function VideoPlayer({
       if (canSeekAnywhere) {
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
-        return;
+        return true;
       }
 
       const seekable = video.seekable;
@@ -721,19 +729,22 @@ export function VideoPlayer({
         if (nativeSeconds >= seekable.start(i) && nativeSeconds <= seekable.end(i)) {
           if (isHlsStream) video.currentTime = nativeSeconds;
           else handleSeek(nativeSeconds);
-          return;
+          return true;
         }
       }
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
+      // A wired handler replans and lands the position, so that counts as
+      // accepted; with no handler the seek is simply dropped.
       onReanchorSeek?.(seconds);
+      return onReanchorSeek !== undefined;
     },
     [canSeekAnywhere, handleSeek, isHlsStream, onReanchorSeek],
   );
 
   const handlePlayerSeek = useCallback(
-    (seconds: number) => {
+    (seconds: number): boolean => {
       if (
         watchTogetherRoomId &&
         !watchTogether.closedReason &&
@@ -743,23 +754,27 @@ export function VideoPlayer({
           "Reconnecting to room. Controls are temporarily unavailable.",
           "warning",
         );
-        return;
+        return false;
       }
       if (watchTogether.room && !watchTogether.room.self_can_manage_room) {
         showWatchTogetherNotice("Only the host can seek the room.", "warning");
-        return;
+        return false;
       }
       if (watchTogether.room && watchTogetherSync.attachedSessionId !== sessionId) {
         showWatchTogetherNotice("Joining room playback. Try again in a moment.", "info");
-        return;
+        return false;
       }
 
       if (watchTogether.room) {
         const video = videoRef.current;
-        watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true);
-        return;
+        // In a room the seek is a request: `ok` says it reached the room, and
+        // the position moves when the room's transport command comes back. That
+        // is the strongest answer available synchronously, and it is false for
+        // exactly the cases the caller cares about — a dropped socket or a
+        // session the room is not driving.
+        return watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true).ok;
       }
-      performPlayerSeek(seconds);
+      return performPlayerSeek(seconds);
     },
     [
       performPlayerSeek,
@@ -1303,13 +1318,19 @@ export function VideoPlayer({
     select: selectActiveIntroPrompt,
     dismiss: dismissActiveIntroPrompt,
   } = useIntroSkipPrompt({
-    mode: introSkipMode,
+    mode: introSkipMode ?? "ask",
     intro,
     introKey,
     currentTime,
     playing,
     enabled:
-      displayMode === "foreground" && isPlayerReady && !awaitingFirstFrame && introPromptCanSeek,
+      displayMode === "foreground" &&
+      isPlayerReady &&
+      !awaitingFirstFrame &&
+      introPromptCanSeek &&
+      // An unknown mode neither prompts nor skips. The mode above is only the
+      // placeholder that keeps the hook's contract total while this is false.
+      introSkipMode !== null,
     onSeek: handlePlayerSeek,
   });
 
@@ -1808,20 +1829,35 @@ export function VideoPlayer({
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
 
+    const promptSelector = '[data-intro-skip-prompt="true"]';
+
     const handlePromptKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const isPrompt = target?.closest('[data-intro-skip-prompt="true"]') !== null;
+      const targetInPrompt = target?.closest(promptSelector) != null;
       const isEditingOrInMenu =
-        !isPrompt &&
+        !targetInPrompt &&
         target?.closest(
           'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
-        ) !== null;
+        ) != null;
       if (isEditingOrInMenu) return;
 
       const isSelect = event.key === "Enter" || event.key === " ";
       const isBack = event.key === "Escape" || event.key === "BrowserBack";
       if (!isSelect && !isBack) return;
+
+      // Enter and Space belong to whatever control has focus: taking them at
+      // the document would make Space on Play/Pause or on the seek slider skip
+      // the intro and swallow the press. So Select is only claimed when the
+      // pill itself is focused, or when no control is — the case the spec's
+      // "handled at the player root" rule exists for. Back stays global: it has
+      // no competing meaning on the transport, and it must reach the pill
+      // whether or not the pill is in the focus tree.
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const promptHasFocus = targetInPrompt || active?.closest(promptSelector) != null;
+      const focusIsUnclaimed =
+        active === null || active === document.body || active === containerRef.current;
+      if (isSelect && !promptHasFocus && !focusIsUnclaimed) return;
 
       const handled = isSelect ? selectIntroPrompt() : dismissIntroPrompt();
       if (!handled) return;

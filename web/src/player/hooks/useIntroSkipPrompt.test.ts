@@ -19,11 +19,12 @@ interface Props {
 
 describe("useIntroSkipPrompt", () => {
   const intro = { start: 10, end: 20 };
-  let onSeek: (seconds: number) => void;
+  let onSeek: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    onSeek = vi.fn();
+    // The default player accepts every seek; the refusal cases opt out.
+    onSeek = vi.fn(() => true);
   });
 
   afterEach(() => {
@@ -130,8 +131,85 @@ describe("useIntroSkipPrompt", () => {
     act(() => vi.advanceTimersByTime(2_000));
     expect(result.current.prompt?.remainingMs).toBe(pausedRemaining);
 
+    // Resuming replays exactly what was frozen — the grace window itself is
+    // not deducted, so the clock has the same 4 s left it had at the edge.
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
-    act(() => vi.advanceTimersByTime(2_500));
+    act(() => vi.advanceTimersByTime(pausedRemaining));
+    expect(result.current.prompt).toBeNull();
+  });
+
+  // The grace window is there to tell a rebuffer from a pause. Charging the
+  // viewer for it would make every pause cost 1.5 s of a 5 s prompt.
+  it("freezes a pause at what the clock had when playback stopped", () => {
+    const { result, rerender } = renderPrompt();
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+
+    act(() => vi.advanceTimersByTime(1_000));
+    rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
+    act(() => vi.advanceTimersByTime(PLAYBACK_PAUSE_GRACE_MS));
+
+    expect(result.current.prompt?.remainingMs).toBe(4_000);
+  });
+
+  // A prompt with less left than the grace window used to expire mid-pause,
+  // because the countdown stayed armed while the picture was frozen.
+  it("keeps a prompt with less than the grace window left alive across a pause", () => {
+    const { result, rerender } = renderPrompt();
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+
+    act(() => vi.advanceTimersByTime(4_000));
+    rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
+    act(() => vi.advanceTimersByTime(10_000));
+
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+    expect(result.current.prompt?.remainingMs).toBe(1_000);
+
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+    act(() => vi.advanceTimersByTime(999));
+    expect(result.current.prompt).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.prompt).toBeNull();
+  });
+
+  // A rebuffer must leave the deadline exactly where it was, so the prompt
+  // still ends five wall-clock seconds after it appeared.
+  it("resumes a sub-grace rebuffer against the original deadline", () => {
+    const { result, rerender } = renderPrompt();
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+
+    act(() => vi.advanceTimersByTime(1_000));
+    rerender({ mode: "ask", currentTime: 12, playing: false, enabled: true });
+    act(() => vi.advanceTimersByTime(1_000));
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+
+    act(() => vi.advanceTimersByTime(2_999));
+    expect(result.current.prompt).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.prompt).toBeNull();
+  });
+
+  it("keeps the prompt when the seek it asked for was refused", () => {
+    onSeek.mockReturnValue(false);
+    const { result, rerender } = renderPrompt();
+    rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
+
+    act(() => expect(result.current.select()).toBe(true));
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+
+    // Unresolved as well as visible: a second press must be able to try again.
+    onSeek.mockReturnValue(true);
+    act(() => expect(result.current.select()).toBe(true));
+    expect(result.current.prompt).toBeNull();
+  });
+
+  it("drops the undo when the automatic skip was refused", () => {
+    onSeek.mockReturnValue(false);
+    const { result, rerender } = renderPrompt({ mode: "always" });
+
+    rerender({ mode: "always", currentTime: 12, playing: true, enabled: true });
+
+    // Nothing moved, so "Intro skipped" would be a lie.
+    expect(onSeek).toHaveBeenCalledWith(20);
     expect(result.current.prompt).toBeNull();
   });
 

@@ -7,6 +7,7 @@ import {
   manifestPlatformFor,
   settingAppliesToPlatform,
 } from "@/lib/deviceSettingGroups";
+import type { SettingKey } from "@/lib/settingsContract";
 import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 
 describe("deviceSettingGroups", () => {
@@ -46,6 +47,27 @@ describe("deviceSettingGroups", () => {
   it("shows only the three-way intro mode while the compatibility mirror is live", () => {
     expect(groupForDeviceSetting("playback.intro_skip_mode")).toBe("episodes");
     expect(groupForDeviceSetting("playback.auto_skip_intro")).toBeNull();
+  });
+
+  // A server older than revision 7 cannot store the enum, so the deprecated
+  // boolean is the only intro control it has — and the only way to see or clear
+  // an override already stored on the device.
+  it("keeps the legacy intro switch on a server without the replacement key", () => {
+    const legacyKeys: SettingKey[] = ["playback.auto_skip_intro", "playback.auto_play_next"];
+    expect(groupForDeviceSetting("playback.auto_skip_intro", legacyKeys)).toBe("episodes");
+    expect(hiddenDeviceSettingKeys(legacyKeys)).not.toContain("playback.auto_skip_intro");
+
+    const keys = groupDeviceSettings(legacyKeys).flatMap((group) => group.keys);
+    expect(keys).toContain("playback.auto_skip_intro");
+  });
+
+  it("drops the legacy intro switch once the server offers the replacement", () => {
+    const modernKeys: SettingKey[] = ["playback.auto_skip_intro", "playback.intro_skip_mode"];
+    expect(groupForDeviceSetting("playback.auto_skip_intro", modernKeys)).toBeNull();
+    expect(hiddenDeviceSettingKeys(modernKeys)).toContain("playback.auto_skip_intro");
+
+    const keys = groupDeviceSettings(modernKeys).flatMap((group) => group.keys);
+    expect(keys).toEqual(["playback.intro_skip_mode"]);
   });
 
   it("returns groups in reading order and omits empty ones", () => {

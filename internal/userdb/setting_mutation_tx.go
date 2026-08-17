@@ -52,16 +52,19 @@ var _ userstore.SettingMutationTransactioner = (*SQLiteUserStore)(nil)
 var _ userstore.SettingMutationWriter = (*sqliteSettingMutationWriter)(nil)
 
 // WithSettingMutationTransaction uses BEGIN IMMEDIATE so same-database
-// contenders serialize before checking mutation_id. The setting row and its
-// receipt then commit together; rollback covers callback errors and crashes.
+// contenders serialize before checking mutation_id. Everything the callback
+// writes then commits together; rollback covers callback errors and crashes.
+//
+// An empty mutationID is a mutation with no idempotency receipt. This backend
+// needs no special case for it: BEGIN IMMEDIATE already serializes every writer
+// against this user's database, so the atomicity guarantee is the same one and
+// the only thing missing is a receipt to record.
 func (s *SQLiteUserStore) WithSettingMutationTransaction(
 	ctx context.Context,
 	mutationID string,
 	fn func(userstore.SettingMutationWriter) error,
 ) (err error) {
-	if mutationID == "" {
-		return fmt.Errorf("setting mutation transaction requires a mutation id")
-	}
+	_ = mutationID // serialization here is per-database, not per-mutation id
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("opening setting mutation connection: %w", err)
@@ -110,6 +113,21 @@ func (w *sqliteSettingMutationWriter) UpsertSettingValue(
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
 	return upsertSettingValue(w.exec, id, value)
+}
+
+func (w *sqliteSettingMutationWriter) DeleteSettingValue(
+	_ context.Context,
+	id userstore.SettingIdentity,
+) (bool, error) {
+	return deleteSettingValue(w.exec, id)
+}
+
+func (w *sqliteSettingMutationWriter) UpdateProfile(
+	_ context.Context,
+	id string,
+	u userstore.UpdateProfileInput,
+) error {
+	return updateProfile(w.exec, id, u)
 }
 
 func (w *sqliteSettingMutationWriter) CompareAndSetSettingValue(
