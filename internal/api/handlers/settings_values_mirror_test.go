@@ -277,6 +277,97 @@ func TestProfileScopeEnumWriteUpdatesTheLegacyColumn(t *testing.T) {
 	}
 }
 
+// requireColumn asserts what user_profiles.auto_skip_intro holds, which is
+// still what GET /profiles serves and what the web player reads.
+func requireColumn(t *testing.T, store userstore.UserStore, want bool, when string) {
+	t.Helper()
+	profile, err := store.GetProfile(context.Background(), "profile-1")
+	if err != nil || profile == nil {
+		t.Fatalf("reading profile: %v", err)
+	}
+	if profile.AutoSkipIntro != want {
+		t.Errorf("user_profiles.auto_skip_intro = %v %s, want %v",
+			profile.AutoSkipIntro, when, want)
+	}
+}
+
+// TestABooleanWriteCorrectsAColumnTheEnumMoved. The column has to be movable
+// from both halves of the pair, or the first enum write pins it: an old client
+// that then saves the switch stores its value in the canonical rows and reads
+// the opposite back out of the profile DTO.
+func TestABooleanWriteCorrectsAColumnTheEnumMoved(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	if rec := routeValues(t, handler, http.MethodPut,
+		settingskeys.PlaybackIntroSkipMode, "scope=profile",
+		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("enum PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	requireColumn(t, store, true, "after intro_skip_mode was set to always")
+
+	if rec := routeValues(t, handler, http.MethodPut,
+		settingskeys.PlaybackAutoSkipIntro, "scope=profile",
+		[]byte(`{"value":false}`)); rec.Code != http.StatusOK {
+		t.Fatalf("boolean PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `false`)
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"ask"`)
+	requireColumn(t, store, false, "after the switch was turned off")
+}
+
+// TestClearingTheProfileScopePairResetsTheLegacyColumn. A cleared row means
+// "inherit again", so the column has to fall back with it — otherwise the
+// profile DTO, and the web player that reads it, go on acting on the choice
+// this request removed.
+func TestClearingTheProfileScopePairResetsTheLegacyColumn(t *testing.T) {
+	for _, cleared := range []string{
+		settingskeys.PlaybackIntroSkipMode,
+		settingskeys.PlaybackAutoSkipIntro,
+	} {
+		t.Run(cleared, func(t *testing.T) {
+			handler, store := newValuesTestHandler(t)
+
+			if rec := routeValues(t, handler, http.MethodPut,
+				settingskeys.PlaybackIntroSkipMode, "scope=profile",
+				[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+				t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
+			}
+			requireColumn(t, store, true, "after the seeding write")
+
+			if rec := routeValues(t, handler, http.MethodDelete,
+				cleared, "scope=profile", nil); rec.Code != http.StatusNoContent {
+				t.Fatalf("DELETE %s = %d: %s", cleared, rec.Code, rec.Body.String())
+			}
+			// Nothing is stored at any scope now, so the pair resolves to the
+			// contract default — "ask", which the boolean spells false.
+			requireColumn(t, store, false, "after the profile-scope value was cleared")
+		})
+	}
+}
+
+// TestClearingADeviceOverrideLeavesTheProfileColumnAlone: the column follows the
+// profile-wide choice, and giving up one television's override does not revoke
+// it.
+func TestClearingADeviceOverrideLeavesTheProfileColumnAlone(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	for _, scope := range []string{"scope=profile", "scope=profile_device"} {
+		if rec := routeValues(t, handler, http.MethodPut,
+			settingskeys.PlaybackIntroSkipMode, scope,
+			[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+			t.Fatalf("seed PUT at %s = %d: %s", scope, rec.Code, rec.Body.String())
+		}
+	}
+	requireColumn(t, store, true, "after the profile-scope write")
+
+	if rec := routeValues(t, handler, http.MethodDelete,
+		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("device DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	requireColumn(t, store, true, "after a device override was cleared")
+	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
+}
+
 // TestDeviceScopeEnumWriteLeavesTheProfileColumnAlone: the column is
 // profile-wide, and one television's override is not the household's choice.
 func TestDeviceScopeEnumWriteLeavesTheProfileColumnAlone(t *testing.T) {

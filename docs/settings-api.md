@@ -153,7 +153,7 @@ client shows up correctly on the others:
 | `DELETE` of either                     | removes the other at the same identity                         |
 | `PUT`/`POST /profiles` with `auto_skip_intro` | writes both keys at `profile` scope                     |
 | `PUT`/`DELETE` of the legacy `/settings/{key}` or `/settings/device/{key}` for `playback.auto_skip_intro` | writes or clears both keys at the scope that route owns |
-| `playback.intro_skip_mode` at `profile` scope | updates `user_profiles.auto_skip_intro`, so the profile DTO stays truthful for clients that read it |
+| `PUT` or `DELETE` of either key at `profile` scope | sets `user_profiles.auto_skip_intro` to what the pair now resolves to — the written value, or the contract default once the row is cleared — so the profile DTO stays truthful for clients that read it |
 
 Both rows commit together on the idempotent write path, and a replayed
 mutation id re-serves its receipt without writing either again. The response is

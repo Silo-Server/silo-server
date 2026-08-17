@@ -889,9 +889,10 @@ func (h *SettingValuesHandler) setValueAt(
 	}
 
 	// GET /profiles still serves auto_skip_intro from the legacy column, so a
-	// profile-scope choice made through the new key has to reach it or the
-	// profile DTO keeps reporting the preference the household abandoned.
-	if !h.syncLegacyIntroSkipColumn(r, w, store, identity, mirror, hasMirror) {
+	// profile-scope choice made through either half of the pair has to reach it
+	// or the profile DTO keeps reporting the preference the household abandoned.
+	if !h.syncLegacyIntroSkipColumn(r, w, store, identity,
+		legacyIntroSkipColumnWrite(identity.Key, normalized, mirror, hasMirror)) {
 		return
 	}
 
@@ -931,46 +932,98 @@ func (h *SettingValuesHandler) setValueAt(
 	}
 }
 
-// syncLegacyIntroSkipColumn mirrors a profile-scope playback.intro_skip_mode
-// write into user_profiles.auto_skip_intro, and reports whether the request may
-// continue.
+// legacyIntroSkipColumnWrite is the playback.auto_skip_intro value a canonical
+// write implies, or nil when the write is not part of the intro-skip pair.
 //
-// It is deliberately one-directional. The canonical write path does not
-// otherwise touch the legacy preference columns — the cutover direction is that
-// the profile DTO stops reading them, which it already has for the language and
-// subtitle fields — so this is not a general dual-write, only the narrow repair
-// that keeps the one DTO field still served from its column truthful while the
-// key that replaced it is the one clients write. A write of the deprecated
-// boolean itself is left alone, exactly as it is today.
+// Either half answers, because the mirror has already made them one preference:
+// the boolean is its own answer, and the enum's is the companion just computed
+// for it. Both have to answer, or the column would be movable in one direction
+// only — an enum write could set it and the boolean write that followed could
+// not correct it.
+func legacyIntroSkipColumnWrite(
+	key string,
+	normalized json.RawMessage,
+	mirror settingscontract.MirroredWrite,
+	hasMirror bool,
+) json.RawMessage {
+	if !hasMirror {
+		return nil
+	}
+	switch key {
+	case settingskeys.PlaybackAutoSkipIntro:
+		return normalized
+	case settingskeys.PlaybackIntroSkipMode:
+		return mirror.Value
+	default:
+		return nil
+	}
+}
+
+// legacyIntroSkipColumnCleared is the playback.auto_skip_intro value a cleared
+// profile-scope row leaves behind, or nil when the cleared key is not part of
+// the intro-skip pair.
+//
+// Clearing the profile-scope row is how a household says "inherit again", so
+// what the column must now hold is what the key resolves to with no explicit
+// value: the contract default. It is read from the manifest rather than spelled
+// here so a changed default cannot leave the column behind.
+func (h *SettingValuesHandler) legacyIntroSkipColumnCleared(key string) json.RawMessage {
+	switch key {
+	case settingskeys.PlaybackAutoSkipIntro, settingskeys.PlaybackIntroSkipMode:
+	default:
+		return nil
+	}
+	def, ok := h.contract.Lookup(settingskeys.PlaybackAutoSkipIntro)
+	if !ok || len(def.DefaultValue) == 0 {
+		return nil
+	}
+	return def.DefaultValue
+}
+
+// syncLegacyIntroSkipColumn writes the intro-skip preference through to
+// user_profiles.auto_skip_intro, and reports whether the request may continue.
+// A nil value means this request has nothing to say about the column.
+//
+// GET /profiles still serves auto_skip_intro from its column — the profile
+// DTO's shape is pinned by shipped clients — so the column is a third copy of
+// one preference and has to track every canonical profile-scope change to
+// either half of the pair, set or clear alike. A column that only the enum
+// write could move would end up contradicting the very row the caller stored:
+// an enum write sets it true, and a later boolean write, or a DELETE that goes
+// back to inheriting, leaves the DTO reporting a choice nobody holds.
+//
+// Device scope is none of its business: the column is profile-wide, and one
+// television's override is not the household's choice. The canonical write path
+// touches no other legacy preference column — the cutover direction is that the
+// profile DTO stops reading them, which it already has for the language and
+// subtitle fields — so this stays the narrow repair for the one field still
+// served from its column.
 //
 // A failure fails the request for the same reason the companion row write does:
 // the caller asked for one preference change, and reporting success while half
-// of it landed is what makes the two halves drift.
+// of it landed is what makes the copies drift.
 func (h *SettingValuesHandler) syncLegacyIntroSkipColumn(
 	r *http.Request,
 	w http.ResponseWriter,
 	store userstore.UserStore,
 	identity userstore.SettingIdentity,
-	mirror settingscontract.MirroredWrite,
-	hasMirror bool,
+	value json.RawMessage,
 ) bool {
-	if !hasMirror ||
-		identity.Key != settingskeys.PlaybackIntroSkipMode ||
-		identity.Scope != settingscontract.ScopeProfile {
+	if value == nil || identity.Scope != settingscontract.ScopeProfile {
 		return true
 	}
 
 	var enabled bool
-	if err := json.Unmarshal(mirror.Value, &enabled); err != nil {
-		slog.ErrorContext(r.Context(), "settings mirror produced a non-boolean auto_skip_intro",
-			"component", "api", "profile_id", identity.ProfileID, "error", err)
+	if err := json.Unmarshal(value, &enabled); err != nil {
+		slog.ErrorContext(r.Context(), "intro skip preference produced a non-boolean auto_skip_intro",
+			"component", "api", "profile_id", identity.ProfileID, "key", identity.Key, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
 		return false
 	}
 	if err := store.UpdateProfile(r.Context(), identity.ProfileID,
 		userstore.UpdateProfileInput{AutoSkipIntro: &enabled}); err != nil {
-		slog.ErrorContext(r.Context(), "failed to mirror intro skip mode into the profile column",
-			"component", "api", "profile_id", identity.ProfileID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to mirror the intro skip preference into the profile column",
+			"component", "api", "profile_id", identity.ProfileID, "key", identity.Key, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
 		return false
 	}
@@ -1066,6 +1119,13 @@ func (h *SettingValuesHandler) deleteValueAt(
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear the setting")
 			return
 		}
+	}
+	// Both rows are gone, so the profile now inherits — and the legacy column
+	// has to say so too, or GET /profiles would go on serving the value this
+	// request just cleared.
+	if !h.syncLegacyIntroSkipColumn(r, w, store, identity,
+		h.legacyIntroSkipColumnCleared(identity.Key)) {
+		return
 	}
 	auditSettingsForOther(r.Context(), settingsAuditRecord{
 		Action:          "clear",

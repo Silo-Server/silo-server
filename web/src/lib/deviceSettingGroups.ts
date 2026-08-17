@@ -43,6 +43,10 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "playback.preferred_quality": "picture",
   "playback.max_bitrate_kbps": "picture",
   "playback.auto_skip_intro": "episodes",
+  // Hidden for now (see HIDDEN_KEYS), but its home is recorded here so that
+  // unhiding it is one deletion rather than a key that quietly falls through to
+  // the category fallback and lands under Picture.
+  "playback.intro_skip_mode": "episodes",
   "playback.auto_skip_credits": "episodes",
   "playback.auto_skip_recap": "episodes",
   "playback.auto_play_next": "episodes",
@@ -68,6 +72,15 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * screen, which already edits them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
+ *
+ * `playback.intro_skip_mode` is hidden for the length of one release rather
+ * than forever. It replaces `playback.auto_skip_intro`, which is still the key
+ * this player reads, so showing both would put two controls for one preference
+ * on one screen — and the server keeps the pair in step at write time, so
+ * editing either would silently move the other behind the UI. The web player
+ * cannot honour "never" yet either, so the three-way control would offer a mode
+ * that does nothing here. It appears, and the switch goes away, in the
+ * follow-up that teaches the player the mode.
  */
 const HIDDEN_KEYS = new Set<string>([
   "ui.theme",
@@ -78,6 +91,7 @@ const HIDDEN_KEYS = new Set<string>([
   "ui.remember_library_page_state",
   "nav.primary_menu",
   "ui.card_presentation",
+  "playback.intro_skip_mode",
 ]);
 
 /**
