@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { LanguageSelect } from "@/components/settings/LanguageSelect";
@@ -19,7 +20,11 @@ import {
 } from "@/lib/metadataLanguagePreferences";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
-import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import {
+  settingsCapabilitiesSupportKey,
+  useEffectiveSettings,
+  useSettingsCapabilities,
+} from "@/hooks/queries/settingValues";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { toast } from "sonner";
@@ -37,11 +42,10 @@ import { toast } from "sonner";
  * through useAutoPlayNextSetting, shared with the post-roll toggle so the two
  * surfaces cannot land on different scopes.
  */
-const PLAYBACK_KEYS: SettingKey[] = [
+const BASE_PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
-  SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
   SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
@@ -49,6 +53,7 @@ const PLAYBACK_KEYS: SettingKey[] = [
 ];
 
 const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
+const INTRO_SKIP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]);
 
 // Radix Select cannot represent "" as an item value, so the unset entry needs
 // a sentinel that never collides with a stored bitrate.
@@ -182,7 +187,21 @@ function AutoPlayNextSetting() {
 }
 
 export default function PlaybackSettings() {
-  const { data: effective } = useEffectiveSettings({ keys: PLAYBACK_KEYS });
+  const capabilities = useSettingsCapabilities();
+  const supportsIntroSkipMode = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
+  );
+  const playbackKeys = useMemo(
+    () => [
+      ...BASE_PLAYBACK_KEYS,
+      supportsIntroSkipMode
+        ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
+        : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+    ],
+    [supportsIntroSkipMode],
+  );
+  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const {
     save: saveProfileDefault,
     reset: resetProfileDefault,
@@ -293,20 +312,45 @@ export default function PlaybackSettings() {
           onOverridesChange={saveMetadataOverrides}
         />
 
-        <SettingRow
-          label="Auto-skip intros"
-          description="Jump past intros automatically when Silo can detect them."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, checked)
-              }
-            />
-          )}
-        />
+        {supportsIntroSkipMode ? (
+          <SettingRow
+            label="Skip intros"
+            description="Leave intros alone, offer a Skip Intro button, or skip automatically with an undo."
+            control={(id) => (
+              <Select
+                value={read<string>(SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE)}
+                disabled={pending}
+                onValueChange={(value) => saveValue(SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE, value)}
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INTRO_SKIP_MODES.map((mode) => (
+                    <SelectItem key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
+        ) : (
+          <SettingRow
+            label="Auto-skip intros"
+            description="Jump past intros automatically when Silo can detect them."
+            control={(id) => (
+              <Switch
+                id={id}
+                checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO)}
+                disabled={pending}
+                onCheckedChange={(checked) =>
+                  saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, checked)
+                }
+              />
+            )}
+          />
+        )}
 
         <SettingRow
           label="Auto-skip credits"

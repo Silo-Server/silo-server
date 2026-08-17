@@ -20,13 +20,24 @@ if (typeof window !== "undefined" && !window.HTMLElement.prototype.hasPointerCap
   window.HTMLElement.prototype.scrollIntoView = () => {};
 }
 
-import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
+import type {
+  EffectiveSetting,
+  EffectiveSettingsMap,
+  SettingsCapabilities,
+} from "@/hooks/queries/settingValues";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 
 const mocks = vi.hoisted(() => ({
   useEffectiveSettings: vi.fn(),
   useSetSettingValue: vi.fn(),
   useClearSettingValue: vi.fn(),
+  capabilities: {
+    api_version: 1,
+    revision: 7,
+    contract_etag: "revision-seven",
+    supports_batched_effective: true,
+    supports_idempotent_writes: true,
+  } as SettingsCapabilities,
 }));
 
 vi.mock("@/hooks/queries/settingValues", async () => {
@@ -39,6 +50,7 @@ vi.mock("@/hooks/queries/settingValues", async () => {
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
     useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
     useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
+    useSettingsCapabilities: () => ({ data: mocks.capabilities, isLoading: false }),
   };
 });
 
@@ -61,6 +73,7 @@ describe("PlaybackSettings", () => {
     mocks.useEffectiveSettings.mockReset();
     mocks.useSetSettingValue.mockReset();
     mocks.useClearSettingValue.mockReset();
+    mocks.capabilities.revision = 7;
     mutate = vi.fn();
     mutateAsync = vi.fn().mockResolvedValue(undefined);
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
@@ -93,25 +106,35 @@ describe("PlaybackSettings", () => {
     const batched = mocks.useEffectiveSettings.mock.calls.find(
       ([options]) => (options?.keys?.length ?? 0) > 2,
     );
-    expect(batched?.[0].keys).toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO);
+    expect(batched?.[0].keys).toContain(SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE);
+    expect(batched?.[0].keys).not.toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO);
     expect(batched?.[0].keys).toContain(SETTING_KEYS.UI_NEXT_UP_MODE);
     expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE);
     expect(batched?.[0].keys).toContain(SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES);
   });
 
-  it("saves a toggle as typed JSON at profile scope", () => {
+  it("saves the selected intro mode as typed JSON at profile scope", async () => {
     render(<PlaybackSettings />);
 
-    fireEvent.click(screen.getByLabelText("Auto-skip intros"));
+    await userEvent.click(screen.getByRole("combobox", { name: "Skip intros" }));
+    await userEvent.click(screen.getByRole("option", { name: "Skip automatically" }));
 
     // Awaited rather than fire-and-forget: the write is followed by a clear of
     // any device override, which has to see whether the write landed.
     expect(mutateAsync).toHaveBeenCalledWith({
-      key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
-      // Typed JSON, not the "true"/"false" strings the legacy endpoint took.
-      value: true,
+      key: SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
+      value: "always",
       identity: { scope: "profile" },
     });
+  });
+
+  it("keeps the legacy switch when the connected server predates revision 7", () => {
+    mocks.capabilities.revision = 6;
+
+    render(<PlaybackSettings />);
+
+    expect(screen.getByLabelText("Auto-skip intros")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Skip intros" })).not.toBeInTheDocument();
   });
 
   it("reads a stored value in preference to the contract default", () => {

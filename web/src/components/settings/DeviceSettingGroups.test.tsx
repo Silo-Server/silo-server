@@ -108,6 +108,22 @@ describe("DeviceSettingGroups", () => {
     expect(typeof firstCall![1]).toBe("boolean");
   });
 
+  it("offers the three intro modes and writes the selected device override", async () => {
+    const { onChange } = renderGroups({
+      "playback.intro_skip_mode": effective({
+        key: "playback.intro_skip_mode",
+        value: "ask",
+        source: "profile",
+      }),
+    });
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Skip intros" }));
+    await userEvent.click(screen.getByRole("option", { name: "Never" }));
+
+    expect(onChange).toHaveBeenCalledWith("playback.intro_skip_mode", "never");
+    expect(screen.queryByText("Auto-skip intros")).not.toBeInTheDocument();
+  });
+
   // A capped setting explains the cap. A disabled control with no reason is
   // exactly what the settings contract's UX rules forbid.
   it("explains a household limit instead of silently narrowing", () => {

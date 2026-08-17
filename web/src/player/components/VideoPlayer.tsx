@@ -11,6 +11,7 @@ import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
@@ -36,6 +37,7 @@ import { HlsStartupGuard } from "../utils/hlsStartupGuard";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
 import type {
   PlaybackExitState,
+  IntroSkipMode,
   PlayerDisplayMode,
   PlayerPictureInPictureChange,
   PlayerPlaybackStateChange,
@@ -115,7 +117,7 @@ interface VideoPlayerProps {
   showForcedSubtitles?: boolean;
   profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
-  autoSkipIntro?: boolean;
+  introSkipMode?: IntroSkipMode;
   credits: PlayerTimeRange | null;
   recap?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
@@ -216,7 +218,7 @@ export function VideoPlayer({
   showForcedSubtitles,
   profileLanguage,
   intro,
-  autoSkipIntro = false,
+  introSkipMode = "ask",
   credits,
   recap = null,
   autoSkipRecap = false,
@@ -265,8 +267,8 @@ export function VideoPlayer({
   const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
-  const autoSkippedIntroKeyRef = useRef<string | null>(null);
   const autoSkippedRecapKeyRef = useRef<string | null>(null);
+  const lastInputWasKeyboardRef = useRef(false);
   const endedFiredRef = useRef(false);
   const [hasEnded, setHasEnded] = useState(false);
   const onEndedRef = useRef(onEnded);
@@ -1282,52 +1284,34 @@ export function VideoPlayer({
     }
   }, [cancelNextEpisodeAutoPlay, displayMode]);
 
-  // -- Intro skip --
-  const showIntroSkip = intro != null && currentTime >= intro.start && currentTime < intro.end;
+  // -- Intro/recap skip --
   const showRecapSkip = recap != null && currentTime >= recap.start && currentTime < recap.end;
-
-  const skipIntro = useCallback(() => {
-    if (intro) handlePlayerSeek(intro.end);
-  }, [intro, handlePlayerSeek]);
 
   const skipRecap = useCallback(() => {
     if (recap) handlePlayerSeek(recap.end);
   }, [recap, handlePlayerSeek]);
 
-  useEffect(() => {
-    if (!autoSkipIntro || !intro || !isPlayerReady || awaitingFirstFrame) {
-      return;
-    }
-    if (currentTime < intro.start || currentTime >= intro.end) {
-      return;
-    }
-    if (
-      roomPlaybackActive &&
-      (!watchTogether.room?.self_can_manage_room ||
-        watchTogetherSync.attachedSessionId !== sessionId)
-    ) {
-      return;
-    }
-
-    const introKey = `${sessionId}:${activeFileId ?? "unknown"}:${intro.start}:${intro.end}`;
-    if (autoSkippedIntroKeyRef.current === introKey) {
-      return;
-    }
-    autoSkippedIntroKeyRef.current = introKey;
-    handlePlayerSeek(intro.end);
-  }, [
-    activeFileId,
-    autoSkipIntro,
-    awaitingFirstFrame,
-    currentTime,
-    handlePlayerSeek,
+  const introPromptCanSeek =
+    !roomPlaybackActive ||
+    (watchTogether.room?.self_can_manage_room === true &&
+      watchTogetherSync.attachedSessionId === sessionId);
+  const introKey = intro
+    ? `${sessionId}:${activeFileId ?? selectedVersion?.file_id ?? "unknown"}:${intro.start}:${intro.end}`
+    : null;
+  const {
+    prompt: activeIntroPrompt,
+    select: selectActiveIntroPrompt,
+    dismiss: dismissActiveIntroPrompt,
+  } = useIntroSkipPrompt({
+    mode: introSkipMode,
     intro,
-    isPlayerReady,
-    roomPlaybackActive,
-    sessionId,
-    watchTogether.room?.self_can_manage_room,
-    watchTogetherSync.attachedSessionId,
-  ]);
+    introKey,
+    currentTime,
+    playing,
+    enabled:
+      displayMode === "foreground" && isPlayerReady && !awaitingFirstFrame && introPromptCanSeek,
+    onSeek: handlePlayerSeek,
+  });
 
   useEffect(() => {
     if (!autoSkipRecap || !recap || !isPlayerReady || awaitingFirstFrame) {
@@ -1776,6 +1760,90 @@ export function VideoPlayer({
     }
     return clearControlsTimer;
   }, [clearControlsTimer, playing, resetControlsTimer]);
+
+  useEffect(() => {
+    const markKeyboardInput = (event: KeyboardEvent) => {
+      if (
+        event.key === "Tab" ||
+        event.key === "Enter" ||
+        event.key === " " ||
+        event.key.startsWith("Arrow")
+      ) {
+        lastInputWasKeyboardRef.current = true;
+      }
+    };
+    const markPointerInput = () => {
+      lastInputWasKeyboardRef.current = false;
+    };
+    document.addEventListener("keydown", markKeyboardInput, true);
+    document.addEventListener("pointerdown", markPointerInput, true);
+    return () => {
+      document.removeEventListener("keydown", markKeyboardInput, true);
+      document.removeEventListener("pointerdown", markPointerInput, true);
+    };
+  }, []);
+
+  const focusTransportAfterIntroPrompt = useCallback(() => {
+    resetControlsTimer();
+    window.setTimeout(() => {
+      containerRef.current
+        ?.querySelector<HTMLElement>('[role="slider"][aria-label="Seek"]')
+        ?.focus({ preventScroll: true });
+    }, 0);
+  }, [resetControlsTimer]);
+
+  const selectIntroPrompt = useCallback(() => {
+    if (!selectActiveIntroPrompt()) return false;
+    focusTransportAfterIntroPrompt();
+    return true;
+  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
+
+  const dismissIntroPrompt = useCallback(() => {
+    if (!dismissActiveIntroPrompt()) return false;
+    focusTransportAfterIntroPrompt();
+    return true;
+  }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
+
+  const introPromptVisible = activeIntroPrompt !== null;
+  useEffect(() => {
+    if (!introPromptVisible || displayMode !== "foreground") return;
+
+    const handlePromptKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const isPrompt = target?.closest('[data-intro-skip-prompt="true"]') !== null;
+      const isEditingOrInMenu =
+        !isPrompt &&
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+        ) !== null;
+      if (isEditingOrInMenu) return;
+
+      const isSelect = event.key === "Enter" || event.key === " ";
+      const isBack = event.key === "Escape" || event.key === "BrowserBack";
+      if (!isSelect && !isBack) return;
+
+      const handled = isSelect ? selectIntroPrompt() : dismissIntroPrompt();
+      if (!handled) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+
+    document.addEventListener("keydown", handlePromptKeyDown, true);
+    return () => document.removeEventListener("keydown", handlePromptKeyDown, true);
+  }, [dismissIntroPrompt, displayMode, introPromptVisible, selectIntroPrompt]);
+
+  const focusIntroPromptOnMount = (() => {
+    if (!activeIntroPrompt || !lastInputWasKeyboardRef.current) return false;
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const interactionInProgress =
+      active?.closest(
+        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
+      ) !== null ||
+      containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
+        null;
+    return !interactionInProgress;
+  })();
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -2641,8 +2709,16 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Intro skip button */}
-      {!isDetached && showIntroSkip && <IntroSkipButton onSkip={skipIntro} />}
+      {/* Intro skip / undo prompt */}
+      {!isDetached && activeIntroPrompt && (
+        <IntroSkipButton
+          onSkip={selectIntroPrompt}
+          label={activeIntroPrompt.label}
+          timer={activeIntroPrompt}
+          controlsVisible={controlsVisible}
+          focusOnMount={focusIntroPromptOnMount}
+        />
+      )}
       {!isDetached && showRecapSkip && <IntroSkipButton onSkip={skipRecap} label="Skip Recap" />}
 
       {/* Marker editor */}

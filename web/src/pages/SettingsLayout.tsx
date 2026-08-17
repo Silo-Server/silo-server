@@ -93,7 +93,7 @@ const NAV_SECTIONS: NavSection[] = [
           "Maximum bitrate",
           "Spoken language",
           "Metadata language",
-          "Auto-skip intros",
+          "Skip intros",
           "Auto-skip credits",
           "Auto-skip recaps",
           "Start next at preview",

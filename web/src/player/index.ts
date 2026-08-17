@@ -19,6 +19,7 @@ export type {
   PlayerPlaybackTransport,
   SeriesContext,
   EpisodeRef,
+  IntroSkipMode,
   SubtitleMode,
   ResumeHints,
 } from "./types";

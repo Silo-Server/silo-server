@@ -7,6 +7,8 @@ Skipping intros stops being a switch and becomes a choice of three: leave intros
 - Adds `playback.intro_skip_mode` (`never` / `ask` / `always`, default `ask`) at contract revision 7 and deprecates `playback.auto_skip_intro`, which could not express "never".
 - Migrates every stored auto-skip-intro preference onto the new key, on both the PostgreSQL and per-user SQLite backends, so nobody's existing choice changes.
 - Mirrors the two keys at write time for one release, so a preference set on an older phone, TV, or browser still shows up correctly on an updated one.
+- Replaces the web profile and device switches with a three-way selector, while retaining the old switch only against servers older than contract revision 7.
+- Gives the web player a timed Skip Intro prompt for **Ask**, no overlay for **Never**, and an immediate skip with a five-second **Play Intro** undo for **Always**.
 
 ## 2026-04-09
 

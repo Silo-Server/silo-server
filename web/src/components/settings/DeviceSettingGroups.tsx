@@ -25,6 +25,8 @@ const EMPTY_SELECT_VALUE = "__empty__";
 export interface DeviceSettingGroupsProps {
   /** Effective values resolved for the device being edited. */
   settings: Partial<Record<SettingKey, EffectiveSetting>>;
+  /** Definitions supported by the connected server contract. */
+  keys?: readonly SettingKey[];
   /**
    * Whose settings these are, for the reset label. "your" on your own devices,
    * a name when the household parent is acting for someone else.
@@ -45,6 +47,7 @@ export interface DeviceSettingGroupsProps {
 
 export function DeviceSettingGroups({
   settings,
+  keys,
   ownerLabel,
   devicePlatform,
   disabled = false,
@@ -59,7 +62,7 @@ export function DeviceSettingGroups({
   );
   return (
     <div className="space-y-4">
-      {groupDeviceSettings(undefined, {
+      {groupDeviceSettings(keys, {
         devicePlatform,
         keysWithStoredValues: storedHere,
       }).map((group) => (

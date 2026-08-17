@@ -427,6 +427,7 @@ function DeviceDetail({
       ) : (
         <DeviceSettingGroups
           settings={settings}
+          keys={supportedKeys}
           ownerLabel={ownerLabel}
           devicePlatform={device.device_platform}
           disabled={setValue.isPending || clearValue.isPending}

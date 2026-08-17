@@ -43,14 +43,9 @@ describe("deviceSettingGroups", () => {
     expect(groupForDeviceSetting("ui.library_page_state")).toBeNull();
   });
 
-  // playback.intro_skip_mode replaces playback.auto_skip_intro, which this
-  // player still reads, and the server keeps the pair in step at write time.
-  // Two controls for one preference on one screen would disagree with each
-  // other the moment either was touched, so only the switch shows until the
-  // player learns the mode.
-  it("shows one intro-skip control while both keys are live", () => {
-    expect(groupForDeviceSetting("playback.intro_skip_mode")).toBeNull();
-    expect(groupForDeviceSetting("playback.auto_skip_intro")).toBe("episodes");
+  it("shows only the three-way intro mode while the compatibility mirror is live", () => {
+    expect(groupForDeviceSetting("playback.intro_skip_mode")).toBe("episodes");
+    expect(groupForDeviceSetting("playback.auto_skip_intro")).toBeNull();
   });
 
   it("returns groups in reading order and omits empty ones", () => {
