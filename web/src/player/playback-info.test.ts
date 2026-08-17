@@ -202,6 +202,25 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
   });
 
+  it("uses the plan-selected audio track in playback diagnostics", () => {
+    const sections = buildPlaybackInfoSections({
+      streamUrl: "/api/v1/stream/test",
+      plan: fixturePlanV3({
+        selected_tracks: { audio: { id: "file:7:audio:1", index: 1 } },
+      }),
+      currentSourceVersion: makeVersion({
+        effective_audio_track_index: 0,
+        audio_tracks: [
+          { codec: "truehd", profile: "Dolby TrueHD + Dolby Atmos", default: true },
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos" },
+        ],
+      }),
+      runtimeStats: {},
+    });
+
+    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
+  });
+
   it("shows explicit unavailable placeholders when metadata is missing", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "/api/v1/stream/test",

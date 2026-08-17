@@ -52,7 +52,9 @@ export function buildPlaybackInfoSections({
   runtimeStats,
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
-  const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
+  const audioTrack = currentSourceVersion
+    ? pickAudioTrack(currentSourceVersion, plan.selected_tracks.audio?.index)
+    : undefined;
   const requestedSource =
     requestedVersion &&
     currentSourceVersion &&
@@ -359,8 +361,17 @@ function pickVideoTrack(version: PlayerFileVersion): PlayerVideoTrack | undefine
   return version.video_tracks?.[0];
 }
 
-function pickAudioTrack(version: PlayerFileVersion): PlayerAudioTrack | undefined {
-  return version.audio_tracks?.find((track) => track.default) ?? version.audio_tracks?.[0];
+function pickAudioTrack(
+  version: PlayerFileVersion,
+  selectedIndex?: number,
+): PlayerAudioTrack | undefined {
+  const tracks = version.audio_tracks;
+  return (
+    tracks?.[selectedIndex ?? -1] ??
+    tracks?.[version.effective_audio_track_index ?? -1] ??
+    tracks?.find((track) => track.default) ??
+    tracks?.[0]
+  );
 }
 
 function displayValue(value?: string): string {
