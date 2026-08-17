@@ -298,14 +298,15 @@ func TestSeasonalTitleOverridePicksActiveThemeTitle(t *testing.T) {
 // no custom title uses the same label advertised by the section editor.
 func TestSeasonalTitleOverrideUsesDefaultTitle(t *testing.T) {
 	tests := []struct {
-		theme string
-		now   time.Time
-		want  string
+		theme       string
+		customTitle string
+		now         time.Time
+		want        string
 	}{
 		{theme: "valentines", now: time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC), want: "Valentine's Day"},
 		{theme: "st_patricks", now: time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC), want: "St. Patrick's Day"},
 		{theme: "thanksgiving", now: time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC), want: "Thanksgiving"},
-		{theme: "christmas", now: time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), want: "Christmas"},
+		{theme: "christmas", customTitle: " 	", now: time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), want: "Christmas"},
 		{theme: "halloween", now: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), want: "Halloween"},
 		{theme: "saturday_morning", now: time.Date(2026, 3, 7, 10, 0, 0, 0, time.UTC), want: "Saturday Morning Cartoons"},
 		{theme: "family_movie_night", now: time.Date(2026, 4, 10, 19, 0, 0, 0, time.UTC), want: "Family Movie Night"},
@@ -315,6 +316,9 @@ func TestSeasonalTitleOverrideUsesDefaultTitle(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.theme, func(t *testing.T) {
 			p := SeasonalThemedParams{EnabledThemes: []string{tt.theme}}
+			if tt.customTitle != "" {
+				p.ThemeTitles = map[string]string{tt.theme: tt.customTitle}
+			}
 			if got := SeasonalTitleOverride(p, tt.now, nil); got != tt.want {
 				t.Errorf("SeasonalTitleOverride() = %q, want %q", got, tt.want)
 			}

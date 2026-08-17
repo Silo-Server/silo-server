@@ -125,8 +125,8 @@ var seasonalThemeDefaultTitles = map[string]string{
 // EnabledThemes takes precedence when both fields are populated.
 //
 // ThemeTitles is an optional per-theme display-name override. While a theme is
-// active, the API uses its custom title when non-empty and otherwise uses the
-// theme's default display name.
+// active, the API uses its custom title when it contains non-whitespace
+// characters and otherwise uses the theme's default display name.
 type SeasonalThemedParams struct {
 	EnabledThemes []string          `json:"enabled_themes,omitempty"`
 	ThemeTitles   map[string]string `json:"theme_titles,omitempty"`
