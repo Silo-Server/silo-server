@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 7,
+  "revision": 8,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -598,6 +598,29 @@
       "description": "Duration the sleep timer starts on when you turn it on. 0 leaves it off.",
       "recommended_control": "stepper",
       "notes": "Android keeps this device-local today and clamps to 0..240; it was never written to the server rather than written and rejected. The maximum matches that clamp rather than exceeding it, and the default matches Android's shipped 30, because a manifest that disagrees with the only client implementing a setting is the drift this contract exists to remove — and a default of 0 would silently turn the preset off for everyone at cutover. Raising the maximum later is additive under the widening rule: replace the bare maximum with its history so a client can still see the 240 an older server enforces. This is the duration the timer starts on, not whether one is running: the design classes a running sleep timer as private local, so only the persisted default is registered."
+    },
+    {
+      "key": "player.apple.control_plane",
+      "introduced_in": 8,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "off", "label": "Legacy player" },
+          { "value": "native_direct", "label": "New control plane, direct routes only" },
+          { "value": "loopback", "label": "New control plane, loopback routes only" },
+          { "value": "all", "label": "New control plane everywhere" }
+        ]
+      },
+      "default_value": "off",
+      "platforms": ["ios", "tvos", "macos"],
+      "category": "player",
+      "label": "Apple playback control plane",
+      "description": "Which playback routes the Apple client's new control plane handles on this device. \"off\" keeps every route on the legacy player path. \"native_direct\" enables the control plane only for direct-play routes, \"loopback\" only for loopback routes, and \"all\" enables it for every route.",
+      "recommended_control": "select",
+      "notes": "Rollout kill-switch for the Apple playback control plane (silo-apple architecture remediation, stage 2), not a viewer preference. The client ships the control plane dark: \"off\" is the default and the shipped behaviour, so enabling it is a deliberate server-side act and rolling it back is a settings write rather than a TestFlight release. The value names a route family rather than a percentage because the two families fail differently — a direct route that regresses can be returned to the legacy path without also reverting loopback, and vice versa. Device scope matches every other remote player.* key and is what makes the rollback targeted: one misbehaving Apple TV goes back to \"off\" without moving the rest of the fleet. Widening to profile scope later is additive under the scope rule (add the scope with its own introduced_in). This key is deliberately hidden from the web device settings screen — it is an operations flag, and the surface that flips it is the admin device-overrides view, which iterates every device-scoped key. The name encodes a platform, which the schema's key description says canonical names do not do; that exception is owner-approved and intentional, because the control plane being rolled out is one client's playback stack and no other platform can honour the value. Retiring it once the control plane is unconditional removes the key rather than generalizing it."
     },
     {
       "key": "ui.theme",

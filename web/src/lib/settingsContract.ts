@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 7;
+export const SETTINGS_REVISION = 8;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -197,6 +197,8 @@ export const SETTING_KEYS = {
   PLAYBACK_SUBTITLE_LANGUAGE: "playback.subtitle_language",
   /** Subtitles */
   PLAYBACK_SUBTITLE_MODE: "playback.subtitle_mode",
+  /** Apple playback control plane */
+  PLAYER_APPLE_CONTROL_PLANE: "player.apple.control_plane",
   /** Audio sync offset */
   PLAYER_AUDIO_SYNC_MS: "player.audio_sync_ms",
   /** Dolby Vision */
@@ -701,6 +703,29 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "auto", label: "Auto", introducedIn: 1 },
       { value: "always", label: "Always on", introducedIn: 1 },
       { value: "off", label: "Off", introducedIn: 1 },
+    ],
+  },
+  "player.apple.control_plane": {
+    key: "player.apple.control_plane",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 8,
+    scopes: ["profile_device"],
+    scopeIntroducedIn: [8],
+    resolutionOrder: ["profile_device", "default"],
+    defaultValue: "off",
+    label: "Apple playback control plane",
+    description:
+      'Which playback routes the Apple client\'s new control plane handles on this device. "off" keeps every route on the legacy player path. "native_direct" enables the control plane only for direct-play routes, "loopback" only for loopback routes, and "all" enables it for every route.',
+    category: "player",
+    control: "select",
+    platforms: ["ios", "tvos", "macos"],
+    values: [
+      { value: "off", label: "Legacy player", introducedIn: 8 },
+      { value: "native_direct", label: "New control plane, direct routes only", introducedIn: 8 },
+      { value: "loopback", label: "New control plane, loopback routes only", introducedIn: 8 },
+      { value: "all", label: "New control plane everywhere", introducedIn: 8 },
     ],
   },
   "player.audio_sync_ms": {

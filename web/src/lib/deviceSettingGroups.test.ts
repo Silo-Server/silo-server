@@ -44,6 +44,13 @@ describe("deviceSettingGroups", () => {
     expect(groupForDeviceSetting("ui.library_page_state")).toBeNull();
   });
 
+  // An Apple rollout kill-switch is not a viewer preference, and its manifest
+  // category would otherwise file it under Picture beside HDR.
+  it("keeps the Apple control-plane rollout flag off the device screen", () => {
+    expect(groupForDeviceSetting("player.apple.control_plane")).toBeNull();
+    expect(hiddenDeviceSettingKeys()).toContain("player.apple.control_plane");
+  });
+
   it("shows only the three-way intro mode while the compatibility mirror is live", () => {
     expect(groupForDeviceSetting("playback.intro_skip_mode")).toBe("episodes");
     expect(groupForDeviceSetting("playback.auto_skip_intro")).toBeNull();

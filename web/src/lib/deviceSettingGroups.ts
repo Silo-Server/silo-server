@@ -69,6 +69,13 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * screen, which already edits them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
+ *
+ * `player.apple.control_plane` is a rollout kill-switch for the Apple client's
+ * playback stack, not a viewer preference: nobody browsing their device
+ * settings can tell what it does, and its manifest category would otherwise
+ * file it under Picture. It stays reachable from the admin device-overrides
+ * view, which iterates every device-scoped key rather than these groups, so
+ * hiding it here costs nothing operationally.
  */
 const HIDDEN_KEYS = new Set<string>([
   "ui.theme",
@@ -79,6 +86,7 @@ const HIDDEN_KEYS = new Set<string>([
   "ui.remember_library_page_state",
   "nav.primary_menu",
   "ui.card_presentation",
+  "player.apple.control_plane",
 ]);
 
 /**
