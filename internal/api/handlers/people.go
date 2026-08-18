@@ -368,11 +368,7 @@ func (h *PeopleHandler) enqueuePersonRefreshIfDue(person models.Person) {
 		return
 	}
 
-	if personMetadataIncomplete(person) {
-		return
-	}
-
-	if person.UpdatedAt.Before(time.Now().Add(-personMetadataStaleAfter)) {
+	if personMetadataIncomplete(person) || person.UpdatedAt.Before(time.Now().Add(-personMetadataStaleAfter)) {
 		h.refreshQueue.Enqueue(person.ID)
 	}
 }

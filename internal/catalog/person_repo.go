@@ -959,7 +959,26 @@ func (r *PersonRepository) UpdatePhotoIfSourceMatches(ctx context.Context, perso
 	return tag.RowsAffected() > 0, nil
 }
 
-// FindRefreshCandidates returns people with external IDs that are incomplete or stale.
+// MarkRefreshAttempt records a provider lookup without changing the person's
+// metadata timestamp. Failed and partial lookups therefore receive the same
+// durable refresh backoff as successful lookups.
+func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_attempted_at = NOW()
+		WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("mark person %d refresh attempt: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// FindRefreshCandidates returns people whose most recent metadata update or
+// provider lookup is stale. Fresh incomplete people are refreshed on demand
+// when their detail page is viewed instead of being swept repeatedly.
 func (r *PersonRepository) FindRefreshCandidates(
 	ctx context.Context,
 	staleAfter time.Duration,
@@ -969,11 +988,23 @@ func (r *PersonRepository) FindRefreshCandidates(
 		return []int64{}, nil
 	}
 
-	args := []any{limit}
-	stalePredicate := ""
-	if staleAfter > 0 {
-		args = append(args, time.Now().Add(-staleAfter))
-		stalePredicate = " OR updated_at < $2"
+	if staleAfter <= 0 {
+		rows, err := r.pool.Query(ctx, `
+			SELECT id
+			FROM people
+			WHERE
+				(tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+				AND (
+					COALESCE(bio, '') = ''
+					OR COALESCE(photo_path, '') = ''
+					OR birth_date IS NULL
+				)
+			ORDER BY updated_at ASC, id ASC
+			LIMIT $1`, limit)
+		if err != nil {
+			return nil, fmt.Errorf("query refresh candidates: %w", err)
+		}
+		return scanPersonRefreshCandidateIDs(rows, limit)
 	}
 
 	rows, err := r.pool.Query(ctx, `
@@ -981,18 +1012,19 @@ func (r *PersonRepository) FindRefreshCandidates(
 		FROM people
 		WHERE
 			(tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
-			AND (
-				COALESCE(bio, '') = ''
-				OR COALESCE(photo_path, '') = ''
-				OR birth_date IS NULL`+stalePredicate+`
-			)
-		ORDER BY updated_at ASC
+			AND GREATEST(updated_at, COALESCE(metadata_refresh_attempted_at, updated_at)) < $2
+		ORDER BY GREATEST(updated_at, COALESCE(metadata_refresh_attempted_at, updated_at)) ASC, id ASC
 		LIMIT $1`,
-		args...,
+		limit,
+		time.Now().Add(-staleAfter),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query refresh candidates: %w", err)
 	}
+	return scanPersonRefreshCandidateIDs(rows, limit)
+}
+
+func scanPersonRefreshCandidateIDs(rows pgx.Rows, limit int) ([]int64, error) {
 	defer rows.Close()
 
 	ids := make([]int64, 0, limit)

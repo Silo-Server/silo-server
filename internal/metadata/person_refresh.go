@@ -24,6 +24,7 @@ var (
 type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Update(ctx context.Context, person models.Person) error
+	MarkRefreshAttempt(ctx context.Context, id int64) error
 	FindRefreshCandidates(ctx context.Context, staleAfter time.Duration, limit int) ([]int64, error)
 }
 
@@ -107,6 +108,12 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 	if person == nil {
 		return nil, ErrPersonNotFound
+	}
+	if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPersonNotFound
+		}
+		return nil, fmt.Errorf("mark person %d refresh attempt: %w", id, err)
 	}
 
 	accumulator := PersonDetailResult{

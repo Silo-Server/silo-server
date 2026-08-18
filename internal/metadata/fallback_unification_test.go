@@ -9,7 +9,8 @@ import (
 )
 
 type fakePersonRefreshRepo struct {
-	persons map[int64]models.Person
+	persons         map[int64]models.Person
+	refreshAttempts []int64
 }
 
 func newFakePersonRefreshRepo(persons ...models.Person) *fakePersonRefreshRepo {
@@ -36,6 +37,11 @@ func (r *fakePersonRefreshRepo) Update(_ context.Context, person models.Person) 
 
 func (r *fakePersonRefreshRepo) FindRefreshCandidates(_ context.Context, _ time.Duration, _ int) ([]int64, error) {
 	return nil, nil
+}
+
+func (r *fakePersonRefreshRepo) MarkRefreshAttempt(_ context.Context, id int64) error {
+	r.refreshAttempts = append(r.refreshAttempts, id)
+	return nil
 }
 
 type stubPersonProvider struct {
@@ -432,5 +438,24 @@ func TestPersonRefreshWithProviders_FillsFallbackAcrossProviders(t *testing.T) {
 	}
 	if person.TmdbID != "tmdb-2" || person.TvdbID != "tvdb-2" {
 		t.Fatalf("provider IDs = (%q, %q), want tmdb-2 and tvdb-2", person.TmdbID, person.TvdbID)
+	}
+}
+
+func TestPersonRefreshWithProviders_RecordsFailedAttempt(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{
+		ID:     3,
+		Name:   "Missing Provider Person",
+		TmdbID: "missing-tmdb-id",
+	})
+	service := &PersonRefreshService{repo: repo}
+
+	_, err := service.refreshPersonWithProviders(context.Background(), 3, []Provider{
+		stubPersonProvider{slug: "tmdb"},
+	})
+	if err != ErrPersonMetadataNotFound {
+		t.Fatalf("refreshPersonWithProviders() error = %v, want %v", err, ErrPersonMetadataNotFound)
+	}
+	if len(repo.refreshAttempts) != 1 || repo.refreshAttempts[0] != 3 {
+		t.Fatalf("refresh attempts = %v, want [3]", repo.refreshAttempts)
 	}
 }
