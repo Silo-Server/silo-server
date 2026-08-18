@@ -16,6 +16,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
 const CATEGORY_ORDER: TaskCategory[] = ["library", "metadata", "system"];
 const RUN_BUTTON_MIN_VISIBLE_MS = 1_000;
@@ -280,14 +281,19 @@ function TaskRow({
                 className={`h-full rounded-full transition-all duration-300 ${
                   task.state === "cancelling" ? "bg-yellow-500" : "bg-primary"
                 }`}
-                style={{ width: `${Math.max(task.progress, 2)}%` }}
+                style={{ width: `${Math.max(clampTaskProgress(task.progress), 2)}%` }}
               />
             </div>
-            <p className="text-muted-foreground text-xs">
-              {task.state === "cancelling"
-                ? "Cancelling..."
-                : task.progress_message || `${Math.round(task.progress)}%`}
-            </p>
+            <div className="text-muted-foreground flex items-center justify-between gap-3 text-xs">
+              <p className="min-w-0 truncate">
+                {task.state === "cancelling" ? "Cancelling..." : task.progress_message || "Running"}
+              </p>
+              {task.state !== "cancelling" && task.progress > 0 && (
+                <span className="shrink-0 font-medium tabular-nums">
+                  {formatTaskProgress(task.progress)}
+                </span>
+              )}
+            </div>
           </div>
         )}
 

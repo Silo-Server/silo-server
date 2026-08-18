@@ -33,21 +33,62 @@ func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
 	}
 }
 
-func TestImageCacheJobRediscoveryUsesNextAttemptAt(t *testing.T) {
+func TestClassifyImageCacheFailureParksEmptyResolverURL(t *testing.T) {
+	got := classifyImageCacheFailure(0, imageCacheEmptyResolvedURLError)
+	if got.status != ImageCacheStatusFailed {
+		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
+	}
+	if got.attempt != 1 {
+		t.Fatalf("attempt = %d, want 1", got.attempt)
+	}
+	if got.retryDelay != 0 {
+		t.Fatalf("retry delay = %s, want 0", got.retryDelay)
+	}
+}
+
+func TestClassifyImageCacheFailureRetriesTransientError(t *testing.T) {
+	got := classifyImageCacheFailure(0, "temporary network error")
+	if got.status != ImageCacheStatusQueued {
+		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusQueued)
+	}
+	if got.attempt != 1 {
+		t.Fatalf("attempt = %d, want 1", got.attempt)
+	}
+	if got.retryDelay != time.Minute {
+		t.Fatalf("retry delay = %s, want 1m", got.retryDelay)
+	}
+}
+
+func TestClassifyImageCacheFailureParksExhaustedTransientError(t *testing.T) {
+	got := classifyImageCacheFailure(imageCacheMaxAttempts-1, "temporary network error")
+	if got.status != ImageCacheStatusFailed {
+		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
+	}
+	if got.attempt != imageCacheMaxAttempts {
+		t.Fatalf("attempt = %d, want %d", got.attempt, imageCacheMaxAttempts)
+	}
+}
+
+func TestImageCacheTerminalFailuresStayParked(t *testing.T) {
 	body, err := os.ReadFile("image_cache_job_repo.go")
 	if err != nil {
 		t.Fatalf("read image_cache_job_repo.go: %v", err)
 	}
 	sql := string(body)
-	if strings.Contains(sql, "metadata_image_cache_jobs.updated_at < NOW()") || strings.Contains(sql, "j.updated_at < NOW()") {
-		t.Fatal("failed image cache job rediscovery must use next_attempt_at, not updated_at age")
-	}
-	for _, want := range []string{
-		"metadata_image_cache_jobs.next_attempt_at <= NOW()",
-		"j.next_attempt_at <= NOW()",
+	for _, forbidden := range []string{
+		"WHEN metadata_image_cache_jobs.status = 'failed'",
+		"j.status = 'failed'",
 	} {
-		if !strings.Contains(sql, want) {
-			t.Fatalf("image cache job rediscovery missing %q", want)
+		if strings.Contains(sql, forbidden) {
+			t.Fatalf("terminal image cache jobs must not be rediscovered: found %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path",
+		"j.source_path IS DISTINCT FROM ac.source_path",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("changed image sources must be eligible for caching again: missing %q", required)
 		}
 	}
 }

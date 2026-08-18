@@ -35,6 +35,8 @@ const (
 	imageCacheLeaseDuration = 15 * time.Minute
 	imageCacheMaxAttempts   = 8
 	imageCacheDeferredRetry = 7 * 24 * time.Hour
+
+	imageCacheEmptyResolvedURLError = "image resolver returned empty URL"
 )
 
 type EnqueueImageCacheJobInput struct {
@@ -55,8 +57,54 @@ type ImageCacheJobRepository struct {
 	pool *pgxpool.Pool
 }
 
+// ImageCacheQueueProgress is a point-in-time summary of the durable image
+// cache queue. Succeeded and failed are terminal states; queued and running are
+// still outstanding.
+type ImageCacheQueueProgress struct {
+	Known     bool
+	Total     int64
+	Succeeded int64
+	Failed    int64
+	Queued    int64
+	Running   int64
+}
+
+func (p ImageCacheQueueProgress) Completed() int64 {
+	return p.Succeeded + p.Failed
+}
+
 func NewImageCacheJobRepository(pool *pgxpool.Pool) *ImageCacheJobRepository {
 	return &ImageCacheJobRepository{pool: pool}
+}
+
+// GetQueueProgress returns exact global counts for task progress reporting.
+// Keeping this query on the repository ensures callers do not duplicate queue
+// status semantics or reach around the data layer.
+func (r *ImageCacheJobRepository) GetQueueProgress(ctx context.Context) (ImageCacheQueueProgress, error) {
+	var progress ImageCacheQueueProgress
+	if r == nil || r.pool == nil {
+		return progress, nil
+	}
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status = 'succeeded'),
+			COUNT(*) FILTER (WHERE status = 'failed'),
+			COUNT(*) FILTER (WHERE status = 'queued'),
+			COUNT(*) FILTER (WHERE status = 'running')
+		FROM metadata_image_cache_jobs
+	`).Scan(
+		&progress.Total,
+		&progress.Succeeded,
+		&progress.Failed,
+		&progress.Queued,
+		&progress.Running,
+	)
+	if err != nil {
+		return ImageCacheQueueProgress{}, fmt.Errorf("counting metadata image cache jobs: %w", err)
+	}
+	progress.Known = true
+	return progress, nil
 }
 
 func imageCacheRetryDelay(attempt int) time.Duration {
@@ -75,6 +123,32 @@ func imageCacheFailureRetryDelay(attempt int, errText string) time.Duration {
 		return imageCacheDeferredRetry
 	}
 	return imageCacheRetryDelay(attempt)
+}
+
+type imageCacheFailureDisposition struct {
+	status     string
+	attempt    int
+	retryDelay time.Duration
+}
+
+func classifyImageCacheFailure(attemptCount int, errText string) imageCacheFailureDisposition {
+	nextAttempt := attemptCount + 1
+	if errText == imageCacheEmptyResolvedURLError {
+		return imageCacheFailureDisposition{
+			status:  ImageCacheStatusFailed,
+			attempt: nextAttempt,
+		}
+	}
+
+	status := ImageCacheStatusQueued
+	if nextAttempt >= imageCacheMaxAttempts {
+		status = ImageCacheStatusFailed
+	}
+	return imageCacheFailureDisposition{
+		status:     status,
+		attempt:    nextAttempt,
+		retryDelay: imageCacheFailureRetryDelay(nextAttempt, errText),
+	}
 }
 
 func isStableProviderImageFailure(errText string) bool {
@@ -193,9 +267,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			status = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 'queued'
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-					THEN 'queued'
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN 'queued'
@@ -206,9 +277,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			attempt_count = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 0
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-					THEN 0
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN 0
@@ -216,9 +284,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			next_attempt_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
-					THEN NOW()
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NOW()
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -228,9 +293,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			locked_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NULL
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN NULL
@@ -238,9 +300,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			locked_by = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
-					THEN ''
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -250,9 +309,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			last_error = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN ''
@@ -260,9 +316,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			completed_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
-					THEN NULL
-				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -272,10 +325,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			updated_at = NOW()
 		WHERE metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 		   OR metadata_image_cache_jobs.status IN ('queued', 'running')
-		   OR (
-			   metadata_image_cache_jobs.status = 'failed'
-			   AND metadata_image_cache_jobs.next_attempt_at <= NOW()
-		   )
 		   OR (
 			   $%d::boolean
 			   AND metadata_image_cache_jobs.status = 'succeeded'
@@ -404,15 +453,11 @@ func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64, l
 	return nil
 }
 
-// MarkFailed records a failed attempt with backoff, guarded by lease ownership
-// for the same reason as MarkSucceeded.
+// MarkFailed records a failed attempt, parking known-terminal failures and
+// applying backoff to retryable failures. Lease ownership is guarded for the
+// same reason as MarkSucceeded.
 func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, attemptCount int, lockedBy string, errText string) error {
-	nextAttempt := attemptCount + 1
-	status := ImageCacheStatusQueued
-	if nextAttempt >= imageCacheMaxAttempts {
-		status = ImageCacheStatusFailed
-	}
-	delay := imageCacheFailureRetryDelay(nextAttempt, errText)
+	disposition := classifyImageCacheFailure(attemptCount, errText)
 
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
@@ -426,7 +471,7 @@ func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, atte
 		WHERE id = $1
 		  AND status = 'running'
 		  AND locked_by = $6
-	`, id, status, nextAttempt, intervalLiteral(delay), errText, lockedBy)
+	`, id, disposition.status, disposition.attempt, intervalLiteral(disposition.retryDelay), errText, lockedBy)
 	if err != nil {
 		return fmt.Errorf("marking metadata image cache job failed: %w", err)
 	}
@@ -787,10 +832,6 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			WHERE j.id IS NULL
 			   OR j.source_path IS DISTINCT FROM ac.source_path
 			   OR j.status = 'succeeded'
-			   OR (
-				   j.status = 'failed'
-				   AND j.next_attempt_at <= NOW()
-			   )
 			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
 			LIMIT $1
 		)

@@ -12,25 +12,31 @@ import (
 
 type fakeMetadataImageCacheRunner struct {
 	stats       metadata.ImageCacheRunStats
+	updates     []metadata.ImageCacheRunStats
 	err         error
 	claimLimit  int
 	concurrency int
 	maxRuntime  time.Duration
 }
 
-func (f *fakeMetadataImageCacheRunner) RunUntilIdle(_ context.Context, _ string, claimLimit int, concurrency int, maxRuntime time.Duration) (metadata.ImageCacheRunStats, error) {
+func (f *fakeMetadataImageCacheRunner) RunUntilIdle(_ context.Context, _ string, claimLimit int, concurrency int, maxRuntime time.Duration, reportProgress metadata.ImageCacheRunProgressReporter) (metadata.ImageCacheRunStats, error) {
 	f.claimLimit = claimLimit
 	f.concurrency = concurrency
 	f.maxRuntime = maxRuntime
+	for _, update := range f.updates {
+		reportProgress(update)
+	}
 	return f.stats, f.err
 }
 
 type recordingProgress struct {
-	message string
+	percents []float64
+	messages []string
 }
 
-func (r *recordingProgress) Report(_ float64, message string) {
-	r.message = message
+func (r *recordingProgress) Report(percent float64, message string) {
+	r.percents = append(r.percents, percent)
+	r.messages = append(r.messages, message)
 }
 
 func (r *recordingProgress) SetResultData(json.RawMessage) {}
@@ -50,6 +56,15 @@ func TestCacheMetadataImagesTaskProperties(t *testing.T) {
 
 func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 	runner := &fakeMetadataImageCacheRunner{
+		updates: []metadata.ImageCacheRunStats{{
+			Batches:   2,
+			Claimed:   3,
+			Succeeded: 2,
+			Failed:    1,
+			Queue: metadata.ImageCacheQueueProgress{
+				Known: true, Total: 10, Succeeded: 6, Failed: 1, Queued: 2, Running: 1,
+			},
+		}},
 		stats: metadata.ImageCacheRunStats{
 			Batches:          3,
 			EnqueuedExisting: 5,
@@ -68,13 +83,42 @@ func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 	if runner.claimLimit != 1000 {
 		t.Fatalf("claimLimit = %d, want 1000", runner.claimLimit)
 	}
-	if runner.concurrency != 12 {
-		t.Fatalf("concurrency = %d, want 12", runner.concurrency)
+	if runner.concurrency != 2 {
+		t.Fatalf("concurrency = %d, want 2", runner.concurrency)
 	}
 	if runner.maxRuntime != 10*time.Minute {
 		t.Fatalf("maxRuntime = %s, want 10m", runner.maxRuntime)
 	}
-	if progress.message != "Batches 3, enqueued 5 existing, claimed 4, cached 3, failed 1, skipped 0, uploaded 7 variants, found 2 existing variants, deleted 0 old successes" {
-		t.Fatalf("progress message = %q", progress.message)
+	if len(progress.messages) != 3 {
+		t.Fatalf("progress reports = %d, want 3", len(progress.messages))
+	}
+	if progress.messages[0] != "Starting metadata image cache" || progress.percents[0] != 0 {
+		t.Fatalf("initial progress = %g %q", progress.percents[0], progress.messages[0])
+	}
+	if progress.messages[1] != "Processed 3 images across 2 batches (2 cached, 1 failed attempt, 0 skipped) · Overall 7/10 complete (1 terminal failure)" || progress.percents[1] != 70 {
+		t.Fatalf("live progress = %g %q", progress.percents[1], progress.messages[1])
+	}
+	if progress.messages[2] != "Batches 3, enqueued 5 existing, claimed 4, cached 3, 1 failed attempt, skipped 0, uploaded 7 variants, found 2 existing variants, deleted 0 old successes" || progress.percents[2] != 100 {
+		t.Fatalf("final progress = %g %q", progress.percents[2], progress.messages[2])
+	}
+}
+
+func TestCacheMetadataImagesPercent(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue metadata.ImageCacheQueueProgress
+		want  float64
+	}{
+		{name: "unknown", queue: metadata.ImageCacheQueueProgress{}, want: 0},
+		{name: "known empty", queue: metadata.ImageCacheQueueProgress{Known: true}, want: 0},
+		{name: "partial", queue: metadata.ImageCacheQueueProgress{Known: true, Total: 8, Succeeded: 5, Failed: 1}, want: 75},
+		{name: "running completion is capped", queue: metadata.ImageCacheQueueProgress{Known: true, Total: 8, Succeeded: 7, Failed: 1}, want: 99.9},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cacheMetadataImagesPercent(tt.queue); got != tt.want {
+				t.Fatalf("cacheMetadataImagesPercent() = %g, want %g", got, tt.want)
+			}
+		})
 	}
 }

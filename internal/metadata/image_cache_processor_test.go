@@ -60,6 +60,11 @@ type loopingImageCacheJobs struct {
 	succeededIDs   []int64
 	enqueueCalls   int
 	claimCalls     int
+	queueProgress  ImageCacheQueueProgress
+}
+
+func (f *loopingImageCacheJobs) GetQueueProgress(context.Context) (ImageCacheQueueProgress, error) {
+	return f.queueProgress, nil
 }
 
 func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
@@ -483,6 +488,9 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	// the queue empty and sweep again (enqueues 0 -> idle).
 	jobs := &loopingImageCacheJobs{
 		enqueueResults: []int{1, 0},
+		queueProgress: ImageCacheQueueProgress{
+			Known: true, Total: 10, Succeeded: 7, Failed: 1, Queued: 2,
+		},
 		claimedResults: [][]*models.MetadataImageCacheJob{
 			{job1},
 			{},
@@ -498,7 +506,17 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	episodes := &fakeEpisodeStillUpdater{updated: true}
 
 	processor := NewImageCacheProcessor(jobs, cacher, resolver, nil, episodes)
-	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, time.Minute)
+	var progressUpdates []ImageCacheRunStats
+	stats, err := processor.RunUntilIdle(
+		context.Background(),
+		"test-worker",
+		1000,
+		2,
+		time.Minute,
+		func(update ImageCacheRunStats) {
+			progressUpdates = append(progressUpdates, update)
+		},
+	)
 	if err != nil {
 		t.Fatalf("RunUntilIdle() error = %v", err)
 	}
@@ -513,6 +531,15 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	}
 	if len(jobs.succeededIDs) != 2 || jobs.succeededIDs[0] != 10 || jobs.succeededIDs[1] != 11 {
 		t.Fatalf("succeededIDs = %#v, want [10 11]", jobs.succeededIDs)
+	}
+	if len(progressUpdates) == 0 {
+		t.Fatal("RunUntilIdle() did not report progress")
+	}
+	if got := progressUpdates[0].Queue; got != jobs.queueProgress {
+		t.Fatalf("initial queue progress = %+v, want %+v", got, jobs.queueProgress)
+	}
+	if got := progressUpdates[len(progressUpdates)-1]; got != stats {
+		t.Fatalf("last progress update = %+v, want final stats %+v", got, stats)
 	}
 }
 
