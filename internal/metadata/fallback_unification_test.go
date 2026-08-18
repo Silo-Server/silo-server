@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -452,7 +453,7 @@ func TestPersonRefreshWithProviders_RecordsFailedAttempt(t *testing.T) {
 	_, err := service.refreshPersonWithProviders(context.Background(), 3, []Provider{
 		stubPersonProvider{slug: "tmdb"},
 	})
-	if err != ErrPersonMetadataNotFound {
+	if !errors.Is(err, ErrPersonMetadataNotFound) {
 		t.Fatalf("refreshPersonWithProviders() error = %v, want %v", err, ErrPersonMetadataNotFound)
 	}
 	if len(repo.refreshAttempts) != 1 || repo.refreshAttempts[0] != 3 {
