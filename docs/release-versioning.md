@@ -2,8 +2,8 @@
 
 Silo uses GitHub Releases as the public record of shipped versions and their
 changes. There is no historical Silo release series yet: the repository has no
-release tags, and the published container images are currently identified by
-`latest` or a short commit SHA.
+release tags. Newly published default-branch container images are identified by
+an ordered `build-N`, `latest`, and a short commit SHA.
 
 ## Version format
 
@@ -24,12 +24,23 @@ applicable.
 The Git tag and matching GitHub Release are the authoritative product version.
 Other version-like values in the repository describe dependencies, protocols,
 or compatibility targets and are not Silo release numbers. The build details in
-the admin interface continue to show the commit SHA for exact traceability.
+the admin interface show both values for numbered container builds and retain
+the commit SHA alone for older or local builds.
 
 GitHub automatically supplies source archives for each release. Container
-publishing remains independent: the default-branch workflow publishes only
-`latest` and short-commit-SHA tags. Versioned container tags are not introduced
-by this release process.
+publishing remains independent. Successful default-branch builds publish three
+tags that identify the same multi-platform image:
+
+| Tag | Meaning |
+| --- | --- |
+| `build-N` | Ordered build identifier. A larger number is a newer published build; gaps from unsuccessful or non-publishing workflow runs are expected. |
+| `latest` | Mutable pointer updated by successful default-branch publications. |
+| Short commit SHA | Exact source identity for the build. |
+
+Build numbers are not release versions and do not carry compatibility or
+support guarantees. Pin a `build-N`, commit-SHA tag, or image digest when a
+deployment must not move with `latest`. Versioned container tags are not
+introduced by the GitHub Release process.
 
 ## Release notes
 

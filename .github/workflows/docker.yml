@@ -13,12 +13,52 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Published build numbers belong to this workflow. Keep it as the sole owner
+  # of the sequence; raise the offset if the workflow counter ever loses
+  # continuity so a new build remains greater than every existing build tag.
+  BUILD_NUMBER_OFFSET: 0
   GOPROXY: https://proxy.golang.org,direct
   GOPRIVATE: github.com/Silo-Server/*
   GONOSUMDB: github.com/Silo-Server/*
 
 jobs:
+  prepare:
+    name: Prepare build identity
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      build_number: ${{ steps.identity.outputs.build_number }}
+      built_at: ${{ steps.identity.outputs.built_at }}
+      image_version: ${{ steps.identity.outputs.image_version }}
+    steps:
+      - name: Resolve build identity
+        id: identity
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ -z "$DEFAULT_BRANCH" ]]; then
+            echo "::error::Repository default branch is unavailable."
+            exit 1
+          fi
+
+          build_number=""
+          image_version="${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            build_number=$((GITHUB_RUN_NUMBER + BUILD_NUMBER_OFFSET))
+            if (( build_number <= 0 )); then
+              echo "::error::Build number must be positive."
+              exit 1
+            fi
+            image_version="build-${build_number}"
+          fi
+
+          echo "build_number=${build_number}" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "image_version=${image_version}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +144,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          labels: |
+            org.opencontainers.image.created=${{ needs.prepare.outputs.built_at }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.image_version }}
 
       - name: Build and push by digest
         id: build
@@ -117,6 +161,8 @@ jobs:
           build-args: |
             BUILD_REVISION=${{ github.sha }}
             BUILD_DIRTY=false
+            BUILD_NUMBER=${{ needs.prepare.outputs.build_number }}
+            BUILD_DATE=${{ needs.prepare.outputs.built_at }}
           cache-from: type=gha,scope=docker-${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,scope=docker-${{ env.PLATFORM_PAIR }},mode=max
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true
@@ -137,7 +183,7 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [prepare, build]
     permissions:
       packages: write
 
@@ -169,6 +215,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=build-${{ needs.prepare.outputs.build_number }},enable={{is_default_branch}}
             type=sha,prefix=,format=short
 
       - name: Create and push manifest list
@@ -180,5 +227,11 @@ jobs:
             $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
 
       - name: Inspect manifest list
+        env:
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:build-${BUILD_NUMBER}"
+          fi

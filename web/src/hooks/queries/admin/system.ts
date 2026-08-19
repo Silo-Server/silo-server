@@ -7,6 +7,8 @@ export interface BuildInfo {
   revision: string;
   dirty: boolean;
   vcs_time: string;
+  build_number?: number;
+  built_at?: string;
   available: boolean;
 }
 

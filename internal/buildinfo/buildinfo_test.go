@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestCurrentIncludesContainerIdentity(t *testing.T) {
+	previousRevision := revisionOverride
+	previousDirty := dirtyOverride
+	previousBuildNumber := buildNumberOverride
+	previousBuiltAt := builtAtOverride
+	t.Cleanup(func() {
+		revisionOverride = previousRevision
+		dirtyOverride = previousDirty
+		buildNumberOverride = previousBuildNumber
+		builtAtOverride = previousBuiltAt
+	})
+
+	revisionOverride = "edf2977f5013df08e57a869bf722af4243a0a4fd"
+	dirtyOverride = "false"
+	buildNumberOverride = "411"
+	builtAtOverride = "2026-08-19T19:45:00Z"
+
+	got := Current()
+	if got.BuildNumber != 411 || got.BuiltAt != "2026-08-19T19:45:00Z" {
+		t.Fatalf("Current() container identity = build %d at %q", got.BuildNumber, got.BuiltAt)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	t.Parallel()
 
@@ -13,6 +36,8 @@ func TestResolve(t *testing.T) {
 		settings         []debug.BuildSetting
 		overrideRevision string
 		overrideDirty    string
+		buildNumber      uint64
+		builtAt          string
 		want             Info
 	}{
 		{
@@ -22,12 +47,16 @@ func TestResolve(t *testing.T) {
 				{Key: "vcs.modified", Value: "false"},
 				{Key: "vcs.time", Value: "2026-04-05T22:24:40Z"},
 			},
+			buildNumber: 411,
+			builtAt:     "2026-08-19T19:45:00Z",
 			want: Info{
-				Display:   "b4c5aae1",
-				Revision:  "b4c5aae18aa653725ac697b29a05eac797576008",
-				Dirty:     false,
-				VCSTime:   "2026-04-05T22:24:40Z",
-				Available: true,
+				Display:     "b4c5aae1",
+				Revision:    "b4c5aae18aa653725ac697b29a05eac797576008",
+				Dirty:       false,
+				VCSTime:     "2026-04-05T22:24:40Z",
+				BuildNumber: 411,
+				BuiltAt:     "2026-08-19T19:45:00Z",
+				Available:   true,
 			},
 		},
 		{
@@ -86,6 +115,21 @@ func TestResolve(t *testing.T) {
 				Dirty:     true,
 				VCSTime:   "",
 				Available: true,
+			},
+		},
+		{
+			name:             "ordered container build",
+			overrideRevision: "edf2977f5013df08e57a869bf722af4243a0a4fd",
+			buildNumber:      411,
+			builtAt:          " 2026-08-19T19:45:00Z ",
+			want: Info{
+				Display:     "edf2977f",
+				Revision:    "edf2977f5013df08e57a869bf722af4243a0a4fd",
+				Dirty:       false,
+				VCSTime:     "",
+				BuildNumber: 411,
+				BuiltAt:     "2026-08-19T19:45:00Z",
+				Available:   true,
 			},
 		},
 		{
@@ -164,10 +208,32 @@ func TestResolve(t *testing.T) {
 			t.Parallel()
 
 			overrideRevision, overrideDirty := parseOverrides(tc.overrideRevision, tc.overrideDirty)
-			got := resolve(tc.settings, overrideRevision, overrideDirty)
+			got := resolve(tc.settings, overrideRevision, overrideDirty, tc.buildNumber, tc.builtAt)
 			if got != tc.want {
 				t.Fatalf("resolve() = %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseBuildNumber(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value string
+		want  uint64
+	}{
+		{value: "411", want: 411},
+		{value: " 411 ", want: 411},
+		{value: ""},
+		{value: "0"},
+		{value: "-1"},
+		{value: "not-a-number"},
+	}
+
+	for _, tc := range tests {
+		if got := parseBuildNumber(tc.value); got != tc.want {
+			t.Fatalf("parseBuildNumber(%q) = %d, want %d", tc.value, got, tc.want)
+		}
 	}
 }

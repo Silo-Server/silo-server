@@ -2,6 +2,12 @@
 
 ## 2026-08-19
 
+### Make published server builds easy to compare
+Every successful default-branch container build now carries an ordered build number alongside its exact source revision.
+- Publishes `build-N` beside the existing mutable `latest` and short-commit-SHA image tags.
+- Shows `Build N · SHA` in the admin sidebar, with the build timestamp available on hover.
+- Keeps build identifiers separate from deliberate Semantic Versioning releases; skipped workflow numbers simply leave harmless gaps.
+
 ### Make metadata refresh finish with the right artwork
 Manual Quick and Complete Refresh now finish the selected item's artwork before reporting success instead of leaving it behind the global image-cache backlog.
 - Chooses a text-bearing poster in the library's metadata language, then English, another language, and finally textless artwork.

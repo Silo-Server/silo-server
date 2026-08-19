@@ -38,6 +38,8 @@ COPY contracts/ contracts/
 FROM build-base AS build
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
+ARG BUILD_NUMBER
+ARG BUILD_DATE
 COPY --from=silo_plugin_sdk . /tmp/silo-plugin-sdk
 RUN test -f /tmp/silo-plugin-sdk/go.mod
 RUN --mount=type=cache,target=/root/.cache/go-build \
@@ -45,7 +47,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go mod edit -replace=github.com/Silo-Server/silo-plugin-sdk=/tmp/silo-plugin-sdk && \
     go mod download && \
     go build \
-    -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY}" \
+    -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
 # Stage 4: Runtime

@@ -49,7 +49,9 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
   } else if (buildInfo.isError) {
     buildDisplay = "load failed";
   } else if (buildInfo.data?.available) {
-    buildDisplay = buildInfo.data.display;
+    const buildNumber = buildInfo.data.build_number ?? 0;
+    buildDisplay =
+      buildNumber > 0 ? `${buildNumber} · ${buildInfo.data.display}` : buildInfo.data.display;
   }
 
   const activityBadge =
@@ -145,7 +147,10 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
           <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.18em] uppercase">
             Build
           </div>
-          <div className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5">
+          <div
+            className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5"
+            title={buildInfo.data?.built_at ? `Built ${buildInfo.data.built_at}` : undefined}
+          >
             {buildDisplay}
           </div>
         </div>

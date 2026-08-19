@@ -2,37 +2,45 @@ package buildinfo
 
 import (
 	"runtime/debug"
+	"strconv"
 	"strings"
 )
 
 const unavailableDisplay = "unavailable"
 
 var (
-	revisionOverride string
-	dirtyOverride    string
+	revisionOverride    string
+	dirtyOverride       string
+	buildNumberOverride string
+	builtAtOverride     string
 )
 
-// Info describes the running Silo build as embedded by Go's VCS metadata.
+// Info describes the running Silo build from Go VCS metadata and CI-injected
+// container identity.
 type Info struct {
-	Display   string `json:"display"`
-	Revision  string `json:"revision"`
-	Dirty     bool   `json:"dirty"`
-	VCSTime   string `json:"vcs_time"`
-	Available bool   `json:"available"`
+	Display     string `json:"display"`
+	Revision    string `json:"revision"`
+	Dirty       bool   `json:"dirty"`
+	VCSTime     string `json:"vcs_time"`
+	BuildNumber uint64 `json:"build_number"`
+	BuiltAt     string `json:"built_at"`
+	Available   bool   `json:"available"`
 }
 
 // Current reads build metadata from the running binary.
 func Current() Info {
 	overrideRevision, overrideDirty := parseOverrides(revisionOverride, dirtyOverride)
+	overrideBuildNumber := parseBuildNumber(buildNumberOverride)
+	overrideBuiltAt := strings.TrimSpace(builtAtOverride)
 
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return buildInfo(overrideRevision, overrideDirty, "")
+		return buildInfo(overrideRevision, overrideDirty, "", overrideBuildNumber, overrideBuiltAt)
 	}
-	return resolve(info.Settings, overrideRevision, overrideDirty)
+	return resolve(info.Settings, overrideRevision, overrideDirty, overrideBuildNumber, overrideBuiltAt)
 }
 
-func resolve(settings []debug.BuildSetting, fallbackRevision string, fallbackDirty bool) Info {
+func resolve(settings []debug.BuildSetting, fallbackRevision string, fallbackDirty bool, buildNumber uint64, builtAt string) Info {
 	var (
 		revision string
 		vcsTime  string
@@ -51,19 +59,28 @@ func resolve(settings []debug.BuildSetting, fallbackRevision string, fallbackDir
 	}
 
 	if revision != "" {
-		return buildInfo(revision, dirty, vcsTime)
+		return buildInfo(revision, dirty, vcsTime, buildNumber, builtAt)
 	}
 
-	return buildInfo(fallbackRevision, fallbackDirty, "")
+	return buildInfo(fallbackRevision, fallbackDirty, "", buildNumber, builtAt)
 }
 
 func parseOverrides(revision, dirty string) (string, bool) {
 	return strings.TrimSpace(revision), strings.EqualFold(strings.TrimSpace(dirty), "true")
 }
 
-func buildInfo(revision string, dirty bool, vcsTime string) Info {
+func parseBuildNumber(value string) uint64 {
+	buildNumber, err := strconv.ParseUint(strings.TrimSpace(value), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return buildNumber
+}
+
+func buildInfo(revision string, dirty bool, vcsTime string, buildNumber uint64, builtAt string) Info {
 	revision = strings.TrimSpace(revision)
 	vcsTime = strings.TrimSpace(vcsTime)
+	builtAt = strings.TrimSpace(builtAt)
 	if revision == "" {
 		return unavailableInfo()
 	}
@@ -77,20 +94,24 @@ func buildInfo(revision string, dirty bool, vcsTime string) Info {
 	}
 
 	return Info{
-		Display:   display,
-		Revision:  revision,
-		Dirty:     dirty,
-		VCSTime:   vcsTime,
-		Available: true,
+		Display:     display,
+		Revision:    revision,
+		Dirty:       dirty,
+		VCSTime:     vcsTime,
+		BuildNumber: buildNumber,
+		BuiltAt:     builtAt,
+		Available:   true,
 	}
 }
 
 func unavailableInfo() Info {
 	return Info{
-		Display:   unavailableDisplay,
-		Revision:  "",
-		Dirty:     false,
-		VCSTime:   "",
-		Available: false,
+		Display:     unavailableDisplay,
+		Revision:    "",
+		Dirty:       false,
+		VCSTime:     "",
+		BuildNumber: 0,
+		BuiltAt:     "",
+		Available:   false,
 	}
 }
