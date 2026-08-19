@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastLoading: vi.fn(),
   toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
   useMutation: vi.fn(),
   useQueryClient: vi.fn(),
 }));
@@ -59,6 +60,7 @@ vi.mock("sonner", () => ({
     error: (...args: unknown[]) => mocks.toastError(...args),
     loading: (...args: unknown[]) => mocks.toastLoading(...args),
     success: (...args: unknown[]) => mocks.toastSuccess(...args),
+    warning: (...args: unknown[]) => mocks.toastWarning(...args),
   },
 }));
 
@@ -112,6 +114,7 @@ describe("item query helpers", () => {
     mocks.toastLoading.mockReset();
     mocks.toastLoading.mockReturnValue("refresh-toast");
     mocks.toastSuccess.mockReset();
+    mocks.toastWarning.mockReset();
     mocks.useMutation.mockReset();
     mocks.useMutation.mockImplementation((options: unknown) => ({
       ...(options as object),
@@ -158,6 +161,45 @@ describe("item query helpers", () => {
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Metadata refreshed", {
       id: "refresh-toast",
     });
+  });
+
+  it("warns when the refresh succeeded but artwork caching did not finish", async () => {
+    const invalidateQueries = vi.fn().mockResolvedValue(undefined);
+    mocks.useQueryClient.mockReturnValue({ invalidateQueries });
+
+    useRefreshItemMetadata();
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as RefreshMetadataMutationOptions;
+    const variables: RefreshMetadataVariables = {
+      item: { content_id: "series-1", type: "series" },
+      mode: "quick",
+    };
+
+    const context = options.onMutate?.(variables);
+    await options.onSuccess?.(
+      {
+        job: {
+          result_payload: {
+            refresh_content_id: "series-1",
+            artwork_cache_warning: "2 refreshed artwork image(s) failed to cache",
+          },
+        },
+      },
+      variables,
+      context,
+    );
+
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    expect(mocks.toastWarning).toHaveBeenCalledWith(
+      "Metadata refreshed, but artwork caching did not finish",
+      {
+        id: "refresh-toast",
+        description: "2 refreshed artwork image(s) failed to cache",
+      },
+    );
+    // The refresh still committed, so the caches must be invalidated anyway.
+    expect(invalidateQueries).toHaveBeenCalled();
   });
 
   it("replaces the spinning refresh notification with a failure", () => {

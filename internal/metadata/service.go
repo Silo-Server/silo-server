@@ -6814,9 +6814,11 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 
 	bestByType := map[ImageType]*best{
 		ImagePoster: selectBest(ImagePoster, posterFilters),
-		// Provider backdrops tagged with a language may contain text. Automatic
-		// scans therefore select only language-neutral backgrounds.
-		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{languageNeutral}),
+		// Provider backdrops tagged with a language may contain text, so
+		// language-neutral backgrounds win. A tagged backdrop is still better
+		// than none, so it stays as the terminal tier: items whose backdrops
+		// are all language-tagged must not end up with no backdrop at all.
+		ImageBackdrop: selectBest(ImageBackdrop, []func(RemoteImage) bool{languageNeutral, hasLanguage}),
 		ImageLogo:     selectBest(ImageLogo, logoFilters),
 	}
 

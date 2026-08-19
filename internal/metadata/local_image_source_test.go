@@ -279,14 +279,16 @@ func TestApplyBestImagesLogoLanguageFallbacks(t *testing.T) {
 	}
 }
 
-func TestApplyBestImagesRejectsLanguageTaggedProviderBackgrounds(t *testing.T) {
+func TestApplyBestImagesFallsBackToLanguageTaggedBackgrounds(t *testing.T) {
+	// Language-neutral backgrounds are preferred, but an item whose backdrops
+	// are all language-tagged must still get one rather than none.
 	item := &models.MediaItem{}
 	applyBestImages(item, []RemoteImage{
 		{ProviderID: "tmdb", URL: "english", Type: ImageBackdrop, Language: "en", Rating: 10},
 		{ProviderID: "tmdb", URL: "german", Type: ImageBackdrop, Language: "de", Rating: 9},
 	}, MergeFillEmpty, "en")
-	if item.BackdropPath != "" {
-		t.Fatalf("BackdropPath = %q, want no language-tagged provider background", item.BackdropPath)
+	if item.BackdropPath != "english" {
+		t.Fatalf("BackdropPath = %q, want a language-tagged fallback background", item.BackdropPath)
 	}
 }
 

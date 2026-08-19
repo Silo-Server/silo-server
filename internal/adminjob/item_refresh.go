@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,6 +68,9 @@ type ItemRefreshResult struct {
 	ScanPath           string              `json:"scan_path"`
 	ScanResult         *scanner.ScanResult `json:"scan_result"`
 	MatchedFiles       int                 `json:"matched_files"`
+	// ArtworkCacheWarning is set when the metadata refresh committed but its
+	// artwork did not finish caching. The refresh itself still succeeded.
+	ArtworkCacheWarning string `json:"artwork_cache_warning,omitempty"`
 }
 
 type itemRefreshItemRepo interface {
@@ -417,6 +421,11 @@ type ItemRefreshIngester interface {
 }
 
 type ItemRefreshArtworkCacher interface {
+	// ArtworkCachingEnabled reports whether caching would actually run. The
+	// cacher is wired whenever object storage is configured, independently of
+	// the metadata.cache_images setting, so the refresh asks before it
+	// advertises an artwork step.
+	ArtworkCachingEnabled() bool
 	CacheTargetArtwork(ctx context.Context, targetContentID string) error
 }
 
@@ -487,8 +496,9 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if !folder.Enabled {
 		return nil, fmt.Errorf("resolve scan scope: library is disabled")
 	}
+	cacheArtwork := e.artworkCacher != nil && e.artworkCacher.ArtworkCachingEnabled()
 	progressTotal := 3
-	if e.artworkCacher != nil {
+	if cacheArtwork {
 		progressTotal = 4
 	}
 
@@ -550,12 +560,22 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
 	}
-	if e.artworkCacher != nil {
+	artworkWarning := ""
+	if cacheArtwork {
 		if progress != nil {
 			progress(4, progressTotal, "Caching refreshed artwork")
 		}
+		// The metadata refresh is already committed at this point, so artwork
+		// that fails to cache is reported as a warning on the result. Aborting
+		// here would skip the cache invalidation and the rebuilt content IDs
+		// below, leaving clients pointed at an item that no longer exists.
 		if err := e.artworkCacher.CacheTargetArtwork(ctx, refreshContentID); err != nil {
-			return nil, fmt.Errorf("cache refreshed artwork: %w", err)
+			artworkWarning = err.Error()
+			slog.WarnContext(ctx, "item refresh: artwork caching did not complete",
+				"component", "adminjob",
+				"content_id", refreshContentID,
+				"error", err,
+			)
 		}
 	}
 
@@ -580,12 +600,13 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 
 	return &ItemRefreshResult{
-		RequestedContentID: req.RequestedContentID,
-		RefreshContentID:   refreshContentID,
-		DetailContentID:    detailContentID,
-		ScanPath:           req.ScanPath,
-		ScanResult:         scanResult,
-		MatchedFiles:       matched,
+		RequestedContentID:  req.RequestedContentID,
+		RefreshContentID:    refreshContentID,
+		DetailContentID:     detailContentID,
+		ScanPath:            req.ScanPath,
+		ScanResult:          scanResult,
+		MatchedFiles:        matched,
+		ArtworkCacheWarning: artworkWarning,
 	}, nil
 }
 

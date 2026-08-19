@@ -29,6 +29,7 @@ type targetImageCacheJobs struct {
 	targetCalls    int
 	runningResults []bool
 	runningCalls   int
+	alwaysRunning  bool
 }
 
 func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
@@ -48,7 +49,7 @@ func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, ta
 }
 
 func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
-	running := false
+	running := f.alwaysRunning
 	if f.runningCalls < len(f.runningResults) {
 		running = f.runningResults[f.runningCalls]
 	}
@@ -341,8 +342,9 @@ func TestImageCacheProcessorCachesOnlyManuallyRefreshedTargetImmediately(t *test
 	if jobs.targetCalls != 2 {
 		t.Fatalf("target claim calls = %d, want 2", jobs.targetCalls)
 	}
-	if jobs.retryCalls != 2 {
-		t.Fatalf("target retry calls = %d, want 2", jobs.retryCalls)
+	// The retry-now reset runs once per refresh, not once per poll.
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
 	}
 	if jobs.succeededID != 23 {
 		t.Fatalf("succeededID = %d, want 23", jobs.succeededID)
@@ -407,11 +409,37 @@ func TestImageCacheProcessorRetriesTargetAfterConcurrentWorkerFinishes(t *testin
 	if err := processor.CacheTargetArtwork(context.Background(), "series-1"); err != nil {
 		t.Fatalf("CacheTargetArtwork() error = %v", err)
 	}
-	if jobs.retryCalls != 3 {
-		t.Fatalf("target retry calls = %d, want 3", jobs.retryCalls)
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
 	}
 	if jobs.succeededID != 25 {
 		t.Fatalf("succeededID = %d, want 25", jobs.succeededID)
+	}
+}
+
+func TestImageCacheProcessorStopsWaitingOnStuckBackgroundWorker(t *testing.T) {
+	// A worker that claimed the job and died holds its lease for
+	// imageCacheLeaseDuration. The interactive refresh must not block that
+	// long: it gives up and reports the artwork as still pending.
+	jobs := &targetImageCacheJobs{alwaysRunning: true}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{},
+		&fakeImageResolver{},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{}},
+	)
+	processor.idleWaitTimeout = 20 * time.Millisecond
+
+	err := processor.CacheTargetArtwork(context.Background(), "series-1")
+	if !errors.Is(err, ErrTargetArtworkPending) {
+		t.Fatalf("CacheTargetArtwork() error = %v, want ErrTargetArtworkPending", err)
+	}
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	// A hot 10 Hz poll would issue far more probes than this in 20ms.
+	if jobs.runningCalls > 4 {
+		t.Fatalf("running probes = %d, want a backed-off poll", jobs.runningCalls)
 	}
 }
 

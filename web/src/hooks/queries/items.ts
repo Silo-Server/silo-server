@@ -68,6 +68,9 @@ interface ItemRefreshJobResult {
   detail_content_id?: string;
   scan_path?: string;
   matched_files?: number;
+  // Set when the metadata refresh committed but its artwork did not finish
+  // caching. The refresh itself succeeded, so this is a warning, not an error.
+  artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
   };
@@ -104,8 +107,14 @@ export function useRefreshItemMetadata() {
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
+      const artworkWarning = result.artwork_cache_warning;
 
-      if (mode === "complete") {
+      if (artworkWarning) {
+        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+          id: context?.toastID,
+          description: artworkWarning,
+        });
+      } else if (mode === "complete") {
         toast.success("Complete refresh finished", { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(

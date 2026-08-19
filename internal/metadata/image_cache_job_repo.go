@@ -296,6 +296,18 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 	return int(tag.RowsAffected()), nil
 }
 
+// imageCacheTargetScope matches every job an interactive refresh of one
+// content ID is responsible for: the target's own rows plus the rows of its
+// children. Season, episode, and localization jobs are enqueued under their
+// own content ID with series_id pointing at the series, so a series-level
+// refresh only reaches them through series_id. Item and item_localization
+// rows carry series_id = the item's own content ID, so a movie or a
+// season/episode target still matches on target_content_id alone. Person
+// jobs have an empty series_id and stay out of scope.
+func imageCacheTargetScope(param string) string {
+	return "(target_content_id = " + param + " OR series_id = " + param + ")"
+}
+
 func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context, targetContentID string) error {
 	query := `
 		UPDATE metadata_image_cache_jobs
@@ -320,7 +332,7 @@ func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context, tar
 	`
 	args := []any{intervalLiteral(imageCacheLeaseDuration), imageCacheMaxAttempts}
 	if targetContentID != "" {
-		query += " AND target_content_id = $3"
+		query += " AND " + imageCacheTargetScope("$3")
 		args = append(args, targetContentID)
 	}
 	_, err := r.pool.Exec(ctx, query, args...)
@@ -351,18 +363,23 @@ func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetCont
 	if err := r.recoverExpiredRunning(ctx, targetContentID); err != nil {
 		return err
 	}
+	// attempt_count is preserved: a manual refresh buys the target one
+	// immediate retry, it does not reset the retry budget a background worker
+	// already spent on artwork that keeps failing. Failed rows are requeued
+	// regardless of their timer; queued rows are only pulled forward while
+	// they are still deferred, so the reset stays a small, one-off write.
+	// CacheTargetArtwork runs this once per refresh, not once per poll.
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
 		SET status = 'queued',
-			attempt_count = 0,
 			next_attempt_at = NOW(),
 			locked_at = NULL,
 			locked_by = '',
-			last_error = '',
 			completed_at = NULL,
 			updated_at = NOW()
-		WHERE target_content_id = $1
+		WHERE `+imageCacheTargetScope("$1")+`
 		  AND status IN ('queued', 'failed')
+		  AND (status = 'failed' OR next_attempt_at > NOW())
 	`, targetContentID)
 	if err != nil {
 		return fmt.Errorf("retrying target metadata image cache jobs: %w", err)
@@ -391,7 +408,7 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 		SELECT EXISTS (
 			SELECT 1
 			FROM metadata_image_cache_jobs
-			WHERE target_content_id = $1
+			WHERE `+imageCacheTargetScope("$1")+`
 			  AND status = 'running'
 		)
 	`, targetContentID).Scan(&running); err != nil {
@@ -413,7 +430,7 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 	`
 	args := []any{limit, workerID}
 	if targetContentID != "" {
-		query += " AND target_content_id = $3"
+		query += " AND " + imageCacheTargetScope("$3")
 		args = append(args, targetContentID)
 	}
 	query += `
