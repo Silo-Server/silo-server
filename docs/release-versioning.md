@@ -3,7 +3,7 @@
 Silo uses GitHub Releases as the public record of shipped versions and their
 changes. There is no historical Silo release series yet: the repository has no
 release tags, and the published container images are currently identified by
-`latest`, `nightly`, or a commit SHA.
+`latest` or a short commit SHA.
 
 ## Version format
 
@@ -27,10 +27,9 @@ or compatibility targets and are not Silo release numbers. The build details in
 the admin interface continue to show the commit SHA for exact traceability.
 
 GitHub automatically supplies source archives for each release. Container
-publishing remains independent: the registry currently contains `latest`,
-`nightly`, and commit-SHA tags, while the current default-branch workflow
-publishes `latest` and commit-SHA tags. Versioned container tags are not
-introduced by this release process.
+publishing remains independent: the default-branch workflow publishes only
+`latest` and short-commit-SHA tags. Versioned container tags are not introduced
+by this release process.
 
 ## Release notes
 

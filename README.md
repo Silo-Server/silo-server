@@ -367,7 +367,6 @@ If you prefer running Silo without Docker:
 | [Release versioning](docs/release-versioning.md) | Version selection, GitHub release notes, prereleases, and maintainer checks |
 | [Development guide](DEVELOPMENT.md) | Local setup, builds, tests, migrations, and repository structure |
 | [Canonical Settings API](docs/settings-api.md) | Client contracts, contextual headers, remote scopes, and effective reads |
-| [Security policy](SECURITY.md) | Supported versions and private vulnerability reporting |
 
 ## Reporting Issues
 
