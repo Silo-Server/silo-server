@@ -1,8 +1,38 @@
-# Silo
+<p align="center">
+  <img src="assets/icon.png" alt="Silo logo" width="112" height="112">
+</p>
 
-Silo is a self-hosted media streaming server for your movies, shows, music, and books. Point it at your media folders and stream to your devices — at home or away — with direct play, remuxing, and hardware-accelerated transcoding handled automatically.
+<h1 align="center">Silo</h1>
 
-Join the community on [Discord](https://discord.gg/4RxuUQAEnW). If Silo is useful to you, consider [sponsoring the project](https://github.com/sponsors/quick104) — see [Supporting Silo](#supporting-silo).
+<p align="center">
+  <strong>Your media. Your server. Your way.</strong>
+</p>
+
+<p align="center">
+  A modern, self-hosted media server for movies, shows, music, and books.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Silo-Server/silo-server/releases"><img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/Silo-Server/silo-server?include_prereleases&amp;sort=semver&amp;display_name=tag&amp;style=flat-square&amp;label=release"></a>
+  <a href="https://github.com/Silo-Server/silo-server/actions/workflows/ci.yml"><img alt="Continuous integration" src="https://img.shields.io/github/actions/workflow/status/Silo-Server/silo-server/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
+  <img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white">
+  <a href="LICENSE"><img alt="AGPL-3.0-or-later license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-555555?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#deploy-with-docker-recommended">Installation</a>
+  · <a href="docs/wiki/index.md">Documentation</a>
+  · <a href="https://github.com/Silo-Server/silo-server/releases">Releases</a>
+  · <a href="https://discord.gg/4RxuUQAEnW">Discord</a>
+  · <a href="https://github.com/sponsors/quick104">Donate</a>
+  · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+---
+
+Silo streams your media at home or away, choosing direct play, remuxing, or
+hardware-accelerated transcoding automatically for each device.
 
 ## Highlights
 
@@ -12,6 +42,20 @@ Join the community on [Discord](https://discord.gg/4RxuUQAEnW). If Silo is usefu
 - **Household profiles** — multiple profiles per account, with per-profile watch state and parental controls.
 - **Plugin-driven metadata** — match and enrich your libraries with providers like TMDB and TVDB, installed as plugins.
 - **Fast setup** — one `docker compose up -d` brings up the whole stack; everything else is configured in the admin UI.
+
+## Releases and updates
+
+Silo uses [Semantic Versioning](https://semver.org/) in the form
+`vMAJOR.MINOR.PATCH`, with suffixes such as `-alpha.1` for prereleases. The
+[GitHub Releases](https://github.com/Silo-Server/silo-server/releases) page is
+the canonical public history of shipped changes, with categorized notes,
+contributors, and a full comparison for every version.
+
+Until the maintainers publish the first release, builds remain identified by
+their commit SHA. For every release, review the notes for configuration,
+compatibility, and upgrade information before updating. See
+[Release versioning](docs/release-versioning.md) for the version contract and
+maintainer release process.
 
 ## Deploy with Docker (recommended)
 
