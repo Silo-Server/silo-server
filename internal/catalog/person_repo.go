@@ -467,10 +467,12 @@ func (r *PersonRepository) Get(ctx context.Context, id int64) (*models.Person, e
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people WHERE id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.MetadataRefreshAttemptedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person %d: %w", id, err)
@@ -483,10 +485,12 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people WHERE LOWER(name) = LOWER($1)`, name,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+		&p.MetadataRefreshAttemptedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get person by name %q: %w", name, err)
@@ -508,7 +512,8 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people WHERE name ILIKE '%' || $1 || '%'
 		ORDER BY name LIMIT $2`, query, limit,
 	)
@@ -522,6 +527,7 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 		var p models.Person
 		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 			&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+			&p.MetadataRefreshAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan person: %w", err)
 		}
@@ -794,7 +800,8 @@ func (r *PersonRepository) resolveExternalIDConflict(
 func scanPeopleByIDsForUpdate(ctx context.Context, tx pgx.Tx, ids ...int64) (map[int64]models.Person, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
-			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
+			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
+			metadata_refresh_attempted_at
 		FROM people
 		WHERE id = ANY($1)
 		ORDER BY id
@@ -809,6 +816,7 @@ func scanPeopleByIDsForUpdate(ctx context.Context, tx pgx.Tx, ids ...int64) (map
 		var p models.Person
 		if err := rows.Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 			&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
+			&p.MetadataRefreshAttemptedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan locked person: %w", err)
 		}
@@ -959,36 +967,94 @@ func (r *PersonRepository) UpdatePhotoIfSourceMatches(ctx context.Context, perso
 	return tag.RowsAffected() > 0, nil
 }
 
-// FindRefreshCandidates returns people with external IDs that are incomplete or stale.
-func (r *PersonRepository) FindRefreshCandidates(
-	ctx context.Context,
-	staleAfter time.Duration,
-	limit int,
-) ([]int64, error) {
+// MarkRefreshAttempt records a provider lookup without changing the person's
+// metadata timestamp. Failed and partial lookups therefore receive the same
+// durable refresh backoff as successful lookups.
+func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_attempted_at = NOW()
+		WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("mark person %d refresh attempt: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// Person metadata refresh policy. FindRefreshCandidates (SQL) and
+// PersonRefreshDue (Go) are two views of the same rule; keep them in sync.
+const (
+	// PersonMetadataStaleAfter is how long complete person metadata is trusted
+	// before another provider lookup is attempted.
+	PersonMetadataStaleAfter = 90 * 24 * time.Hour
+
+	// PersonRefreshRetryAfter bounds how often one person may be sent to a
+	// provider. It applies to every candidate, so a person the providers simply
+	// have no bio or birth date for is retried on this cadence instead of on
+	// every sweep.
+	PersonRefreshRetryAfter = 7 * 24 * time.Hour
+)
+
+// PersonMetadataIncomplete reports whether a provider could still fill in
+// metadata Silo does not have. A photo_path of "-" is the "provider has no
+// photo" sentinel — an answer, not a gap — so it counts as complete, matching
+// the SQL predicate in FindRefreshCandidates.
+func PersonMetadataIncomplete(person models.Person) bool {
+	return person.Bio == "" || person.PhotoPath == "" || person.BirthDate == nil
+}
+
+// PersonRefreshDue reports whether a person is due for a provider lookup: they
+// carry an external id, no lookup has been attempted within
+// PersonRefreshRetryAfter, and their metadata is either incomplete or older
+// than PersonMetadataStaleAfter. Callers that already hold the row use this
+// instead of re-querying; the worker sweep uses FindRefreshCandidates, which
+// encodes the same rule in SQL.
+func PersonRefreshDue(person models.Person, now time.Time) bool {
+	if person.TmdbID == "" && person.ImdbID == "" && person.TvdbID == "" {
+		return false
+	}
+	if person.MetadataRefreshAttemptedAt != nil &&
+		!person.MetadataRefreshAttemptedAt.Before(now.Add(-PersonRefreshRetryAfter)) {
+		return false
+	}
+	return PersonMetadataIncomplete(person) ||
+		person.UpdatedAt.Before(now.Add(-PersonMetadataStaleAfter))
+}
+
+// FindRefreshCandidates returns people who are due for a provider metadata
+// lookup, least recently touched first. See PersonRefreshDue for the rule.
+//
+// Gating on metadata_refresh_attempted_at rather than on updated_at is what
+// keeps this from becoming a hot loop: a person the providers cannot complete
+// is retried once per PersonRefreshRetryAfter instead of on every sweep, while
+// a person nobody has ever looked up is eligible immediately, so freshly
+// ingested credits are backfilled without waiting out a staleness window.
+func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 {
 		return []int64{}, nil
 	}
 
-	args := []any{limit}
-	stalePredicate := ""
-	if staleAfter > 0 {
-		args = append(args, time.Now().Add(-staleAfter))
-		stalePredicate = " OR updated_at < $2"
-	}
-
+	now := time.Now()
 	rows, err := r.pool.Query(ctx, `
 		SELECT id
 		FROM people
 		WHERE
 			(tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+			AND (metadata_refresh_attempted_at IS NULL OR metadata_refresh_attempted_at < $2)
 			AND (
 				COALESCE(bio, '') = ''
 				OR COALESCE(photo_path, '') = ''
-				OR birth_date IS NULL`+stalePredicate+`
+				OR birth_date IS NULL
+				OR updated_at < $3
 			)
-		ORDER BY updated_at ASC
+		ORDER BY GREATEST(updated_at, COALESCE(metadata_refresh_attempted_at, updated_at)) ASC, id ASC
 		LIMIT $1`,
-		args...,
+		limit,
+		now.Add(-PersonRefreshRetryAfter),
+		now.Add(-PersonMetadataStaleAfter),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query refresh candidates: %w", err)

@@ -1593,6 +1593,9 @@ func main() {
 				deps.EventBus,
 				deps.RealtimeHub,
 			)
+			if metadataImageCacheProcessor != nil {
+				itemRefreshExecutor.SetArtworkCacher(metadataImageCacheProcessor)
+			}
 		}
 	}
 

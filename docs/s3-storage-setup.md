@@ -30,14 +30,14 @@ Images are served directly from the S3 endpoint with time-limited signed URLs.
 Serves images via an unsigned public URL through a custom domain. Use this when your bucket is publicly readable (e.g. Cloudflare R2 with a public custom domain) and you don't need URL-level access control.
 
 **Additional setting:**
-- **Public Endpoint** — The public CDN domain bound to the bucket (e.g. `https://cdn.example.com`)
+- **Read Endpoint** — The public CDN domain bound to the bucket (e.g. `https://cdn.example.com`)
 
 ### Cloudflare Token Auth
 
 Generates HMAC-signed URLs validated by a Cloudflare WAF rule. Best for Cloudflare R2 with a custom domain when you want URL-level access control without exposing the R2 API endpoint.
 
 **Additional settings:**
-- **Public Endpoint** — R2 custom domain (e.g. `https://cdn.example.com`)
+- **Read Endpoint** — R2 custom domain (e.g. `https://cdn.example.com`)
 - **Token Secret** — HMAC-SHA256 shared secret (must match the WAF rule)
 - **Token Param** — Query parameter name (default: `verify`)
 - **Token TTL** — Token lifetime in seconds (default: `10800` = 3 hours)
@@ -61,7 +61,7 @@ Generates HMAC-signed URLs validated by a Cloudflare WAF rule. Best for Cloudfla
 | Secret Key | R2 API token secret key |
 | Path Style | Enabled |
 | URL Auth Method | Public (no auth) |
-| Public Endpoint | `https://your-custom-domain.com` |
+| Read Endpoint | `https://your-custom-domain.com` |
 
 ### Option B: Token-authenticated (recommended)
 
@@ -107,7 +107,7 @@ Replace:
 | Secret Key | R2 API token secret key |
 | Path Style | Enabled |
 | URL Auth Method | Cloudflare Token Auth |
-| Public Endpoint | `https://your-cdn-domain.com` |
+| Read Endpoint | `https://your-cdn-domain.com` |
 | Token Secret | Same secret from Step 1 |
 | Token Param | `verify` (default) |
 | Token TTL | `10800` (default, must match WAF rule) |

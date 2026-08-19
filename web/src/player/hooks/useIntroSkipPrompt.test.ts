@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { IntroSkipMode } from "../types";
 import {
@@ -9,6 +9,8 @@ import {
   PLAYBACK_PAUSE_GRACE_MS,
   useIntroSkipPrompt,
 } from "./useIntroSkipPrompt";
+
+type SeekHandler = (seconds: number) => boolean | Promise<boolean>;
 
 interface Props {
   mode: IntroSkipMode;
@@ -19,12 +21,12 @@ interface Props {
 
 describe("useIntroSkipPrompt", () => {
   const intro = { start: 10, end: 20 };
-  let onSeek: ReturnType<typeof vi.fn>;
+  let onSeek: Mock<SeekHandler>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     // The default player accepts every seek; the refusal cases opt out.
-    onSeek = vi.fn(() => true);
+    onSeek = vi.fn<SeekHandler>(() => true);
   });
 
   afterEach(() => {

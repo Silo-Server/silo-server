@@ -1,23 +1,121 @@
-# Silo
+<p align="center">
+  <img src="assets/icon.png" alt="Silo logo" width="112" height="112">
+</p>
 
-Silo is a self-hosted media streaming server for your movies, shows, music, and books. Point it at your media folders and stream to your devices — at home or away — with direct play, remuxing, and hardware-accelerated transcoding handled automatically.
+<h1 align="center">Silo</h1>
 
-Join the community on [Discord](https://discord.gg/4RxuUQAEnW). If Silo is useful to you, consider [sponsoring the project](https://github.com/sponsors/quick104) — see [Supporting Silo](#supporting-silo).
+<p align="center">
+  <strong>Your media. Your server. Your way.</strong>
+</p>
 
-## Highlights
+<p align="center">
+  A modern, self-hosted media server for movies, shows, music, and books.
+</p>
 
-- **Plays your media, your way** — direct play when the device supports it, remux or hardware-accelerated transcode (including NVENC) when it doesn't.
-- **Web app included** — a full-featured web client and admin interface ship with the server.
-- **Works with apps you already use** — optional Jellyfin/Emby-compatible API supports clients such as VidHub, Findroid, and Infuse.
-- **Household profiles** — multiple profiles per account, with per-profile watch state and parental controls.
-- **Plugin-driven metadata** — match and enrich your libraries with providers like TMDB and TVDB, installed as plugins.
-- **Fast setup** — one `docker compose up -d` brings up the whole stack; everything else is configured in the admin UI.
+<p align="center">
+  <a href="https://github.com/Silo-Server/silo-server/releases"><img alt="Latest GitHub release" src="https://img.shields.io/github/v/release/Silo-Server/silo-server?include_prereleases&amp;sort=semver&amp;display_name=tag&amp;style=flat-square&amp;label=release"></a>
+  <a href="https://github.com/Silo-Server/silo-server/actions/workflows/ci.yml"><img alt="Continuous integration" src="https://img.shields.io/github/actions/workflow/status/Silo-Server/silo-server/ci.yml?branch=main&amp;style=flat-square&amp;label=CI"></a>
+  <img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-149ECA?style=flat-square&amp;logo=react&amp;logoColor=white">
+  <a href="LICENSE"><img alt="AGPL-3.0-or-later license" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-555555?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#deploy-with-docker-recommended">Installation</a>
+  · <a href="docs/wiki/index.md">Documentation</a>
+  · <a href="https://github.com/Silo-Server/silo-server/releases">Releases</a>
+  · <a href="https://discord.com/invite/4RxuUQAEnW">Discord</a>
+  · <a href="https://github.com/sponsors/quick104">Donate</a>
+  · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+---
+
+## Product overview
+
+Silo keeps your media and its metadata under your control while providing a
+modern experience at home or away.
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Play</strong><br><br>
+      Direct play when possible, remux when needed, or use hardware-accelerated
+      transcoding—including NVENC—automatically for each device.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Explore</strong><br><br>
+      Organize movies, shows, music, and books with plugin-driven matching and
+      enrichment from providers such as TMDB and TVDB.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Connect</strong><br><br>
+      Use the included web app or optional Jellyfin/Emby-compatible clients such
+      as VidHub, Findroid, and Infuse.
+    </td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Share</strong><br><br>
+      Give household members their own profiles, watch state, and parental
+      controls without giving up ownership of the server.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Deploy</strong><br><br>
+      Start the integrated stack with Docker Compose, then manage libraries,
+      users, providers, and playback settings in the admin UI.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Scale</strong><br><br>
+      Keep everything on one host or separate API, proxy, and transcode roles
+      across a shared PostgreSQL and Redis deployment.
+    </td>
+  </tr>
+</table>
+
+## Releases and updates
+
+Silo uses [Semantic Versioning](https://semver.org/) in the form
+`vMAJOR.MINOR.PATCH`, with suffixes such as `-alpha.1` for prereleases and
+optional `+build.7` metadata. The
+[GitHub Releases](https://github.com/Silo-Server/silo-server/releases) page is
+the canonical public history of shipped changes, with categorized notes,
+contributors, and a full comparison for every version.
+
+> [!IMPORTANT]
+> Until the maintainers select and publish Silo's first release, builds remain
+> identified by their commit SHA. No version is implied by this documentation.
+
+For every release, review the notes for configuration, compatibility, and
+upgrade information before updating. See
+[Release versioning](docs/release-versioning.md) for the version contract and
+maintainer release process.
 
 ## Deploy with Docker (recommended)
 
 The easiest way to run Silo is with Docker Compose 2.24 or newer. The default stack assumes you do
 not already have PostgreSQL and Redis available, so it bundles PostgreSQL, Redis, FFmpeg, and the
 application for a one-command start.
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Default stack</strong><br><br>
+      One integrated Silo server with bundled PostgreSQL and Redis. This is the
+      recommended starting point.
+    </td>
+    <td width="33%" valign="top">
+      <strong>GPU acceleration</strong><br><br>
+      Add <a href="#optional-intelamd-va-api-or-intel-quick-sync">VA-API / Quick Sync</a>
+      or <a href="#optional-nvidianvenc">NVIDIA NVENC</a> only when the host supports it.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Distributed deployment</strong><br><br>
+      Separate API, proxy, and transcode roles when one integrated host is no
+      longer the right fit. See the <a href="#distributed-examples">examples</a>.
+    </td>
+  </tr>
+</table>
 
 1. **Create a `.env` file**
 
@@ -261,6 +359,15 @@ If you prefer running Silo without Docker:
 
    The server starts at `http://localhost:8080` by default. All other settings are configured through the admin UI.
 
+## Documentation
+
+| Start with | Use it for |
+| --- | --- |
+| [Documentation index](docs/wiki/index.md) | Feature guides, administration, deployment, playback, and troubleshooting |
+| [Release versioning](docs/release-versioning.md) | Version selection, GitHub release notes, prereleases, and maintainer checks |
+| [Development guide](DEVELOPMENT.md) | Local setup, builds, tests, migrations, and repository structure |
+| [Canonical Settings API](docs/settings-api.md) | Client contracts, contextual headers, remote scopes, and effective reads |
+
 ## Reporting Issues
 
 Client implementers can use the [Canonical Settings API guide](docs/settings-api.md)
@@ -312,6 +419,11 @@ Donations go directly toward the costs of building and running the project:
 - Future development costs
 
 Sponsoring is entirely optional — Silo is and will remain free and open source. Bug reports, contributions, and feedback are just as valuable.
+
+<p align="center">
+  <a href="https://github.com/sponsors/quick104"><strong>Sponsor Silo</strong></a>
+  · <a href="https://discord.com/invite/4RxuUQAEnW"><strong>Join the Discord community</strong></a>
+</p>
 
 ## License & Trademarks
 

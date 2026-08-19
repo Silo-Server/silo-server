@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,43 @@ type fakeImageCacheJobs struct {
 	deletedCount  int
 	requeuedIDs   []int64
 	currentSource *string // when set, overrides CurrentTargetSourcePath
+}
+
+type targetImageCacheJobs struct {
+	fakeImageCacheJobs
+	retriedTarget  string
+	retryCalls     int
+	claimedTarget  string
+	targetClaims   [][]*models.MetadataImageCacheJob
+	targetCalls    int
+	runningResults []bool
+	runningCalls   int
+	alwaysRunning  bool
+}
+
+func (f *targetImageCacheJobs) retryTargetNow(_ context.Context, targetContentID string) error {
+	f.retriedTarget = targetContentID
+	f.retryCalls++
+	return nil
+}
+
+func (f *targetImageCacheJobs) claimDueForTarget(_ context.Context, _ string, targetContentID string, _ int) ([]*models.MetadataImageCacheJob, error) {
+	f.claimedTarget = targetContentID
+	var jobs []*models.MetadataImageCacheJob
+	if f.targetCalls < len(f.targetClaims) {
+		jobs = f.targetClaims[f.targetCalls]
+	}
+	f.targetCalls++
+	return jobs, nil
+}
+
+func (f *targetImageCacheJobs) targetHasRunningJobs(_ context.Context, _ string) (bool, error) {
+	running := f.alwaysRunning
+	if f.runningCalls < len(f.runningResults) {
+		running = f.runningResults[f.runningCalls]
+	}
+	f.runningCalls++
+	return running, nil
 }
 
 func (f *fakeImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
@@ -274,6 +312,141 @@ func TestImageCacheProcessorUpdatesItemArtworkOnSuccess(t *testing.T) {
 	}
 	if items.cachedPath != "tmdb/series/1396/backdrop/original.webp" {
 		t.Fatalf("cachedPath = %q", items.cachedPath)
+	}
+}
+
+func TestImageCacheProcessorCachesOnlyManuallyRefreshedTargetImmediately(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                23,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
+	}
+	cacher := &fakeImageCacher{result: &CacheImageResult{
+		BasePath:  "tmdb/series/1396/poster",
+		Ext:       ".webp",
+		Thumbhash: "thumb",
+	}}
+	resolver := &fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"}
+	items := &fakeItemArtworkUpdater{updated: true}
+
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{
+		Items: items,
+	})
+	if err := processor.CacheTargetArtwork(context.Background(), "series-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork() error = %v", err)
+	}
+	if jobs.retriedTarget != "series-1" || jobs.claimedTarget != "series-1" {
+		t.Fatalf("target retry/claim = %q/%q, want series-1", jobs.retriedTarget, jobs.claimedTarget)
+	}
+	if jobs.targetCalls != 2 {
+		t.Fatalf("target claim calls = %d, want 2", jobs.targetCalls)
+	}
+	// The retry-now reset runs once per refresh, not once per poll.
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	if jobs.succeededID != 23 {
+		t.Fatalf("succeededID = %d, want 23", jobs.succeededID)
+	}
+	if items.cachedPath != "tmdb/series/1396/poster/original.webp" {
+		t.Fatalf("cachedPath = %q", items.cachedPath)
+	}
+}
+
+func TestImageCacheProcessorReportsImmediateTargetFailure(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                24,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims: [][]*models.MetadataImageCacheJob{{job}, nil},
+	}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{err: errors.New("cache failed")},
+		&fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}},
+	)
+
+	err := processor.CacheTargetArtwork(context.Background(), "series-1")
+	if err == nil || !strings.Contains(err.Error(), "failed to cache") {
+		t.Fatalf("CacheTargetArtwork() error = %v, want cache failure", err)
+	}
+	if jobs.failedID != 24 {
+		t.Fatalf("failedID = %d, want 24", jobs.failedID)
+	}
+}
+
+func TestImageCacheProcessorRetriesTargetAfterConcurrentWorkerFinishes(t *testing.T) {
+	job := &models.MetadataImageCacheJob{
+		ID:                25,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "series-1",
+		SourcePath:        "tmdb://poster/series.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "1396",
+		ContentType:       "series",
+		ImageType:         ImageCacheImagePoster,
+	}
+	jobs := &targetImageCacheJobs{
+		targetClaims:   [][]*models.MetadataImageCacheJob{nil, {job}, nil},
+		runningResults: []bool{true, false},
+	}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{result: &CacheImageResult{BasePath: "tmdb/series/1396/poster", Ext: ".webp"}},
+		&fakeImageResolver{url: "https://image.tmdb.org/t/p/original/poster.jpg"},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}},
+	)
+
+	if err := processor.CacheTargetArtwork(context.Background(), "series-1"); err != nil {
+		t.Fatalf("CacheTargetArtwork() error = %v", err)
+	}
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	if jobs.succeededID != 25 {
+		t.Fatalf("succeededID = %d, want 25", jobs.succeededID)
+	}
+}
+
+func TestImageCacheProcessorStopsWaitingOnStuckBackgroundWorker(t *testing.T) {
+	// A worker that claimed the job and died holds its lease for
+	// imageCacheLeaseDuration. The interactive refresh must not block that
+	// long: it gives up and reports the artwork as still pending.
+	jobs := &targetImageCacheJobs{alwaysRunning: true}
+	processor := NewImageCacheProcessorWithTargets(
+		jobs,
+		&fakeImageCacher{},
+		&fakeImageResolver{},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{}},
+	)
+	processor.idleWaitTimeout = 20 * time.Millisecond
+
+	err := processor.CacheTargetArtwork(context.Background(), "series-1")
+	if !errors.Is(err, ErrTargetArtworkPending) {
+		t.Fatalf("CacheTargetArtwork() error = %v, want ErrTargetArtworkPending", err)
+	}
+	if jobs.retryCalls != 1 {
+		t.Fatalf("target retry calls = %d, want 1", jobs.retryCalls)
+	}
+	// A hot 10 Hz poll would issue far more probes than this in 20ms.
+	if jobs.runningCalls > 4 {
+		t.Fatalf("running probes = %d, want a backed-off poll", jobs.runningCalls)
 	}
 }
 

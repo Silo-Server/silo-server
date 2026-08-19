@@ -4,7 +4,7 @@
 // the user store. Clients render step kinds they know and skip the rest,
 // which is what lets the server add a stop without three app-store releases.
 //
-// Spec: docs/superpowers/specs/2026-07-27-invitations-and-onboarding-design.md
+// Design: docs/architecture/invitations-onboarding.md
 package onboarding
 
 import "context"

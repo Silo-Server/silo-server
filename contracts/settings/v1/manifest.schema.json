@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/contracts/settings/v1/manifest.schema.json",
   "title": "Silo cross-platform user settings manifest",
-  "description": "Canonical contract for every production, user-facing setting. See docs/superpowers/specs/2026-07-10-cross-platform-user-settings-contract-design.md.",
+  "description": "Canonical contract for every production, user-facing setting. See docs/architecture/settings-contract.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["api_version", "revision", "definitions"],

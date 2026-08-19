@@ -68,15 +68,29 @@ interface ItemRefreshJobResult {
   detail_content_id?: string;
   scan_path?: string;
   matched_files?: number;
+  // Set when the metadata refresh committed but its artwork did not finish
+  // caching. The refresh itself succeeded, so this is a warning, not an error.
+  artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
   };
+}
+
+interface RefreshItemMetadataContext {
+  toastID: string | number;
 }
 
 export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
+    onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
+      toastID: toast.loading(
+        mode === "complete"
+          ? "Complete metadata refresh running…"
+          : "Quick metadata refresh running…",
+      ),
+    }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
       const job = await api<AdminJob>(
         `/admin/items/${itemPathID(item.content_id)}/refresh-metadata`,
@@ -88,20 +102,27 @@ export function useRefreshItemMetadata() {
       const completed = await awaitAdminJob(job.id);
       return { job: completed };
     },
-    onSuccess: async ({ job }, { item, mode, onReplaced }) => {
+    onSuccess: async ({ job }, { item, mode, onReplaced }, context) => {
       const result = (job.result_payload ?? {}) as ItemRefreshJobResult;
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
+      const artworkWarning = result.artwork_cache_warning;
 
-      if (mode === "complete") {
-        toast.success("Complete refresh finished");
+      if (artworkWarning) {
+        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+          id: context?.toastID,
+          description: artworkWarning,
+        });
+      } else if (mode === "complete") {
+        toast.success("Complete refresh finished", { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(
           `Metadata refreshed. Found ${newFiles} new file version${newFiles === 1 ? "" : "s"}`,
+          { id: context?.toastID },
         );
       } else {
-        toast.success("Metadata refreshed");
+        toast.success("Metadata refreshed", { id: context?.toastID });
       }
 
       await Promise.all([
@@ -173,8 +194,10 @@ export function useRefreshItemMetadata() {
         await onReplaced(detailContentID);
       }
     },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+    onError: (err, _variables, context) => {
+      toast.error(err instanceof Error ? err.message : "Refresh failed", {
+        id: context?.toastID,
+      });
     },
   });
 }

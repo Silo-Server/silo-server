@@ -1,6 +1,6 @@
 # Intro Skip Mode: Never / Ask / Always
 
-Status: Proposed (spec + cross-repo plan)
+Status: Shipped in `silo-server` (2026-08-17, #660); client adoption tracked per repo
 Date: 2026-08-16
 Repos affected: `silo-server` (contract, migration, web), `silo-android`, `silo-apple`
 

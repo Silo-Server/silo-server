@@ -338,13 +338,14 @@ type ImageRequest struct {
 
 // RemoteImage describes an available image from a provider.
 type RemoteImage struct {
-	ProviderID string // Slug of the provider that returned this image
-	URL        string
-	Type       ImageType
-	Language   string
-	Width      int
-	Height     int
-	Rating     float64 // Vote average for ordering
+	ProviderID   string // Slug of the provider that returned this image
+	URL          string
+	Type         ImageType
+	Language     string
+	Width        int
+	Height       int
+	Rating       float64 // Vote average for ordering
+	IncludesText *bool   // nil when the provider does not report text presence
 }
 
 // ImageType classifies image purpose.

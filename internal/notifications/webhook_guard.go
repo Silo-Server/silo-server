@@ -8,9 +8,9 @@ import (
 )
 
 // webhookDeniedNetworks are the private/special ranges webhook destinations
-// must never resolve to (docs/superpowers/plans/notifications/04, "Trust
-// Model"). IPv4-mapped IPv6 addresses are unwrapped before checking, so the
-// IPv4 entries also cover ::ffff:0:0/96 bypass attempts.
+// must never resolve to (docs/architecture/notifications.md, "Trust model
+// and SSRF guard"). IPv4-mapped IPv6 addresses are unwrapped before
+// checking, so the IPv4 entries also cover ::ffff:0:0/96 bypass attempts.
 var webhookDeniedNetworks = func() []*net.IPNet {
 	cidrs := []string{
 		// IPv4 private/special.

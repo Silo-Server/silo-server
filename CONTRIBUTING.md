@@ -21,7 +21,7 @@ Silo is in heavy active development. Features get rewritten, APIs shift, whole s
 
 Small stuff (typo fixes, minor bugs) — just open a merge request. No ceremony.
 
-For anything bigger, start with an issue first. New features, API changes, schema migrations, large refactors, behavior changes — talk about it before writing code. Design docs live under `docs/superpowers/specs/` and `docs/superpowers/plans/` if you need examples.
+For anything bigger, start with an issue first. New features, API changes, schema migrations, large refactors, behavior changes — talk about it before writing code. Durable design docs live under `docs/architecture/`; working plans and specs are ephemeral and go in the PR description, not the repo.
 
 ## Don't Submit AI Slop
 

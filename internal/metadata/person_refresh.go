@@ -24,7 +24,8 @@ var (
 type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Update(ctx context.Context, person models.Person) error
-	FindRefreshCandidates(ctx context.Context, staleAfter time.Duration, limit int) ([]int64, error)
+	MarkRefreshAttempt(ctx context.Context, id int64) error
+	FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
 type PersonRefreshService struct {
@@ -82,15 +83,11 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 	return s.refreshPersonWithProviders(ctx, id, providers)
 }
 
-func (s *PersonRefreshService) FindCandidates(
-	ctx context.Context,
-	staleAfter time.Duration,
-	limit int,
-) ([]int64, error) {
+func (s *PersonRefreshService) FindCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if s.repo == nil {
 		return nil, fmt.Errorf("person refresh repository is not configured")
 	}
-	return s.repo.FindRefreshCandidates(ctx, staleAfter, limit)
+	return s.repo.FindRefreshCandidates(ctx, limit)
 }
 
 func (s *PersonRefreshService) refreshPersonWithProviders(
@@ -107,6 +104,15 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 	if person == nil {
 		return nil, ErrPersonNotFound
+	}
+	// Record the attempt before any provider I/O so the backoff survives a
+	// crash mid-refresh. The write is bookkeeping, not a precondition: if it
+	// fails, the refresh still runs and only the backoff is lost.
+	if err := s.repo.MarkRefreshAttempt(ctx, id); err != nil {
+		slog.WarnContext(ctx, "person refresh: failed to record refresh attempt", "component", "metadata",
+			"person_id", id,
+			"error", err,
+		)
 	}
 
 	accumulator := PersonDetailResult{

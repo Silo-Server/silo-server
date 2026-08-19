@@ -444,6 +444,11 @@ type Person struct {
 	PlexGUID        string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// MetadataRefreshAttemptedAt is when a provider lookup was last attempted
+	// for this person, whether or not it returned anything. nil means never
+	// attempted. Only the whole-row people loaders in catalog populate it;
+	// credit listings (ItemPerson) leave it nil.
+	MetadataRefreshAttemptedAt *time.Time
 }
 
 // ItemPerson represents a person's credit on a specific media item.

@@ -143,6 +143,23 @@ type itemRefreshTestRefresher struct {
 	folderID   int
 }
 
+type itemRefreshTestArtworkCacher struct {
+	contentID string
+	disabled  bool
+	called    bool
+	err       error
+}
+
+func (c *itemRefreshTestArtworkCacher) ArtworkCachingEnabled() bool {
+	return !c.disabled
+}
+
+func (c *itemRefreshTestArtworkCacher) CacheTargetArtwork(_ context.Context, contentID string) error {
+	c.called = true
+	c.contentID = contentID
+	return c.err
+}
+
 func (r *itemRefreshTestRefresher) RefreshItem(_ context.Context, contentID string) error {
 	r.contentID = contentID
 	return nil
@@ -299,6 +316,8 @@ func TestItemRefreshExecutorAllowsScanPathOutsideLibraryRoots(t *testing.T) {
 	skippedRootRepo := newItemRefreshTestSkippedRootRepo()
 
 	executor := NewItemRefreshExecutor(folderRepo, fileRepo, rootClaimRepo, groupClaimRepo, skippedRootRepo, nil, nil, ingester, refresher, nil, nil)
+	artworkCacher := &itemRefreshTestArtworkCacher{}
+	executor.SetArtworkCacher(artworkCacher)
 
 	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "119730834381996036",
@@ -321,8 +340,88 @@ func TestItemRefreshExecutorAllowsScanPathOutsideLibraryRoots(t *testing.T) {
 	if got, want := refresher.folderID, 3; got != want {
 		t.Fatalf("RefreshItemForLibrary() folder_id = %d, want %d", got, want)
 	}
+	if got, want := artworkCacher.contentID, "119730834381996036"; got != want {
+		t.Fatalf("CacheTargetArtwork() content_id = %q, want %q", got, want)
+	}
 	if got, want := result.MatchedFiles, 2; got != want {
 		t.Fatalf("Execute() matched files = %d, want %d", got, want)
+	}
+}
+
+func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
+	t.Parallel()
+
+	executor := NewItemRefreshExecutor(
+		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
+		&itemRefreshTestFileRepo{},
+		&itemRefreshTestRootClaimRepo{},
+		&itemRefreshTestGroupClaimRepo{},
+		newItemRefreshTestSkippedRootRepo(),
+		nil,
+		nil,
+		&itemRefreshTestIngester{},
+		&itemRefreshTestRefresher{},
+		nil,
+		nil,
+	)
+	executor.SetArtworkCacher(&itemRefreshTestArtworkCacher{err: errors.New("download failed")})
+
+	// The metadata refresh is already committed when artwork caching runs, so
+	// a caching failure must not discard the result the client needs.
+	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+		RequestedContentID: "series-1",
+		RefreshContentID:   "series-1",
+		ScanFolderID:       3,
+		ScanPath:           "/media/series-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want nil", err)
+	}
+	if got, want := result.ArtworkCacheWarning, "download failed"; got != want {
+		t.Fatalf("Execute() artwork warning = %q, want %q", got, want)
+	}
+	if got, want := result.RefreshContentID, "series-1"; got != want {
+		t.Fatalf("Execute() refresh content id = %q, want %q", got, want)
+	}
+}
+
+func TestItemRefreshExecutorSkipsArtworkStepWhenCachingDisabled(t *testing.T) {
+	t.Parallel()
+
+	executor := NewItemRefreshExecutor(
+		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
+		&itemRefreshTestFileRepo{},
+		&itemRefreshTestRootClaimRepo{},
+		&itemRefreshTestGroupClaimRepo{},
+		newItemRefreshTestSkippedRootRepo(),
+		nil,
+		nil,
+		&itemRefreshTestIngester{},
+		&itemRefreshTestRefresher{},
+		nil,
+		nil,
+	)
+	cacher := &itemRefreshTestArtworkCacher{disabled: true}
+	executor.SetArtworkCacher(cacher)
+
+	var totals []int
+	if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
+		RequestedContentID: "series-1",
+		RefreshContentID:   "series-1",
+		ScanFolderID:       3,
+		ScanPath:           "/media/series-1",
+	}, func(_, total int, _ string) {
+		totals = append(totals, total)
+	}); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if cacher.called {
+		t.Fatal("CacheTargetArtwork() called while image caching is disabled")
+	}
+	for _, total := range totals {
+		if total != 3 {
+			t.Fatalf("progress total = %d, want 3", total)
+		}
 	}
 }
 
@@ -367,6 +466,8 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 		nil,
 		nil,
 	)
+	artworkCacher := &itemRefreshTestArtworkCacher{}
+	executor.SetArtworkCacher(artworkCacher)
 
 	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID:     "old-episode-id",
@@ -396,6 +497,9 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	}
 	if got, want := refresher.contentID, "new-episode-id"; got != want {
 		t.Fatalf("RefreshItem() content_id = %q, want %q", got, want)
+	}
+	if got, want := artworkCacher.contentID, "new-episode-id"; got != want {
+		t.Fatalf("CacheTargetArtwork() content_id = %q, want %q", got, want)
 	}
 	if got, want := result.RefreshContentID, "new-episode-id"; got != want {
 		t.Fatalf("result refresh_content_id = %q, want %q", got, want)

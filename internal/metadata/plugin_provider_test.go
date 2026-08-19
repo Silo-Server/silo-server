@@ -400,6 +400,53 @@ func TestPluginProviderAssetRequests_ForwardProviderContext(t *testing.T) {
 	})
 }
 
+func TestPluginProviderGetImages_MapsIncludesTextMetadata(t *testing.T) {
+	metadata, err := structpb.NewStruct(map[string]any{
+		"rating":        8.5,
+		"includes_text": false,
+	})
+	if err != nil {
+		t.Fatalf("structpb.NewStruct() error = %v", err)
+	}
+	client := &fakePluginMetadataClient{
+		imagesResponse: &pluginv1.GetImagesResponse{Images: []*pluginv1.ImageRecord{
+			{
+				Url:      "https://artworks.thetvdb.com/example.jpg",
+				Kind:     "poster",
+				Language: "en",
+				Metadata: metadata,
+			},
+		}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         "tvdb",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+
+	images, err := provider.GetImages(context.Background(), ImageRequest{
+		ProviderIDs: map[string]string{"tvdb": "series-1"},
+		ContentType: "series",
+		Language:    "en",
+	})
+	if err != nil {
+		t.Fatalf("GetImages() error = %v", err)
+	}
+	if len(images) != 1 {
+		t.Fatalf("GetImages() returned %d images, want 1", len(images))
+	}
+	if images[0].Rating != 8.5 {
+		t.Fatalf("Rating = %v, want 8.5", images[0].Rating)
+	}
+	if images[0].IncludesText == nil || *images[0].IncludesText {
+		t.Fatalf("IncludesText = %v, want explicit false", images[0].IncludesText)
+	}
+}
+
 func mustStructFromStringMap(t *testing.T, values map[string]string) *structpb.Struct {
 	t.Helper()
 

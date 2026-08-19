@@ -39,7 +39,7 @@ you start only PostgreSQL and Redis. Change it before testing libraries against 
 
 If you are developing `Silo` and `silo-plugin-sdk` together, keep using the local [`go.work`](go.work) workspace. That workspace is a developer convenience only. CI and release builds run with `GOWORK=off`, so any new SDK helper used here must be pushed and tagged in `silo-plugin-sdk` before this repo can merge or release the change.
 
-Plugin authors should start with [docs/architecture/plugin-development.md](docs/architecture/plugin-development.md), which covers the RPC plugin package format, generated proto workflow, SDK import paths, route and asset exposure, and auth or user-config integration points.
+Plugin authors should start with the `silo-plugin-sdk` repository (usually checked out side-by-side with this one), which owns the RPC plugin package format, protobuf contracts, generated plugin API, SDK import paths, and manifest helpers.
 
 ## Make Targets
 

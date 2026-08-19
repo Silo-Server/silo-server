@@ -732,7 +732,14 @@ func (r *Runner) executeItemRefresh(job *models.AdminJob) {
 		r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
 	}
 
+	// The executor decides how many steps a refresh has (artwork caching adds a
+	// fourth), so the failure and completion totals track what it published
+	// rather than a hard-coded 3 that would make progress jump backwards.
+	progressTotal := 3
 	result, err := r.itemRefresh.Execute(ctx, req, func(current, total int, message string) {
+		if total > 0 {
+			progressTotal = total
+		}
 		if updateErr := r.repo.UpdateProgress(ctx, job.ID, current, total, message); updateErr != nil {
 			slog.Warn("admin jobs: failed to update item refresh progress",
 				"job_id", job.ID,
@@ -748,21 +755,25 @@ func (r *Runner) executeItemRefresh(job *models.AdminJob) {
 		message := err.Error()
 		switch {
 		case containsPhase(message, "scan scope"):
-			r.failJob(job.ID, 1, 3, "Item refresh failed", message)
+			r.failJob(job.ID, 1, progressTotal, "Item refresh failed", message)
 		case containsPhase(message, "match discovered files"):
-			r.failJob(job.ID, 2, 3, "Item refresh failed", message)
+			r.failJob(job.ID, 2, progressTotal, "Item refresh failed", message)
 		case containsPhase(message, "refresh metadata"):
-			r.failJob(job.ID, 3, 3, "Item refresh failed", message)
+			r.failJob(job.ID, 3, progressTotal, "Item refresh failed", message)
 		default:
-			r.failJob(job.ID, 0, 3, "Item refresh failed", message)
+			r.failJob(job.ID, 0, progressTotal, "Item refresh failed", message)
 		}
 		return
 	}
+	message := "Metadata refreshed"
+	if result != nil && result.ArtworkCacheWarning != "" {
+		message = "Metadata refreshed, artwork incomplete"
+	}
 	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
-		Message:         "Metadata refreshed",
-		ProgressCurrent: 3,
-		ProgressTotal:   3,
+		Message:         message,
+		ProgressCurrent: progressTotal,
+		ProgressTotal:   progressTotal,
 	}); err != nil {
 		slog.Warn("admin jobs: failed to complete item refresh", "job_id", job.ID, "error", err)
 		return

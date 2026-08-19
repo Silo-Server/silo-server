@@ -2,7 +2,7 @@
 // quality-aware registry shared by the web app and mobile clients for offline
 // playback. It replaces the former internal/download package, absorbing its
 // bandwidth/quota/serving logic and reshaping the table and /downloads contract. See
-// docs/superpowers/specs/2026-06-18-offline-sync-mobile-design.md.
+// docs/downloads-api.md.
 package downloads
 
 import (

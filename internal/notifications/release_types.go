@@ -5,8 +5,8 @@ import (
 )
 
 // Domain types for the user-facing release-notification system
-// (docs/superpowers/plans/notifications/). These are unrelated to the
-// operational catalog/jobs Hub defined in hub.go.
+// (docs/architecture/notifications.md, "Release types"). These are unrelated
+// to the operational catalog/jobs Hub defined in hub.go.
 
 // DeliveryTypeEpisodeAvailable is the v1 primary delivery type. The type
 // registry is extensible; clients must render unknown types with a generic

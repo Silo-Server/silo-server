@@ -3,8 +3,8 @@
 `mobitool.wasm` is [libmobi](https://github.com/bfabiszewski/libmobi)'s `mobitool`
 compiled to `wasm32-wasi`. The server runs it **in-process** via
 [`wazero`](https://github.com/tetratelabs/wazero) (pure Go) to convert
-MOBI/AZW/AZW3 ebooks to EPUB on demand. See the design doc:
-`docs/superpowers/specs/2026-06-17-kindle-epub-conversion-design.md`.
+MOBI/AZW/AZW3 ebooks to EPUB on demand. The consuming package is
+`internal/ebookconvert`, which `go:embed`s this artifact.
 
 ## Why this shape
 - **No cgo, no external binary.** The `.wasm` is `go:embed`-ed; the Go build stays
@@ -14,6 +14,34 @@ MOBI/AZW/AZW3 ebooks to EPUB on demand. See the design doc:
 - **Sandboxed.** Untrusted ebook bytes are parsed inside the WASM sandbox with
   only a per-conversion scratch dir mounted — a libmobi memory bug on a malicious
   file cannot reach the host.
+  - Sandbox scope: this is a **memory-safety boundary, not a hard filesystem
+    jail**. The input is mounted read-only via a confined `fs.FS` (no `..`
+    escape), but a writable wazero dir mount can still be traversed within the
+    server user's permissions, so filesystem isolation relies on running the
+    server as a constrained, non-root user (the container already does). Never
+    preopen the library directory or the cache root — only per-conversion
+    scratch dirs.
+
+## How the server uses it
+- The module is instantiated as a WASI **command module** per conversion
+  (argv ≈ `mobitool -e -o <outdir> <input>`), compiled once at startup and
+  reused. Both stdout **and** stderr are captured — mobitool reports many
+  failures on stdout with exit 0.
+- Conversion is **on-demand through the read endpoint** (never at scan/ingest),
+  gated by an admin setting and a capability endpoint, with the result cached on
+  disk. Cache keys combine strong source identity (file id + size + mtime +
+  scanner checksum when available) with a fingerprint of this `.wasm`, so
+  bumping the artifact transparently invalidates old conversions. Concurrent
+  reads of the same book singleflight into one conversion.
+- **Error taxonomy** (`internal/ebookconvert/errors.go`): *deterministic*
+  verdicts — DRM-protected, conversion failed (corrupt/unconvertible) — are
+  negatively cached so a known-bad file is not reconverted on every open;
+  *transient* verdicts — timeout, oversize source, caller cancellation — are
+  never cached and retry on the next read.
+- **Constraints:** DRM-free sources only (DRM removal is out of scope, always);
+  fixed-layout "Print Replica" books are not convertible (mobitool ignores
+  `-e`); source and output sizes, wall-clock time, wasm memory, and conversion
+  concurrency are all capped via `ebookconvert.Options`.
 
 ## Pinned versions
 

@@ -1,7 +1,8 @@
 // Package ebookconvert converts Kindle-family ebooks (MOBI/AZW/AZW3) to EPUB
 // in-process, by running libmobi's mobitool compiled to wasm32-wasi on the
 // wazero runtime. No cgo, no external binary; untrusted input is parsed inside
-// the WASM sandbox. See docs/.../2026-06-17-kindle-epub-conversion-design.md.
+// the WASM sandbox. See tools/mobitool-wasm/README.md for the module's build
+// provenance and the overall design.
 package ebookconvert
 
 import "errors"

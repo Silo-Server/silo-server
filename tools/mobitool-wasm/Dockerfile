@@ -12,7 +12,7 @@
 # Pins (bump deliberately; the converter cache key includes these):
 #   wasi-sdk 25.0 · libmobi 906274205c11944b628da1c553b255acb1af7c55 · zlib 1.3.1
 #
-# Proven build config (see ../../docs/superpowers/specs/2026-06-17-kindle-epub-conversion-design.md):
+# Proven build config (validated by the 2026-06-17 build spike; see ./README.md):
 #   --with-libxml2=no  -> internal xmlwriter provides OPF/EPUB support (-e)
 #   zlib built to wasm -> avoids libmobi's bundled-miniz duplicate-symbol clash
 #                         with mobitool's own miniz (EPUB zip) at wasm-ld time.
