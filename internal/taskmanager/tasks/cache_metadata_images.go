@@ -56,6 +56,10 @@ func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmana
 		hostname = "silo"
 	}
 	progress.Report(0, "Starting metadata image cache")
+	// Discovery widens the denominator mid-run, so the raw ratio can dip when a
+	// sweep enqueues a fresh page. Reports are sequential, so a high-water mark
+	// is enough to keep what the user sees from walking backwards.
+	reportedPercent := 0.0
 	stats, err := t.runner.RunUntilIdle(
 		ctx,
 		hostname,
@@ -63,7 +67,12 @@ func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmana
 		cacheMetadataImagesWorkers,
 		cacheMetadataImagesMaxRuntime,
 		func(update metadata.ImageCacheRunStats) {
-			progress.Report(cacheMetadataImagesPercent(update.Queue), formatCacheMetadataImagesProgress(update))
+			percent := cacheMetadataImagesPercent(update)
+			if percent < reportedPercent {
+				percent = reportedPercent
+			}
+			reportedPercent = percent
+			progress.Report(percent, formatCacheMetadataImagesProgress(update))
 		},
 	)
 	if err != nil {
@@ -90,7 +99,7 @@ func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmana
 }
 
 func formatCacheMetadataImagesProgress(stats metadata.ImageCacheRunStats) string {
-	processed := stats.Succeeded + stats.Failed + stats.Skipped
+	processed := stats.Processed()
 	message := fmt.Sprintf(
 		"Processed %d images across %d batches (%d cached, %d %s, %d skipped)",
 		processed,
@@ -100,18 +109,8 @@ func formatCacheMetadataImagesProgress(stats metadata.ImageCacheRunStats) string
 		imageCacheFailedAttemptLabel(stats.Failed),
 		stats.Skipped,
 	)
-	if stats.Queue.Known && stats.Queue.Total > 0 {
-		failureLabel := "terminal failures"
-		if stats.Queue.Failed == 1 {
-			failureLabel = "terminal failure"
-		}
-		message += fmt.Sprintf(
-			" · Overall %d/%d complete (%d %s)",
-			stats.Queue.Completed(),
-			stats.Queue.Total,
-			stats.Queue.Failed,
-			failureLabel,
-		)
+	if total := cacheMetadataImagesRunTotal(stats); total > 0 {
+		message += fmt.Sprintf(" · %d of %d in this run's backlog", processed, total)
 	}
 	return message
 }
@@ -123,18 +122,39 @@ func imageCacheFailedAttemptLabel(count int) string {
 	return "failed attempts"
 }
 
-func cacheMetadataImagesPercent(queue metadata.ImageCacheQueueProgress) float64 {
-	if !queue.Known || queue.Total <= 0 {
+// cacheMetadataImagesRunTotal is the denominator for this execution's progress:
+// the backlog sampled when the run started, plus the work discovery has
+// enqueued since, widened again if the run has somehow processed more than
+// both. Reporting against the run rather than the whole durable queue keeps a
+// steady-state server from opening at ~100%; counting discovered work keeps a
+// first-run backfill — which samples an empty backlog because discovery has not
+// swept yet — from reporting its first completed batch as the whole job.
+func cacheMetadataImagesRunTotal(stats metadata.ImageCacheRunStats) int64 {
+	if !stats.Backlog.Known {
 		return 0
 	}
-	percent := float64(queue.Completed()) * 100 / float64(queue.Total)
+	total := stats.Backlog.Outstanding() + int64(stats.EnqueuedExisting)
+	if processed := int64(stats.Processed()); processed > total {
+		total = processed
+	}
+	return total
+}
+
+func cacheMetadataImagesPercent(stats metadata.ImageCacheRunStats) float64 {
+	total := cacheMetadataImagesRunTotal(stats)
+	if total <= 0 {
+		return 0
+	}
+	processed := int64(stats.Processed())
+	if processed <= 0 {
+		return 0
+	}
+	percent := float64(processed) * 100 / float64(total)
 	// Execute reports the authoritative 100% after the runner returns. Keep a
-	// still-running task below 100% while it may be performing discovery.
-	if percent >= 100 {
+	// still-running task below 100% while it may still claim or discover work,
+	// and short enough of it that one-decimal rounding cannot read as complete.
+	if percent >= 99.9 {
 		return 99.9
-	}
-	if percent < 0 {
-		return 0
 	}
 	return percent
 }

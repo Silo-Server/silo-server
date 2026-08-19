@@ -60,11 +60,13 @@ type loopingImageCacheJobs struct {
 	succeededIDs   []int64
 	enqueueCalls   int
 	claimCalls     int
-	queueProgress  ImageCacheQueueProgress
+	backlog        ImageCacheBacklog
+	backlogCalls   int
 }
 
-func (f *loopingImageCacheJobs) GetQueueProgress(context.Context) (ImageCacheQueueProgress, error) {
-	return f.queueProgress, nil
+func (f *loopingImageCacheJobs) GetBacklog(context.Context) (ImageCacheBacklog, error) {
+	f.backlogCalls++
+	return f.backlog, nil
 }
 
 func (f *loopingImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
@@ -488,9 +490,7 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	// the queue empty and sweep again (enqueues 0 -> idle).
 	jobs := &loopingImageCacheJobs{
 		enqueueResults: []int{1, 0},
-		queueProgress: ImageCacheQueueProgress{
-			Known: true, Total: 10, Succeeded: 7, Failed: 1, Queued: 2,
-		},
+		backlog:        ImageCacheBacklog{Known: true, Queued: 2, Running: 1},
 		claimedResults: [][]*models.MetadataImageCacheJob{
 			{job1},
 			{},
@@ -535,8 +535,14 @@ func TestImageCacheProcessorRunUntilIdleDrainsNewWorkAddedDuringRun(t *testing.T
 	if len(progressUpdates) == 0 {
 		t.Fatal("RunUntilIdle() did not report progress")
 	}
-	if got := progressUpdates[0].Queue; got != jobs.queueProgress {
-		t.Fatalf("initial queue progress = %+v, want %+v", got, jobs.queueProgress)
+	if got := progressUpdates[0].Backlog; got != jobs.backlog {
+		t.Fatalf("initial backlog = %+v, want %+v", got, jobs.backlog)
+	}
+	if progressUpdates[0].Processed() != 0 {
+		t.Fatalf("initial processed = %d, want 0", progressUpdates[0].Processed())
+	}
+	if jobs.backlogCalls != 1 {
+		t.Fatalf("GetBacklog calls = %d, want exactly 1 per run", jobs.backlogCalls)
 	}
 	if got := progressUpdates[len(progressUpdates)-1]; got != stats {
 		t.Fatalf("last progress update = %+v, want final stats %+v", got, stats)

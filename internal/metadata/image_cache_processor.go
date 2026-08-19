@@ -46,10 +46,10 @@ type imageCacheTargetCachedPathReader interface {
 	CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
 }
 
-// imageCacheQueueProgressReader is optional so lightweight processor fakes and
+// imageCacheBacklogReader is optional so lightweight processor fakes and
 // alternate stores do not need a database-backed count implementation.
-type imageCacheQueueProgressReader interface {
-	GetQueueProgress(ctx context.Context) (ImageCacheQueueProgress, error)
+type imageCacheBacklogReader interface {
+	GetBacklog(ctx context.Context) (ImageCacheBacklog, error)
 }
 
 // LibraryRootResolver reports the media folder root paths a piece of content
@@ -198,11 +198,22 @@ type ImageCacheRunStats struct {
 	UploadedVariants int
 	ExistingVariants int
 	RuntimeLimited   bool
-	Queue            ImageCacheQueueProgress
+
+	// Backlog is the outstanding queue sampled once, when this run started, and
+	// never moves during the run. It forms this execution's progress denominator
+	// together with EnqueuedExisting, so retention deleting old rows underneath
+	// the run cannot move reported progress.
+	Backlog ImageCacheBacklog
 }
 
-// ImageCacheRunProgressReporter receives cumulative run stats and the latest
-// durable queue snapshot after each queue or discovery batch.
+// Processed reports how many jobs this run has finished with, in any terminal
+// way.
+func (s ImageCacheRunStats) Processed() int {
+	return s.Succeeded + s.Failed + s.Skipped
+}
+
+// ImageCacheRunProgressReporter receives cumulative stats for the current
+// execution after each queue or discovery batch.
 type ImageCacheRunProgressReporter func(ImageCacheRunStats)
 
 func (s *ImageCacheRunStats) add(other ImageCacheRunStats) {
@@ -300,7 +311,8 @@ func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string,
 	if p == nil || p.jobs == nil || p.cacher == nil || !p.enabled.Load() {
 		return total, nil
 	}
-	p.reportRunProgress(ctx, &total, reportProgress)
+	total.Backlog = p.sampleBacklog(ctx)
+	reportImageCacheRunProgress(reportProgress, total)
 
 	if maxRuntime <= 0 {
 		enqueued, derr := p.discoverExisting(ctx, claimLimit)
@@ -311,7 +323,7 @@ func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string,
 		stats, err := p.RunOnce(ctx, workerID, claimLimit, concurrency)
 		total.add(stats)
 		total.Batches = 1
-		p.reportRunProgress(ctx, &total, reportProgress)
+		reportImageCacheRunProgress(reportProgress, total)
 		return total, err
 	}
 
@@ -332,7 +344,7 @@ func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string,
 		stats, err := p.RunOnce(ctx, workerID, claimLimit, concurrency)
 		total.Batches++
 		total.add(stats)
-		p.reportRunProgress(ctx, &total, reportProgress)
+		reportImageCacheRunProgress(reportProgress, total)
 		if err != nil {
 			return total, err
 		}
@@ -348,7 +360,7 @@ func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string,
 			return total, err
 		}
 		total.EnqueuedExisting += enqueued
-		p.reportRunProgress(ctx, &total, reportProgress)
+		reportImageCacheRunProgress(reportProgress, total)
 		if enqueued == 0 {
 			// Catalog fully swept; throttle the next sweep.
 			p.markDiscovered()
@@ -357,19 +369,27 @@ func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string,
 	}
 }
 
-func (p *ImageCacheProcessor) reportRunProgress(ctx context.Context, stats *ImageCacheRunStats, reportProgress ImageCacheRunProgressReporter) {
-	if reportProgress == nil || stats == nil {
+// sampleBacklog counts the outstanding queue once per run. It is deliberately
+// not called per batch: the count is the run's fixed progress denominator, and
+// repeating it would put an aggregate over the whole queue on the hot path.
+func (p *ImageCacheProcessor) sampleBacklog(ctx context.Context) ImageCacheBacklog {
+	reader, ok := p.jobs.(imageCacheBacklogReader)
+	if !ok {
+		return ImageCacheBacklog{}
+	}
+	backlog, err := reader.GetBacklog(ctx)
+	if err != nil {
+		p.logger.WarnContext(ctx, "metadata image cache: failed to count queue backlog", "error", err)
+		return ImageCacheBacklog{}
+	}
+	return backlog
+}
+
+func reportImageCacheRunProgress(reportProgress ImageCacheRunProgressReporter, stats ImageCacheRunStats) {
+	if reportProgress == nil {
 		return
 	}
-	if reader, ok := p.jobs.(imageCacheQueueProgressReader); ok {
-		queue, err := reader.GetQueueProgress(ctx)
-		if err != nil {
-			p.logger.WarnContext(ctx, "metadata image cache: failed to count queue progress", "error", err)
-		} else {
-			stats.Queue = queue
-		}
-	}
-	reportProgress(*stats)
+	reportProgress(stats)
 }
 
 // discoveryDue reports whether enough time has elapsed since the last completed

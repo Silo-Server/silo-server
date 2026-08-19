@@ -6,5 +6,9 @@ export function clampTaskProgress(progress: number): number {
 export function formatTaskProgress(progress: number): string {
   const clamped = clampTaskProgress(progress);
   if (Number.isInteger(clamped)) return `${clamped}%`;
-  return `${clamped.toFixed(1)}%`;
+  const rounded = clamped.toFixed(1);
+  // A task that is still running reports just under 100 on purpose; one-decimal
+  // rounding must not turn that back into a finished-looking "100.0%".
+  if (Number(rounded) >= 100) return "99.9%";
+  return `${rounded}%`;
 }

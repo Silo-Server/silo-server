@@ -36,6 +36,21 @@ const (
 	imageCacheMaxAttempts   = 8
 	imageCacheDeferredRetry = 7 * 24 * time.Hour
 
+	// imageCacheFailedCooldown is how long a job that spent its attempt budget
+	// (or its lease-expiry budget) stays parked in 'failed' before catalog
+	// discovery may re-admit it. Long enough that permanently broken artwork
+	// costs one retry cycle a week instead of one every couple of hours, short
+	// enough that an hours-long provider or storage outage cannot tombstone the
+	// whole queue.
+	imageCacheFailedCooldown = 7 * 24 * time.Hour
+
+	// imageCachePermanentPark parks a failure that cannot heal on its own: the
+	// row is a deduplication tombstone and rediscovery must not pick it up
+	// again. Recovery stays possible through the source_path-change branch of
+	// the enqueue upsert, which is the only event that can make the artwork
+	// usable again.
+	imageCachePermanentPark = 100 * 365 * 24 * time.Hour
+
 	imageCacheEmptyResolvedURLError = "image resolver returned empty URL"
 )
 
@@ -57,54 +72,43 @@ type ImageCacheJobRepository struct {
 	pool *pgxpool.Pool
 }
 
-// ImageCacheQueueProgress is a point-in-time summary of the durable image
-// cache queue. Succeeded and failed are terminal states; queued and running are
-// still outstanding.
-type ImageCacheQueueProgress struct {
-	Known     bool
-	Total     int64
-	Succeeded int64
-	Failed    int64
-	Queued    int64
-	Running   int64
+// ImageCacheBacklog is a point-in-time count of the jobs still outstanding:
+// queued and running. It deliberately carries no succeeded/failed/total
+// breakdown — those need an unindexed full-table aggregate, while both counts
+// here are served by the queue's partial status indexes.
+type ImageCacheBacklog struct {
+	Known   bool
+	Queued  int64
+	Running int64
 }
 
-func (p ImageCacheQueueProgress) Completed() int64 {
-	return p.Succeeded + p.Failed
+func (b ImageCacheBacklog) Outstanding() int64 {
+	return b.Queued + b.Running
 }
 
 func NewImageCacheJobRepository(pool *pgxpool.Pool) *ImageCacheJobRepository {
 	return &ImageCacheJobRepository{pool: pool}
 }
 
-// GetQueueProgress returns exact global counts for task progress reporting.
-// Keeping this query on the repository ensures callers do not duplicate queue
-// status semantics or reach around the data layer.
-func (r *ImageCacheJobRepository) GetQueueProgress(ctx context.Context) (ImageCacheQueueProgress, error) {
-	var progress ImageCacheQueueProgress
+// GetBacklog counts the outstanding queue so a run can report progress against
+// the work it set out to do. Keeping this query on the repository ensures
+// callers do not duplicate queue status semantics or reach around the data
+// layer. Callers should sample it once per run, not per batch.
+func (r *ImageCacheJobRepository) GetBacklog(ctx context.Context) (ImageCacheBacklog, error) {
+	var backlog ImageCacheBacklog
 	if r == nil || r.pool == nil {
-		return progress, nil
+		return backlog, nil
 	}
 	err := r.pool.QueryRow(ctx, `
 		SELECT
-			COUNT(*),
-			COUNT(*) FILTER (WHERE status = 'succeeded'),
-			COUNT(*) FILTER (WHERE status = 'failed'),
-			COUNT(*) FILTER (WHERE status = 'queued'),
-			COUNT(*) FILTER (WHERE status = 'running')
-		FROM metadata_image_cache_jobs
-	`).Scan(
-		&progress.Total,
-		&progress.Succeeded,
-		&progress.Failed,
-		&progress.Queued,
-		&progress.Running,
-	)
+			(SELECT COUNT(*) FROM metadata_image_cache_jobs WHERE status = 'queued'),
+			(SELECT COUNT(*) FROM metadata_image_cache_jobs WHERE status = 'running')
+	`).Scan(&backlog.Queued, &backlog.Running)
 	if err != nil {
-		return ImageCacheQueueProgress{}, fmt.Errorf("counting metadata image cache jobs: %w", err)
+		return ImageCacheBacklog{}, fmt.Errorf("counting outstanding metadata image cache jobs: %w", err)
 	}
-	progress.Known = true
-	return progress, nil
+	backlog.Known = true
+	return backlog, nil
 }
 
 func imageCacheRetryDelay(attempt int) time.Duration {
@@ -131,23 +135,36 @@ type imageCacheFailureDisposition struct {
 	retryDelay time.Duration
 }
 
+// classifyImageCacheFailure decides what one failed attempt does to the row.
+//
+// A job that still has attempts left goes back to 'queued' with backoff. Once
+// the attempt budget is spent the row parks in 'failed', and next_attempt_at
+// decides whether it can ever come back: a failure that cannot heal unless the
+// source path changes is parked past any recovery window and acts as a
+// deduplication tombstone, while every other exhausted row parks for a cooldown
+// so that a long outage does not permanently kill artwork caching.
+//
+// Note that an empty resolved URL is *not* treated as permanent: the resolver
+// also returns "" while a plugin is disabled, upgrading, or still loading, and
+// this layer cannot tell that apart from artwork the provider no longer has.
 func classifyImageCacheFailure(attemptCount int, errText string) imageCacheFailureDisposition {
 	nextAttempt := attemptCount + 1
-	if errText == imageCacheEmptyResolvedURLError {
+	if nextAttempt < imageCacheMaxAttempts {
 		return imageCacheFailureDisposition{
-			status:  ImageCacheStatusFailed,
-			attempt: nextAttempt,
+			status:     ImageCacheStatusQueued,
+			attempt:    nextAttempt,
+			retryDelay: imageCacheFailureRetryDelay(nextAttempt, errText),
 		}
 	}
 
-	status := ImageCacheStatusQueued
-	if nextAttempt >= imageCacheMaxAttempts {
-		status = ImageCacheStatusFailed
+	park := imageCacheFailedCooldown
+	if isStableProviderImageFailure(errText) {
+		park = imageCachePermanentPark
 	}
 	return imageCacheFailureDisposition{
-		status:     status,
+		status:     ImageCacheStatusFailed,
 		attempt:    nextAttempt,
-		retryDelay: imageCacheFailureRetryDelay(nextAttempt, errText),
+		retryDelay: park,
 	}
 }
 
@@ -267,6 +284,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			status = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 'queued'
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN 'queued'
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN 'queued'
@@ -277,6 +297,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			attempt_count = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 0
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN 0
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN 0
@@ -284,6 +307,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			next_attempt_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN NOW()
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NOW()
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -293,6 +319,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			locked_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NULL
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN NULL
@@ -300,6 +329,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			locked_by = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN ''
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -309,6 +341,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			last_error = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN ''
@@ -316,6 +351,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			completed_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN NULL
+				WHEN metadata_image_cache_jobs.status = 'failed'
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -325,6 +363,10 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			updated_at = NOW()
 		WHERE metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 		   OR metadata_image_cache_jobs.status IN ('queued', 'running')
+		   OR (
+			   metadata_image_cache_jobs.status = 'failed'
+			   AND metadata_image_cache_jobs.next_attempt_at <= NOW()
+		   )
 		   OR (
 			   $%d::boolean
 			   AND metadata_image_cache_jobs.status = 'succeeded'
@@ -345,6 +387,10 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 	return int(tag.RowsAffected()), nil
 }
 
+// recoverExpiredRunning releases jobs whose worker lease expired, burning one
+// attempt each. A job that runs out of attempts this way parks for the failure
+// cooldown rather than forever: repeated lease expiry means workers kept dying,
+// which says nothing about whether the artwork itself is usable.
 func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
@@ -354,7 +400,7 @@ func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) err
 			END,
 			attempt_count = attempt_count + 1,
 			next_attempt_at = CASE
-				WHEN attempt_count + 1 >= $2 THEN next_attempt_at
+				WHEN attempt_count + 1 >= $2 THEN NOW() + $3::interval
 				ELSE NOW()
 			END,
 			locked_at = NULL,
@@ -366,7 +412,7 @@ func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) err
 			updated_at = NOW()
 		WHERE status = 'running'
 		  AND locked_at < NOW() - $1::interval
-	`, intervalLiteral(imageCacheLeaseDuration), imageCacheMaxAttempts)
+	`, intervalLiteral(imageCacheLeaseDuration), imageCacheMaxAttempts, intervalLiteral(imageCacheFailedCooldown))
 	if err != nil {
 		return fmt.Errorf("recovering expired metadata image cache jobs: %w", err)
 	}
@@ -832,6 +878,10 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			WHERE j.id IS NULL
 			   OR j.source_path IS DISTINCT FROM ac.source_path
 			   OR j.status = 'succeeded'
+			   OR (
+				   j.status = 'failed'
+				   AND j.next_attempt_at <= NOW()
+			   )
 			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
 			LIMIT $1
 		)

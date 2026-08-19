@@ -33,16 +33,19 @@ func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
 	}
 }
 
-func TestClassifyImageCacheFailureParksEmptyResolverURL(t *testing.T) {
+func TestClassifyImageCacheFailureRetriesEmptyResolverURL(t *testing.T) {
+	// The resolver also returns an empty URL while a plugin is disabled,
+	// upgrading, or still loading, so this must never tombstone artwork on the
+	// first attempt.
 	got := classifyImageCacheFailure(0, imageCacheEmptyResolvedURLError)
-	if got.status != ImageCacheStatusFailed {
-		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
+	if got.status != ImageCacheStatusQueued {
+		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusQueued)
 	}
 	if got.attempt != 1 {
 		t.Fatalf("attempt = %d, want 1", got.attempt)
 	}
-	if got.retryDelay != 0 {
-		t.Fatalf("retry delay = %s, want 0", got.retryDelay)
+	if got.retryDelay != time.Minute {
+		t.Fatalf("retry delay = %s, want 1m", got.retryDelay)
 	}
 }
 
@@ -59,7 +62,7 @@ func TestClassifyImageCacheFailureRetriesTransientError(t *testing.T) {
 	}
 }
 
-func TestClassifyImageCacheFailureParksExhaustedTransientError(t *testing.T) {
+func TestClassifyImageCacheFailureParksExhaustedTransientErrorRecoverably(t *testing.T) {
 	got := classifyImageCacheFailure(imageCacheMaxAttempts-1, "temporary network error")
 	if got.status != ImageCacheStatusFailed {
 		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
@@ -67,29 +70,24 @@ func TestClassifyImageCacheFailureParksExhaustedTransientError(t *testing.T) {
 	if got.attempt != imageCacheMaxAttempts {
 		t.Fatalf("attempt = %d, want %d", got.attempt, imageCacheMaxAttempts)
 	}
+	if got.retryDelay != imageCacheFailedCooldown {
+		t.Fatalf("retry delay = %s, want the recoverable cooldown %s", got.retryDelay, imageCacheFailedCooldown)
+	}
+	if got.retryDelay >= imageCachePermanentPark {
+		t.Fatal("an outage must not park a job past the recovery window")
+	}
 }
 
-func TestImageCacheTerminalFailuresStayParked(t *testing.T) {
-	body, err := os.ReadFile("image_cache_job_repo.go")
-	if err != nil {
-		t.Fatalf("read image_cache_job_repo.go: %v", err)
+func TestClassifyImageCacheFailureTombstonesExhaustedStableFailure(t *testing.T) {
+	got := classifyImageCacheFailure(
+		imageCacheMaxAttempts-1,
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 404",
+	)
+	if got.status != ImageCacheStatusFailed {
+		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
 	}
-	sql := string(body)
-	for _, forbidden := range []string{
-		"WHEN metadata_image_cache_jobs.status = 'failed'",
-		"j.status = 'failed'",
-	} {
-		if strings.Contains(sql, forbidden) {
-			t.Fatalf("terminal image cache jobs must not be rediscovered: found %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path",
-		"j.source_path IS DISTINCT FROM ac.source_path",
-	} {
-		if !strings.Contains(sql, required) {
-			t.Fatalf("changed image sources must be eligible for caching again: missing %q", required)
-		}
+	if got.retryDelay != imageCachePermanentPark {
+		t.Fatalf("retry delay = %s, want the permanent park %s", got.retryDelay, imageCachePermanentPark)
 	}
 }
 
