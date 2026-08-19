@@ -1,5 +1,14 @@
 # Feature Changelog
 
+## 2026-08-19
+
+### Make metadata refresh finish with the right artwork
+Manual Quick and Complete Refresh now finish the selected item's artwork before reporting success instead of leaving it behind the global image-cache backlog.
+- Chooses a text-bearing poster in the library's metadata language, then English, another language, and finally textless artwork.
+- Honors an optional `includes_text` signal from metadata plugins so a language-tagged but textless poster cannot outrank one that actually carries a title.
+- Claims only the refreshed item's cache jobs, retries failed or delayed jobs, and waits for an existing worker without draining unrelated artwork.
+- Replaces the web app's refresh spinner with the final success or failure message.
+
 ## 2026-08-16
 
 ### Let viewers turn the intro prompt off

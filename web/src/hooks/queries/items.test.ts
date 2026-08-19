@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   isItemDetailQueryKey: vi.fn((_queryKey: unknown, _itemId: string) => true),
   updateCatalogItemDetail: vi.fn(),
   toastError: vi.fn(),
+  toastLoading: vi.fn(),
   toastSuccess: vi.fn(),
   useMutation: vi.fn(),
   useQueryClient: vi.fn(),
@@ -56,11 +57,17 @@ vi.mock("@/pages/homeSurfaceRefresh", () => ({
 vi.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mocks.toastError(...args),
+    loading: (...args: unknown[]) => mocks.toastLoading(...args),
     success: (...args: unknown[]) => mocks.toastSuccess(...args),
   },
 }));
 
-import { fetchWatchDetail, redetectEpisodeIntro, useWatchedStateMutation } from "./items";
+import {
+  fetchWatchDetail,
+  redetectEpisodeIntro,
+  useRefreshItemMetadata,
+  useWatchedStateMutation,
+} from "./items";
 
 type WatchedMutationContext = { previous: Array<[readonly unknown[], unknown]> };
 
@@ -72,6 +79,27 @@ type WatchedMutationOptions = {
   onSettled?: () => Promise<unknown>;
 };
 
+type RefreshMetadataVariables = {
+  item: { content_id: string; type: string };
+  mode: "quick" | "complete";
+};
+
+type RefreshMetadataContext = { toastID: string | number };
+
+type RefreshMetadataMutationOptions = {
+  onMutate?: (variables: RefreshMetadataVariables) => RefreshMetadataContext;
+  onSuccess?: (
+    data: { job: { result_payload?: Record<string, unknown> } },
+    variables: RefreshMetadataVariables,
+    context?: RefreshMetadataContext,
+  ) => Promise<void>;
+  onError?: (
+    err: unknown,
+    variables: RefreshMetadataVariables,
+    context?: RefreshMetadataContext,
+  ) => void;
+};
+
 describe("item query helpers", () => {
   beforeEach(() => {
     mocks.api.mockReset();
@@ -81,6 +109,8 @@ describe("item query helpers", () => {
     mocks.isItemDetailQueryKey.mockReset();
     mocks.isItemDetailQueryKey.mockReturnValue(true);
     mocks.toastError.mockReset();
+    mocks.toastLoading.mockReset();
+    mocks.toastLoading.mockReturnValue("refresh-toast");
     mocks.toastSuccess.mockReset();
     mocks.useMutation.mockReset();
     mocks.useMutation.mockImplementation((options: unknown) => ({
@@ -105,6 +135,45 @@ describe("item query helpers", () => {
 
     expect(mocks.api).toHaveBeenCalledWith("/admin/items/episode%201%2Fid%3Aabc/redetect-intro", {
       method: "POST",
+    });
+  });
+
+  it("shows one spinning refresh notification and replaces it with success", async () => {
+    const invalidateQueries = vi.fn().mockResolvedValue(undefined);
+    mocks.useQueryClient.mockReturnValue({ invalidateQueries });
+
+    useRefreshItemMetadata();
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as RefreshMetadataMutationOptions;
+    const variables: RefreshMetadataVariables = {
+      item: { content_id: "series-1", type: "series" },
+      mode: "quick",
+    };
+
+    const context = options.onMutate?.(variables);
+    expect(mocks.toastLoading).toHaveBeenCalledWith("Quick metadata refresh running…");
+
+    await options.onSuccess?.({ job: { result_payload: {} } }, variables, context);
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Metadata refreshed", {
+      id: "refresh-toast",
+    });
+  });
+
+  it("replaces the spinning refresh notification with a failure", () => {
+    useRefreshItemMetadata();
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as RefreshMetadataMutationOptions;
+    const variables: RefreshMetadataVariables = {
+      item: { content_id: "series-1", type: "series" },
+      mode: "quick",
+    };
+    const context = options.onMutate?.(variables);
+
+    options.onError?.(new Error("Artwork download failed"), variables, context);
+    expect(mocks.toastError).toHaveBeenCalledWith("Artwork download failed", {
+      id: "refresh-toast",
     });
   });
 
