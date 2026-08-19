@@ -76,7 +76,8 @@ modern experience at home or away.
 ## Releases and updates
 
 Silo uses [Semantic Versioning](https://semver.org/) in the form
-`vMAJOR.MINOR.PATCH`, with suffixes such as `-alpha.1` for prereleases. The
+`vMAJOR.MINOR.PATCH`, with suffixes such as `-alpha.1` for prereleases and
+optional `+build.7` metadata. The
 [GitHub Releases](https://github.com/Silo-Server/silo-server/releases) page is
 the canonical public history of shipped changes, with categorized notes,
 contributors, and a full comparison for every version.

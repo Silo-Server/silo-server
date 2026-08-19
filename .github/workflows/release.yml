@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Semantic version tag (vMAJOR.MINOR.PATCH[-PRERELEASE])
+        description: Semantic version tag (vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD])
         required: true
         type: string
       prerelease:
@@ -39,19 +39,22 @@ jobs:
 
           core_identifier='(0|[1-9][0-9]*)'
           prerelease_identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-          version_pattern="^v${core_identifier}\\.${core_identifier}\\.${core_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?$"
+          build_identifier='[0-9A-Za-z-]+'
+          version_pattern="^v${core_identifier}\\.${core_identifier}\\.${core_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?(\\+${build_identifier}(\\.${build_identifier})*)?$"
 
           if [[ ! "$VERSION" =~ $version_pattern ]]; then
-            echo "::error::Version must use vMAJOR.MINOR.PATCH with an optional prerelease suffix."
+            echo "::error::Version must use vMAJOR.MINOR.PATCH with optional prerelease and build metadata."
             exit 1
           fi
 
-          if [[ "$VERSION" == *-* && "$PRERELEASE" != "true" ]]; then
+          version_without_build="${VERSION%%+*}"
+
+          if [[ "$version_without_build" == *-* && "$PRERELEASE" != "true" ]]; then
             echo "::error::A version with a prerelease suffix must be marked as a prerelease."
             exit 1
           fi
 
-          if [[ "$VERSION" != *-* && "$PRERELEASE" == "true" ]]; then
+          if [[ "$version_without_build" != *-* && "$PRERELEASE" == "true" ]]; then
             echo "::error::A stable version cannot be marked as a prerelease."
             exit 1
           fi

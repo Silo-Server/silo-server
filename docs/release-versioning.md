@@ -12,6 +12,8 @@ Release tags follow [Semantic Versioning](https://semver.org/) with a leading
 
 - Stable release: `vMAJOR.MINOR.PATCH`, for example `v1.2.0`
 - Prerelease: `vMAJOR.MINOR.PATCH-SUFFIX`, for example `v0.1.0-alpha.1`
+- Build metadata: append `+IDENTIFIER`, for example `v1.2.0+build.7` or
+  `v0.1.0-alpha.1+build.7`
 
 For releases below `v1.0.0`, a minor release may include breaking changes. Every
 release note must call out upgrade, configuration, and compatibility impact when
@@ -50,6 +52,11 @@ announcing a release.
 The workflow rejects non-SemVer tags, mismatched prerelease settings, and runs
 from branches other than `main`. It also refuses to reuse a release tag or create
 a release when there are no commits since the previous one.
+
+GitHub's manual-workflow permission is the release access boundary: only users
+with repository write access can dispatch it. If Silo later requires a second
+approval, maintainers should configure a protected release environment with
+required reviewers and attach the release job to it before use.
 
 This process does not choose or create Silo's first version. The first tag must
 be agreed by the maintainers before the workflow is run.
