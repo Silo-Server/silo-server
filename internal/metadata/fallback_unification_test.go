@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type fakePersonRefreshRepo struct {
-	persons         map[int64]models.Person
-	refreshAttempts []int64
+	persons           map[int64]models.Person
+	refreshAttempts   []int64
+	refreshAttemptErr error
 }
 
 func newFakePersonRefreshRepo(persons ...models.Person) *fakePersonRefreshRepo {
@@ -36,13 +36,13 @@ func (r *fakePersonRefreshRepo) Update(_ context.Context, person models.Person) 
 	return nil
 }
 
-func (r *fakePersonRefreshRepo) FindRefreshCandidates(_ context.Context, _ time.Duration, _ int) ([]int64, error) {
+func (r *fakePersonRefreshRepo) FindRefreshCandidates(_ context.Context, _ int) ([]int64, error) {
 	return nil, nil
 }
 
 func (r *fakePersonRefreshRepo) MarkRefreshAttempt(_ context.Context, id int64) error {
 	r.refreshAttempts = append(r.refreshAttempts, id)
-	return nil
+	return r.refreshAttemptErr
 }
 
 type stubPersonProvider struct {
@@ -458,5 +458,30 @@ func TestPersonRefreshWithProviders_RecordsFailedAttempt(t *testing.T) {
 	}
 	if len(repo.refreshAttempts) != 1 || repo.refreshAttempts[0] != 3 {
 		t.Fatalf("refresh attempts = %v, want [3]", repo.refreshAttempts)
+	}
+}
+
+// A failed attempt write is bookkeeping loss, not a reason to skip the refresh
+// the caller asked for.
+func TestPersonRefreshWithProviders_RefreshesWhenAttemptWriteFails(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{
+		ID:     4,
+		Name:   "Attempt Write Fails",
+		TmdbID: "tmdb-4",
+	})
+	repo.refreshAttemptErr = errors.New("timeout: context deadline exceeded")
+	service := &PersonRefreshService{repo: repo}
+
+	person, err := service.refreshPersonWithProviders(context.Background(), 4, []Provider{
+		stubPersonProvider{slug: "tmdb", detail: &PersonDetailResult{
+			Name: "Attempt Write Fails",
+			Bio:  "Refreshed anyway",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("refreshPersonWithProviders() error = %v, want nil", err)
+	}
+	if person.Bio != "Refreshed anyway" {
+		t.Fatalf("bio = %q, want %q", person.Bio, "Refreshed anyway")
 	}
 }

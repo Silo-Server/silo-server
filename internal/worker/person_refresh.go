@@ -11,13 +11,12 @@ import (
 
 type PersonRefresher interface {
 	RefreshPerson(ctx context.Context, id int64) (*models.Person, error)
-	FindCandidates(ctx context.Context, staleAfter time.Duration, limit int) ([]int64, error)
+	FindCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
 type PersonRefreshWorkerConfig struct {
 	Interval       time.Duration
 	Delay          time.Duration
-	StaleAfter     time.Duration
 	BatchSize      int
 	RefreshTimeout time.Duration
 }
@@ -26,7 +25,6 @@ func DefaultPersonRefreshWorkerConfig() PersonRefreshWorkerConfig {
 	return PersonRefreshWorkerConfig{
 		Interval:       10 * time.Minute,
 		Delay:          200 * time.Millisecond,
-		StaleAfter:     90 * 24 * time.Hour,
 		BatchSize:      100,
 		RefreshTimeout: 2 * time.Minute,
 	}
@@ -49,9 +47,6 @@ func NewPersonRefreshWorker(service PersonRefresher, config PersonRefreshWorkerC
 	}
 	if config.Delay < 0 {
 		config.Delay = 0
-	}
-	if config.StaleAfter < 0 {
-		config.StaleAfter = 0
 	}
 	if config.BatchSize <= 0 {
 		config.BatchSize = 100
@@ -158,7 +153,7 @@ func (w *PersonRefreshWorker) collectBatch() []int64 {
 		return batch
 	}
 
-	candidates, err := w.service.FindCandidates(context.Background(), w.config.StaleAfter, w.config.BatchSize-len(batch))
+	candidates, err := w.service.FindCandidates(context.Background(), w.config.BatchSize-len(batch))
 	if err != nil {
 		slog.Warn("person refresh worker: failed to find candidates", "error", err)
 		return batch
