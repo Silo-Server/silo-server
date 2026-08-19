@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -180,6 +181,40 @@ func TestPrepareTransportV3LocalFallbackRejectsUnavailableTransformations(t *tes
 	_, transportErr := handler.prepareTransportV3(request, &playback.Session{ID: "session-local-capability"}, v3HandlerFixtureFile(t), playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac"})
 	if transportErr == nil || transportErr.reason != "transcode_node_capability_unavailable" || !transportErr.retryable {
 		t.Fatalf("transport error = %#v", transportErr)
+	}
+}
+
+func TestPrepareTransportV3IdentityRejectsStaleDVRecipe(t *testing.T) {
+	for _, profile := range []int{7, 8} {
+		t.Run(fmt.Sprintf("profile_%d", profile), func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
+				Name:          playback.TransformationServerDV7HDR10V3,
+				RecipeVersion: playback.TransformationServerDV7HDR10RecipeVersionV3,
+				Available:     true,
+			}}))
+			plan := &playback.PlanV3{
+				PlanID:   "plan:stale-dv-recipe",
+				Delivery: playback.DeliveryRemuxProgressiveV3,
+				Source:   playback.SourceDescriptorV3{DVProfile: profile},
+				Claims:   playback.ValidationClaimsV3{Video: playback.VideoClaimsV3{HDR10: true}},
+				Transformations: []playback.TransformationV3{{
+					Name:          playback.TransformationServerDV7HDR10V3,
+					Executor:      playback.ExecutorServerV3,
+					RecipeVersion: "1",
+				}},
+			}
+
+			_, transportErr := handler.prepareTransportV3(
+				httptest.NewRequest(http.MethodPost, "/", nil),
+				&playback.Session{ID: "session-stale-dv-recipe"},
+				v3HandlerFixtureFile(t),
+				playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy"},
+			)
+			if transportErr == nil || transportErr.reason != "transcode_node_capability_unavailable" || !transportErr.retryable {
+				t.Fatalf("transport error = %#v, want retryable capability mismatch", transportErr)
+			}
+		})
 	}
 }
 

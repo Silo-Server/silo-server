@@ -878,6 +878,11 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			return preparedTransportV3{}, err
 		}
 	}
+	if !servedByProxy && planRequiresServerTransformationsV3(result.Plan) {
+		if err := validateAdvertisedTransformationsV3(result.Plan, h.transformationRegistryV3(r.Context()).Advertised()); err != nil {
+			return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "No available playback executor can run the selected playback recipe.", retryable: true, cause: err}
+		}
+	}
 
 	previousNodeURL := session.TranscodeNodeURL
 	previousTransportID := remoteTransportID(session)

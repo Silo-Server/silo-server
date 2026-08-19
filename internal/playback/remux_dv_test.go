@@ -99,6 +99,12 @@ func TestSupportsDV7HDR10FilterChainTimesOut(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > 5*time.Second {
 		t.Fatalf("FFmpeg capability probe took %v, want a bounded timeout", elapsed)
 	}
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho dovi_rpu\necho filter_units\n"), 0o755); err != nil {
+		t.Fatalf("replace fake ffmpeg: %v", err)
+	}
+	if !supportsDV7HDR10FilterChain(bin) {
+		t.Fatal("an inconclusive timeout was cached instead of re-probing FFmpeg")
+	}
 }
 
 // Profile 8 base layers are self-contained: the RPU stays valid without an

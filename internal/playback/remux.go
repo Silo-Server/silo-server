@@ -63,7 +63,11 @@ func supportsDV7HDR10FilterChain(bin string) bool {
 	probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(probeCtx, bin, "-hide_banner", "-bsfs").Output()
-	available := err == nil && hasDV7HDR10FilterChain(out)
+	if err != nil {
+		slog.Warn("failed to probe ffmpeg dovi_rpu/filter_units bitstream filters; validated Profile 7 HDR10 remux is disabled for this request", "ffmpeg", bin, "error", err)
+		return false
+	}
+	available := hasDV7HDR10FilterChain(out)
 	if !available {
 		slog.Warn("ffmpeg lacks the dovi_rpu/filter_units bitstream filters; validated Profile 7 HDR10 remux is disabled", "ffmpeg", bin)
 	}

@@ -127,9 +127,9 @@ unknown, and both look like an absent field.
 delivery classes a client negotiates in. §4 gives the folding.
 
 `transformations` advertises only what the *installed* FFmpeg was probed for at
-startup — a server without a `dovi_rpu` bitstream filter does not list
-`server_dv7_to_hdr10`. A client must not assume a transformation exists because
-this document names it.
+startup — a server without both the `dovi_rpu` and `filter_units` bitstream
+filters does not list `server_dv7_to_hdr10`. A client must not assume a
+transformation exists because this document names it.
 
 `enabled` survives from the rollout period and is now constant `true`; the
 negative shape was deliberately removed before v1 lock because v3 is the only
