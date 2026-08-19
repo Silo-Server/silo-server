@@ -24,7 +24,7 @@
   <a href="#deploy-with-docker-recommended">Installation</a>
   · <a href="docs/wiki/index.md">Documentation</a>
   · <a href="https://github.com/Silo-Server/silo-server/releases">Releases</a>
-  · <a href="https://discord.gg/4RxuUQAEnW">Discord</a>
+  · <a href="https://discord.com/invite/4RxuUQAEnW">Discord</a>
   · <a href="https://github.com/sponsors/quick104">Donate</a>
   · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
@@ -423,7 +423,7 @@ Sponsoring is entirely optional — Silo is and will remain free and open source
 
 <p align="center">
   <a href="https://github.com/sponsors/quick104"><strong>Sponsor Silo</strong></a>
-  · <a href="https://discord.gg/4RxuUQAEnW"><strong>Join the Discord community</strong></a>
+  · <a href="https://discord.com/invite/4RxuUQAEnW"><strong>Join the Discord community</strong></a>
 </p>
 
 ## License & Trademarks
