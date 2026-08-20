@@ -326,11 +326,12 @@ func videoToolboxSupportsTargetCodec(ffmpegPath, codec string) (bool, string) {
 }
 
 func cachedVideoToolboxProbe(ffmpegPath string) hardwareProbeResult {
-	// Cache on the cleaned spelling, but execute the exact path the transcode
-	// will run: filepath.Clean turns "./ffmpeg-full" into a bare name, which
-	// would probe a PATH binary instead of the configured file.
+	// Execute the exact path the transcode will run and cache on that same
+	// spelling: filepath.Clean would turn "./ffmpeg" into a bare name that
+	// collides with the PATH-resolved executable, which can be a different
+	// binary with different capabilities.
 	execPath := probeExecFFmpegPath(ffmpegPath)
-	cacheKey := normalizeFFmpegPath(ffmpegPath)
+	cacheKey := execPath
 	videoToolboxProbeCache.Lock()
 	if result, ok := videoToolboxProbeCache.byPath[cacheKey]; ok {
 		videoToolboxProbeCache.Unlock()

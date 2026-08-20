@@ -659,3 +659,21 @@ func TestCachedVideoToolboxProbeExecutesConfiguredRelativePath(t *testing.T) {
 		t.Fatalf("probe must execute the configured relative path, got reason %q", result.reason)
 	}
 }
+
+func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing.T) {
+	setupHWAccelTest(t)
+	capable := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+	incapable := writeFakeFFmpeg(t, fakeFFmpegProbe{})
+	// PATH resolves the bare "ffmpeg" name to the incapable binary while the
+	// dot-relative spelling names the capable one; a cleaned cache key would
+	// collide the two and let one spelling's verdict leak to the other.
+	t.Setenv("PATH", filepath.Dir(incapable.path))
+	t.Chdir(filepath.Dir(capable.path))
+
+	if result := cachedVideoToolboxProbe("./" + filepath.Base(capable.path)); !result.available {
+		t.Fatalf("relative spelling should probe the capable binary, got %q", result.reason)
+	}
+	if result := cachedVideoToolboxProbe("ffmpeg"); result.available {
+		t.Fatal("PATH spelling should probe the incapable binary, not reuse the relative spelling's cache entry")
+	}
+}
