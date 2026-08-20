@@ -78,6 +78,10 @@ func (f *filesMediaStore) GetAudiobookByID(_ context.Context, contentID string, 
 	return &models.MediaItem{ContentID: contentID, Type: mediaTypeEbook}, nil
 }
 
+func (f *filesMediaStore) GetItemType(ctx context.Context, contentID string, access catalog.AccessFilter) (string, error) {
+	return itemTypeFromLookup(f.GetAudiobookByID(ctx, contentID, access))
+}
+
 // makeTempAudio writes minimal bytes to a .mp3 file in t.TempDir() and
 // returns the path. ServeDirectPlay only needs the file to exist and be
 // readable; content correctness is not asserted by these tests.

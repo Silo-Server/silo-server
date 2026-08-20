@@ -1,6 +1,7 @@
 package audiobooks
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -57,5 +58,11 @@ func TestLibraryStringAggregationUsesPostgresSafeOrdering(t *testing.T) {
 	}
 	if !strings.Contains(sql, "GROUP BY publisher ORDER BY LOWER(publisher), publisher") {
 		t.Fatalf("query does not group and deterministically order publisher values: %s", sql)
+	}
+	// The filter sheet is a dropdown, not a paginated surface: an unbounded
+	// distinct set on a large library is exactly what the paged authors and
+	// series listers already refuse to return.
+	if !strings.Contains(sql, "LIMIT "+strconv.Itoa(abs.FilterDataFetchCap)) {
+		t.Fatalf("query is unbounded; want LIMIT %d: %s", abs.FilterDataFetchCap, sql)
 	}
 }

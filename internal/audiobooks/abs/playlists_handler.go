@@ -152,7 +152,13 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 			continue
 		}
 		item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
-		if lookupErr == nil && item != nil && item.Type == mediaTypeAudiobook {
+		if lookupErr != nil {
+			// A member that is gone or not an audiobook is dropped silently by
+			// design; a failing lookup drops it too, but must stay visible.
+			slog.WarnContext(r.Context(), "abs playlist member lookup failed", "component", "audiobooks", "err", lookupErr, "content_id", it.LibraryItemID)
+			continue
+		}
+		if item != nil && item.Type == mediaTypeAudiobook {
 			mediaItems = append(mediaItems, item)
 		}
 	}

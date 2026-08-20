@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -130,6 +131,7 @@ func TestABSAccessResolverMetadataCurationPolicy(t *testing.T) {
 				&recordingScopeResolver{},
 				accessResolverGroupProvider{policy: tt.group},
 			)
+			resolver.SetPermissionDecider(newTestPermissionDecider(t))
 			allowed, err := resolver.CanCurateMetadata(context.Background(), "42", tt.profileID)
 			if err != nil {
 				t.Fatalf("CanCurateMetadata: %v", err)
@@ -138,5 +140,70 @@ func TestABSAccessResolverMetadataCurationPolicy(t *testing.T) {
 				t.Fatalf("allowed = %v, want %v", allowed, tt.wantAllow)
 			}
 		})
+	}
+}
+
+// newTestPermissionDecider builds the real PDP over the vendored policy bundle
+// so these cases assert the decision ABS clients actually get, overrides and
+// all — not a stand-in with its own rules.
+func newTestPermissionDecider(t *testing.T) policy.PermissionDecider {
+	t.Helper()
+	engine, err := policy.NewEngine(context.Background())
+	if err != nil {
+		t.Fatalf("policy.NewEngine: %v", err)
+	}
+	return policy.NewPDP(engine)
+}
+
+// TestABSAccessResolverMetadataCurationFailsClosedWithoutDecider pins the
+// no-PDP behavior: the gate errors instead of falling back to a hand-rolled
+// permission check, which would silently bypass custom policy overrides and
+// decision logging.
+func TestABSAccessResolverMetadataCurationFailsClosedWithoutDecider(t *testing.T) {
+	resolver := NewABSAccessResolver(
+		accessResolverUserRepo{user: &models.User{ID: 42, Role: "admin", Enabled: true}},
+		accessResolverStoreProvider{store: accessResolverUserStore{}},
+		&recordingScopeResolver{},
+	)
+
+	allowed, err := resolver.CanCurateMetadata(context.Background(), "42", "")
+	if allowed {
+		t.Fatal("metadata curation allowed without a policy decider")
+	}
+	if !errors.Is(err, policy.ErrNoPermissionDecider) {
+		t.Fatalf("error = %v, want ErrNoPermissionDecider", err)
+	}
+}
+
+// TestABSAccessResolverMetadataCurationHonorsCustomOverride proves the ABS
+// gate goes through the PDP: a custom override that denies metadata curation
+// has to bind here exactly as it does on the native route gate.
+func TestABSAccessResolverMetadataCurationHonorsCustomOverride(t *testing.T) {
+	engine, err := policy.NewEngineWithCustom(context.Background(), map[string]policy.ActiveSource{
+		policy.DomainPermission: {DocumentID: 1, VersionID: 1, Source: `package silo_custom.permission
+
+import rego.v1
+
+override(base, i) := {"allowed": false, "reason": "curation frozen"} if {
+	i.permission == "metadata_curation"
+} else := base`},
+	})
+	if err != nil {
+		t.Fatalf("policy.NewEngineWithCustom: %v", err)
+	}
+
+	resolver := NewABSAccessResolver(
+		accessResolverUserRepo{user: &models.User{ID: 42, Role: "admin", Enabled: true}},
+		accessResolverStoreProvider{store: accessResolverUserStore{}},
+		&recordingScopeResolver{},
+	)
+	resolver.SetPermissionDecider(policy.NewPDP(engine))
+
+	allowed, err := resolver.CanCurateMetadata(context.Background(), "42", "")
+	if err != nil {
+		t.Fatalf("CanCurateMetadata: %v", err)
+	}
+	if allowed {
+		t.Fatal("custom policy override denying metadata curation was not applied to the ABS gate")
 	}
 }

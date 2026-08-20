@@ -8,8 +8,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -21,13 +21,27 @@ type ABSAccessResolver struct {
 	users    access.UserRepository
 	stores   userstore.UserStoreProvider
 	groups   access.GroupPolicyProvider
+	// permissions decides permission gates (metadata curation today). It is
+	// the same PDP the native route gates use, so custom policy overrides and
+	// decision logging cover the ABS surface too. Nil fails those gates
+	// closed — see CanCurateMetadata.
+	permissions policy.PermissionDecider
+}
+
+// SetPermissionDecider wires the policy PDP used for ABS permission gates.
+// Wiring it is mandatory for metadata curation over ABS; the gate fails closed
+// without it rather than falling back to a check that would bypass custom
+// policy overrides and decision logging.
+func (r *ABSAccessResolver) SetPermissionDecider(decider policy.PermissionDecider) {
+	if r == nil {
+		return
+	}
+	r.permissions = decider
 }
 
 type scopeResolver interface {
 	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
 }
-
-const adminRole = "admin"
 
 // NewABSAccessResolver creates a resolver for ABS-authenticated access checks.
 func NewABSAccessResolver(
@@ -87,13 +101,22 @@ func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profil
 	}, nil
 }
 
-// CanCurateMetadata applies the same permission model as Silo's native
-// metadata mutation gate. Explicit metadata_curation survives only when the
-// user's access group permits it. An admin role grants the capability only
-// while acting without a profile or through the household's primary profile.
+// CanCurateMetadata answers the ABS metadata-mutation gate through the policy
+// PDP, with the same input shape the native route gate builds
+// (internal/api/middleware.PolicyPermissionMiddleware.RequireMetadataCurationForItem):
+// the account's role and effective group permissions plus the household
+// profile the ABS session selected. Routing through the PDP is what makes
+// custom policy overrides and decision logging apply to ABS clients.
+//
+// ABS authentication skips a second PIN challenge but does not erase the
+// selected profile: an admin acting through a non-primary profile is not an
+// acting admin, exactly as on the native surface.
 func (r *ABSAccessResolver) CanCurateMetadata(ctx context.Context, userID, profileID string) (bool, error) {
 	if r == nil || r.users == nil || r.stores == nil {
 		return false, fmt.Errorf("ABS metadata authorizer is not configured")
+	}
+	if r.permissions == nil {
+		return false, fmt.Errorf("ABS metadata curation gate: %w", policy.ErrNoPermissionDecider)
 	}
 	uid, err := strconv.Atoi(userID)
 	if err != nil {
@@ -103,27 +126,41 @@ func (r *ABSAccessResolver) CanCurateMetadata(ctx context.Context, userID, profi
 	if err != nil {
 		return false, fmt.Errorf("load ABS user %d: %w", uid, err)
 	}
-	if user == nil || !user.Enabled {
+	if user == nil {
 		return false, nil
 	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, r.groups)
 	if err != nil {
 		return false, fmt.Errorf("load ABS access group policy for user %d: %w", uid, err)
 	}
-	for _, permission := range effective.Permissions {
-		if permission == string(auth.PermissionMetadataCuration) {
-			return true, nil
-		}
+	actingAsPrimary, err := r.actingAsPrimary(ctx, uid, profileID)
+	if err != nil {
+		return false, err
 	}
-	if user.Role != adminRole {
+	decision, err := policy.CheckMetadataCuration(ctx, r.permissions, policy.GateActor{
+		UserID:              user.ID,
+		Role:                user.Role,
+		Enabled:             user.Enabled,
+		AssignedPermissions: effective.Permissions,
+		DeclaredProfileID:   profileID,
+		ActingAsPrimary:     actingAsPrimary,
+	})
+	if err != nil {
+		return false, fmt.Errorf("evaluate ABS metadata curation for user %d: %w", uid, err)
+	}
+	return decision.Allowed, nil
+}
+
+// actingAsPrimary reports whether the ABS session's selected profile is the
+// household's primary profile. No selected profile means the request is
+// account-level, where the acting-admin rule keys off the empty profile id.
+func (r *ABSAccessResolver) actingAsPrimary(ctx context.Context, userID int, profileID string) (bool, error) {
+	if profileID == "" {
 		return false, nil
 	}
-	if profileID == "" {
-		return true, nil
-	}
-	store, err := r.stores.ForUser(ctx, uid)
+	store, err := r.stores.ForUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("open ABS user store for %d: %w", uid, err)
+		return false, fmt.Errorf("open ABS user store for %d: %w", userID, err)
 	}
 	profile, err := store.GetProfile(ctx, profileID)
 	if err != nil {

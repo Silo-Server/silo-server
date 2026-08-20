@@ -3,27 +3,31 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// resolveDefaultLibrary returns the first audiobook library (the canonical
-// default for legacy response surfaces) or a virtual fallback when the store
-// is empty or errors.
+// resolveDefaultLibrary returns the default audiobook library (the canonical
+// attachment point for legacy response surfaces) or a virtual fallback when
+// the store is empty or errors.
 func (h *Handler) resolveDefaultLibrary(ctx context.Context, filters ...catalog.AccessFilter) AudiobookLibrary {
 	access := emptyAccessFilter()
 	if len(filters) > 0 {
 		access = filters[0]
 	}
-	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx, access); err == nil && len(libs) > 0 {
-		return libs[0]
+	if libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx, access); err == nil {
+		if lib, ok := defaultLibrary(libs); ok {
+			return lib
+		}
 	}
-	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
+	return virtualAudiobookLibrary()
 }
 
 // resolveLibrariesForItems keeps global item-shaped responses attached to an
@@ -33,23 +37,27 @@ func (h *Handler) resolveLibrariesForItems(ctx context.Context, items []*models.
 	resolved := make(map[string]AudiobookLibrary, len(items))
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
 	if err != nil {
+		slog.WarnContext(ctx, "abs item library list failed", "component", "audiobooks", "err", err)
 		libs = nil
 	}
 	libsByID := make(map[int64]AudiobookLibrary, len(libs))
 	for _, lib := range libs {
 		libsByID[lib.ID] = lib
 	}
-	memberships := map[string]int64{}
-	if store, ok := h.deps.MediaStore.(itemLibraryBatchStore); ok {
-		ids := make([]string, 0, len(items))
-		for _, item := range items {
-			if item != nil {
-				ids = append(ids, item.ContentID)
-			}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			ids = append(ids, item.ContentID)
 		}
-		if batch, batchErr := store.GetItemLibraryIDs(ctx, ids, access); batchErr == nil {
-			memberships = batch
-		}
+	}
+	memberships, err := h.deps.MediaStore.GetItemLibraryIDs(ctx, ids, access)
+	if err != nil {
+		// A failed membership lookup only costs accuracy: every item falls
+		// back to the first library of its own kind below. Log it so a
+		// persistently failing query is visible rather than silently
+		// mislabeling library IDs on every response.
+		slog.WarnContext(ctx, "abs item library membership lookup failed", "component", "audiobooks", "items", len(ids), "err", err)
+		memberships = nil
 	}
 	for _, item := range items {
 		if item == nil {
@@ -60,11 +68,16 @@ func (h *Handler) resolveLibrariesForItems(ctx context.Context, items []*models.
 			continue
 		}
 		lib := resolveFallbackLibrary(item.Type)
-		for _, candidate := range libs {
-			if (item.Type == mediaTypeEbook && (candidate.Type == mediaTypeEbook || candidate.Type == libraryTypeEbooks)) ||
-				(item.Type == mediaTypeAudiobook && candidate.Type != mediaTypeEbook && candidate.Type != libraryTypeEbooks) {
-				lib = candidate
-				break
+		if item.Type == mediaTypeEbook || item.Type == mediaTypeAudiobook {
+			// No membership row: attach the item to the first library of its
+			// own kind so the wire libraryId at least points somewhere the
+			// item could plausibly live.
+			wantEbookLibrary := item.Type == mediaTypeEbook
+			for _, candidate := range libs {
+				if librarykind.IsEbook(candidate.Type) == wantEbookLibrary {
+					lib = candidate
+					break
+				}
 			}
 		}
 		resolved[item.ContentID] = lib
@@ -153,19 +166,11 @@ func (h *Handler) siloItemToLibraryItemDetail(ctx context.Context, item *models.
 	if item.Type != mediaTypeEbook {
 		return siloItemToLibraryItemDetail(item, files, lib, baseURL)
 	}
-	primaryID, configured, hasPrimary, err := h.ebookPrimary(ctx, item.ContentID)
+	selection, err := h.deps.MediaStore.GetPrimaryEbookFileID(ctx, item.ContentID)
 	if err != nil {
-		return siloEbookToLibraryItemDetail(base, files, 0, false, false)
+		return siloEbookToLibraryItemDetail(base, files, EbookPrimarySelection{})
 	}
-	return siloEbookToLibraryItemDetail(base, files, primaryID, configured, hasPrimary)
-}
-
-func (h *Handler) ebookPrimary(ctx context.Context, contentID string) (int, bool, bool, error) {
-	store, ok := h.deps.MediaStore.(ebookPrimaryStore)
-	if !ok {
-		return 0, false, false, nil
-	}
-	return store.GetPrimaryEbookFileID(ctx, contentID)
+	return siloEbookToLibraryItemDetail(base, files, selection)
 }
 
 // handleSimilarItems — GET /abs/api/items/{id}/similar

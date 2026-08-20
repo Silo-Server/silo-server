@@ -174,9 +174,13 @@ type stubMediaStore struct {
 	noopMediaStore
 	known     map[string]*models.MediaItem // itemID → row (nil means "exists but no row needed")
 	lookupErr error
+	// fullItemLoads counts hydrating GetAudiobookByID calls so hot-path tests
+	// can assert they took the cheap GetItemType projection instead.
+	fullItemLoads int
 }
 
 func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
+	s.fullItemLoads++
 	if s.lookupErr != nil {
 		return nil, s.lookupErr
 	}
@@ -188,6 +192,31 @@ func (s *stubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalo
 	}
 	return nil, nil
 }
+
+// GetItemType mirrors GetAudiobookByID's lookup without counting a hydrating
+// load, so hot-path tests can assert the handler took the cheap projection.
+func (s *stubMediaStore) GetItemType(_ context.Context, id string, _ catalog.AccessFilter) (string, error) {
+	if s.lookupErr != nil {
+		return "", s.lookupErr
+	}
+	if it, ok := s.known[id]; ok {
+		if it == nil {
+			return mediaTypeAudiobook, nil
+		}
+		return it.Type, nil
+	}
+	return "", nil
+}
+
+// itemTypeFromLookup adapts a fake's GetAudiobookByID result to the cheap
+// GetItemType projection the handlers use on hot paths.
+func itemTypeFromLookup(item *models.MediaItem, err error) (string, error) {
+	if err != nil || item == nil {
+		return "", err
+	}
+	return item.Type, nil
+}
+
 func (s *stubMediaStore) GetAudiobooksByIDs(_ context.Context, ids []string, _ catalog.AccessFilter) (map[string]*models.MediaItem, error) {
 	if s.lookupErr != nil {
 		return nil, s.lookupErr

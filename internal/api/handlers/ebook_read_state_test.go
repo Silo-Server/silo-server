@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -155,22 +156,6 @@ func TestMarkEbookUnreadDeletesProgressRow(t *testing.T) {
 	}
 }
 
-func TestPreferredEbookReadFilePrefersEpub(t *testing.T) {
-	pdf := &models.MediaFile{ID: 1, BaseType: "ebook", FilePath: "/books/a.pdf", Container: "pdf"}
-	epub := &models.MediaFile{ID: 2, BaseType: "ebook", FilePath: "/books/a.epub", Container: "epub"}
-	video := &models.MediaFile{ID: 3, BaseType: "movie", FilePath: "/movies/a.mkv", Container: "mkv"}
-
-	if got := preferredEbookReadFile([]*models.MediaFile{video, pdf, epub}); got == nil || got.ID != 2 {
-		t.Fatalf("preferredEbookReadFile = %+v, want epub file 2", got)
-	}
-	if got := preferredEbookReadFile([]*models.MediaFile{video, pdf}); got == nil || got.ID != 1 {
-		t.Fatalf("preferredEbookReadFile = %+v, want first reader-supported file 1", got)
-	}
-	if got := preferredEbookReadFile([]*models.MediaFile{video}); got != nil {
-		t.Fatalf("preferredEbookReadFile = %+v, want nil without ebook files", got)
-	}
-}
-
 func TestSetEbookReadStateMarkReadShowsPlayedUserState(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeEbookReadStateStore()
@@ -226,5 +211,112 @@ func TestSetEbookReadStateFailsWithoutAccessibleFile(t *testing.T) {
 	err := handler.setEbookReadState(ctx, 42, "profile-1", "ebook-1", true, catalog.AccessFilter{})
 	if !errors.Is(err, catalog.ErrItemNotFound) {
 		t.Fatalf("err = %v, want catalog.ErrItemNotFound", err)
+	}
+}
+
+// fakeEbookPrimaryFileResolver stands in for the abs_ebook_primary_files
+// lookup: configured reports whether a selection row exists at all, hasPrimary
+// distinguishes a pinned file from the explicit "all files supplementary"
+// state.
+type fakeEbookPrimaryFileResolver struct {
+	fileID     int
+	configured bool
+	hasPrimary bool
+	err        error
+	calls      int
+}
+
+func (f *fakeEbookPrimaryFileResolver) GetPrimaryEbookFileID(context.Context, string) (abs.EbookPrimarySelection, error) {
+	f.calls++
+	return abs.EbookPrimarySelection{FileID: f.fileID, Configured: f.configured, HasPrimary: f.hasPrimary}, f.err
+}
+
+// TestDefaultEbookFileIDHonorsCuratedPrimary pins the cross-surface agreement:
+// a file pinned as primary through Audiobookshelf is the file a native
+// mark-read points at, instead of the reader's EPUB-first guess.
+func TestDefaultEbookFileIDHonorsCuratedPrimary(t *testing.T) {
+	ctx := context.Background()
+	files := map[string][]*models.MediaFile{
+		"ebook-1": {
+			{ID: 5, BaseType: "ebook", FilePath: "/books/b.epub", Container: "epub"},
+			{ID: 6, BaseType: "ebook", FilePath: "/books/b.pdf", Container: "pdf"},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		resolver *fakeEbookPrimaryFileResolver
+		want     int
+	}{
+		{
+			name:     "no resolver falls back to the reader default",
+			resolver: nil,
+			want:     5,
+		},
+		{
+			name:     "pinned primary wins over the EPUB default",
+			resolver: &fakeEbookPrimaryFileResolver{fileID: 6, configured: true, hasPrimary: true},
+			want:     6,
+		},
+		{
+			name:     "all-supplementary selection falls back to the reader default",
+			resolver: &fakeEbookPrimaryFileResolver{configured: true},
+			want:     5,
+		},
+		{
+			name:     "no selection row falls back to the reader default",
+			resolver: &fakeEbookPrimaryFileResolver{},
+			want:     5,
+		},
+		{
+			name:     "primary outside the accessible files falls back",
+			resolver: &fakeEbookPrimaryFileResolver{fileID: 99, configured: true, hasPrimary: true},
+			want:     5,
+		},
+		{
+			name:     "resolver failure must not block marking the book read",
+			resolver: &fakeEbookPrimaryFileResolver{err: errors.New("boom"), configured: true, hasPrimary: true},
+			want:     5,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := &ItemsHandler{fileRepo: &fakeEbookFileProvider{files: files}}
+			if tt.resolver != nil {
+				handler.SetEbookPrimaryFileResolver(tt.resolver)
+			}
+
+			fileID, err := handler.defaultEbookFileID(ctx, "ebook-1", catalog.AccessFilter{})
+			if err != nil {
+				t.Fatalf("defaultEbookFileID: %v", err)
+			}
+			if fileID != tt.want {
+				t.Fatalf("file id = %d, want %d", fileID, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultEbookFileIDIgnoresPrimaryOutsideAccess keeps the curated pin
+// subject to the caller's access filter: a primary in a library this viewer
+// cannot see must not leak into their progress row.
+func TestDefaultEbookFileIDIgnoresPrimaryOutsideAccess(t *testing.T) {
+	ctx := context.Background()
+	handler := &ItemsHandler{
+		fileRepo: &fakeEbookFileProvider{files: map[string][]*models.MediaFile{
+			"ebook-1": {
+				{ID: 5, BaseType: "ebook", FilePath: "/books/b.epub", Container: "epub", MediaFolderID: 1},
+				{ID: 6, BaseType: "ebook", FilePath: "/books/b.pdf", Container: "pdf", MediaFolderID: 2},
+			},
+		}},
+	}
+	handler.SetEbookPrimaryFileResolver(&fakeEbookPrimaryFileResolver{fileID: 6, configured: true, hasPrimary: true})
+
+	fileID, err := handler.defaultEbookFileID(ctx, "ebook-1", catalog.AccessFilter{AllowedLibraryIDs: []int{1}})
+	if err != nil {
+		t.Fatalf("defaultEbookFileID: %v", err)
+	}
+	if fileID != 5 {
+		t.Fatalf("file id = %d, want the accessible EPUB 5", fileID)
 	}
 }

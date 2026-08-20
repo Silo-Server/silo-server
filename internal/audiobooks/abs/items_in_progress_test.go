@@ -39,8 +39,22 @@ func (s *inProgressStubMediaStore) GetAudiobookByID(_ context.Context, id string
 	return s.byID[id], nil
 }
 
+func (s *inProgressStubMediaStore) GetItemType(ctx context.Context, id string, access catalog.AccessFilter) (string, error) {
+	return itemTypeFromLookup(s.GetAudiobookByID(ctx, id, access))
+}
+
 func (s *inProgressStubMediaStore) GetMediaFiles(_ context.Context, contentID string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return s.files[contentID], nil
+}
+
+func (s *inProgressStubMediaStore) GetMediaFilesByContentIDs(_ context.Context, contentIDs []string, _ catalog.AccessFilter) (map[string][]*models.MediaFile, error) {
+	out := make(map[string][]*models.MediaFile, len(contentIDs))
+	for _, id := range contentIDs {
+		if files, ok := s.files[id]; ok {
+			out[id] = files
+		}
+	}
+	return out, nil
 }
 
 func (s *inProgressStubMediaStore) GetItemLibraryIDs(_ context.Context, contentIDs []string, _ catalog.AccessFilter) (map[string]int64, error) {

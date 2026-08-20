@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -112,8 +115,29 @@ func (h *ItemsHandler) setEbookReadState(
 	})
 }
 
+// EbookPrimaryFileResolver reports an explicitly configured primary ebook file
+// for an item. The Audiobookshelf compatibility layer lets a curator pin one
+// file as the book (abs_ebook_primary_files) or declare that every file is
+// supplementary; the native surfaces honor that choice so both agree on which
+// file "the ebook" means. The zero-value selection means no choice was ever
+// recorded; Configured without HasPrimary is the explicit "all supplementary"
+// state.
+type EbookPrimaryFileResolver interface {
+	GetPrimaryEbookFileID(ctx context.Context, contentID string) (abs.EbookPrimarySelection, error)
+}
+
+// SetEbookPrimaryFileResolver wires the optional curated primary-file lookup.
+// Leaving it unset keeps the EPUB-first default.
+func (h *ItemsHandler) SetEbookPrimaryFileResolver(resolver EbookPrimaryFileResolver) {
+	h.ebookPrimaryFiles = resolver
+}
+
 // defaultEbookFileID resolves the file a fresh mark-read progress row should
-// reference, respecting the caller's access filter.
+// reference, respecting the caller's access filter. A curated primary file
+// (see EbookPrimaryFileResolver) wins when it is one of the files this caller
+// can access; anything else — no selection, an explicit "all supplementary"
+// selection, or a primary the caller cannot see — falls back to the EPUB-first
+// default so native reading never breaks on a curation choice.
 func (h *ItemsHandler) defaultEbookFileID(ctx context.Context, contentID string, filter catalog.AccessFilter) (int, error) {
 	if h.fileRepo == nil {
 		return 0, catalog.ErrItemNotFound
@@ -122,29 +146,38 @@ func (h *ItemsHandler) defaultEbookFileID(ctx context.Context, contentID string,
 	if err != nil {
 		return 0, err
 	}
-	file := preferredEbookReadFile(catalog.FilterMediaFilesByAccess(files, filter))
+	accessible := catalog.FilterMediaFilesByAccess(files, filter)
+	if file := h.curatedEbookFile(ctx, contentID, accessible); file != nil {
+		return file.ID, nil
+	}
+	file := ebookformat.PreferredReadFile(accessible)
 	if file == nil {
 		return 0, catalog.ErrItemNotFound
 	}
 	return file.ID, nil
 }
 
-// preferredEbookReadFile mirrors the web reader's default file choice
-// (web/src/pages/ItemDetail/EbookContent.tsx preferredReadVersion): prefer an
-// EPUB version, otherwise the first reader-supported ebook file. Callers must
-// pass access-filtered files.
-func preferredEbookReadFile(files []*models.MediaFile) *models.MediaFile {
-	var first *models.MediaFile
-	for _, file := range files {
-		if !isEbookFile(file) {
-			continue
-		}
-		if ebookReaderFormat(file.FilePath, file.Container) == "epub" {
+// curatedEbookFile returns the curated primary file when one is configured and
+// present in the accessible set, otherwise nil. A resolver error is treated as
+// "no curated file": the read-state write is more important than honoring the
+// pin, and the caller still gets the reader's default.
+func (h *ItemsHandler) curatedEbookFile(ctx context.Context, contentID string, accessible []*models.MediaFile) *models.MediaFile {
+	if h == nil || h.ebookPrimaryFiles == nil {
+		return nil
+	}
+	selection, err := h.ebookPrimaryFiles.GetPrimaryEbookFileID(ctx, contentID)
+	if err != nil {
+		slog.WarnContext(ctx, "curated primary ebook lookup failed",
+			"component", "ebooks", "content_id", contentID, "err", err)
+		return nil
+	}
+	if !selection.Configured || !selection.HasPrimary {
+		return nil
+	}
+	for _, file := range accessible {
+		if file != nil && file.ID == selection.FileID {
 			return file
 		}
-		if first == nil {
-			first = file
-		}
 	}
-	return first
+	return nil
 }

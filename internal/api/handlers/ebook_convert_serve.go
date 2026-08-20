@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -46,7 +47,7 @@ func (c *EbookConversion) active(ctx context.Context) bool {
 var kindleReaderFormats = map[string]bool{"mobi": true, "azw": true, "azw3": true}
 
 func isKindleReaderFile(file *models.MediaFile) bool {
-	return file != nil && kindleReaderFormats[ebookReaderFormat(file.FilePath, file.Container)]
+	return file != nil && kindleReaderFormats[ebookformat.FormatForFile(file)]
 }
 
 // serveEbook serves an ebook file, converting Kindle-family formats to EPUB
@@ -134,7 +135,7 @@ func (h *EbookReaderHandler) serveKindleHead(w http.ResponseWriter, r *http.Requ
 func setConvertedEpubHeaders(w http.ResponseWriter, file *models.MediaFile, key ebookconvert.SourceKey) {
 	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
 	w.Header().Set("Content-Type", "application/epub+zip")
-	w.Header().Set("Content-Disposition", inlineContentDisposition(name))
+	w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("inline", name))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set(ConversionHeader, "converted")
 	w.Header().Set("ETag", fmt.Sprintf("%q", "epubconv-"+key.CacheKey()))

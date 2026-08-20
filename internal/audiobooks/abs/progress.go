@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -52,20 +53,55 @@ type ProgressStore interface {
 type EbookProgressStore interface {
 	GetEbookProgress(ctx context.Context, userID, profileID, contentID string) (*EbookProgress, error)
 	ListEbookProgress(ctx context.Context, userID, profileID string, limit int) ([]EbookProgress, error)
-	UpsertEbookProgress(ctx context.Context, progress EbookProgress) (*EbookProgress, error)
+	// UpsertEbookProgress merges a partial write into the stored row and
+	// returns the committed row. The merge happens inside the statement, so
+	// callers must not read-modify-write. Returns ErrEbookProgressFileRequired
+	// when no row exists yet and the patch carries no FileID.
+	UpsertEbookProgress(ctx context.Context, patch EbookProgressPatch) (*EbookProgress, error)
 	DeleteEbookProgress(ctx context.Context, userID, profileID, contentID string) error
 	SetEbookHidden(ctx context.Context, userID, profileID, contentID string, hide bool) error
 }
 
+// ErrEbookProgressFileRequired reports that the first write for an item cannot
+// be stored because no ebook file has been resolved yet. ebook_reader_progress
+// holds a NOT NULL foreign key to media_files, so the caller has to pick the
+// item's ebook file (respecting library access) and retry with FileID set.
+var ErrEbookProgressFileRequired = errors.New("ebook progress: file id required for a new row")
+
 type EbookProgress struct {
-	UserID                  string
-	ProfileID               string
-	ContentID               string
-	FileID                  int
-	Location                string
-	Progress                float64
-	UpdatedAt               time.Time
+	UserID    string
+	ProfileID string
+	ContentID string
+	FileID    int
+	Location  string
+	Progress  float64
+	UpdatedAt time.Time
+}
+
+// EbookProgressPatch is a partial write against a reader-progress row. Nil
+// fields are left to the stored value by the store's merge statement rather
+// than being read into Go first: an autosave that only reports a location
+// cannot blank the progress another device just wrote, and the hot path costs
+// a single round trip.
+type EbookProgressPatch struct {
+	UserID    string
+	ProfileID string
+	ContentID string
+
+	// FileID is only consulted when the row has to be inserted; an existing
+	// row keeps its file unless a file is explicitly supplied.
+	FileID   *int
+	Location *string
+	Progress *float64
+
+	// AllowFinishedRegression lets progress fall back below
+	// models.EbookFinishedProgressThreshold. Routine autosaves leave it false
+	// so a late page-turn from a second device cannot un-finish a book.
 	AllowFinishedRegression bool
+	// ResetWhenFinished carries upstream Audiobookshelf's isFinished:false
+	// semantics: clear progress, but only when the *stored* row was finished.
+	// A row below the threshold keeps the progress it already had.
+	ResetWhenFinished bool
 }
 
 // ABSPlaybackSessionStore tracks the active /abs/api/items/{id}/play sessions
@@ -385,77 +421,99 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, payload)
 }
 
+// handleSetEbookProgress applies a partial reader-progress write.
+//
+// The body is translated into an EbookProgressPatch and handed to the store in
+// one shot: merging with the stored row, the finished-regression guard, and
+// upstream Audiobookshelf's isFinished:false rule are all evaluated against the
+// stored row inside the write statement. Reading the row into Go first would
+// let two devices reading the same book clobber each other between the read and
+// the write.
 func (h *Handler) handleSetEbookProgress(w http.ResponseWriter, r *http.Request, a ctxAuth, contentID string, body progressBody) {
 	if h.deps.EbookProgressStore == nil {
 		http.Error(w, "ebook progress unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	current := EbookProgress{UserID: a.UserID, ProfileID: a.ProfileID, ContentID: contentID}
-	if existing, err := h.deps.EbookProgressStore.GetEbookProgress(r.Context(), a.UserID, a.ProfileID, contentID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	} else if existing != nil {
-		current = *existing
-	}
+	patch := EbookProgressPatch{UserID: a.UserID, ProfileID: a.ProfileID, ContentID: contentID}
 	if body.EbookProgress != nil {
-		current.Progress = *body.EbookProgress
+		if *body.EbookProgress < 0 || *body.EbookProgress > 1 {
+			http.Error(w, "ebookProgress must be between 0 and 1", http.StatusBadRequest)
+			return
+		}
+		progress := *body.EbookProgress
+		patch.Progress = &progress
+	}
+	if body.EbookLocation != nil {
+		location := *body.EbookLocation
+		patch.Location = &location
 	}
 	if body.IsFinished != nil {
 		if *body.IsFinished {
-			current.Progress = 1
+			finished := 1.0
+			patch.Progress = &finished
 		} else {
-			current.AllowFinishedRegression = true
-			if body.EbookProgress == nil || current.Progress >= models.EbookFinishedProgressThreshold {
-				current.Progress = 0
-			}
+			// Un-finishing is explicit, so the regression guard steps aside.
+			// Without an ebookProgress of its own the reset only applies to a
+			// stored row that was actually finished; an in-progress row keeps
+			// its place in the book.
+			patch.AllowFinishedRegression = true
+			patch.ResetWhenFinished = body.EbookProgress == nil
 		}
 	}
-	if body.EbookLocation != nil {
-		current.Location = *body.EbookLocation
+
+	committed, err := h.deps.EbookProgressStore.UpsertEbookProgress(r.Context(), patch)
+	if errors.Is(err, ErrEbookProgressFileRequired) {
+		fileID, ok := h.defaultEbookFileID(w, r, a, contentID)
+		if !ok {
+			return
+		}
+		patch.FileID = &fileID
+		committed, err = h.deps.EbookProgressStore.UpsertEbookProgress(r.Context(), patch)
 	}
-	if current.Progress < 0 || current.Progress > 1 {
-		http.Error(w, "ebookProgress must be between 0 and 1", http.StatusBadRequest)
-		return
-	}
-	if current.FileID == 0 {
-		access, err := h.accessFilterForAuth(r.Context(), a)
-		if err != nil {
-			h.writeAccessResolutionError(w, r, err)
-			return
-		}
-		files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
-		if err != nil {
-			http.Error(w, "load ebook files: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		primaryID, configured, hasPrimary, err := h.ebookPrimary(r.Context(), contentID)
-		if err != nil {
-			http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		primary := selectEbookFile(files, 0)
-		if configured {
-			if !hasPrimary {
-				http.Error(w, "ebook not found", http.StatusNotFound)
-				return
-			}
-			primary = selectEbookFile(files, primaryID)
-		}
-		if primary == nil {
-			http.Error(w, "ebook not found", http.StatusNotFound)
-			return
-		}
-		current.FileID = primary.ID
-	}
-	committed, err := h.deps.EbookProgressStore.UpsertEbookProgress(r.Context(), current)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if committed == nil {
-		committed = &current
+		http.Error(w, "ebook progress not committed", http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, http.StatusOK, ebookProgressToABS(*committed))
+}
+
+// defaultEbookFileID resolves the ebook file a brand-new progress row should
+// point at: the configured primary when the item has one, otherwise the ABS
+// default pick over the files this caller may see. It writes the HTTP error and
+// returns false when the item has no readable ebook file.
+func (h *Handler) defaultEbookFileID(w http.ResponseWriter, r *http.Request, a ctxAuth, contentID string) (int, bool) {
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return 0, false
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
+	if err != nil {
+		http.Error(w, "load ebook files: "+err.Error(), http.StatusInternalServerError)
+		return 0, false
+	}
+	selection, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
+	if err != nil {
+		http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+		return 0, false
+	}
+	primary := ebookformat.PreferredFile(files)
+	if selection.Configured {
+		if !selection.HasPrimary {
+			http.Error(w, "ebook not found", http.StatusNotFound)
+			return 0, false
+		}
+		primary = ebookformat.FileByID(files, selection.FileID)
+	}
+	if primary == nil {
+		http.Error(w, "ebook not found", http.StatusNotFound)
+		return 0, false
+	}
+	return primary.ID, true
 }
 
 func ebookProgressToABS(p EbookProgress) map[string]any {

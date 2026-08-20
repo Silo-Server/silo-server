@@ -138,7 +138,7 @@ type libAuthorsStub struct {
 	authors []AuthorSummary
 }
 
-func (s *libAuthorsStub) ListLibraryAuthors(_ context.Context, _ int64, _, _ int, _ string, _ bool, _ catalog.AccessFilter) ([]AuthorSummary, int, error) {
+func (s *libAuthorsStub) ListLibraryAuthors(_ context.Context, _ AudiobookLibrary, _, _ int, _ string, _ bool, _ catalog.AccessFilter) ([]AuthorSummary, int, error) {
 	return s.authors, len(s.authors), nil
 }
 

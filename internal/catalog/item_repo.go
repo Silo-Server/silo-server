@@ -684,8 +684,69 @@ func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []st
 	return scanItems(rows)
 }
 
+// GetTypeWithAccess returns the media_items.type of one item, honoring the
+// same access predicates as GetByIDsWithAccess. It returns "" when the item
+// does not exist or the viewer may not see it. Hot paths that only need to
+// branch on the item kind use this instead of a full item fetch: it is a
+// single projection query with no people/season/file hydration behind it.
+func (r *ItemRepository) GetTypeWithAccess(ctx context.Context, contentID string, access AccessFilter) (string, error) {
+	if contentID == "" {
+		return "", nil
+	}
+	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+		return "", nil
+	}
+	sql, args := r.buildItemAccessSQL("mi.type", []string{contentID}, access)
+	var itemType string
+	err := r.pool.QueryRow(ctx, sql+" LIMIT 1", args...).Scan(&itemType)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("fetching media item type with access: %w", err)
+	}
+	return itemType, nil
+}
+
+// GetAccessibleIDs returns the subset of contentIDs the viewer may see, in
+// content_id order. It shares buildItemAccessSQL with GetByIDsWithAccess, so
+// the two can never disagree about what "accessible" means, but projects only
+// the key: callers that just need an access gate before a second batch query
+// (media files, artwork, progress) must not pay for full item hydration.
+func (r *ItemRepository) GetAccessibleIDs(ctx context.Context, contentIDs []string, access AccessFilter) ([]string, error) {
+	if len(contentIDs) == 0 {
+		return []string{}, nil
+	}
+	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+		return []string{}, nil
+	}
+	sql, args := r.buildItemAccessSQL("mi.content_id", contentIDs, access)
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("fetching accessible media item IDs: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0, len(contentIDs))
+	for rows.Next() {
+		var contentID string
+		if err := rows.Scan(&contentID); err != nil {
+			return nil, fmt.Errorf("scanning accessible media item ID: %w", err)
+		}
+		out = append(out, contentID)
+	}
+	return out, rows.Err()
+}
+
 func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access AccessFilter) (string, []any) {
-	sql := `SELECT ` + itemColumns + `
+	return r.buildItemAccessSQL(itemColumns, contentIDs, access)
+}
+
+// buildItemAccessSQL renders a content_id-keyed media_items query with the
+// shared library/rating access predicates. The projection varies (full item
+// columns, or a single column for the cheap type lookup); the access WHERE
+// must not, so both callers stay in lockstep as access logic evolves.
+func (r *ItemRepository) buildItemAccessSQL(projection string, contentIDs []string, access AccessFilter) (string, []any) {
+	sql := `SELECT ` + projection + `
             FROM media_items mi
             WHERE mi.content_id = ANY($1)`
 	args := []any{contentIDs}

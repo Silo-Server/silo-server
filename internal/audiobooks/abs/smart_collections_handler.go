@@ -10,6 +10,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/smartcoll"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -302,7 +303,13 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	} else {
-		targetLibs = allLibs
+		// Smart collections are audiobook rules (duration, narrator, listening
+		// progress); an unscoped collection must not sweep in ebook libraries.
+		for _, lib := range allLibs {
+			if !librarykind.IsEbook(lib.Type) {
+				targetLibs = append(targetLibs, lib)
+			}
+		}
 	}
 
 	owner := sameABSPrincipal(a, c.UserID, c.ProfileID)
@@ -325,12 +332,18 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 
 	candidates := make([]smartcoll.Candidate, 0, 256)
 	for _, lib := range targetLibs {
-		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 0, 0, access, Filter{})
+		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib, 0, 0, access, Filter{})
 		if lerr != nil {
 			slog.WarnContext(r.Context(), "abs smart collection list-audiobooks failed", "component", "audiobooks", "err", lerr, "library", lib.ID)
 			continue
 		}
 		for _, mi := range items {
+			if mi == nil || mi.Type != mediaTypeAudiobook {
+				// Defense in depth: an explicitly listed libraryId, or a
+				// mixed-type folder, must not put an ebook into an audiobook
+				// rule set. Matches the guards on bookmarks and playlists.
+				continue
+			}
 			cand := smartcoll.Candidate{Item: siloItemToSmartcollItem(mi)}
 			if owner {
 				if p, ok := progressByID[mi.ContentID]; ok {

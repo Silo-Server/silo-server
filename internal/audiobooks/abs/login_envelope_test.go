@@ -24,6 +24,10 @@ func (r *scopedLoginResolver) ResolveABSAccess(_ context.Context, userID, profil
 	return r.filter, nil
 }
 
+func (r *scopedLoginResolver) CanCurateMetadata(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 type scopedLoginMediaStore struct {
 	noopMediaStore
 	filter catalog.AccessFilter

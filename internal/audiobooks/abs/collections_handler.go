@@ -110,7 +110,14 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 	items := make([]*models.MediaItem, 0, len(rows))
 	for _, it := range rows {
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
-		if err != nil || item == nil || item.Type != mediaTypeAudiobook {
+		if err != nil {
+			// A missing or non-audiobook member is expected (deleted item,
+			// no access); a lookup failure is not, and silently shortening
+			// the collection would hide it.
+			slog.WarnContext(r.Context(), "abs collection member lookup failed", "component", "audiobooks", "err", err, "collection", collectionID, "content_id", it.LibraryItemID)
+			continue
+		}
+		if item == nil || item.Type != mediaTypeAudiobook {
 			continue
 		}
 		items = append(items, item)

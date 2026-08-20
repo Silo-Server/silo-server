@@ -25,15 +25,15 @@ func (s *searchStubMediaStore) ListAudiobookLibraries(context.Context, catalog.A
 	return s.libs, nil
 }
 
-func (s *searchStubMediaStore) SearchAudiobooks(_ context.Context, _ int64, _ string, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (s *searchStubMediaStore) SearchAudiobooks(_ context.Context, _ AudiobookLibrary, _ string, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return s.results, nil
 }
 
-func (s *searchStubMediaStore) ListLibraryAuthors(context.Context, int64, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
+func (s *searchStubMediaStore) ListLibraryAuthors(context.Context, AudiobookLibrary, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
 	return s.authors, len(s.authors), nil
 }
 
-func (s *searchStubMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
+func (s *searchStubMediaStore) ListLibrarySeries(context.Context, AudiobookLibrary, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
 	return s.series, len(s.series), nil
 }
 

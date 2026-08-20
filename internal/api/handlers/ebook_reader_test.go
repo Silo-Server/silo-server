@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -240,27 +239,6 @@ func TestEbookReaderServesContainerMimeForMismatchedExtension(t *testing.T) {
 	}
 }
 
-func TestEbookMimeTypeNeverReturnsOctetStreamForAdmittedFiles(t *testing.T) {
-	cases := []struct {
-		path      string
-		container string
-		wantMime  string
-	}{
-		{"/library/book.txt", "epub", "application/epub+zip"},
-		{"/library/book", "pdf", "application/pdf"},
-		{"/library/book.epub", "pdf", "application/epub+zip"}, // known extension wins
-	}
-	for _, tc := range cases {
-		file := &models.MediaFile{FilePath: tc.path, Container: tc.container, BaseType: "ebook"}
-		if !isEbookFile(file) {
-			t.Fatalf("isEbookFile(%q, %q) = false, want admitted", tc.path, tc.container)
-		}
-		if got := ebookMimeType(tc.path, tc.container); got != tc.wantMime {
-			t.Fatalf("ebookMimeType(%q, %q) = %q, want %q", tc.path, tc.container, got, tc.wantMime)
-		}
-	}
-}
-
 func TestEbookReaderRejectsNonEbookFile(t *testing.T) {
 	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
 		FileResolver: stubMediaFileResolver{
@@ -283,76 +261,6 @@ func TestEbookReaderRejectsNonEbookFile(t *testing.T) {
 
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
-	cases := map[string]string{
-		"book.epub":    "application/epub+zip",
-		"book.pdf":     "application/pdf",
-		"book.mobi":    "application/x-mobipocket-ebook",
-		"book.azw":     "application/vnd.amazon.ebook",
-		"book.azw3":    "application/vnd.amazon.mobi8-ebook",
-		"book.cbz":     "application/vnd.comicbook+zip",
-		"book.cbr":     "application/vnd.comicbook-rar",
-		"book.fb2":     "application/x-fictionbook+xml",
-		"book.fbz":     "application/x-zip-compressed-fb2",
-		"book.fb2.zip": "application/x-zip-compressed-fb2",
-		"book.md":      "application/octet-stream",
-		"book.unknown": "application/octet-stream",
-	}
-	rejected := map[string]bool{"book.md": true, "book.unknown": true}
-
-	for name, wantMime := range cases {
-		t.Run(name, func(t *testing.T) {
-			container := name
-			if name == "book.fb2.zip" {
-				container = "fbz"
-			}
-			file := &models.MediaFile{FilePath: "/library/" + name, Container: container}
-			if rejected[name] {
-				file.BaseType = "ebook"
-				if isEbookFile(file) {
-					t.Fatalf("%s should not be treated as an ebook reader format", name)
-				}
-				if got := ebookMimeType(file.FilePath, file.Container); got != wantMime {
-					t.Fatalf("ebookMimeType() = %q, want %q", got, wantMime)
-				}
-				return
-			}
-			file.BaseType = "ebook"
-			if !isEbookFile(file) {
-				t.Fatal("expected ebook reader format")
-			}
-			if got := ebookMimeType(file.FilePath, file.Container); got != wantMime {
-				t.Fatalf("ebookMimeType() = %q, want %q", got, wantMime)
-			}
-		})
-	}
-}
-
-func TestEbookReaderRejectsPlainText(t *testing.T) {
-	file := &models.MediaFile{
-		FilePath: "/library/book.txt",
-		BaseType: "ebook",
-	}
-
-	if isEbookFile(file) {
-		t.Fatal("plain text should not be treated as an ebook reader format")
-	}
-	if got := ebookMimeType(file.FilePath, file.Container); got == "text/plain; charset=utf-8" {
-		t.Fatal("plain text should not have an ebook reader MIME type")
-	}
-}
-
-func TestEbookReaderRecognizesFBZFromCompoundFilenameWithoutContainer(t *testing.T) {
-	file := &models.MediaFile{
-		FilePath: "/library/book.fb2.zip",
-		BaseType: "ebook",
-	}
-
-	if !isEbookFile(file) {
-		t.Fatal("expected .fb2.zip path to be treated as an ebook reader format")
 	}
 }
 
@@ -843,32 +751,6 @@ func TestEbookReaderRejectsOversizedProgressBody(t *testing.T) {
 	}
 	if store.upserted != nil {
 		t.Fatalf("oversized body must not be saved, got %+v", store.upserted)
-	}
-}
-
-func TestInlineContentDispositionProducesParseableHeaders(t *testing.T) {
-	cases := map[string]string{
-		"book.epub":            "book.epub",
-		`bo"ok\.epub`:          `bo"ok\.epub`,
-		`trailing-slash\`:      `trailing-slash\`,
-		"börk \U0001F4DA.epub": "börk \U0001F4DA.epub",
-		"":                     "ebook",
-		".":                    "ebook",
-	}
-	for name, want := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := inlineContentDisposition(name)
-			mediaType, params, err := mime.ParseMediaType(got)
-			if err != nil {
-				t.Fatalf("header %q is malformed: %v", got, err)
-			}
-			if mediaType != "inline" {
-				t.Fatalf("media type = %q", mediaType)
-			}
-			if params["filename"] != want {
-				t.Fatalf("filename = %q, want %q", params["filename"], want)
-			}
-		})
 	}
 }
 

@@ -2261,6 +2261,14 @@ func main() {
 		slog.Info("task manager started")
 	}
 
+	// The curated primary ebook file (set through the Audiobookshelf surface)
+	// is read by the native ebook endpoints as well, so it is wired whether or
+	// not ABS compatibility is enabled: disabling ABS must not silently change
+	// which file the native reader treats as the book.
+	if deps.DB != nil {
+		deps.EbookPrimaryFiles = &audiobooks.ABSMediaStore{Pool: deps.DB}
+	}
+
 	// Build the ABS-compatible REST + Socket.io handler when a DB pool is
 	// available. Routes are mounted at the root level by NewRouter (not under
 	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
@@ -2303,6 +2311,14 @@ func main() {
 		} else {
 			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore)
 		}
+		absAccessResolver := audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore)
+		if policySystem != nil {
+			// ABS permission gates share the native PDP so custom policy
+			// overrides and decision logging cover ABS clients too. Without
+			// it those gates fail closed rather than falling back to a check
+			// that would bypass both.
+			absAccessResolver.SetPermissionDecider(policySystem.PDP())
+		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -2312,7 +2328,7 @@ func main() {
 				Auth: absAuthSvc,
 				Pool: deps.DB,
 			},
-			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore),
+			AccessResolver: absAccessResolver,
 			Recs:           recommendations.NewRepo(deps.DB),
 			Detail:         absDetailSvc,
 			SessionMgr:     sessionMgr,

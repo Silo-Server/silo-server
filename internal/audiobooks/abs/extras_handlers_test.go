@@ -2,6 +2,7 @@ package abs
 
 import (
 	"context"
+	"errors"
 	"mime"
 	"net/http"
 	"os"
@@ -36,8 +37,8 @@ func (s *ebookPrimaryTestStore) GetMediaFiles(context.Context, string, catalog.A
 	return s.files, nil
 }
 
-func (s *ebookPrimaryTestStore) GetPrimaryEbookFileID(context.Context, string) (int, bool, bool, error) {
-	return s.primaryID, s.configured, s.hasPrimary, nil
+func (s *ebookPrimaryTestStore) GetPrimaryEbookFileID(context.Context, string) (EbookPrimarySelection, error) {
+	return EbookPrimarySelection{FileID: s.primaryID, Configured: s.configured, HasPrimary: s.hasPrimary}, nil
 }
 
 func (s *ebookPrimaryTestStore) SetPrimaryEbookFileID(_ context.Context, _ string, fileID int) error {
@@ -48,37 +49,6 @@ func (s *ebookPrimaryTestStore) SetPrimaryEbookFileID(_ context.Context, _ strin
 func (s *ebookPrimaryTestStore) ClearPrimaryEbookFileID(context.Context, string) error {
 	s.cleared = true
 	return nil
-}
-
-func TestEbookContentType(t *testing.T) {
-	tests := map[string]string{
-		".epub": ebookEPUBMimeType,
-		".PDF":  "application/pdf",
-		".cbz":  "application/vnd.comicbook+zip",
-		".m4b":  "",
-	}
-	for ext, want := range tests {
-		if got := ebookContentType(ext); got != want {
-			t.Errorf("ebookContentType(%q) = %q, want %q", ext, got, want)
-		}
-	}
-}
-
-func TestSelectEbookFile(t *testing.T) {
-	files := []*models.MediaFile{
-		{ID: 1, FilePath: "/books/supplement.pdf"},
-		{ID: 2, FilePath: "/books/primary.epub"},
-		{ID: 3, FilePath: "/books/audio.m4b"},
-	}
-	if got := selectEbookFile(files, 0); got == nil || got.ID != 2 {
-		t.Fatalf("primary ebook = %#v, want EPUB id 2", got)
-	}
-	if got := selectEbookFile(files, 1); got == nil || got.ID != 1 {
-		t.Fatalf("requested ebook = %#v, want PDF id 1", got)
-	}
-	if got := selectEbookFile(files, 3); got != nil {
-		t.Fatalf("audio file selected as ebook: %#v", got)
-	}
 }
 
 func TestEbookStatusToggleClearsEffectivePrimary(t *testing.T) {
@@ -150,5 +120,93 @@ func TestEbookFilePreservesSpecificContentType(t *testing.T) {
 	}
 	if disposition != "inline" || params["filename"] != filename {
 		t.Fatalf("Content-Disposition = %q, want safe filename %q", rec.Header().Get("Content-Disposition"), filename)
+	}
+}
+
+// TestEbookEndpointsRejectNonEbookItems pins the item-type guard: the ABS item
+// detail only ever advertises an ebookFile for an ebook item, so serving (or
+// repointing) a supplementary ebook attached to an audiobook through these
+// routes would be a shape the client never asked for. Upstream ABS answers a
+// client error for a non-book item; these return 400.
+func TestEbookEndpointsRejectNonEbookItems(t *testing.T) {
+	newStore := func() *ebookPrimaryTestStore {
+		return &ebookPrimaryTestStore{
+			stubMediaStore: &stubMediaStore{known: map[string]*models.MediaItem{
+				testEbookID: {ContentID: testEbookID, Type: mediaTypeAudiobook},
+			}},
+			files: []*models.MediaFile{{ID: 2, FilePath: "/books/primary.epub"}},
+		}
+	}
+
+	t.Run("file", func(t *testing.T) {
+		store := newStore()
+		h := New(Dependencies{MediaStore: store})
+		rec := dispatchABSWithParams(http.MethodGet, "/api/items/ebook-1/ebook",
+			map[string]string{"id": testEbookID}, nil, "1", testProfileID, h.handleEbookFile)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("status", func(t *testing.T) {
+		store := newStore()
+		h := New(Dependencies{MediaStore: store, AccessResolver: metadataAuthorizerStub{allowed: true}})
+		rec := dispatchABSWithParams(http.MethodPatch, "/api/items/ebook-1/ebook/2/status",
+			map[string]string{"id": testEbookID, "fileid": "2"}, nil, "1", testProfileID, h.handleEbookStatus)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if store.cleared || store.setID != 0 {
+			t.Fatal("a non-ebook item mutated the primary ebook selection")
+		}
+	})
+}
+
+// TestEbookEndpointsReportItemLookupFailures separates "this item is not
+// visible to you" from "the lookup itself failed": a database error must not
+// masquerade as a 404, which clients cache as a missing book.
+func TestEbookEndpointsReportItemLookupFailures(t *testing.T) {
+	newStore := func() *ebookPrimaryTestStore {
+		return &ebookPrimaryTestStore{
+			stubMediaStore: &stubMediaStore{lookupErr: errors.New("db down")},
+			files:          []*models.MediaFile{{ID: 2, FilePath: "/books/primary.epub"}},
+		}
+	}
+
+	t.Run("file", func(t *testing.T) {
+		h := New(Dependencies{MediaStore: newStore()})
+		rec := dispatchABSWithParams(http.MethodGet, "/api/items/ebook-1/ebook",
+			map[string]string{"id": testEbookID}, nil, "1", testProfileID, h.handleEbookFile)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("status", func(t *testing.T) {
+		store := newStore()
+		h := New(Dependencies{MediaStore: store, AccessResolver: metadataAuthorizerStub{allowed: true}})
+		rec := dispatchABSWithParams(http.MethodPatch, "/api/items/ebook-1/ebook/2/status",
+			map[string]string{"id": testEbookID, "fileid": "2"}, nil, "1", testProfileID, h.handleEbookStatus)
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+		}
+		if store.cleared || store.setID != 0 {
+			t.Fatal("a failed lookup mutated the primary ebook selection")
+		}
+	})
+}
+
+// TestEbookFileReportsMissingItemAsNotFound keeps the missing/inaccessible
+// item on 404 rather than the 400 the type guard emits.
+func TestEbookFileReportsMissingItemAsNotFound(t *testing.T) {
+	store := &ebookPrimaryTestStore{
+		stubMediaStore: &stubMediaStore{},
+		files:          []*models.MediaFile{{ID: 2, FilePath: "/books/primary.epub"}},
+	}
+	h := New(Dependencies{MediaStore: store})
+	rec := dispatchABSWithParams(http.MethodGet, "/api/items/ebook-1/ebook",
+		map[string]string{"id": testEbookID}, nil, "1", testProfileID, h.handleEbookFile)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }

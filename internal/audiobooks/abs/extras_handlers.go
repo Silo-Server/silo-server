@@ -1,17 +1,15 @@
 package abs
 
 import (
-	"context"
 	"log/slog"
-	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -225,59 +223,41 @@ func (h *Handler) handleEbookFile(w http.ResponseWriter, r *http.Request) {
 		h.writeAccessResolutionError(w, r, err)
 		return
 	}
+	if !h.requireEbookItem(w, r, contentID, access) {
+		return
+	}
 	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
 	if err != nil {
 		http.Error(w, "load files: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if fileID == 0 {
-		if store, ok := h.deps.MediaStore.(ebookPrimaryStore); ok {
-			if primaryID, configured, hasPrimary, err := store.GetPrimaryEbookFileID(r.Context(), contentID); err != nil {
-				http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+		primary, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
+		if err != nil {
+			http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if primary.Configured {
+			if !primary.HasPrimary {
+				http.Error(w, "ebook not found", http.StatusNotFound)
 				return
-			} else if configured {
-				if !hasPrimary {
-					http.Error(w, "ebook not found", http.StatusNotFound)
-					return
-				}
-				fileID = primaryID
 			}
+			fileID = primary.FileID
 		}
 	}
-	selected := selectEbookFile(files, fileID)
+	// fileID is set when the caller addressed a file explicitly or a curator
+	// pinned one; otherwise fall back to ABS's EPUB-first default.
+	selected := ebookformat.PreferredFile(files)
+	if fileID != 0 {
+		selected = ebookformat.FileByID(files, fileID)
+	}
 	if selected == nil {
 		http.Error(w, "ebook not found", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Content-Type", ebookContentType(filepath.Ext(selected.FilePath)))
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filepath.Base(selected.FilePath)}))
+	w.Header().Set("Content-Type", ebookformat.MimeTypeForFile(selected))
+	w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("inline", filepath.Base(selected.FilePath)))
 	_ = playback.ServeDirectPlay(w, r, selected.FilePath)
-}
-
-// selectEbookFile follows ABS primary-file behavior: use an explicitly
-// requested supported ebook, otherwise prefer EPUB and fall back to the first
-// supported ebook in stable media-file order.
-func selectEbookFile(files []*models.MediaFile, fileID int) *models.MediaFile {
-	var first *models.MediaFile
-	for _, file := range files {
-		contentType := ebookContentType(filepath.Ext(file.FilePath))
-		if contentType == "" {
-			continue
-		}
-		if fileID != 0 {
-			if file.ID == fileID {
-				return file
-			}
-			continue
-		}
-		if strings.EqualFold(filepath.Ext(file.FilePath), ".epub") {
-			return file
-		}
-		if first == nil {
-			first = file
-		}
-	}
-	return first
 }
 
 // handleEbookStatus — PATCH /items/{id}/ebook/{fileid}/status
@@ -298,21 +278,23 @@ func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 		h.writeAccessResolutionError(w, r, err)
 		return
 	}
+	if !h.requireEbookItem(w, r, contentID, access) {
+		return
+	}
 	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
 	if err != nil {
 		http.Error(w, "load ebook files: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if selectEbookFile(files, fileID) == nil {
+	if ebookformat.FileByID(files, fileID) == nil {
 		http.Error(w, "invalid ebook file id", http.StatusBadRequest)
 		return
 	}
-	authorizer, ok := h.deps.AccessResolver.(MetadataCurationAuthorizer)
-	if !ok {
+	if h.deps.AccessResolver == nil {
 		http.Error(w, "ebook primary selection unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	allowed, err := authorizer.CanCurateMetadata(r.Context(), a.UserID, a.ProfileID)
+	allowed, err := h.deps.AccessResolver.CanCurateMetadata(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "abs ebook primary authorization failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", contentID)
 		http.Error(w, "ebook primary authorization failed", http.StatusInternalServerError)
@@ -322,26 +304,22 @@ func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "metadata curation permission required", http.StatusForbidden)
 		return
 	}
-	store, ok := h.deps.MediaStore.(ebookPrimaryStore)
-	if !ok {
-		http.Error(w, "ebook primary selection unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	primaryID, configured, hasPrimary, err := store.GetPrimaryEbookFileID(r.Context(), contentID)
+	primary, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
 	if err != nil {
 		http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defaultFile := selectEbookFile(files, 0)
-	if (configured && hasPrimary && primaryID == fileID) || (!configured && defaultFile != nil && defaultFile.ID == fileID) {
-		if err := store.ClearPrimaryEbookFileID(r.Context(), contentID); err != nil {
+	defaultFile := ebookformat.PreferredFile(files)
+	if (primary.Configured && primary.HasPrimary && primary.FileID == fileID) ||
+		(!primary.Configured && defaultFile != nil && defaultFile.ID == fileID) {
+		if err := h.deps.MediaStore.ClearPrimaryEbookFileID(r.Context(), contentID); err != nil {
 			http.Error(w, "clear primary ebook: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	err = store.SetPrimaryEbookFileID(r.Context(), contentID, fileID)
+	err = h.deps.MediaStore.SetPrimaryEbookFileID(r.Context(), contentID, fileID)
 	if err != nil {
 		http.Error(w, "set primary ebook: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -349,28 +327,28 @@ func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-type ebookPrimaryStore interface {
-	GetPrimaryEbookFileID(ctx context.Context, contentID string) (fileID int, configured bool, hasPrimary bool, err error)
-	SetPrimaryEbookFileID(ctx context.Context, contentID string, fileID int) error
-	ClearPrimaryEbookFileID(ctx context.Context, contentID string) error
-}
-
-func ebookContentType(ext string) string {
-	switch strings.ToLower(ext) {
-	case ".epub":
-		return ebookEPUBMimeType
-	case ".pdf":
-		return "application/pdf"
-	case ".mobi", ".azw", ".azw3":
-		return "application/x-mobipocket-ebook"
-	case ".cbz":
-		return "application/vnd.comicbook+zip"
-	case ".cbr":
-		return "application/vnd.comicbook-rar"
-	case ".fb2":
-		return "application/x-fictionbook+xml"
+// requireEbookItem loads the addressed item and enforces that the ebook
+// endpoints only ever act on ebook items. Upstream ABS answers its ebook
+// routes with a client error for a non-book item; answering from the file list
+// alone would instead serve (or repoint) a supplementary ebook that the ABS
+// item detail never advertises for an audiobook. It writes the response and
+// returns false when the request must not proceed.
+func (h *Handler) requireEbookItem(w http.ResponseWriter, r *http.Request, contentID string, access catalog.AccessFilter) bool {
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs ebook item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return false
 	}
-	return ""
+	if item == nil {
+		http.Error(w, "item not found", http.StatusNotFound)
+		return false
+	}
+	if item.Type != mediaTypeEbook {
+		http.Error(w, "item is not an ebook", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------

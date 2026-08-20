@@ -29,8 +29,10 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
-	if err == nil && len(libs) > 0 {
-		defaultLibID = audiobookLibraryID(libs[0])
+	if err == nil {
+		if lib, ok := defaultLibrary(libs); ok {
+			defaultLibID = audiobookLibraryID(lib)
+		}
 	}
 
 	// Resolve the real display username; the token only carries the userID, so

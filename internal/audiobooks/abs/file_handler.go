@@ -3,7 +3,7 @@ package abs
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"mime"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -68,8 +69,15 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 		h.writeAccessResolutionError(w, r, err)
 		return
 	}
-	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
-	if err != nil || item == nil {
+	// Only the item's kind matters here, and this is the Range-request hot
+	// path: a full item fetch would hydrate people and series for nothing.
+	itemType, err := h.deps.MediaStore.GetItemType(r.Context(), contentID, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs file stream item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if itemType == "" {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
@@ -84,7 +92,7 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	// real file IDs; audiobook players receive synthetic inos, with a legacy
 	// 0-based track-index fallback.
 	fileIdx := -1
-	if item.Type == mediaTypeEbook {
+	if itemType == mediaTypeEbook {
 		for i, f := range files {
 			if strconv.Itoa(f.ID) == inoStr {
 				fileIdx = i
@@ -115,17 +123,16 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	// /download variant: hint the client to save rather than stream.
 	if strings.HasSuffix(r.URL.Path, "/download") {
 		filename := filepath.Base(mediaFile.FilePath)
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+		w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("attachment", filename))
 	}
 
 	// Set Content-Type for audio files. ServeDirectPlay uses MimeFromExtension
 	// which covers video containers; we override with audio-specific MIME
 	// types because ABS clients pattern-match on Content-Type.
-	ext := strings.ToLower(filepath.Ext(mediaFile.FilePath))
-	if ct := ebookContentType(ext); ct != "" {
+	if ct := ebookformat.MimeType(ebookformat.FormatForFile(mediaFile)); ct != "" {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-	} else if ct := audioContentType(ext); ct != "" {
+	} else if ct := audioContentType(strings.ToLower(filepath.Ext(mediaFile.FilePath))); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 

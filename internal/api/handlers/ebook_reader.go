@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -129,7 +129,7 @@ func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Reque
 		h.writeReadError(w, err)
 		return
 	}
-	if file == nil || file.ContentID != contentID || !isEbookFile(file) {
+	if file == nil || file.ContentID != contentID || !ebookformat.IsEbookFile(file) {
 		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 		return
 	}
@@ -269,7 +269,7 @@ func (h *EbookReaderHandler) HandleSaveProgress(w http.ResponseWriter, r *http.R
 		h.writeReadError(w, err)
 		return
 	}
-	if file == nil || file.ContentID != contentID || !isEbookFile(file) {
+	if file == nil || file.ContentID != contentID || !ebookformat.IsEbookFile(file) {
 		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 		return
 	}
@@ -618,90 +618,13 @@ func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.Media
 		return fmt.Errorf("stat ebook file: %w", err)
 	}
 
-	w.Header().Set("Content-Type", ebookMimeType(file.FilePath, file.Container))
-	w.Header().Set("Content-Disposition", inlineContentDisposition(filepath.Base(file.FilePath)))
+	w.Header().Set("Content-Type", ebookformat.MimeTypeForFile(file))
+	w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("inline", filepath.Base(file.FilePath)))
 	// Ebook files are served inline on the API origin (and reachable via the
 	// ?token= query fallback), so browsers must never content-sniff them.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, stat.Name(), stat.ModTime(), f)
 	return nil
-}
-
-// inlineContentDisposition builds an inline Content-Disposition header value.
-// mime.FormatMediaType handles quoting, backslash escaping, and RFC 5987
-// (filename*) encoding for non-ASCII names.
-func inlineContentDisposition(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" || name == "." || name == string(filepath.Separator) {
-		name = "ebook"
-	}
-	if disposition := mime.FormatMediaType("inline", map[string]string{"filename": name}); disposition != "" {
-		return disposition
-	}
-	return `inline; filename="ebook"`
-}
-
-func isEbookFile(file *models.MediaFile) bool {
-	if file == nil {
-		return false
-	}
-	if !strings.EqualFold(file.BaseType, "ebook") {
-		return false
-	}
-	return ebookReaderFormat(file.FilePath, file.Container) != ""
-}
-
-// ebookReaderFormat resolves the whitelisted reader format for a file from
-// its filename extension, falling back to the catalog container when the
-// extension is not a known ebook format. It returns "" when neither identity
-// is whitelisted. isEbookFile admission and ebookMimeType both key off this
-// resolution, so an admitted file always maps to a concrete ebook MIME type
-// and never falls through to application/octet-stream.
-func ebookReaderFormat(path, container string) string {
-	if strings.HasSuffix(strings.ToLower(path), ".fb2.zip") {
-		return "fbz"
-	}
-	if format := normalizeEbookReaderFormat(filepath.Ext(path)); format != "" {
-		return format
-	}
-	return normalizeEbookReaderFormat(container)
-}
-
-// normalizeEbookReaderFormat maps an extension or container value onto the
-// ebook reader format whitelist, returning "" for unknown values.
-func normalizeEbookReaderFormat(value string) string {
-	format := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), ".")
-	switch format {
-	case "epub", "pdf", "mobi", "azw", "azw3", "cbz", "cbr", "fb2", "fbz":
-		return format
-	default:
-		return ""
-	}
-}
-
-func ebookMimeType(path, container string) string {
-	switch ebookReaderFormat(path, container) {
-	case "epub":
-		return "application/epub+zip"
-	case "pdf":
-		return "application/pdf"
-	case "mobi":
-		return "application/x-mobipocket-ebook"
-	case "azw":
-		return "application/vnd.amazon.ebook"
-	case "azw3":
-		return "application/vnd.amazon.mobi8-ebook"
-	case "cbz":
-		return "application/vnd.comicbook+zip"
-	case "cbr":
-		return "application/vnd.comicbook-rar"
-	case "fb2":
-		return "application/x-fictionbook+xml"
-	case "fbz":
-		return "application/x-zip-compressed-fb2"
-	default:
-		return "application/octet-stream"
-	}
 }
 
 type PGEbookReaderProgressStore struct {

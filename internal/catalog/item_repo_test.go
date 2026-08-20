@@ -814,3 +814,35 @@ func TestItemRepo_ListUnmatchedByFolderAndPathPrefix_ExcludesMangaChapters(t *te
 		t.Fatalf("expected 4 args with limit; got %v", args)
 	}
 }
+
+// TestItemRepo_TypeProjectionSharesAccessPredicates pins the invariant behind
+// the cheap projection lookups (GetTypeWithAccess, GetAccessibleIDs): each
+// must be the same query as the full fetch with a narrower projection.
+func TestItemRepo_TypeProjectionSharesAccessPredicates(t *testing.T) {
+	repo := &ItemRepository{}
+	access := AccessFilter{
+		AllowedLibraryIDs:  []int{1, 2},
+		DisabledLibraryIDs: []int{3},
+		MaxContentRating:   "PG-13",
+	}
+	fullSQL, fullArgs := repo.buildItemAccessSQL(itemColumns, []string{"a"}, access)
+
+	// Every narrow projection sharing the builder must keep the full fetch's
+	// access WHERE verbatim, so an item hidden from the batch read can never
+	// leak through a cheaper query.
+	for _, projection := range []string{"mi.type", "mi.content_id"} {
+		narrowSQL, narrowArgs := repo.buildItemAccessSQL(projection, []string{"a"}, access)
+
+		fullWhere := fullSQL[strings.Index(fullSQL, "FROM media_items mi"):]
+		narrowWhere := narrowSQL[strings.Index(narrowSQL, "FROM media_items mi"):]
+		if fullWhere != narrowWhere {
+			t.Fatalf("projection %q changed the access predicates:\nfull:   %s\nnarrow: %s", projection, fullWhere, narrowWhere)
+		}
+		if len(fullArgs) != len(narrowArgs) {
+			t.Fatalf("projection %q args differ: full %v, narrow %v", projection, fullArgs, narrowArgs)
+		}
+		if strings.Contains(narrowSQL, itemColumns) {
+			t.Fatalf("projection %q must project a single column; got %s", projection, narrowSQL)
+		}
+	}
+}

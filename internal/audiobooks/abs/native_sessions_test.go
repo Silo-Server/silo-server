@@ -26,6 +26,10 @@ func (s *playStartMediaStore) GetAudiobookByID(_ context.Context, id string, _ c
 	return nil, nil
 }
 
+func (s *playStartMediaStore) GetItemType(ctx context.Context, id string, access catalog.AccessFilter) (string, error) {
+	return itemTypeFromLookup(s.GetAudiobookByID(ctx, id, access))
+}
+
 func (s *playStartMediaStore) GetMediaFiles(_ context.Context, contentID string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
 	if s.item != nil && s.item.ContentID == contentID {
 		return s.files, nil

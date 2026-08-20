@@ -181,5 +181,3 @@ func TestHandleSimilarItemsUsesEachItemsActualLibrary(t *testing.T) {
 		t.Fatalf("similar ebook file = %v, want epub", mediaBlock["ebookFile"])
 	}
 }
-
-var _ itemLibraryBatchStore = (*inProgressStubMediaStore)(nil)

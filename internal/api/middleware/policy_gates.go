@@ -1,10 +1,7 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
-	"slices"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -22,9 +19,7 @@ const (
 
 // PermissionDecider is the narrow policy decision interface used by route
 // gates. *policy.PDP satisfies it.
-type PermissionDecider interface {
-	CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error)
-}
+type PermissionDecider = policy.PermissionDecider
 
 // NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
 // policy PDP while preserving RequireActingAdmin's response contract.
@@ -52,18 +47,15 @@ func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker Primar
 				return
 			}
 
-			decision, _, err := pdp.CheckPermission(r.Context(), policy.PermissionInput{
-				SchemaVersion:     1,
+			decision, _, err := pdp.CheckPermission(r.Context(), policy.ActingAdminInput(policy.GateActor{
 				UserID:            claims.UserID,
 				Role:              claims.Role,
-				UserEnabled:       true,
-				Permission:        policy.PermissionActingAdmin,
+				Enabled:           true,
 				DeclaredProfileID: declaredProfileID,
 				ActingAsPrimary:   actingAsPrimary,
-				RequestTime:       policyRequestTime(),
 				DeviceID:          policyDeviceID(r),
 				ClientIP:          clientip.FromContext(r.Context()),
-			})
+			}))
 			if err != nil {
 				writeInternalError(w, activeProfileVerificationFailedMsg)
 				return
@@ -127,14 +119,13 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 		if claims.Role == "admin" {
-			actingAdmin, err := m.checkPermission(r, policy.PermissionInput{
+			actingAdmin, err := m.checkPermission(r, policy.ActingAdminInput(policy.GateActor{
 				UserID:            claims.UserID,
 				Role:              claims.Role,
-				UserEnabled:       true,
-				Permission:        policy.PermissionActingAdmin,
+				Enabled:           true,
 				DeclaredProfileID: declaredProfileID,
 				ActingAsPrimary:   actingAsPrimary,
-			})
+			}))
 			if err != nil {
 				writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 				return
@@ -166,17 +157,15 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 
-		permissionOnlyInput := policy.PermissionInput{
+		actor := policy.GateActor{
 			UserID:              user.ID,
 			Role:                user.Role,
-			UserEnabled:         user.Enabled,
-			AssignedPermissions: slices.Clone(effective.Permissions),
-			Permission:          policy.PermissionMetadataCuration,
+			Enabled:             user.Enabled,
+			AssignedPermissions: effective.Permissions,
 			DeclaredProfileID:   declaredProfileID,
 			ActingAsPrimary:     actingAsPrimary,
-			TargetLibraryIDs:    []int{0},
 		}
-		permissionOnly, err := m.checkPermission(r, permissionOnlyInput)
+		permissionOnly, err := m.checkPermission(r, policy.MetadataCurationInput(actor))
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify metadata curation permission")
 			return
@@ -196,18 +185,9 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 
-		decision, err := m.checkPermission(r, policy.PermissionInput{
-			UserID:                  user.ID,
-			Role:                    user.Role,
-			UserEnabled:             user.Enabled,
-			AssignedPermissions:     slices.Clone(effective.Permissions),
-			Permission:              policy.PermissionMetadataCuration,
-			DeclaredProfileID:       declaredProfileID,
-			ActingAsPrimary:         actingAsPrimary,
-			TargetLibraryIDs:        slices.Clone(targetLibraries),
-			UserLibraryIDs:          slices.Clone(effective.LibraryIDs),
-			UserLibrariesRestricted: effective.LibraryIDs != nil,
-		})
+		decision, err := m.checkPermission(r, policy.MetadataCurationForLibrariesInput(
+			actor, targetLibraries, effective.LibraryIDs, effective.LibraryIDs != nil,
+		))
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify metadata curation permission")
 			return
@@ -256,15 +236,14 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 
-		decision, err := m.checkPermission(r, policy.PermissionInput{
+		decision, err := m.checkPermission(r, policy.MarkerEditInput(policy.GateActor{
 			UserID:              user.ID,
 			Role:                user.Role,
-			UserEnabled:         user.Enabled,
-			AssignedPermissions: slices.Clone(effective.Permissions),
-			Permission:          policy.PermissionMarkerEdit,
+			Enabled:             user.Enabled,
+			AssignedPermissions: effective.Permissions,
 			DeclaredProfileID:   declaredProfileID,
 			ActingAsPrimary:     actingAsPrimary,
-		})
+		}))
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify marker edit permission")
 			return
@@ -285,22 +264,16 @@ func (m *PolicyPermissionMiddleware) primaryChecker() PrimaryProfileChecker {
 	return m.checkPrimary
 }
 
+// checkPermission stamps the request-scoped facts onto an input built by the
+// shared policy constructors and evaluates it.
 func (m *PolicyPermissionMiddleware) checkPermission(r *http.Request, input policy.PermissionInput) (policy.PermissionDecision, error) {
 	if m == nil || m.pdp == nil {
-		return policy.PermissionDecision{}, errMissingPolicyDecider{}
+		return policy.PermissionDecision{}, policy.ErrNoPermissionDecider
 	}
-	input.SchemaVersion = 1
-	input.RequestTime = policyRequestTime()
 	input.DeviceID = policyDeviceID(r)
 	input.ClientIP = clientip.FromContext(r.Context())
 	decision, _, err := m.pdp.CheckPermission(r.Context(), input)
 	return decision, err
-}
-
-type errMissingPolicyDecider struct{}
-
-func (errMissingPolicyDecider) Error() string {
-	return "missing policy permission decider"
 }
 
 func resolveActingAdminFacts(r *http.Request, userID int, checkPrimary PrimaryProfileChecker) (string, bool, error) {
@@ -316,10 +289,6 @@ func resolveActingAdminFacts(r *http.Request, userID int, checkPrimary PrimaryPr
 		return profileID, false, err
 	}
 	return profileID, found && isPrimary, nil
-}
-
-func policyRequestTime() string {
-	return time.Now().UTC().Format(time.RFC3339)
 }
 
 func policyDeviceID(r *http.Request) string {

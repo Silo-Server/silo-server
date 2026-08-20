@@ -88,7 +88,7 @@ func newSmartCollectionsHarness(t *testing.T, knownItems ...string) *smartCollec
 	t.Helper()
 	known := map[string]*models.MediaItem{}
 	for _, id := range knownItems {
-		known[id] = &models.MediaItem{ContentID: id, Title: "Title-" + id}
+		known[id] = &models.MediaItem{ContentID: id, Title: "Title-" + id, Type: mediaTypeAudiobook}
 	}
 	store := newMemSmartCollectionStore()
 	prog := &fakeProgressStore{}
@@ -108,13 +108,21 @@ func newSmartCollectionsHarness(t *testing.T, knownItems ...string) *smartCollec
 type itemListStubMediaStore struct {
 	stubMediaStore
 	items []*models.MediaItem
+	libs  []AudiobookLibrary
+	// scanned records every library the candidate sweep asked for, so the
+	// ebook-exclusion test can assert the ebook folder was never queried.
+	scanned []int64
 }
 
-func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int, _ catalog.AccessFilter, _ Filter) ([]*models.MediaItem, int, error) {
+func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, lib AudiobookLibrary, _, _ int, _ catalog.AccessFilter, _ Filter) ([]*models.MediaItem, int, error) {
+	s.scanned = append(s.scanned, lib.ID)
 	return s.items, len(s.items), nil
 }
 
 func (s *itemListStubMediaStore) ListAudiobookLibraries(_ context.Context, _ catalog.AccessFilter) ([]AudiobookLibrary, error) {
+	if s.libs != nil {
+		return s.libs, nil
+	}
 	return []AudiobookLibrary{{ID: 9, Name: "Audiobooks", Type: "audiobooks"}}, nil
 }
 
@@ -381,5 +389,40 @@ func TestSmartCollection_Items_NonOwnerPublic_OK(t *testing.T) {
 		map[string]string{"id": id}, nil, "2", "", hb.H.handleSmartCollectionItems)
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
+	}
+}
+
+// TestSmartCollection_Items_ExcludesEbookLibraries pins that an unscoped smart
+// collection stays audiobook-only. ListAudiobookLibraries now also returns
+// ebook folders, and the rule vocabulary (narrator, duration, listening
+// progress) is audiobook-shaped, so ebook folders must not be swept — and an
+// ebook that reaches the candidate loop anyway must not become a member.
+func TestSmartCollection_Items_ExcludesEbookLibraries(t *testing.T) {
+	hb := newSmartCollectionsHarness(t, "book-a")
+	store := hb.H.deps.MediaStore.(*itemListStubMediaStore)
+	store.libs = []AudiobookLibrary{
+		{ID: 9, Name: "Audiobooks", Type: "audiobooks"},
+		{ID: 10, Name: "Ebooks", Type: libraryTypeEbooks},
+	}
+	store.items = append(store.items, &models.MediaItem{ContentID: "ebook-x", Title: "Title-ebook-x", Type: mediaTypeEbook})
+
+	id := createSmartCollectionForUser(t, hb, "1", "", `{"name":"all"}`)
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/smart-collections/"+id+"/items",
+		map[string]string{"id": id}, nil, "1", "", hb.H.handleSmartCollectionItems)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(store.scanned) != 1 || store.scanned[0] != 9 {
+		t.Fatalf("scanned libraries = %v, want only the audiobook library 9", store.scanned)
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	results, _ := env["results"].([]any)
+	if len(results) != 1 {
+		t.Fatalf("results len = %d, want 1 (the ebook must not be a member); body=%s", len(results), rec.Body.String())
+	}
+	entry, _ := results[0].(map[string]any)
+	if entry["id"] != "book-a" {
+		t.Fatalf("member = %v, want book-a", entry["id"])
 	}
 }
