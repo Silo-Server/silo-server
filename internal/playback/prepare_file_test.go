@@ -99,7 +99,10 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 				TargetCodecAudio:    "aac",
 				TargetResolution:    "720p",
 				HWAccel:             tt.hwAccel,
-				AudioTrackIndex:     -1,
+				// Fake VideoToolbox-capable ffmpeg so the encoder probe in
+				// resolveEffectiveTranscodeHWAccel succeeds on Linux CI too.
+				FFmpegPath:      videoToolboxTestFFmpeg(t),
+				AudioTrackIndex: -1,
 			}, "/artifacts/out.mp4")
 			joined := strings.Join(args, " ")
 			for _, want := range tt.want {
