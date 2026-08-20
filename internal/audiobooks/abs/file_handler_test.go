@@ -3,9 +3,12 @@ package abs
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -18,6 +21,26 @@ type fileStreamTestStore struct {
 
 func (s *fileStreamTestStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return s.files, nil
+}
+
+func TestFileStreamRoutesRegisterHead(t *testing.T) {
+	h := New(Dependencies{MediaStore: &stubMediaStore{}})
+	router := chi.NewRouter()
+	h.Mount(router)
+
+	for _, path := range []string{
+		"/api/items/book-1/file/1",
+		"/api/items/book-1/file/1/download",
+		"/abs/api/items/book-1/file/1",
+		"/abs/api/items/book-1/file/1/download",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodHead, path, nil)
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("HEAD %s status = %d, want auth middleware 401 (route registered)", path, rec.Code)
+		}
+	}
 }
 
 func TestFileStreamNumericIdentifierIsResolvedByMediaType(t *testing.T) {

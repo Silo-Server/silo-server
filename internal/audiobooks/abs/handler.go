@@ -457,7 +457,9 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// /download variant is the same handler; Content-Disposition is set when
 			// the path ends in /download.
 			r.Get(prefix+"/items/{libraryItemId}/file/{ino}", h.handleFileStream)
+			r.Head(prefix+"/items/{libraryItemId}/file/{ino}", h.handleFileStream)
 			r.Get(prefix+"/items/{libraryItemId}/file/{ino}/download", h.handleFileStream)
+			r.Head(prefix+"/items/{libraryItemId}/file/{ino}/download", h.handleFileStream)
 		}
 	})
 
