@@ -125,7 +125,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		// once in software instead of failing every artifact rebuild with the
 		// same hardware command.
 		if retryAccel := StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
-			slog.Warn("prepared encode failed; retrying with software encoding",
+			slog.WarnContext(ctx, "prepared encode failed; retrying with software encoding",
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
 			retryOpts := opts
 			retryOpts.HWAccel = retryAccel
