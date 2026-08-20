@@ -645,3 +645,17 @@ func TestExplicitVideoToolboxBypassesFFmpegProbe(t *testing.T) {
 		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
 	}
 }
+
+func TestCachedVideoToolboxProbeExecutesConfiguredRelativePath(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+	// Empty PATH: if the probe cleaned "./ffmpeg" to a bare name it would fall
+	// back to PATH lookup and fail instead of executing the configured file.
+	t.Setenv("PATH", t.TempDir())
+	t.Chdir(filepath.Dir(ffmpeg.path))
+
+	result := cachedVideoToolboxProbe("./" + filepath.Base(ffmpeg.path))
+	if !result.available {
+		t.Fatalf("probe must execute the configured relative path, got reason %q", result.reason)
+	}
+}

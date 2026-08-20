@@ -36,7 +36,11 @@ type Watcher struct {
 	eventBus  cache.EventBus
 	bootstrap BootstrapOverrides
 	onChange  []func(old, updated *config.Config)
-	reloadCh  chan struct{} // buffered(1), event bus writes here
+	// normalizers run on every config the watcher constructs, after bootstrap
+	// overrides and before the config becomes visible, so derived repairs
+	// (e.g. resolving the seeded ffmpeg path) survive hot reloads.
+	normalizers []func(*config.Config)
+	reloadCh    chan struct{} // buffered(1), event bus writes here
 }
 
 // NewWatcher creates a new config watcher. Call Start to begin watching. The
@@ -51,6 +55,12 @@ func NewWatcher(pool *pgxpool.Pool, cipher *secret.Cipher, eventBus cache.EventB
 		bootstrap: bootstrap,
 		reloadCh:  make(chan struct{}, 1),
 	}
+}
+
+// OnLoad registers a normalization applied to every config this watcher
+// constructs (initial load and every reload). Register before Start.
+func (w *Watcher) OnLoad(fn func(*config.Config)) {
+	w.normalizers = append(w.normalizers, fn)
 }
 
 // Config returns the current config. Safe for concurrent use.
@@ -184,6 +194,10 @@ func (w *Watcher) applySettings(m map[string]string) error {
 	}
 	if w.bootstrap.RedisURL != "" {
 		newCfg.Redis.URL = w.bootstrap.RedisURL
+	}
+
+	for _, normalize := range w.normalizers {
+		normalize(newCfg)
 	}
 
 	w.mu.Lock()

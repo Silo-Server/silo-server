@@ -101,3 +101,29 @@ func TestOnChangeAfterFirstApplySeesLaterChanges(t *testing.T) {
 		t.Errorf("callback saw old=%q new=%q, want old=info new=error", gotOld, gotNew)
 	}
 }
+
+func TestOnLoadNormalizersApplyOnEveryLoad(t *testing.T) {
+	w := &Watcher{}
+	w.OnLoad(func(c *config.Config) {
+		c.Playback.FFmpegPath = "/resolved/ffmpeg"
+	})
+
+	if err := w.applySettings(map[string]string{
+		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
+	}); err != nil {
+		t.Fatalf("applySettings() error = %v", err)
+	}
+	if got := w.Config().Playback.FFmpegPath; got != "/resolved/ffmpeg" {
+		t.Fatalf("Playback.FFmpegPath = %q, want normalized value", got)
+	}
+
+	// A reload constructs a fresh config; the normalizer must apply again.
+	if err := w.applySettings(map[string]string{
+		"playback.ffmpeg_path": "/usr/lib/jellyfin-ffmpeg/ffmpeg",
+	}); err != nil {
+		t.Fatalf("applySettings() reload error = %v", err)
+	}
+	if got := w.Config().Playback.FFmpegPath; got != "/resolved/ffmpeg" {
+		t.Fatalf("after reload Playback.FFmpegPath = %q, want normalized value", got)
+	}
+}
