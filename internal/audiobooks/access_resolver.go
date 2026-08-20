@@ -27,6 +27,8 @@ type scopeResolver interface {
 	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
 }
 
+const adminRole = "admin"
+
 // NewABSAccessResolver creates a resolver for ABS-authenticated access checks.
 func NewABSAccessResolver(
 	users access.UserRepository,
@@ -71,7 +73,7 @@ func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profil
 	})
 	if err != nil {
 		if errors.Is(err, access.ErrProfileNotFound) || errors.Is(err, access.ErrProfileUnverified) {
-			return catalog.AccessFilter{}, fmt.Errorf("%w: %v", abs.ErrAccessDenied, err)
+			return catalog.AccessFilter{}, fmt.Errorf("%w: %w", abs.ErrAccessDenied, err)
 		}
 		return catalog.AccessFilter{}, err
 	}
@@ -113,7 +115,7 @@ func (r *ABSAccessResolver) CanCurateMetadata(ctx context.Context, userID, profi
 			return true, nil
 		}
 	}
-	if user.Role != "admin" {
+	if user.Role != adminRole {
 		return false, nil
 	}
 	if profileID == "" {

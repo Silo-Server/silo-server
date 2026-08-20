@@ -46,6 +46,7 @@ const (
 	absMediaTypeAudiobook = abs.MediaTypeAudiobook
 	absMediaTypeEbook     = abs.MediaTypeEbook
 	absLibraryTypeEbooks  = "ebooks"
+	absEbookItemCondition = "mi.type = 'ebook'"
 )
 
 // cachedAudiobookCount returns a memoized COUNT(*) for the given (countSQL, args)
@@ -859,7 +860,7 @@ func (s *ABSMediaStore) ListContinueListening(ctx context.Context, userID, profi
 	args := []any{userID, profileID, limit}
 	if itemType == absMediaTypeEbook {
 		conditions := []string{
-			`mi.type = 'ebook'`,
+			absEbookItemCondition,
 			`erp.user_id = $1::integer`,
 			`($2 = '' OR erp.profile_id = $2)`,
 			`erp.progress > 0`,
@@ -933,9 +934,9 @@ func (s *ABSMediaStore) ListFinished(ctx context.Context, userID, profileID stri
 		return nil, err
 	}
 	args := []any{userID, profileID, limit}
-	if itemType == "ebook" {
+	if itemType == absMediaTypeEbook {
 		conditions := []string{
-			`mi.type = 'ebook'`,
+			absEbookItemCondition,
 			`erp.user_id = $1::integer`,
 			`($2 = '' OR erp.profile_id = $2)`,
 			fmt.Sprintf(`erp.progress >= %v`, models.EbookFinishedProgressThreshold),

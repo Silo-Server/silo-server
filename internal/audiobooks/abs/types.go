@@ -116,6 +116,8 @@ const (
 	mtimeMsKey           = "mtimeMs"
 )
 
+const virtualEbookLibraryName = "Books"
+
 // AuthorObj is the ABS-shaped author reference. ABS clients filter by id;
 // some screens render only name.
 type AuthorObj struct {

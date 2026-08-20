@@ -74,7 +74,7 @@ func (h *Handler) resolveLibrariesForItems(ctx context.Context, items []*models.
 
 func resolveFallbackLibrary(itemType string) AudiobookLibrary {
 	if itemType == mediaTypeEbook {
-		return AudiobookLibrary{ID: 0, Name: "Books", Type: mediaTypeEbook}
+		return AudiobookLibrary{ID: 0, Name: virtualEbookLibraryName, Type: mediaTypeEbook}
 	}
 	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
 }
