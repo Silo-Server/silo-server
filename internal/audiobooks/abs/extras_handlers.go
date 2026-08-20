@@ -3,9 +3,14 @@ package abs
 import (
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // extras_handlers.go bundles the ABS endpoints that don't fit naturally
@@ -44,10 +49,10 @@ func (h *Handler) handleHealthcheck(w http.ResponseWriter, _ *http.Request) {
 // install wizard); we surface that so clients skip straight to login.
 func (h *Handler) handleInit(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"isInit":         true,
-		"language":       "en-us",
-		"authMethods":    []string{"local"},
-		"authFormData":   map[string]any{},
+		isInitKey:        true,
+		languageKey:      languageEnglishUS,
+		authMethodsKey:   []string{localAuthMethod},
+		authFormDataKey:  map[string]any{},
 		"serverSettings": map[string]any{},
 	})
 }
@@ -61,7 +66,7 @@ func (h *Handler) handleInit(w http.ResponseWriter, _ *http.Request) {
 // is enabled. silo is local-auth-only today.
 func (h *Handler) handleAuthSettings(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authActiveAuthMethods":      []string{"local"},
+		authActiveMethodsKey:         []string{localAuthMethod},
 		"authOpenIDIssuerURL":        nil,
 		"authOpenIDAuthorizationURL": nil,
 		"authPasswordlessSettings":   map[string]any{},
@@ -130,18 +135,38 @@ func (h *Handler) handleDeleteItemProgress(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if h.deps.ProgressStore == nil {
+	contentID := chi.URLParam(r, libraryItemIDKey)
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs delete progress item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if item == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	contentID := chi.URLParam(r, "libraryItemId")
-	if err := h.deps.ProgressStore.DeleteProgress(r.Context(), a.UserID, a.ProfileID, contentID); err != nil {
+	if item.Type == mediaTypeEbook {
+		if h.deps.EbookProgressStore == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		err = h.deps.EbookProgressStore.DeleteEbookProgress(r.Context(), a.UserID, a.ProfileID, contentID)
+	} else if h.deps.ProgressStore != nil {
+		err = h.deps.ProgressStore.DeleteProgress(r.Context(), a.UserID, a.ProfileID, contentID)
+	}
+	if err != nil {
 		slog.WarnContext(r.Context(), "abs delete progress failed", "component", "audiobooks", "err", err, "content", contentID)
 		http.Error(w, "delete progress failed", http.StatusInternalServerError)
 		return
 	}
 	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
-		"data": map[string]any{"libraryItemId": contentID, "currentTime": 0, "isFinished": false, "progress": 0},
+		dataKey: map[string]any{libraryItemIDKey: contentID, currentTimeKey: 0, isFinishedKey: false, progressKey: 0},
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -156,40 +181,174 @@ func (h *Handler) handleSetEpisodeProgress(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"libraryItemId": chi.URLParam(r, "libraryItemId"),
-		"episodeId":     chi.URLParam(r, "episodeId"),
-		"currentTime":   0.0,
-		"duration":      0.0,
-		"isFinished":    false,
-		"progress":      0.0,
-		"lastUpdate":    0,
+		libraryItemIDKey: chi.URLParam(r, libraryItemIDKey),
+		episodeIDKey:     chi.URLParam(r, episodeIDKey),
+		currentTimeKey:   0.0,
+		durationKey:      0.0,
+		isFinishedKey:    false,
+		progressKey:      0.0,
+		lastUpdateKey:    0,
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Ebooks — stub surface until ebook scanner lands
+// Ebooks
 // ---------------------------------------------------------------------------
 
-// handleEbookFile — GET /items/{id}/ebook/{fileid}
-// Streams an ebook file (epub / pdf / mobi / cbz). silo's audiobook
-// scanner does not yet enumerate ebook files; until it does this returns
-// 404. The shape was intentionally chosen over 501 because the ABS web
-// reader treats 404 as "no ebook available for this item" and degrades
-// cleanly; 501 surfaces an alarming error banner.
-func (h *Handler) handleEbookFile(w http.ResponseWriter, _ *http.Request) {
-	http.Error(w, "ebook not available", http.StatusNotFound)
+// handleEbookFile — GET /items/{id}/ebook[/{fileid}]
+// Streams the primary ebook when fileid is omitted, or a selected
+// supplementary ebook when it is present.
+func (h *Handler) handleEbookFile(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	contentID := chi.URLParam(r, "id")
+	fileID := 0
+	if rawFileID := chi.URLParam(r, "fileid"); rawFileID != "" {
+		var err error
+		fileID, err = strconv.Atoi(rawFileID)
+		if err != nil || fileID <= 0 {
+			http.Error(w, "invalid ebook file", http.StatusBadRequest)
+			return
+		}
+	}
+	if contentID == "" {
+		http.Error(w, "item required", http.StatusBadRequest)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
+	if !h.requireEbookItem(w, r, contentID, access) {
+		return
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
+	if err != nil {
+		http.Error(w, "load files: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if fileID == 0 {
+		primary, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
+		if err != nil {
+			http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if primary.Configured {
+			if !primary.HasPrimary {
+				http.Error(w, "ebook not found", http.StatusNotFound)
+				return
+			}
+			fileID = primary.FileID
+		}
+	}
+	// fileID is set when the caller addressed a file explicitly or a curator
+	// pinned one; otherwise fall back to ABS's EPUB-first default.
+	selected := ebookformat.PreferredFile(files)
+	if fileID != 0 {
+		selected = ebookformat.FileByID(files, fileID)
+	}
+	if selected == nil {
+		http.Error(w, "ebook not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", ebookformat.MimeTypeForFile(selected))
+	w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("inline", filepath.Base(selected.FilePath)))
+	_ = playback.ServeDirectPlay(w, r, selected.FilePath)
 }
 
 // handleEbookStatus — PATCH /items/{id}/ebook/{fileid}/status
-// Marks an ebook file as read/unread. silo has no ebook catalog yet;
-// accept the request and return the empty status object so the client
-// optimistic update succeeds.
 func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"libraryItemId":   chi.URLParam(r, "id"),
-		"fileId":          chi.URLParam(r, "fileid"),
-		"isSupplementary": false,
-	})
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	contentID := chi.URLParam(r, "id")
+	fileID, err := strconv.Atoi(chi.URLParam(r, "fileid"))
+	if contentID == "" || err != nil || fileID <= 0 {
+		http.Error(w, "item and file required", http.StatusBadRequest)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
+	if !h.requireEbookItem(w, r, contentID, access) {
+		return
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
+	if err != nil {
+		http.Error(w, "load ebook files: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if ebookformat.FileByID(files, fileID) == nil {
+		http.Error(w, "invalid ebook file id", http.StatusBadRequest)
+		return
+	}
+	if h.deps.AccessResolver == nil {
+		http.Error(w, "ebook primary selection unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	allowed, err := h.deps.AccessResolver.CanCurateMetadata(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs ebook primary authorization failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", contentID)
+		http.Error(w, "ebook primary authorization failed", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "metadata curation permission required", http.StatusForbidden)
+		return
+	}
+	primary, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
+	if err != nil {
+		http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defaultFile := ebookformat.PreferredFile(files)
+	if (primary.Configured && primary.HasPrimary && primary.FileID == fileID) ||
+		(!primary.Configured && defaultFile != nil && defaultFile.ID == fileID) {
+		if err := h.deps.MediaStore.ClearPrimaryEbookFileID(r.Context(), contentID); err != nil {
+			http.Error(w, "clear primary ebook: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	err = h.deps.MediaStore.SetPrimaryEbookFileID(r.Context(), contentID, fileID)
+	if err != nil {
+		http.Error(w, "set primary ebook: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// requireEbookItem loads the addressed item and enforces that the ebook
+// endpoints only ever act on ebook items. Upstream ABS answers its ebook
+// routes with a client error for a non-book item; answering from the file list
+// alone would instead serve (or repoint) a supplementary ebook that the ABS
+// item detail never advertises for an audiobook. It writes the response and
+// returns false when the request must not proceed.
+func (h *Handler) requireEbookItem(w http.ResponseWriter, r *http.Request, contentID string, access catalog.AccessFilter) bool {
+	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs ebook item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return false
+	}
+	if item == nil {
+		http.Error(w, "item not found", http.StatusNotFound)
+		return false
+	}
+	if item.Type != mediaTypeEbook {
+		http.Error(w, "item is not an ebook", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -222,9 +381,9 @@ func (h *Handler) handleSendEbookToDevice(w http.ResponseWriter, _ *http.Request
 // return an empty preview object so the client renders an "unknown feed"
 // state and the user can back out without an error toast.
 func (h *Handler) handlePodcastFeed(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"podcast": map[string]any{
-		"metadata": map[string]any{"title": "", "author": "", "description": "", "feedUrl": "", "language": ""},
-		"episodes": []any{},
+	writeJSON(w, http.StatusOK, map[string]any{podcastKey: map[string]any{
+		metadataKey: map[string]any{titleKey: "", "author": "", descriptionKey: "", "feedUrl": "", languageKey: ""},
+		"episodes":  []any{},
 	}})
 }
 

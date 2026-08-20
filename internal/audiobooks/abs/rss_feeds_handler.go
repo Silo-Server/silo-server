@@ -59,14 +59,14 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed store unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	itemID := chi.URLParam(r, "itemId")
+	itemID := chi.URLParam(r, itemIDParam)
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
@@ -154,20 +154,20 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed not found", http.StatusNotFound)
 		return
 	}
-	slug := strings.TrimSuffix(chi.URLParam(r, "slug"), ".xml")
+	slug := strings.TrimSuffix(chi.URLParam(r, slugKey), ".xml")
 	f, err := h.deps.RSSFeedStore.GetFeedBySlug(r.Context(), slug)
 	if errors.Is(err, ErrNotFound) || (err == nil && f.ClosedAt != nil) {
 		http.Error(w, "feed not found", http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		slog.ErrorContext(r.Context(), "abs public feed get failed", "component", "audiobooks", "err", err, "slug", slug)
+		slog.ErrorContext(r.Context(), "abs public feed get failed", "component", "audiobooks", "err", err, slugKey, slug)
 		http.Error(w, "feed get failed", http.StatusInternalServerError)
 		return
 	}
 
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), f.LibraryItemID, emptyAccessFilter())
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		http.Error(w, "feed item not found", http.StatusNotFound)
 		return
 	}
@@ -214,7 +214,7 @@ func (h *Handler) handlePublicFeedFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feed not found", http.StatusNotFound)
 		return
 	}
-	slug := chi.URLParam(r, "slug")
+	slug := chi.URLParam(r, slugKey)
 	f, err := h.deps.RSSFeedStore.GetFeedBySlug(r.Context(), slug)
 	if errors.Is(err, ErrNotFound) || (err == nil && f.ClosedAt != nil) {
 		http.Error(w, "feed not found", http.StatusNotFound)

@@ -90,6 +90,10 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 	if deps.Pool != nil {
 		progressStore = &ABSProgressStore{Pool: deps.Pool}
 	}
+	var ebookProgressStore abs.EbookProgressStore
+	if deps.Pool != nil {
+		ebookProgressStore = &ABSEbookProgressStore{Pool: deps.Pool}
+	}
 
 	var playbackSessionStore abs.ABSPlaybackSessionStore
 	if deps.Pool != nil {
@@ -165,6 +169,7 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		Publisher:            nil, // EventPublisher: no-op stub; Socket.io handles realtime
 		Recommender:          buildABSRecommender(deps),
 		ProgressStore:        progressStore,
+		EbookProgressStore:   ebookProgressStore,
 		PlaybackSessionStore: playbackSessionStore,
 		BookmarkStore:        bookmarkStore,
 		CollectionStore:      collectionStore,

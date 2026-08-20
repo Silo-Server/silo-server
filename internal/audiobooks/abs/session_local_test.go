@@ -19,7 +19,7 @@ type positionRecordingProgressFake struct {
 	mu      sync.Mutex
 	seeded  map[string]*ProgressRow // contentID → existing row GetProgress returns
 	calls   map[string]float64      // contentID → last persisted position (either path)
-	viaPath map[string]string       // contentID → "create" | "update"
+	viaPath map[string]string       // contentID → "create" | testUpdatePath
 }
 
 func (f *positionRecordingProgressFake) GetProgress(_ context.Context, _, _, contentID string) (*ProgressRow, error) {
@@ -41,7 +41,7 @@ func (f *positionRecordingProgressFake) UpsertProgress(_ context.Context, row Pr
 func (f *positionRecordingProgressFake) UpdateProgressPosition(_ context.Context, _, _, contentID string, pos float64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.recordLocked(contentID, pos, "update")
+	f.recordLocked(contentID, pos, testUpdatePath)
 	return nil
 }
 
@@ -69,7 +69,7 @@ func (f *positionRecordingProgressFake) path(contentID string) string {
 
 func TestSyncLocalSession_UpdatesPosition(t *testing.T) {
 	prog := &positionRecordingProgressFake{}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil}}
 	pub := &recordingPublisher{}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog, Publisher: pub})
 
@@ -79,7 +79,7 @@ func TestSyncLocalSession_UpdatesPosition(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	got, ok := prog.pos("book-1")
+	got, ok := prog.pos(testBookID)
 	if !ok {
 		t.Fatalf("progress not persisted for book-1")
 	}
@@ -88,7 +88,7 @@ func TestSyncLocalSession_UpdatesPosition(t *testing.T) {
 	}
 	// No pre-existing row: the position must be persisted via a create (upsert),
 	// not the UPDATE-only path that would silently drop an offline-only book.
-	if p := prog.path("book-1"); p != "create" {
+	if p := prog.path(testBookID); p != "create" {
 		t.Errorf("persist path = %q, want create", p)
 	}
 	// Realtime event should fire so other clients catch up.
@@ -108,9 +108,9 @@ func TestSyncLocalSession_ExistingRow_UsesUpdate(t *testing.T) {
 	// must advance it via the monotonic UPDATE path — not recreate it — to avoid
 	// clobbering is_finished / progress_pct the user set explicitly.
 	prog := &positionRecordingProgressFake{
-		seeded: map[string]*ProgressRow{"book-1": {ContentID: "book-1", CurrentSeconds: 5}},
+		seeded: map[string]*ProgressRow{testBookID: {ContentID: testBookID, CurrentSeconds: 5}},
 	}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	body := []byte(`{"id":"sess-1","libraryItemId":"book-1","currentTime":200}`)
@@ -119,10 +119,10 @@ func TestSyncLocalSession_ExistingRow_UsesUpdate(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if p := prog.path("book-1"); p != "update" {
+	if p := prog.path(testBookID); p != testUpdatePath {
 		t.Errorf("persist path = %q, want update", p)
 	}
-	if got, _ := prog.pos("book-1"); got != 200 {
+	if got, _ := prog.pos(testBookID); got != 200 {
 		t.Errorf("position = %v, want 200", got)
 	}
 }
@@ -138,14 +138,32 @@ func TestSyncLocalSession_UnknownItem_500(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
 	}
-	if _, ok := prog.pos("ghost"); ok {
+	if _, ok := prog.pos(testGhostID); ok {
 		t.Errorf("position should not be written for unknown item")
+	}
+}
+
+func TestSyncLocalSession_EbookDoesNotWriteAudioProgress(t *testing.T) {
+	prog := &positionRecordingProgressFake{}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
+
+	body := []byte(`{"id":"sess-ebook","libraryItemId":"ebook-1","currentTime":10}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/session/local", nil, body, "1", testProfileID, h.handleSyncLocalSession)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := prog.pos(testEbookID); ok {
+		t.Fatal("ebook local audio session wrote user_watch_progress")
 	}
 }
 
 func TestSyncLocalSessions_Batch_ResultsShape(t *testing.T) {
 	prog := &positionRecordingProgressFake{}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil, "book-2": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil, testSecondBookID: nil}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	body := []byte(`{"sessions":[
@@ -177,17 +195,17 @@ func TestSyncLocalSessions_Batch_ResultsShape(t *testing.T) {
 	if !resp.Results[2].Success {
 		t.Errorf("s3 result = %+v, want success", resp.Results[2])
 	}
-	if p, _ := prog.pos("book-1"); p != 11 {
+	if p, _ := prog.pos(testBookID); p != 11 {
 		t.Errorf("book-1 position = %v, want 11", p)
 	}
-	if p, _ := prog.pos("book-2"); p != 33 {
+	if p, _ := prog.pos(testSecondBookID); p != 33 {
 		t.Errorf("book-2 position = %v, want 33", p)
 	}
 }
 
 func TestSyncLocalSessions_MalformedSessionSkipped(t *testing.T) {
 	prog := &positionRecordingProgressFake{}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	// Second session is not an object — must be skipped, not fatal.

@@ -9,6 +9,8 @@ import (
 // bookmarks handlers need. Implemented by ABSBookmarkStore in
 // internal/audiobooks/abs_bookmark_store.go.
 type BookmarkStore interface {
+	// ListByUser returns every bookmark for a profile, newest first.
+	ListByUser(ctx context.Context, userID, profileID string) ([]Bookmark, error)
 	// List returns all bookmarks for (user, profile, item) ordered by
 	// time ASC. Returns an empty slice (never nil) when none exist.
 	List(ctx context.Context, userID, profileID, itemID string) ([]Bookmark, error)
@@ -44,11 +46,11 @@ type Bookmark struct {
 // omitempty), camelCase, with timestamps as JS-epoch milliseconds.
 func bookmarkToABS(b Bookmark) map[string]any {
 	return map[string]any{
-		"id":            b.ID,
-		"libraryItemId": b.LibraryItemID,
-		"time":          b.Time,
-		"title":         b.Title,
-		"createdAt":     b.CreatedAt.UnixMilli(),
-		"updatedAt":     b.UpdatedAt.UnixMilli(),
+		"id":             b.ID,
+		libraryItemIDKey: b.LibraryItemID,
+		"time":           b.Time,
+		titleKey:         b.Title,
+		createdAtKey:     b.CreatedAt.UnixMilli(),
+		updatedAtKey:     b.UpdatedAt.UnixMilli(),
 	}
 }

@@ -89,8 +89,13 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 		w.Header().Set("ETag", etag)
 	}
 
-	// Set Content-Type explicitly so ServeContent does not sniff.
-	w.Header().Set("Content-Type", MimeFromExtension(filePath))
+	// Callers such as the ebook compatibility layer know a more specific MIME
+	// type than the playback extension table. Preserve it when supplied; all
+	// direct-play responses opt out of browser MIME sniffing.
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", MimeFromExtension(filePath))
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	hadRange := len(r.Header.Values("Range")) > 0
 	hadIfMatch := len(r.Header.Values("If-Match")) > 0

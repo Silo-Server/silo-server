@@ -28,7 +28,7 @@ func TestBookmarkEnvelope_HasRequiredKeys(t *testing.T) {
 	}
 	js := string(body)
 	for _, key := range []string{
-		`"id":`, `"libraryItemId":`, `"time":`, `"title":`,
+		jsonIDField, `"libraryItemId":`, `"time":`, `"title":`,
 		`"createdAt":`, `"updatedAt":`,
 	} {
 		if !strings.Contains(js, key) {

@@ -107,3 +107,22 @@ func TestSiloItemToMetadata_JSONKeysAlwaysPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestSiloItemToMetadataLanguageFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		item *models.MediaItem
+		want string
+	}{
+		{name: "original", item: &models.MediaItem{OriginalLanguage: testJapanese, DefaultMetadataLanguage: "en"}, want: testJapanese},
+		{name: "default metadata language", item: &models.MediaItem{DefaultMetadataLanguage: "dan"}, want: "dan"},
+		{name: "safe default", item: &models.MediaItem{}, want: "en"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := siloItemToMetadata(test.item).Language; got != test.want {
+				t.Fatalf("language = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

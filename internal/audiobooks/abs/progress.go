@@ -3,11 +3,16 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // ---------------------------------------------------------------------------
@@ -40,6 +45,63 @@ type ProgressStore interface {
 	// Idempotent — succeeds even when no row matches. Used by the ABS
 	// "Reset Progress" affordance: DELETE /api/me/progress/{libraryItemId}.
 	DeleteProgress(ctx context.Context, userID, profileID, contentID string) error
+}
+
+// EbookProgressStore persists the reader state used by Silo's native ebook
+// reader. It stays separate from ProgressStore: audiobooks use time-based
+// user_watch_progress, while ebooks use CFI/location progress.
+type EbookProgressStore interface {
+	GetEbookProgress(ctx context.Context, userID, profileID, contentID string) (*EbookProgress, error)
+	ListEbookProgress(ctx context.Context, userID, profileID string, limit int) ([]EbookProgress, error)
+	// UpsertEbookProgress merges a partial write into the stored row and
+	// returns the committed row. The merge happens inside the statement, so
+	// callers must not read-modify-write. Returns ErrEbookProgressFileRequired
+	// when no row exists yet and the patch carries no FileID.
+	UpsertEbookProgress(ctx context.Context, patch EbookProgressPatch) (*EbookProgress, error)
+	DeleteEbookProgress(ctx context.Context, userID, profileID, contentID string) error
+	SetEbookHidden(ctx context.Context, userID, profileID, contentID string, hide bool) error
+}
+
+// ErrEbookProgressFileRequired reports that the first write for an item cannot
+// be stored because no ebook file has been resolved yet. ebook_reader_progress
+// holds a NOT NULL foreign key to media_files, so the caller has to pick the
+// item's ebook file (respecting library access) and retry with FileID set.
+var ErrEbookProgressFileRequired = errors.New("ebook progress: file id required for a new row")
+
+type EbookProgress struct {
+	UserID    string
+	ProfileID string
+	ContentID string
+	FileID    int
+	Location  string
+	Progress  float64
+	UpdatedAt time.Time
+}
+
+// EbookProgressPatch is a partial write against a reader-progress row. Nil
+// fields are left to the stored value by the store's merge statement rather
+// than being read into Go first: an autosave that only reports a location
+// cannot blank the progress another device just wrote, and the hot path costs
+// a single round trip.
+type EbookProgressPatch struct {
+	UserID    string
+	ProfileID string
+	ContentID string
+
+	// FileID is only consulted when the row has to be inserted; an existing
+	// row keeps its file unless a file is explicitly supplied.
+	FileID   *int
+	Location *string
+	Progress *float64
+
+	// AllowFinishedRegression lets progress fall back below
+	// models.EbookFinishedProgressThreshold. Routine autosaves leave it false
+	// so a late page-turn from a second device cannot un-finish a book.
+	AllowFinishedRegression bool
+	// ResetWhenFinished carries upstream Audiobookshelf's isFinished:false
+	// semantics: clear progress, but only when the *stored* row was finished.
+	// A row below the threshold keeps the progress it already had.
+	ResetWhenFinished bool
 }
 
 // ABSPlaybackSessionStore tracks the active /abs/api/items/{id}/play sessions
@@ -118,7 +180,7 @@ type ABSPlaybackSession struct {
 // ---------------------------------------------------------------------------
 
 // handleGetMyProgress — GET /abs/api/me/progress
-// Lists all progress rows for the caller that belong to audiobooks.
+// Lists all progress rows for the caller that belong to audiobooks and ebooks.
 // The ABS mobile client reads this on startup to seed resume positions.
 func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
@@ -126,22 +188,37 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if h.deps.ProgressStore == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": []any{}})
+	if h.deps.ProgressStore == nil && h.deps.EbookProgressStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{mediaProgressKey: []any{}})
 		return
 	}
-	rows, err := h.deps.ProgressStore.ListProgressForAudiobooks(r.Context(), a.UserID, a.ProfileID, 500)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var rows []ProgressRow
+	var ebookRows []EbookProgress
+	var err error
+	if h.deps.ProgressStore != nil {
+		rows, err = h.deps.ProgressStore.ListProgressForAudiobooks(r.Context(), a.UserID, a.ProfileID, 500)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if h.deps.EbookProgressStore != nil {
+		ebookRows, err = h.deps.EbookProgressStore.ListEbookProgress(r.Context(), a.UserID, a.ProfileID, 500)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
-	ids := make([]string, 0, len(rows))
+	ids := make([]string, 0, len(rows)+len(ebookRows))
 	for _, p := range rows {
+		ids = append(ids, p.ContentID)
+	}
+	for _, p := range ebookRows {
 		ids = append(ids, p.ContentID)
 	}
 	// One batch fetch acts as the access/existence gate (the item itself isn't
@@ -151,14 +228,19 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := make([]map[string]any, 0, len(rows))
+	out := make([]map[string]any, 0, len(rows)+len(ebookRows))
 	for _, p := range rows {
 		if byID[p.ContentID] == nil {
 			continue
 		}
 		out = append(out, progressRowToABS(p))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
+	for _, p := range ebookRows {
+		if byID[p.ContentID] != nil {
+			out = append(out, ebookProgressToABS(p))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{mediaProgressKey: out})
 }
 
 // handleGetItemProgress — GET /abs/api/me/progress/{libraryItemId}
@@ -169,18 +251,39 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	contentID := chi.URLParam(r, "libraryItemId")
-	if h.deps.ProgressStore == nil {
+	contentID := chi.URLParam(r, libraryItemIDKey)
+	if h.deps.ProgressStore == nil && h.deps.EbookProgressStore == nil {
 		http.Error(w, "progress not found", http.StatusNotFound)
 		return
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
 	if err != nil || item == nil {
+		http.Error(w, "progress not found", http.StatusNotFound)
+		return
+	}
+	if item.Type == mediaTypeEbook {
+		if h.deps.EbookProgressStore == nil {
+			http.Error(w, "progress not found", http.StatusNotFound)
+			return
+		}
+		p, err := h.deps.EbookProgressStore.GetEbookProgress(r.Context(), a.UserID, a.ProfileID, contentID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if p == nil {
+			http.Error(w, "progress not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, ebookProgressToABS(*p))
+		return
+	}
+	if h.deps.ProgressStore == nil {
 		http.Error(w, "progress not found", http.StatusNotFound)
 		return
 	}
@@ -200,10 +303,8 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 // All fields are optional — only present fields update the row (PATCH semantics).
 //
 // EbookProgress / EbookLocation are emitted by the ABS clients (AudioBooth's
-// BooksService writes them on every page turn). silo's audiobook-first catalog
-// doesn't yet persist ebook position; the fields are accepted-and-ignored so
-// the client write succeeds and the user isn't shown a sync error. They will
-// flow into a dedicated ebook progress column when the ebook scanner lands.
+// BooksService writes them on every page turn). They are persisted through
+// Silo's native ebook_reader_progress store.
 type progressBody struct {
 	CurrentTime   *float64 `json:"currentTime"`
 	Duration      *float64 `json:"duration"`
@@ -212,6 +313,8 @@ type progressBody struct {
 	EbookProgress *float64 `json:"ebookProgress"`
 	EbookLocation *string  `json:"ebookLocation"`
 }
+
+const maxProgressBodyBytes int64 = 16 << 10
 
 // handleSetItemProgress — POST /abs/api/me/progress/{libraryItemId}
 // UPSERTs the progress row. Merges body fields over any existing row so a
@@ -227,24 +330,49 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	contentID := chi.URLParam(r, "libraryItemId")
+	contentID := chi.URLParam(r, libraryItemIDKey)
+	r.Body = http.MaxBytesReader(w, r.Body, maxProgressBodyBytes)
 	var body progressBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	decodeErr := decoder.Decode(&body)
+	if decodeErr == nil {
+		var trailing any
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			if err == nil {
+				err = errors.New("multiple JSON values")
+			}
+			decodeErr = err
+		}
+	}
+	if decodeErr != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(decodeErr, &tooLarge) {
+			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if h.deps.ProgressStore == nil {
+	if h.deps.ProgressStore == nil && h.deps.EbookProgressStore == nil {
 		http.Error(w, "progress store unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
 	if err != nil || item == nil {
 		http.Error(w, "item not found", http.StatusNotFound)
+		return
+	}
+	if item.Type == mediaTypeEbook {
+		h.handleSetEbookProgress(w, r, a, contentID, body)
+		return
+	}
+	if h.deps.ProgressStore == nil {
+		http.Error(w, "progress store unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -284,13 +412,134 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 	updated, err := h.deps.ProgressStore.GetProgress(r.Context(), a.UserID, a.ProfileID, contentID)
 	if err != nil || updated == nil {
 		// Best-effort: return the in-memory merged row rather than failing.
-		h.publish(a.UserID, "user_item_progress_updated", map[string]any{"data": progressRowToABS(next)})
+		h.publish(a.UserID, "user_item_progress_updated", map[string]any{dataKey: progressRowToABS(next)})
 		writeJSON(w, http.StatusOK, progressRowToABS(next))
 		return
 	}
 	payload := progressRowToABS(*updated)
-	h.publish(a.UserID, "user_item_progress_updated", map[string]any{"data": payload})
+	h.publish(a.UserID, "user_item_progress_updated", map[string]any{dataKey: payload})
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// handleSetEbookProgress applies a partial reader-progress write.
+//
+// The body is translated into an EbookProgressPatch and handed to the store in
+// one shot: merging with the stored row, the finished-regression guard, and
+// upstream Audiobookshelf's isFinished:false rule are all evaluated against the
+// stored row inside the write statement. Reading the row into Go first would
+// let two devices reading the same book clobber each other between the read and
+// the write.
+func (h *Handler) handleSetEbookProgress(w http.ResponseWriter, r *http.Request, a ctxAuth, contentID string, body progressBody) {
+	if h.deps.EbookProgressStore == nil {
+		http.Error(w, "ebook progress unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	patch := EbookProgressPatch{UserID: a.UserID, ProfileID: a.ProfileID, ContentID: contentID}
+	if body.EbookProgress != nil {
+		if *body.EbookProgress < 0 || *body.EbookProgress > 1 {
+			http.Error(w, "ebookProgress must be between 0 and 1", http.StatusBadRequest)
+			return
+		}
+		progress := *body.EbookProgress
+		patch.Progress = &progress
+	}
+	if body.EbookLocation != nil {
+		location := *body.EbookLocation
+		patch.Location = &location
+	}
+	if body.IsFinished != nil {
+		if *body.IsFinished {
+			finished := 1.0
+			patch.Progress = &finished
+		} else {
+			// Un-finishing is explicit, so the regression guard steps aside.
+			// Without an ebookProgress of its own the reset only applies to a
+			// stored row that was actually finished; an in-progress row keeps
+			// its place in the book.
+			patch.AllowFinishedRegression = true
+			patch.ResetWhenFinished = body.EbookProgress == nil
+		}
+	}
+
+	committed, err := h.deps.EbookProgressStore.UpsertEbookProgress(r.Context(), patch)
+	if errors.Is(err, ErrEbookProgressFileRequired) {
+		fileID, ok := h.defaultEbookFileID(w, r, a, contentID)
+		if !ok {
+			return
+		}
+		patch.FileID = &fileID
+		committed, err = h.deps.EbookProgressStore.UpsertEbookProgress(r.Context(), patch)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if committed == nil {
+		http.Error(w, "ebook progress not committed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, ebookProgressToABS(*committed))
+}
+
+// defaultEbookFileID resolves the ebook file a brand-new progress row should
+// point at: the configured primary when the item has one, otherwise the ABS
+// default pick over the files this caller may see. It writes the HTTP error and
+// returns false when the item has no readable ebook file.
+func (h *Handler) defaultEbookFileID(w http.ResponseWriter, r *http.Request, a ctxAuth, contentID string) (int, bool) {
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return 0, false
+	}
+	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
+	if err != nil {
+		http.Error(w, "load ebook files: "+err.Error(), http.StatusInternalServerError)
+		return 0, false
+	}
+	selection, err := h.deps.MediaStore.GetPrimaryEbookFileID(r.Context(), contentID)
+	if err != nil {
+		http.Error(w, "load primary ebook: "+err.Error(), http.StatusInternalServerError)
+		return 0, false
+	}
+	primary := ebookformat.PreferredFile(files)
+	if selection.Configured {
+		if !selection.HasPrimary {
+			http.Error(w, "ebook not found", http.StatusNotFound)
+			return 0, false
+		}
+		primary = ebookformat.FileByID(files, selection.FileID)
+	}
+	if primary == nil {
+		http.Error(w, "ebook not found", http.StatusNotFound)
+		return 0, false
+	}
+	return primary.ID, true
+}
+
+func ebookProgressToABS(p EbookProgress) map[string]any {
+	lastUpdate := int64(0)
+	if !p.UpdatedAt.IsZero() {
+		lastUpdate = p.UpdatedAt.UnixMilli()
+	}
+	var finishedAt any
+	if p.Progress >= models.EbookFinishedProgressThreshold {
+		finishedAt = lastUpdate
+	}
+	return map[string]any{
+		"id":             p.UserID + "-" + p.ContentID,
+		userIDKey:        p.UserID,
+		libraryItemIDKey: p.ContentID,
+		episodeIDKey:     nil,
+		durationKey:      0,
+		progressKey:      p.Progress,
+		currentTimeKey:   0,
+		isFinishedKey:    p.Progress >= models.EbookFinishedProgressThreshold,
+		"ebookLocation":  p.Location,
+		"ebookProgress":  p.Progress,
+		lastUpdateKey:    lastUpdate,
+		"startedAt":      lastUpdate,
+		"finishedAt":     finishedAt,
+	}
 }
 
 // syncPayload is the JSON body for PATCH /abs/api/session/{sid}/sync.
@@ -349,11 +598,11 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), sess.ContentID, access)
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -380,17 +629,17 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 
 	// Realtime push to other connected clients.
 	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
-		"data": map[string]any{
-			"libraryItemId": sess.ContentID,
-			"currentTime":   p.CurrentTime,
-			"sessionId":     sid,
+		dataKey: map[string]any{
+			libraryItemIDKey: sess.ContentID,
+			currentTimeKey:   p.CurrentTime,
+			"sessionId":      sid,
 		},
 	})
 	h.publish(a.UserID, "user_session_updated", map[string]any{
-		"id":            sid,
-		"libraryItemId": sess.ContentID,
-		"currentTime":   p.CurrentTime,
-		"timeListening": p.timeDelta(),
+		"id":             sid,
+		libraryItemIDKey: sess.ContentID,
+		currentTimeKey:   p.CurrentTime,
+		timeListeningKey: p.timeDelta(),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -425,8 +674,8 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 	h.stopNativePlaybackSession(r.Context(), sid)
 
 	h.publish(a.UserID, "user_session_closed", map[string]any{
-		"id":            sid,
-		"libraryItemId": sess.ContentID,
+		"id":             sid,
+		libraryItemIDKey: sess.ContentID,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -440,16 +689,16 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 func progressRowToABS(p ProgressRow) map[string]any {
 	lastMs := p.UpdatedAt.UnixMilli()
 	out := map[string]any{
-		"id":            p.UserID + "-" + p.ContentID,
-		"libraryItemId": p.ContentID,
-		"mediaItemId":   p.ContentID,
-		"currentTime":   p.CurrentSeconds,
-		"duration":      p.DurationSeconds,
-		"isFinished":    p.IsFinished,
-		"progress":      p.ProgressPct,
-		"startedAt":     lastMs,
-		"finishedAt":    nil,
-		"lastUpdate":    lastMs,
+		"id":             p.UserID + "-" + p.ContentID,
+		libraryItemIDKey: p.ContentID,
+		"mediaItemId":    p.ContentID,
+		currentTimeKey:   p.CurrentSeconds,
+		durationKey:      p.DurationSeconds,
+		isFinishedKey:    p.IsFinished,
+		progressKey:      p.ProgressPct,
+		startedAtKey:     lastMs,
+		"finishedAt":     nil,
+		lastUpdateKey:    lastMs,
 	}
 	if p.IsFinished {
 		out["finishedAt"] = lastMs

@@ -55,9 +55,9 @@ func TestStats_Aggregate_Ok(t *testing.T) {
 
 func TestStats_Sessions_List_Paginated(t *testing.T) {
 	fake := &statsFakeStore{closed: []ABSPlaybackSession{
-		{ID: "s1", UserID: "1", ContentID: "book-1"},
-		{ID: "s2", UserID: "1", ContentID: "book-2"},
-		{ID: "s3", UserID: "1", ContentID: "book-3"},
+		{ID: "s1", UserID: "1", ContentID: testBookID},
+		{ID: "s2", UserID: "1", ContentID: testSecondBookID},
+		{ID: "s3", UserID: "1", ContentID: testThirdBookID},
 	}}
 	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
 
@@ -83,7 +83,7 @@ func TestStats_Sessions_List_Paginated(t *testing.T) {
 // (Flutter/Swift decoders) require: mediaType, mediaMetadata, displayTitle.
 func TestStats_Sessions_List_EnvelopeShape(t *testing.T) {
 	fake := &statsFakeStore{closed: []ABSPlaybackSession{
-		{ID: "s1", UserID: "1", ContentID: "book-1", TimeListeningSeconds: 120, CurrentPositionSeconds: 45.5},
+		{ID: "s1", UserID: "1", ContentID: testBookID, TimeListeningSeconds: 120, CurrentPositionSeconds: 45.5},
 	}}
 	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
 
@@ -107,7 +107,7 @@ func TestStats_Sessions_List_EnvelopeShape(t *testing.T) {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
 	sess, _ := sessions[0].(map[string]any)
-	if sess["mediaType"] != "book" {
+	if sess["mediaType"] != LibraryMediaType {
 		t.Errorf("mediaType = %v, want book", sess["mediaType"])
 	}
 	if _, ok := sess["mediaMetadata"].(map[string]any); !ok {
@@ -128,7 +128,7 @@ func TestStats_Sessions_List_EnvelopeShape(t *testing.T) {
 
 func TestStats_Session_Detail_Owner(t *testing.T) {
 	fake := &statsFakeStore{}
-	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: "book-1"})
+	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: testBookID})
 	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions/s1", map[string]string{"sid": "s1"}, nil, "1", "", h.handleListeningSessionDetail)
@@ -144,7 +144,7 @@ func TestStats_Session_Detail_Owner(t *testing.T) {
 
 func TestStats_Session_Detail_NonOwner_404(t *testing.T) {
 	fake := &statsFakeStore{}
-	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: "book-1"})
+	_ = fake.InsertPlaybackSession(context.Background(), ABSPlaybackSession{ID: "s1", UserID: "1", ContentID: testBookID})
 	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions/s1", map[string]string{"sid": "s1"}, nil, "2", "", h.handleListeningSessionDetail)

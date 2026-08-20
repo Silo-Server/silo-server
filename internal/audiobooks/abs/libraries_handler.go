@@ -1,6 +1,8 @@
 package abs
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -9,7 +11,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -37,7 +43,7 @@ const (
 func (h *Handler) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
@@ -97,48 +103,159 @@ func (h *Handler) countUserPlaylists(r *http.Request) int {
 	return len(rows)
 }
 
+// FilterDataFetchCap bounds every filter-sheet aggregate: the paged listers
+// (authors, series) are asked for at most this many rows, and the distinct
+// value queries behind narrators/publishers/languages carry the same LIMIT.
+// Silo serves libraries real ABS never sees, and the filter sheet is a
+// convenience surface — past this size the client must use the dedicated
+// paginated /authors and /series endpoints instead.
+const FilterDataFetchCap = 5000
+
+// filterDataCacheTTL bounds how stale a memoized filter sheet may be. The
+// aggregates only move when the library changes, and the sheet is re-fetched
+// on every library-detail open, so a short window removes the repeat cost
+// without clients noticing a scan.
+const filterDataCacheTTL = 60 * time.Second
+
+type filterDataEntry struct {
+	payload map[string]any
+	exp     time.Time
+}
+
 // buildFilterData populates the filter sheet payload from the same store
 // queries /libraries/{id}/authors and /libraries/{id}/series use. Caps at
-// 5000 per kind to keep the response bounded; libraries larger than that
-// will paginate via the dedicated /authors and /series endpoints.
+// FilterDataFetchCap per kind to keep the response bounded; libraries larger
+// than that will paginate via the dedicated /authors and /series endpoints.
 //
-// Narrators / genres / publishers / languages / tags are left as empty
-// arrays for now — Phase 1 will populate them once the catalog has the
-// aggregations indexed. iOS tolerates empty filter dropdowns gracefully.
+// The six aggregates are independent, so they run concurrently: the sheet is
+// six full-library GROUP BYs, and serializing them made opening a library
+// detail with ?include=filterdata the slowest read on the ABS surface. A kind
+// whose query fails stays an empty array, exactly as it did serially; the
+// first failure is logged so a persistently broken aggregate is visible.
 //
-// The two fetch/convert blocks deliberately stay un-abstracted: they target
-// different store methods (ListLibraryAuthors / ListLibrarySeries) and
-// produce different output types (AuthorObj / SeriesObj). A generic helper
-// would need closures at each call site that are longer than the inlined
-// code; the structural parallelism is the cheapest form here.
+// The assembled payload is memoized per (library, access filter) — see
+// filterDataKey — because every client re-requests it on each library open and
+// the inputs only change when the catalog does. The returned map is shared
+// between requests, so callers must treat it as read-only.
 func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[string]any {
 	ctx := r.Context()
-	const fetchCap = 5000
 	access, _, _ := h.accessFilterFromRequest(r)
 
-	authorObjs := []AuthorObj{}
-	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap, 0, "name", false, access); err == nil {
-		for _, a := range rows {
-			authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
-		}
+	key := filterDataKey(lib, access)
+	if payload, ok := h.cachedFilterData(key); ok {
+		return payload
 	}
 
-	seriesObjs := []SeriesObj{}
-	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, fetchCap, 0, access); err == nil {
-		for _, s := range rows {
-			seriesObjs = append(seriesObjs, SeriesObj{ID: s.ID, Name: s.Name})
+	var (
+		authorRows []AuthorSummary
+		seriesRows []SeriesSummary
+		genres     = []string{}
+		narrators  = []string{}
+		publishers = []string{}
+		languages  = []string{}
+		group      errgroup.Group
+	)
+	group.Go(func() error {
+		var err error
+		authorRows, _, err = h.deps.MediaStore.ListLibraryAuthors(ctx, lib, FilterDataFetchCap, 0, nameKey, false, access)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		seriesRows, _, err = h.deps.MediaStore.ListLibrarySeries(ctx, lib, FilterDataFetchCap, 0, access)
+		return err
+	})
+	group.Go(func() error {
+		rows, err := h.deps.MediaStore.ListLibraryGenres(ctx, lib, access)
+		if err == nil && rows != nil {
+			genres = rows
 		}
+		return err
+	})
+	// Narrators describe audio performance. Ebook libraries intentionally leave
+	// this filter empty even if a legacy item happens to carry that credit.
+	if !librarykind.IsEbook(lib.Type) {
+		group.Go(func() error {
+			rows, err := h.deps.MediaStore.ListLibraryNarrators(ctx, lib, access)
+			if err == nil && rows != nil {
+				narrators = rows
+			}
+			return err
+		})
+	}
+	group.Go(func() error {
+		rows, err := h.deps.MediaStore.ListLibraryPublishers(ctx, lib, access)
+		if err == nil && rows != nil {
+			publishers = rows
+		}
+		return err
+	})
+	group.Go(func() error {
+		rows, err := h.deps.MediaStore.ListLibraryLanguages(ctx, lib, access)
+		if err == nil && rows != nil {
+			languages = rows
+		}
+		return err
+	})
+	if err := group.Wait(); err != nil {
+		slog.WarnContext(ctx, "abs filter data aggregate failed", "component", "audiobooks", "library", lib.ID, "err", err)
 	}
 
-	return map[string]any{
-		"authors":    authorObjs,
-		"series":     seriesObjs,
-		"narrators":  []string{},
-		"genres":     []string{},
-		"publishers": []string{},
-		"languages":  []string{},
-		"tags":       []string{},
+	authorObjs := make([]AuthorObj, 0, len(authorRows))
+	for _, a := range authorRows {
+		authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
 	}
+	seriesObjs := make([]SeriesObj, 0, len(seriesRows))
+	for _, series := range seriesRows {
+		seriesObjs = append(seriesObjs, SeriesObj{ID: series.ID, Name: series.Name})
+	}
+
+	payload := map[string]any{
+		authorsKey:    authorObjs,
+		seriesWireKey: seriesObjs,
+		narratorsKey:  narrators,
+		genresKey:     genres,
+		"publishers":  publishers,
+		"languages":   languages,
+		tagsKey:       []string{},
+	}
+	h.storeFilterData(key, payload)
+	return payload
+}
+
+// filterDataKey derives the memo key the way ABSMediaStore.cachedAudiobookCount
+// derives its own: the library plus the rendered access filter, so any access
+// dimension added later automatically partitions the cache instead of letting
+// one viewer's sheet leak to another.
+func filterDataKey(lib AudiobookLibrary, access catalog.AccessFilter) string {
+	return strconv.FormatInt(lib.ID, 10) + "\x1f" + lib.Type + "\x1f" + fmt.Sprintf("%v", access)
+}
+
+func (h *Handler) cachedFilterData(key string) (map[string]any, bool) {
+	h.filterDataMu.Lock()
+	defer h.filterDataMu.Unlock()
+	entry, ok := h.filterDataCache[key]
+	if !ok || !time.Now().Before(entry.exp) {
+		return nil, false
+	}
+	return entry.payload, true
+}
+
+// storeFilterData memoizes one payload and sweeps expired entries on write, so
+// per-viewer keys cannot accumulate for the process lifetime.
+func (h *Handler) storeFilterData(key string, payload map[string]any) {
+	now := time.Now()
+	h.filterDataMu.Lock()
+	defer h.filterDataMu.Unlock()
+	if h.filterDataCache == nil {
+		h.filterDataCache = make(map[string]filterDataEntry)
+	}
+	for k, entry := range h.filterDataCache {
+		if now.After(entry.exp) {
+			delete(h.filterDataCache, k)
+		}
+	}
+	h.filterDataCache[key] = filterDataEntry{payload: payload, exp: now.Add(filterDataCacheTTL)}
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +291,7 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	// (LibraryItem.toOldJSONMinified); the non-minified hybrid is a shape no
 	// real client requests. Default to minified; only an explicit minified=0
 	// opts into the full shape.
-	minified := q.Get("minified") != "0"
+	minified := q.Get(minifiedKey) != "0"
 	collapseSeries := q.Get("collapseseries") == "1"
 	include := q.Get("include")
 
@@ -182,18 +299,18 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 
-	// authors/series/narrators filters push down into SQL (indexed) so we never
+	// Supported metadata filters push down into SQL so we never
 	// load + hydrate the whole library. This applies even with collapseseries=1
 	// (the client's per-artist album sync): the SQL filter reduces to a handful
 	// of rows, then collapse + paging run in Go over that small set. Only
-	// progress/genre/tag/language filters still need the Go post-filter and the
-	// full fetch.
+	// progress/tag filters still need the Go post-filter and the full fetch.
 	pushDown := hasFilter &&
-		(filter.Kind == FilterAuthors || filter.Kind == FilterSeries || filter.Kind == FilterNarrators)
+		(filter.Kind == FilterAuthors || filter.Kind == FilterSeries || filter.Kind == FilterNarrators ||
+			filter.Kind == FilterGenres || filter.Kind == FilterLanguages || filter.Kind == FilterPublishers)
 	sqlFilter := Filter{}
 	if pushDown {
 		sqlFilter = filter
@@ -210,7 +327,7 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		fetchOffset = page * limit
 	}
 
-	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, fetchLimit, fetchOffset, access, sqlFilter)
+	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib, fetchLimit, fetchOffset, access, sqlFilter)
 	if err != nil {
 		http.Error(w, "list audiobooks: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -255,6 +372,9 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	pageSlice := collapsed[pageStart:pageEnd]
+	if librarykind.IsEbook(lib.Type) {
+		pageSlice = h.enrichEbookLibraryItems(r.Context(), pageSlice, access)
+	}
 
 	// Serialise.
 	var results any
@@ -362,7 +482,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	sortDesc := r.URL.Query().Get("desc") == "1"
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Reads the precomputed author materialized view: indexed paginated read +
@@ -372,14 +492,14 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 {
 		offset = page * limit
 	}
-	pageAuthors, total, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, limit, offset, sortBy, sortDesc, access)
+	pageAuthors, total, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib, limit, offset, sortBy, sortDesc, access)
 	if err != nil {
 		http.Error(w, "list authors: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if total > len(pageAuthors) && r.URL.Query().Get("page") == "" {
+	if total > len(pageAuthors) && r.URL.Query().Get(pageKey) == "" {
 		slog.WarnContext(r.Context(), "abs authors truncated for non-paginated request", "component", "audiobooks",
-			"library", lib.ID, "total", total, "returned", len(pageAuthors))
+			"library", lib.ID, totalKey, total, "returned", len(pageAuthors))
 	}
 	libID := audiobookLibraryID(lib)
 	results := make([]map[string]any, 0, len(pageAuthors))
@@ -391,11 +511,11 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	// when true, else a bare { authors: [...] }. Emitting the paged shape for
 	// the non-paginated request crashes clients that key on `authors`.
 	q := r.URL.Query()
-	if q.Get("limit") != "" && q.Get("page") != "" {
-		writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
+	if q.Get("limit") != "" && q.Get(pageKey) != "" {
+		writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, nameKey, false, "", false, ""))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authors": results})
+	writeJSON(w, http.StatusOK, map[string]any{authorsKey: results})
 }
 
 // handleLibrarySeries — GET /abs/api/libraries/{id}/series
@@ -417,7 +537,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	}
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Paginate in SQL with a separate COUNT so large libraries aren't truncated
@@ -426,14 +546,14 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	if limit > 0 {
 		offset = page * limit
 	}
-	pageSeries, total, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, limit, offset, access)
+	pageSeries, total, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib, limit, offset, access)
 	if err != nil {
 		http.Error(w, "list series: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if total > len(pageSeries) && r.URL.Query().Get("page") == "" {
+	if total > len(pageSeries) && r.URL.Query().Get(pageKey) == "" {
 		slog.WarnContext(r.Context(), "abs series truncated for non-paginated request", "component", "audiobooks",
-			"library", lib.ID, "total", total, "returned", len(pageSeries))
+			"library", lib.ID, totalKey, total, "returned", len(pageSeries))
 	}
 	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
@@ -454,7 +574,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		obj["books"] = books
 		results = append(results, obj)
 	}
-	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
+	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, nameKey, false, "", false, ""))
 }
 
 // handleLibrarySearch — GET /abs/api/libraries/{id}/search?q=…&limit=…
@@ -480,13 +600,13 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	empty := map[string]any{
-		"book":      []any{},
-		"podcast":   []any{},
-		"narrators": []any{},
-		"tags":      []any{},
-		"genres":    []any{},
-		"series":    []any{},
-		"authors":   []any{},
+		LibraryMediaType: []any{},
+		podcastKey:       []any{},
+		narratorsKey:     []any{},
+		tagsKey:          []any{},
+		genresKey:        []any{},
+		seriesWireKey:    []any{},
+		authorsKey:       []any{},
 	}
 	if q == "" {
 		writeJSON(w, http.StatusOK, empty)
@@ -494,21 +614,26 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	}
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
-	items, err := h.deps.MediaStore.SearchAudiobooks(r.Context(), lib.ID, q, limit, access)
+	items, err := h.deps.MediaStore.SearchAudiobooks(r.Context(), lib, q, limit, access)
 	if err != nil {
 		http.Error(w, "search: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	baseURL := h.absBaseURL(r)
 	libID := audiobookLibraryID(lib)
-	books := make([]map[string]any, 0, len(items))
+	bookItems := make([]LibraryItem, 0, len(items))
 	for _, it := range items {
-		books = append(books, map[string]any{
-			"libraryItem": siloItemToLibraryItem(it, lib, baseURL),
-		})
+		bookItems = append(bookItems, siloItemToLibraryItem(it, lib, baseURL))
+	}
+	if librarykind.IsEbook(lib.Type) {
+		bookItems = h.enrichEbookLibraryItems(r.Context(), bookItems, access)
+	}
+	books := make([]map[string]any, 0, len(bookItems))
+	for _, item := range bookItems {
+		books = append(books, map[string]any{"libraryItem": item})
 	}
 
 	// Best-effort author/series buckets: silo has no dedicated search-scoped
@@ -518,19 +643,19 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	// substring match. narrators/tags/genres have no backing aggregation
 	// query at all in silo's catalog today and stay empty-but-present.
 	qLower := strings.ToLower(q)
-	const fetchCap = 5000
+	const fetchCap = FilterDataFetchCap
 
 	authorsOut := []any{}
-	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, fetchCap, 0, "name", false, access); err == nil {
+	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib, fetchCap, 0, nameKey, false, access); err == nil {
 		for _, a := range rows {
 			if !strings.Contains(strings.ToLower(a.Name), qLower) {
 				continue
 			}
 			authorsOut = append(authorsOut, map[string]any{
-				"id":        a.ID,
-				"name":      a.Name,
-				"numBooks":  a.NumBooks,
-				"libraryId": libID,
+				"id":         a.ID,
+				nameKey:      a.Name,
+				numBooksKey:  a.NumBooks,
+				libraryIDKey: libID,
 			})
 			if len(authorsOut) >= limit {
 				break
@@ -539,7 +664,7 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	seriesOut := []any{}
-	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, fetchCap, 0, access); err == nil {
+	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib, fetchCap, 0, access); err == nil {
 		for _, s := range rows {
 			if !strings.Contains(strings.ToLower(s.Name), qLower) {
 				continue
@@ -556,23 +681,23 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 					updatedMs = bp.UpdatedAt.UnixMilli()
 				}
 				seriesBooks = append(seriesBooks, map[string]any{
-					"id":        bp.ContentID,
-					"libraryId": libID,
-					"mediaType": LibraryMediaType,
-					"updatedAt": updatedMs,
-					"media": map[string]any{
-						"coverPath": baseURL + "/api/items/" + bp.ContentID + "/cover",
-						"metadata":  map[string]any{"title": bp.Title},
+					"id":         bp.ContentID,
+					libraryIDKey: libID,
+					mediaTypeKey: LibraryMediaType,
+					updatedAtKey: updatedMs,
+					mediaKey: map[string]any{
+						coverPathKey: baseURL + "/api/items/" + bp.ContentID + "/cover",
+						metadataKey:  map[string]any{titleKey: bp.Title},
 					},
 				})
 			}
 			seriesOut = append(seriesOut, map[string]any{
-				"series": map[string]any{
-					"id":        s.ID,
-					"name":      s.Name,
-					"numBooks":  s.NumBooks,
-					"libraryId": libID,
-					"addedAt":   0,
+				seriesWireKey: map[string]any{
+					"id":         s.ID,
+					nameKey:      s.Name,
+					numBooksKey:  s.NumBooks,
+					libraryIDKey: libID,
+					addedAtKey:   0,
 				},
 				"books": seriesBooks,
 			})
@@ -583,20 +708,16 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := empty
-	out["book"] = books
-	out["authors"] = authorsOut
-	out["series"] = seriesOut
+	out[LibraryMediaType] = books
+	out[authorsKey] = authorsOut
+	out[seriesWireKey] = seriesOut
 	writeJSON(w, http.StatusOK, out)
 }
 
 // handlePersonalized — GET /abs/api/libraries/{id}/personalized
 //
-// Emits the canonical six-shelf Home tab payload that ABS mobile clients
-// expect: continue-listening, continue-series, newest, recent-series,
-// discover, listen-again. Shelves we don't yet populate (continue-series,
-// listen-again) ship with empty entities/total — the client iterates the
-// shelf list by id and skips empties cleanly, but it crashes on a missing
-// shelf id. Matches continuum-plugin-audiobooks/handlePersonalized layout.
+// Emits populated Audiobookshelf-compatible Home shelves. Upstream omits a
+// shelf when there is no data; it does not send permanent empty placeholders.
 func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	lib, ok := h.resolveLibrary(w, r)
 	if !ok {
@@ -615,33 +736,74 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	const shelfLimit = 10
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 
-	shelves := []map[string]any{
-		{"id": "continue-listening", "label": "Continue Listening", "labelStringKey": "LabelContinueListening", "type": "book", "entities": []any{}, "total": 0},
-		{"id": "continue-series", "label": "Continue Series", "labelStringKey": "LabelContinueSeries", "type": "book", "entities": []any{}, "total": 0},
-		{"id": "newest", "label": "Newest", "labelStringKey": "LabelNewest", "type": "book", "entities": []any{}, "total": 0},
-		{"id": "recent-series", "label": "Recent Series", "labelStringKey": "LabelRecentSeries", "type": "series", "entities": []any{}, "total": 0},
-		{"id": "discover", "label": "Discover", "labelStringKey": "LabelDiscover", "type": "book", "entities": []any{}, "total": 0},
-		{"id": "listen-again", "label": "Listen Again", "labelStringKey": "LabelListenAgain", "type": "book", "entities": []any{}, "total": 0},
+	isEbook := librarykind.IsEbook(lib.Type)
+	continueID, continueLabel, continueKey := "continue-listening", "Continue Listening", "LabelContinueListening"
+	againID, againLabel, againKey := "listen-again", "Listen Again", "LabelListenAgain"
+	if isEbook {
+		continueID, continueLabel, continueKey = "continue-reading", "Continue Reading", "LabelContinueReading"
+		againID, againLabel, againKey = "read-again", "Read Again", "LabelReadAgain"
 	}
 
-	if items, err := h.deps.MediaStore.ListContinueListening(r.Context(), a.UserID, a.ProfileID, lib.ID, shelfLimit, access); err == nil && len(items) > 0 {
-		shelves[0]["entities"] = minifiedSlice(items, lib, baseURL)
-		shelves[0]["total"] = len(items)
+	// The five shelf queries are independent, so the Home tab costs one round
+	// trip instead of five serialized ones. A shelf whose query fails is
+	// omitted exactly as before; errgroup.Group (not WithContext) is
+	// deliberate, so one failure does not cancel the other four.
+	var (
+		continueItems, recentItems, discoverItems, finishedItems []*models.MediaItem
+		recentSeries                                             []SeriesSummary
+		group                                                    errgroup.Group
+	)
+	ctx := r.Context()
+	group.Go(func() error {
+		var err error
+		continueItems, err = h.deps.MediaStore.ListContinueListening(ctx, a.UserID, a.ProfileID, lib, shelfLimit, access)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		recentItems, err = h.deps.MediaStore.ListRecentlyAdded(ctx, lib, shelfLimit, access)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		recentSeries, _, err = h.deps.MediaStore.ListLibrarySeries(ctx, lib, shelfLimit, 0, access)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		discoverItems, err = h.deps.MediaStore.ListDiscover(ctx, lib, shelfLimit, access)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		finishedItems, err = h.deps.MediaStore.ListFinished(ctx, a.UserID, a.ProfileID, lib, shelfLimit, access)
+		return err
+	})
+	if err := group.Wait(); err != nil {
+		slog.WarnContext(ctx, "abs personalized shelf query failed", "component", "audiobooks", "library", lib.ID, "err", err)
 	}
 
-	if items, err := h.deps.MediaStore.ListRecentlyAdded(r.Context(), lib.ID, shelfLimit, access); err == nil && len(items) > 0 {
-		shelves[2]["entities"] = minifiedSlice(items, lib, baseURL)
-		shelves[2]["total"] = len(items)
+	// Minify every book shelf together: for an ebook library the enrichment
+	// behind this is two queries for the whole page rather than two per shelf.
+	minified := h.minifiedShelves(ctx, [][]*models.MediaItem{continueItems, recentItems, discoverItems, finishedItems}, lib, baseURL, access)
+	continueEntities, recentEntities, discoverEntities, finishedEntities := minified[0], minified[1], minified[2], minified[3]
+
+	shelves := make([]map[string]any, 0, 5)
+	if len(continueEntities) > 0 {
+		shelves = append(shelves, map[string]any{"id": continueID, labelKey: continueLabel, labelStringKey: continueKey, typeKey: LibraryMediaType, entitiesKey: continueEntities, totalKey: len(continueEntities)})
+	}
+	if len(recentEntities) > 0 {
+		shelves = append(shelves, map[string]any{"id": "recently-added", labelKey: "Recently Added", labelStringKey: "LabelRecentlyAdded", typeKey: LibraryMediaType, entitiesKey: recentEntities, totalKey: len(recentEntities)})
 	}
 
 	libID := audiobookLibraryID(lib)
-	if series, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, shelfLimit, 0, access); err == nil && len(series) > 0 {
-		recent := make([]map[string]any, 0, len(series))
-		for _, s := range series {
+	if len(recentSeries) > 0 {
+		recent := make([]map[string]any, 0, len(recentSeries))
+		for _, s := range recentSeries {
 			// Full real-ABS series object + minified books (same shape as
 			// /libraries/{id}/series) so the recent-series shelf card decodes
 			// identically and its cover stack has real items.
@@ -657,43 +819,116 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 			obj["books"] = books
 			recent = append(recent, obj)
 		}
-		shelves[3]["entities"] = recent
-		shelves[3]["total"] = len(recent)
+		shelves = append(shelves, map[string]any{"id": "recent-series", labelKey: "Recent Series", labelStringKey: "LabelRecentSeries", typeKey: seriesWireKey, entitiesKey: recent, totalKey: len(recent)})
 	}
 
-	if items, err := h.deps.MediaStore.ListDiscover(r.Context(), lib.ID, shelfLimit, access); err == nil && len(items) > 0 {
-		shelves[4]["entities"] = minifiedSlice(items, lib, baseURL)
-		shelves[4]["total"] = len(items)
+	if len(discoverEntities) > 0 {
+		shelves = append(shelves, map[string]any{"id": "discover", labelKey: "Discover", labelStringKey: "LabelDiscover", typeKey: LibraryMediaType, entitiesKey: discoverEntities, totalKey: len(discoverEntities)})
+	}
+	if len(finishedEntities) > 0 {
+		shelves = append(shelves, map[string]any{"id": againID, labelKey: againLabel, labelStringKey: againKey, typeKey: LibraryMediaType, entitiesKey: finishedEntities, totalKey: len(finishedEntities)})
 	}
 
 	writeJSON(w, http.StatusOK, shelves)
 }
 
-// minifiedSlice converts a batch of MediaItems into ABS Minified entries.
-func minifiedSlice(items []*models.MediaItem, lib AudiobookLibrary, baseURL string) []MinifiedLibraryItem {
-	out := make([]MinifiedLibraryItem, 0, len(items))
-	for _, it := range items {
-		out = append(out, Minify(siloItemToLibraryItem(it, lib, baseURL)))
+// minifiedShelves converts several shelves of MediaItems into ABS Minified
+// entries in one pass. Ebook enrichment is the reason this is not a per-shelf
+// helper: it costs two queries, and running it once over the union of the Home
+// tab's shelves keeps that at two for the whole response instead of two per
+// shelf. Output shelves line up with the input by index.
+func (h *Handler) minifiedShelves(ctx context.Context, shelves [][]*models.MediaItem, lib AudiobookLibrary, baseURL string, access catalog.AccessFilter) [][]MinifiedLibraryItem {
+	total := 0
+	for _, items := range shelves {
+		total += len(items)
+	}
+	entries := make([]LibraryItem, 0, total)
+	for _, items := range shelves {
+		for _, it := range items {
+			entries = append(entries, siloItemToLibraryItem(it, lib, baseURL))
+		}
+	}
+	if librarykind.IsEbook(lib.Type) {
+		entries = h.enrichEbookLibraryItems(ctx, entries, access)
+	}
+	out := make([][]MinifiedLibraryItem, len(shelves))
+	offset := 0
+	for i, items := range shelves {
+		out[i] = make([]MinifiedLibraryItem, 0, len(items))
+		for range items {
+			out[i] = append(out[i], Minify(entries[offset]))
+			offset++
+		}
 	}
 	return out
+}
+
+// enrichEbookLibraryItems fills ebookFile/libraryFiles for a whole page in two
+// queries regardless of page size.
+func (h *Handler) enrichEbookLibraryItems(ctx context.Context, entries []LibraryItem, access catalog.AccessFilter) []LibraryItem {
+	if len(entries) == 0 {
+		return entries
+	}
+	contentIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		contentIDs = append(contentIDs, entry.ID)
+	}
+	filesByID, err := h.deps.MediaStore.GetMediaFilesByContentIDs(ctx, contentIDs, access)
+	if err != nil {
+		slog.WarnContext(ctx, "abs ebook batch file enrichment failed", "component", "audiobooks", "items", len(entries), "error", err)
+		return entries
+	}
+	primaryByID, err := h.deps.MediaStore.GetPrimaryEbookFileIDs(ctx, contentIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "abs ebook batch primary enrichment failed", "component", "audiobooks", "items", len(entries), "error", err)
+		primaryByID = nil
+	}
+	for i := range entries {
+		entries[i] = siloEbookToLibraryItemDetail(entries[i], filesByID[entries[i].ID], primaryByID[entries[i].ID])
+	}
+	return entries
 }
 
 // ---------------------------------------------------------------------------
 // Library resolver
 // ---------------------------------------------------------------------------
 
+// defaultLibrary picks the library that a missing or sentinel {libraryId}
+// resolves to. ListAudiobookLibraries returns ebook folders alongside
+// audiobook ones, but every surface that falls through to a default is
+// audiobook-shaped, so an audiobook library wins over folder order. An
+// ebook-only deployment still gets its first library rather than nothing.
+// The bool is false only when the caller has access to no library at all.
+func defaultLibrary(libs []AudiobookLibrary) (AudiobookLibrary, bool) {
+	for _, lib := range libs {
+		if librarykind.IsAudiobook(lib.Type) {
+			return lib, true
+		}
+	}
+	if len(libs) > 0 {
+		return libs[0], true
+	}
+	return AudiobookLibrary{}, false
+}
+
+// virtualAudiobookLibrary is the stand-in served when no library is reachable,
+// so ABS clients get an empty browse response instead of an error.
+func virtualAudiobookLibrary() AudiobookLibrary {
+	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
+}
+
 // resolveLibrary looks up the library identified by the {libraryId} URL
 // param, handling the virtual "silo-audiobooks" sentinel. Returns (lib, true)
 // on success or writes a 404 and returns (zero, false) on failure.
 func (h *Handler) resolveLibrary(w http.ResponseWriter, r *http.Request) (AudiobookLibrary, bool) {
-	idStr := chi.URLParam(r, "libraryId")
+	idStr := chi.URLParam(r, libraryIDKey)
 	if idStr == "" {
 		idStr = chi.URLParam(r, "id")
 	}
 
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return AudiobookLibrary{}, false
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
@@ -702,14 +937,14 @@ func (h *Handler) resolveLibrary(w http.ResponseWriter, r *http.Request) (Audiob
 		return AudiobookLibrary{}, false
 	}
 
-	// Virtual sentinel → first library.
+	// Virtual sentinel → the default library.
 	if idStr == "" || idStr == VirtualLibraryID {
-		if len(libs) > 0 {
-			return libs[0], true
+		if lib, ok := defaultLibrary(libs); ok {
+			return lib, true
 		}
 		// No libraries configured yet: return a virtual one so ABS clients
 		// still get a sensible (empty) browse response.
-		return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}, true
+		return virtualAudiobookLibrary(), true
 	}
 
 	n, err := strconv.ParseInt(idStr, 10, 64)
@@ -853,6 +1088,13 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 	if len(item.Studios) > 0 {
 		publisher = strings.TrimSpace(item.Studios[0])
 	}
+	language := strings.TrimSpace(item.OriginalLanguage)
+	if language == "" {
+		language = strings.TrimSpace(item.DefaultMetadataLanguage)
+	}
+	if language == "" {
+		language = "en"
+	}
 
 	return Metadata{
 		Title:             item.Title,
@@ -869,7 +1111,7 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 		PublishedYear:     publishedYear,
 		Publisher:         publisher,
 		Genres:            genres,
-		Language:          "en",
+		Language:          language,
 		Tags:              tags,
 	}
 }
@@ -879,6 +1121,9 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 // handleItem (single-item GET).
 func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFile, lib AudiobookLibrary, baseURL string) LibraryItem {
 	base := siloItemToLibraryItem(item, lib, baseURL)
+	if item.Type == mediaTypeEbook {
+		return siloEbookToLibraryItemDetail(base, files, EbookPrimarySelection{})
+	}
 
 	tracks := siloFilesToAudioTracks(item.ContentID, files, baseURL, "")
 
@@ -920,12 +1165,12 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 			totalSize += t.Metadata.Size
 		}
 		libraryFiles = append(libraryFiles, map[string]any{
-			"ino":             t.Ino,
-			"metadata":        t.Metadata,
+			inoKey:            t.Ino,
+			metadataKey:       t.Metadata,
 			"isSupplementary": false,
-			"addedAt":         nowMs,
-			"updatedAt":       nowMs,
-			"fileType":        "audio",
+			addedAtKey:        nowMs,
+			updatedAtKey:      nowMs,
+			fileTypeKey:       "audio",
 		})
 	}
 
@@ -939,6 +1184,61 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 	base.LibraryFiles = libraryFiles
 	base.Size = totalSize
 	return base
+}
+
+// siloEbookToLibraryItemDetail produces the ABS BookMedia form used by its
+// web/mobile readers.  Ebooks have no audio tracks; each file is exposed as
+// `ebookFile`, with the preferred EPUB first where multiple editions exist.
+func siloEbookToLibraryItemDetail(base LibraryItem, files []*models.MediaFile, primary EbookPrimarySelection) LibraryItem {
+	selected := ebookformat.PreferredFile(files)
+	if primary.Configured {
+		selected = nil
+		if primary.HasPrimary {
+			selected = ebookformat.FileByID(files, primary.FileID)
+		}
+	}
+	if selected != nil {
+		primary := ebookFileFromMediaFile(selected)
+		base.Media.EbookFile = &primary
+		base.Media.Size = selected.FileSize
+		base.Size = selected.FileSize
+	}
+	base.LibraryFiles = make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		if ebookformat.FormatForFile(file) == "" {
+			continue
+		}
+		ebook := ebookFileFromMediaFile(file)
+		base.LibraryFiles = append(base.LibraryFiles, map[string]any{
+			inoKey:            ebook.Ino,
+			metadataKey:       ebook.Metadata,
+			"isSupplementary": selected == nil || file.ID != selected.ID,
+			addedAtKey:        ebook.AddedAt,
+			updatedAtKey:      ebook.UpdatedAt,
+			fileTypeKey:       mediaTypeEbook,
+		})
+	}
+	return base
+}
+
+func ebookFileFromMediaFile(file *models.MediaFile) EbookFile {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.FilePath)), ".")
+	ebook := EbookFile{
+		Ino:         strconv.Itoa(file.ID),
+		EbookFormat: ext,
+		AddedAt:     file.CreatedAt.UnixMilli(),
+		UpdatedAt:   file.UpdatedAt.UnixMilli(),
+	}
+	ebook.Metadata.Filename = filepath.Base(file.FilePath)
+	ebook.Metadata.Ext = "." + ext
+	ebook.Metadata.Path = file.FilePath
+	ebook.Metadata.RelPath = filepath.Base(file.FilePath)
+	ebook.Metadata.Size = file.FileSize
+	ebook.Metadata.MtimeMs = file.UpdatedAt.UnixMilli()
+	ebook.Metadata.CtimeMs = file.CreatedAt.UnixMilli()
+	ebook.Metadata.BirthtimeMs = file.CreatedAt.UnixMilli()
+	ebook.Metadata.Format = ext
+	return ebook
 }
 
 // siloFilesToAudioTracks converts silo MediaFile rows into ABS AudioTrack

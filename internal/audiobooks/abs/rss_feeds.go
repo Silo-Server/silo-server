@@ -31,12 +31,12 @@ type RSSFeed struct {
 func rssFeedToABS(f RSSFeed, baseURL string) map[string]any {
 	url := baseURL + "/feed/" + f.Slug + ".xml"
 	return map[string]any{
-		"id":            f.ID,
-		"userId":        f.UserID,
-		"libraryItemId": f.LibraryItemID,
-		"slug":          f.Slug,
-		"minified":      f.Minified,
-		"createdAt":     f.CreatedAt.UnixMilli(),
-		"url":           url,
+		"id":             f.ID,
+		userIDKey:        f.UserID,
+		libraryItemIDKey: f.LibraryItemID,
+		slugKey:          f.Slug,
+		minifiedKey:      f.Minified,
+		createdAtKey:     f.CreatedAt.UnixMilli(),
+		"url":            url,
 	}
 }

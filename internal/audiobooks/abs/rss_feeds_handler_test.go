@@ -85,7 +85,7 @@ func newFeedsHarness(t *testing.T, knownItems ...string) (*Handler, *memRSSFeedS
 	t.Helper()
 	known := map[string]*models.MediaItem{}
 	for _, id := range knownItems {
-		known[id] = nil
+		known[id] = &models.MediaItem{ContentID: id, Type: mediaTypeAudiobook}
 	}
 	store := newMemRSSFeedStore()
 	h := New(Dependencies{MediaStore: &stubMediaStore{known: known}, RSSFeedStore: store})
@@ -93,9 +93,9 @@ func newFeedsHarness(t *testing.T, knownItems ...string) (*Handler, *memRSSFeedS
 }
 
 func TestFeed_Open_GeneratesSlug(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+		map[string]string{itemIDParam: testBookID}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
 	}
@@ -108,9 +108,9 @@ func TestFeed_Open_GeneratesSlug(t *testing.T) {
 }
 
 func TestFeed_Open_CustomSlug(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"my-cool-feed"}`), "1", "", h.handleOpenItemFeed)
+		map[string]string{itemIDParam: testBookID}, []byte(`{"slug":"my-cool-feed"}`), "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
 	}
@@ -122,19 +122,19 @@ func TestFeed_Open_CustomSlug(t *testing.T) {
 }
 
 func TestFeed_Open_InvalidSlug_400(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"BAD!"}`), "1", "", h.handleOpenItemFeed)
+		map[string]string{itemIDParam: testBookID}, []byte(`{"slug":"BAD!"}`), "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
 
 func TestFeed_Open_Collision_409(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	body := []byte(`{"slug":"taken-slug"}`)
-	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, body, "1", "", h.handleOpenItemFeed)
-	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, body, "1", "", h.handleOpenItemFeed)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{itemIDParam: testBookID}, body, "1", "", h.handleOpenItemFeed)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{itemIDParam: testBookID}, body, "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409", rec.Code)
 	}
@@ -143,15 +143,33 @@ func TestFeed_Open_Collision_409(t *testing.T) {
 func TestFeed_Open_UnknownItem_404(t *testing.T) {
 	h, _ := newFeedsHarness(t)
 	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/ghost/open",
-		map[string]string{"itemId": "ghost"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+		map[string]string{itemIDParam: testGhostID}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
 }
 
+func TestFeed_Open_Ebook_404(t *testing.T) {
+	store := newMemRSSFeedStore()
+	h := New(Dependencies{
+		MediaStore: &stubMediaStore{known: map[string]*models.MediaItem{
+			testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+		}},
+		RSSFeedStore: store,
+	})
+	rec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/ebook-1/open",
+		map[string]string{itemIDParam: testEbookID}, []byte(`{}`), "1", testProfileID, h.handleOpenItemFeed)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(store.rows) != 0 {
+		t.Fatalf("ebook feed rows = %d, want 0", len(store.rows))
+	}
+}
+
 func TestFeed_List_OwnerOnly(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+	h, _ := newFeedsHarness(t, testBookID)
+	_ = dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{itemIDParam: testBookID}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
 	rec := dispatchABSWithParams(http.MethodGet, "/api/feeds", nil, nil, "2", "", h.handleListRSSFeeds)
 	var env map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &env)
@@ -162,8 +180,8 @@ func TestFeed_List_OwnerOnly(t *testing.T) {
 }
 
 func TestFeed_Close_Owner(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+	h, _ := newFeedsHarness(t, testBookID)
+	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{itemIDParam: testBookID}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
 	var open map[string]any
 	_ = json.Unmarshal(openRec.Body.Bytes(), &open)
 	id, _ := open["id"].(string)
@@ -175,8 +193,8 @@ func TestFeed_Close_Owner(t *testing.T) {
 }
 
 func TestFeed_Close_NonOwner_404(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
-	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{"itemId": "book-1"}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
+	h, _ := newFeedsHarness(t, testBookID)
+	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open", map[string]string{itemIDParam: testBookID}, []byte(`{}`), "1", "", h.handleOpenItemFeed)
 	var open map[string]any
 	_ = json.Unmarshal(openRec.Body.Bytes(), &open)
 	id, _ := open["id"].(string)
@@ -188,7 +206,7 @@ func TestFeed_Close_NonOwner_404(t *testing.T) {
 }
 
 func TestPublicFeed_UnknownSlug_404(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	rec := dispatchABSWithParams(http.MethodGet, "/feed/missing.xml",
 		map[string]string{"slug": "missing.xml"}, nil, "", "", h.handlePublicFeed)
 	if rec.Code != http.StatusNotFound {
@@ -197,9 +215,9 @@ func TestPublicFeed_UnknownSlug_404(t *testing.T) {
 }
 
 func TestPublicFeed_HappyPath_XML(t *testing.T) {
-	h, _ := newFeedsHarness(t, "book-1")
+	h, _ := newFeedsHarness(t, testBookID)
 	openRec := dispatchABSWithParams(http.MethodPost, "/api/feeds/item/book-1/open",
-		map[string]string{"itemId": "book-1"}, []byte(`{"slug":"happy-feed"}`), "1", "", h.handleOpenItemFeed)
+		map[string]string{itemIDParam: testBookID}, []byte(`{"slug":"happy-feed"}`), "1", "", h.handleOpenItemFeed)
 	if openRec.Code != http.StatusOK {
 		t.Fatalf("seed open failed: %s", openRec.Body.String())
 	}
@@ -217,5 +235,21 @@ func TestPublicFeed_HappyPath_XML(t *testing.T) {
 		if !strings.Contains(body, needle) {
 			t.Errorf("body missing %q; got %s", needle, body)
 		}
+	}
+}
+
+func TestPublicFeed_Ebook_404(t *testing.T) {
+	store := newMemRSSFeedStore()
+	store.rows["ebook-feed"] = RSSFeed{ID: "ebook-feed", LibraryItemID: testEbookID, Slug: "ebook-feed"}
+	h := New(Dependencies{
+		MediaStore: &stubMediaStore{known: map[string]*models.MediaItem{
+			testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+		}},
+		RSSFeedStore: store,
+	})
+	rec := dispatchABSWithParams(http.MethodGet, "/feed/ebook-feed.xml",
+		map[string]string{"slug": "ebook-feed.xml"}, nil, "", "", h.handlePublicFeed)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }

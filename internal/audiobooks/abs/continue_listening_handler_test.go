@@ -30,11 +30,11 @@ func (f *recordingProgressFake) SetHideFromContinue(_ context.Context, userID, p
 
 func TestContinue_Remove_SetsHide(t *testing.T) {
 	prog := &recordingProgressFake{}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/book-1/remove-from-continue-listening",
-		map[string]string{"itemId": "book-1"}, nil, "1", "", h.handleRemoveFromContinueListening)
+		map[string]string{itemIDParam: testBookID}, nil, "1", "", h.handleRemoveFromContinueListening)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -50,11 +50,11 @@ func TestContinue_Remove_SetsHide(t *testing.T) {
 
 func TestContinue_Readd_SetsShow(t *testing.T) {
 	prog := &recordingProgressFake{}
-	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{testBookID: nil}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/book-1/readd-to-continue-listening",
-		map[string]string{"itemId": "book-1"}, nil, "1", "", h.handleReaddToContinueListening)
+		map[string]string{itemIDParam: testBookID}, nil, "1", "", h.handleReaddToContinueListening)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -69,7 +69,7 @@ func TestContinue_UnknownItem_404(t *testing.T) {
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/ghost/remove-from-continue-listening",
-		map[string]string{"itemId": "ghost"}, nil, "1", "", h.handleRemoveFromContinueListening)
+		map[string]string{itemIDParam: testGhostID}, nil, "1", "", h.handleRemoveFromContinueListening)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -78,14 +78,26 @@ func TestContinue_UnknownItem_404(t *testing.T) {
 func TestContinue_MediaLookupError_500(t *testing.T) {
 	prog := &recordingProgressFake{}
 	media := &stubMediaStore{
-		known:     map[string]*models.MediaItem{"book-1": nil},
+		known:     map[string]*models.MediaItem{testBookID: nil},
 		lookupErr: errors.New("media lookup failed"),
 	}
 	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
 
 	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/book-1/remove-from-continue-listening",
-		map[string]string{"itemId": "book-1"}, nil, "1", "", h.handleRemoveFromContinueListening)
+		map[string]string{itemIDParam: testBookID}, nil, "1", "", h.handleRemoveFromContinueListening)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestContinue_EbookWithoutProgressStore_503(t *testing.T) {
+	media := &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	h := New(Dependencies{MediaStore: media})
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/ebook-1/remove-from-continue-listening",
+		map[string]string{itemIDParam: testEbookID}, nil, "1", testProfileID, h.handleRemoveFromContinueListening)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
 	}
 }

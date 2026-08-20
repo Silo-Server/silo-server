@@ -25,6 +25,27 @@ type ABSBookmarkStore struct {
 // abs.BookmarkStore contract. Catches signature drift at build time.
 var _ abs.BookmarkStore = (*ABSBookmarkStore)(nil)
 
+func (s *ABSBookmarkStore) ListByUser(ctx context.Context, userID, profileID string) ([]abs.Bookmark, error) {
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return nil, fmt.Errorf("abs_bookmark_store: invalid user id %q: %w", userID, err)
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT id, library_item_id, time_seconds, title, created_at, updated_at FROM abs_bookmarks WHERE user_id = $1 AND COALESCE(profile_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid) ORDER BY updated_at DESC`, uid, profileArg(profileID))
+	if err != nil {
+		return nil, fmt.Errorf("abs_bookmark_store: list by user: %w", err)
+	}
+	defer rows.Close()
+	out := []abs.Bookmark{}
+	for rows.Next() {
+		var b abs.Bookmark
+		if err := rows.Scan(&b.ID, &b.LibraryItemID, &b.Time, &b.Title, &b.CreatedAt, &b.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // profileArg returns the value to bind for the profile_id column.
 // pgx interprets a (*string)(nil) as SQL NULL, which is exactly what
 // the schema wants for primary-profile rows.

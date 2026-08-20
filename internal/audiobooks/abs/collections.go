@@ -68,14 +68,14 @@ type CollectionItem struct {
 // camelCase, with timestamps as JS-epoch milliseconds.
 func collectionToABS(c Collection, books []map[string]any) map[string]any {
 	out := map[string]any{
-		"id":          c.ID,
-		"libraryId":   VirtualLibraryID, // real ABS Collection.toOldJSON has libraryId; silo collections are cross-library user-personal
-		"userId":      c.UserID,
-		"name":        c.Name,
-		"description": c.Description,
-		"isPublic":    c.IsPublic,
-		"lastUpdate":  c.UpdatedAt.UnixMilli(),
-		"createdAt":   c.CreatedAt.UnixMilli(),
+		"id":           c.ID,
+		libraryIDKey:   VirtualLibraryID, // real ABS Collection.toOldJSON has libraryId; silo collections are cross-library user-personal
+		userIDKey:      c.UserID,
+		nameKey:        c.Name,
+		descriptionKey: c.Description,
+		isPublicKey:    c.IsPublic,
+		lastUpdateKey:  c.UpdatedAt.UnixMilli(),
+		createdAtKey:   c.CreatedAt.UnixMilli(),
 	}
 	if books != nil {
 		out["books"] = books

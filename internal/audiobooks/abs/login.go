@@ -13,6 +13,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ErrNotFound is returned by TokenStore when a JTI is absent.
@@ -118,6 +119,11 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		http.Error(w, "token store not available", http.StatusServiceUnavailable)
 		return
 	}
+	libraryAccess, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: userID, ProfileID: profileID})
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
 
 	secret, err := h.deps.Config.JWTSecret(r.Context())
 	if err != nil {
@@ -186,7 +192,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		setRefreshCookie(w, r, refresh, refreshTTL)
 	}
 
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, libraryAccess, now, userID, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
@@ -200,7 +206,7 @@ func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
 	// harmless extras for plugin-shape clients.
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
-		"server":  "audiobookshelf",
+		"server":  audiobookshelfIcon,
 		"version": ServerVersion,
 		"pong":    true,
 	})
@@ -208,7 +214,7 @@ func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
 
 // handleABSInit — GET /init. Real ABS first-run detection probe.
 func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"isInit": true})
+	writeJSON(w, http.StatusOK, map[string]any{isInitKey: true})
 }
 
 // handleABSStatus — GET /status. Mobile clients call this on every
@@ -219,12 +225,12 @@ func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
 // present a usable login flow.
 func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"app":           "audiobookshelf",
-		"serverVersion": ServerVersion,
-		"isInit":        true,
-		"language":      "en-us",
-		"authMethods":   []string{"local"},
-		"authFormData":  map[string]any{},
+		"app":            audiobookshelfIcon,
+		serverVersionKey: ServerVersion,
+		isInitKey:        true,
+		languageKey:      languageEnglishUS,
+		authMethodsKey:   []string{localAuthMethod},
+		authFormDataKey:  map[string]any{},
 	})
 }
 
@@ -245,25 +251,25 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 	}
 	nowMs := now.UnixMilli()
 	return map[string]any{
-		"id":                              userID,
-		"username":                        name,
-		"email":                           "",
-		"type":                            "user",
-		"defaultLibraryId":                defaultLibraryID,
-		"librariesAccessible":             []any{},
-		"itemTagsAccessible":              []any{},
-		"itemTagsSelected":                []any{},
-		"mediaProgress":                   []any{},
-		"bookmarks":                       []any{},
-		"seriesHideFromContinueListening": []any{},
-		"isOldToken":                      false,
-		"isActive":                        true,
-		"isLocked":                        false,
-		"hasOpenIDLink":                   false,
-		"token":                           token,
-		"lastSeen":                        nowMs,
-		"createdAt":                       nowMs,
-		"permissions": map[string]any{
+		"id":                 userID,
+		usernameKey:          name,
+		"email":              "",
+		typeKey:              userType,
+		"defaultLibraryId":   defaultLibraryID,
+		librariesAccessKey:   []any{},
+		"itemTagsAccessible": []any{},
+		itemTagsSelectedKey:  []any{},
+		mediaProgressKey:     []any{},
+		bookmarksKey:         []any{},
+		seriesHideKey:        []any{},
+		isOldTokenKey:        false,
+		"isActive":           true,
+		"isLocked":           false,
+		"hasOpenIDLink":      false,
+		tokenKey:             token,
+		lastSeenKey:          nowMs,
+		createdAtKey:         nowMs,
+		permissionsKey: map[string]any{
 			"download":                  true,
 			"update":                    true,
 			"delete":                    true,
@@ -288,6 +294,7 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, now time
 // persisted — avoids two near-simultaneous time.Now() calls drifting apart.
 func (h *Handler) loginEnvelope(
 	r *http.Request,
+	access catalog.AccessFilter,
 	now time.Time,
 	userID, displayName, accessToken, refreshToken string,
 	returnRefreshInBody bool,
@@ -295,7 +302,6 @@ func (h *Handler) loginEnvelope(
 	// displayName falls back to userID when the validator didn't supply one.
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
-	access, _, _ := h.accessFilterFromRequest(r)
 	libs, _ := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	for i, lib := range libs {
 		if i == 0 {
@@ -322,7 +328,7 @@ func (h *Handler) loginEnvelope(
 		"id":                                "server-settings",
 		"version":                           ServerVersion,
 		"buildNumber":                       1,
-		"language":                          "en-us",
+		languageKey:                         languageEnglishUS,
 		"dateFormat":                        "MM/dd/yyyy",
 		"timeFormat":                        "HH:mm",
 		"timeZone":                          "UTC",
@@ -365,7 +371,7 @@ func (h *Handler) loginEnvelope(
 		"rateLimitLoginWindow":               600000,
 		"backupPath":                         "/metadata/backups",
 		"allowedOrigins":                     []string{},
-		"authActiveAuthMethods":              []string{"local"},
+		authActiveMethodsKey:                 []string{localAuthMethod},
 		"authLoginCustomMessage":             nil,
 		"authOpenIDIssuerURL":                nil,
 		"authOpenIDAuthorizationURL":         nil,
@@ -407,6 +413,11 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	libraryAccess, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
 	// Mint a NEW access token. ABS v2.26.0+ clients check whether the
 	// stored `serverConfig.token` equals the `user.token` echoed by
 	// /authorize; if equal they assume the server is still on the
@@ -440,7 +451,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	// /authorize never issues a refresh token (the client already holds one),
 	// so there is nothing to return in the body.
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, access, "", false))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, libraryAccess, time.Now(), a.UserID, a.UserID, access, "", false))
 }
 
 // setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
@@ -514,6 +525,11 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.DebugContext(r.Context(), "abs refresh: parse/type failed", "component", "audiobooks", "err", err, "type", claimsType)
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+		return
+	}
+	libraryAccess, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: claims.UserID, ProfileID: claims.ProfileID})
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
@@ -596,7 +612,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	if !returnRefreshInBody {
 		setRefreshCookie(w, r, refresh, refreshTTL)
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, "", access, refresh, returnRefreshInBody))
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, libraryAccess, now, claims.UserID, "", access, refresh, returnRefreshInBody))
 }
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)

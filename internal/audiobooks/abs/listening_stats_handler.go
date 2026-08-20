@@ -129,18 +129,18 @@ func statsToABS(s Stats) map[string]any {
 	}
 	days := make([]map[string]any, 0, len(s.Days))
 	for _, d := range s.Days {
-		days = append(days, map[string]any{"date": d.Date, "seconds": d.Seconds})
+		days = append(days, map[string]any{dateKey: d.Date, "seconds": d.Seconds})
 	}
 	monthly := make([]map[string]any, 0, len(s.Monthly))
 	for _, m := range s.Monthly {
 		monthly = append(monthly, map[string]any{"month": m.Month, "seconds": m.Seconds})
 	}
 	return map[string]any{
-		"totalTime": s.TotalTime,
-		"items":     s.Items,
-		"days":      days,
-		"dayOfWeek": dow,
-		"monthly":   monthly,
+		"totalTime":  s.TotalTime,
+		itemsKey:     s.Items,
+		"days":       days,
+		dayOfWeekKey: dow,
+		"monthly":    monthly,
 	}
 }
 
@@ -155,9 +155,9 @@ func listeningSessionsEnvelope(sessions []map[string]any, total, itemsPerPage, p
 		numPages = (total + itemsPerPage - 1) / itemsPerPage
 	}
 	return map[string]any{
-		"total":        total,
+		totalKey:       total,
 		"numPages":     numPages,
-		"page":         page,
+		pageKey:        page,
 		"itemsPerPage": itemsPerPage,
 		"sessions":     sessions,
 	}
@@ -176,7 +176,7 @@ func sessionToABS(s ABSPlaybackSession, item *models.MediaItem, baseURL string) 
 	mediaMetadata := buildSiloPlayMediaMetadata(item)
 
 	displayAuthor := ""
-	if v, ok := mediaMetadata["authorName"].(string); ok {
+	if v, ok := mediaMetadata[authorNameKey].(string); ok {
 		displayAuthor = v
 	}
 
@@ -198,46 +198,46 @@ func sessionToABS(s ABSPlaybackSession, item *models.MediaItem, baseURL string) 
 	}
 
 	out := map[string]any{
-		"id":            s.ID,
-		"userId":        s.UserID,
-		"libraryId":     VirtualLibraryID,
-		"libraryItemId": s.ContentID,
-		"bookId":        s.ContentID,
-		"episodeId":     nil, // silo is audiobook-only; podcasts are out of scope
-		"mediaType":     LibraryMediaType,
-		"mediaMetadata": mediaMetadata,
+		"id":             s.ID,
+		userIDKey:        s.UserID,
+		libraryIDKey:     VirtualLibraryID,
+		libraryItemIDKey: s.ContentID,
+		bookIDKey:        s.ContentID,
+		episodeIDKey:     nil, // silo is audiobook-only; podcasts are out of scope
+		mediaTypeKey:     LibraryMediaType,
+		"mediaMetadata":  mediaMetadata,
 		// Chapters are not loaded for session list/detail responses (would
 		// require an extra media-files fetch per session); real ABS clients
 		// read chapters from the /play or /sync payload for in-player
 		// rendering, so an empty list here is a safe placeholder rather than
 		// the full per-file chapter set.
-		"chapters":      []map[string]any{},
-		"displayTitle":  item.Title,
-		"displayAuthor": displayAuthor,
-		"coverPath":     baseURL + "/api/items/" + s.ContentID + "/cover",
+		chaptersKey:      []map[string]any{},
+		"displayTitle":   item.Title,
+		displayAuthorKey: displayAuthor,
+		coverPathKey:     baseURL + "/api/items/" + s.ContentID + "/cover",
 		// duration: the total book duration isn't tracked on the session row
 		// itself; 0 is a safe placeholder (never crashes, only affects the
 		// progress-bar denominator on this historical-session view).
-		"duration":    0,
-		"playMethod":  0, // DIRECTPLAY
-		"mediaPlayer": "exo-player",
-		"deviceInfo": map[string]any{
+		durationKey:    0,
+		playMethodKey:  0, // DIRECTPLAY
+		mediaPlayerKey: "exo-player",
+		deviceInfoKey: map[string]any{
 			"deviceId":      "unknown",
 			"manufacturer":  "Unknown",
 			"model":         "Unknown",
 			"sdkVersion":    0,
 			"clientVersion": "0.0.0",
 		},
-		"serverVersion": ServerVersion,
-		"date":          dateStr,
-		"dayOfWeek":     dayOfWeek,
-		"timeListening": s.TimeListeningSeconds,
+		serverVersionKey: ServerVersion,
+		dateKey:          dateStr,
+		dayOfWeekKey:     dayOfWeek,
+		timeListeningKey: s.TimeListeningSeconds,
 		// startTime: media position when this session began. Not persisted
 		// separately from currentTime on ABSPlaybackSession; 0 is safe.
-		"startTime":   0,
-		"currentTime": s.CurrentPositionSeconds,
-		"startedAt":   startedAtMs,
-		"updatedAt":   updatedAtMs,
+		startTimeKey:   0,
+		currentTimeKey: s.CurrentPositionSeconds,
+		startedAtKey:   startedAtMs,
+		updatedAtKey:   updatedAtMs,
 	}
 	// Additive extra field (not part of upstream toJSON) kept for backward
 	// compatibility with any existing silo-side consumers.

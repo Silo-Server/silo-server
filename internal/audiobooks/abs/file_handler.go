@@ -3,6 +3,7 @@ package abs
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/ebookformat"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -59,12 +61,24 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentID := chi.URLParam(r, "libraryItemId")
+	contentID := chi.URLParam(r, libraryItemIDKey)
 	inoStr := chi.URLParam(r, "ino")
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
+	// Only the item's kind matters here, and this is the Range-request hot
+	// path: a full item fetch would hydrate people and series for nothing.
+	itemType, err := h.deps.MediaStore.GetItemType(r.Context(), contentID, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs file stream item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if itemType == "" {
+		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
 	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
@@ -73,24 +87,29 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the ino back to a file by recomputing trackInoFor for each file
-	// at its 0-based position in the sorted slice. Keeping the resolution logic
-	// here (symmetric with handlePlayStart's generation) means both paths stay
-	// in sync whenever the sort order or ino derivation changes.
+	// Resolve identifiers by media type so a small numeric media_files ID can
+	// never shadow the same raw audiobook track index. Ebook readers receive
+	// real file IDs; audiobook players receive synthetic inos, with a legacy
+	// 0-based track-index fallback.
 	fileIdx := -1
-	for i, f := range files {
-		if trackInoFor(contentID, i) == inoStr {
-			fileIdx = i
-			_ = f
-			break
+	if itemType == mediaTypeEbook {
+		for i, f := range files {
+			if strconv.Itoa(f.ID) == inoStr {
+				fileIdx = i
+				break
+			}
 		}
-	}
-
-	// Fallback: legacy or third-party callers sometimes pass the raw 0-based
-	// file index directly. Accept it when it resolves to a real position.
-	if fileIdx < 0 {
-		if n, err := strconv.Atoi(inoStr); err == nil && n >= 0 && n < len(files) {
-			fileIdx = n
+	} else {
+		for i := range files {
+			if trackInoFor(contentID, i) == inoStr {
+				fileIdx = i
+				break
+			}
+		}
+		if fileIdx < 0 {
+			if n, parseErr := strconv.Atoi(inoStr); parseErr == nil && n >= 0 && n < len(files) {
+				fileIdx = n
+			}
 		}
 	}
 
@@ -104,14 +123,16 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	// /download variant: hint the client to save rather than stream.
 	if strings.HasSuffix(r.URL.Path, "/download") {
 		filename := filepath.Base(mediaFile.FilePath)
-		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+		w.Header().Set("Content-Disposition", ebookformat.ContentDisposition("attachment", filename))
 	}
 
 	// Set Content-Type for audio files. ServeDirectPlay uses MimeFromExtension
 	// which covers video containers; we override with audio-specific MIME
 	// types because ABS clients pattern-match on Content-Type.
-	ext := strings.ToLower(filepath.Ext(mediaFile.FilePath))
-	if ct := audioContentType(ext); ct != "" {
+	if ct := ebookformat.MimeType(ebookformat.FormatForFile(mediaFile)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	} else if ct := audioContentType(strings.ToLower(filepath.Ext(mediaFile.FilePath))); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
 

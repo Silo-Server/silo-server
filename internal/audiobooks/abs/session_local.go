@@ -79,7 +79,7 @@ func (h *Handler) handleSyncLocalSession(w http.ResponseWriter, r *http.Request)
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	res := h.syncOneLocalSession(r.Context(), a, access, sess)
@@ -113,7 +113,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	results := make([]localSyncResult, 0, len(body.Sessions))
@@ -126,7 +126,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 		}
 		results = append(results, h.syncOneLocalSession(r.Context(), a, access, sess))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	writeJSON(w, http.StatusOK, map[string]any{resultsKey: results})
 }
 
 // syncOneLocalSession applies one offline session's position to the caller's
@@ -153,7 +153,7 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 		return res
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(ctx, sess.LibraryItemID, access)
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		if err != nil {
 			slog.WarnContext(ctx, "abs local session sync: media lookup failed", "component", "audiobooks",
 				"library_item_id", sess.LibraryItemID, "error", err)
@@ -202,9 +202,9 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 			// Realtime push so other connected clients see the caught-up
 			// position — same event handleSessionSync emits.
 			h.publish(a.UserID, "user_item_progress_updated", map[string]any{
-				"data": map[string]any{
-					"libraryItemId": sess.LibraryItemID,
-					"currentTime":   sess.CurrentTime,
+				dataKey: map[string]any{
+					libraryItemIDKey: sess.LibraryItemID,
+					currentTimeKey:   sess.CurrentTime,
 				},
 			})
 		}

@@ -25,12 +25,14 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	defaultLibID := VirtualLibraryID
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
-	if err == nil && len(libs) > 0 {
-		defaultLibID = audiobookLibraryID(libs[0])
+	if err == nil {
+		if lib, ok := defaultLibrary(libs); ok {
+			defaultLibID = audiobookLibraryID(lib)
+		}
 	}
 
 	// Resolve the real display username; the token only carries the userID, so
@@ -67,22 +69,23 @@ func audiobookLibraryMap(lib AudiobookLibrary) map[string]any {
 	}
 	id := audiobookLibraryID(lib)
 	return map[string]any{
-		"id":   id,
-		"name": name,
+		"id":    id,
+		nameKey: name,
 		// folders mirror real ABS LibraryFolder.toOldJSON {id,fullPath,libraryId,addedAt}.
 		// silo serves a single virtual folder per library.
 		"folders": []map[string]any{
-			{"id": VirtualFolderID, "fullPath": "/" + name, "libraryId": id, "addedAt": 0},
+			{"id": VirtualFolderID, "fullPath": "/" + name, libraryIDKey: id, addedAtKey: 0},
 		},
-		"displayOrder":    1,
-		"icon":            "audiobookshelf",
-		"mediaType":       LibraryMediaType,
+		"displayOrder": 1,
+		"icon":         audiobookshelfIcon,
+		// ABS uses `book` for both text ebooks and audiobooks.
+		mediaTypeKey:      LibraryMediaType,
 		"provider":        "audible",
 		"settings":        audiobookLibrarySettings(),
-		"lastScan":        nil,
+		lastScanKey:       nil,
 		"lastScanVersion": ServerVersion,
-		"createdAt":       0,
-		"lastUpdate":      0,
+		createdAtKey:      0,
+		lastUpdateKey:     0,
 	}
 }
 

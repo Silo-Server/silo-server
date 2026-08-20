@@ -109,10 +109,32 @@ func Minify(item LibraryItem) MinifiedLibraryItem {
 		tags = []string{}
 	}
 	// Every audiobook has at least one audio file; report >= 1 so strict
-	// clients (Plappa) don't drop the item. Exact counts come from item-detail.
+	// clients (Plappa) don't drop the item. An ebook is deliberately different:
+	// its ebookFormat is the signal that clients such as Still use to offer
+	// “Read”, so it must retain zero audio tracks.
 	numTracks := item.Media.NumTracks
-	if numTracks < 1 {
+	var ebookFormat *string
+	if item.Media.EbookFile != nil && item.Media.EbookFile.EbookFormat != "" {
+		format := item.Media.EbookFile.EbookFormat
+		ebookFormat = &format
+	}
+	ebookOnlyFiles := len(item.LibraryFiles) > 0
+	for _, file := range item.LibraryFiles {
+		fileType, _ := file[fileTypeKey].(string)
+		if fileType != mediaTypeEbook {
+			ebookOnlyFiles = false
+			break
+		}
+	}
+	if numTracks < 1 && ebookFormat == nil && !ebookOnlyFiles {
 		numTracks = 1
+	}
+	// ABS numFiles counts all library files, not just audio tracks. Ebooks
+	// intentionally have no audio tracks but do have readable files; zero here
+	// makes clients discard them as empty.
+	numFiles := numTracks
+	if len(item.LibraryFiles) > 0 {
+		numFiles = len(item.LibraryFiles)
 	}
 	return MinifiedLibraryItem{
 		ID:          item.ID,
@@ -144,7 +166,7 @@ func Minify(item LibraryItem) MinifiedLibraryItem {
 				Publisher:         m.Publisher,
 				Description:       m.Description,
 				ISBN:              m.ISBN,
-				Language:          "en",
+				Language:          m.Language,
 				Explicit:          m.Explicit,
 			},
 			CoverPath:     item.Media.CoverPath,
@@ -153,10 +175,11 @@ func Minify(item LibraryItem) MinifiedLibraryItem {
 			NumAudioFiles: numTracks,
 			NumChapters:   len(item.Media.Chapters),
 			Duration:      item.Media.Duration,
-			Size:          0,
+			Size:          item.Media.Size,
+			EbookFormat:   ebookFormat,
 		},
-		NumFiles:        numTracks,
-		Size:            0,
+		NumFiles:        numFiles,
+		Size:            item.Size,
 		CollapsedSeries: item.CollapsedSeries,
 	}
 }

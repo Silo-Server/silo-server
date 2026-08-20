@@ -32,8 +32,8 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "author get failed", http.StatusInternalServerError)
 		return
 	}
-	lib := h.resolveDefaultLibrary(r.Context(), access)
-	writeJSON(w, http.StatusOK, authorToABS(author, lib, h.absBaseURL(r)))
+	items := h.mapLibraryItems(r.Context(), author.Books, h.absBaseURL(r), access)
+	writeJSON(w, http.StatusOK, authorToABS(author, items))
 }
 
 func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
@@ -63,8 +63,8 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "series get failed", http.StatusInternalServerError)
 		return
 	}
-	lib := h.resolveDefaultLibrary(r.Context(), access)
-	writeJSON(w, http.StatusOK, seriesToABS(series, lib, h.absBaseURL(r)))
+	items := h.mapLibraryItems(r.Context(), series.Books, h.absBaseURL(r), access)
+	writeJSON(w, http.StatusOK, seriesToABS(series, items))
 }
 
 // authorObjectABS builds the real ABS Author.toOldJSON(+numBooks) shape
@@ -81,26 +81,29 @@ func authorObjectABS(id, name, libraryID string, numBooks int, hasPhoto bool) ma
 		imagePath = "/metadata/authors/" + id + ".jpg"
 	}
 	return map[string]any{
-		"id":          id,
-		"asin":        nil,
-		"name":        name,
-		"description": nil,
-		"imagePath":   imagePath,
-		"libraryId":   libraryID,
-		"addedAt":     0,
-		"updatedAt":   0,
-		"numBooks":    numBooks,
+		"id":           id,
+		asinKey:        nil,
+		nameKey:        name,
+		descriptionKey: nil,
+		"imagePath":    imagePath,
+		libraryIDKey:   libraryID,
+		addedAtKey:     0,
+		updatedAtKey:   0,
+		numBooksKey:    numBooks,
 	}
 }
 
-func authorToABS(a Author, lib AudiobookLibrary, baseURL string) map[string]any {
-	libID := audiobookLibraryID(lib)
+func authorToABS(a Author, items []LibraryItem) map[string]any {
+	libID := VirtualLibraryID
+	if len(items) > 0 {
+		libID = items[0].LibraryID
+	}
 	obj := authorObjectABS(a.ID, a.Name, libID, len(a.Books), a.PosterPath != "")
 	// Author-detail books are full minified library items (not thin stubs) so
 	// any strict client decodes them with its LibraryItem model.
 	books := make([]MinifiedLibraryItem, 0, len(a.Books))
-	for _, b := range a.Books {
-		books = append(books, Minify(siloItemToLibraryItem(b, lib, baseURL)))
+	for _, item := range items {
+		books = append(books, Minify(item))
 	}
 	obj["libraryItems"] = books
 	return obj
@@ -112,22 +115,25 @@ func authorToABS(a Author, lib AudiobookLibrary, baseURL string) map[string]any 
 func seriesObjectABS(id, name, libraryID string, numBooks int) map[string]any {
 	return map[string]any{
 		"id":               id,
-		"name":             name,
+		nameKey:            name,
 		"nameIgnorePrefix": titleIgnorePrefix(name),
-		"description":      nil,
-		"addedAt":          0,
-		"updatedAt":        0,
-		"libraryId":        libraryID,
-		"numBooks":         numBooks,
+		descriptionKey:     nil,
+		addedAtKey:         0,
+		updatedAtKey:       0,
+		libraryIDKey:       libraryID,
+		numBooksKey:        numBooks,
 	}
 }
 
-func seriesToABS(s Series, lib AudiobookLibrary, baseURL string) map[string]any {
-	libID := audiobookLibraryID(lib)
+func seriesToABS(s Series, items []LibraryItem) map[string]any {
+	libID := VirtualLibraryID
+	if len(items) > 0 {
+		libID = items[0].LibraryID
+	}
 	obj := seriesObjectABS(s.ID, s.Name, libID, len(s.Books))
 	books := make([]MinifiedLibraryItem, 0, len(s.Books))
-	for _, b := range s.Books {
-		books = append(books, Minify(siloItemToLibraryItem(b, lib, baseURL)))
+	for _, item := range items {
+		books = append(books, Minify(item))
 	}
 	obj["books"] = books
 	return obj

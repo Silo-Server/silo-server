@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // playlistBody is the JSON body for POST and PATCH /playlists[/{id}].
@@ -81,7 +83,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Add any items the client sent on the same POST — real-ABS mobile
@@ -97,7 +99,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		// audiobook-only-hydration policy. Audiobook items get a
 		// MediaStore lookup so typos don't create orphan rows.
 		if it.EpisodeID == "" {
-			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil {
+			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil || mi.Type != mediaTypeAudiobook {
 				slog.DebugContext(r.Context(), "abs playlist create-items: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}
@@ -114,7 +116,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		persisted = p
 	}
 
-	h.publish(a.UserID, "playlist_added", map[string]any{"id": p.ID, "name": p.Name})
+	h.publish(a.UserID, "playlist_added", map[string]any{"id": p.ID, nameKey: p.Name})
 	writeJSON(w, http.StatusOK, h.playlistFullShape(r, persisted))
 }
 
@@ -143,21 +145,42 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		return []map[string]any{}
 	}
 	access, _, _ := h.accessFilterFromRequest(r)
-	lib := h.resolveDefaultLibrary(r.Context(), access)
-	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
+	mediaItems := make([]*models.MediaItem, 0, len(rows))
+	for _, it := range rows {
+		if it.EpisodeID != "" {
+			continue
+		}
+		item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
+		if lookupErr != nil {
+			// A member that is gone or not an audiobook is dropped silently by
+			// design; a failing lookup drops it too, but must stay visible.
+			slog.WarnContext(r.Context(), "abs playlist member lookup failed", "component", "audiobooks", "err", lookupErr, "content_id", it.LibraryItemID)
+			continue
+		}
+		if item != nil && item.Type == mediaTypeAudiobook {
+			mediaItems = append(mediaItems, item)
+		}
+	}
+	mappedItems := h.mapLibraryItems(r.Context(), mediaItems, baseURL, access)
+	mappedByID := make(map[string]LibraryItem, len(mappedItems))
+	for _, item := range mappedItems {
+		mappedByID[item.ID] = item
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
 		entry := map[string]any{
-			"libraryItemId": it.LibraryItemID,
-			"position":      it.Position,
+			libraryItemIDKey: it.LibraryItemID,
+			"position":       it.Position,
 		}
 		if it.EpisodeID != "" {
-			entry["episodeId"] = it.EpisodeID
-		} else if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); err == nil && item != nil {
-			entry["libraryId"] = libID
-			entry["title"] = item.Title
-			entry["libraryItem"] = siloItemToLibraryItem(item, lib, baseURL)
+			entry[episodeIDKey] = it.EpisodeID
+		} else if item, ok := mappedByID[it.LibraryItemID]; ok {
+			entry[libraryIDKey] = item.LibraryID
+			entry[titleKey] = item.Media.Metadata.Title
+			entry["libraryItem"] = item
+		} else {
+			continue
 		}
 		out = append(out, entry)
 	}
@@ -192,7 +215,7 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if h.deps.PlaylistStore == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}, "total": 0})
+		writeJSON(w, http.StatusOK, map[string]any{resultsKey: []any{}, totalKey: 0})
 		return
 	}
 	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
@@ -209,7 +232,7 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 	}
 	// LazyBookshelf reads payload.total to compute pagination; emit both
 	// for the bookshelf grid AND the create modal (modal ignores total).
-	writeJSON(w, http.StatusOK, map[string]any{"results": out, "total": len(out)})
+	writeJSON(w, http.StatusOK, map[string]any{resultsKey: out, totalKey: len(out)})
 }
 
 // handleListPlaylists — GET /playlists.
@@ -361,11 +384,11 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 	if body.EpisodeID == "" {
 		access, err := h.accessFilterForAuth(r.Context(), a)
 		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			h.writeAccessResolutionError(w, r, err)
 			return
 		}
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID, access)
-		if err != nil || item == nil {
+		if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
 		}
@@ -470,7 +493,7 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 				continue
 			}
 			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
-			if lookupErr != nil || item == nil {
+			if lookupErr != nil || item == nil || item.Type != mediaTypeAudiobook {
 				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}
@@ -548,7 +571,7 @@ func (h *Handler) handleRemovePlaylistItem(w http.ResponseWriter, r *http.Reques
 // Owner-only. Removes the item keyed on (libraryItemId, episodeId).
 // Idempotent. Fires playlist_updated.
 func (h *Handler) handleRemovePlaylistEpisode(w http.ResponseWriter, r *http.Request) {
-	h.removePlaylistItemImpl(w, r, chi.URLParam(r, "episodeId"))
+	h.removePlaylistItemImpl(w, r, chi.URLParam(r, episodeIDKey))
 }
 
 // removePlaylistItemImpl is the shared body for both remove variants.
@@ -565,7 +588,7 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	id := playlistURLID(r)
-	libItem := chi.URLParam(r, "libraryItemId")
+	libItem := chi.URLParam(r, libraryItemIDKey)
 	if libItem == "" {
 		http.Error(w, "libraryItemId required", http.StatusBadRequest)
 		return

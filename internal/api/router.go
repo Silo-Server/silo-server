@@ -192,6 +192,13 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// EbookPrimaryFiles resolves an item's curated primary ebook file (the
+	// selection Audiobookshelf clients make, stored in
+	// abs_ebook_primary_files) so the native ebook surfaces agree with ABS on
+	// which file "the ebook" is. May be nil; the reader then applies its own
+	// EPUB-first default.
+	EbookPrimaryFiles handlers.EbookPrimaryFileResolver
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -671,6 +678,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if ebookProgressStore != nil {
 			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
+		}
+		if deps.EbookPrimaryFiles != nil {
+			itemsHandler.SetEbookPrimaryFileResolver(deps.EbookPrimaryFiles)
 		}
 		if deps.FileRepo != nil {
 			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{

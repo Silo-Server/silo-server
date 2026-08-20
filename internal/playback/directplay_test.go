@@ -65,6 +65,9 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	if got := full.Header().Get("Accept-Ranges"); got != "bytes" {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
 	}
+	if got := full.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
 	etag := full.Header().Get("ETag")
 	validatorRequired := platformRequiresDirectPlayValidator()
 	if validatorRequired && etag == "" {
@@ -229,6 +232,26 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			t.Fatalf("body length = %d, want 0", rr.Body.Len())
 		}
 	})
+}
+
+func TestServeDirectPlayPreservesCallerContentType(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "fixture.epub")
+	if err := os.WriteFile(filePath, []byte("ebook"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/ebook", nil)
+	rr := httptest.NewRecorder()
+	rr.Header().Set("Content-Type", "application/epub+zip")
+	if err := ServeDirectPlay(rr, req, filePath); err != nil {
+		t.Fatalf("ServeDirectPlay: %v", err)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/epub+zip" {
+		t.Fatalf("Content-Type = %q, want application/epub+zip", got)
+	}
+	if got := rr.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
 }
 
 func TestDirectStreamConditionalResult(t *testing.T) {

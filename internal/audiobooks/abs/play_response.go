@@ -40,15 +40,15 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentID := chi.URLParam(r, "libraryItemId")
+	contentID := chi.URLParam(r, libraryItemIDKey)
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
@@ -126,7 +126,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 
 	displayTitle := item.Title
 	displayAuthor := ""
-	if v, ok := mediaMetadata["authorName"].(string); ok {
+	if v, ok := mediaMetadata[authorNameKey].(string); ok {
 		displayAuthor = v
 	}
 
@@ -136,38 +136,38 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	dayOfWeek := now.UTC().Weekday().String()
 
 	playbackSession := map[string]any{
-		"id":            sessionID,
-		"userId":        a.UserID,
-		"libraryId":     VirtualLibraryID,
-		"libraryItemId": contentID,
-		"bookId":        contentID,
-		"episodeId":     nil,
-		"mediaType":     LibraryMediaType,
-		"mediaMetadata": mediaMetadata,
-		"chapters":      chapters,
-		"displayTitle":  displayTitle,
-		"displayAuthor": displayAuthor,
-		"coverPath":     baseURL + "/api/items/" + contentID + "/cover",
-		"duration":      totalDuration,
-		"playMethod":    0, // DIRECTPLAY
-		"mediaPlayer":   "exo-player",
-		"deviceInfo": map[string]any{
+		"id":             sessionID,
+		userIDKey:        a.UserID,
+		libraryIDKey:     VirtualLibraryID,
+		libraryItemIDKey: contentID,
+		bookIDKey:        contentID,
+		episodeIDKey:     nil,
+		mediaTypeKey:     LibraryMediaType,
+		"mediaMetadata":  mediaMetadata,
+		chaptersKey:      chapters,
+		"displayTitle":   displayTitle,
+		displayAuthorKey: displayAuthor,
+		coverPathKey:     baseURL + "/api/items/" + contentID + "/cover",
+		durationKey:      totalDuration,
+		playMethodKey:    0, // DIRECTPLAY
+		mediaPlayerKey:   "exo-player",
+		deviceInfoKey: map[string]any{
 			"deviceId":      "unknown",
 			"manufacturer":  "Unknown",
 			"model":         "Unknown",
 			"sdkVersion":    0,
 			"clientVersion": "0.0.0",
 		},
-		"serverVersion": ServerVersion,
-		"date":          dateStr,
-		"dayOfWeek":     dayOfWeek,
-		"timeListening": 0,
-		"startTime":     currentTime,
-		"currentTime":   currentTime,
-		"startedAt":     nowMs,
-		"updatedAt":     nowMs,
-		"audioTracks":   audioTracks,
-		"libraryItem":   libraryItem,
+		serverVersionKey: ServerVersion,
+		dateKey:          dateStr,
+		dayOfWeekKey:     dayOfWeek,
+		timeListeningKey: 0,
+		startTimeKey:     currentTime,
+		currentTimeKey:   currentTime,
+		startedAtKey:     nowMs,
+		updatedAtKey:     nowMs,
+		"audioTracks":    audioTracks,
+		"libraryItem":    libraryItem,
 	}
 
 	writeJSON(w, http.StatusOK, playbackSession)
@@ -282,10 +282,10 @@ func buildSiloChapters(files []*models.MediaFile) []map[string]any {
 		chapters := make([]map[string]any, 0, len(f.Chapters))
 		for i, c := range f.Chapters {
 			chapters = append(chapters, map[string]any{
-				"id":    i,
-				"start": c.StartSeconds,
-				"end":   c.EndSeconds,
-				"title": c.Title,
+				"id":     i,
+				"start":  c.StartSeconds,
+				"end":    c.EndSeconds,
+				titleKey: c.Title,
 			})
 		}
 		return chapters
@@ -306,8 +306,8 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 		switch p.Kind {
 		case models.PersonKindAuthor:
 			authors = append(authors, map[string]any{
-				"id":   strconv.FormatInt(p.ID, 10),
-				"name": p.Name,
+				"id":    strconv.FormatInt(p.ID, 10),
+				nameKey: p.Name,
 			})
 			authorNames = append(authorNames, p.Name)
 		case models.PersonKindNarrator:
@@ -338,7 +338,7 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 		if name == "" {
 			continue
 		}
-		obj := map[string]any{"id": name, "name": name}
+		obj := map[string]any{"id": name, nameKey: name}
 		if membership.Index != nil {
 			obj["sequence"] = strconv.FormatFloat(*membership.Index, 'f', -1, 64)
 		}
@@ -351,28 +351,28 @@ func buildSiloPlayMediaMetadata(item *models.MediaItem) map[string]any {
 	}
 
 	return map[string]any{
-		"title":             title,
-		"titleIgnorePrefix": titleIgnorePrefix(title),
-		"subtitle":          nil,
-		"authors":           authors,
-		"authorName":        authorName,
-		"authorNameLF":      authorNameLF,
-		"narrators":         narrators,
-		"narratorName":      strings.Join(narrators, ", "),
-		"series":            series,
-		"seriesName":        strings.Join(seriesNames, ", "),
-		"genres":            genres,
-		"tags":              []string{},
-		"publishedYear":     publishedYear,
-		"publishedDate":     nil,
-		"publisher":         publisher,
-		"description":       nilIfEmpty(item.Overview),
-		"descriptionPlain":  nilIfEmpty(stripHTML(item.Overview)),
-		"isbn":              nil,
-		"asin":              nil,
-		"language":          "en",
-		"explicit":          false,
-		"abridged":          false,
+		titleKey:             title,
+		titleIgnorePrefixKey: titleIgnorePrefix(title),
+		subtitleKey:          nil,
+		authorsKey:           authors,
+		authorNameKey:        authorName,
+		authorNameLFKey:      authorNameLF,
+		narratorsKey:         narrators,
+		narratorNameKey:      strings.Join(narrators, ", "),
+		seriesWireKey:        series,
+		seriesNameKey:        strings.Join(seriesNames, ", "),
+		genresKey:            genres,
+		tagsKey:              []string{},
+		publishedYearKey:     publishedYear,
+		publishedDateKey:     nil,
+		publisherKey:         publisher,
+		descriptionKey:       nilIfEmpty(item.Overview),
+		"descriptionPlain":   nilIfEmpty(stripHTML(item.Overview)),
+		isbnKey:              nil,
+		asinKey:              nil,
+		languageKey:          "en",
+		explicitKey:          false,
+		abridgedKey:          false,
 	}
 }
 
@@ -399,12 +399,12 @@ func buildSiloPlayLibraryItem(
 	for _, t := range audioTracks {
 		nowMs := time.Now().UnixMilli()
 		libraryFiles = append(libraryFiles, map[string]any{
-			"ino":             t.Ino,
-			"metadata":        t.Metadata,
+			inoKey:            t.Ino,
+			metadataKey:       t.Metadata,
 			"isSupplementary": false,
-			"addedAt":         nowMs,
-			"updatedAt":       nowMs,
-			"fileType":        "audio",
+			addedAtKey:        nowMs,
+			updatedAtKey:      nowMs,
+			fileTypeKey:       "audio",
 		})
 		if t.Metadata != nil {
 			totalSize += t.Metadata.Size
@@ -418,41 +418,41 @@ func buildSiloPlayLibraryItem(
 	updatedAtMs := item.UpdatedAt.UnixMilli()
 
 	return map[string]any{
-		"id":               contentID,
-		"ino":              firstIno,
-		"oldLibraryItemId": nil,
-		"libraryId":        VirtualLibraryID,
-		"folderId":         VirtualFolderID,
-		"path":             contentID,
-		"relPath":          contentID,
-		"isFile":           true,
-		"mtimeMs":          nil,
-		"ctimeMs":          nil,
-		"birthtimeMs":      nil,
-		"addedAt":          addedAtMs,
-		"updatedAt":        updatedAtMs,
-		"lastScan":         addedAtMs,
-		"scanVersion":      ServerVersion,
-		"isMissing":        false,
-		"isInvalid":        false,
-		"mediaType":        LibraryMediaType,
-		"media": map[string]any{
-			"id":            contentID,
-			"libraryItemId": contentID,
-			"metadata":      mediaMetadata,
-			"coverPath":     baseURL + "/api/items/" + contentID + "/cover",
-			"tags":          []any{},
-			"audioFiles":    audioTracks,
-			"chapters":      chapters,
-			"ebookFile":     nil,
-			"duration":      totalDuration,
-			"size":          totalSize,
-			"tracks":        audioTracks,
+		"id":                contentID,
+		inoKey:              firstIno,
+		oldLibraryItemIDKey: nil,
+		libraryIDKey:        VirtualLibraryID,
+		folderIDKey:         VirtualFolderID,
+		pathKey:             contentID,
+		relPathKey:          contentID,
+		isFileKey:           true,
+		mtimeMsKey:          nil,
+		ctimeMsKey:          nil,
+		birthtimeMsKey:      nil,
+		addedAtKey:          addedAtMs,
+		updatedAtKey:        updatedAtMs,
+		lastScanKey:         addedAtMs,
+		"scanVersion":       ServerVersion,
+		isMissingKey:        false,
+		isInvalidKey:        false,
+		mediaTypeKey:        LibraryMediaType,
+		mediaKey: map[string]any{
+			"id":             contentID,
+			libraryItemIDKey: contentID,
+			metadataKey:      mediaMetadata,
+			coverPathKey:     baseURL + "/api/items/" + contentID + "/cover",
+			tagsKey:          []any{},
+			"audioFiles":     audioTracks,
+			chaptersKey:      chapters,
+			"ebookFile":      nil,
+			durationKey:      totalDuration,
+			sizeKey:          totalSize,
+			"tracks":         audioTracks,
 		},
 		"libraryFiles": libraryFiles,
 		// size on the outer libraryItem is a STRING in real ABS wire format —
 		// mobile sort comparators string-compare it.
-		"size": strconv.FormatInt(totalSize, 10),
+		sizeKey: strconv.FormatInt(totalSize, 10),
 	}
 }
 

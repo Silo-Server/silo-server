@@ -11,10 +11,12 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -33,50 +35,89 @@ import (
 type AudiobookLibrary struct {
 	ID   int64
 	Name string
-	Type string // always "audiobooks" for this surface
+	// Type is Silo's persisted folder type (audiobook or ebook).  ABS calls
+	// both of these a "book" library, but the adapter needs the source type
+	// to keep each catalog isolated.
+	Type string
 }
 
 // MediaStore is the slice of silo's catalog the ABS handler reads.
 // Real impl: catalog.ItemRepository + scanner.FileRepository wrapped in
 // a small adapter struct added in a later stage.
+//
+// Library-scoped reads take the resolved AudiobookLibrary rather than a bare
+// id: the handler has already looked the library up, and its Type decides
+// whether the query targets audiobook or ebook items. Passing it through keeps
+// the store from re-reading media_folders once per call. The zero value (id 0,
+// empty type) is the virtual library: every audiobook, no folder filter.
 type MediaStore interface {
 	GetAudiobookByID(ctx context.Context, contentID string, access catalog.AccessFilter) (*models.MediaItem, error)
+	// GetItemType returns the item's media type, or "" when the item is
+	// missing or outside the viewer's access. Request paths that only branch
+	// on the kind of item use it instead of GetAudiobookByID, which also
+	// hydrates people and series.
+	GetItemType(ctx context.Context, contentID string, access catalog.AccessFilter) (string, error)
 	// GetAudiobooksByIDs batch-fetches audiobooks by content_id (people + series
 	// hydrated once), keyed by content_id, for list/shelf handlers.
 	GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error)
-	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
-	// it filters to items in that media_folder; 0 means all audiobook items.
+	// ListAudiobooks returns a page of the library's books. A zero-value lib
+	// spans every audiobook in the catalog.
 	// filter optionally pushes an authors/series/narrators predicate into the
 	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
-	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
+	ListAudiobooks(ctx context.Context, lib AudiobookLibrary, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
+	// GetMediaFilesByContentIDs is the batch form of GetMediaFiles, keyed by
+	// content_id, so list and shelf handlers stay at a constant query count.
+	GetMediaFilesByContentIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string][]*models.MediaFile, error)
 	// GetMediaFileByID fetches a single media file by its integer PK.
 	// Used by the ABS file-streaming handler when a caller supplies a
 	// raw file ID instead of an ino.
 	GetMediaFileByID(ctx context.Context, fileID int) (*models.MediaFile, error)
-	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.
+	// GetPrimaryEbookFileID returns the explicitly curated primary ebook file
+	// for one item. A zero-value selection means no preference is recorded and
+	// callers apply the ABS default (prefer EPUB).
+	GetPrimaryEbookFileID(ctx context.Context, contentID string) (EbookPrimarySelection, error)
+	// GetPrimaryEbookFileIDs is the batch form of GetPrimaryEbookFileID.
+	// Content IDs with no recorded preference are absent from the map.
+	GetPrimaryEbookFileIDs(ctx context.Context, contentIDs []string) (map[string]EbookPrimarySelection, error)
+	// SetPrimaryEbookFileID and ClearPrimaryEbookFileID persist and drop the
+	// curated selection. Both change shared catalog metadata, so handlers gate
+	// them on AccessResolver.CanCurateMetadata.
+	SetPrimaryEbookFileID(ctx context.Context, contentID string, fileID int) error
+	ClearPrimaryEbookFileID(ctx context.Context, contentID string) error
+	// ListAudiobookLibraries returns the media_folder rows the ABS surface
+	// serves: audiobook and ebook libraries alike.
 	ListAudiobookLibraries(ctx context.Context, access catalog.AccessFilter) ([]AudiobookLibrary, error)
+	// GetItemLibraryIDs resolves the source library of each item in one query
+	// so global item-shaped responses avoid a membership lookup per item.
+	// Items with no accessible membership are absent from the map.
+	GetItemLibraryIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]int64, error)
 	// SearchAudiobooks does a fuzzy title/author/narrator match for the ABS
 	// /libraries/{id}/search endpoint. Hydrates People so the mapper has
 	// author/narrator names.
-	SearchAudiobooks(ctx context.Context, libraryID int64, query string, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	SearchAudiobooks(ctx context.Context, lib AudiobookLibrary, query string, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListContinueListening returns books that the given user has progress
 	// on but hasn't finished — feeds the Home tab's continue shelf.
-	ListContinueListening(ctx context.Context, userID, profileID string, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	ListContinueListening(ctx context.Context, userID, profileID string, lib AudiobookLibrary, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	ListFinished(ctx context.Context, userID, profileID string, lib AudiobookLibrary, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListRecentlyAdded returns the most recently added audiobooks for the
 	// Home tab's recently-added shelf.
-	ListRecentlyAdded(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	ListRecentlyAdded(ctx context.Context, lib AudiobookLibrary, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
 	// ListDiscover returns a randomized sampling of audiobooks for the
 	// Home tab's discover shelf (helps new users browse the library).
-	ListDiscover(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	ListDiscover(ctx context.Context, lib AudiobookLibrary, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
+	ListLibraryGenres(ctx context.Context, lib AudiobookLibrary, access catalog.AccessFilter) ([]string, error)
+	ListLibraryNarrators(ctx context.Context, lib AudiobookLibrary, access catalog.AccessFilter) ([]string, error)
+	ListLibraryPublishers(ctx context.Context, lib AudiobookLibrary, access catalog.AccessFilter) ([]string, error)
+	ListLibraryLanguages(ctx context.Context, lib AudiobookLibrary, access catalog.AccessFilter) ([]string, error)
 	// ListLibraryAuthors returns one page of distinct audiobook authors (from a
 	// precomputed materialized view) plus the total author count. sortBy is one
 	// of "name" (default), "addedAt", or "numBooks"; limit<=0 returns all.
-	ListLibraryAuthors(ctx context.Context, libraryID int64, limit, offset int, sortBy string, sortDesc bool, access catalog.AccessFilter) ([]AuthorSummary, int, error)
+	ListLibraryAuthors(ctx context.Context, lib AudiobookLibrary, limit, offset int, sortBy string, sortDesc bool, access catalog.AccessFilter) ([]AuthorSummary, int, error)
 	// ListLibrarySeries returns one SQL-paginated page of distinct series (from
 	// audiobook_series) in the library plus the total series count. limit<=0
 	// returns all.
-	ListLibrarySeries(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]SeriesSummary, int, error)
+	ListLibrarySeries(ctx context.Context, lib AudiobookLibrary, limit, offset int, access catalog.AccessFilter) ([]SeriesSummary, int, error)
 	// GetAuthorByID returns the author with the given people.id plus
 	// their audiobook list, sorted by title. Returns ErrNotFound when
 	// no people row matches.
@@ -86,6 +127,15 @@ type MediaStore interface {
 	// by series_index ASC (NULLS LAST), title fallback. Returns
 	// ErrNotFound when no rows match.
 	GetSeriesByName(ctx context.Context, seriesName string, access catalog.AccessFilter) (Series, error)
+}
+
+// EbookPrimarySelection preserves all three curated primary-file states: no
+// preference row (the zero value), an explicit "no primary" row, or an
+// explicit file ID.
+type EbookPrimarySelection struct {
+	FileID     int
+	Configured bool
+	HasPrimary bool
 }
 
 // AuthorSummary is an aggregated author entry for /libraries/{id}/authors.
@@ -177,10 +227,20 @@ type ProfileCredentialValidator interface {
 }
 
 // AccessResolver resolves the ABS-authenticated user/profile into the same
-// effective catalog access filter used by silo's native API.
+// effective catalog access filter used by silo's native API, and answers the
+// one authorization question the ABS surface asks beyond read access.
 type AccessResolver interface {
 	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
+	// CanCurateMetadata reports whether the principal may change shared
+	// catalog metadata. Ebook primary-file selection is server-global, so
+	// read access alone is insufficient.
+	CanCurateMetadata(ctx context.Context, userID, profileID string) (bool, error)
 }
+
+// ErrAccessDenied distinguishes an invalid/unauthorized ABS principal from an
+// operational access-resolution failure. Handlers must not expose resolver
+// details or turn database failures into a misleading 403.
+var ErrAccessDenied = errors.New("ABS access denied")
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
 // handlers guard with publish/broadcast nil-safe wrappers.
@@ -245,8 +305,13 @@ type Dependencies struct {
 	// host-proxy-routable URLs. Defaults to "silo.audiobooks" when nil.
 	InstallID func() string
 	// ProgressStore provides access to user_watch_progress for ABS
-	// progress endpoints. May be nil; handlers degrade gracefully.
+	// progress endpoints. Production wiring always sets it; when it is nil
+	// the progress endpoints respond 503 "progress unavailable" rather than
+	// silently reporting no progress.
 	ProgressStore ProgressStore
+	// EbookProgressStore backs ABS ebook read/unread state and shares progress
+	// with Silo's native reader.
+	EbookProgressStore EbookProgressStore
 	// PlaybackSessionStore persists abs_playback_sessions rows
 	// (migration 143) for /session/{sid}/sync and /session/{sid}/close.
 	// May be nil; handlers degrade gracefully.
@@ -290,6 +355,14 @@ type Dependencies struct {
 // Handler wires the /abs/api/* and canonical ABS-client paths.
 type Handler struct {
 	deps Dependencies
+
+	// filterDataCache memoizes the assembled library filter sheet per
+	// (library, access filter). Every client re-requests it on each library
+	// open and each build is six full-library aggregates; the inputs only
+	// change when the catalog does, so a short TTL is safe. See
+	// buildFilterData.
+	filterDataMu    sync.Mutex
+	filterDataCache map[string]filterDataEntry
 }
 
 // New constructs an ABS Handler. Sensible defaults are applied for optional
@@ -410,7 +483,9 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// /download variant is the same handler; Content-Disposition is set when
 			// the path ends in /download.
 			r.Get(prefix+"/items/{libraryItemId}/file/{ino}", h.handleFileStream)
+			r.Head(prefix+"/items/{libraryItemId}/file/{ino}", h.handleFileStream)
 			r.Get(prefix+"/items/{libraryItemId}/file/{ino}/download", h.handleFileStream)
+			r.Head(prefix+"/items/{libraryItemId}/file/{ino}/download", h.handleFileStream)
 		}
 	})
 
@@ -446,6 +521,8 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// POST  /session/local-all      — batch-sync offline-recorded sessions
 			r.Post(prefix+"/session/local-all", h.handleSyncLocalSessions)
 			// Bookmarks — POST/PATCH both upsert; DELETE is idempotent.
+			r.Get(prefix+"/me/bookmarks", h.handleListBookmarks)
+			r.Get(prefix+"/me/item/{itemId}/bookmarks", h.handleListBookmarks)
 			r.Post(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_created"))
 			r.Patch(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_updated"))
 			r.Delete(prefix+"/me/item/{itemId}/bookmark/{time}", h.handleDeleteBookmark)
@@ -498,8 +575,9 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// Year-in-review stats — AudioBooth's "Year Stats" widget on the
 			// profile screen. Synthesized from AggregateStats today.
 			r.Get(prefix+"/me/stats/year/{year}", h.handleYearStats)
-			// Ebook surface — stubs until the ebook scanner lands.
-			// Mobile clients call these but degrade cleanly on empty/404.
+			// Ebook surface. The no-file-ID form serves the selected primary
+			// ebook; a file ID selects a supplementary ebook.
+			r.Get(prefix+"/items/{id}/ebook", h.handleEbookFile)
 			r.Get(prefix+"/items/{id}/ebook/{fileid}", h.handleEbookFile)
 			r.Patch(prefix+"/items/{id}/ebook/{fileid}/status", h.handleEbookStatus)
 			// E-reader devices + ebook email delivery — empty list / 503
@@ -595,7 +673,25 @@ func (h *Handler) accessFilterFromRequest(r *http.Request) (catalog.AccessFilter
 		return catalog.AccessFilter{}, false, nil
 	}
 	filter, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		slog.WarnContext(r.Context(), "abs access resolution failed", "component", "audiobooks", "user_id", a.UserID, "profile_id", a.ProfileID, "path", r.URL.Path, "err", err)
+	}
 	return filter, true, err
+}
+
+func (h *Handler) writeAccessResolutionError(w http.ResponseWriter, r *http.Request, err error) {
+	status := http.StatusInternalServerError
+	message := "access resolution failed"
+	if errors.Is(err, ErrAccessDenied) {
+		status = http.StatusForbidden
+		message = "forbidden"
+	}
+	slog.WarnContext(r.Context(), "abs access resolution failed",
+		"component", "audiobooks",
+		"path", r.URL.Path,
+		"err", err,
+	)
+	http.Error(w, message, status)
 }
 
 func emptyAccessFilter() catalog.AccessFilter {
@@ -762,7 +858,7 @@ func readPagedQuery(r *http.Request, defaultLimit int) (limit, page int) {
 			limit = n
 		}
 	}
-	if v := r.URL.Query().Get("page"); v != "" {
+	if v := r.URL.Query().Get(pageKey); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			page = n
 		}
@@ -775,14 +871,14 @@ func readPagedQuery(r *http.Request, defaultLimit int) (limit, page int) {
 // their presence (sortBy, filterBy, minified).
 func pagedEnvelope(results any, total, limit, page int, sortBy string, sortDesc bool, filterBy string, minified bool, include string) map[string]any {
 	return map[string]any{
-		"results":  results,
-		"total":    total,
-		"limit":    limit,
-		"page":     page,
-		"sortBy":   sortBy,
-		"sortDesc": sortDesc,
-		"filterBy": filterBy,
-		"minified": minified,
-		"include":  include,
+		resultsKey:  results,
+		totalKey:    total,
+		"limit":     limit,
+		pageKey:     page,
+		"sortBy":    sortBy,
+		"sortDesc":  sortDesc,
+		"filterBy":  filterBy,
+		minifiedKey: minified,
+		"include":   include,
 	}
 }

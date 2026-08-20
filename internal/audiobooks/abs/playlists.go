@@ -54,20 +54,20 @@ type PlaylistItem struct {
 // Description is always present (round-tripped from storage).
 func playlistToABS(p Playlist, items []map[string]any) map[string]any {
 	out := map[string]any{
-		"id":          p.ID,
-		"libraryId":   VirtualLibraryID, // real ABS Playlist.toOldJSON has libraryId; silo playlists are cross-library user-personal
-		"userId":      p.UserID,
-		"name":        p.Name,
-		"description": p.Description,
-		"isPublic":    p.IsPublic,
-		"createdAt":   p.CreatedAt.UnixMilli(),
-		"lastUpdate":  p.UpdatedAt.UnixMilli(),
+		"id":           p.ID,
+		libraryIDKey:   VirtualLibraryID, // real ABS Playlist.toOldJSON has libraryId; silo playlists are cross-library user-personal
+		userIDKey:      p.UserID,
+		nameKey:        p.Name,
+		descriptionKey: p.Description,
+		isPublicKey:    p.IsPublic,
+		createdAtKey:   p.CreatedAt.UnixMilli(),
+		lastUpdateKey:  p.UpdatedAt.UnixMilli(),
 	}
 	if p.CoverItem != "" {
-		out["coverPath"] = p.CoverItem
+		out[coverPathKey] = p.CoverItem
 	}
 	if items != nil {
-		out["items"] = items
+		out[itemsKey] = items
 	}
 	return out
 }

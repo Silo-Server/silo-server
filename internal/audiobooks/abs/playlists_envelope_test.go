@@ -15,9 +15,9 @@ func TestPlaylistEnvelope_HasRequiredKeys(t *testing.T) {
 	out := playlistToABS(Playlist{
 		ID:          "01HPL",
 		UserID:      "1",
-		Name:        "queue",
+		Name:        testQueue,
 		Description: "",
-		CoverItem:   "01HCOVER",
+		CoverItem:   testCoverID,
 		IsPublic:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -32,7 +32,7 @@ func TestPlaylistEnvelope_HasRequiredKeys(t *testing.T) {
 			t.Errorf("envelope missing %s; got %s", key, js)
 		}
 	}
-	if out["coverPath"] != "01HCOVER" {
+	if out["coverPath"] != testCoverID {
 		t.Errorf("coverPath = %v, want 01HCOVER", out["coverPath"])
 	}
 }

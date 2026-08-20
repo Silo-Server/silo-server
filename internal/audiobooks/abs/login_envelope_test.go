@@ -1,13 +1,48 @@
 package abs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
+
+type scopedLoginResolver struct {
+	filter    catalog.AccessFilter
+	userID    string
+	profileID string
+}
+
+func (r *scopedLoginResolver) ResolveABSAccess(_ context.Context, userID, profileID string) (catalog.AccessFilter, error) {
+	r.userID = userID
+	r.profileID = profileID
+	return r.filter, nil
+}
+
+func (r *scopedLoginResolver) CanCurateMetadata(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+type scopedLoginMediaStore struct {
+	noopMediaStore
+	filter catalog.AccessFilter
+}
+
+func (s *scopedLoginMediaStore) ListAudiobookLibraries(_ context.Context, filter catalog.AccessFilter) ([]AudiobookLibrary, error) {
+	s.filter = filter
+	if len(filter.AllowedLibraryIDs) == 1 && filter.AllowedLibraryIDs[0] == 22 {
+		return []AudiobookLibrary{{ID: 22, Name: "Allowed Books", Type: libraryTypeEbooks}}, nil
+	}
+	return []AudiobookLibrary{
+		{ID: 11, Name: "Forbidden Books", Type: libraryTypeEbooks},
+		{ID: 22, Name: "Allowed Books", Type: libraryTypeEbooks},
+	}, nil
+}
 
 // TestLoginEnvelope_HasRequiredKeys marshals the response and asserts every
 // field the real ABS iOS client expects is present. Guards against silent
@@ -17,7 +52,7 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
+	env := h.loginEnvelope(req, catalog.AccessFilter{}, time.Now(), "u1", "Display Name", testAccessToken, "refresh.jwt", true)
 	body, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -61,7 +96,7 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 		t.Fatalf("user.permissions is not a map: %T", user["permissions"])
 	}
 	permKeys := []string{
-		"download", "update", "delete", "upload",
+		"download", testUpdatePath, "delete", "upload",
 		"accessAllLibraries", "accessAllTags", "accessExplicitContent",
 		"selectedTagsNotAccessible",
 	}
@@ -85,10 +120,10 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 		}
 	}
 
-	if user["token"] != "access.jwt" {
+	if user["token"] != testAccessToken {
 		t.Errorf("user.token = %v, want access.jwt", user["token"])
 	}
-	if env["accessToken"] != "access.jwt" {
+	if env["accessToken"] != testAccessToken {
 		t.Errorf("accessToken = %v, want access.jwt", env["accessToken"])
 	}
 	if env["refreshToken"] != "refresh.jwt" {
@@ -105,12 +140,12 @@ func TestLoginEnvelope_XReturnTokens_SurfacesOnUser(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.Header.Set("x-return-tokens", "true")
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
+	env := h.loginEnvelope(req, catalog.AccessFilter{}, time.Now(), "u1", "Display Name", testAccessToken, "refresh.jwt", true)
 	user, ok := env["user"].(map[string]any)
 	if !ok {
 		t.Fatalf("user is not a map: %T", env["user"])
 	}
-	if user["accessToken"] != "access.jwt" {
+	if user["accessToken"] != testAccessToken {
 		t.Errorf("user.accessToken = %v, want access.jwt (x-return-tokens not honored)", user["accessToken"])
 	}
 	if user["refreshToken"] != "refresh.jwt" {
@@ -126,9 +161,9 @@ func TestLoginEnvelope_NoXReturnTokens(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", false)
+	env := h.loginEnvelope(req, catalog.AccessFilter{}, time.Now(), "u1", "Display Name", testAccessToken, "refresh.jwt", false)
 	user, _ := env["user"].(map[string]any)
-	if user["accessToken"] != "access.jwt" {
+	if user["accessToken"] != testAccessToken {
 		t.Errorf("user.accessToken = %v, want access.jwt (must always be present)", user["accessToken"])
 	}
 	if rt, present := user["refreshToken"]; !present || rt != nil {
@@ -143,9 +178,47 @@ func TestLoginEnvelope_DisplayNameFallsBackToUserID(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(), "user-42", "", "a", "r", false)
+	env := h.loginEnvelope(req, catalog.AccessFilter{}, time.Now(), "user-42", "", "a", "r", false)
 	user, _ := env["user"].(map[string]any)
 	if user["username"] != "user-42" {
 		t.Errorf("username = %v, want user-42 (fallback)", user["username"])
+	}
+}
+
+func TestCompleteLoginScopesLibrariesToSelectedProfile(t *testing.T) {
+	resolver := &scopedLoginResolver{filter: catalog.AccessFilter{AllowedLibraryIDs: []int{22}, ProfileID: "kids"}}
+	media := &scopedLoginMediaStore{}
+	store := newMemTokenStore()
+	h := New(Dependencies{
+		Config:         &staticConfig{secret: []byte("test-secret-32-bytes-aaaaaaaaaaaaa")},
+		TokenStore:     store,
+		MediaStore:     media,
+		AccessResolver: resolver,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/login", nil)
+	req.Header.Set("x-return-tokens", "true")
+	rec := httptest.NewRecorder()
+
+	h.completeLogin(rec, req, "42", "kids", "Kids")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if resolver.userID != "42" || resolver.profileID != "kids" {
+		t.Fatalf("resolved principal = (%q, %q), want (42, kids)", resolver.userID, resolver.profileID)
+	}
+	if len(media.filter.AllowedLibraryIDs) != 1 || media.filter.AllowedLibraryIDs[0] != 22 {
+		t.Fatalf("library access = %#v, want [22]", media.filter.AllowedLibraryIDs)
+	}
+	var body struct {
+		Libraries []struct {
+			ID string `json:"id"`
+		} `json:"libraries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Libraries) != 1 || body.Libraries[0].ID != "22" {
+		t.Fatalf("libraries = %#v, want only library 22", body.Libraries)
 	}
 }

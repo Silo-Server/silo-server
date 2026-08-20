@@ -5,13 +5,118 @@ package abs
 // mode and rejects modern refresh-token semantics.
 // Ref: /opt/audiobookshelf-app/components/connect/ServerConnectForm.vue:731
 const (
-	VirtualLibraryID   = "silo-audiobooks"
-	VirtualLibraryName = "Audiobooks"
-	VirtualFolderID    = "main"
-	LibraryMediaType   = "book"
-	ServerVersion      = "2.35.0"
-	ServerSourceTag    = "silo"
+	VirtualLibraryID     = "silo-audiobooks"
+	VirtualLibraryName   = "Audiobooks"
+	VirtualFolderID      = "main"
+	LibraryMediaType     = "book"
+	ServerVersion        = "2.35.0"
+	ServerSourceTag      = "silo"
+	MediaTypeAudiobook   = "audiobook"
+	MediaTypeEbook       = "ebook"
+	mediaTypeAudiobook   = MediaTypeAudiobook
+	mediaTypeEbook       = MediaTypeEbook
+	libraryTypeEbooks    = "ebooks"
+	ebookEPUBMimeType    = "application/epub+zip"
+	bookmarksKey         = "bookmarks"
+	entitiesKey          = "entities"
+	libraryItemIDKey     = "libraryItemId"
+	episodeIDKey         = "episodeId"
+	durationKey          = "duration"
+	progressKey          = "progress"
+	currentTimeKey       = "currentTime"
+	isFinishedKey        = "isFinished"
+	narratorsKey         = "narrators"
+	genresKey            = "genres"
+	itemIDParam          = "itemId"
+	authorsKey           = "authors"
+	chaptersKey          = "chapters"
+	titleKey             = "title"
+	createdAtKey         = "createdAt"
+	updatedAtKey         = "updatedAt"
+	dataKey              = "data"
+	lastUpdateKey        = "lastUpdate"
+	authorNameLFKey      = "authorNameLF"
+	descriptionKey       = "description"
+	podcastKey           = "podcast"
+	labelKey             = "label"
+	userIDKey            = "userId"
+	libraryIDKey         = "libraryId"
+	bookIDKey            = "bookId"
+	mediaTypeKey         = "mediaType"
+	startTimeKey         = "startTime"
+	startedAtKey         = "startedAt"
+	mediaProgressKey     = "mediaProgress"
+	narratorNameKey      = "narratorName"
+	fileTypeKey          = "fileType"
+	displayAuthorKey     = "displayAuthor"
+	coverPathKey         = "coverPath"
+	playMethodKey        = "playMethod"
+	mediaPlayerKey       = "mediaPlayer"
+	timeListeningKey     = "timeListening"
+	slugKey              = "slug"
+	minifiedKey          = "minified"
+	metadataKey          = "metadata"
+	audiobookshelfIcon   = "audiobookshelf"
+	asinKey              = "asin"
+	addedAtKey           = "addedAt"
+	numBooksKey          = "numBooks"
+	nameKey              = "name"
+	isPublicKey          = "isPublic"
+	mediaKey             = "media"
+	resultsKey           = "results"
+	totalKey             = "total"
+	pageKey              = "page"
+	folderIDKey          = "folderId"
+	isInvalidKey         = "isInvalid"
+	tagsKey              = "tags"
+	authorNameKey        = "authorName"
+	seriesWireKey        = "series"
+	publishedDateKey     = "publishedDate"
+	labelStringKey       = "labelStringKey"
+	lastScanKey          = "lastScan"
+	serverVersionKey     = "serverVersion"
+	dateKey              = "date"
+	dayOfWeekKey         = "dayOfWeek"
+	seriesHideKey        = "seriesHideFromContinueListening"
+	isOldTokenKey        = "isOldToken"
+	lastSeenKey          = "lastSeen"
+	abridgedKey          = "abridged"
+	inoKey               = "ino"
+	birthtimeMsKey       = "birthtimeMs"
+	isMissingKey         = "isMissing"
+	sizeKey              = "size"
+	subtitleKey          = "subtitle"
+	seriesNameKey        = "seriesName"
+	publishedYearKey     = "publishedYear"
+	explicitKey          = "explicit"
+	typeKey              = "type"
+	itemsKey             = "items"
+	deviceInfoKey        = "deviceInfo"
+	languageKey          = "language"
+	authMethodsKey       = "authMethods"
+	authFormDataKey      = "authFormData"
+	usernameKey          = "username"
+	librariesAccessKey   = "librariesAccessible"
+	itemTagsSelectedKey  = "itemTagsSelected"
+	tokenKey             = "token"
+	permissionsKey       = "permissions"
+	languageEnglishUS    = "en-us"
+	localAuthMethod      = "local"
+	userType             = "user"
+	oldLibraryItemIDKey  = "oldLibraryItemId"
+	ctimeMsKey           = "ctimeMs"
+	titleIgnorePrefixKey = "titleIgnorePrefix"
+	publisherKey         = "publisher"
+	isbnKey              = "isbn"
+	isInitKey            = "isInit"
+	authActiveMethodsKey = "authActiveAuthMethods"
+	pathKey              = "path"
+	relPathKey           = "relPath"
+	isFileKey            = "isFile"
+	mtimeMsKey           = "mtimeMs"
 )
+
+const virtualEbookLibraryName = "Books"
 
 // AuthorObj is the ABS-shaped author reference. ABS clients filter by id;
 // some screens render only name.
@@ -182,9 +287,15 @@ type EbookFile struct {
 	UpdatedAt    int64  `json:"updatedAt"`
 	MetadataPath string `json:"metadataPath,omitempty"`
 	Metadata     struct {
-		Filename string `json:"filename"`
-		Ext      string `json:"ext"`
-		Size     int64  `json:"size"`
+		Filename    string `json:"filename"`
+		Ext         string `json:"ext"`
+		Path        string `json:"path"`
+		RelPath     string `json:"relPath"`
+		Size        int64  `json:"size"`
+		MtimeMs     int64  `json:"mtimeMs"`
+		CtimeMs     int64  `json:"ctimeMs"`
+		BirthtimeMs int64  `json:"birthtimeMs"`
+		Format      string `json:"format"`
 	} `json:"metadata"`
 }
 

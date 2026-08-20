@@ -48,15 +48,15 @@ func smartCollectionToABS(c SmartCollection) map[string]any {
 		}
 	}
 	return map[string]any{
-		"id":          c.ID,
-		"userId":      c.UserID,
-		"name":        c.Name,
-		"description": c.Description,
-		"color":       c.Color,
-		"isPublic":    c.IsPublic,
-		"isPinned":    c.IsPinned,
-		"queryDef":    qd,
-		"createdAt":   c.CreatedAt.UnixMilli(),
-		"updatedAt":   c.UpdatedAt.UnixMilli(),
+		"id":           c.ID,
+		userIDKey:      c.UserID,
+		nameKey:        c.Name,
+		descriptionKey: c.Description,
+		"color":        c.Color,
+		isPublicKey:    c.IsPublic,
+		"isPinned":     c.IsPinned,
+		"queryDef":     qd,
+		createdAtKey:   c.CreatedAt.UnixMilli(),
+		updatedAtKey:   c.UpdatedAt.UnixMilli(),
 	}
 }

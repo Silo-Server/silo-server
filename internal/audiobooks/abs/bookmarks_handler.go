@@ -19,6 +19,53 @@ type bookmarkBody struct {
 	Time  *float64 `json:"time"`
 }
 
+func (h *Handler) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
+	a, ok := absAuthFrom(r)
+	if !ok || a.UserID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if h.deps.BookmarkStore == nil {
+		writeJSON(w, http.StatusOK, map[string]any{bookmarksKey: []any{}})
+		return
+	}
+	itemID := chi.URLParam(r, itemIDParam)
+	var rows []Bookmark
+	var err error
+	if itemID == "" {
+		rows, err = h.deps.BookmarkStore.ListByUser(r.Context(), a.UserID, a.ProfileID)
+	} else {
+		rows, err = h.deps.BookmarkStore.List(r.Context(), a.UserID, a.ProfileID, itemID)
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs bookmark list failed", "component", "audiobooks", "err", err)
+		http.Error(w, "list bookmarks failed", http.StatusInternalServerError)
+		return
+	}
+	access, err := h.accessFilterForAuth(r.Context(), a)
+	if err != nil {
+		h.writeAccessResolutionError(w, r, err)
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	for _, b := range rows {
+		ids = append(ids, b.LibraryItemID)
+	}
+	allowed, err := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), ids, access)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs bookmark access check failed", "component", "audiobooks", "err", err)
+		http.Error(w, "bookmark access check failed", http.StatusInternalServerError)
+		return
+	}
+	out := make([]any, 0, len(rows))
+	for _, b := range rows {
+		if item, ok := allowed[b.LibraryItemID]; ok && item.Type == mediaTypeAudiobook {
+			out = append(out, bookmarkToABS(b))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{bookmarksKey: out})
+}
+
 // handleUpsertBookmark backs both POST (reason="bookmark_created") and
 // PATCH (reason="bookmark_updated") /me/item/{itemId}/bookmark. Both
 // share the exact same upsert semantics — only the realtime event
@@ -35,7 +82,7 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 			return
 		}
 
-		itemID := chi.URLParam(r, "itemId")
+		itemID := chi.URLParam(r, itemIDParam)
 		if itemID == "" {
 			http.Error(w, "itemId required", http.StatusBadRequest)
 			return
@@ -57,23 +104,23 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 		// longer exists. Skipped on DELETE (see handleDeleteBookmark).
 		access, err := h.accessFilterForAuth(r.Context(), a)
 		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			h.writeAccessResolutionError(w, r, err)
 			return
 		}
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "abs bookmark item lookup failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", itemID)
+			slog.ErrorContext(r.Context(), "abs bookmark item lookup failed", "component", "audiobooks", "err", err, "item", itemID)
 			http.Error(w, "item lookup failed", http.StatusInternalServerError)
 			return
 		}
-		if item == nil {
+		if item == nil || item.Type != mediaTypeAudiobook {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
 		}
 
 		bm, err := h.deps.BookmarkStore.Upsert(r.Context(), a.UserID, a.ProfileID, itemID, *body.Time, body.Title)
 		if err != nil {
-			slog.ErrorContext(r.Context(), "abs bookmark upsert failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", itemID)
+			slog.ErrorContext(r.Context(), "abs bookmark upsert failed", "component", "audiobooks", "err", err, "item", itemID)
 			http.Error(w, "bookmark persist failed", http.StatusInternalServerError)
 			return
 		}
@@ -108,7 +155,7 @@ func (h *Handler) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemID := chi.URLParam(r, "itemId")
+	itemID := chi.URLParam(r, itemIDParam)
 	if itemID == "" {
 		http.Error(w, "itemId required", http.StatusBadRequest)
 		return
@@ -132,7 +179,7 @@ func (h *Handler) handleDeleteBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.deps.BookmarkStore.Delete(r.Context(), a.UserID, a.ProfileID, itemID, t); err != nil {
-		slog.ErrorContext(r.Context(), "abs bookmark delete failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", itemID)
+		slog.ErrorContext(r.Context(), "abs bookmark delete failed", "component", "audiobooks", "err", err, "item", itemID)
 		http.Error(w, "bookmark delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -170,7 +217,7 @@ func parseBookmarkTime(s string) (float64, bool) {
 func writeBookmarkList(w http.ResponseWriter, r *http.Request, h *Handler, userID, profileID, itemID string) {
 	rows, err := h.deps.BookmarkStore.List(r.Context(), userID, profileID, itemID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "abs bookmark list after mutation failed", "component", "audiobooks", "err", err, "user", userID, "item", itemID)
+		slog.WarnContext(r.Context(), "abs bookmark list after mutation failed", "component", "audiobooks", "err", err, "item", itemID)
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}

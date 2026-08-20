@@ -106,6 +106,7 @@ type ItemsHandler struct {
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
 	ebookReadStateStore      EbookReadStateStore
+	ebookPrimaryFiles        EbookPrimaryFileResolver
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context

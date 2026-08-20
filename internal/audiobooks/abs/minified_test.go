@@ -13,7 +13,7 @@ import (
 // be >= 1 or Plappa drops the item.
 func TestMinify_ConformsToRealABSKeys(t *testing.T) {
 	item := &models.MediaItem{
-		ContentID: "book-1",
+		ContentID: testBookID,
 		Title:     "Test Book",
 		People: []models.ItemPerson{
 			{Person: models.Person{ID: 42, Name: "Stephen King"}, Kind: models.PersonKindAuthor},
@@ -54,7 +54,7 @@ func TestMinify_ConformsToRealABSKeys(t *testing.T) {
 			t.Errorf("minified media missing key %q", k)
 		}
 	}
-	if media["id"] != "book-1" {
+	if media["id"] != testBookID {
 		t.Errorf("media.id = %v, want book-1", media["id"])
 	}
 	// Plappa guard: never advertise 0 audio files.
@@ -88,5 +88,32 @@ func TestSiloItemToLibraryItem_MediaHasID(t *testing.T) {
 	}
 	if full.Media.LibraryItemID != "book-9" {
 		t.Errorf("media.libraryItemId = %q, want book-9", full.Media.LibraryItemID)
+	}
+}
+
+func TestMinifyEbookPreservesReaderSignal(t *testing.T) {
+	format := "pdf"
+	item := LibraryItem{
+		ID:           testEbookID,
+		LibraryFiles: []map[string]any{{"fileType": mediaTypeEbook}},
+		Media: LibraryItemMedia{
+			ID:        testEbookID,
+			Metadata:  Metadata{Language: testJapanese},
+			EbookFile: &EbookFile{EbookFormat: format},
+		},
+	}
+
+	got := Minify(item)
+	if got.Media.EbookFormat == nil || *got.Media.EbookFormat != format {
+		t.Fatalf("ebookFormat = %v, want %q", got.Media.EbookFormat, format)
+	}
+	if got.Media.NumTracks != 0 || got.Media.NumAudioFiles != 0 {
+		t.Fatalf("ebook audio counts = (%d, %d), want zero", got.Media.NumTracks, got.Media.NumAudioFiles)
+	}
+	if got.NumFiles != 1 {
+		t.Fatalf("ebook numFiles = %d, want 1", got.NumFiles)
+	}
+	if got.Media.Metadata.Language != testJapanese {
+		t.Fatalf("ebook language = %q, want %q", got.Media.Metadata.Language, testJapanese)
 	}
 }

@@ -23,10 +23,13 @@ type noopMediaStore struct{}
 func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFilter) (*models.MediaItem, error) {
 	return nil, nil
 }
+func (noopMediaStore) GetItemType(context.Context, string, catalog.AccessFilter) (string, error) {
+	return "", nil
+}
 func (noopMediaStore) GetAudiobooksByIDs(context.Context, []string, catalog.AccessFilter) (map[string]*models.MediaItem, error) {
 	return map[string]*models.MediaItem{}, nil
 }
-func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, Filter) ([]*models.MediaItem, int, error) {
+func (noopMediaStore) ListAudiobooks(context.Context, AudiobookLibrary, int, int, catalog.AccessFilter, Filter) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
@@ -38,22 +41,37 @@ func (noopMediaStore) GetMediaFileByID(context.Context, int) (*models.MediaFile,
 func (noopMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
 	return nil, nil
 }
-func (noopMediaStore) SearchAudiobooks(context.Context, int64, string, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (noopMediaStore) SearchAudiobooks(context.Context, AudiobookLibrary, string, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListContinueListening(context.Context, string, string, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListContinueListening(context.Context, string, string, AudiobookLibrary, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListRecentlyAdded(context.Context, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListFinished(context.Context, string, string, AudiobookLibrary, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListDiscover(context.Context, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (noopMediaStore) ListRecentlyAdded(context.Context, AudiobookLibrary, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
+func (noopMediaStore) ListDiscover(context.Context, AudiobookLibrary, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryGenres(context.Context, AudiobookLibrary, catalog.AccessFilter) ([]string, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryNarrators(context.Context, AudiobookLibrary, catalog.AccessFilter) ([]string, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryPublishers(context.Context, AudiobookLibrary, catalog.AccessFilter) ([]string, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryLanguages(context.Context, AudiobookLibrary, catalog.AccessFilter) ([]string, error) {
+	return nil, nil
+}
+func (noopMediaStore) ListLibraryAuthors(context.Context, AudiobookLibrary, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
 	return nil, 0, nil
 }
-func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
+func (noopMediaStore) ListLibrarySeries(context.Context, AudiobookLibrary, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
 	return nil, 0, nil
 }
 func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilter) (Author, error) {
@@ -62,6 +80,25 @@ func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilte
 func (noopMediaStore) GetSeriesByName(context.Context, string, catalog.AccessFilter) (Series, error) {
 	return Series{}, ErrNotFound
 }
+func (noopMediaStore) GetMediaFilesByContentIDs(context.Context, []string, catalog.AccessFilter) (map[string][]*models.MediaFile, error) {
+	return map[string][]*models.MediaFile{}, nil
+}
+func (noopMediaStore) GetItemLibraryIDs(context.Context, []string, catalog.AccessFilter) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+func (noopMediaStore) GetPrimaryEbookFileID(context.Context, string) (EbookPrimarySelection, error) {
+	return EbookPrimarySelection{}, nil
+}
+func (noopMediaStore) GetPrimaryEbookFileIDs(context.Context, []string) (map[string]EbookPrimarySelection, error) {
+	return map[string]EbookPrimarySelection{}, nil
+}
+func (noopMediaStore) SetPrimaryEbookFileID(context.Context, string, int) error { return nil }
+func (noopMediaStore) ClearPrimaryEbookFileID(context.Context, string) error    { return nil }
+
+// noopMediaStore is the shared base every ABS handler-test double embeds, so
+// it must stay a complete MediaStore: a missing method surfaces here as a
+// compile error rather than in each of the dozen fakes.
+var _ MediaStore = noopMediaStore{}
 
 // memTokenStore is an in-memory TokenStore for handleRefresh tests.
 type memTokenStore struct {

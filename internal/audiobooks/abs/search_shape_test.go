@@ -25,15 +25,15 @@ func (s *searchStubMediaStore) ListAudiobookLibraries(context.Context, catalog.A
 	return s.libs, nil
 }
 
-func (s *searchStubMediaStore) SearchAudiobooks(_ context.Context, _ int64, _ string, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, error) {
+func (s *searchStubMediaStore) SearchAudiobooks(_ context.Context, _ AudiobookLibrary, _ string, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return s.results, nil
 }
 
-func (s *searchStubMediaStore) ListLibraryAuthors(context.Context, int64, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
+func (s *searchStubMediaStore) ListLibraryAuthors(context.Context, AudiobookLibrary, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
 	return s.authors, len(s.authors), nil
 }
 
-func (s *searchStubMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
+func (s *searchStubMediaStore) ListLibrarySeries(context.Context, AudiobookLibrary, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
 	return s.series, len(s.series), nil
 }
 
@@ -41,12 +41,12 @@ func newSearchHarness() *Handler {
 	store := &searchStubMediaStore{
 		libs: []AudiobookLibrary{{ID: 1, Name: "Audiobooks", Type: "audiobooks"}},
 		results: []*models.MediaItem{
-			{ContentID: "book-1", Title: "The Search Result"},
+			{ContentID: testBookID, Title: "The Search Result"},
 		},
 		authors: []AuthorSummary{{ID: "a1", Name: "Search Author", NumBooks: 3}},
 		series: []SeriesSummary{{
 			ID: "s1", Name: "Search Series", NumBooks: 2,
-			Books: []SeriesBookPreview{{ContentID: "book-1", Title: "The Search Result"}},
+			Books: []SeriesBookPreview{{ContentID: testBookID, Title: "The Search Result"}},
 		}},
 	}
 	return New(Dependencies{MediaStore: store})
@@ -68,7 +68,7 @@ func TestLibrarySearch_BucketKeysPresent(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"book", "podcast", "narrators", "tags", "genres", "series", "authors"} {
+	for _, key := range []string{LibraryMediaType, "podcast", "narrators", "tags", "genres", "series", "authors"} { //nolint:goconst // External ABS bucket names.
 		if _, ok := got[key]; !ok {
 			t.Errorf("missing bucket key %q in response: %v", key, got)
 		}
@@ -90,9 +90,9 @@ func TestLibrarySearch_BookEntryHasLibraryItem(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	books, ok := got["book"].([]any)
+	books, ok := got[LibraryMediaType].([]any)
 	if !ok || len(books) != 1 {
-		t.Fatalf("book bucket = %v, want 1 entry", got["book"])
+		t.Fatalf("book bucket = %v, want 1 entry", got[LibraryMediaType])
 	}
 	entry, ok := books[0].(map[string]any)
 	if !ok {
@@ -102,7 +102,7 @@ func TestLibrarySearch_BookEntryHasLibraryItem(t *testing.T) {
 	if !ok {
 		t.Fatalf("book entry missing libraryItem sub-object: %v", entry)
 	}
-	if li["id"] != "book-1" {
+	if li["id"] != testBookID {
 		t.Errorf("libraryItem.id = %v, want book-1", li["id"])
 	}
 	if _, hasMatchKey := entry["matchKey"]; hasMatchKey {
@@ -126,7 +126,7 @@ func TestLibrarySearch_EmptyQuery_ReturnsEmptyBuckets(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	for _, key := range []string{"book", "podcast", "narrators", "tags", "genres", "series", "authors"} {
+	for _, key := range []string{LibraryMediaType, "podcast", "narrators", "tags", "genres", "series", "authors"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("missing bucket key %q on empty query: %v", key, got)
 		}

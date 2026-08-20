@@ -15,8 +15,10 @@ import (
 // inProgressStubMediaStore backs the /me/items-in-progress shape tests.
 type inProgressStubMediaStore struct {
 	noopMediaStore
-	libs []AudiobookLibrary
-	byID map[string]*models.MediaItem
+	libs        []AudiobookLibrary
+	byID        map[string]*models.MediaItem
+	libraryByID map[string]int64
+	files       map[string][]*models.MediaFile
 }
 
 func (s *inProgressStubMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
@@ -28,6 +30,38 @@ func (s *inProgressStubMediaStore) GetAudiobooksByIDs(_ context.Context, ids []s
 	for _, id := range ids {
 		if it, ok := s.byID[id]; ok {
 			out[id] = it
+		}
+	}
+	return out, nil
+}
+
+func (s *inProgressStubMediaStore) GetAudiobookByID(_ context.Context, id string, _ catalog.AccessFilter) (*models.MediaItem, error) {
+	return s.byID[id], nil
+}
+
+func (s *inProgressStubMediaStore) GetItemType(ctx context.Context, id string, access catalog.AccessFilter) (string, error) {
+	return itemTypeFromLookup(s.GetAudiobookByID(ctx, id, access))
+}
+
+func (s *inProgressStubMediaStore) GetMediaFiles(_ context.Context, contentID string, _ catalog.AccessFilter) ([]*models.MediaFile, error) {
+	return s.files[contentID], nil
+}
+
+func (s *inProgressStubMediaStore) GetMediaFilesByContentIDs(_ context.Context, contentIDs []string, _ catalog.AccessFilter) (map[string][]*models.MediaFile, error) {
+	out := make(map[string][]*models.MediaFile, len(contentIDs))
+	for _, id := range contentIDs {
+		if files, ok := s.files[id]; ok {
+			out[id] = files
+		}
+	}
+	return out, nil
+}
+
+func (s *inProgressStubMediaStore) GetItemLibraryIDs(_ context.Context, contentIDs []string, _ catalog.AccessFilter) (map[string]int64, error) {
+	out := make(map[string]int64, len(contentIDs))
+	for _, id := range contentIDs {
+		if libraryID, ok := s.libraryByID[id]; ok {
+			out[id] = libraryID
 		}
 	}
 	return out, nil
@@ -52,14 +86,14 @@ func TestItemsInProgress_EnvelopeAndItemShape(t *testing.T) {
 	media := &inProgressStubMediaStore{
 		libs: []AudiobookLibrary{{ID: 1, Name: "Audiobooks", Type: "audiobooks"}},
 		byID: map[string]*models.MediaItem{
-			"book-1": {ContentID: "book-1", Title: "In Progress Book"},
+			testBookID: {ContentID: testBookID, Title: "In Progress Book"},
 		},
 	}
 	progress := &inProgressFakeProgressStore{
 		rows: []ProgressRow{
 			{
 				UserID:         "1",
-				ContentID:      "book-1",
+				ContentID:      testBookID,
 				CurrentSeconds: 120,
 				ProgressPct:    0.25,
 				IsFinished:     false,
@@ -87,7 +121,7 @@ func TestItemsInProgress_EnvelopeAndItemShape(t *testing.T) {
 		t.Fatalf("entry not an object: %v", items[0])
 	}
 
-	if entry["id"] != "book-1" {
+	if entry["id"] != testBookID {
 		t.Errorf("id = %v, want book-1", entry["id"])
 	}
 	if _, hasMedia := entry["media"]; !hasMedia {
@@ -132,5 +166,40 @@ func TestItemsInProgress_Unauthenticated_401(t *testing.T) {
 	h.handleItemsInProgress(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestItemsInProgressUsesActualEbookLibraryMembership(t *testing.T) {
+	updatedAt := time.Now()
+	media := &inProgressStubMediaStore{
+		libs: []AudiobookLibrary{
+			{ID: 17, Name: "First Books", Type: mediaTypeEbook},  //nolint:goconst // Stable fixture label.
+			{ID: 18, Name: "Second Books", Type: mediaTypeEbook}, //nolint:goconst // Stable fixture label.
+		},
+		byID: map[string]*models.MediaItem{
+			testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook, Title: "Reader Test"}, //nolint:goconst // Stable fixture label.
+		},
+		libraryByID: map[string]int64{testEbookID: 18},
+	}
+	ebookProgress := &recordingEbookProgressStore{rows: []EbookProgress{{
+		UserID: "1", ProfileID: testProfileID, ContentID: testEbookID, Progress: 0.4, UpdatedAt: updatedAt,
+	}}}
+	h := New(Dependencies{MediaStore: media, EbookProgressStore: ebookProgress})
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/items-in-progress", nil, nil, "1", testProfileID, h.handleItemsInProgress)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	items, _ := got["libraryItems"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("libraryItems = %#v, want one", got["libraryItems"])
+	}
+	entry, _ := items[0].(map[string]any)
+	if entry["libraryId"] != "18" {
+		t.Fatalf("libraryId = %v, want 18", entry["libraryId"])
 	}
 }
