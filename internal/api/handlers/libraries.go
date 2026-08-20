@@ -43,6 +43,7 @@ type LibraryHandler struct {
 	folderRepo            *catalog.FolderRepository
 	ingester              libraryIngester
 	userRepo              *auth.UserRepository
+	AccessGroups          access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	pool                  *pgxpool.Pool
 	refresher             AdminMetadataRefresher
 	chainCacheInvalidator interface{ InvalidateChainCache() }
@@ -439,8 +440,14 @@ func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.
 				return
 			}
 
-			if user.LibraryIDs != nil {
-				folders, err = h.folderRepo.ListByIDs(r.Context(), user.LibraryIDs)
+			effective, policyErr := access.EffectivePolicyForUser(r.Context(), user, h.AccessGroups)
+			if policyErr != nil {
+				slog.ErrorContext(r.Context(), "resolving user policy for library access", "component", "api", "error", policyErr)
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
+				return
+			}
+			if effective.LibraryIDs != nil {
+				folders, err = h.folderRepo.ListByIDs(r.Context(), effective.LibraryIDs)
 			} else {
 				folders, err = h.folderRepo.GetEnabled(r.Context())
 			}

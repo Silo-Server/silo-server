@@ -18,7 +18,7 @@ var (
 	ErrAPIKeyNotFound = errors.New("api key not found")
 )
 
-const apiKeyColumns = `id, user_id, label, api_key, rate_tier, created_at, last_used_at`
+const apiKeyColumns = `id, user_id, label, api_key, rate_tier, scopes, created_at, last_used_at`
 
 // APIKeyRepository provides CRUD operations for the api_keys table.
 type APIKeyRepository struct {
@@ -39,6 +39,7 @@ func scanAPIKey(row pgx.Row) (*models.APIKey, error) {
 		&k.Label,
 		&k.Key,
 		&k.RateTier,
+		&k.Scopes,
 		&k.CreatedAt,
 		&k.LastUsedAt,
 	)
@@ -62,6 +63,7 @@ func scanAPIKeys(rows pgx.Rows) ([]*models.APIKey, error) {
 			&k.Label,
 			&k.Key,
 			&k.RateTier,
+			&k.Scopes,
 			&k.CreatedAt,
 			&k.LastUsedAt,
 		)
@@ -85,18 +87,24 @@ func generateAPIKey() (string, error) {
 	return "sa_" + hex.EncodeToString(b), nil
 }
 
-// Create generates a new API key for the given user and returns the full record.
-func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string) (*models.APIKey, error) {
+// Create generates a new API key for the given user and returns the full
+// record. scopes may be nil or empty for an unscoped key (full access as the
+// owning user); callers should validate scopes with NormalizeAPIKeyScopes
+// first.
+func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
 	key, err := generateAPIKey()
 	if err != nil {
 		return nil, err
 	}
+	if scopes == nil {
+		scopes = []string{}
+	}
 
-	query := `INSERT INTO api_keys (user_id, label, api_key)
-		VALUES ($1, $2, $3)
+	query := `INSERT INTO api_keys (user_id, label, api_key, scopes)
+		VALUES ($1, $2, $3, $4)
 		RETURNING ` + apiKeyColumns
 
-	row := r.pool.QueryRow(ctx, query, userID, label, key)
+	row := r.pool.QueryRow(ctx, query, userID, label, key, scopes)
 	return scanAPIKey(row)
 }
 
@@ -149,7 +157,7 @@ func (r *APIKeyRepository) ListByUserAdmin(ctx context.Context, userID int) ([]*
 // ListAll returns all API keys across all users, ordered by creation time descending.
 // Each entry includes the owning user's username.
 func (r *APIKeyRepository) ListAll(ctx context.Context) ([]*models.APIKeyWithUser, error) {
-	query := `SELECT ak.id, ak.user_id, u.username, ak.label, ak.api_key, ak.rate_tier, ak.created_at, ak.last_used_at
+	query := `SELECT ak.id, ak.user_id, u.username, ak.label, ak.api_key, ak.rate_tier, ak.scopes, ak.created_at, ak.last_used_at
 		FROM api_keys ak
 		JOIN users u ON u.id = ak.user_id
 		ORDER BY ak.created_at DESC`
@@ -169,6 +177,7 @@ func (r *APIKeyRepository) ListAll(ctx context.Context) ([]*models.APIKeyWithUse
 			&k.Label,
 			&k.Key,
 			&k.RateTier,
+			&k.Scopes,
 			&k.CreatedAt,
 			&k.LastUsedAt,
 		)

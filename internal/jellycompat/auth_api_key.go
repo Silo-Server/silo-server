@@ -172,6 +172,16 @@ func (a *AdminAPIKeyAuthenticator) validate(ctx context.Context, token string) (
 	if err != nil || user == nil || !user.Enabled {
 		return nil, nil, unauthorized
 	}
+	// Scoped keys are allowlist credentials for the versioned API only; no
+	// compat route is in any scope's allowlist, so they are refused here
+	// outright rather than inheriting the owning admin's compat access.
+	if len(apiKey.Scopes) > 0 {
+		return nil, nil, adminAPIKeyAuthResult{
+			status:  http.StatusForbidden,
+			code:    "Forbidden",
+			message: "API key scopes do not permit this route",
+		}
+	}
 	if user.Role != "admin" {
 		return nil, nil, adminAPIKeyAuthResult{
 			status:  http.StatusForbidden,

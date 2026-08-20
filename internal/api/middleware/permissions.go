@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -24,15 +25,25 @@ type MetadataTargetLibraryResolver interface {
 type PermissionMiddleware struct {
 	users        PermissionUserLoader
 	libraries    MetadataTargetLibraryResolver
-	checkPrimary PrimaryProfileChecker // nil disables the acting-admin profile policy
+	checkPrimary PrimaryProfileChecker      // nil disables the acting-admin profile policy
+	groups       access.GroupPolicyProvider // nil means "no access groups"
 }
 
+// NewPermissionMiddleware creates the legacy permission middleware. The
+// optional group policy provider mirrors NewPolicyPermissionMiddleware and is
+// what lets an inherited (NULL) library list resolve to the group's list
+// instead of reading as unrestricted.
 func NewPermissionMiddleware(
 	users PermissionUserLoader,
 	libraries MetadataTargetLibraryResolver,
 	checkPrimary PrimaryProfileChecker,
+	groups ...access.GroupPolicyProvider,
 ) *PermissionMiddleware {
-	return &PermissionMiddleware{users: users, libraries: libraries, checkPrimary: checkPrimary}
+	var groupProvider access.GroupPolicyProvider
+	if len(groups) > 0 {
+		groupProvider = groups[0]
+	}
+	return &PermissionMiddleware{users: users, libraries: libraries, checkPrimary: checkPrimary, groups: groupProvider}
 }
 
 // RequireMetadataCurationForItem allows acting admins or users with
@@ -100,7 +111,15 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			writePermissionError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		if !metadataTargetWithinUserLibraries(user.LibraryIDs, targetLibraries) {
+		// Resolve through the inherit/override policy so an account that
+		// inherits its group's library list is held to that list. A failed
+		// lookup fails closed, matching the PDP-backed gate.
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil {
+			writeForbidden(w, "Metadata curation permission required")
+			return
+		}
+		if !metadataTargetWithinUserLibraries(effective.LibraryIDs, targetLibraries) {
 			writeForbidden(w, "Item is outside your assigned libraries")
 			return
 		}

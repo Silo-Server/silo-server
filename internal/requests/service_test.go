@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestCreateRequestQuotaExceeded(t *testing.T) {
@@ -50,6 +51,42 @@ func TestCreateRequestGroupPolicyCanForbidRequests(t *testing.T) {
 	})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("error = %v, want ErrForbidden", err)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("created requests = %d, want 0", len(store.created))
+	}
+}
+
+func TestCreateRequestAccountOverrideBeatsGroupDeny(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	service := newTestService(store)
+	groupID := int64(1)
+	allow := true
+	service.SetUserRepository(requestUserRepo{user: &models.User{ID: 1, AccessGroupID: &groupID, RequestsAllowed: &allow}})
+	service.SetGroupPolicyProvider(requestGroupProvider{group: &access.GroupPolicy{RequestsAllowed: false}})
+
+	if _, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	}); err != nil {
+		t.Fatalf("CreateRequest returned error: %v", err)
+	}
+}
+
+func TestCreateRequestFailsWithoutUserRepository(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	service := NewService(store, &fakeTMDBClient{}, &fakePresence{})
+
+	_, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if err == nil {
+		t.Fatal("CreateRequest without a user repository should fail rather than skip the per-user gate")
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("created requests = %d, want 0", len(store.created))
@@ -403,6 +440,7 @@ func TestCreateRequestBlocksWhenHydratedTVDBIDIsAvailable(t *testing.T) {
 		MediaTypeSeries: {420105: 201992},
 	}}
 	service := NewService(store, tmdbClient, presence)
+	service.SetUserRepository(requestUserRepo{})
 
 	_, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
 		MediaType: MediaTypeSeries,
@@ -1427,7 +1465,26 @@ func newTestService(store *fakeStore) *Service {
 func newTestServiceWithTMDB(store *fakeStore, tmdbClient *fakeTMDBClient) *Service {
 	service := NewService(store, tmdbClient, &fakePresence{})
 	service.Now = func() time.Time { return time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC) }
+	service.SetUserRepository(requestUserRepo{})
 	return service
+}
+
+// requestUserRepo stands in for the account loader. The default account is
+// bound to an access group and sets no overrides, so the group policy decides.
+type requestUserRepo struct {
+	user *models.User
+	err  error
+}
+
+func (r requestUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.user != nil {
+		return r.user, nil
+	}
+	groupID := int64(1)
+	return &models.User{ID: id, AccessGroupID: &groupID}, nil
 }
 
 func testViewer(userID int) Viewer {

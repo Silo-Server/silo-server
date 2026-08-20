@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -14,20 +15,33 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// APIKeyStore is the storage the API key endpoints need. It is an interface
+// so the handlers can be exercised without a database.
+type APIKeyStore interface {
+	Create(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error)
+	ListByUser(ctx context.Context, userID int) ([]*models.APIKey, error)
+	ListByUserAdmin(ctx context.Context, userID int) ([]*models.APIKey, error)
+	ListAll(ctx context.Context) ([]*models.APIKeyWithUser, error)
+	Delete(ctx context.Context, id int64, userID int) error
+	DeleteByAdmin(ctx context.Context, id int64) error
+	UpdateTier(ctx context.Context, id int64, tier string) error
+}
+
 // APIKeyHandler handles API key management endpoints.
 type APIKeyHandler struct {
-	repo *auth.APIKeyRepository
+	repo APIKeyStore
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler.
-func NewAPIKeyHandler(repo *auth.APIKeyRepository) *APIKeyHandler {
+func NewAPIKeyHandler(repo APIKeyStore) *APIKeyHandler {
 	return &APIKeyHandler{repo: repo}
 }
 
 // --- Request/Response types ---
 
 type createAPIKeyRequest struct {
-	Label string `json:"label"`
+	Label  string   `json:"label"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 type apiKeyResponse struct {
@@ -36,8 +50,19 @@ type apiKeyResponse struct {
 	Label      string     `json:"label"`
 	Key        string     `json:"key"`
 	RateTier   string     `json:"rate_tier"`
+	Scopes     []string   `json:"scopes"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
+// apiKeyScopesOrEmpty renders a key's scopes for JSON. An unscoped key stores
+// NULL/nil scopes; the API always reports an array so clients never have to
+// distinguish null from empty.
+func apiKeyScopesOrEmpty(scopes []string) []string {
+	if scopes == nil {
+		return []string{}
+	}
+	return scopes
 }
 
 func toAPIKeyResponse(k *models.APIKey) apiKeyResponse {
@@ -47,6 +72,7 @@ func toAPIKeyResponse(k *models.APIKey) apiKeyResponse {
 		Label:      k.Label,
 		Key:        k.Key,
 		RateTier:   k.RateTier,
+		Scopes:     apiKeyScopesOrEmpty(k.Scopes),
 		CreatedAt:  k.CreatedAt,
 		LastUsedAt: k.LastUsedAt,
 	}
@@ -59,13 +85,15 @@ type adminApiKeyResponse struct {
 	Label      string     `json:"label"`
 	Key        string     `json:"key"`
 	RateTier   string     `json:"rate_tier"`
+	Scopes     []string   `json:"scopes"`
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
 type adminCreateAPIKeyRequest struct {
-	Label  string `json:"label"`
-	UserID *int   `json:"user_id,omitempty"`
+	Label  string   `json:"label"`
+	UserID *int     `json:"user_id,omitempty"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // requireJWTAuth checks that the request was authenticated with a JWT, not an API key.
@@ -101,13 +129,35 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	key, err := h.repo.Create(r.Context(), claims.UserID, req.Label)
+	scopes, err := auth.NormalizeAPIKeyScopes(req.Scopes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	key, err := h.repo.Create(r.Context(), claims.UserID, req.Label, scopes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, toAPIKeyResponse(key))
+}
+
+// apiKeyScopesResponse is the feature-detection payload for API key scopes:
+// clients read the scopes this server understands instead of sniffing the
+// server version before offering them.
+type apiKeyScopesResponse struct {
+	Scopes []auth.APIKeyScope `json:"scopes"`
+}
+
+// HandleListAPIKeyScopes handles GET /api-keys/scopes.
+func (h *APIKeyHandler) HandleListAPIKeyScopes(w http.ResponseWriter, r *http.Request) {
+	if apimw.GetClaims(r.Context()) == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	writeJSON(w, http.StatusOK, apiKeyScopesResponse{Scopes: auth.APIKeyScopeCatalog()})
 }
 
 // HandleListAPIKeys handles GET /api-keys.
@@ -215,6 +265,7 @@ func (h *APIKeyHandler) HandleAdminListAllAPIKeys(w http.ResponseWriter, r *http
 			Label:      k.Label,
 			Key:        k.Key,
 			RateTier:   k.RateTier,
+			Scopes:     apiKeyScopesOrEmpty(k.Scopes),
 			CreatedAt:  k.CreatedAt,
 			LastUsedAt: k.LastUsedAt,
 		})
@@ -276,12 +327,18 @@ func (h *APIKeyHandler) HandleAdminCreateAPIKey(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	scopes, err := auth.NormalizeAPIKeyScopes(req.Scopes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
 	targetUserID := claims.UserID
 	if req.UserID != nil {
 		targetUserID = *req.UserID
 	}
 
-	key, err := h.repo.Create(r.Context(), targetUserID, req.Label)
+	key, err := h.repo.Create(r.Context(), targetUserID, req.Label, scopes)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create API key")
 		return

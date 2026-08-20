@@ -314,7 +314,12 @@ func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	result, err := h.catalogResolver.Resolve(r.Context(), req, h.itemsHandler.accessFilter(r))
+	filter, ok := h.itemsHandler.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.catalogResolver.Resolve(r.Context(), req, filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "browse_failed", err.Error())
 		return

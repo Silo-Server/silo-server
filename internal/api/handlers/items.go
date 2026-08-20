@@ -108,6 +108,7 @@ type ItemsHandler struct {
 	ebookReadStateStore      EbookReadStateStore
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
+	AccessGroups             access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 }
 
 // NewItemsHandler creates a new ItemsHandler.
@@ -479,7 +480,12 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	detail, err := h.detailSvc.GetWatchDetail(r.Context(), id, h.accessFilter(r))
+	filter, ok := h.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
+	detail, err := h.detailSvc.GetWatchDetail(r.Context(), id, filter)
 	if err != nil {
 		switch {
 		case catalog.IsWatchTargetNotPlayable(err):
@@ -633,7 +639,11 @@ func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *ht
 	// Authorize against the series for a season or episode ID, exactly as the
 	// on-view translation route does, so an unsupported-type answer never
 	// leaks the existence of content the caller cannot see.
-	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), target.accessContentID, h.accessFilter(r)); err != nil {
+	filter, ok := h.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), target.accessContentID, filter); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
@@ -782,7 +792,10 @@ func (h *ItemsHandler) handleSetWatchedState(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	filter := h.accessFilter(r)
+	filter, ok := h.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
 	targetType, targets, err := h.resolveWatchedTargets(r.Context(), id, filter)
 	if err != nil {
 		switch {
@@ -895,7 +908,12 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 		return true
 	}
 
-	result, err := h.catalogResolver.Resolve(r.Context(), req, h.accessFilter(r))
+	filter, ok := h.accessFilterOrError(w, r)
+	if !ok {
+		return true
+	}
+
+	result, err := h.catalogResolver.Resolve(r.Context(), req, filter)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -909,7 +927,7 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 		return true
 	}
 
-	overlaySummaries := h.listOverlaySummaries(r.Context(), result.Items, h.accessFilter(r))
+	overlaySummaries := h.listOverlaySummaries(r.Context(), result.Items, filter)
 	userStates := h.listItemUserStates(r, result.Items)
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -932,10 +950,15 @@ func (h *ItemsHandler) writeCatalogFiltersResponse(w http.ResponseWriter, r *htt
 		return true
 	}
 
+	filter, ok := h.accessFilterOrError(w, r)
+	if !ok {
+		return true
+	}
+
 	filters, err := h.catalogResolver.ListFiltersWithOptions(
 		r.Context(),
 		req,
-		h.accessFilter(r),
+		filter,
 		catalog.CatalogFilterOptions{IncludeTechnical: false},
 	)
 	if err != nil {
@@ -964,7 +987,7 @@ func (h *ItemsHandler) toItemListResponse(r *http.Request, item *models.MediaIte
 
 func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse) itemListResponse {
 	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeItemModel(r.Context(), item, h.accessFilter(r)); err == nil && localized != nil {
+		if localized, err := h.detailSvc.LocalizeItemModel(r.Context(), item, h.accessFilterOrDeny(r)); err == nil && localized != nil {
 			item = localized
 		}
 	}
@@ -1187,7 +1210,7 @@ func (h *ItemsHandler) toEpisodeResponse(r *http.Request, ep *models.Episode) ep
 
 func (h *ItemsHandler) toEpisodeResponseWithFallback(r *http.Request, ep *models.Episode, fallback episodeImageFallback) episodeResponse {
 	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeEpisodeModel(r.Context(), ep, h.accessFilter(r)); err == nil && localized != nil {
+		if localized, err := h.detailSvc.LocalizeEpisodeModel(r.Context(), ep, h.accessFilterOrDeny(r)); err == nil && localized != nil {
 			ep = localized
 		}
 	}
@@ -1230,7 +1253,7 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (ep
 // each resolve in one round-trip for the whole list instead of per episode.
 func (h *ItemsHandler) buildEpisodeResponses(r *http.Request, episodes []*models.Episode) []episodeResponse {
 	ctx := r.Context()
-	filter := h.accessFilter(r)
+	filter := h.accessFilterOrDeny(r)
 
 	if h.detailSvc != nil {
 		if localized, err := h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); err == nil && len(localized) == len(episodes) {
@@ -1780,7 +1803,7 @@ func (h *ItemsHandler) toSeasonResponseFromEpisodes(
 	userData *catalog.SeasonUserData,
 ) seasonResponse {
 	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeSeasonModel(r.Context(), s, h.accessFilter(r)); err == nil && localized != nil {
+		if localized, err := h.detailSvc.LocalizeSeasonModel(r.Context(), s, h.accessFilterOrDeny(r)); err == nil && localized != nil {
 			s = localized
 		}
 	}
@@ -2114,7 +2137,11 @@ func filterSortClause(sort, order string) string {
 	}
 }
 
-func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
+// accessFilter resolves the viewer's catalog access filter. It returns an
+// error when the account's policy cannot be resolved; callers must fail closed
+// rather than fall back to an unrestricted filter (see accessFilterOrError and
+// accessFilterOrDeny).
+func (h *ItemsHandler) accessFilter(r *http.Request) (catalog.AccessFilter, error) {
 	deviceID := deviceMetadataFromRequest(r).DeviceID
 	selectedFileID := 0
 	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
@@ -2143,7 +2170,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 			UserID:                    apimw.GetUserID(r.Context()),
 			ProfileID:                 apimw.GetProfileID(r.Context()),
 			DeviceID:                  deviceID,
-		}
+		}, nil
 	}
 
 	var libraryIDs []int
@@ -2154,12 +2181,17 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 			user, userErr := h.UserRepo.GetByID(r.Context(), userID)
 			if userErr != nil {
 				slog.ErrorContext(r.Context(), "looking up user for library access", "component", "api", "error", userErr)
-			} else {
-				if user.LibraryIDs != nil {
-					libraryIDs = user.LibraryIDs
-				}
-				maxPlaybackQuality = access.NormalizePlaybackQuality(user.MaxPlaybackQuality)
+				return catalog.AccessFilter{}, userErr
 			}
+			effective, policyErr := access.EffectivePolicyForUser(r.Context(), user, h.AccessGroups)
+			if policyErr != nil {
+				slog.ErrorContext(r.Context(), "resolving user policy for library access", "component", "api", "error", policyErr)
+				return catalog.AccessFilter{}, policyErr
+			}
+			if effective.LibraryIDs != nil {
+				libraryIDs = effective.LibraryIDs
+			}
+			maxPlaybackQuality = access.NormalizePlaybackQuality(effective.MaxPlaybackQuality)
 		}
 	}
 
@@ -2171,7 +2203,31 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 		UserID:                apimw.GetUserID(r.Context()),
 		ProfileID:             apimw.GetProfileID(r.Context()),
 		DeviceID:              deviceID,
+	}, nil
+}
+
+// accessFilterOrError resolves the viewer's access filter for a handler that
+// owns the response. An unresolvable policy is answered with 500 rather than
+// an unrestricted listing.
+func (h *ItemsHandler) accessFilterOrError(w http.ResponseWriter, r *http.Request) (catalog.AccessFilter, bool) {
+	filter, err := h.accessFilter(r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
+		return catalog.AccessFilter{}, false
 	}
+	return filter, true
+}
+
+// accessFilterOrDeny is the variant for enrichment paths with no error
+// channel (localization, per-item file listings). An unresolvable policy
+// yields a filter that allows nothing, so the enrichment degrades instead of
+// widening access; the request's primary query has already failed closed.
+func (h *ItemsHandler) accessFilterOrDeny(r *http.Request) catalog.AccessFilter {
+	filter, err := h.accessFilter(r)
+	if err != nil {
+		return catalog.AccessFilter{AllowedLibraryIDs: []int{}}
+	}
+	return filter
 }
 
 func (h *ItemsHandler) ensurePresentationLibraryAccess(ctx context.Context, contentID string, filter catalog.AccessFilter) error {

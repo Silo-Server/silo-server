@@ -80,6 +80,11 @@ func (h *CatalogHandler) HandleGetAudiobookGroups(w http.ResponseWriter, r *http
 		includeTotal = parsed
 	}
 
+	filter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
 	result, err := catalog.ListAudiobookGroups(
 		r.Context(),
 		h.itemsH.browseRepo.Pool(),
@@ -92,7 +97,7 @@ func (h *CatalogHandler) HandleGetAudiobookGroups(w http.ResponseWriter, r *http
 			Limit:        limit,
 			Offset:       offset,
 		},
-		h.itemsH.accessFilter(r),
+		filter,
 	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list audiobook groups")

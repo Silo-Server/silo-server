@@ -59,6 +59,8 @@ type UserRepository interface {
 
 type AccessGroupValidator interface {
 	Get(ctx context.Context, id int64) (*access.Group, error)
+	List(ctx context.Context) ([]access.Group, error)
+	GetPolicyForUser(ctx context.Context, userID int) (*access.GroupPolicy, error)
 }
 
 // ServerSettingsStore provides access to server-wide admin settings.
@@ -167,7 +169,7 @@ type createUserRequest struct {
 	CreateDefaultProfile     bool                   `json:"create_default_profile"`
 	DefaultProfileName       string                 `json:"default_profile_name,omitempty"`
 	LibraryIDs               []int                  `json:"library_ids"`
-	MaxPlaybackQuality       string                 `json:"max_playback_quality"`
+	MaxPlaybackQuality       *string                `json:"max_playback_quality,omitempty"`
 	MaxStreams               *int                   `json:"max_streams,omitempty"`
 	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
 	TranscodeAllowed         *bool                  `json:"transcode_allowed,omitempty"`
@@ -175,6 +177,34 @@ type createUserRequest struct {
 	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
 	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+	RequestsAllowed          *bool                  `json:"requests_allowed,omitempty"`
+	AccessGroupID            *int64                 `json:"access_group_id,omitempty"`
+}
+
+// optionalField is a tri-state JSON field for nullable policy columns: absent
+// leaves the column alone, explicit null clears it back to "inherit from the
+// access group", and a value stores an explicit override.
+type optionalField[T any] struct {
+	Set   bool
+	Value *T
+}
+
+func (f *optionalField[T]) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		f.Value = nil
+		return nil
+	}
+	var value T
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	f.Value = &value
+	return nil
+}
+
+func (f optionalField[T]) Optional() models.Optional[T] {
+	return models.Optional[T]{Set: f.Set, Value: f.Value}
 }
 
 type createStringSliceField struct {
@@ -189,28 +219,6 @@ func (f *createStringSliceField) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	return json.Unmarshal(data, &f.Value)
-}
-
-type updateLibraryIDsField struct {
-	Set   bool
-	Value []int
-}
-
-func (f *updateLibraryIDsField) UnmarshalJSON(data []byte) error {
-	f.Set = true
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		f.Value = nil
-		return nil
-	}
-	return json.Unmarshal(data, &f.Value)
-}
-
-func (f updateLibraryIDsField) Ptr() *[]int {
-	if !f.Set {
-		return nil
-	}
-	value := append([]int(nil), f.Value...)
-	return &value
 }
 
 type updateStringSliceField struct {
@@ -243,58 +251,74 @@ type updateUserRequest struct {
 	Role                     *string                `json:"role,omitempty"`
 	Permissions              updateStringSliceField `json:"permissions,omitempty"`
 	Enabled                  *bool                  `json:"enabled,omitempty"`
-	LibraryIDs               updateLibraryIDsField  `json:"library_ids,omitempty"`
-	MaxPlaybackQuality       *string                `json:"max_playback_quality,omitempty"`
-	MaxStreams               *int                   `json:"max_streams,omitempty"`
-	MaxTranscodes            *int                   `json:"max_transcodes,omitempty"`
-	TranscodeAllowed         *bool                  `json:"transcode_allowed,omitempty"`
-	AudioTranscodeAllowed    *bool                  `json:"audio_transcode_allowed,omitempty"`
+	LibraryIDs               optionalField[[]int]   `json:"library_ids,omitempty"`
+	MaxPlaybackQuality       optionalField[string]  `json:"max_playback_quality,omitempty"`
+	MaxStreams               optionalField[int]     `json:"max_streams,omitempty"`
+	MaxTranscodes            optionalField[int]     `json:"max_transcodes,omitempty"`
+	TranscodeAllowed         optionalField[bool]    `json:"transcode_allowed,omitempty"`
+	AudioTranscodeAllowed    optionalField[bool]    `json:"audio_transcode_allowed,omitempty"`
 	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
-	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
-	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
-	AccessGroupID            updateAccessGroupField `json:"access_group_id,omitempty"`
+	DownloadAllowed          optionalField[bool]    `json:"download_allowed,omitempty"`
+	DownloadTranscodeAllowed optionalField[bool]    `json:"download_transcode_allowed,omitempty"`
+	RequestsAllowed          optionalField[bool]    `json:"requests_allowed,omitempty"`
+	AccessGroupID            optionalField[int64]   `json:"access_group_id,omitempty"`
 }
 
-type updateAccessGroupField struct {
-	Set   bool
-	Value *int64
-}
-
-func (f *updateAccessGroupField) UnmarshalJSON(data []byte) error {
-	f.Set = true
-	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-		f.Value = nil
-		return nil
+// libraryIDsOptional maps library_ids to the repository tri-state: null (or
+// absent) clears the override so the account inherits the group's libraries;
+// an array — including an empty one — is an explicit override. The slice is
+// copied so the stored override never aliases the decoded request body.
+func (r *updateUserRequest) libraryIDsOptional() models.Optional[[]int] {
+	optional := r.LibraryIDs.Optional()
+	if optional.Value != nil {
+		value := append([]int{}, *optional.Value...)
+		optional.Value = &value
 	}
-	var value int64
-	if err := json.Unmarshal(data, &value); err != nil {
-		return err
-	}
-	f.Value = &value
-	return nil
+	return optional
 }
 
 // adminUserResponse represents a user in admin JSON responses.
+//
+// The policy fields carry the account's stored overrides: null means the
+// field is inherited from the access group. EffectivePolicy is the resolved
+// value the server enforces (override when set, otherwise the group's value,
+// otherwise the permissive no-group default).
 type adminUserResponse struct {
-	ID                       int        `json:"id"`
-	Username                 string     `json:"username"`
-	Email                    string     `json:"email"`
-	Role                     string     `json:"role"`
-	Permissions              []string   `json:"permissions"`
-	Enabled                  bool       `json:"enabled"`
-	LibraryIDs               []int      `json:"library_ids"`
-	MaxPlaybackQuality       string     `json:"max_playback_quality"`
-	MaxStreams               int        `json:"max_streams"`
-	MaxTranscodes            int        `json:"max_transcodes"`
-	TranscodeAllowed         bool       `json:"transcode_allowed"`
-	AudioTranscodeAllowed    bool       `json:"audio_transcode_allowed"`
-	MaxProfiles              int        `json:"max_profiles"`
-	DownloadAllowed          bool       `json:"download_allowed"`
-	DownloadTranscodeAllowed bool       `json:"download_transcode_allowed"`
-	AccessGroupID            *int64     `json:"access_group_id"`
-	CreatedAt                time.Time  `json:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at"`
-	LastActiveAt             *time.Time `json:"last_active_at,omitempty"`
+	ID                       int                 `json:"id"`
+	Username                 string              `json:"username"`
+	Email                    string              `json:"email"`
+	Role                     string              `json:"role"`
+	Permissions              []string            `json:"permissions"`
+	Enabled                  bool                `json:"enabled"`
+	LibraryIDs               []int               `json:"library_ids"`
+	MaxPlaybackQuality       *string             `json:"max_playback_quality"`
+	MaxStreams               *int                `json:"max_streams"`
+	MaxTranscodes            *int                `json:"max_transcodes"`
+	TranscodeAllowed         *bool               `json:"transcode_allowed"`
+	AudioTranscodeAllowed    *bool               `json:"audio_transcode_allowed"`
+	MaxProfiles              int                 `json:"max_profiles"`
+	DownloadAllowed          *bool               `json:"download_allowed"`
+	DownloadTranscodeAllowed *bool               `json:"download_transcode_allowed"`
+	RequestsAllowed          *bool               `json:"requests_allowed"`
+	AccessGroupID            *int64              `json:"access_group_id"`
+	EffectivePolicy          effectivePolicyResp `json:"effective_policy"`
+	CreatedAt                time.Time           `json:"created_at"`
+	UpdatedAt                time.Time           `json:"updated_at"`
+	LastActiveAt             *time.Time          `json:"last_active_at,omitempty"`
+}
+
+// effectivePolicyResp is the resolved policy block on admin user responses.
+type effectivePolicyResp struct {
+	LibraryIDs               []int    `json:"library_ids"`
+	MaxPlaybackQuality       string   `json:"max_playback_quality"`
+	MaxStreams               int      `json:"max_streams"`
+	MaxTranscodes            int      `json:"max_transcodes"`
+	TranscodeAllowed         bool     `json:"transcode_allowed"`
+	AudioTranscodeAllowed    bool     `json:"audio_transcode_allowed"`
+	DownloadAllowed          bool     `json:"download_allowed"`
+	DownloadTranscodeAllowed bool     `json:"download_transcode_allowed"`
+	RequestsAllowed          bool     `json:"requests_allowed"`
+	Permissions              []string `json:"permissions"`
 }
 
 type adminPlaybackHistoryRow struct {
@@ -340,8 +364,10 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 	return ""
 }
 
-// toAdminUserResponse converts a User model to an admin API response.
-func toAdminUserResponse(u *models.User) adminUserResponse {
+// toAdminUserResponse converts a User model to an admin API response. group
+// is the user's access-group policy (nil when ungrouped or unknown).
+func toAdminUserResponse(u *models.User, group *access.GroupPolicy) adminUserResponse {
+	effective := access.ApplyGroupPolicy(u, group)
 	resp := adminUserResponse{
 		ID:                       u.ID,
 		Username:                 u.Username,
@@ -349,23 +375,198 @@ func toAdminUserResponse(u *models.User) adminUserResponse {
 		Role:                     u.Role,
 		Permissions:              append([]string{}, u.Permissions...),
 		Enabled:                  u.Enabled,
-		LibraryIDs:               append([]int(nil), u.LibraryIDs...),
-		MaxPlaybackQuality:       access.NormalizePlaybackQuality(u.MaxPlaybackQuality),
-		MaxStreams:               u.MaxStreams,
-		MaxTranscodes:            u.MaxTranscodes,
-		TranscodeAllowed:         u.TranscodeAllowed,
-		AudioTranscodeAllowed:    u.AudioTranscodeAllowed,
+		LibraryIDs:               cloneIntSlice(u.LibraryIDs),
+		MaxPlaybackQuality:       normalizedQualityPtr(u.MaxPlaybackQuality),
+		MaxStreams:               clonePtr(u.MaxStreams),
+		MaxTranscodes:            clonePtr(u.MaxTranscodes),
+		TranscodeAllowed:         clonePtr(u.TranscodeAllowed),
+		AudioTranscodeAllowed:    clonePtr(u.AudioTranscodeAllowed),
 		MaxProfiles:              u.MaxProfiles,
-		DownloadAllowed:          u.DownloadAllowed,
-		DownloadTranscodeAllowed: u.DownloadTranscodeAllowed,
-		CreatedAt:                u.CreatedAt,
-		UpdatedAt:                u.UpdatedAt,
-	}
-	if u.AccessGroupID != nil {
-		id := *u.AccessGroupID
-		resp.AccessGroupID = &id
+		DownloadAllowed:          clonePtr(u.DownloadAllowed),
+		DownloadTranscodeAllowed: clonePtr(u.DownloadTranscodeAllowed),
+		RequestsAllowed:          clonePtr(u.RequestsAllowed),
+		AccessGroupID:            clonePtr(u.AccessGroupID),
+		EffectivePolicy: effectivePolicyResp{
+			LibraryIDs:               effective.LibraryIDs,
+			MaxPlaybackQuality:       effective.MaxPlaybackQuality,
+			MaxStreams:               effective.MaxStreams,
+			MaxTranscodes:            effective.MaxTranscodes,
+			TranscodeAllowed:         effective.TranscodeAllowed,
+			AudioTranscodeAllowed:    effective.AudioTranscodeAllowed,
+			DownloadAllowed:          effective.DownloadAllowed,
+			DownloadTranscodeAllowed: effective.DownloadTranscodeAllowed,
+			RequestsAllowed:          effective.RequestsAllowed,
+			Permissions:              append([]string{}, effective.Permissions...),
+		},
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
 	}
 	return resp
+}
+
+func normalizedQualityPtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := access.NormalizePlaybackQuality(*value)
+	return &normalized
+}
+
+// cloneIntSlice preserves the nil/empty distinction: nil stays nil (JSON
+// null = inherit) and an empty override stays an empty array.
+func cloneIntSlice(values []int) []int {
+	if values == nil {
+		return nil
+	}
+	out := make([]int, len(values))
+	copy(out, values)
+	return out
+}
+
+// roleAdmin is the server-wide admin account role.
+const roleAdmin = "admin"
+
+// validateStreamLimits rejects negative concurrency caps. nil means "inherit
+// from the access group" and 0 means an explicit "unlimited" override, so only
+// a negative value is meaningless.
+func validateStreamLimits(maxStreams, maxTranscodes *int) error {
+	if (maxStreams != nil && *maxStreams < 0) || (maxTranscodes != nil && *maxTranscodes < 0) {
+		return errors.New("max_streams and max_transcodes must be 0 (unlimited) or positive")
+	}
+	return nil
+}
+
+// actorIsScopedAPIKey reports whether the request is authenticated by an API
+// key that carries scopes. Unscoped keys and JWT sessions are not constrained:
+// an unscoped key already acts with its owner's full authority, and a JWT
+// actor is the admin themselves.
+func actorIsScopedAPIKey(ctx context.Context) bool {
+	claims := apimw.GetClaims(ctx)
+	return claims != nil && len(claims.APIKeyScopes) > 0
+}
+
+// rejectScopedAPIKeyCreate stops a scoped API key from minting an admin
+// account, which it could then log into for an unscoped session. Provisioning
+// ordinary accounts — password included — stays in scope. It reports whether
+// it wrote a response.
+func rejectScopedAPIKeyCreate(w http.ResponseWriter, r *http.Request, role string) bool {
+	if !actorIsScopedAPIKey(r.Context()) || role != roleAdmin {
+		return false
+	}
+	writeError(w, http.StatusForbidden, "insufficient_scope",
+		"A scoped API key may not create an admin account")
+	return true
+}
+
+// rejectScopedAPIKeyUpdate stops a scoped API key from escalating through an
+// existing account: it may neither grant the admin role nor touch the
+// credentials or role of an account that is already an admin — either would
+// hand it an unscoped admin session. Editing an ordinary account, password
+// included, stays in scope.
+//
+// It returns the target account when it had to load one, so the caller can
+// reuse it as the pre-update snapshot instead of reading the row twice, and
+// reports whether it wrote a response.
+func (h *AdminHandler) rejectScopedAPIKeyUpdate(
+	w http.ResponseWriter,
+	r *http.Request,
+	id int,
+	req *updateUserRequest,
+) (*models.User, bool) {
+	if !actorIsScopedAPIKey(r.Context()) {
+		return nil, false
+	}
+	if req.Role != nil && *req.Role == roleAdmin {
+		writeError(w, http.StatusForbidden, "insufficient_scope",
+			"A scoped API key may not grant the admin role")
+		return nil, true
+	}
+	if req.Password == nil && req.Role == nil {
+		return nil, false
+	}
+
+	target, err := h.userRepo.GetByID(r.Context(), id)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return nil, true
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return nil, true
+	}
+	if target.Role == roleAdmin {
+		writeError(w, http.StatusForbidden, "insufficient_scope",
+			"A scoped API key may not change the password or role of an admin account")
+		return nil, true
+	}
+	return target, false
+}
+
+// clonePtr copies a policy override pointer so a response never aliases the
+// stored model. A nil pointer stays nil (JSON null = inherit).
+func clonePtr[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	out := *value
+	return &out
+}
+
+// groupPolicyProvider exposes the access-group store as a policy provider,
+// preserving a nil interface when access groups are not configured.
+func (h *AdminHandler) groupPolicyProvider() access.GroupPolicyProvider {
+	if h == nil || h.AccessGroups == nil {
+		return nil
+	}
+	return h.AccessGroups
+}
+
+// groupPolicies loads every access group's policy keyed by ID so a list of
+// users can be resolved without a query per user. A lookup failure is an
+// error, not an empty map: rendering a group-restricted user against
+// NoGroupPolicy would report a fully permissive effective_policy.
+func (h *AdminHandler) groupPolicies(ctx context.Context) (map[int64]access.GroupPolicy, error) {
+	policies := map[int64]access.GroupPolicy{}
+	if h == nil || h.AccessGroups == nil {
+		return policies, nil
+	}
+	groups, err := h.AccessGroups.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading access groups for effective policy: %w", err)
+	}
+	for _, group := range groups {
+		policies[group.ID] = group.Policy()
+	}
+	return policies, nil
+}
+
+// groupPolicyFor returns the user's group policy, or nil when the user is
+// ungrouped (or the group row is gone — the FK clears membership on delete,
+// so a residual not-found is treated as ungrouped, not an error).
+func (h *AdminHandler) groupPolicyFor(ctx context.Context, u *models.User) (*access.GroupPolicy, error) {
+	if u == nil || u.AccessGroupID == nil || h == nil || h.AccessGroups == nil {
+		return nil, nil
+	}
+	group, err := h.AccessGroups.Get(ctx, *u.AccessGroupID)
+	if err != nil {
+		if errors.Is(err, access.ErrGroupNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loading access group for effective policy: %w", err)
+	}
+	policy := group.Policy()
+	return &policy, nil
+}
+
+func lookupGroupPolicy(policies map[int64]access.GroupPolicy, u *models.User) *access.GroupPolicy {
+	if u == nil || u.AccessGroupID == nil {
+		return nil
+	}
+	policy, ok := policies[*u.AccessGroupID]
+	if !ok {
+		return nil
+	}
+	return &policy
 }
 
 func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) (map[int]time.Time, error) {
@@ -418,11 +619,16 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	policies, err := h.groupPolicies(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
+		return
+	}
 	resp := make([]adminUserResponse, 0, len(users))
 	userIDs := make([]int, 0, len(users))
 	for _, u := range users {
 		userIDs = append(userIDs, u.ID)
-		resp = append(resp, toAdminUserResponse(u))
+		resp = append(resp, toAdminUserResponse(u, lookupGroupPolicy(policies, u)))
 	}
 	lastActive, err := h.loadUserLastActiveAt(r.Context(), userIDs)
 	if err != nil {
@@ -450,7 +656,12 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := toAdminUserResponse(user)
+	groupPolicy, err := h.groupPolicyFor(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
+		return
+	}
+	resp := toAdminUserResponse(user, groupPolicy)
 	lastActive, err := h.loadUserLastActiveAt(r.Context(), []int{user.ID})
 	if err != nil {
 		slog.WarnContext(r.Context(), "failed to load admin user last activity", "component", "api", "user_id", user.ID, "error", err)
@@ -471,18 +682,30 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	req.Username = auth.NormalizeUsername(req.Username)
 	req.Email = auth.NormalizeEmail(req.Email)
 
+	if rejectScopedAPIKeyCreate(w, r, req.Role) {
+		return
+	}
+
 	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
 		return
 	}
 
-	maxPlaybackQuality, ok := access.ParsePlaybackQualityPreset(req.MaxPlaybackQuality)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-		return
+	var maxPlaybackQuality *string
+	if req.MaxPlaybackQuality != nil {
+		normalized, ok := access.ParsePlaybackQualityPreset(*req.MaxPlaybackQuality)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
+			return
+		}
+		maxPlaybackQuality = &normalized
 	}
 	if req.MaxProfiles != nil && *req.MaxProfiles < 1 {
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
+		return
+	}
+	if err := validateStreamLimits(req.MaxStreams, req.MaxTranscodes); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	permissions := auth.DefaultUserPermissions()
@@ -494,6 +717,20 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if req.AccessGroupID != nil {
+		if h.AccessGroups == nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are not configured")
+			return
+		}
+		if _, err := h.AccessGroups.Get(r.Context(), *req.AccessGroupID); err != nil {
+			if errors.Is(err, access.ErrGroupNotFound) {
+				writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate access group")
+			return
+		}
+	}
 
 	user, err := h.accountProvisioner.CreateAccount(r.Context(), auth.CreateAccountInput{
 		User: models.CreateUserInput{
@@ -502,6 +739,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 			Password:                 req.Password,
 			Role:                     req.Role,
 			Permissions:              permissions,
+			AccessGroupID:            req.AccessGroupID,
 			LibraryIDs:               req.LibraryIDs,
 			MaxPlaybackQuality:       maxPlaybackQuality,
 			MaxStreams:               req.MaxStreams,
@@ -511,6 +749,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 			MaxProfiles:              req.MaxProfiles,
 			DownloadAllowed:          req.DownloadAllowed,
 			DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
+			RequestsAllowed:          req.RequestsAllowed,
 		},
 		DefaultProfile: auth.DefaultProfileOptions{
 			Enabled: req.CreateDefaultProfile,
@@ -518,12 +757,21 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		},
 	})
 	if err != nil {
+		if auth.IsDuplicate(err) {
+			writeError(w, http.StatusConflict, "duplicate", "A user with that username or email already exists")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
 		return
 	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(user.ID))
 
-	writeJSON(w, http.StatusCreated, toAdminUserResponse(user))
+	createdGroupPolicy, err := h.groupPolicyFor(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
+		return
+	}
+	writeJSON(w, http.StatusCreated, toAdminUserResponse(user, createdGroupPolicy))
 }
 
 // HandleUpdateUser handles PUT /admin/users/{id}.
@@ -541,17 +789,26 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var maxPlaybackQuality *string
-	if req.MaxPlaybackQuality != nil {
-		normalized, ok := access.ParsePlaybackQualityPreset(*req.MaxPlaybackQuality)
+	currentUser, blocked := h.rejectScopedAPIKeyUpdate(w, r, id, &req)
+	if blocked {
+		return
+	}
+
+	maxPlaybackQuality := req.MaxPlaybackQuality.Optional()
+	if maxPlaybackQuality.Value != nil {
+		normalized, ok := access.ParsePlaybackQualityPreset(*maxPlaybackQuality.Value)
 		if !ok {
 			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
 			return
 		}
-		maxPlaybackQuality = &normalized
+		maxPlaybackQuality.Value = &normalized
 	}
 	if req.MaxProfiles != nil && *req.MaxProfiles < 1 {
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
+		return
+	}
+	if err := validateStreamLimits(req.MaxStreams.Value, req.MaxTranscodes.Value); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	if req.AccessGroupID.Set {
@@ -591,21 +848,20 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		Role:                     req.Role,
 		Permissions:              permissions,
 		Enabled:                  req.Enabled,
-		LibraryIDs:               req.LibraryIDs.Ptr(),
+		LibraryIDs:               req.libraryIDsOptional(),
 		MaxPlaybackQuality:       maxPlaybackQuality,
-		MaxStreams:               req.MaxStreams,
-		MaxTranscodes:            req.MaxTranscodes,
-		TranscodeAllowed:         req.TranscodeAllowed,
-		AudioTranscodeAllowed:    req.AudioTranscodeAllowed,
+		MaxStreams:               req.MaxStreams.Optional(),
+		MaxTranscodes:            req.MaxTranscodes.Optional(),
+		TranscodeAllowed:         req.TranscodeAllowed.Optional(),
+		AudioTranscodeAllowed:    req.AudioTranscodeAllowed.Optional(),
 		MaxProfiles:              req.MaxProfiles,
-		DownloadAllowed:          req.DownloadAllowed,
-		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
-		AccessGroupIDSet:         req.AccessGroupID.Set,
-		AccessGroupID:            req.AccessGroupID.Value,
+		DownloadAllowed:          req.DownloadAllowed.Optional(),
+		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed.Optional(),
+		RequestsAllowed:          req.RequestsAllowed.Optional(),
+		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
-	var currentUser *models.User
-	if updateMayRequireSessionRevocation(updateInput) {
+	if currentUser == nil && updateMayRequireSessionRevocation(updateInput) {
 		currentUser, err = h.userRepo.GetByID(r.Context(), id)
 		if err != nil {
 			if auth.IsNotFound(err) {
@@ -639,7 +895,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toAdminUserResponse(user))
+	updatedGroupPolicy, err := h.groupPolicyFor(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve effective policy")
+		return
+	}
+	writeJSON(w, http.StatusOK, toAdminUserResponse(user, updatedGroupPolicy))
 }
 
 // HandleDeleteUser handles DELETE /admin/users/{id}.
@@ -653,6 +914,10 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 
 	err = h.userRepo.Delete(r.Context(), id)
 	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete user")
 		return
 	}
@@ -712,7 +977,7 @@ func (h *AdminHandler) HandleImpersonateUser(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, buildLoginResponse(pair, effectiveUser, impersonator))
+	writeJSON(w, http.StatusOK, buildLoginResponse(pair, effectiveUser, effectiveDownloadAllowed(r.Context(), effectiveUser, h.groupPolicyProvider()), impersonator))
 }
 
 // HandleListSessions handles GET /admin/sessions.
@@ -899,8 +1164,8 @@ func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 		input.Role != nil ||
 		input.Enabled != nil ||
 		input.Permissions != nil ||
-		input.MaxPlaybackQuality != nil ||
-		input.AccessGroupIDSet
+		input.MaxPlaybackQuality.Set ||
+		input.AccessGroupID.Set
 }
 
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
@@ -919,14 +1184,20 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
 		return true
 	}
-	if input.MaxPlaybackQuality != nil &&
-		access.NormalizePlaybackQuality(*input.MaxPlaybackQuality) != access.NormalizePlaybackQuality(current.MaxPlaybackQuality) {
+	if input.MaxPlaybackQuality.Set && !qualityOverrideEqual(input.MaxPlaybackQuality.Value, current.MaxPlaybackQuality) {
 		return true
 	}
-	if input.AccessGroupIDSet && !accessGroupIDEqual(input.AccessGroupID, current.AccessGroupID) {
+	if input.AccessGroupID.Set && !accessGroupIDEqual(input.AccessGroupID.Value, current.AccessGroupID) {
 		return true
 	}
 	return false
+}
+
+func qualityOverrideEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return access.NormalizePlaybackQuality(*a) == access.NormalizePlaybackQuality(*b)
 }
 
 func accessGroupIDEqual(a, b *int64) bool {

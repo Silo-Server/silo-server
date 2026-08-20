@@ -9,6 +9,7 @@ type APIKey struct {
 	Label      string
 	Key        string // full key including "sa_" prefix
 	RateTier   string
+	Scopes     []string // empty = unscoped (full access as the owning user)
 	CreatedAt  time.Time
 	LastUsedAt *time.Time // nil if never used
 }

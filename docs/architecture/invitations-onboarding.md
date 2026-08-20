@@ -41,10 +41,11 @@ dump yields no usable links.
 - **Privilege ceiling.** An invitation granting `admin` requires the inviter
   to be an admin, enforced in the service against the inviter's row in the
   database, not the request.
-- **Access composition unchanged.** Pre-bound `library_ids` and
+- **Invitation binding unchanged.** Pre-bound `library_ids` and
   `access_group_id` are applied verbatim at accept and then feed the existing
-  strictest-layer-wins restriction resolver. An invitation sets initial
-  values; it is never a bypass.
+  inherit/override policy resolver: the group supplies every field the
+  account leaves unset, and a pre-bound library list is stored as an explicit
+  account override. An invitation sets initial values; it is never a bypass.
 
 ## Lifecycle invariants
 

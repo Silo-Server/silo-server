@@ -81,6 +81,7 @@ func (p accessResolverGroupProvider) GetPolicyForUser(context.Context, int) (*ac
 }
 
 func TestABSAccessResolverMetadataCurationPolicy(t *testing.T) {
+	groupID := int64(7)
 	tests := []struct {
 		name      string
 		user      *models.User
@@ -97,7 +98,7 @@ func TestABSAccessResolverMetadataCurationPolicy(t *testing.T) {
 		},
 		{
 			name:      "group removes explicit permission",
-			user:      &models.User{ID: 42, Role: "user", Enabled: true, Permissions: []string{"metadata_curation"}},
+			user:      &models.User{ID: 42, Role: "user", Enabled: true, Permissions: []string{"metadata_curation"}, AccessGroupID: &groupID},
 			profileID: "viewer",
 			group:     &access.GroupPolicy{AllowedPermissions: []string{"marker_edit"}},
 		},

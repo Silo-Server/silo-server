@@ -25,8 +25,13 @@ import { useUserIPs } from "@/hooks/queries/admin/ips";
 import type { AdminUser, AdminUserProfile, UpdateUserRequest, UserIPEntry } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
-import { UserTranscodeLimitField } from "@/components/UserTranscodeLimitField";
+import {
+  PolicyAccessFields,
+  PolicyLimitFields,
+  policyInheritHints,
+  policyStateFromUser,
+  policyUpdateFields,
+} from "@/components/UserPolicyFields";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -57,13 +62,7 @@ import { ArrowUpRight, ChevronRight, Pencil, RotateCcw, Settings2, UserCircle } 
 import { useNavigate } from "react-router";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  PLAYBACK_QUALITY_OPTIONS,
-  formatPlaybackQualityPreset,
-  playbackQualityPresetFromValue,
-  playbackQualityValueFromPreset,
-  type PlaybackQualityPreset,
-} from "@/lib/playback-quality";
+import { formatPlaybackQualityPreset } from "@/lib/playback-quality";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
@@ -254,12 +253,13 @@ function OverviewTab({ user }: { user: AdminUser }) {
   const { data: libraries = [] } = useAdminLibraries();
   const { data: accessGroups = [] } = useAccessGroups();
 
+  const effective = user.effective_policy;
   const libraryNames =
-    user.library_ids === null
+    effective.library_ids === null
       ? "All libraries"
-      : user.library_ids.length === 0
+      : effective.library_ids.length === 0
         ? "None"
-        : user.library_ids
+        : effective.library_ids
             .map((id) => {
               const lib = libraries.find((l) => l.id === id);
               return lib ? lib.name : `#${id}`;
@@ -270,6 +270,10 @@ function OverviewTab({ user }: { user: AdminUser }) {
       ? "None"
       : (accessGroups.find((group) => group.id === user.access_group_id)?.name ??
         `#${user.access_group_id}`);
+
+  // Effective values, annotated when the account overrides its group.
+  const overridden = (isOverride: boolean) => (isOverride ? " (override)" : "");
+  const allowed = (value: boolean) => (value ? "Allowed" : "Not allowed");
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -290,55 +294,73 @@ function OverviewTab({ user }: { user: AdminUser }) {
       <div className="surface-panel overflow-hidden rounded-2xl border-0">
         <div className="border-border border-b px-4 py-3">
           <h3 className="text-sm font-medium">Permissions & Limits</h3>
+          <p className="text-muted-foreground text-xs">
+            Effective values. Fields marked (override) are set on this account; everything else
+            follows the group.
+          </p>
         </div>
         <div className="divide-border divide-y">
           <DetailRow label="Group" value={groupName} />
-          <DetailRow label="Library Access" value={libraryNames} />
+          <DetailRow
+            label="Library Access"
+            value={libraryNames + overridden(user.library_ids !== null)}
+          />
           <DetailRow
             label="Marker Editing"
-            value={
-              hasAssignedPermission(user.permissions, PERMISSION_MARKER_EDIT)
-                ? "Allowed"
-                : "Not allowed"
-            }
+            value={allowed(hasAssignedPermission(effective.permissions, PERMISSION_MARKER_EDIT))}
           />
           <DetailRow
             label="Metadata Curation"
-            value={
-              hasAssignedPermission(user.permissions, PERMISSION_METADATA_CURATION)
-                ? "Allowed"
-                : "Not allowed"
-            }
+            value={allowed(
+              hasAssignedPermission(effective.permissions, PERMISSION_METADATA_CURATION),
+            )}
           />
           <DetailRow
             label="Max Playback Quality"
-            value={formatPlaybackQualityPreset(user.max_playback_quality)}
+            value={
+              formatPlaybackQualityPreset(effective.max_playback_quality) +
+              overridden(user.max_playback_quality !== null)
+            }
           />
           <DetailRow
             label="Max Streams"
-            value={user.max_streams === 0 ? "Unlimited" : String(user.max_streams)}
+            value={
+              (effective.max_streams === 0 ? "Unlimited" : String(effective.max_streams)) +
+              overridden(user.max_streams !== null)
+            }
           />
           <DetailRow
             label="Max Transcodes"
             value={
-              !user.transcode_allowed
+              (!effective.transcode_allowed
                 ? "Disabled"
-                : user.max_transcodes === 0
+                : effective.max_transcodes === 0
                   ? "Unlimited"
-                  : String(user.max_transcodes)
+                  : String(effective.max_transcodes)) + overridden(user.max_transcodes !== null)
             }
           />
-          {!user.transcode_allowed && (
-            <DetailRow
-              label="Audio Transcodes"
-              value={user.audio_transcode_allowed ? "Allowed" : "Not allowed"}
-            />
-          )}
+          <DetailRow
+            label="Audio Transcodes"
+            value={
+              allowed(effective.audio_transcode_allowed) +
+              overridden(user.audio_transcode_allowed !== null)
+            }
+          />
           <DetailRow label="Max Profiles" value={String(user.max_profiles)} />
-          <DetailRow label="Downloads" value={user.download_allowed ? "Allowed" : "Not allowed"} />
+          <DetailRow
+            label="Downloads"
+            value={allowed(effective.download_allowed) + overridden(user.download_allowed !== null)}
+          />
           <DetailRow
             label="Download Transcode"
-            value={user.download_transcode_allowed ? "Allowed" : "Not allowed"}
+            value={
+              allowed(effective.download_transcode_allowed) +
+              overridden(user.download_transcode_allowed !== null)
+            }
+          />
+          <DetailRow
+            label="Media Requests"
+            value={allowed(effective.requests_allowed) + overridden(user.requests_allowed !== null)}
           />
         </div>
       </div>
@@ -1030,26 +1052,21 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [role, setRole] = useState(user.role);
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
-  const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user.library_ids);
   const [accessGroupID, setAccessGroupID] = useState<number | null>(user.access_group_id);
-  const [maxStreams, setMaxStreams] = useState(user.max_streams);
-  const [maxTranscodes, setMaxTranscodes] = useState(user.max_transcodes);
-  const [transcodeAllowed, setTranscodeAllowed] = useState(user.transcode_allowed);
-  const [audioTranscodeAllowed, setAudioTranscodeAllowed] = useState(user.audio_transcode_allowed);
+  const [policy, setPolicy] = useState(() => policyStateFromUser(user));
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
-  const [maxPlaybackQualityPreset, setMaxPlaybackQualityPreset] = useState<PlaybackQualityPreset>(
-    playbackQualityPresetFromValue(user.max_playback_quality),
-  );
-  const [downloadAllowed, setDownloadAllowed] = useState(user.download_allowed);
-  const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
-    user.download_transcode_allowed,
-  );
   const accessGroupSelectId = useId();
-  const maxTranscodesId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
   const accessGroupValue = accessGroupID === null ? "none" : String(accessGroupID);
+  // Hints come from the group selected right now, so they follow the picker
+  // instead of describing the group the account was last saved with. When that
+  // group is not in the loaded list, fall back to the resolved policy the
+  // server sent — but only while the saved group is still the selected one.
+  const inheritHints =
+    policyInheritHints(accessGroupID, accessGroups) ??
+    (accessGroupID === user.access_group_id ? user.effective_policy : undefined);
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
@@ -1061,16 +1078,9 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       role,
       permissions,
       enabled,
-      library_ids: libraryIDs,
       access_group_id: accessGroupID,
-      max_streams: maxStreams,
-      max_transcodes: maxTranscodes,
-      transcode_allowed: transcodeAllowed,
-      audio_transcode_allowed: audioTranscodeAllowed,
       max_profiles: maxProfiles,
-      max_playback_quality: playbackQualityValueFromPreset(maxPlaybackQualityPreset),
-      download_allowed: downloadAllowed,
-      download_transcode_allowed: downloadTranscodeAllowed,
+      ...policyUpdateFields(policy),
     };
     if (password) body.password = password;
     updateMutation.mutate({ id: user.id, body }, { onSuccess: onClose });
@@ -1167,11 +1177,6 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                 </SelectContent>
               </Select>
             </div>
-            <LibraryAccessSelector
-              libraries={libraries}
-              value={libraryIDs}
-              onChange={setLibraryIDs}
-            />
             <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
               <div>
                 <Label htmlFor={markerEditId}>Marker Editing</Label>
@@ -1206,78 +1211,24 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                 }
               />
             </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label>Downloads Allowed</Label>
-                <Switch checked={downloadAllowed} onCheckedChange={setDownloadAllowed} />
-              </div>
-              <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label>Download Transcode Allowed</Label>
-                <Switch
-                  checked={downloadTranscodeAllowed}
-                  onCheckedChange={setDownloadTranscodeAllowed}
-                />
-              </div>
-            </div>
+            <PolicyAccessFields
+              state={policy}
+              onChange={setPolicy}
+              effective={inheritHints}
+              libraries={libraries}
+            />
           </TabsContent>
 
           <TabsContent value="limits" className="mt-0 space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label>Max Streams</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={maxStreams}
-                  onChange={(e) => setMaxStreams(Number(e.target.value))}
-                />
-                <p className="text-muted-foreground text-xs">0 = unlimited</p>
-              </div>
-              <UserTranscodeLimitField
-                id={maxTranscodesId}
-                maxTranscodes={maxTranscodes}
-                onMaxTranscodesChange={setMaxTranscodes}
-                transcodeAllowed={transcodeAllowed}
-                onTranscodeAllowedChange={setTranscodeAllowed}
-                audioTranscodeAllowed={audioTranscodeAllowed}
-                onAudioTranscodeAllowedChange={setAudioTranscodeAllowed}
+            <PolicyLimitFields state={policy} onChange={setPolicy} effective={inheritHints} />
+            <div className="space-y-1">
+              <Label>Max Profiles</Label>
+              <Input
+                type="number"
+                min={1}
+                value={maxProfiles}
+                onChange={(e) => setMaxProfiles(Number(e.target.value))}
               />
-              <div className="space-y-1">
-                <Label>Max Profiles</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={maxProfiles}
-                  onChange={(e) => setMaxProfiles(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label>Max Playback Quality</Label>
-                <Select
-                  value={maxPlaybackQualityPreset}
-                  onValueChange={(value) =>
-                    setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PLAYBACK_QUALITY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {
-                    PLAYBACK_QUALITY_OPTIONS.find(
-                      (option) => option.value === maxPlaybackQualityPreset,
-                    )?.description
-                  }
-                </p>
-              </div>
             </div>
           </TabsContent>
         </div>

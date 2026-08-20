@@ -2333,6 +2333,8 @@ export interface AccessGroup {
   max_playback_quality: string;
   download_allowed: boolean;
   download_transcode_allowed: boolean;
+  transcode_allowed: boolean;
+  audio_transcode_allowed: boolean;
   max_streams: number;
   max_transcodes: number;
   allowed_permissions: string[] | null;
@@ -2350,11 +2352,29 @@ export interface AccessGroupInput {
   max_playback_quality?: string;
   download_allowed?: boolean;
   download_transcode_allowed?: boolean;
+  transcode_allowed?: boolean;
+  audio_transcode_allowed?: boolean;
   max_streams?: number;
   max_transcodes?: number;
   allowed_permissions?: string[] | null;
   requests_allowed?: boolean;
   is_default?: boolean;
+}
+
+// Stored per-user policy overrides are nullable: null means the field is
+// inherited from the access group. effective_policy carries the resolved
+// values the server enforces.
+export interface AdminUserEffectivePolicy {
+  library_ids: number[] | null;
+  max_playback_quality: string;
+  max_streams: number;
+  max_transcodes: number;
+  transcode_allowed: boolean;
+  audio_transcode_allowed: boolean;
+  download_allowed: boolean;
+  download_transcode_allowed: boolean;
+  requests_allowed: boolean;
+  permissions: string[];
 }
 
 export interface AdminUser {
@@ -2366,19 +2386,22 @@ export interface AdminUser {
   enabled: boolean;
   library_ids: number[] | null;
   access_group_id: number | null;
-  max_playback_quality: string;
-  max_streams: number;
-  max_transcodes: number;
-  transcode_allowed: boolean;
-  audio_transcode_allowed: boolean;
+  max_playback_quality: string | null;
+  max_streams: number | null;
+  max_transcodes: number | null;
+  transcode_allowed: boolean | null;
+  audio_transcode_allowed: boolean | null;
   max_profiles: number;
-  download_allowed: boolean;
-  download_transcode_allowed: boolean;
+  download_allowed: boolean | null;
+  download_transcode_allowed: boolean | null;
+  requests_allowed: boolean | null;
+  effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;
   last_active_at?: string;
 }
 
+// Policy fields left undefined at create inherit from the access group.
 export interface CreateUserRequest {
   username: string;
   email: string;
@@ -2396,8 +2419,12 @@ export interface CreateUserRequest {
   max_profiles?: number;
   download_allowed?: boolean;
   download_transcode_allowed?: boolean;
+  requests_allowed?: boolean;
 }
 
+// Policy fields are tri-state on update: absent leaves the stored value
+// alone, an explicit null clears the override back to inherit, and a value
+// stores an explicit override.
 export interface UpdateUserRequest {
   username?: string;
   email?: string;
@@ -2407,14 +2434,15 @@ export interface UpdateUserRequest {
   enabled?: boolean;
   library_ids?: number[] | null;
   access_group_id?: number | null;
-  max_playback_quality?: string;
-  max_streams?: number;
-  max_transcodes?: number;
-  transcode_allowed?: boolean;
-  audio_transcode_allowed?: boolean;
+  max_playback_quality?: string | null;
+  max_streams?: number | null;
+  max_transcodes?: number | null;
+  transcode_allowed?: boolean | null;
+  audio_transcode_allowed?: boolean | null;
   max_profiles?: number;
-  download_allowed?: boolean;
-  download_transcode_allowed?: boolean;
+  download_allowed?: boolean | null;
+  download_transcode_allowed?: boolean | null;
+  requests_allowed?: boolean | null;
 }
 
 export interface AdminStats {

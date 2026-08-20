@@ -101,15 +101,21 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
+			if !apiKeyScopesAllow(apiKey.Scopes, r) {
+				writeForbidden(w, "API key scopes do not permit this route")
+				return
+			}
+
 			am.apiKeyLastUsed.Touch(apiKey.ID)
 
 			claims = &auth.Claims{
-				UserID:    user.ID,
-				Role:      user.Role,
-				SessionID: "",
-				TokenType: auth.TokenTypeAPIKey,
-				APIKeyID:  apiKey.ID,
-				RateTier:  apiKey.RateTier,
+				UserID:       user.ID,
+				Role:         user.Role,
+				SessionID:    "",
+				TokenType:    auth.TokenTypeAPIKey,
+				APIKeyID:     apiKey.ID,
+				RateTier:     apiKey.RateTier,
+				APIKeyScopes: apiKey.Scopes,
 			}
 		} else {
 			// JWT authentication (existing flow).

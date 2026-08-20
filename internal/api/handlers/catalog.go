@@ -111,7 +111,10 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	accessFilter := h.itemsH.accessFilter(r)
+	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
 	groupedByWork := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("group")), "work")
 	if groupedByWork {
 		result, entries, err := h.resolveGroupedCatalogByWork(r, req, accessFilter)
@@ -433,11 +436,16 @@ func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.
 		return
 	}
 
+	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
 	includeTechnical := parseIncludeTechnical(r.URL.Query().Get("include_technical"))
 	filters, err := h.resolver.ListFiltersWithOptions(
 		r.Context(),
 		req,
-		h.itemsH.accessFilter(r),
+		accessFilter,
 		catalog.CatalogFilterOptions{IncludeTechnical: includeTechnical},
 	)
 	if err != nil {
@@ -526,10 +534,15 @@ func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *h
 		limit = n
 	}
 
+	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
 	result, err := h.resolver.SearchFacet(
 		r.Context(),
 		req,
-		h.itemsH.accessFilter(r),
+		accessFilter,
 		facet,
 		prefix,
 		limit,
@@ -590,7 +603,10 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	accessFilter := h.itemsH.accessFilter(r)
+	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
 	if req.LibraryID > 0 {
 		accessFilter.PresentationLibraryID = &req.LibraryID
 	}
@@ -745,7 +761,12 @@ func (h *CatalogHandler) HandleLegacySearch(w http.ResponseWriter, r *http.Reque
 	}
 	offset := max(catalog.ParseIntParam(r.URL.Query().Get("offset")), 0)
 
-	items, total, err := h.itemsH.itemRepo.Search(r.Context(), query, parseSearchTypes(r.URL.Query()["type"]), limit, offset, h.itemsH.accessFilter(r))
+	accessFilter, ok := h.itemsH.accessFilterOrError(w, r)
+	if !ok {
+		return
+	}
+
+	items, total, err := h.itemsH.itemRepo.Search(r.Context(), query, parseSearchTypes(r.URL.Query()["type"]), limit, offset, accessFilter)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "search failed", "component", "api", "query", query, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Search failed")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -367,7 +368,7 @@ func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 
 func TestResolver_RestrictedAccountInheritingProfile(t *testing.T) {
 	resolver := NewResolver(
-		stubUserRepo{user: &models.User{ID: 1, LibraryIDs: []int{1, 3}, MaxPlaybackQuality: "1080p", AccessPolicyRevision: 4}},
+		stubUserRepo{user: &models.User{ID: 1, LibraryIDs: []int{1, 3}, MaxPlaybackQuality: ptr("1080p"), AccessPolicyRevision: 4}},
 		stubStoreProvider{store: stubStore{profile: &userstore.Profile{ID: "prof-1"}}},
 		nil,
 	)
@@ -646,34 +647,60 @@ func TestResolver_MetadataLanguageIgnoresLegacyColumn(t *testing.T) {
 }
 
 func TestResolver_AppliesGroupPolicy(t *testing.T) {
-	resolver := NewResolver(
-		stubUserRepo{user: &models.User{
-			ID:                   1,
-			LibraryIDs:           []int{1, 2, 3},
-			MaxPlaybackQuality:   PlaybackQuality4K,
-			AccessPolicyRevision: 5,
-		}},
-		stubStoreProvider{store: stubStore{}},
-		nil,
-		stubGroupProvider{group: &GroupPolicy{
-			LibraryIDs:               []int{2, 4},
-			MaxPlaybackQuality:       PlaybackQualityStandard,
-			DownloadAllowed:          true,
-			DownloadTranscodeAllowed: true,
-			RequestsAllowed:          true,
-		}},
-	)
+	groupID := int64(9)
+	group := &GroupPolicy{
+		LibraryIDs:               []int{2, 4},
+		MaxPlaybackQuality:       PlaybackQualityStandard,
+		DownloadAllowed:          true,
+		DownloadTranscodeAllowed: true,
+		TranscodeAllowed:         true,
+		AudioTranscodeAllowed:    true,
+		RequestsAllowed:          true,
+	}
 
-	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1})
-	if err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	if !scope.LibrariesRestricted || len(scope.AllowedLibraryIDs) != 1 || scope.AllowedLibraryIDs[0] != 2 {
-		t.Fatalf("scope libraries = restricted %t ids %#v, want [2]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
-	}
-	if scope.MaxPlaybackQuality != PlaybackQualityStandard {
-		t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, PlaybackQualityStandard)
-	}
+	t.Run("unset account fields inherit the group", func(t *testing.T) {
+		resolver := NewResolver(
+			stubUserRepo{user: &models.User{ID: 1, AccessGroupID: &groupID, AccessPolicyRevision: 5}},
+			stubStoreProvider{store: stubStore{}},
+			nil,
+			stubGroupProvider{group: group},
+		)
+		scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1})
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if !scope.LibrariesRestricted || !reflect.DeepEqual(scope.AllowedLibraryIDs, []int{2, 4}) {
+			t.Fatalf("scope libraries = restricted %t ids %#v, want [2 4]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
+		}
+		if scope.MaxPlaybackQuality != PlaybackQualityStandard {
+			t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, PlaybackQualityStandard)
+		}
+	})
+
+	t.Run("account overrides replace the group values", func(t *testing.T) {
+		resolver := NewResolver(
+			stubUserRepo{user: &models.User{
+				ID:                   1,
+				AccessGroupID:        &groupID,
+				LibraryIDs:           []int{1, 2, 3},
+				MaxPlaybackQuality:   ptr(PlaybackQuality4K),
+				AccessPolicyRevision: 5,
+			}},
+			stubStoreProvider{store: stubStore{}},
+			nil,
+			stubGroupProvider{group: group},
+		)
+		scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1})
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		if !scope.LibrariesRestricted || !reflect.DeepEqual(scope.AllowedLibraryIDs, []int{1, 2, 3}) {
+			t.Fatalf("scope libraries = restricted %t ids %#v, want [1 2 3]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
+		}
+		if scope.MaxPlaybackQuality != PlaybackQuality4K {
+			t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, PlaybackQuality4K)
+		}
+	})
 }
 
 type stubGroupProvider struct {

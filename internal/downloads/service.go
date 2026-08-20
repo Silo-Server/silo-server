@@ -274,21 +274,21 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	if err != nil {
 		return Capability{}, fmt.Errorf("loading user: %w", err)
 	}
-	user, err = s.effectiveDownloadUser(ctx, user)
+	policyUser, err := s.effectiveDownloadUser(ctx, user)
 	if err != nil {
 		return Capability{}, fmt.Errorf("loading access group policy: %w", err)
 	}
 	c := Capability{
 		Enabled:              cfg.Enabled,
-		DownloadAllowed:      user.DownloadAllowed,
+		DownloadAllowed:      policyUser.Policy.DownloadAllowed,
 		QualityPresets:       []string{},
 		TranscodeEnabled:     cfg.TranscodeEnabled,
-		TranscodeUserAllowed: user.DownloadTranscodeAllowed,
+		TranscodeUserAllowed: policyUser.Policy.DownloadTranscodeAllowed,
 	}
 	if s.actionDecider != nil {
-		c.QualityPresets = s.policyPresetsFor(ctx, user, cfg, s.artifacts != nil)
+		c.QualityPresets = s.policyPresetsFor(ctx, policyUser, cfg, s.artifacts != nil)
 	} else {
-		c.QualityPresets = s.policy.PresetsFor(user, cfg, s.artifacts != nil)
+		c.QualityPresets = s.policy.PresetsFor(policyUser, cfg, s.artifacts != nil)
 	}
 	if len(c.QualityPresets) > 0 {
 		// Per-season download is always available when downloads are enabled;
@@ -302,7 +302,7 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	return c, nil
 }
 
-func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*models.User, error) {
+func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*PolicyUser, error) {
 	if user == nil {
 		return nil, nil
 	}
@@ -310,15 +310,7 @@ func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) 
 	if err != nil {
 		return nil, err
 	}
-	out := *user
-	out.LibraryIDs = effective.LibraryIDs
-	out.MaxPlaybackQuality = effective.MaxPlaybackQuality
-	out.MaxStreams = effective.MaxStreams
-	out.MaxTranscodes = effective.MaxTranscodes
-	out.Permissions = effective.Permissions
-	out.DownloadAllowed = effective.DownloadAllowed
-	out.DownloadTranscodeAllowed = effective.DownloadTranscodeAllowed
-	return &out, nil
+	return &PolicyUser{ID: user.ID, Policy: effective}, nil
 }
 
 // CreateRequest holds the parameters for creating a download. A non-empty
@@ -1031,7 +1023,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 }
 
-func (s *Service) resolveBulkQuality(requested string, _ *models.User, _ config.DownloadConfig) (QualityDecision, error) {
+func (s *Service) resolveBulkQuality(requested string, _ *PolicyUser, _ config.DownloadConfig) (QualityDecision, error) {
 	quality := normalizeQuality(requested)
 	if !ValidQuality(quality) {
 		return QualityDecision{}, ErrInvalidQuality

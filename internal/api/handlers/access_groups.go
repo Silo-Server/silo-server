@@ -39,6 +39,8 @@ type accessGroupCreateRequest struct {
 	MaxPlaybackQuality       string                      `json:"max_playback_quality"`
 	DownloadAllowed          *bool                       `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                       `json:"download_transcode_allowed,omitempty"`
+	TranscodeAllowed         *bool                       `json:"transcode_allowed,omitempty"`
+	AudioTranscodeAllowed    *bool                       `json:"audio_transcode_allowed,omitempty"`
 	MaxStreams               *int                        `json:"max_streams,omitempty"`
 	MaxTranscodes            *int                        `json:"max_transcodes,omitempty"`
 	AllowedPermissions       accessGroupStringSliceField `json:"allowed_permissions"`
@@ -53,6 +55,8 @@ type accessGroupUpdateRequest struct {
 	MaxPlaybackQuality       *string                     `json:"max_playback_quality,omitempty"`
 	DownloadAllowed          *bool                       `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                       `json:"download_transcode_allowed,omitempty"`
+	TranscodeAllowed         *bool                       `json:"transcode_allowed,omitempty"`
+	AudioTranscodeAllowed    *bool                       `json:"audio_transcode_allowed,omitempty"`
 	MaxStreams               *int                        `json:"max_streams,omitempty"`
 	MaxTranscodes            *int                        `json:"max_transcodes,omitempty"`
 	AllowedPermissions       accessGroupStringSliceField `json:"allowed_permissions,omitempty"`
@@ -68,6 +72,8 @@ type accessGroupResponse struct {
 	MaxPlaybackQuality       string    `json:"max_playback_quality"`
 	DownloadAllowed          bool      `json:"download_allowed"`
 	DownloadTranscodeAllowed bool      `json:"download_transcode_allowed"`
+	TranscodeAllowed         bool      `json:"transcode_allowed"`
+	AudioTranscodeAllowed    bool      `json:"audio_transcode_allowed"`
 	MaxStreams               int       `json:"max_streams"`
 	MaxTranscodes            int       `json:"max_transcodes"`
 	AllowedPermissions       []string  `json:"allowed_permissions"`
@@ -248,6 +254,14 @@ func (r accessGroupCreateRequest) toInput(w http.ResponseWriter) (access.CreateG
 	if r.DownloadTranscodeAllowed != nil {
 		downloadTranscodeAllowed = *r.DownloadTranscodeAllowed
 	}
+	transcodeAllowed := true
+	if r.TranscodeAllowed != nil {
+		transcodeAllowed = *r.TranscodeAllowed
+	}
+	audioTranscodeAllowed := true
+	if r.AudioTranscodeAllowed != nil {
+		audioTranscodeAllowed = *r.AudioTranscodeAllowed
+	}
 	requestsAllowed := true
 	if r.RequestsAllowed != nil {
 		requestsAllowed = *r.RequestsAllowed
@@ -271,6 +285,8 @@ func (r accessGroupCreateRequest) toInput(w http.ResponseWriter) (access.CreateG
 		MaxPlaybackQuality:       maxPlaybackQuality,
 		DownloadAllowed:          downloadAllowed,
 		DownloadTranscodeAllowed: downloadTranscodeAllowed,
+		TranscodeAllowed:         transcodeAllowed,
+		AudioTranscodeAllowed:    audioTranscodeAllowed,
 		MaxStreams:               maxStreams,
 		MaxTranscodes:            maxTranscodes,
 		AllowedPermissions:       allowedPermissions,
@@ -318,6 +334,8 @@ func (r accessGroupUpdateRequest) toInput(w http.ResponseWriter) (access.UpdateG
 		MaxPlaybackQuality:       maxPlaybackQuality,
 		DownloadAllowed:          r.DownloadAllowed,
 		DownloadTranscodeAllowed: r.DownloadTranscodeAllowed,
+		TranscodeAllowed:         r.TranscodeAllowed,
+		AudioTranscodeAllowed:    r.AudioTranscodeAllowed,
 		MaxStreams:               r.MaxStreams,
 		MaxTranscodes:            r.MaxTranscodes,
 		AllowedPermissions:       allowedPermissions,
@@ -389,6 +407,8 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		MaxPlaybackQuality:       access.NormalizePlaybackQuality(group.MaxPlaybackQuality),
 		DownloadAllowed:          group.DownloadAllowed,
 		DownloadTranscodeAllowed: group.DownloadTranscodeAllowed,
+		TranscodeAllowed:         group.TranscodeAllowed,
+		AudioTranscodeAllowed:    group.AudioTranscodeAllowed,
 		MaxStreams:               group.MaxStreams,
 		MaxTranscodes:            group.MaxTranscodes,
 		AllowedPermissions:       append([]string(nil), group.AllowedPermissions...),

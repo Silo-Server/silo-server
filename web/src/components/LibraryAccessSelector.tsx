@@ -7,6 +7,13 @@ interface LibraryAccessSelectorProps {
   libraries: Library[];
   value: number[] | null;
   onChange: (value: number[] | null) => void;
+  // Label for the null state. Groups and invitations use the default "All
+  // libraries"; the per-user policy form passes "Inherit from group", where
+  // null means the group's library scope applies.
+  allLabel?: string;
+  // Optional helper line shown while value is null (e.g. what the inherited
+  // scope currently resolves to).
+  emptyHint?: string;
 }
 
 function sortByLibraryOrder(libraries: Library[], ids: number[]) {
@@ -14,7 +21,13 @@ function sortByLibraryOrder(libraries: Library[], ids: number[]) {
   return libraries.filter((library) => selected.has(library.id)).map((library) => library.id);
 }
 
-export function LibraryAccessSelector({ libraries, value, onChange }: LibraryAccessSelectorProps) {
+export function LibraryAccessSelector({
+  libraries,
+  value,
+  onChange,
+  allLabel = "All libraries",
+  emptyHint,
+}: LibraryAccessSelectorProps) {
   const allLibraries = value === null;
 
   function handleAllLibrariesChange(checked: boolean) {
@@ -34,10 +47,12 @@ export function LibraryAccessSelector({ libraries, value, onChange }: LibraryAcc
       <div className="flex items-center justify-between">
         <Label>Library Access</Label>
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-xs">All libraries</span>
+          <span className="text-muted-foreground text-xs">{allLabel}</span>
           <Switch checked={allLibraries} onCheckedChange={handleAllLibrariesChange} />
         </div>
       </div>
+
+      {allLibraries && emptyHint && <p className="text-muted-foreground text-xs">{emptyHint}</p>}
 
       {!allLibraries && (
         <div className="grid gap-1.5">

@@ -291,8 +291,8 @@ func TestSessionManager_UserLimitProviderOverridesDefaults(t *testing.T) {
 	}
 }
 
-func TestSessionManager_GroupPolicyLimitUsesStricterValue(t *testing.T) {
-	user := &models.User{ID: 1, MaxStreams: 6, MaxTranscodes: 2}
+func TestSessionManager_GroupPolicyLimitAppliesWhenAccountInherits(t *testing.T) {
+	user := &models.User{ID: 1}
 	group := &access.GroupPolicy{MaxStreams: 1, MaxTranscodes: 1, RequestsAllowed: true}
 	sm := playback.NewSessionManager(6, 2)
 	sm.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {

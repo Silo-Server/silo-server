@@ -124,12 +124,14 @@ func TestPolicyActingAdminMiddlewareEvalErrorIsInternal(t *testing.T) {
 }
 
 func TestPolicyMetadataCurationMiddlewareAppliesGroupPermissionMask(t *testing.T) {
+	groupID := int64(3)
 	user := &models.User{
-		ID:          7,
-		Role:        "user",
-		Enabled:     true,
-		LibraryIDs:  []int{1},
-		Permissions: []string{policy.PermissionMetadataCuration},
+		ID:            7,
+		Role:          "user",
+		Enabled:       true,
+		AccessGroupID: &groupID,
+		LibraryIDs:    []int{1},
+		Permissions:   []string{policy.PermissionMetadataCuration},
 	}
 	rec := captureMetadataCurationResponse(
 		NewPolicyPermissionMiddleware(
@@ -202,11 +204,13 @@ func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
 }
 
 func TestPolicyMarkerEditMiddlewareAppliesGroupPermissionMask(t *testing.T) {
+	groupID := int64(3)
 	user := &models.User{
-		ID:          7,
-		Role:        "user",
-		Enabled:     true,
-		Permissions: []string{policy.PermissionMarkerEdit},
+		ID:            7,
+		Role:          "user",
+		Enabled:       true,
+		AccessGroupID: &groupID,
+		Permissions:   []string{policy.PermissionMarkerEdit},
 	}
 	rec := captureMarkerEditResponse(
 		NewPolicyPermissionMiddleware(

@@ -8,18 +8,26 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 )
 
 // InvitationHandler handles the public (unauthenticated) claim endpoints.
 type InvitationHandler struct {
-	service *invitations.Service
+	service      *invitations.Service
+	accessGroups access.GroupPolicyProvider
 }
 
 // NewInvitationHandler creates a new InvitationHandler.
 func NewInvitationHandler(service *invitations.Service) *InvitationHandler {
 	return &InvitationHandler{service: service}
+}
+
+// SetAccessGroupProvider wires the access-group policy source used to resolve
+// the effective policy reported on the accept-invitation login response.
+func (h *InvitationHandler) SetAccessGroupProvider(provider access.GroupPolicyProvider) {
+	h.accessGroups = provider
 }
 
 type invitationLookupResponse struct {
@@ -85,5 +93,5 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, nil))
+	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), nil))
 }

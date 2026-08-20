@@ -31,6 +31,7 @@ type SectionHandler struct {
 	EpisodeRepo           *catalog.EpisodeRepository
 	StoreProvider         userstore.UserStoreProvider
 	UserRepo              *auth.UserRepository
+	AccessGroups          access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	DetailSvc             *catalog.DetailService
 	Settings              catalog.SettingsStore
 	CollectionRepo        *catalog.LibraryCollectionRepository
@@ -760,10 +761,24 @@ func (h *SectionHandler) loadResolvedHomeSections(r *http.Request) ([]sections.R
 		accessFilter.DisabledLibraryIDs = scope.DisabledLibraryIDs
 		accessFilter.MaxContentRating = scope.MaxContentRating
 	} else if h.UserRepo != nil {
-		user, _ := h.UserRepo.GetByID(r.Context(), userID)
-		if user != nil && user.LibraryIDs != nil {
-			libraryIDs = user.LibraryIDs
-			accessFilter.AllowedLibraryIDs = user.LibraryIDs
+		// Fail closed: an unresolved policy must not serve unrestricted
+		// sections, so a lookup failure becomes an error for the caller
+		// rather than a silently permissive filter.
+		user, userErr := h.UserRepo.GetByID(r.Context(), userID)
+		if userErr != nil {
+			slog.ErrorContext(r.Context(), "looking up user for section access", "component", "api", "error", userErr)
+			return nil, nil, catalog.AccessFilter{}, profileID, userErr
+		}
+		if user != nil {
+			effective, policyErr := access.EffectivePolicyForUser(r.Context(), user, h.AccessGroups)
+			if policyErr != nil {
+				slog.ErrorContext(r.Context(), "resolving user policy for section access", "component", "api", "error", policyErr)
+				return nil, nil, catalog.AccessFilter{}, profileID, policyErr
+			}
+			if effective.LibraryIDs != nil {
+				libraryIDs = effective.LibraryIDs
+				accessFilter.AllowedLibraryIDs = effective.LibraryIDs
+			}
 		}
 	}
 

@@ -97,7 +97,7 @@ func TestResolveViewerScopeParity(t *testing.T) {
 									user := &models.User{
 										ID:                   42,
 										LibraryIDs:           cloneParityInts(accountCase.libraryIDs),
-										MaxPlaybackQuality:   accountQualityCase.value,
+										MaxPlaybackQuality:   ptr(accountQualityCase.value),
 										AccessPolicyRevision: 9,
 									}
 									profile := cloneParityProfile(profileCase.profile)
@@ -212,7 +212,7 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		SessionID:            "sess-1",
 		AccountLibraryIDs:    cloneParityInts(user.LibraryIDs),
 		AccountRestricted:    user.LibraryIDs != nil,
-		AccountMaxQuality:    user.MaxPlaybackQuality,
+		AccountMaxQuality:    access.ApplyGroupPolicy(user, nil).MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
 		DisabledLibraryIDs:   cloneParityInts(disabled),
 		ProfileVerified:      true,

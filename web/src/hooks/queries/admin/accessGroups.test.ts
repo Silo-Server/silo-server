@@ -24,6 +24,8 @@ const group: AccessGroup = {
   max_playback_quality: "source",
   download_allowed: true,
   download_transcode_allowed: true,
+  transcode_allowed: true,
+  audio_transcode_allowed: true,
   max_streams: 0,
   max_transcodes: 0,
   allowed_permissions: null,

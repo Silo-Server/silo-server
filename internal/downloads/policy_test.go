@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -132,7 +133,7 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			user := &models.User{DownloadAllowed: true, DownloadTranscodeAllowed: tc.userTranscode}
+			user := &PolicyUser{Policy: access.EffectiveUserPolicy{DownloadAllowed: true, DownloadTranscodeAllowed: tc.userTranscode}}
 			cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: tc.transcodeEnabled}
 
 			got, err := resolver.Resolve(ctx, tc.requested, user, cfg, tc.file, tc.caps, tc.artifactsAvailable, "")

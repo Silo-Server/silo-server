@@ -196,7 +196,7 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 		resp.AccessToken = result.TokenPair.AccessToken
 		resp.RefreshToken = result.TokenPair.RefreshToken
 		resp.ExpiresIn = result.TokenPair.ExpiresIn
-		user := buildUserResponse(result.User, nil, nil)
+		user := buildUserResponse(result.User, effectiveDownloadAllowed(r.Context(), result.User, h.accessGroups), nil, nil)
 		resp.User = &user
 		if result.Temporary {
 			resp.ProfileID = result.ProfileID

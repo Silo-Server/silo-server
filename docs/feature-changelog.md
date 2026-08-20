@@ -26,6 +26,20 @@ Plugin watch providers can now ask for connection details per profile instead of
 
 ## 2026-08-19
 
+### Scope API keys to the admin routes they need
+`sa_` API keys can carry scopes. A key without scopes behaves exactly as before — full access as its owning user — while a scoped key is an allowlist credential admitted only to the routes its scopes name. Scopes narrow, they never grant: the owning user's role checks still apply afterwards.
+- Two scopes ship: `admin:users` (user lifecycle plus reading a user's profiles) and `admin:access-groups:read`. Impersonation is outside both.
+- A scoped `admin:users` key cannot escalate: it may not create or promote an `admin` account and may not set a password on an existing admin, so a leaked key cannot mint an unscoped login.
+- `POST /api/v1/api-keys` and `POST /api/v1/admin/api-keys` accept `scopes`; `GET /api/v1/api-keys/scopes` advertises the supported scopes for feature detection. Jellyfin-compat surfaces refuse scoped keys.
+
+### Per-user policy overrides inherit from the access group
+User policy fields stop being "strictest of user and group wins" and become inherit/override: a field left unset on the account takes the access group's value, and a field set on the account is authoritative in either direction — an admin can grant downloads to one member of a no-downloads plan, or cap one member of an unlimited plan.
+- Makes every user policy field nullable (`max_streams`, `max_transcodes`, `max_playback_quality`, `transcode_allowed`, `audio_transcode_allowed`, `download_allowed`, `download_transcode_allowed`, `library_ids`, plus a new `requests_allowed`); `null` means inherit. `0` on a stream or transcode cap now means an explicit "unlimited" override instead of "defer to the group".
+- Adds `transcode_allowed` and `audio_transcode_allowed` to access groups so every account field has a group value to inherit, and lets users override the group's media-request gate.
+- Admin user API: `GET` responses carry the stored overrides (null when inherited) plus an `effective_policy` block with the resolved values; `PUT` accepts an explicit `null` on any policy field to clear an override back to inherit. Login and `/auth/me` now report the resolved `download_allowed`.
+- Migration maps existing rows so an account that was deferring to its group keeps doing so (a cap of 0 or less, an empty quality, and a permissive boolean become inherit), while explicit restrictions (false, positive caps, a named quality, a library list) stay as overrides. Two behavior changes come with it: a stored cap above the group's cap now wins instead of being clamped, and `download_transcode_allowed` — the one field whose old column default was "off", so nearly every account stores false — maps false to inherit rather than to an explicit deny, which means members of a group that allows transcoded downloads now get them. Only an explicit `true` on the account survives as an override; an account with no group still defaults to "off" for that field.
+- Web admin: user forms gain per-field Inherit/Override controls and show the effective value next to each inherited field; the access-group editor gains the two transcode gates.
+
 ### Make published server builds easy to compare
 Every successful default-branch container build now carries an ordered build number alongside its exact source revision.
 - Publishes `build-N` beside the existing mutable `latest` and short-commit-SHA image tags.

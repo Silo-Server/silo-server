@@ -29,6 +29,14 @@ type QualityDecision struct {
 	RequiresArtifact  bool
 }
 
+// PolicyUser is the resolved (access-group-merged) download policy for an
+// account. Download checks never read raw models.User policy fields: those
+// are inherit/override pointers and only make sense after resolution.
+type PolicyUser struct {
+	ID     int
+	Policy access.EffectiveUserPolicy
+}
+
 // DownloadQualityResolver validates a client-facing quality request and maps it
 // to the concrete delivery format and encode target the server should record.
 type DownloadQualityResolver struct {
@@ -40,7 +48,7 @@ type DownloadQualityResolver struct {
 func (r DownloadQualityResolver) Resolve(
 	ctx context.Context,
 	requested string,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	file *models.MediaFile,
 	caps playback.ClientCapabilities,
@@ -77,7 +85,7 @@ func (r DownloadQualityResolver) Resolve(
 	decision := playback.PlayDirect
 	if hasCapabilities(caps) {
 		playDecision := playback.Resolve(file, caps, playback.AdminSettings{
-			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
+			TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
 			Allow4KTranscode: true,
 		})
 		decision = playDecision.Method
@@ -106,7 +114,7 @@ func (r DownloadQualityResolver) Resolve(
 			return QualityDecision{}, err
 		}
 		target := playback.ResolvePrepareTarget(file, FormatRemux, caps, playback.AdminSettings{
-			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
+			TranscodeEnabled: cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed,
 			Allow4KTranscode: true,
 		})
 		return QualityDecision{
@@ -141,12 +149,12 @@ func (r DownloadQualityResolver) Resolve(
 // PresetsFor returns the ordered quality list currently fulfillable for a
 // user. Always non-nil: the capability contract documents quality_presets as
 // an array, and a nil slice would serialize as JSON null.
-func (DownloadQualityResolver) PresetsFor(user *models.User, cfg config.DownloadConfig, artifactsAvailable bool) []string {
-	if !cfg.Enabled || user == nil || !user.DownloadAllowed {
+func (DownloadQualityResolver) PresetsFor(user *PolicyUser, cfg config.DownloadConfig, artifactsAvailable bool) []string {
+	if !cfg.Enabled || user == nil || !user.Policy.DownloadAllowed {
 		return []string{}
 	}
 	presets := []string{QualityOriginal}
-	if artifactsAvailable && cfg.TranscodeEnabled && user.DownloadTranscodeAllowed {
+	if artifactsAvailable && cfg.TranscodeEnabled && user.Policy.DownloadTranscodeAllowed {
 		presets = append(presets, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps)
 	}
 	return presets
@@ -161,7 +169,7 @@ func (s *Service) SetActionDecider(decider ActionDecider) {
 
 func (s *Service) policyPresetsFor(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 ) []string {
@@ -179,7 +187,7 @@ func (s *Service) downloadConfigForUser(
 	ctx context.Context,
 	userID int,
 	deviceID string,
-) (config.DownloadConfig, *models.User, error) {
+) (config.DownloadConfig, *PolicyUser, error) {
 	cfg, err := s.downloadConfigForFeature(ctx, userID, deviceID)
 	if err != nil {
 		return cfg, nil, err
@@ -204,12 +212,12 @@ func (s *Service) downloadUserForConfig(
 	userID int,
 	cfg config.DownloadConfig,
 	deviceID string,
-) (*models.User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID)
+) (*PolicyUser, error) {
+	account, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("loading user: %w", err)
 	}
-	user, err = s.effectiveDownloadUser(ctx, user)
+	user, err := s.effectiveDownloadUser(ctx, account)
 	if err != nil {
 		return nil, ErrDownloadNotAllowed
 	}
@@ -223,7 +231,7 @@ func (s *Service) checkDownloadAction(
 	ctx context.Context,
 	action string,
 	userID int,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	deviceID string,
@@ -232,7 +240,7 @@ func (s *Service) checkDownloadAction(
 		if !cfg.Enabled {
 			return ErrFeatureDisabled
 		}
-		if user == nil || !user.DownloadAllowed {
+		if user == nil || !user.Policy.DownloadAllowed {
 			return ErrDownloadNotAllowed
 		}
 		return nil
@@ -295,7 +303,7 @@ func normalizeQuality(q string) string {
 // user's max playback quality) so the caller can cap the prepared artifact.
 func (r DownloadQualityResolver) ensureTranscodeAvailable(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	requestedQuality string,
@@ -336,14 +344,14 @@ func (r DownloadQualityResolver) ensureTranscodeAvailable(
 // ceiling applies to the prepared artifact (see downloadActionInput).
 func (r DownloadQualityResolver) ensureServedQualityAllowed(
 	ctx context.Context,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	file *models.MediaFile,
 	deviceID string,
 ) error {
 	if r.actionDecider == nil {
-		if user != nil && !access.QualityAllowed(file.Resolution, user.MaxPlaybackQuality) {
+		if user != nil && !access.QualityAllowed(file.Resolution, user.Policy.MaxPlaybackQuality) {
 			return ErrQualityUnavailable
 		}
 		return nil
@@ -391,11 +399,11 @@ func applyQualityCeiling(target *playback.PrepareTarget, file *models.MediaFile,
 	}
 }
 
-func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error {
+func ensureTranscodeAllowed(user *PolicyUser, cfg config.DownloadConfig) error {
 	if !cfg.TranscodeEnabled {
 		return ErrTranscodeDisabled
 	}
-	if user == nil || !user.DownloadTranscodeAllowed {
+	if user == nil || !user.Policy.DownloadTranscodeAllowed {
 		return ErrDownloadNotAllowed
 	}
 	return nil
@@ -412,7 +420,7 @@ func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error 
 func downloadActionInput(
 	action string,
 	userID int,
-	user *models.User,
+	user *PolicyUser,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
 	deviceID string,
@@ -429,14 +437,14 @@ func downloadActionInput(
 	}
 	if user != nil {
 		input.UserID = user.ID
-		input.DownloadAllowed = user.DownloadAllowed
-		input.DownloadTranscodeAllowed = user.DownloadTranscodeAllowed
-		input.MaxPlaybackQuality = user.MaxPlaybackQuality
+		input.DownloadAllowed = user.Policy.DownloadAllowed
+		input.DownloadTranscodeAllowed = user.Policy.DownloadTranscodeAllowed
+		input.MaxPlaybackQuality = user.Policy.MaxPlaybackQuality
 	}
 	return input
 }
 
-func userIDForPolicy(user *models.User) int {
+func userIDForPolicy(user *PolicyUser) int {
 	if user == nil {
 		return 0
 	}
