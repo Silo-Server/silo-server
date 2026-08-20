@@ -236,3 +236,56 @@ func TestPrepareFileRemovesFailedPartialOutput(t *testing.T) {
 		t.Fatalf("failed prepared output left a partial file: %v", statErr)
 	}
 }
+
+func TestPrepareFileRetriesVideoToolboxFailureInSoftware(t *testing.T) {
+	setupHWAccelTest(t)
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	logPath := filepath.Join(dir, "invocations.log")
+	// Answers capability probes and smoke encodes, fails real VideoToolbox
+	// encodes, and succeeds software encodes by writing the output file
+	// (ffmpeg's contract PrepareFile finalizes on).
+	fake := "#!/bin/sh\n" +
+		"printf '%s\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; echo ' V..... hevc_videotoolbox x'; exit 0 ;;\n" +
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
+		"  *videotoolbox*) exit 1 ;;\n" +
+		"  *) for last; do :; done; printf x > \"$last\"; exit 0 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(fake), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:         "/media/movie.mkv",
+		SessionID:         "prepare-vt-retry",
+		FFmpegPath:        script,
+		SourceVideoCodec:  "h264",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		TargetResolution:  "720p",
+		TargetBitrateKbps: 2000,
+		HWAccel:           "videotoolbox",
+		AudioTrackIndex:   -1,
+	}, outputPath)
+	if err != nil {
+		t.Fatalf("PrepareFile() error = %v, want software retry to succeed", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("finalized artifact missing: %v", err)
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read invocation log: %v", err)
+	}
+	if !strings.Contains(string(log), "h264_videotoolbox -pix_fmt") {
+		t.Fatalf("first attempt should encode with VideoToolbox:\n%s", log)
+	}
+	if !strings.Contains(string(log), "libx264") {
+		t.Fatalf("retry should encode with libx264:\n%s", log)
+	}
+}

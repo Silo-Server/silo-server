@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,23 +96,44 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		return fmt.Errorf("prepare-file: %w", err)
 	}
 
-	args := buildPrepareFileArgs(opts, partPath)
-	bin := opts.FFmpegPath
-	if bin == "" {
-		bin = ffmpegBinary()
+	runOnce := func(runOpts TranscodeOpts) error {
+		args := buildPrepareFileArgs(runOpts, partPath)
+		bin := runOpts.FFmpegPath
+		if bin == "" {
+			bin = ffmpegBinary()
+		}
+
+		cmd := exec.CommandContext(ctx, bin, args...)
+		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
+		cmd.Stderr = stderr
+		cmd.WaitDelay = 3 * time.Second
+
+		if err := cmd.Run(); err != nil {
+			_ = os.Remove(partPath)
+			if tail := truncateStderr(stderr.String()); tail != "" {
+				return fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail)
+			}
+			return fmt.Errorf("%w: %w", ErrTranscodeFailed, err)
+		}
+		return nil
 	}
 
-	cmd := exec.CommandContext(ctx, bin, args...)
-	stderr := newBoundedTailBuffer(stderrTailMaxBytes)
-	cmd.Stderr = stderr
-	cmd.WaitDelay = 3 * time.Second
-
-	if err := cmd.Run(); err != nil {
-		_ = os.Remove(partPath)
-		if tail := truncateStderr(stderr.String()); tail != "" {
-			return fmt.Errorf("%w: %w (stderr: %s)", ErrTranscodeFailed, err, tail)
+	err := runOnce(opts)
+	if err != nil && ctx.Err() == nil {
+		// Mirror the transport startup retry: a VideoToolbox encode the
+		// hardware cannot perform (e.g. at the artifact's dimensions) retries
+		// once in software instead of failing every artifact rebuild with the
+		// same hardware command.
+		if retryAccel := StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
+			slog.Warn("prepared encode failed; retrying with software encoding",
+				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
+			retryOpts := opts
+			retryOpts.HWAccel = retryAccel
+			err = runOnce(retryOpts)
 		}
-		return fmt.Errorf("%w: %w", ErrTranscodeFailed, err)
+	}
+	if err != nil {
+		return err
 	}
 
 	if err := syncPreparedFile(partPath); err != nil {
