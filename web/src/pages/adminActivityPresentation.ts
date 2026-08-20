@@ -213,6 +213,8 @@ export function formatTranscodeModeSummary(session: AdminSession): string | null
       return "HW QSV";
     case "vaapi":
       return "HW VAAPI";
+    case "videotoolbox":
+      return "HW VideoToolbox";
     case "none":
       return "SW";
     case "auto":

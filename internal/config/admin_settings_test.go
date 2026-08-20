@@ -264,6 +264,16 @@ func TestNormalizeAdminSettingAcceptsApprovedThemeCatalogURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeAdminSettingAcceptsVideoToolbox(t *testing.T) {
+	got, err := NormalizeAdminSetting("playback.hw_accel", " VideoToolbox ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "videotoolbox" {
+		t.Fatalf("normalized hardware acceleration = %q, want videotoolbox", got)
+	}
+}
+
 func TestValidateAdminSettingsChecksProspectiveRelationships(t *testing.T) {
 	values := map[string]string{
 		"auth.access_token_expiry":      "48h",

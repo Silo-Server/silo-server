@@ -151,6 +151,9 @@ describe("adminActivityPresentation", () => {
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "nvenc" }))).toBe(
       "HW NVENC",
     );
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "videotoolbox" }))).toBe(
+      "HW VideoToolbox",
+    );
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "none" }))).toBe("SW");
     expect(
       formatTranscodeModeSummary(

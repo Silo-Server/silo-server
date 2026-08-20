@@ -286,6 +286,58 @@ func TestExtractFrameUnsupportedHardwareUsesCPU(t *testing.T) {
 	}
 }
 
+func TestExtractFrameVideoToolboxUsesHardwareDecodeOnce(t *testing.T) {
+	calls := 0
+	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:   "/media/movie.mkv",
+		SeekSeconds: 42.5,
+		HWAccel:     "videotoolbox",
+		RunFunc: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			calls++
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, "-hwaccel videotoolbox") {
+				t.Fatalf("VideoToolbox extraction missing hardware decode: %s", joined)
+			}
+			if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "-hwaccel_output_format") {
+				t.Fatalf("VideoToolbox extraction must keep software frames: %s", joined)
+			}
+			return []byte("frame"), nil
+		},
+	})
+	if err != nil || reason != "" || string(data) != "frame" {
+		t.Fatalf("ExtractFrame() = %q, %q, %v", data, reason, err)
+	}
+	if calls != 1 {
+		t.Fatalf("extract calls = %d, want 1", calls)
+	}
+}
+
+func TestExtractFrameVideoToolboxHDRUsesSoftwareToneMap(t *testing.T) {
+	resolver := resolverWithFilters(t, "zscale", "tonemapx")
+	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:               "/media/hdr.mkv",
+		SeekSeconds:             42.5,
+		FFmpegPath:              "/test/ffmpeg",
+		HWAccel:                 "videotoolbox",
+		ToneMap:                 true,
+		AllowSoftwareToneMap:    true,
+		softwareToneMapResolver: resolver,
+		RunFunc: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, "-hwaccel videotoolbox") {
+				t.Fatalf("VideoToolbox HDR extraction missing hardware decode: %s", joined)
+			}
+			if !strings.Contains(joined, softwareToneMapFilterBT2390) {
+				t.Fatalf("VideoToolbox HDR extraction missing software tone map: %s", joined)
+			}
+			return []byte("frame"), nil
+		},
+	})
+	if err != nil || reason != "" || string(data) != "frame" {
+		t.Fatalf("ExtractFrame() = %q, %q, %v", data, reason, err)
+	}
+}
+
 func TestExtractFrameUnsupportedHardwarePreservesSDRRetry(t *testing.T) {
 	calls := 0
 	var firstRemaining, retryRemaining time.Duration

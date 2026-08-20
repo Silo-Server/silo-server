@@ -12,7 +12,11 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Node.js 22+ with pnpm 10.32.1
 - PostgreSQL 18 with pgvector
 - Redis
-- FFmpeg (transcoding)
+- FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
+  text-subtitle burn-in and the complete filter set are available alongside
+  VideoToolbox: `brew install ffmpeg-full`. Silo discovers the Apple Silicon
+  and Intel keg paths automatically when the FFmpeg Path setting is blank; a
+  custom build can be selected explicitly in Admin Settings.
 - A C compiler and build toolchain (CGO dependencies)
 - pkg-config and the libvips development headers (image processing through bimg)
 

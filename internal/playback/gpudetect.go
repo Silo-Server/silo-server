@@ -29,6 +29,13 @@ var (
 	nvencProbeNegativeTTL      = 15 * time.Second
 )
 
+type hardwareProbeResult struct {
+	available     bool
+	reason        string
+	h264Available bool
+	hevcAvailable bool
+}
+
 type nvencProbeResult struct {
 	available bool
 	reason    string
@@ -49,9 +56,9 @@ var nvencProbeCache = struct {
 
 var videoToolboxProbeCache = struct {
 	sync.Mutex
-	byPath map[string]nvencProbeResult
+	byPath map[string]hardwareProbeResult
 }{
-	byPath: make(map[string]nvencProbeResult),
+	byPath: make(map[string]hardwareProbeResult),
 }
 
 // HWAccelInfo describes the detected hardware acceleration capability.
@@ -294,11 +301,30 @@ func nvencProbeCacheKey(ffmpegPath string) string {
 }
 
 func ffmpegSupportsVideoToolbox(ffmpegPath string) (bool, string) {
+	result := cachedVideoToolboxProbe(ffmpegPath)
+	return result.available, result.reason
+}
+
+func videoToolboxSupportsTargetCodec(ffmpegPath, codec string) (bool, string) {
+	result := cachedVideoToolboxProbe(ffmpegPath)
+	if strings.EqualFold(strings.TrimSpace(codec), "hevc") {
+		if result.hevcAvailable {
+			return true, ""
+		}
+		return false, "hevc_videotoolbox encoder unavailable or failed its smoke encode"
+	}
+	if result.h264Available {
+		return true, ""
+	}
+	return false, result.reason
+}
+
+func cachedVideoToolboxProbe(ffmpegPath string) hardwareProbeResult {
 	ffmpegPath = normalizeFFmpegPath(ffmpegPath)
 	videoToolboxProbeCache.Lock()
 	if result, ok := videoToolboxProbeCache.byPath[ffmpegPath]; ok {
 		videoToolboxProbeCache.Unlock()
-		return result.available, result.reason
+		return result
 	}
 	videoToolboxProbeCache.Unlock()
 
@@ -306,55 +332,63 @@ func ffmpegSupportsVideoToolbox(ffmpegPath string) (bool, string) {
 	videoToolboxProbeCache.Lock()
 	videoToolboxProbeCache.byPath[ffmpegPath] = result
 	videoToolboxProbeCache.Unlock()
-	return result.available, result.reason
+	return result
 }
 
 // probeFFmpegVideoToolbox verifies the configured FFmpeg exposes VideoToolbox
-// decode plus both encoders, then smoke-encodes one frame per encoder in the
-// same constant-quality mode the uncapped transcode path emits (-q:v needs an
-// Apple Silicon compression session; Intel Macs must fail here so auto
-// resolves to software instead of approving commands that cannot run). No
-// filter probes: the videotoolbox pipeline keeps decoded frames in system
-// memory, so the regular software filter graph applies (see appendHWAccelArgs).
-func probeFFmpegVideoToolbox(ffmpegPath string) nvencProbeResult {
-	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return nvencProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
+// decode plus H.264 encode, then smoke-encodes each advertised encoder in the
+// portable bitrate mode used by the transcode builder. H.264 is the required
+// baseline because Silo's current playback ladder targets H.264; HEVC is
+// recorded independently so older Intel Macs can still accelerate H.264 while
+// an HEVC recipe falls back to software. No filter probes: the VideoToolbox
+// pipeline keeps decoded frames in system memory, so the regular software
+// filter graph applies (see appendHWAccelArgs).
+func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
+	if output, err := runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
+		return hardwareProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "videotoolbox") {
-		return nvencProbeResult{reason: "videotoolbox hwaccel unavailable"}
+		return hardwareProbeResult{reason: "videotoolbox hwaccel unavailable"}
 	}
 
-	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return nvencProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
-	} else if !ffmpegOutputHasToken(output, "h264_videotoolbox") {
-		return nvencProbeResult{reason: "h264_videotoolbox encoder unavailable"}
-	} else if !ffmpegOutputHasToken(output, "hevc_videotoolbox") {
-		return nvencProbeResult{reason: "hevc_videotoolbox encoder unavailable"}
+	output, err := runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, "-hide_banner", "-encoders")
+	if err != nil {
+		return hardwareProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
+	}
+	if !ffmpegOutputHasToken(output, "h264_videotoolbox") {
+		return hardwareProbeResult{reason: "h264_videotoolbox encoder unavailable"}
 	}
 
-	for _, smoke := range []struct {
-		encoder string
-		quality string
-	}{
-		{"h264_videotoolbox", "65"},
-		{"hevc_videotoolbox", "60"},
-	} {
-		if output, err := runFFmpegProbe(ffmpegPath,
+	smoke := func(encoder string) ([]byte, error) {
+		return runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath,
 			"-hide_banner",
 			"-loglevel", "error",
 			"-f", "lavfi",
 			"-i", "testsrc2=size=640x360:rate=1",
 			"-frames:v", "1",
 			"-an",
-			"-c:v", smoke.encoder,
-			"-q:v", smoke.quality,
+			"-c:v", encoder,
+			"-b:v", "2000k",
+			"-maxrate", "2000k",
+			"-bufsize", "4000k",
 			"-f", "null",
 			"-",
-		); err != nil {
-			return nvencProbeResult{reason: smoke.encoder + " smoke encode failed: " + FormatFFmpegProbeFailure(err, output)}
-		}
+		)
 	}
 
-	return nvencProbeResult{available: true}
+	h264Output, err := smoke("h264_videotoolbox")
+	if err != nil {
+		return hardwareProbeResult{reason: "h264_videotoolbox smoke encode failed: " + FormatFFmpegProbeFailure(err, h264Output)}
+	}
+
+	result := hardwareProbeResult{available: true, h264Available: true}
+	if ffmpegOutputHasToken(output, "hevc_videotoolbox") {
+		hevcOutput, hevcErr := smoke("hevc_videotoolbox")
+		result.hevcAvailable = hevcErr == nil
+		if hevcErr != nil {
+			result.reason = "hevc_videotoolbox smoke encode failed: " + FormatFFmpegProbeFailure(hevcErr, hevcOutput)
+		}
+	}
+	return result
 }
 
 func normalizeFFmpegPath(ffmpegPath string) string {

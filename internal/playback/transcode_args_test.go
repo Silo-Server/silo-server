@@ -275,7 +275,7 @@ func TestPrepareSubtitleFilterInputCreatesParserSafeAlias(t *testing.T) {
 	if !strings.Contains(joined, "-i "+inputPath) {
 		t.Fatalf("media input should keep its original path: %s", joined)
 	}
-	if !strings.Contains(joined, "subtitles='"+wantAlias+"':si=2") {
+	if !strings.Contains(joined, "subtitles=filename='"+wantAlias+"':si=2") {
 		t.Fatalf("subtitle filter should use the parser-safe alias: %s", joined)
 	}
 }
@@ -795,7 +795,7 @@ func TestBuildFFmpegArgs_H264High10QSVASSBurnInUsesSoftwareFrames(t *testing.T) 
 	})
 
 	joined := strings.Join(args, " ")
-	want := "-vf format=yuv420p,scale=-2:720,subtitles='/media/high10.mkv':si=0,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
+	want := "-vf format=yuv420p,scale=-2:720,subtitles=filename='/media/high10.mkv':si=0,format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("High 10 ASS burn-in should render on software frames then upload %q: %s", want, joined)
 	}
@@ -1007,7 +1007,7 @@ func TestBuildFFmpegArgs_TextBurnInStillUsesSubtitlesFilter(t *testing.T) {
 	})
 
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-vf scale=-2:1080,subtitles='/media/movie.mkv':si=1") {
+	if !strings.Contains(joined, "-vf scale=-2:1080,subtitles=filename='/media/movie.mkv':si=1") {
 		t.Fatalf("text burn-in should keep the libass subtitles -vf path: %s", joined)
 	}
 	if strings.Contains(joined, "-filter_complex") {
@@ -1034,7 +1034,7 @@ func TestBuildFFmpegArgs_LegacyBurnInWithoutCodecKeepsTextPath(t *testing.T) {
 	})
 
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "subtitles='/media/movie.mkv':si=0") {
+	if !strings.Contains(joined, "subtitles=filename='/media/movie.mkv':si=0") {
 		t.Fatalf("legacy burn-in without codec should keep the subtitles filter: %s", joined)
 	}
 	if strings.Contains(joined, "-filter_complex") {
@@ -1121,6 +1121,30 @@ func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 				t.Fatalf("resolveEffectiveTranscodeHWAccel() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResolveEffectiveTranscodeHWAccelVideoToolboxChecksTargetEncoder(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, smokeOK: true})
+
+	base := TranscodeOpts{
+		FFmpegPath:       ffmpeg.path,
+		HWAccel:          "videotoolbox",
+		SourceVideoCodec: "h264",
+	}
+
+	h264 := base
+	h264.TargetCodecVideo = "h264"
+	if got := resolveEffectiveTranscodeHWAccel(h264); got != "videotoolbox" {
+		t.Fatalf("H.264 target resolved to %q, want videotoolbox", got)
+	}
+
+	hevc := base
+	hevc.TargetCodecVideo = "hevc"
+	if got := resolveEffectiveTranscodeHWAccel(hevc); got != "none" {
+		t.Fatalf("HEVC target resolved to %q, want software fallback", got)
 	}
 }
 
@@ -1340,6 +1364,28 @@ func TestBuildFFmpegArgs_VideoToolboxH264UsesSoftwareFilters(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgs_VideoToolboxH264UsesPortableDefaultBitrate(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:        "/media/movie.mkv",
+		OutputDir:        "/tmp/out",
+		SessionID:        "session-vt-default-rate",
+		SourceVideoCodec: "h264",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		HWAccel:          "videotoolbox",
+		TargetResolution: "720p",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-b:v 2000k -maxrate 2000k -bufsize 4000k") {
+		t.Fatalf("uncapped VideoToolbox H.264 should use the portable 720p default bitrate: %s", joined)
+	}
+	if strings.Contains(joined, "-q:v") {
+		t.Fatalf("VideoToolbox must not use Apple-Silicon-only qscale mode: %s", joined)
+	}
+}
+
 func TestBuildFFmpegArgs_VideoToolboxHi10PDecodesInSoftware(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:          "/media/movie.mkv",
@@ -1382,8 +1428,8 @@ func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
 	if strings.Contains(joined, "-pix_fmt") {
 		t.Fatalf("videotoolbox hevc must not force a pixel format (HDR10 passthrough): %s", joined)
 	}
-	if !strings.Contains(joined, "-q:v 60") {
-		t.Fatalf("uncapped videotoolbox hevc should use constant-quality mode: %s", joined)
+	if !strings.Contains(joined, "-b:v 6000k -maxrate 6000k -bufsize 12000k") {
+		t.Fatalf("uncapped videotoolbox hevc should use the portable default bitrate: %s", joined)
 	}
 }
 

@@ -47,7 +47,7 @@ func TestChapterCaptureTime(t *testing.T) {
 
 func TestBuildFrameExtractArgs(t *testing.T) {
 	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "qsv", "/dev/dri/renderD128", false)
+		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "qsv", "/dev/dri/renderD128", false, "")
 		if err != nil {
 			t.Fatalf("buildFrameExtractArgs() error = %v", err)
 		}
@@ -57,7 +57,7 @@ func TestBuildFrameExtractArgs(t *testing.T) {
 	})
 
 	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "vaapi", "/dev/dri/renderD128", false)
+		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "vaapi", "/dev/dri/renderD128", false, "")
 		if err != nil {
 			t.Fatalf("buildFrameExtractArgs() error = %v", err)
 		}
@@ -67,7 +67,7 @@ func TestBuildFrameExtractArgs(t *testing.T) {
 	})
 
 	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false)
+		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false, "")
 		if err == nil || !strings.Contains(err.Error(), "does not support") {
 			t.Fatalf("buildFrameExtractArgs() error = %v, want unsupported accelerator error", err)
 		}

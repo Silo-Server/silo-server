@@ -80,6 +80,12 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
 			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
 		},
+		{
+			name:      "videotoolbox keeps hardware encode with software decode",
+			hwAccel:   "videotoolbox",
+			want:      []string{"-c:v h264_videotoolbox", "-vf scale=-2:720"},
+			forbidden: []string{"-hwaccel videotoolbox"},
+		},
 	}
 
 	for _, tt := range tests {

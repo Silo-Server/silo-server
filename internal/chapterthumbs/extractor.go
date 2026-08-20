@@ -33,6 +33,7 @@ const (
 	hwAccelNone                 = "none"
 	hwAccelQSV                  = "qsv"
 	hwAccelVAAPI                = "vaapi"
+	hwAccelVideoToolbox         = "videotoolbox"
 	reasonChapterExtractFailed  = "chapter_extract_failed"
 	reasonDecodeInvalidData     = "decode_invalid_data"
 	reasonFFmpegProbeFailed     = "ffmpeg_probe_failed"
@@ -185,6 +186,19 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 
 	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
 	if supportsHardwareFrameExtract(resolvedAccel) {
+		softwareToneMapFilter := ""
+		if resolvedAccel == hwAccelVideoToolbox && opts.ToneMap {
+			if !opts.AllowSoftwareToneMap {
+				err := errors.New("software HDR tone mapping is disabled")
+				return nil, reasonToneMapUnsupported, wrapReason(reasonToneMapUnsupported, err)
+			}
+			filter, reason, err := softwareToneMapResolver.resolve(ffmpegPath)
+			if err != nil {
+				return nil, reason, wrapReason(reason, err)
+			}
+			softwareToneMapFilter = filter
+		}
+
 		// Resolve a multi-device hw_device list to one concrete GPU for this
 		// extraction; the reservation spans only the hardware attempt below.
 		resolvedDevice, releaseHWDevice := playback.AcquireHWDevice(opts.HWDevice, resolvedAccel)
@@ -193,7 +207,14 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 			resolvedDevice = playback.PickRenderDevice("")
 		}
 
-		args, buildErr := buildFrameExtractArgs(opts.InputPath, opts.SeekSeconds, resolvedAccel, resolvedDevice, opts.ToneMap)
+		args, buildErr := buildFrameExtractArgs(
+			opts.InputPath,
+			opts.SeekSeconds,
+			resolvedAccel,
+			resolvedDevice,
+			opts.ToneMap,
+			softwareToneMapFilter,
+		)
 		if buildErr == nil {
 			attemptCtx, cancel := context.WithTimeout(ctx, extractTimeoutForAttempt(true, opts.ToneMap))
 			data, err := runExtract(attemptCtx, ffmpegPath, args)
@@ -241,7 +262,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 }
 
 func supportsHardwareFrameExtract(hwAccel string) bool {
-	return hwAccel == hwAccelQSV || hwAccel == hwAccelVAAPI
+	return hwAccel == hwAccelQSV || hwAccel == hwAccelVAAPI || hwAccel == hwAccelVideoToolbox
 }
 
 type cpuFrameExtractOptions struct {
@@ -376,7 +397,14 @@ func buildCPUFrameExtractArgs(inputPath string, seekSeconds float64, softwareTon
 	return args
 }
 
-func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string, hwDevice string, toneMap bool) ([]string, error) {
+func buildFrameExtractArgs(
+	inputPath string,
+	seekSeconds float64,
+	hwAccel string,
+	hwDevice string,
+	toneMap bool,
+	softwareToneMapFilter string,
+) ([]string, error) {
 	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
@@ -403,18 +431,34 @@ func buildFrameExtractArgs(inputPath string, seekSeconds float64, hwAccel string
 			"-hwaccel", "vaapi",
 			"-hwaccel_output_format", "vaapi",
 		)
+	case hwAccelVideoToolbox:
+		// VideoToolbox decodes into system-memory frames unless an explicit
+		// output format is requested. Keep them there so MJPEG output and the
+		// optional software HDR tone-map filter need no download/upload roundtrip.
+		args = append(args, "-hwaccel", hwAccelVideoToolbox)
 	default:
 		return nil, fmt.Errorf("hardware chapter thumbnail extraction does not support %q", hwAccel)
 	}
 
-	filter := "hwdownload,format=nv12"
-	if toneMap {
+	var filter string
+	if hwAccel == hwAccelVideoToolbox {
+		if toneMap && softwareToneMapFilter == "" {
+			return nil, errors.New("videotoolbox HDR extraction requires a software tone-map filter")
+		}
+		filter = softwareToneMapFilter
+	} else if toneMap {
 		filter = "setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,procamp_vaapi=b=16:c=1,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12"
+	} else {
+		filter = "hwdownload,format=nv12"
 	}
 	args = append(args,
 		"-ss", fmt.Sprintf("%.3f", seekSeconds),
 		"-i", inputPath,
-		"-vf", filter,
+	)
+	if filter != "" {
+		args = append(args, "-vf", filter)
+	}
+	args = append(args,
 		"-frames:v", "1",
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",

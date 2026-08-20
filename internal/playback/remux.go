@@ -9,11 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+)
+
+const (
+	jellyfinFFmpegPath             = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
+	homebrewFFmpegFullAppleSilicon = "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"
+	homebrewFFmpegFullIntel        = "/usr/local/opt/ffmpeg-full/bin/ffmpeg"
+	ffmpegExecutable               = ffmpegComponent
 )
 
 var (
@@ -28,14 +36,29 @@ var (
 // Resolved once at first call, then cached for the process lifetime.
 func ffmpegBinary() string {
 	ffmpegOnce.Do(func() {
-		const jellyfinPath = "/usr/lib/jellyfin-ffmpeg/ffmpeg"
-		if _, err := exec.LookPath(jellyfinPath); err == nil {
-			resolvedFFmpegPath = jellyfinPath
-			return
-		}
-		resolvedFFmpegPath = "ffmpeg"
+		resolvedFFmpegPath = discoverFFmpegPath(runtime.GOOS, exec.LookPath)
 	})
 	return resolvedFFmpegPath
+}
+
+func discoverFFmpegPath(goos string, lookPath func(string) (string, error)) string {
+	candidates := []string{jellyfinFFmpegPath}
+	if goos == darwinGOOS {
+		// Homebrew's regular FFmpeg omits libass and other filters Silo uses.
+		// Prefer the keg-only full build on both Apple Silicon and Intel Macs
+		// when it is installed; PATH remains the final portable fallback.
+		candidates = []string{
+			homebrewFFmpegFullAppleSilicon,
+			homebrewFFmpegFullIntel,
+			jellyfinFFmpegPath,
+		}
+	}
+	for _, candidate := range candidates {
+		if _, err := lookPath(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ffmpegExecutable
 }
 
 // ResolveFFmpegPath returns the ffmpeg binary the playback pipeline executes
@@ -44,10 +67,27 @@ func ffmpegBinary() string {
 // probes must resolve through this same function so a feature advertised at
 // planning time is guaranteed present in the binary that later runs.
 func ResolveFFmpegPath(configured string) string {
-	if configured = strings.TrimSpace(configured); configured != "" {
-		return configured
+	return resolveFFmpegPath(configured, exec.LookPath, ffmpegBinary)
+}
+
+func resolveFFmpegPath(
+	configured string,
+	lookPath func(string) (string, error),
+	discover func() string,
+) string {
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		return discover()
 	}
-	return ffmpegBinary()
+	// Older and container-oriented settings use Jellyfin's Linux-only path as
+	// the default. Treat that conventional default as discovery only when it is
+	// absent; genuinely custom invalid paths must still fail loudly.
+	if configured == jellyfinFFmpegPath {
+		if _, err := lookPath(configured); err != nil {
+			return discover()
+		}
+	}
+	return configured
 }
 
 // supportsDoviRPUFilter reports whether the given FFmpeg binary can strip

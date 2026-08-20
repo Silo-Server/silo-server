@@ -161,6 +161,51 @@ func TestResolveFFmpegPathTrimsWithoutCleaningRelativeExecutable(t *testing.T) {
 	}
 }
 
+func TestDiscoverFFmpegPathDarwinPrefersFullHomebrewBuilds(t *testing.T) {
+	tests := []struct {
+		name      string
+		available map[string]bool
+		want      string
+	}{
+		{
+			name:      "Apple Silicon prefix",
+			available: map[string]bool{homebrewFFmpegFullAppleSilicon: true},
+			want:      homebrewFFmpegFullAppleSilicon,
+		},
+		{
+			name:      "Intel prefix",
+			available: map[string]bool{homebrewFFmpegFullIntel: true},
+			want:      homebrewFFmpegFullIntel,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookPath := func(path string) (string, error) {
+				if tt.available[path] {
+					return path, nil
+				}
+				return "", fmt.Errorf("not found")
+			}
+			if got := discoverFFmpegPath(darwinGOOS, lookPath); got != tt.want {
+				t.Fatalf("discoverFFmpegPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveFFmpegPathFallsBackOnlyForMissingLegacyDefault(t *testing.T) {
+	missing := func(string) (string, error) { return "", fmt.Errorf("not found") }
+	discover := func() string { return homebrewFFmpegFullAppleSilicon }
+
+	if got := resolveFFmpegPath(jellyfinFFmpegPath, missing, discover); got != discover() {
+		t.Fatalf("legacy default resolved to %q, want discovery result", got)
+	}
+	if got := resolveFFmpegPath("/custom/missing/ffmpeg", missing, discover); got != "/custom/missing/ffmpeg" {
+		t.Fatalf("custom path resolved to %q, want the explicit value preserved", got)
+	}
+}
+
 func TestFFmpegSupportsNVENCRequiresCUDAEncodersFiltersAndSmoke(t *testing.T) {
 	setupHWAccelTest(t)
 	tests := []struct {
@@ -518,7 +563,7 @@ func resetNVENCProbeCacheForTest() {
 	nvencProbeCache.byPath = make(map[string]nvencProbeCacheEntry)
 	nvencProbeCache.Unlock()
 	videoToolboxProbeCache.Lock()
-	videoToolboxProbeCache.byPath = make(map[string]nvencProbeResult)
+	videoToolboxProbeCache.byPath = make(map[string]hardwareProbeResult)
 	videoToolboxProbeCache.Unlock()
 }
 
@@ -546,13 +591,16 @@ func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenProbeFails(t *testing.
 	}
 }
 
-func TestResolveHWAccelWithFFmpegDarwinRequiresBothVTEncoders(t *testing.T) {
+func TestResolveHWAccelWithFFmpegDarwinAllowsH264OnlyVideoToolbox(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = "darwin"
 	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, smokeOK: true})
 
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "none" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none when hevc_videotoolbox is missing", got)
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "videotoolbox" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox for H.264-only Mac", got)
+	}
+	if ok, _ := videoToolboxSupportsTargetCodec(ffmpeg.path, "hevc"); ok {
+		t.Fatal("HEVC target unexpectedly accepted without hevc_videotoolbox")
 	}
 }
 
@@ -566,7 +614,7 @@ func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenSmokeEncodeFails(t *te
 	}
 }
 
-func TestVideoToolboxProbeSmokesBothEncodersInConstantQualityMode(t *testing.T) {
+func TestVideoToolboxProbeSmokesBothEncodersInPortableBitrateMode(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = "darwin"
 	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
@@ -578,10 +626,12 @@ func TestVideoToolboxProbeSmokesBothEncodersInConstantQualityMode(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read probe log: %v", err)
 	}
-	// The smoke encodes must exercise the exact uncapped (-q:v) mode the
-	// transcode arg builder emits — Intel Macs fail that mode at session
-	// creation, so probing without it would approve unrunnable commands.
-	for _, want := range []string{"-c:v h264_videotoolbox -q:v 65", "-c:v hevc_videotoolbox -q:v 60"} {
+	// FFmpeg restricts -q:v to Apple Silicon. The portable bitrate path keeps
+	// H.264 acceleration available on older Intel Macs as well.
+	for _, want := range []string{
+		"-c:v h264_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
+		"-c:v hevc_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
+	} {
 		if !strings.Contains(string(log), want) {
 			t.Fatalf("probe log missing %q:\n%s", want, log)
 		}
