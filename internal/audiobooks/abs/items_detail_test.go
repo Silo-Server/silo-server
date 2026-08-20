@@ -176,8 +176,9 @@ func TestHandleSimilarItemsUsesEachItemsActualLibrary(t *testing.T) {
 		t.Fatalf("library IDs = (%v, %v), want (18, 1)", first["libraryId"], second["libraryId"])
 	}
 	mediaBlock := first["media"].(map[string]any)
-	if mediaBlock["ebookFormat"] != "epub" {
-		t.Fatalf("similar ebook format = %v, want epub", mediaBlock["ebookFormat"])
+	ebookFile, _ := mediaBlock["ebookFile"].(map[string]any)
+	if ebookFile["ebookFormat"] != "epub" {
+		t.Fatalf("similar ebook file = %v, want epub", mediaBlock["ebookFile"])
 	}
 }
 
