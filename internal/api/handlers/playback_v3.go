@@ -2583,19 +2583,6 @@ func (h *PlaybackHandler) startReadyLocalPlaybackTransportV3(ctx context.Context
 	return ts, nil
 }
 
-// retryTransportHWAccelV3 picks the acceleration for the single startup
-// retry after ffmpeg dies before its first segment. VideoToolbox has no
-// alternate render device to move to, so a startup failure there — e.g. an
-// encoder session the hardware cannot create at the requested dimensions —
-// retries with software encoding; every other accel keeps its configured
-// value and relies on AvoidHWDevice to move devices.
-func retryTransportHWAccelV3(configuredHWAccel, ffmpegPath string) string {
-	if playback.ResolveHWAccelWithFFmpeg(configuredHWAccel, ffmpegPath) == "videotoolbox" {
-		return "none"
-	}
-	return configuredHWAccel
-}
-
 // prepareLocalTransportV3 starts a local HLS generation for the selected plan.
 func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3, mode mediaAuthModeV3) (preparedTransportV3, *transportErrorV3) {
 	cfg := h.playbackConfig()
@@ -2677,7 +2664,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			// become an immediate client-visible transport error.
 			retryOpts := opts
 			retryOpts.AvoidHWDevice = startupFailure.failedDevice
-			retryOpts.HWAccel = retryTransportHWAccelV3(opts.HWAccel, opts.FFmpegPath)
+			retryOpts.HWAccel = playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath)
 			slog.WarnContext(r.Context(), "local transcode crashed during startup; retrying once",
 				logComponentKey, playbackLogValueV3,
 				"playback_session_id", session.ID,

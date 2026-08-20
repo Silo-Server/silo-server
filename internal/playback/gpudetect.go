@@ -60,11 +60,29 @@ var nvencProbeCache = struct {
 	byPath: make(map[string]nvencProbeCacheEntry),
 }
 
-var videoToolboxProbeCache = struct {
+// videoToolboxProbeRetryDelay bounds how long a negative probe result is
+// trusted. A transient failure (probe timeout, hardware session contention
+// during a burst of playback starts) must not pin auto mode to software for
+// the process lifetime; successful fully-capable probes are cached forever.
+var videoToolboxProbeRetryDelay = time.Minute
+
+type videoToolboxProbeEntry struct {
+	result    hardwareProbeResult
+	expiresAt time.Time // zero: cached for the process lifetime
+}
+
+type videoToolboxProbeCall struct {
+	done   chan struct{}
+	result hardwareProbeResult
+}
+
+var videoToolboxProbes = struct {
 	sync.Mutex
-	byPath map[string]hardwareProbeResult
+	byPath   map[string]videoToolboxProbeEntry
+	inFlight map[string]*videoToolboxProbeCall
 }{
-	byPath: make(map[string]hardwareProbeResult),
+	byPath:   make(map[string]videoToolboxProbeEntry),
+	inFlight: make(map[string]*videoToolboxProbeCall),
 }
 
 // HWAccelInfo describes the detected hardware acceleration capability.
@@ -332,18 +350,51 @@ func cachedVideoToolboxProbe(ffmpegPath string) hardwareProbeResult {
 	// binary with different capabilities.
 	execPath := probeExecFFmpegPath(ffmpegPath)
 	cacheKey := execPath
-	videoToolboxProbeCache.Lock()
-	if result, ok := videoToolboxProbeCache.byPath[cacheKey]; ok {
-		videoToolboxProbeCache.Unlock()
-		return result
+	videoToolboxProbes.Lock()
+	if entry, ok := videoToolboxProbes.byPath[cacheKey]; ok {
+		if entry.expiresAt.IsZero() || time.Now().Before(entry.expiresAt) {
+			videoToolboxProbes.Unlock()
+			return entry.result
+		}
+		delete(videoToolboxProbes.byPath, cacheKey)
 	}
-	videoToolboxProbeCache.Unlock()
+	// Coalesce concurrent cold-cache probes: a burst of playback starts must
+	// not race overlapping smoke encodes (and let a contention failure
+	// overwrite a success).
+	if call, ok := videoToolboxProbes.inFlight[cacheKey]; ok {
+		videoToolboxProbes.Unlock()
+		<-call.done
+		return call.result
+	}
+	call := &videoToolboxProbeCall{done: make(chan struct{})}
+	videoToolboxProbes.inFlight[cacheKey] = call
+	videoToolboxProbes.Unlock()
 
 	result := probeFFmpegVideoToolbox(execPath)
-	videoToolboxProbeCache.Lock()
-	videoToolboxProbeCache.byPath[cacheKey] = result
-	videoToolboxProbeCache.Unlock()
+	entry := videoToolboxProbeEntry{result: result}
+	if !result.available || !result.hevcAvailable {
+		entry.expiresAt = time.Now().Add(videoToolboxProbeRetryDelay)
+	}
+	videoToolboxProbes.Lock()
+	videoToolboxProbes.byPath[cacheKey] = entry
+	call.result = result
+	delete(videoToolboxProbes.inFlight, cacheKey)
+	close(call.done)
+	videoToolboxProbes.Unlock()
 	return result
+}
+
+// StartupRetryHWAccel returns the acceleration for the single retry after a
+// transcode dies before producing its first segment. VideoToolbox has no
+// alternate render device to move to, so its retry runs in software — e.g. an
+// encoder session the hardware cannot create at the requested dimensions
+// falls back to the working CPU encoder. Every other accel keeps its
+// configured value; the retry moves render devices via AvoidHWDevice instead.
+func StartupRetryHWAccel(configuredHWAccel, ffmpegPath string) string {
+	if ResolveHWAccelWithFFmpeg(configuredHWAccel, ffmpegPath) == transcodeHWVideoToolbox {
+		return transcodeHWNone
+	}
+	return configuredHWAccel
 }
 
 // probeExecFFmpegPath returns the binary a capability probe must execute for

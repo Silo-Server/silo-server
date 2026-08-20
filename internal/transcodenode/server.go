@@ -1115,11 +1115,38 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RequireReady {
 		if _, err := session.WaitForManifest(TranscodeStartReadinessTimeout); err != nil {
+			wasRunning := session.IsRunning()
 			_ = session.Close()
-			unlock()
-			slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
-			http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
-			return
+			// Mirror the API server's local-transport retry: an early death
+			// under VideoToolbox retries once in software (there is no
+			// alternate render device to move to), so a hardware encoder
+			// session this Mac cannot create does not fail clustered
+			// playback while CPU encoding was available.
+			retryAccel := playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath)
+			if wasRunning || retryAccel == opts.HWAccel {
+				unlock()
+				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+				return
+			}
+			slog.WarnContext(r.Context(), "transcode crashed during startup; retrying with software encoding",
+				"component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+			retryOpts := opts
+			retryOpts.HWAccel = retryAccel
+			session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+			if err != nil {
+				unlock()
+				slog.ErrorContext(r.Context(), "start transcode retry", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+				http.Error(w, "failed to start transcode", http.StatusInternalServerError)
+				return
+			}
+			if _, retryErr := session.WaitForManifest(TranscodeStartReadinessTimeout); retryErr != nil {
+				_ = session.Close()
+				unlock()
+				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", retryErr, "session", req.SessionID, "playback_session_id", req.SessionID)
+				http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 

@@ -502,6 +502,12 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ffmpeg")
 	logPath := filepath.Join(dir, "probe.log")
+	writeFakeFFmpegScript(t, path, logPath, probe)
+	return fakeFFmpegBinary{path: path, logPath: logPath}
+}
+
+func writeFakeFFmpegScript(t *testing.T, path, logPath string, probe fakeFFmpegProbe) {
+	t.Helper()
 
 	script := "#!/bin/sh\n"
 	script += fmt.Sprintf("printf '%%s\\n' \"$*\" >> %q\n", logPath)
@@ -555,16 +561,15 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
-	return fakeFFmpegBinary{path: path, logPath: logPath}
 }
 
 func resetNVENCProbeCacheForTest() {
 	nvencProbeCache.Lock()
 	nvencProbeCache.byPath = make(map[string]nvencProbeCacheEntry)
 	nvencProbeCache.Unlock()
-	videoToolboxProbeCache.Lock()
-	videoToolboxProbeCache.byPath = make(map[string]hardwareProbeResult)
-	videoToolboxProbeCache.Unlock()
+	videoToolboxProbes.Lock()
+	videoToolboxProbes.byPath = make(map[string]videoToolboxProbeEntry)
+	videoToolboxProbes.Unlock()
 }
 
 func successfulVideoToolboxProbe() fakeFFmpegProbe {
@@ -675,5 +680,72 @@ func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing
 	}
 	if result := cachedVideoToolboxProbe("ffmpeg"); result.available {
 		t.Fatal("PATH spelling should probe the incapable binary, not reuse the relative spelling's cache entry")
+	}
+}
+
+func TestStartupRetryHWAccel(t *testing.T) {
+	// Explicit values bypass ffmpeg probing, keeping this host-independent.
+	if got := StartupRetryHWAccel("videotoolbox", "/does/not/exist"); got != "none" {
+		t.Fatalf("videotoolbox retry accel = %q, want none (no alternate device to move to)", got)
+	}
+	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
+		if got := StartupRetryHWAccel(accel, "/does/not/exist"); got != accel {
+			t.Fatalf("%s retry accel = %q, want unchanged", accel, got)
+		}
+	}
+}
+
+func TestCachedVideoToolboxProbeCoalescesConcurrentColdProbes(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cachedVideoToolboxProbe(ffmpeg.path)
+		}()
+	}
+	wg.Wait()
+
+	log, err := os.ReadFile(ffmpeg.logPath)
+	if err != nil {
+		t.Fatalf("read probe log: %v", err)
+	}
+	if got := strings.Count(string(log), "-hwaccels"); got != 1 {
+		t.Fatalf("concurrent cold probes ran %d ffmpeg invocations, want 1 (coalesced):\n%s", got, log)
+	}
+}
+
+func TestCachedVideoToolboxProbeRetriesNegativeResultsAfterExpiry(t *testing.T) {
+	setupHWAccelTest(t)
+	oldDelay := videoToolboxProbeRetryDelay
+	videoToolboxProbeRetryDelay = 0
+	t.Cleanup(func() { videoToolboxProbeRetryDelay = oldDelay })
+
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{})
+	if result := cachedVideoToolboxProbe(ffmpeg.path); result.available {
+		t.Fatal("failing fake should probe unavailable")
+	}
+
+	// The hardware "recovers": the same binary now answers every probe.
+	writeFakeFFmpegScript(t, ffmpeg.path, ffmpeg.logPath, successfulVideoToolboxProbe())
+	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
+		t.Fatalf("expired negative result should re-probe, got reason %q", result.reason)
+	}
+}
+
+func TestCachedVideoToolboxProbeCachesFullyCapableResultsForever(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
+		t.Fatalf("capable fake should probe available, got %q", result.reason)
+	}
+
+	// Break the binary; the cached positive verdict must keep serving.
+	writeFakeFFmpegScript(t, ffmpeg.path, ffmpeg.logPath, fakeFFmpegProbe{})
+	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
+		t.Fatal("fully capable results should be cached for the process lifetime")
 	}
 }
