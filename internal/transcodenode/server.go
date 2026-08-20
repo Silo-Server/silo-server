@@ -1409,6 +1409,34 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil, err
 	}
 
+	// Readiness is normally the caller's concern, but a VideoToolbox session
+	// can die at encoder init (e.g. a session the hardware cannot create at
+	// these dimensions), and registering the dead session would serve this
+	// media as permanently missing. Mirror handleStart's software retry for
+	// the accel StartupRetryHWAccel would change; other accels keep the
+	// existing register-immediately behavior.
+	if retryAccel := playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
+		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
+			if session.IsRunning() {
+				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
+					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+			} else {
+				// Keep the shared output directory: the retry writes into it.
+				_ = session.CloseProcess()
+				slog.WarnContext(r.Context(), "reconstructed transcode crashed during startup; retrying with software encoding",
+					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
+				retryOpts := opts
+				retryOpts.HWAccel = retryAccel
+				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+				if err != nil {
+					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
+						"session", sessionID, "playback_session_id", sessionID)
+					return nil
+				}
+			}
+		}
+	}
+
 	// Yield to a winner registered by another path; close only the duplicate ffmpeg,
 	// never the shared output directory the winner is actively serving.
 	s.mu.Lock()
