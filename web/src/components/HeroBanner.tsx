@@ -9,6 +9,7 @@ import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { formatHeroMetadata } from "./heroMetadata";
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -34,15 +35,6 @@ interface HeroBannerProps {
    * param so the watch/item routes can scope back to the right library.
    */
   libraryId?: number;
-}
-
-function formatRuntime(seconds: number | undefined | null): string | null {
-  if (!seconds || seconds <= 0) return null;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  return remaining === 0 ? `${hours}h` : `${hours}h ${remaining}m`;
 }
 
 function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
@@ -131,12 +123,7 @@ export default function HeroBanner({
   if (slides.length === 0) return null;
   if (!current) return null;
 
-  const metaParts: string[] = [];
-  if (current.year > 0) metaParts.push(String(current.year));
-  if (current.rating_imdb != null) metaParts.push(`IMDb ${current.rating_imdb.toFixed(1)}`);
-  (current.genres ?? []).slice(0, 3).forEach((g) => metaParts.push(g));
-  const runtime = formatRuntime(current.duration_seconds);
-  if (runtime) metaParts.push(runtime);
+  const metadata = formatHeroMetadata(current);
 
   const slideCount = slides.length;
   const padded = (n: number) => String(n).padStart(2, "0");
@@ -238,10 +225,10 @@ export default function HeroBanner({
             >
               {current.title}
             </h1>
-            {metaParts.length > 0 && (
+            {metadata.length > 0 && (
               <div className="hero-meta-track mb-5 text-white/85">
-                {metaParts.map((part) => (
-                  <span key={part}>{part}</span>
+                {metadata.map((entry) => (
+                  <span key={entry.key}>{entry.label}</span>
                 ))}
               </div>
             )}
