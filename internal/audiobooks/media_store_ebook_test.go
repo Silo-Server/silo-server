@@ -49,3 +49,13 @@ func TestABSSearchSQLUsesResolvedLibraryItemTypeInBothArms(t *testing.T) {
 		t.Fatalf("ebook search retained audiobook-only predicate: %s", sql)
 	}
 }
+
+func TestLibraryStringAggregationUsesPostgresSafeOrdering(t *testing.T) {
+	sql := buildLibraryStringValuesSQL("publisher", `CROSS JOIN LATERAL unnest(COALESCE(mi.studios, ARRAY[]::text[])) AS publisher`, []string{"mi.type = 'ebook'"})
+	if strings.Contains(sql, "SELECT DISTINCT") {
+		t.Fatalf("query uses DISTINCT with an expression ORDER BY: %s", sql)
+	}
+	if !strings.Contains(sql, "GROUP BY publisher ORDER BY LOWER(publisher), publisher") {
+		t.Fatalf("query does not group and deterministically order publisher values: %s", sql)
+	}
+}

@@ -1053,7 +1053,7 @@ func (s *ABSMediaStore) ListLibraryGenres(ctx context.Context, libraryID int64, 
 		argIdx++
 	}
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
-	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT genre FROM media_items mi CROSS JOIN LATERAL unnest(COALESCE(mi.genres, ARRAY[]::text[])) AS genre WHERE `+strings.Join(conditions, " AND ")+` ORDER BY LOWER(genre)`, args...)
+	rows, err := s.Pool.Query(ctx, `SELECT genre FROM media_items mi CROSS JOIN LATERAL unnest(COALESCE(mi.genres, ARRAY[]::text[])) AS genre WHERE `+strings.Join(conditions, " AND ")+` GROUP BY genre ORDER BY LOWER(genre), genre`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("abs_media_store: list genres: %w", err)
 	}
@@ -1086,7 +1086,7 @@ func (s *ABSMediaStore) listLibraryStringValues(ctx context.Context, libraryID i
 		argIdx++
 	}
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
-	rows, err := s.Pool.Query(ctx, `SELECT DISTINCT `+value+` FROM media_items mi `+from+` WHERE `+strings.Join(conditions, " AND ")+` ORDER BY LOWER(`+value+`)`, args...)
+	rows, err := s.Pool.Query(ctx, buildLibraryStringValuesSQL(value, from, conditions), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1101,6 +1101,12 @@ func (s *ABSMediaStore) listLibraryStringValues(ctx context.Context, libraryID i
 	}
 	return out, rows.Err()
 }
+
+func buildLibraryStringValuesSQL(value, from string, conditions []string) string {
+	return `SELECT ` + value + ` FROM media_items mi ` + from + ` WHERE ` + strings.Join(conditions, " AND ") +
+		` GROUP BY ` + value + ` ORDER BY LOWER(` + value + `), ` + value
+}
+
 func (s *ABSMediaStore) ListLibraryNarrators(ctx context.Context, libraryID int64, access catalog.AccessFilter) ([]string, error) {
 	return s.listLibraryStringValues(ctx, libraryID, access, `JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = 8 JOIN people p ON p.id = ip.person_id`, `p.name`)
 }
