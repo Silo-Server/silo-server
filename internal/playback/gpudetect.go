@@ -358,14 +358,17 @@ func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
 		return hardwareProbeResult{reason: "h264_videotoolbox encoder unavailable"}
 	}
 
-	smoke := func(encoder string) ([]byte, error) {
-		return runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath,
+	smoke := func(encoder string, extraArgs ...string) ([]byte, error) {
+		args := []string{
 			"-hide_banner",
 			"-loglevel", "error",
 			"-f", "lavfi",
 			"-i", "testsrc2=size=640x360:rate=1",
 			"-frames:v", "1",
 			"-an",
+		}
+		args = append(args, extraArgs...)
+		args = append(args,
 			"-c:v", encoder,
 			"-b:v", "2000k",
 			"-maxrate", "2000k",
@@ -373,6 +376,7 @@ func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
 			"-f", "null",
 			"-",
 		)
+		return runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, args...)
 	}
 
 	h264Output, err := smoke("h264_videotoolbox")
@@ -382,7 +386,10 @@ func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
 
 	result := hardwareProbeResult{available: true, h264Available: true}
 	if ffmpegOutputHasToken(output, "hevc_videotoolbox") {
-		hevcOutput, hevcErr := smoke("hevc_videotoolbox")
+		// Probe the 10-bit session the HEVC transcode path actually creates:
+		// hevc passes the source bit depth through (p010 for HDR10), so an
+		// 8-bit-only encoder must not advertise HEVC availability.
+		hevcOutput, hevcErr := smoke("hevc_videotoolbox", "-vf", "format=p010le")
 		result.hevcAvailable = hevcErr == nil
 		if hevcErr != nil {
 			result.reason = "hevc_videotoolbox smoke encode failed: " + FormatFFmpegProbeFailure(hevcErr, hevcOutput)

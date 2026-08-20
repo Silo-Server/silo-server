@@ -1323,11 +1323,22 @@ func TestAppendAudioArgsBoostsOnlyEncodedSurroundToStereo(t *testing.T) {
 	}
 }
 
+// videoToolboxTestFFmpeg supplies a fake VideoToolbox-capable ffmpeg so the
+// argument tests validate construction independent of the host OS: the
+// builder's encoder probe must succeed on Linux CI as well as macOS.
+func videoToolboxTestFFmpeg(t *testing.T) string {
+	t.Helper()
+	resetNVENCProbeCacheForTest()
+	t.Cleanup(resetNVENCProbeCacheForTest)
+	return writeFakeFFmpeg(t, successfulVideoToolboxProbe()).path
+}
+
 func TestBuildFFmpegArgs_VideoToolboxH264UsesSoftwareFilters(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:         "/media/movie.mkv",
 		OutputDir:         "/tmp/out",
 		SessionID:         "session-vt",
+		FFmpegPath:        videoToolboxTestFFmpeg(t),
 		SourceVideoCodec:  "h264",
 		TargetCodecVideo:  "h264",
 		TargetCodecAudio:  "aac",
@@ -1369,6 +1380,7 @@ func TestBuildFFmpegArgs_VideoToolboxH264UsesPortableDefaultBitrate(t *testing.T
 		InputPath:        "/media/movie.mkv",
 		OutputDir:        "/tmp/out",
 		SessionID:        "session-vt-default-rate",
+		FFmpegPath:       videoToolboxTestFFmpeg(t),
 		SourceVideoCodec: "h264",
 		TargetCodecVideo: "h264",
 		TargetCodecAudio: "aac",
@@ -1391,6 +1403,7 @@ func TestBuildFFmpegArgs_VideoToolboxHi10PDecodesInSoftware(t *testing.T) {
 		InputPath:          "/media/movie.mkv",
 		OutputDir:          "/tmp/out",
 		SessionID:          "session-vt-hi10p",
+		FFmpegPath:         videoToolboxTestFFmpeg(t),
 		SourceVideoCodec:   "h264",
 		SourceVideoProfile: "High 10",
 		TargetCodecVideo:   "h264",
@@ -1414,6 +1427,7 @@ func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
 		InputPath:        "/media/movie.mkv",
 		OutputDir:        "/tmp/out",
 		SessionID:        "session-vt-hevc",
+		FFmpegPath:       videoToolboxTestFFmpeg(t),
 		SourceVideoCodec: "hevc",
 		TargetCodecVideo: "hevc",
 		TargetCodecAudio: "copy",
@@ -1438,6 +1452,7 @@ func TestBuildFFmpegArgs_VideoToolboxTextBurnInStaysOnCPUFilters(t *testing.T) {
 		InputPath:          "/media/movie.mkv",
 		OutputDir:          "/tmp/out",
 		SessionID:          "session-vt-sub",
+		FFmpegPath:         videoToolboxTestFFmpeg(t),
 		SourceVideoCodec:   "h264",
 		TargetCodecVideo:   "h264",
 		TargetCodecAudio:   "aac",

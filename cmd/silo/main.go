@@ -667,6 +667,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("building config: %v", err)
 	}
+	// The DB-seeded default is Jellyfin's Linux-only ffmpeg path. Resolve it
+	// through the same discovery the playback pipeline uses so consumers that
+	// read the config directly (scanner ffprobe derivation, intro markers,
+	// audiobook enrichment) execute the discovered binary on hosts where the
+	// conventional default does not exist.
+	cfg.Playback.FFmpegPath = playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 
 	// Step 7: Apply bootstrap overrides
 	cfg.Server.Listen = bc.Listen
