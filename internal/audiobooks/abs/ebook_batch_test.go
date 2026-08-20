@@ -95,24 +95,35 @@ func TestEnrichEbookLibraryItemsDoesNotFanOutAfterBatchFailure(t *testing.T) {
 	}
 }
 
-func TestEnrichEbookLibraryItemsDoesNotFanOutAfterPrimaryBatchFailure(t *testing.T) {
+func TestEnrichEbookLibraryItemsFallsBackWithoutFanOutAfterPrimaryBatchFailure(t *testing.T) {
 	entries := []LibraryItem{
 		{ID: testEbookID, Media: LibraryItemMedia{ID: testEbookID}},
 		{ID: testSecondEbookID, Media: LibraryItemMedia{ID: testSecondEbookID}},
 	}
+	files := map[string][]*models.MediaFile{
+		testEbookID: {
+			{ID: 11, FilePath: "/books/one.pdf"},
+			{ID: 12, FilePath: "/books/one.epub"},
+		},
+		testSecondEbookID: {{ID: 21, FilePath: "/books/two.cbz"}},
+	}
 	store := &batchEbookEnrichmentStore{
 		singleEbookEnrichmentStore: &singleEbookEnrichmentStore{
 			stubMediaStore: &stubMediaStore{},
-			files:          map[string][]*models.MediaFile{},
+			files:          files,
 		},
 		prefErr: errors.New("database unavailable"),
 	}
 	h := New(Dependencies{MediaStore: store})
 
 	got := h.enrichEbookLibraryItems(context.Background(), append([]LibraryItem(nil), entries...), catalog.AccessFilter{})
+	want := []LibraryItem{
+		siloEbookToLibraryItemDetail(entries[0], files[testEbookID], 0, false, false),
+		siloEbookToLibraryItemDetail(entries[1], files[testSecondEbookID], 0, false, false),
+	}
 
-	if !reflect.DeepEqual(got, entries) {
-		t.Fatalf("failed primary batch changed entries\ngot:  %#v\nwant: %#v", got, entries)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("failed primary batch did not use file fallback\ngot:  %#v\nwant: %#v", got, want)
 	}
 	if store.batchFile != 1 || store.batchPref != 1 {
 		t.Fatalf("batch calls = files:%d preferences:%d, want 1 each", store.batchFile, store.batchPref)

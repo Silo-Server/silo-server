@@ -734,6 +734,9 @@ func (h *Handler) enrichEbookLibraryItems(ctx context.Context, entries []Library
 	primaryByID, err := batchStore.GetPrimaryEbookFileIDs(ctx, contentIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "abs ebook batch primary enrichment failed", "component", "audiobooks", "items", len(entries), "error", err)
+		for i := range entries {
+			entries[i] = siloEbookToLibraryItemDetail(entries[i], filesByID[entries[i].ID], 0, false, false)
+		}
 		return entries
 	}
 	for i := range entries {
