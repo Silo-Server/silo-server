@@ -29,7 +29,9 @@ import {
   buildPersonalCatalogHref,
   buildQueryCatalogHref,
   buildSectionCatalogHref,
+  buildUserCollectionCatalogHref,
   parseCatalogSearchParams,
+  sameCatalogDestination,
 } from "@/pages/catalogSearchParams";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -69,6 +71,8 @@ import {
 import { useTheme } from "@/hooks/useTheme";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
 import { cn } from "@/lib/utils";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { menuItemKey } from "@/lib/uiCustomization";
 
 function getLibraryIcon(type: string) {
   switch (type) {
@@ -176,6 +180,13 @@ interface AppSidebarProps {
   collapsed?: boolean;
 }
 
+interface ResolvedPrimaryMenuLink {
+  key: string;
+  href: string;
+  label: string;
+  icon: ReactNode;
+}
+
 export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebarProps) {
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
@@ -186,7 +197,8 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
-  const { togglePin } = useToggleSidebarPin();
+  const { togglePin, canToggle } = useToggleSidebarPin();
+  const { primaryMenu } = useUICustomization();
   const { data: pluginSettings } = usePluginSettingsList();
   const requestStatus = useRequestFeatureStatus();
   const showRequestsNav = requestStatus.data?.requests_enabled === true;
@@ -220,6 +232,104 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   // Grouped view of the Apps entries (null → keep the flat list under the
   // single "Apps" header). See groupAppNavLinks for the SDK category contract.
   const pluginNavGroups = useMemo(() => groupAppNavLinks(pluginNavLinks), [pluginNavLinks]);
+  const primaryMenuLinks = useMemo<ResolvedPrimaryMenuLink[] | null>(() => {
+    if (!primaryMenu) return null;
+
+    return primaryMenu.items.flatMap((item): ResolvedPrimaryMenuLink[] => {
+      const key = menuItemKey(item);
+      if (item.type === "library") {
+        const library = libraries?.find((candidate) => candidate.id === item.library_id);
+        if (!library) return [];
+        return [
+          {
+            key,
+            href: `/library/${library.id}`,
+            label: item.label || library.name,
+            icon: getLibraryIcon(library.type),
+          },
+        ];
+      }
+      if (item.type === "section") {
+        if (!libraries?.some((candidate) => candidate.id === item.library_id)) return [];
+        return [
+          {
+            key,
+            href: buildSectionCatalogHref({
+              scope: "library",
+              libraryId: item.library_id,
+              sectionId: item.section_id,
+              title: item.label,
+            }),
+            label: item.label,
+            icon: <LayoutGrid className="h-[18px] w-[18px] shrink-0" />,
+          },
+        ];
+      }
+      if (item.type === "collection") {
+        if (
+          item.library_id !== undefined &&
+          !libraries?.some((candidate) => candidate.id === item.library_id)
+        ) {
+          return [];
+        }
+        return [
+          {
+            key,
+            href:
+              item.library_id === undefined
+                ? buildUserCollectionCatalogHref(item.collection_id, item.label)
+                : buildLibraryCollectionCatalogHref(
+                    item.collection_id,
+                    item.label,
+                    item.library_id,
+                  ),
+            label: item.label,
+            icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" />,
+          },
+        ];
+      }
+
+      switch (item.destination) {
+        case "home":
+          return [
+            {
+              key,
+              href: "/",
+              label: "Home",
+              icon: <Home className="h-[18px] w-[18px] shrink-0" />,
+            },
+          ];
+        case "for_you":
+          return [
+            {
+              key,
+              href: "/recommendations",
+              label: "For You",
+              icon: <Sparkles className="h-[18px] w-[18px] shrink-0" />,
+            },
+          ];
+        case "calendar":
+          return [
+            {
+              key,
+              href: "/calendar",
+              label: "Calendar",
+              icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" />,
+            },
+          ];
+        // These contract built-ins identify global media destinations, not a
+        // particular library. Web does not currently have complete global
+        // routes for all four media families (notably music), so omit them
+        // instead of silently changing their meaning to the first matching
+        // library. An explicit `library` menu item remains fully supported.
+        case "movies":
+        case "series":
+        case "music":
+        case "audiobooks":
+          return [];
+      }
+    });
+  }, [libraries, primaryMenu]);
 
   const catalogState = useMemo(
     () =>
@@ -300,7 +410,11 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
     }
 
     if (pin.type === "collection") {
-      return catalogState.source === "library_collection" && catalogState.collection_id === pin.id;
+      return (
+        catalogState.source === "library_collection" &&
+        catalogState.collection_id === pin.id &&
+        catalogState.library_id === libId
+      );
     }
 
     return (
@@ -362,7 +476,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
       <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
         {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
           variant outright would pop at the very start of the collapse. */}
-        <div className="sidebar-logo relative flex h-24 items-center">
+        <ViewTransitionLink
+          to="/"
+          onClick={onNavigate}
+          aria-label="Go to home"
+          className="sidebar-logo focus-visible:ring-ring/50 relative flex h-24 items-center transition-opacity hover:opacity-85 focus-visible:ring-[3px] focus-visible:outline-none"
+        >
           <span
             aria-hidden={!showLabels}
             className={`sidebar-fade absolute left-5 ${showLabels ? "opacity-100" : "opacity-0"}`}
@@ -375,33 +494,74 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           >
             <SiloBrand variant="mark" className="h-9 w-9" />
           </span>
-        </div>
+        </ViewTransitionLink>
 
         {/* Main nav */}
         <nav
           aria-label="Main navigation"
           className="sidebar-nav sidebar-scroll flex-1 space-y-7 overflow-y-auto px-3 pb-5"
         >
-          {/* Home */}
-          <ul className="list-none space-y-0.5">
-            <li>
-              <ViewTransitionLink
-                to="/"
-                onClick={onNavigate}
-                className={navLinkClass("/", true)}
-                aria-current={isActive("/", true) ? "page" : undefined}
-              >
-                {isActive("/", true) && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <Home className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Home</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-          </ul>
+          {/* A customized primary menu is an ordered shortcut rail. Search and
+              profile controls remain fixed elsewhere, and the full library
+              tree remains available below as a safe browsing fallback. */}
+          {primaryMenuLinks ? (
+            <ul className="list-none space-y-0.5">
+              {primaryMenuLinks.map((link) => {
+                const [targetPath, targetQuery] = link.href.split("?", 2);
+                const active =
+                  targetPath === "/"
+                    ? isActive("/", true)
+                    : targetPath === "/catalog" && targetQuery !== undefined && catalogState
+                      ? sameCatalogDestination(
+                          catalogState,
+                          parseCatalogSearchParams(new URLSearchParams(targetQuery)),
+                        )
+                      : targetQuery === undefined
+                        ? location.pathname === targetPath ||
+                          location.pathname.startsWith(`${targetPath}/`)
+                        : location.pathname === targetPath && location.search === `?${targetQuery}`;
+                return (
+                  <li key={link.key}>
+                    <ViewTransitionLink
+                      to={link.href}
+                      onClick={onNavigate}
+                      className={navLinkClassForState(active)}
+                      aria-current={active ? "page" : undefined}
+                    >
+                      {active ? (
+                        <span
+                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          style={{ background: "var(--primary)" }}
+                        />
+                      ) : null}
+                      {link.icon}
+                      <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
+                    </ViewTransitionLink>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <ul className="list-none space-y-0.5">
+              <li>
+                <ViewTransitionLink
+                  to="/"
+                  onClick={onNavigate}
+                  className={navLinkClass("/", true)}
+                  aria-current={isActive("/", true) ? "page" : undefined}
+                >
+                  {isActive("/", true) && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <Home className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Home</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+            </ul>
+          )}
 
           {/* Libraries */}
           {libraries && libraries.length > 0 && (
@@ -497,7 +657,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                             {libraryPins.map((pin) => {
                               const pinHref =
                                 pin.type === "collection"
-                                  ? buildLibraryCollectionCatalogHref(pin.id, pin.label)
+                                  ? buildLibraryCollectionCatalogHref(pin.id, pin.label, lib.id)
                                   : buildSectionCatalogHref({
                                       scope: "library",
                                       libraryId: lib.id,
@@ -527,20 +687,22 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                                     )}
                                     <span className="truncate">{pin.label}</span>
                                   </ViewTransitionLink>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      togglePin(lib.id, {
-                                        type: pin.type,
-                                        id: pin.id,
-                                        label: pin.label,
-                                      })
-                                    }
-                                    className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
-                                    title="Unpin"
-                                  >
-                                    <PinOff className="h-3 w-3" />
-                                  </button>
+                                  {canToggle ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        togglePin(lib.id, {
+                                          type: pin.type,
+                                          id: pin.id,
+                                          label: pin.label,
+                                        })
+                                      }
+                                      className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                                      title="Unpin"
+                                    >
+                                      <PinOff className="h-3 w-3" />
+                                    </button>
+                                  ) : null}
                                 </div>
                               );
                             })}
@@ -583,23 +745,25 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </kbd>
                 </ViewTransitionLink>
               </li>
-              <li>
-                <ViewTransitionLink
-                  to="/recommendations"
-                  onClick={onNavigate}
-                  className={navLinkClass("/recommendations")}
-                  aria-current={isActive("/recommendations") ? "page" : undefined}
-                >
-                  {isActive("/recommendations") && (
-                    <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                      style={{ background: "var(--primary)" }}
-                    />
-                  )}
-                  <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
-                </ViewTransitionLink>
-              </li>
+              {primaryMenuLinks === null ? (
+                <li>
+                  <ViewTransitionLink
+                    to="/recommendations"
+                    onClick={onNavigate}
+                    className={navLinkClass("/recommendations")}
+                    aria-current={isActive("/recommendations") ? "page" : undefined}
+                  >
+                    {isActive("/recommendations") && (
+                      <span
+                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                        style={{ background: "var(--primary)" }}
+                      />
+                    )}
+                    <Sparkles className="h-[18px] w-[18px] shrink-0" />
+                    <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
+                  </ViewTransitionLink>
+                </li>
+              ) : null}
               {showRequestsNav && (
                 <li>
                   <ViewTransitionLink
@@ -619,23 +783,25 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </ViewTransitionLink>
                 </li>
               )}
-              <li>
-                <ViewTransitionLink
-                  to="/calendar"
-                  onClick={onNavigate}
-                  className={navLinkClass("/calendar")}
-                  aria-current={isActive("/calendar") ? "page" : undefined}
-                >
-                  {isActive("/calendar") && (
-                    <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                      style={{ background: "var(--primary)" }}
-                    />
-                  )}
-                  <CalendarDays className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
-                </ViewTransitionLink>
-              </li>
+              {primaryMenuLinks === null ? (
+                <li>
+                  <ViewTransitionLink
+                    to="/calendar"
+                    onClick={onNavigate}
+                    className={navLinkClass("/calendar")}
+                    aria-current={isActive("/calendar") ? "page" : undefined}
+                  >
+                    {isActive("/calendar") && (
+                      <span
+                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                        style={{ background: "var(--primary)" }}
+                      />
+                    )}
+                    <CalendarDays className="h-[18px] w-[18px] shrink-0" />
+                    <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
+                  </ViewTransitionLink>
+                </li>
+              ) : null}
               {showNotificationsNav && (
                 <li>
                   <ViewTransitionLink
@@ -928,7 +1094,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
               <DropdownMenuItem
                 onClick={() => {
-                  navigate("/settings/playback");
+                  navigate("/settings");
                 }}
                 className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
               >

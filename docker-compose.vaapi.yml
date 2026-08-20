@@ -1,0 +1,10 @@
+services:
+  silo:
+    devices:
+      - /dev/dri:/dev/dri
+
+  # Optional distributed-mode example. Most single-host installs should
+  # just use the integrated service above.
+  # silo-transcode:
+  #   devices:
+  #     - /dev/dri:/dev/dri

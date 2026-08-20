@@ -553,12 +553,95 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		if err := schema.Validate(doc); err != nil {
 			return fmt.Errorf("does not satisfy %s: %w", v.SchemaRef, err)
 		}
+		if err := validateObjectSemantics(v.SchemaRef, trimmed); err != nil {
+			return fmt.Errorf("does not satisfy %s: %w", v.SchemaRef, err)
+		}
 
 	default:
 		return fmt.Errorf("unknown value type %q", v.Type)
 	}
 
 	return nil
+}
+
+type navigationDocument struct {
+	Items []navigationItem `json:"items"`
+}
+
+type navigationItem struct {
+	Type         string `json:"type"`
+	Destination  string `json:"destination"`
+	LibraryID    *int   `json:"library_id"`
+	SectionID    string `json:"section_id"`
+	CollectionID string `json:"collection_id"`
+	Label        string `json:"label"`
+}
+
+type navigationIdentity struct {
+	Type         string
+	Destination  string
+	LibraryID    int
+	HasLibraryID bool
+	SectionID    string
+	CollectionID string
+}
+
+// validateObjectSemantics holds the few cross-item invariants JSON Schema
+// cannot express. uniqueItems rejects byte-for-byte duplicate objects, but a
+// renamed library is still the same destination and must not appear twice in a
+// menu. Keeping this beside ValidateValue means API writes, migrations, and
+// manifest defaults all enforce the same identity rule.
+func validateObjectSemantics(schemaRef string, raw json.RawMessage) error {
+	if schemaRef != "primary-menu.json" && schemaRef != "navigation-shortcuts.json" {
+		return nil
+	}
+
+	var document navigationDocument
+	if err := strictUnmarshal(raw, &document); err != nil {
+		return fmt.Errorf("decoding navigation document: %w", err)
+	}
+	seen := make(map[navigationIdentity]int, len(document.Items))
+	for index, item := range document.Items {
+		identity, err := item.identity()
+		if err != nil {
+			return fmt.Errorf("items[%d]: %w", index, err)
+		}
+		if first, duplicate := seen[identity]; duplicate {
+			return fmt.Errorf("items[%d] repeats the destination from items[%d]", index, first)
+		}
+		seen[identity] = index
+	}
+	return nil
+}
+
+func (item navigationItem) identity() (navigationIdentity, error) {
+	identity := navigationIdentity{Type: item.Type}
+	switch item.Type {
+	case "builtin":
+		identity.Destination = item.Destination
+	case "library":
+		if item.LibraryID == nil {
+			return navigationIdentity{}, errors.New("library is missing library_id")
+		}
+		identity.LibraryID = *item.LibraryID
+		identity.HasLibraryID = true
+	case "section":
+		if item.LibraryID == nil {
+			return navigationIdentity{}, errors.New("section is missing library_id")
+		}
+		identity.LibraryID = *item.LibraryID
+		identity.HasLibraryID = true
+		identity.SectionID = item.SectionID
+	case "collection":
+		identity.CollectionID = item.CollectionID
+		if item.LibraryID != nil {
+			identity.LibraryID = *item.LibraryID
+			identity.HasLibraryID = true
+		}
+	default:
+		return navigationIdentity{}, fmt.Errorf("unknown navigation item type %q", item.Type)
+	}
+	return identity, nil
 }
 
 // NormalizeValue validates a value and returns the form that should be stored.

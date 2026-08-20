@@ -43,6 +43,8 @@ import {
   useGroupedCollectionCard,
 } from "@/components/collections/GroupedCollectionsBoard";
 import { slugifyGroupSlug } from "@/lib/collectionGroups";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 import {
   buildUserCollectionCatalogHref,
@@ -197,6 +199,8 @@ function CollectionList() {
 // that library's full Collections tab.
 function ServerCollectionsSection() {
   const { data, isLoading } = useServerCollections();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
   const libraries = data ?? [];
 
   if (isLoading) {
@@ -216,7 +220,7 @@ function ServerCollectionsSection() {
               <Skeleton className="h-7 w-40" />
               <div className="flex gap-4 overflow-hidden lg:gap-5">
                 {Array.from({ length: 7 }).map((_, i) => (
-                  <div key={i} className="w-[130px] shrink-0 sm:w-[150px] lg:w-[178px]">
+                  <div key={i} className={posterWidthClasses}>
                     <Skeleton className="aspect-[2/3] rounded-xl" />
                     <Skeleton className="mt-2.5 h-4 w-3/4" />
                   </div>
@@ -255,6 +259,8 @@ function ServerCollectionsSection() {
 // supplies horizontal padding — the row title and cards align to that column.
 function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
   const navigate = useNavigate();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
   const collectionsHref = `/library/${library.library_id}?tab=collections`;
   const hasMore = library.total_count > library.collections.length;
   return (
@@ -265,7 +271,7 @@ function ServerLibraryRow({ library }: { library: ServerCollectionsLibrary }) {
       edgePadding={false}
     >
       {library.collections.map((collection) => (
-        <div key={collection.id} className="w-[130px] sm:w-[150px] lg:w-[178px]">
+        <div key={collection.id} className={posterWidthClasses}>
           <CollectionPosterCard
             collection={collection}
             kind="regular"

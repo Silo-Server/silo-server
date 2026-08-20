@@ -162,6 +162,11 @@ type UserStore interface {
 	DeleteAudioPreference(ctx context.Context, profileID, seriesID string) error
 	SetSeriesPlaybackPreference(ctx context.Context, pref SeriesPlaybackPreference) error
 	GetSeriesPlaybackPreference(ctx context.Context, profileID, seriesID string) (*SeriesPlaybackPreference, error)
+
+	// Collection sort preferences
+	SetCollectionSortPreference(ctx context.Context, pref CollectionSortPreference) error
+	GetCollectionSortPreference(ctx context.Context, profileID, collectionKind, collectionID string) (*CollectionSortPreference, error)
+	ClearCollectionSortPreference(ctx context.Context, profileID, collectionKind, collectionID string) error
 	DeleteSeriesPlaybackPreference(ctx context.Context, profileID, seriesID string) error
 	GetLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) (*LibraryPlaybackPreference, error)
 	ListLibraryPlaybackPreferences(ctx context.Context, profileID string) ([]LibraryPlaybackPreference, error)
@@ -234,4 +239,13 @@ type UserStore interface {
 type DeviceRegistry interface {
 	RegisterDevice(ctx context.Context, entry DeviceEntry) error
 	ListDevices(ctx context.Context) ([]DeviceEntry, error)
+	// DeviceExists reports whether one device is registered to one profile. It
+	// exists so a write naming a device can be authorized without scanning the
+	// whole account's registry: ListDevices is account-wide by construction, so
+	// filtering its result per write would read every household member's rows.
+	DeviceExists(ctx context.Context, profileID, deviceID string) (bool, error)
+	// ForgetDevice removes one profile's registry row for a device. Settings
+	// are deleted separately through the scoped setting deletes, so forgetting
+	// a device shared by two profiles leaves the other profile's row intact.
+	ForgetDevice(ctx context.Context, profileID, deviceID string) error
 }

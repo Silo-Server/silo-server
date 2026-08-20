@@ -50,6 +50,9 @@ func (w *taskWorker) info() TaskInfo {
 		ProgressMessage: w.progressMessage,
 		LastExecution:   w.lastResult,
 	}
+	if task, ok := w.task.(ManualOnlyTask); ok {
+		info.ManualOnly = task.ManualOnly()
+	}
 
 	var earliest time.Time
 	for _, tr := range w.triggers {

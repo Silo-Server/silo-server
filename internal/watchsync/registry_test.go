@@ -24,6 +24,42 @@ func TestRegistryRejectsDuplicateProvider(t *testing.T) {
 	}
 }
 
+type stubPluginProvider struct{ stubProvider }
+
+func (stubPluginProvider) ProviderSource() string { return providerSourcePlugin }
+
+func TestRegistryReplacePluginProviders(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(stubProvider{key: "trakt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.ReplacePluginProviders([]Provider{stubPluginProvider{stubProvider{key: testPluginCapabilityID}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get("anilist"); !ok {
+		t.Fatal("plugin provider was not registered")
+	}
+	if err := registry.ReplacePluginProviders([]Provider{stubPluginProvider{stubProvider{key: "simkl-plugin"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get("anilist"); ok {
+		t.Fatal("stale plugin provider was not removed")
+	}
+	if _, ok := registry.Get("trakt"); !ok {
+		t.Fatal("built-in provider was removed")
+	}
+}
+
+func TestRegistryReplacePluginProvidersRejectsBuiltinCollision(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.Register(stubProvider{key: "trakt"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.ReplacePluginProviders([]Provider{stubPluginProvider{stubProvider{key: "trakt"}}}); err == nil {
+		t.Fatal("expected built-in collision to fail")
+	}
+}
+
 func TestRegistryListWithCapabilities(t *testing.T) {
 	registry := NewRegistry()
 

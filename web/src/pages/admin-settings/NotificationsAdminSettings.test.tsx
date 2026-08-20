@@ -36,7 +36,10 @@ function makeForm() {
         case "notifications.push_relay_key_prefix":
           return "cap_v1_test";
         case "notifications.push_relay_expires_at":
-          return "2026-08-10T00:00:00Z";
+          // Relative so the "renews automatically" (not-yet-expired) branch
+          // stays stable — a hardcoded date turned into a time bomb once the
+          // calendar passed it.
+          return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
         default:
           return "";
       }

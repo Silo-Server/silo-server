@@ -23,18 +23,19 @@ import (
 
 // SectionHandler handles section management and batch section endpoints.
 type SectionHandler struct {
-	repo           *sections.Repository
-	fetcher        *sections.Fetcher
-	previewFetcher sectionPreviewFetcher // set to fetcher at construction; separate for test injection
-	episodeFetcher sectionEpisodeFetcher
-	FolderRepo     *catalog.FolderRepository
-	EpisodeRepo    *catalog.EpisodeRepository
-	StoreProvider  userstore.UserStoreProvider
-	UserRepo       *auth.UserRepository
-	DetailSvc      *catalog.DetailService
-	Settings       catalog.SettingsStore
-	CollectionRepo *catalog.LibraryCollectionRepository
-	EbookProgress  EbookReaderProgressLister
+	repo                  *sections.Repository
+	fetcher               *sections.Fetcher
+	previewFetcher        sectionPreviewFetcher // set to fetcher at construction; separate for test injection
+	episodeFetcher        sectionEpisodeFetcher
+	FolderRepo            *catalog.FolderRepository
+	EpisodeRepo           *catalog.EpisodeRepository
+	StoreProvider         userstore.UserStoreProvider
+	UserRepo              *auth.UserRepository
+	DetailSvc             *catalog.DetailService
+	Settings              catalog.SettingsStore
+	CollectionRepo        *catalog.LibraryCollectionRepository
+	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
+	EbookProgress         EbookReaderProgressLister
 }
 
 // NewSectionHandler creates a new SectionHandler.
@@ -405,6 +406,8 @@ func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.
 	}
 	if err := h.CollectionRepo.Delete(ctx, collectionID); err != nil && !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
 		slog.WarnContext(ctx, "failed to delete unreferenced section-managed collection", "component", "api", "collection_id", collectionID, "error", err)
+	} else if err == nil && h.SortPreferenceCleaner != nil {
+		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
 }
 

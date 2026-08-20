@@ -136,6 +136,37 @@ func (s *PostgresUserStore) ListDevices(ctx context.Context) ([]userstore.Device
 	return entries, rows.Err()
 }
 
+func (s *PostgresUserStore) DeviceExists(ctx context.Context, profileID, deviceID string) (bool, error) {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM user_devices
+			WHERE user_id = $1 AND profile_id = $2 AND device_id = $3)`,
+		s.userID, profileID, deviceID,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking device %q: %w", deviceID, err)
+	}
+	return exists, nil
+}
+
+func (s *PostgresUserStore) ForgetDevice(ctx context.Context, profileID, deviceID string) error {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`DELETE FROM user_devices
+		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3`,
+		s.userID, profileID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("forgetting device %q: %w", deviceID, err)
+	}
+	return nil
+}
+
 func (s *PostgresUserStore) SetDeviceSetting(ctx context.Context, entry userstore.DeviceSettingEntry) error {
 	if err := s.RegisterDevice(ctx, userstore.DeviceEntry{
 		ProfileID:      entry.ProfileID,

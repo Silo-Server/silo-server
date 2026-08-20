@@ -1044,6 +1044,8 @@ export default function NotificationsSettings() {
 
   return (
     <div className="space-y-6">
+      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Notifications</h2>
+
       <PreferencesSection />
 
       <WebPushSection />

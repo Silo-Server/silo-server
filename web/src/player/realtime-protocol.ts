@@ -1,3 +1,5 @@
+import type { SubtitleInventoryItemV3 } from "./protocol-v3";
+
 export type PlaybackRealtimeMessageType = "command" | "event" | "hello" | "ack" | "result";
 
 export type PlaybackCommandName =
@@ -84,6 +86,13 @@ export interface PlaybackSubtitleReadyPayload {
   subtitle_id: number;
   language: string;
   label?: string;
+  /**
+   * The new track's server-assigned combined ordinal, identity and stream URL.
+   * The client folds it in at that ordinal rather than deriving one. Absent
+   * when the server could not resolve the file's inventory, in which case the
+   * client refetches its plan instead.
+   */
+  track?: SubtitleInventoryItemV3;
 }
 
 /** One translated subtitle cue pushed during a live translation (media seconds). */
@@ -121,6 +130,8 @@ export interface PlaybackSubtitleTranslationCompletedPayload {
   subtitle_id: number;
   language: string;
   label?: string;
+  /** See {@link PlaybackSubtitleReadyPayload.track}. */
+  track?: SubtitleInventoryItemV3;
 }
 
 export interface PlaybackSubtitleTranslationFailedPayload {
@@ -254,6 +265,37 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
 }
 
+/**
+ * Validates a pushed inventory entry.
+ *
+ * The combined ordinal is the whole point of the block — it is what lets the
+ * client select the track without counting — so an entry missing it is worse
+ * than no entry at all, and is rejected in favour of refetching the plan.
+ */
+function isSubtitleInventoryItem(value: unknown): value is SubtitleInventoryItemV3 {
+  return (
+    isRecord(value) &&
+    typeof value.track_id === "string" &&
+    typeof value.combined_index === "number" &&
+    Number.isInteger(value.combined_index) &&
+    value.combined_index >= 0 &&
+    typeof value.source === "string" &&
+    typeof value.forced === "boolean" &&
+    typeof value.default === "boolean" &&
+    typeof value.hearing_impaired === "boolean" &&
+    (value.delivery === "sidecar" || value.delivery === "burn_in_only") &&
+    isOptionalString(value.codec) &&
+    isOptionalString(value.language) &&
+    isOptionalString(value.label) &&
+    isOptionalString(value.url) &&
+    isOptionalString(value.font_bundle_url)
+  );
+}
+
+function isOptionalSubtitleInventoryItem(value: unknown): boolean {
+  return value === undefined || value === null || isSubtitleInventoryItem(value);
+}
+
 function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyPayload {
   return (
     isRecord(value) &&
@@ -261,7 +303,8 @@ function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyP
     typeof value.file_id === "number" &&
     typeof value.subtitle_id === "number" &&
     typeof value.language === "string" &&
-    isOptionalString(value.label)
+    isOptionalString(value.label) &&
+    isOptionalSubtitleInventoryItem(value.track)
   );
 }
 
@@ -314,7 +357,8 @@ function isTranslationCompletedPayload(
     typeof value.track_key === "string" &&
     typeof value.subtitle_id === "number" &&
     typeof value.language === "string" &&
-    isOptionalString(value.label)
+    isOptionalString(value.label) &&
+    isOptionalSubtitleInventoryItem(value.track)
   );
 }
 

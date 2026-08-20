@@ -179,6 +179,13 @@ func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
+	effective := EffectiveAdminSettings(nil)
+	if got := effective[chapterThumbnailSoftwareToneMapKey]; got != "false" {
+		t.Fatalf("software tone-map default = %q, want false", got)
+	}
+}
+
 func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	if cfg.S3.Public.URLAuth == "" {
 		cfg.S3.Public.URLAuth = "presigned"
@@ -209,6 +216,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	}{
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
+		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
 		{key: "recommendations.embeddings_cron", value: "not a cron"},
 		{key: "notifications.server_channels.batch_seconds", value: "119"},

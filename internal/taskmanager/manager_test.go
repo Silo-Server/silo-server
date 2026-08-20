@@ -153,6 +153,10 @@ type conditionalStubTask struct {
 	executeCalls    int
 }
 
+type manualOnlyStubTask struct{ stubTask }
+
+func (manualOnlyStubTask) ManualOnly() bool { return true }
+
 func (t *conditionalStubTask) ShouldRun(context.Context) (bool, error) {
 	select {
 	case t.shouldRunCalled <- struct{}{}:
@@ -320,6 +324,35 @@ func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 	if last.NextRunAt.Sub(last.LastExecution.CompletedAt) < 59*time.Minute {
 		t.Fatalf("next run was not rearmed from the latest completion: got %s after completion",
 			last.NextRunAt.Sub(last.LastExecution.CompletedAt))
+	}
+}
+
+func TestTaskManagerRejectsScheduledTriggersForManualOnlyTask(t *testing.T) {
+	const taskKey = "manual-backfill"
+	triggerRepo := &fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{}}
+	manager := taskmanager.New(
+		triggerRepo,
+		fakeExecutionRepository{},
+		newFakeTrigger,
+		slog.New(slog.DiscardHandler),
+	)
+	manager.Register(manualOnlyStubTask{stubTask{key: taskKey}})
+
+	if info := manager.GetTaskInfo(taskKey); !info.ManualOnly {
+		t.Fatal("TaskInfo.ManualOnly = false, want true")
+	}
+	err := manager.UpdateTriggers(taskKey, []taskmanager.TriggerConfig{{
+		Type:       taskmanager.TriggerTypeInterval,
+		IntervalMs: int64(time.Hour / time.Millisecond),
+	}})
+	if !errors.Is(err, taskmanager.ErrTaskManualOnly) {
+		t.Fatalf("UpdateTriggers() error = %v, want ErrTaskManualOnly", err)
+	}
+	if _, wrote := triggerRepo.setCalls[taskKey]; wrote {
+		t.Fatal("manual-only trigger rejection wrote to the trigger repository")
+	}
+	if err := manager.UpdateTriggers(taskKey, nil); err != nil {
+		t.Fatalf("clearing manual-only triggers error = %v", err)
 	}
 }
 

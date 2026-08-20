@@ -361,7 +361,7 @@ Borrows the *behavior* of the requests gate (status endpoint + per-call
 guard that rereads settings) but stores keys in the general `server_settings`
 store — requests uses its own dedicated table, which diagnostics doesn't
 need. Key naming follows existing namespaces (`opslog.*`,
-`audiobooks.enabled`, `playback.protocol_v3_enabled`):
+`audiobooks.enabled`, `playback.*`):
 
 - `diagnostics.uploads_enabled` (bool, default `false`)
 - `diagnostics.max_bundle_bytes` (default 10 MiB compressed)

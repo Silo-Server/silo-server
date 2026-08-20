@@ -1,6 +1,9 @@
 package playback
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +55,61 @@ func TestBuildPrepareFileArgsEmitsFaststartMP4(t *testing.T) {
 	}
 }
 
+func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
+	tests := []struct {
+		name      string
+		hwAccel   string
+		want      []string
+		forbidden []string
+	}{
+		{
+			name:      "qsv keeps hardware encode with software decode upload",
+			hwAccel:   "qsv",
+			want:      []string{"-c:v h264_qsv", "format=nv12,hwupload,hwmap=derive_device=qsv"},
+			forbidden: []string{"-hwaccel qsv", "-hwaccel vaapi"},
+		},
+		{
+			name:      "vaapi keeps hardware encode with software decode upload",
+			hwAccel:   "vaapi",
+			want:      []string{"-c:v h264_vaapi", "scale=-2:720,format=nv12,hwupload"},
+			forbidden: []string{"-hwaccel vaapi"},
+		},
+		{
+			name:      "nvenc falls back to software encode",
+			hwAccel:   "nvenc",
+			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
+			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildPrepareFileArgs(TranscodeOpts{
+				InputPath:           "/media/high10.mkv",
+				SourceVideoCodec:    "h264",
+				SourceVideoProfile:  "High 10",
+				SourceVideoBitDepth: 10,
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				TargetResolution:    "720p",
+				HWAccel:             tt.hwAccel,
+				AudioTrackIndex:     -1,
+			}, "/artifacts/out.mp4")
+			joined := strings.Join(args, " ")
+			for _, want := range tt.want {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("args missing %q: %s", want, joined)
+				}
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(joined, forbidden) {
+					t.Fatalf("args unexpectedly contain %q: %s", forbidden, joined)
+				}
+			}
+		})
+	}
+}
+
 func TestResolvePrepareTarget(t *testing.T) {
 	settings := AdminSettings{TranscodeEnabled: true, Allow4KTranscode: true}
 	file := &models.MediaFile{CodecVideo: "h264", CodecAudio: "dts", Container: "mkv", Resolution: "1080p"}
@@ -80,5 +138,47 @@ func TestResolvePrepareTarget(t *testing.T) {
 	rt = ResolvePrepareTarget(file, "transcode", ClientCapabilities{MaxResolution: "1080p"}, settings)
 	if rt.Resolution != "" {
 		t.Fatalf("transcode resolution = %q, want empty (source)", rt.Resolution)
+	}
+}
+
+func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
+	resetDeviceLoad(t)
+	devA, devB := "/dev/dri/renderD888", "/dev/dri/renderD889"
+	fakeDeviceStat(t, devA, devB)
+
+	// Fake ffmpeg: record argv, create the output (last arg) so finalize works.
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args.txt")
+	script := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argsFile+"\neval \"touch \\${$#}\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath := filepath.Join(dir, "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:        "/nonexistent/input.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		FFmpegPath:       script,
+		HWAccel:          "vaapi",
+		HWDevice:         devA + "," + devB,
+	}, outputPath)
+	if err != nil {
+		t.Fatalf("PrepareFile: %v", err)
+	}
+
+	argv, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(argv)
+	if !strings.Contains(got, devA) {
+		t.Fatalf("ffmpeg args missing resolved device %s:\n%s", devA, got)
+	}
+	if strings.Contains(got, devA+","+devB) {
+		t.Fatalf("ffmpeg args contain the raw device list:\n%s", got)
+	}
+	if count := hwDeviceActiveCount(devA); count != 0 {
+		t.Fatalf("active count after PrepareFile returned = %d, want 0", count)
 	}
 }

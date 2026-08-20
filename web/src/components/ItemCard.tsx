@@ -10,6 +10,7 @@ import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
+import { useUICustomization } from "@/hooks/useUICustomization";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -190,6 +191,9 @@ export default function ItemCard({
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
+  const { cardPresentation } = useUICustomization();
+  const showCaption = cardPresentation.caption !== "artwork";
+  const showMetadata = cardPresentation.caption === "title_metadata";
 
   return (
     <div className="media-card group/card">
@@ -302,17 +306,21 @@ export default function ItemCard({
           variant="poster"
         />
       </div>
-      <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-        <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
-        {episodeLabels?.episodeTitle ? (
-          <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
-            {episodeLabels.episodeTitle}
-          </div>
-        ) : null}
-        <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
-          <SortMeta item={item} sortField={sortField} />
-        </div>
-      </ViewTransitionLink>
+      {showCaption ? (
+        <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
+          <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
+          {showMetadata && episodeLabels?.episodeTitle ? (
+            <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+              {episodeLabels.episodeTitle}
+            </div>
+          ) : null}
+          {showMetadata ? (
+            <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+              <SortMeta item={item} sortField={sortField} />
+            </div>
+          ) : null}
+        </ViewTransitionLink>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import (
 func TestNeedsCriticalProbeRepair_ProbedAudioOnlyFileIsComplete(t *testing.T) {
 	now := time.Now()
 	f := &models.MediaFile{
+		BaseType:       "audiobook",
 		ProbeSource:    "local",
 		ProbeUpdatedAt: &now,
 		Duration:       3600,
@@ -25,6 +26,117 @@ func TestNeedsCriticalProbeRepair_ProbedAudioOnlyFileIsComplete(t *testing.T) {
 	}
 	if NeedsCriticalProbeRepair(f) {
 		t.Fatal("a successfully-probed audio-only file must not need probe repair")
+	}
+}
+
+func TestNeedsCriticalProbeRepair_ProbedMovieWithOnlyAudioMetadataRepairs(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		BaseType:       "movie",
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       7200,
+		Container:      "mkv",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Codec: "aac"}},
+		Chapters:       []models.MediaChapter{},
+	}
+	if !NeedsCriticalProbeRepair(f) {
+		t.Fatal("a movie with only audio metadata must be reprobed before playback")
+	}
+}
+
+func TestNeedsCriticalProbeRepairScanState_UsesMediaAwareAudioOnlyEvidence(t *testing.T) {
+	now := time.Now()
+	completeAudio := scanStateFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       3600,
+		Container:      "mp3",
+		CodecAudio:     "mp3",
+		HasAudioTracks: true,
+		HasChapters:    true,
+	}
+
+	audiobook := completeAudio
+	audiobook.BaseType = "audiobook"
+	if needsCriticalProbeRepairScanState(&audiobook) {
+		t.Fatal("a complete audio-only audiobook must remain stable during library scans")
+	}
+
+	movie := completeAudio
+	movie.BaseType = "movie"
+	if !needsCriticalProbeRepairScanState(&movie) {
+		t.Fatal("a movie with only audio metadata must be repaired during library scans")
+	}
+
+	legacyCoverArt := completeAudio
+	legacyCoverArt.BaseType = "audiobook"
+	legacyCoverArt.Container = "mp4"
+	legacyCoverArt.CodecAudio = "aac"
+	legacyCoverArt.CodecVideo = "mjpeg"
+	legacyCoverArt.Resolution = "500x500"
+	legacyCoverArt.HasVideoTracks = true
+	if !needsCriticalProbeRepairScanState(&legacyCoverArt) {
+		t.Fatal("legacy attached-picture video metadata must be repaired during library scans")
+	}
+
+	genuineVideo := legacyCoverArt
+	genuineVideo.CodecVideo = "h264"
+	genuineVideo.Resolution = "1080p"
+	genuineVideo.HasNonImageVideoTracks = true
+	if needsCriticalProbeRepairScanState(&genuineVideo) {
+		t.Fatal("a complete non-image video stream must not be mistaken for attached cover art")
+	}
+}
+
+// A successfully-probed synthetic clip may legitimately have no audio
+// stream. Requiring audio metadata made both request-time repair and stable
+// library scans retry ffprobe forever, even though another probe could never
+// populate an audio track that is not in the file.
+func TestNeedsCriticalProbeRepair_ProbedVideoOnlyFileIsComplete(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       30,
+		Container:      "mkv",
+		CodecVideo:     "h264",
+		Resolution:     "1080p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264", ColorRange: "tv"}},
+		Chapters:       []models.MediaChapter{},
+		// video-only: CodecAudio and AudioTracks intentionally empty
+	}
+	if NeedsCriticalProbeRepair(f) {
+		t.Fatal("a successfully-probed video-only file must not need probe repair")
+	}
+
+	scanFile := &scanStateFile{
+		ProbeSource:    f.ProbeSource,
+		ProbeUpdatedAt: f.ProbeUpdatedAt,
+		Duration:       f.Duration,
+		Container:      f.Container,
+		CodecVideo:     f.CodecVideo,
+		Resolution:     f.Resolution,
+		HasVideoTracks: true,
+		HasChapters:    true,
+	}
+	if needsCriticalProbeRepairScanState(scanFile) {
+		t.Fatal("a successfully-probed video-only file must not be reprobed on a stable scan")
+	}
+}
+
+func TestNeedsCriticalProbeRepair_LegacyAudiobookCoverArtRepairs(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		BaseType: "audiobook", ProbeSource: "local", ProbeUpdatedAt: &now,
+		Duration: 3600, Container: "mp4", CodecAudio: "aac", CodecVideo: "mjpeg",
+		AudioTracks: []models.AudioTrack{{Codec: "aac"}},
+		VideoTracks: []models.VideoTrack{{Codec: "mjpeg", Width: 500, Height: 500, ColorRange: "unknown"}},
+		Chapters:    []models.MediaChapter{},
+	}
+	if !NeedsCriticalProbeRepair(f) {
+		t.Fatal("legacy attached-picture video metadata must trigger a repair probe")
 	}
 }
 
@@ -99,6 +211,44 @@ func TestNeedsCriticalProbeRepair_ImplausiblyShortLargeVideoRepairs(t *testing.T
 
 	if !NeedsCriticalProbeRepair(f) {
 		t.Fatal("a large video claiming to be four seconds should need probe repair")
+	}
+}
+
+func TestNeedsCriticalProbeRepair_LongVideoConverges(t *testing.T) {
+	now := time.Now().UTC()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		FileSize:       77_507_139_196,
+		Duration:       182930,
+		Container:      "mp4",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Language: "eng"}},
+		CodecVideo:     "h264",
+		Resolution:     "1080p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264", ColorRange: "unknown"}},
+		Chapters:       []models.MediaChapter{},
+	}
+
+	if NeedsCriticalProbeRepair(f) {
+		t.Fatal("an accepted long video must not need request-time probe repair")
+	}
+
+	scanFile := &scanStateFile{
+		ProbeSource:    f.ProbeSource,
+		ProbeUpdatedAt: f.ProbeUpdatedAt,
+		FileSize:       f.FileSize,
+		Duration:       f.Duration,
+		Container:      f.Container,
+		CodecVideo:     f.CodecVideo,
+		CodecAudio:     f.CodecAudio,
+		Resolution:     f.Resolution,
+		HasVideoTracks: true,
+		HasAudioTracks: true,
+		HasChapters:    true,
+	}
+	if needsCriticalProbeRepairScanState(scanFile) {
+		t.Fatal("an accepted long video must not be reprobed on subsequent library scans")
 	}
 }
 

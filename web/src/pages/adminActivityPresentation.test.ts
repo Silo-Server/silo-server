@@ -13,6 +13,8 @@ import {
   formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
+  getSessionClientLabel,
+  getSessionClientLabelFull,
   normalizeContainerDecision,
   normalizeStreamDecision,
 } from "./adminActivityPresentation";
@@ -35,6 +37,11 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     position_seconds: overrides.position_seconds ?? 300,
     is_paused: overrides.is_paused ?? false,
     client_name: overrides.client_name,
+    client_version: overrides.client_version,
+    client_build: overrides.client_build,
+    client_channel: overrides.client_channel,
+    client_label: overrides.client_label,
+    client_label_full: overrides.client_label_full,
     client_user_agent: overrides.client_user_agent,
     effective_play_method: overrides.effective_play_method,
     is_jellyfin_client: overrides.is_jellyfin_client,
@@ -292,5 +299,32 @@ describe("adminActivityPresentation", () => {
     expect(normalizeStreamDecision(session.audio_decision)).toBe("transcode");
     expect(formatDeliveredContainerSummary(session)).toBe("HLS");
     expect(formatVideoDetail(session)).toBe("Video stream copied");
+  });
+
+  it("prefers the server's exact client label in the full label", () => {
+    const session = makeSession({
+      client_name: "Silo Android TV",
+      client_version: "1.0.0",
+      client_build: "5",
+      client_label: "Silo Android TV 1.0.0",
+      client_label_full: "Silo Android TV 1.0.0 (build 5)",
+    });
+
+    expect(getSessionClientLabelFull(session)).toBe("Silo Android TV 1.0.0 (build 5)");
+    // The compact row label keeps its unchanged width.
+    expect(getSessionClientLabel(session)).toBe("Silo Android TV 1.0.0");
+  });
+
+  it("falls back to the compact label, then to name and version", () => {
+    expect(
+      getSessionClientLabelFull(
+        makeSession({ client_label: "Chrome 120", client_name: "Chrome", client_version: "120.0" }),
+      ),
+    ).toBe("Chrome 120");
+    expect(
+      getSessionClientLabelFull(makeSession({ client_name: "Silo iOS", client_version: "2.1.0" })),
+    ).toBe("Silo iOS 2.1.0");
+    expect(getSessionClientLabelFull(makeSession({ client_name: "Silo iOS" }))).toBe("Silo iOS");
+    expect(getSessionClientLabelFull(makeSession())).toBe("");
   });
 });

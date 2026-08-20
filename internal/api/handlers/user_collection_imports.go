@@ -75,6 +75,7 @@ type userImportSharedFields struct {
 	PosterURL              string          `json:"poster_url"`
 	LibraryIDs             []int           `json:"library_ids,omitempty"`
 	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty"`
+	SortConfig             json.RawMessage `json:"sort_config,omitempty"`
 }
 
 type userImportMDBListRequest struct {
@@ -217,6 +218,11 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	sortConfig, err := NormalizeCollectionSortConfig(shared.SortConfig, true)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
 		CreatorProfileID:       profileID,
@@ -225,7 +231,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		CollectionType:         collectionType,
 		IsShared:               shared.IsShared,
 		QueryDefinition:        "{}",
-		SortConfig:             "{}",
+		SortConfig:             sortConfig,
 		SourceURL:              cfg.DisplayURL(),
 		SourceConfig:           sourceConfigJSON,
 		SyncSchedule:           schedule,

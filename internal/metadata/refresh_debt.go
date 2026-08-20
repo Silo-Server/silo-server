@@ -14,6 +14,14 @@ const (
 	RefreshDebtReasonRefreshFailure         int64 = 4
 	RefreshDebtReasonCoreMetadataIncomplete int64 = 8
 	RefreshDebtReasonProviderIDIncomplete   int64 = 16
+	// RefreshDebtReasonTrailersRequested marks a refresh a viewer asked for
+	// through the trailer action. It exists so that request survives a restart
+	// that kills the detached goroutine actually doing the work, and it is
+	// deliberately not a "something is wrong with this item" reason: it carries
+	// no priority case (so it sits at the default band and never front-runs
+	// real debt) and nothing recomputes it, so the next successful refresh
+	// clears it like any resolved reason.
+	RefreshDebtReasonTrailersRequested int64 = 32
 )
 
 const (

@@ -48,7 +48,10 @@ type playbackSessionRow struct {
 	ClientIP                 string    `json:"client_ip,omitempty"`
 	ClientName               string    `json:"client_name,omitempty"`
 	ClientVersion            string    `json:"client_version,omitempty"`
+	ClientBuild              string    `json:"client_build,omitempty"`
+	ClientChannel            string    `json:"client_channel,omitempty"`
 	ClientLabel              string    `json:"client_label,omitempty"`
+	ClientLabelFull          string    `json:"client_label_full,omitempty"`
 	ClientUserAgent          string    `json:"client_user_agent,omitempty"`
 	AudioTrackIndex          int       `json:"audio_track_index"`
 	TranscodeAudio           bool      `json:"transcode_audio"`
@@ -89,6 +92,11 @@ type playbackSessionsCapabilitiesResponse struct {
 	EffectivePlayMethodValues []string `json:"effective_play_method_values"`
 	// IsJellyfinClient reports that rows carry is_jellyfin_client.
 	IsJellyfinClient bool `json:"is_jellyfin_client"`
+	// ClientBuild reports that rows carry client_build (and the exact-version
+	// client_label_full derived from it).
+	ClientBuild bool `json:"client_build"`
+	// ClientChannel reports that rows carry client_channel.
+	ClientChannel bool `json:"client_channel"`
 }
 
 // HandleGetSessionsCapabilities exposes additive feature support for the live
@@ -98,6 +106,8 @@ func (h *AdminHandler) HandleGetSessionsCapabilities(w http.ResponseWriter, _ *h
 		EffectivePlayMethod:       true,
 		EffectivePlayMethodValues: []string{"direct", "remux", "transcode", "audio"},
 		IsJellyfinClient:          true,
+		ClientBuild:               true,
+		ClientChannel:             true,
 	})
 }
 
@@ -182,6 +192,8 @@ func (l *PlaybackSessionsLoader) Load(
 			COALESCE(HOST(s.client_ip), ''),
 			COALESCE(s.client_name, ''),
 			COALESCE(s.client_version, ''),
+			COALESCE(s.client_build, ''),
+			COALESCE(s.client_channel, ''),
 			COALESCE(s.client_user_agent, ''),
 			COALESCE(s.audio_track_index, 0),
 			COALESCE(s.transcode_audio, FALSE),
@@ -239,6 +251,7 @@ func (l *PlaybackSessionsLoader) Load(
 			&posterPath,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.StartedAt, &s.UpdatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
+			&s.ClientBuild, &s.ClientChannel,
 			&s.ClientUserAgent, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
@@ -253,6 +266,13 @@ func (l *PlaybackSessionsLoader) Load(
 		s.SourceBitrateKbps = sourceBitrateKbps
 		s.SourceAudioChannels = sourceAudioChannels
 		s.ClientLabel = playbackClientDisplayName(s.ClientName, s.ClientVersion, s.ClientUserAgent)
+		// Only worth the bytes when it says more than the compact label — which
+		// it does not for any client without a build or a non-release channel,
+		// i.e. most of a 200-row page. Clients read client_label when
+		// client_label_full is absent, so omitting the duplicate costs nothing.
+		if full := playbackClientFullDisplayName(s.ClientName, s.ClientVersion, s.ClientBuild, s.ClientChannel, s.ClientUserAgent); full != s.ClientLabel {
+			s.ClientLabelFull = full
+		}
 		enrichPlaybackSessionRow(&s, audioTracksJSON)
 		sessions = append(sessions, s)
 	}
@@ -447,11 +467,47 @@ func firstNonEmptyValue(values ...string) string {
 	return ""
 }
 
+// playbackClientFullDisplayName renders the client's exact identity — version,
+// opaque build, and non-default channel — for surfaces that can afford the
+// width (expanded session details, tooltips). The name-and-version half is
+// whatever the compact label resolved, so a client identified only by its user
+// agent still gets its build named: a client that bothered to report a build
+// has earned having it displayed, whether or not it also named itself.
+func playbackClientFullDisplayName(name, version, build, channel, userAgent string) string {
+	label := playbackClientDisplayName(name, version, userAgent)
+	if label == "" {
+		return ""
+	}
+
+	build = strings.TrimSpace(build)
+	channel = strings.TrimSpace(channel)
+	// "release" is the assumed channel, so naming it adds width without adding
+	// information; every other channel is worth calling out.
+	if strings.EqualFold(channel, "release") {
+		channel = ""
+	}
+	var qualifiers []string
+	if build != "" {
+		qualifiers = append(qualifiers, "build "+build)
+	}
+	if channel != "" {
+		qualifiers = append(qualifiers, channel)
+	}
+	if len(qualifiers) > 0 {
+		label += " (" + strings.Join(qualifiers, ", ") + ")"
+	}
+	return label
+}
+
+// playbackClientDisplayName renders the compact label the session lists show.
+// A client that reports its own name keeps its version verbatim — truncating
+// "1.0.0" to "1" hid the only field that identifies the running build. Labels
+// derived from a user agent stay shortened, where a full browser version
+// ("120.0.6099.109") is noise.
 func playbackClientDisplayName(name, version, userAgent string) string {
 	name = strings.TrimSpace(name)
-	version = shortPlaybackClientVersion(version)
 	if name != "" {
-		if version != "" {
+		if version = strings.TrimSpace(version); version != "" {
 			return name + " " + version
 		}
 		return name

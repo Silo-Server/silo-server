@@ -36,6 +36,30 @@ const schema: PluginConfigSchema = {
 };
 
 describe("PluginConfigForm secrets", () => {
+  it("derives a form when a plugin only supplies JSON Schema", () => {
+    render(
+      <PluginConfigForm
+        schema={{
+          key: "server",
+          title: "Server",
+          json_schema: JSON.stringify({
+            type: "object",
+            properties: {
+              base_url: { type: "string", title: "Base URL" },
+              api_key: { type: "string", format: "password" },
+            },
+            required: ["base_url", "api_key"],
+          }),
+          required: true,
+        }}
+        onSave={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Api Key")).toHaveAttribute("type", "password");
+  });
+
   it("shows redacted saved state and only clears through an explicit action", async () => {
     const onSave = vi.fn();
     render(

@@ -23,12 +23,14 @@ import {
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig, TriggerType } from "@/api/types";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
 const REFRESH_REASON_LABELS: Record<string, string> = {
   episode_incomplete: "Episode incomplete",
   stale_provider_id: "Stale provider ID",
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
+  trailers_requested: "Trailers requested",
 };
 
 // --- Trigger display helpers ---
@@ -540,14 +542,19 @@ export default function AdminTaskDetail() {
               className={`h-full rounded-full transition-all duration-300 ${
                 task.state === "cancelling" ? "bg-yellow-500" : "bg-primary"
               }`}
-              style={{ width: `${Math.max(task.progress, 2)}%` }}
+              style={{ width: `${Math.max(clampTaskProgress(task.progress), 2)}%` }}
             />
           </div>
-          <p className="text-muted-foreground text-sm">
-            {task.state === "cancelling"
-              ? "Cancelling..."
-              : task.progress_message || `${Math.round(task.progress)}%`}
-          </p>
+          <div className="text-muted-foreground flex items-center justify-between gap-3 text-sm">
+            <p className="min-w-0 truncate">
+              {task.state === "cancelling" ? "Cancelling..." : task.progress_message || "Running"}
+            </p>
+            {task.state !== "cancelling" && task.progress > 0 && (
+              <span className="shrink-0 font-medium tabular-nums">
+                {formatTaskProgress(task.progress)}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -561,14 +568,21 @@ export default function AdminTaskDetail() {
       <div className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-medium tracking-tight">Schedule</h2>
-          {!editing && (
+          {!task.manual_only && !editing && (
             <Button variant="outline" size="sm" onClick={startEditing}>
               Edit Schedule
             </Button>
           )}
         </div>
 
-        {!editing ? (
+        {task.manual_only ? (
+          <div className="surface-panel-subtle rounded-xl p-4 text-sm">
+            <p className="text-muted-foreground">
+              Manual only. This task runs only when you select Run Now; scheduled triggers cannot be
+              configured.
+            </p>
+          </div>
+        ) : !editing ? (
           <div className="surface-panel overflow-hidden rounded-2xl border-0">
             {task.triggers.length === 0 && (
               <p className="text-muted-foreground p-4 text-sm">No triggers configured.</p>

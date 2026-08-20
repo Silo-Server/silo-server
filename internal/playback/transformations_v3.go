@@ -35,9 +35,9 @@ func ProbeTransformationRegistryV3(ctx context.Context, ffmpegPath string) *Tran
 	cancelEncoders()
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
 	return NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: bytes.Contains(bsfs, []byte("dovi_rpu")), RequiredCapability: "ffmpeg_bsf:dovi_rpu", PromisedDynamicRange: "hdr10", ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"}, TerminalReason: "dv_conversion_unsupported"},
-		{Name: "audio_to_aac", RecipeVersion: "1", Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")), RequiredCapability: "ffmpeg_encoder:aac", ValidatedClaims: []string{"media3_audio_decode"}, TerminalReason: "audio_conversion_unsupported"},
-		{Name: "video_to_h264", RecipeVersion: "1", Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: "sdr", ValidatedClaims: []string{"media3_h264_decode"}, TerminalReason: "video_conversion_unsupported"},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: bytes.Contains(bsfs, []byte("dovi_rpu")), RequiredCapability: "ffmpeg_bsf:dovi_rpu", PromisedDynamicRange: DynamicRangeHDR10V3, ValidatedClaims: DV7ToHDR10ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
+		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")), RequiredCapability: "ffmpeg_encoder:aac", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimH264DecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},
 	})
 }
 
@@ -113,7 +113,7 @@ func (r *TransformationRegistryV3) Advertised() []TransformationV3 {
 	result := make([]TransformationV3, 0, len(r.entries))
 	for _, spec := range r.entries {
 		if spec.Available {
-			result = append(result, TransformationV3{Name: spec.Name, Executor: "server", RecipeVersion: spec.RecipeVersion, ValidatedClaims: append([]string(nil), spec.ValidatedClaims...)})
+			result = append(result, TransformationV3{Name: spec.Name, Executor: ExecutorServerV3, RecipeVersion: spec.RecipeVersion, ValidatedClaims: append([]string(nil), spec.ValidatedClaims...)})
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })

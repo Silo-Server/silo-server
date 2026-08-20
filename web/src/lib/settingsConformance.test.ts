@@ -40,6 +40,7 @@ interface ConformanceCase {
   context?: {
     profile_id?: string;
     device_id?: string;
+    client_family?: string;
     library_ids?: number[];
     series_ids?: string[];
   };
@@ -48,6 +49,7 @@ interface ConformanceCase {
     scope: RemoteSettingScope;
     profile_id?: string;
     device_id?: string;
+    client_family?: string;
     library_id?: number;
     series_id?: string;
     value: unknown;
@@ -109,7 +111,7 @@ function loadFixture(): ConformanceFixture {
     if (testCase.context !== undefined) {
       assertOnlyKnownFields(
         testCase.context,
-        ["profile_id", "device_id", "library_ids", "series_ids"],
+        ["profile_id", "device_id", "client_family", "library_ids", "series_ids"],
         `${casePath}.context`,
       );
     }
@@ -117,7 +119,16 @@ function loadFixture(): ConformanceFixture {
       const rowPath = `${casePath}.stored[${rowIndex}]`;
       assertOnlyKnownFields(
         row,
-        ["key", "scope", "profile_id", "device_id", "library_id", "series_id", "value"],
+        [
+          "key",
+          "scope",
+          "profile_id",
+          "device_id",
+          "client_family",
+          "library_id",
+          "series_id",
+          "value",
+        ],
         rowPath,
       );
       expect("value" in row, `${rowPath} must spell an authored null as null`).toBe(true);
@@ -167,6 +178,7 @@ describe("settings conformance fixture", () => {
         const context: SettingResolutionContext = {
           profileId: testCase.context?.profile_id,
           deviceId: testCase.context?.device_id,
+          clientFamily: testCase.context?.client_family,
           libraryIds: testCase.context?.library_ids,
           seriesIds: testCase.context?.series_ids,
         };
@@ -175,6 +187,7 @@ describe("settings conformance fixture", () => {
           scope: row.scope,
           profileId: row.profile_id,
           deviceId: row.device_id,
+          clientFamily: row.client_family,
           libraryId: row.library_id,
           seriesId: row.series_id,
           value: row.value,

@@ -1050,6 +1050,45 @@ func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, 
 	return &match, nil
 }
 
+func (r *Repository) MatchEpisodesBySeries(
+	ctx context.Context,
+	seriesID string,
+	seasonNumber *int,
+	watchedAt *time.Time,
+) ([]Match, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
+		FROM episodes e
+		LEFT JOIN media_items series ON series.content_id = e.series_id
+		WHERE e.series_id = $1
+		  AND ($2::integer IS NULL OR e.season_number = $2)
+		  AND ($3::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= ($3::timestamptz AT TIME ZONE 'UTC')::date)
+		  AND EXISTS (
+			SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id
+		  )
+		ORDER BY e.season_number, e.episode_number, e.content_id`,
+		seriesID, seasonNumber, watchedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("matching episodes by series: %w", err)
+	}
+	defer rows.Close()
+
+	matches := make([]Match, 0)
+	for rows.Next() {
+		var match Match
+		if err := rows.Scan(&match.MediaItemID, &match.Title, &match.Year); err != nil {
+			return nil, fmt.Errorf("scanning series episode match: %w", err)
+		}
+		match.Kind = KindEpisode
+		matches = append(matches, match)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series episode matches: %w", err)
+	}
+	return matches, nil
+}
+
 func scanSource(scanner interface{ Scan(dest ...any) error }) (*Source, error) {
 	var source Source
 	if err := scanner.Scan(

@@ -124,10 +124,21 @@ func planProfileSettingsSync(
 		if field.raw == nil {
 			continue
 		}
-		out = append(out, profileSettingSync{
-			key:   field.key,
-			value: json.RawMessage(strconv.FormatBool(*field.raw)),
-		})
+		value := json.RawMessage(strconv.FormatBool(*field.raw))
+		out = append(out, profileSettingSync{key: field.key, value: value})
+
+		// A key that has a replacement carries it along, so the legacy profile
+		// route lands the same pair of rows the canonical route does. Without
+		// this, a client that still sets auto_skip_intro through PUT /profiles
+		// would leave intro_skip_mode resolving to the contract default and a
+		// new client would read a preference nobody chose.
+		mirror, ok, err := settingscontract.MirrorWrite(field.key, value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", field.key, err)
+		}
+		if ok {
+			out = append(out, profileSettingSync{key: mirror.Key, value: mirror.Value})
+		}
 	}
 	return out, nil
 }

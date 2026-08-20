@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -47,6 +48,33 @@ type MetadataRefreshRequester interface {
 	RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error
 }
 
+// TrailerRefreshRequester starts a viewer-triggered trailer fetch for one item
+// and reports whether it was queued, in cooldown, or disabled by every
+// containing library. Implemented by *metadata.MetadataService.
+type TrailerRefreshRequester interface {
+	RequestTrailersRefresh(ctx context.Context, contentID string) (metadata.TrailerRefreshOutcome, error)
+}
+
+// trailerItemAccess resolves and authorizes the item behind the trailer
+// refresh route. The concrete *catalog.ItemRepository satisfies it; the
+// interface keeps the handler testable without a database.
+type trailerItemAccess interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+}
+
+// trailerSeasonLookup and trailerEpisodeLookup resolve the content IDs that are
+// not media_items rows. Season and episode detail pages carry their own IDs, so
+// without these a client that asks for their trailers would get a 404 that
+// looks like a missing item instead of the contracted "wrong type" answer.
+type trailerSeasonLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Season, error)
+}
+
+type trailerEpisodeLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
+}
+
 type LocalWatchEventDispatcher interface {
 	HandleLocalWatchEvent(ctx context.Context, event watchsync.LocalWatchEvent) error
 }
@@ -70,6 +98,11 @@ type ItemsHandler struct {
 	profileStaler            ProfileStaler
 	profileRefreshRequester  ProfileRefreshRequester
 	metadataRefreshRequester MetadataRefreshRequester
+	trailerRefreshRequester  TrailerRefreshRequester
+	trailerItemAccess        trailerItemAccess
+	trailerSeasonLookup      trailerSeasonLookup
+	trailerEpisodeLookup     trailerEpisodeLookup
+	trailerRefreshLimiter    ratelimit.RateLimiter
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
 	ebookReadStateStore      EbookReadStateStore
@@ -128,6 +161,47 @@ func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshReques
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {
 	h.metadataRefreshRequester = requester
+}
+
+// SetTrailerRefreshLimiter wires the process's configured rate limiter into the
+// trailer fetch action, so the per-user budget is shared across instances when
+// the deployment runs the Redis backend. A private in-memory limiter would give
+// each instance its own allowance for the same user, and the per-item database
+// cooldown cannot make up the difference — it bounds one item, while this
+// budget bounds how many distinct items a user can start refreshes for.
+//
+// Call before SetTrailerRefreshRequester, which falls back to a private
+// in-memory limiter when none is set (single-instance deployments, and any
+// deployment with rate limiting turned off entirely).
+func (h *ItemsHandler) SetTrailerRefreshLimiter(limiter ratelimit.RateLimiter) {
+	if h == nil || limiter == nil {
+		return
+	}
+	h.trailerRefreshLimiter = limiter
+}
+
+// SetTrailerRefreshRequester wires the viewer-facing trailer fetch action.
+// Leaving it unset disables the route's behavior (503), so the router only
+// registers it when the metadata service is available.
+func (h *ItemsHandler) SetTrailerRefreshRequester(requester TrailerRefreshRequester) {
+	if h == nil {
+		return
+	}
+	h.trailerRefreshRequester = requester
+	if h.trailerRefreshLimiter == nil {
+		h.trailerRefreshLimiter = ratelimit.NewMemoryLimiter()
+	}
+	if h.trailerItemAccess == nil && h.itemRepo != nil {
+		h.trailerItemAccess = h.itemRepo
+	}
+	// Seasons and episodes are not media_items rows, so the route needs these
+	// to tell "this ID is an episode" from "no such content".
+	if h.trailerSeasonLookup == nil && h.seasonRepo != nil {
+		h.trailerSeasonLookup = h.seasonRepo
+	}
+	if h.trailerEpisodeLookup == nil && h.episodeRepo != nil {
+		h.trailerEpisodeLookup = h.episodeRepo
+	}
 }
 
 func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchProvider) {
@@ -426,6 +500,238 @@ func (h *ItemsHandler) HandleGetWatchDetail(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// trailerRefreshRate bounds how often one user may trigger trailer fetches
+// across all items. The per-item cooldown enforced by the metadata service is
+// the real budget; this only keeps a misbehaving client from hammering the
+// endpoint (same shape as personRefreshRate).
+var trailerRefreshRate = ratelimit.Rate{
+	RequestsPerSecond: 10,
+	RequestsPerMinute: 10,
+	Burst:             10,
+}
+
+// trailerRefreshLimiterKey namespaces this action's per-user counter. The
+// limiter behind it is normally the process-wide one shared with the rate-limit
+// middleware, whose keys are namespaced the same way ("ip:", "key:").
+func trailerRefreshLimiterKey(userID int) string {
+	return "trailers:" + strconv.Itoa(userID)
+}
+
+// trailerRefreshResponse is the body of the trailer refresh endpoint.
+// NextAllowedAt is present only for the cooldown status.
+type trailerRefreshResponse struct {
+	Status        string `json:"status"`
+	NextAllowedAt string `json:"next_allowed_at,omitempty"`
+}
+
+// trailerRefreshCapabilityResponse tells a client whether this server offers
+// the viewer-facing trailer fetch, following the per-subsystem convention
+// (/events/capability, /playback/capability, /ebooks/capability).
+//
+// Without it the only signal is a 404 from the POST, which a client cannot
+// tell apart from a missing item — and the route is registered conditionally
+// (it needs the metadata service to implement the optional interface), so
+// "this build has the feature" is not the same question as "this deployment
+// serves it". A client that finds refresh false should hide the action rather
+// than offer a button that cannot work.
+type trailerRefreshCapabilityResponse struct {
+	SchemaVersion int `json:"schema_version"`
+	// Refresh reports that POST /items/{id}/trailers/refresh is served here.
+	Refresh bool `json:"refresh"`
+	// CooldownSeconds is the per-item window between viewer-triggered
+	// refreshes, so a client can explain the wait without having received a
+	// cooldown response first.
+	CooldownSeconds int `json:"cooldown_seconds"`
+	// Statuses is every value the refresh endpoint's status field may take.
+	Statuses []string `json:"statuses"`
+	// SupportedTypes is the item types the action applies to; nothing else
+	// carries remote videos, so clients should not show the action elsewhere.
+	SupportedTypes []string `json:"supported_types"`
+}
+
+// HandleTrailerRefreshCapability reports whether the trailer refresh action is
+// available. GET /api/v1/items/trailers/capability.
+//
+// It answers even when the feature is unwired, because "refresh": false is the
+// answer in that case; the router registers it unconditionally so a client
+// never has to interpret a 404 on the probe itself.
+func (h *ItemsHandler) HandleTrailerRefreshCapability(w http.ResponseWriter, _ *http.Request) {
+	enabled := h != nil && h.trailerRefreshRequester != nil && h.trailerItemAccess != nil
+	resp := trailerRefreshCapabilityResponse{
+		SchemaVersion:  1,
+		Refresh:        enabled,
+		Statuses:       []string{},
+		SupportedTypes: []string{},
+	}
+	if enabled {
+		resp.CooldownSeconds = int(metadata.TrailerRefreshCooldown / time.Second)
+		resp.Statuses = []string{
+			metadata.TrailerRefreshStatusQueued,
+			metadata.TrailerRefreshStatusCooldown,
+			metadata.TrailerRefreshStatusDisabled,
+		}
+		resp.SupportedTypes = []string{"movie", "series"}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleRequestTrailersRefresh handles POST /api/v1/items/{id}/trailers/refresh:
+// any authenticated viewer with access to a movie or series may ask the server
+// to fetch its remote trailers, at most once per item per cooldown window.
+//
+// "cooldown" and "disabled" are expected client-rendered states, not errors,
+// so they answer 200; 429 stays reserved for the per-user limiter. The access
+// check runs before the metadata service is called so a caller who cannot see
+// the item can never consume its cooldown slot. A season or episode ID resolves
+// through its own table to 400 unsupported-type; only genuinely unknown content
+// answers 404.
+func (h *ItemsHandler) HandleRequestTrailersRefresh(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.trailerRefreshRequester == nil || h.trailerItemAccess == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Trailer refresh is not configured")
+		return
+	}
+
+	contentID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if contentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+		return
+	}
+
+	userID := apimw.GetUserID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+
+	if h.trailerRefreshLimiter != nil {
+		// The limiter may be the process-wide one the middleware uses, so the
+		// key is namespaced: an unprefixed user id would share a counter with
+		// whatever else keys on the same string.
+		result := h.trailerRefreshLimiter.Allow(r.Context(), trailerRefreshLimiterKey(userID), trailerRefreshRate)
+		if !result.Allowed {
+			if result.RetryAfter > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(result.RetryAfter.Seconds()))))
+			}
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "Too many trailer refresh requests")
+			return
+		}
+	}
+
+	target, err := h.resolveTrailerRefreshTarget(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "trailers: failed to look up item", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+		return
+	}
+	// Authorize against the series for a season or episode ID, exactly as the
+	// on-view translation route does, so an unsupported-type answer never
+	// leaks the existence of content the caller cannot see.
+	if err := h.trailerItemAccess.EnsureAccessible(r.Context(), target.accessContentID, h.accessFilter(r)); err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "trailers: failed to authorize item", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+		return
+	}
+
+	// Only movie and series detail responses carry videos/extras, so anything
+	// else — another media_items type, or a season/episode ID, which is not a
+	// media_items row at all — is a client bug rather than an empty result.
+	if !target.supportsTrailers {
+		writeError(w, http.StatusBadRequest, "unsupported_type", "Trailers are only available for movies and series")
+		return
+	}
+
+	outcome, err := h.trailerRefreshRequester.RequestTrailersRefresh(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		slog.ErrorContext(r.Context(), "trailers: failed to request refresh", "component", "api",
+			"content_id", contentID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request trailers")
+		return
+	}
+
+	switch outcome.Status {
+	case metadata.TrailerRefreshStatusQueued:
+		writeJSON(w, http.StatusAccepted, trailerRefreshResponse{Status: outcome.Status})
+	case metadata.TrailerRefreshStatusCooldown:
+		resp := trailerRefreshResponse{Status: outcome.Status}
+		if outcome.NextAllowedAt != nil {
+			resp.NextAllowedAt = outcome.NextAllowedAt.UTC().Format(time.RFC3339)
+		}
+		writeJSON(w, http.StatusOK, resp)
+	case metadata.TrailerRefreshStatusDisabled:
+		writeJSON(w, http.StatusOK, trailerRefreshResponse{Status: outcome.Status})
+	default:
+		slog.ErrorContext(r.Context(), "trailers: unexpected refresh outcome", "component", "api",
+			"content_id", contentID, "status", outcome.Status)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request trailers")
+	}
+}
+
+// trailerRefreshTarget is what a content ID on the trailer refresh route turned
+// out to be: whether trailers apply to it at all, and which item ID authorizes
+// it (a season or episode is authorized through its series).
+type trailerRefreshTarget struct {
+	supportsTrailers bool
+	accessContentID  string
+}
+
+// resolveTrailerRefreshTarget identifies the content behind an ID the same way
+// the on-view translation route does. Seasons and episodes live in their own
+// tables, so a media_items miss is not proof the content is absent — falling
+// through to those lookups is what lets a real episode ID answer 400
+// unsupported-type instead of a misleading 404.
+func (h *ItemsHandler) resolveTrailerRefreshTarget(ctx context.Context, contentID string) (trailerRefreshTarget, error) {
+	item, err := h.trailerItemAccess.GetByID(ctx, contentID)
+	switch {
+	case err == nil && item != nil:
+		return trailerRefreshTarget{
+			supportsTrailers: item.Type == "movie" || item.Type == "series",
+			accessContentID:  contentID,
+		}, nil
+	case err == nil, errors.Is(err, catalog.ErrItemNotFound):
+		// Fall through to the season and episode lookups.
+	default:
+		return trailerRefreshTarget{}, err
+	}
+
+	if h.trailerSeasonLookup != nil {
+		season, err := h.trailerSeasonLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil && season != nil:
+			return trailerRefreshTarget{accessContentID: season.SeriesID}, nil
+		case err == nil, errors.Is(err, catalog.ErrSeasonNotFound):
+		default:
+			return trailerRefreshTarget{}, err
+		}
+	}
+
+	if h.trailerEpisodeLookup != nil {
+		episode, err := h.trailerEpisodeLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil && episode != nil:
+			return trailerRefreshTarget{accessContentID: episode.SeriesID}, nil
+		case err == nil, errors.Is(err, catalog.ErrEpisodeNotFound):
+		default:
+			return trailerRefreshTarget{}, err
+		}
+	}
+
+	return trailerRefreshTarget{}, catalog.ErrItemNotFound
 }
 
 // HandleMarkWatched handles POST /watched/{id}.
@@ -1809,6 +2115,7 @@ func filterSortClause(sort, order string) string {
 }
 
 func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
+	deviceID := deviceMetadataFromRequest(r).DeviceID
 	selectedFileID := 0
 	if fileIDRaw := strings.TrimSpace(r.URL.Query().Get("fileId")); fileIDRaw != "" {
 		if fileID, err := strconv.Atoi(fileIDRaw); err == nil && fileID > 0 {
@@ -1835,6 +2142,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 			SelectedFileID:            selectedFileID,
 			UserID:                    apimw.GetUserID(r.Context()),
 			ProfileID:                 apimw.GetProfileID(r.Context()),
+			DeviceID:                  deviceID,
 		}
 	}
 
@@ -1862,6 +2170,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 		SelectedFileID:        selectedFileID,
 		UserID:                apimw.GetUserID(r.Context()),
 		ProfileID:             apimw.GetProfileID(r.Context()),
+		DeviceID:              deviceID,
 	}
 }
 
@@ -1955,15 +2264,40 @@ func (h *ItemsHandler) resolveWatchedTargets(ctx context.Context, contentID stri
 	}}, nil
 }
 
+// episodeTargets resolves the watched leaf targets for a season or series.
+// Durations come from one batched file lookup rather than a query per episode:
+// marking a long series used to issue one GetByEpisodeID per episode before it
+// wrote anything.
 func (h *ItemsHandler) episodeTargets(ctx context.Context, episodes []*models.Episode) []watchedLeafTarget {
+	episodeIDs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		episodeIDs = append(episodeIDs, episode.ContentID)
+	}
+	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
+
 	targets := make([]watchedLeafTarget, 0, len(episodes))
 	for _, episode := range episodes {
 		targets = append(targets, watchedLeafTarget{
 			ContentID:       episode.ContentID,
-			DurationSeconds: h.contentDurationSeconds(ctx, "", episode.ContentID, episode.Runtime),
+			DurationSeconds: mediaFileDurationSeconds(filesByEpisode[episode.ContentID], episode.Runtime),
 		})
 	}
 	return targets
+}
+
+// mediaFileDurationSeconds picks a playable duration from an item's files,
+// falling back to the catalog runtime. Mirrors contentDurationSeconds's
+// preference order so the batched and single-item paths agree.
+func mediaFileDurationSeconds(files []*models.MediaFile, fallbackRuntimeMinutes int) float64 {
+	for _, file := range files {
+		if file != nil && file.Duration > 0 {
+			return float64(file.Duration)
+		}
+	}
+	if fallbackRuntimeMinutes > 0 {
+		return float64(fallbackRuntimeMinutes * 60)
+	}
+	return 0
 }
 
 func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, episodeID string, fallbackRuntimeMinutes int) float64 {
@@ -1985,18 +2319,10 @@ func (h *ItemsHandler) contentDurationSeconds(ctx context.Context, contentID, ep
 	case contentID != "":
 		files, err = h.fileRepo.GetByContentID(ctx, contentID)
 	}
-	if err == nil {
-		for _, file := range files {
-			if file != nil && file.Duration > 0 {
-				return float64(file.Duration)
-			}
-		}
+	if err != nil {
+		files = nil
 	}
-
-	if fallbackRuntimeMinutes > 0 {
-		return float64(fallbackRuntimeMinutes * 60)
-	}
-	return 0
+	return mediaFileDurationSeconds(files, fallbackRuntimeMinutes)
 }
 
 // isNotFound checks if an error is a "not found" sentinel.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -248,6 +249,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	}
 	rows := batch.Rows
 	result := ImportListResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	existingByRemoteKey, err := s.listItemStatesByRemoteKey(ctx, conn.ID, b.kind, rows)
+	if err != nil {
+		return result, err
+	}
 	seenRemoteKeys := make(map[string]bool, len(rows))
 	states := make([]ListItemState, 0, len(rows))
 	// orderedIDs records matched local ids in the order the provider returned
@@ -255,6 +260,12 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	// sort locally.
 	orderedIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
+		if row.Removed {
+			if err := s.applyRemoteListTombstone(ctx, conn, store, b, row, existingByRemoteKey, &result); err != nil {
+				return result, err
+			}
+			continue
+		}
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return result, err
@@ -296,10 +307,14 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err := s.repo.UpsertListItemStates(ctx, states); err != nil {
 		return result, err
 	}
-	if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemoteKeys, &result); err != nil {
-		return result, err
+	if !batch.Incremental {
+		if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemoteKeys, &result); err != nil {
+			return result, err
+		}
 	}
-	if b.applyOrder != nil && b.orderEnabled != nil && b.capOrder != nil &&
+	// An incremental response is only a delta; replacing the whole local order
+	// with that subset would discard every item absent from the delta.
+	if !batch.Incremental && b.applyOrder != nil && b.orderEnabled != nil && b.capOrder != nil &&
 		b.orderEnabled(conn) && b.capOrder(provider.Capabilities()) {
 		if err := b.applyOrder(ctx, store, conn.ProfileID, orderedIDs); err != nil {
 			return result, err
@@ -313,6 +328,69 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *Service) listItemStatesByRemoteKey(
+	ctx context.Context,
+	connectionID string,
+	kind ListKind,
+	rows []RemoteFavorite,
+) (map[string]ListItemState, error) {
+	hasTombstone := false
+	for _, row := range rows {
+		if row.Removed {
+			hasTombstone = true
+			break
+		}
+	}
+	if !hasTombstone {
+		return nil, nil
+	}
+	states, err := s.repo.ListListItemStates(ctx, connectionID, kind)
+	if err != nil {
+		return nil, err
+	}
+	byRemoteKey := make(map[string]ListItemState, len(states))
+	for _, state := range states {
+		if key := strings.TrimSpace(state.ProviderItemKey); key != "" {
+			byRemoteKey[key] = state
+		}
+	}
+	return byRemoteKey, nil
+}
+
+func (s *Service) applyRemoteListTombstone(
+	ctx context.Context,
+	conn Connection,
+	store userstore.UserStore,
+	b listBinding,
+	row RemoteFavorite,
+	existingByRemoteKey map[string]ListItemState,
+	result *ImportListResult,
+) error {
+	key := strings.TrimSpace(row.ProviderItemKey)
+	state, ok := existingByRemoteKey[key]
+	if key == "" || !ok {
+		result.Warnings = append(result.Warnings, "watch sync provider returned an unknown list removal")
+		return nil
+	}
+	now := s.now()
+	if b.removalsEnabled(conn) && state.LocalPresent {
+		if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
+			return err
+		}
+		if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
+			return err
+		}
+		result.Removed++
+		state.LocalPresent = false
+	}
+	if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
+		return err
+	}
+	state.RemotePresent = false
+	existingByRemoteKey[key] = state
+	return nil
 }
 
 func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemoteKeys map[string]bool, result *ImportListResult) error {

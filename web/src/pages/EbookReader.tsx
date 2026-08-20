@@ -42,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { hasRouterHistory } from "@/lib/backNavigation";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -596,7 +597,33 @@ export default function EbookReader() {
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label="Back">
-            <Link to={backHref}>
+            <Link
+              to={backHref}
+              onClick={(event) => {
+                // Exiting the reader must consume the reader's history entry,
+                // not push the target on top of it — otherwise pressing back
+                // on the destination re-opens the reader (issue #189). The
+                // href stays for modified clicks (new tab). A directly opened
+                // reader replaces itself with that target so browser Back
+                // cannot reopen the reader.
+                if (
+                  event.defaultPrevented ||
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                if (hasRouterHistory()) {
+                  navigate(-1);
+                } else {
+                  navigate(backHref, { replace: true });
+                }
+              }}
+            >
               <ArrowLeft className="size-5" />
             </Link>
           </Button>
@@ -612,7 +639,7 @@ export default function EbookReader() {
               className="hidden gap-1 sm:inline-flex"
               title={`Next: ${nextChapter.label}`}
             >
-              <Link to={nextChapterHref}>
+              <Link to={nextChapterHref} replace>
                 <span className="text-muted-foreground max-w-36 truncate text-xs">
                   {nextChapter.label}
                 </span>
@@ -1280,7 +1307,7 @@ export default function EbookReader() {
             size="lg"
             className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
           >
-            <Link to={nextChapterHref}>
+            <Link to={nextChapterHref} replace>
               Next: {nextChapter.label}
               <ChevronRight className="size-[18px]" />
             </Link>

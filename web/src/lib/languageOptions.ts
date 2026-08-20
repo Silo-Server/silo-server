@@ -32,11 +32,13 @@ export function withCurrentLanguageOption(
 /**
  * Suggested values for one open language setting.
  *
- * The generated contract list is the stable floor. A newer server may add
- * values observed in this deployment's catalog, and the current stored tag is
- * always synthesized into the list so an open value such as `pt-BR` never
- * leaves a select with no matching row. True language aliases are de-duplicated,
- * with the exact current wire value winning so the control remains selected.
+ * The generated contract list is the stable floor. The server adds observed
+ * original languages for catalog.metadata_language only (the audio/subtitle
+ * track scans were too expensive; those pickers offer free entry via
+ * LanguageSelect's "Other…" instead), and the current stored tag is always
+ * synthesized into the list so an open value such as `pt-BR` never leaves a
+ * select with no matching row. True language aliases are de-duplicated, with
+ * the exact current wire value winning so the control remains selected.
  */
 export function namedLanguageOptionsFor(
   key: SettingKey,

@@ -8,8 +8,8 @@ import (
 // Discord embed metadata helpers shared by the per-profile webhook/DM
 // builders and the server-channel builders. Everything here is pure and may
 // only ever emit public provider origins (TMDB, IMDb, TVDB and their image
-// CDNs) — never the user's own server origin (docs/superpowers/plans/
-// notifications/04, "Server URL leakage").
+// CDNs) — never the user's own server origin
+// (docs/architecture/notifications.md, "Server URL leakage").
 
 // discordOverviewLimit clips overviews well below Discord's 4096-char
 // description cap: a full synopsis crowds the embed; a teaser reads better.

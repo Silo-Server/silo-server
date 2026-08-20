@@ -230,3 +230,37 @@ func TestExtractEpisodeCatalogUserStatePlanForLastWatched(t *testing.T) {
 		t.Fatalf("expected genre rule to remain in entry def, got %+v", plan.entryDef.Groups)
 	}
 }
+
+func TestBuildEpisodeCatalogEntryQueryWhereParenthesizesMatchAnyGroup(t *testing.T) {
+	// Both episode preview paths append this expression to an AND-joined
+	// whereParts list that already carries the library, content-rating, and
+	// series-parent-guard constraints. A match-any group emits a top-level OR,
+	// so the result must come back parenthesized — otherwise SQL precedence
+	// detaches an OR arm from every one of those constraints.
+	def := QueryDefinition{
+		MediaScope: "episode",
+		Match:      "all",
+		Groups: []QueryGroup{{
+			Match: "any",
+			Rules: []QueryRule{
+				{Field: "genre", Op: "contains", Value: "Action"},
+				{Field: "genre", Op: "contains", Value: "Adventure"},
+			},
+		}},
+	}.Normalize()
+
+	where, args, nextArgIdx, ok, err := buildEpisodeCatalogEntryQueryWhere(def, 5)
+	if err != nil {
+		t.Fatalf("buildEpisodeCatalogEntryQueryWhere returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("buildEpisodeCatalogEntryQueryWhere unexpectedly fell back")
+	}
+	want := "(ece.genres @> ARRAY[$5]::text[] OR ece.genres @> ARRAY[$6]::text[])"
+	if where != want {
+		t.Fatalf("WHERE = %q, want %q", where, want)
+	}
+	if nextArgIdx != 7 || len(args) != 2 {
+		t.Fatalf("nextArgIdx = %d, len(args) = %d; want 7, 2", nextArgIdx, len(args))
+	}
+}

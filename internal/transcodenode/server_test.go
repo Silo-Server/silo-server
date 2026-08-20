@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -22,6 +24,80 @@ import (
 )
 
 const testSecret = "node-reconstruct-test-secret"
+
+type allowInputPaths struct{}
+
+func (allowInputPaths) Allowed(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+type blockingSessionTracker struct {
+	trackStarted  chan struct{}
+	trackRelease  chan struct{}
+	removeStarted chan struct{}
+
+	mu                sync.Mutex
+	events            []string
+	trackHasDeadline  bool
+	removeHasDeadline bool
+}
+
+type blockingResponseWriter struct {
+	header       http.Header
+	writeStarted chan struct{}
+	releaseWrite chan struct{}
+	startOnce    sync.Once
+}
+
+func newBlockingResponseWriter() *blockingResponseWriter {
+	return &blockingResponseWriter{
+		header:       make(http.Header),
+		writeStarted: make(chan struct{}),
+		releaseWrite: make(chan struct{}),
+	}
+}
+
+func (w *blockingResponseWriter) Header() http.Header { return w.header }
+func (*blockingResponseWriter) WriteHeader(int)       {}
+func (w *blockingResponseWriter) Write(p []byte) (int, error) {
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	<-w.releaseWrite
+	return len(p), nil
+}
+
+func newBlockingSessionTracker() *blockingSessionTracker {
+	return &blockingSessionTracker{
+		trackStarted:  make(chan struct{}),
+		trackRelease:  make(chan struct{}),
+		removeStarted: make(chan struct{}),
+	}
+}
+
+func (t *blockingSessionTracker) Track(ctx context.Context, _ nodesessions.SessionInfo) {
+	_, hasDeadline := ctx.Deadline()
+	t.mu.Lock()
+	t.trackHasDeadline = hasDeadline
+	t.events = append(t.events, "track")
+	t.mu.Unlock()
+	close(t.trackStarted)
+	<-t.trackRelease
+	t.mu.Lock()
+	t.events = append(t.events, "track-done")
+	t.mu.Unlock()
+}
+
+func (t *blockingSessionTracker) Remove(ctx context.Context, _ string) {
+	_, hasDeadline := ctx.Deadline()
+	t.mu.Lock()
+	t.removeHasDeadline = hasDeadline
+	t.events = append(t.events, "remove")
+	t.mu.Unlock()
+	close(t.removeStarted)
+}
+
+func (*blockingSessionTracker) Cleanup(context.Context) {}
+func (*blockingSessionTracker) NodeURL() string         { return "http://node" }
+func (*blockingSessionTracker) NodeName() string        { return "node" }
 
 // newTestServer builds a transcode Server whose config carries a known JWT secret
 // so reconstructFromToken can verify forwarded stream tokens. The tracker is left
@@ -32,10 +108,43 @@ func newTestServer(t *testing.T) *Server {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = testSecret
 	cfg.Playback.TranscodeDir = t.TempDir()
+	cfg.Download.ArtifactDir = filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
 	w.SetConfigForTest(cfg)
 	return &Server{
-		watcher:  w,
-		sessions: make(map[string]*playback.TranscodeSession),
+		watcher:      w,
+		inputPaths:   allowInputPaths{},
+		transcodeDir: cfg.Playback.TranscodeDir,
+		artifactRoot: filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
+		sessions:     make(map[string]*playback.TranscodeSession),
+	}
+}
+
+func TestNewServerUsesConfiguredDownloadArtifactDir(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
+	cfg.Download.ArtifactDir = filepath.Join(t.TempDir(), "prepared-downloads")
+	w.SetConfigForTest(cfg)
+
+	server := NewServer(w, nil)
+	if server.artifactRoot != cfg.Download.ArtifactDir {
+		t.Fatalf("artifact root = %q, want configured %q", server.artifactRoot, cfg.Download.ArtifactDir)
+	}
+}
+
+func TestNewServerKeepsDefaultDownloadArtifactsInsideTranscodeVolume(t *testing.T) {
+	w := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
+	cfg := &config.Config{}
+	cfg.Playback.TranscodeDir = filepath.Join(t.TempDir(), "transcodes")
+	w.SetConfigForTest(cfg)
+
+	server := NewServer(w, nil)
+	want := filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
+	if server.artifactRoot != want {
+		t.Fatalf("artifact root = %q, want mounted path %q", server.artifactRoot, want)
+	}
+	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
+		t.Fatal("default artifact directory is not protected from the transcode orphan sweep")
 	}
 }
 
@@ -68,6 +177,369 @@ func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
 	server.mu.RUnlock()
 	if registered {
 		t.Fatal("failed readiness session was registered")
+	}
+}
+
+func TestHandleDownloadPrepareKeepsStartupArtifactRootAcrossReload(t *testing.T) {
+	server := newTestServer(t)
+	artifactDir := server.artifactRoot
+	server.watcher.Config().Download.ArtifactDir = t.TempDir()
+	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\nprintf artifact > \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	server.watcher.Config().Playback.HWAccel = "none"
+	outputPath := filepath.Join(artifactDir, "artifact-1.mp4")
+	body, err := json.Marshal(downloadprepare.Request{
+		ArtifactID:       "artifact-1",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "copy",
+		TargetCodecAudio: "copy",
+		AudioTrackIndex:  -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleDownloadPrepare(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	info, err := os.Stat(outputPath)
+	if err != nil {
+		t.Fatalf("prepared output: %v", err)
+	}
+	responseBody := rr.Body.String()
+	var result downloadprepare.Result
+	if err := json.Unmarshal([]byte(responseBody), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ArtifactID != "artifact-1" || result.FileSize != info.Size() || strings.Contains(responseBody, artifactDir) {
+		t.Fatalf("prepare result = %+v body=%s", result, responseBody)
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after prepare = %d, want 0", got)
+	}
+}
+
+func TestSessionOutputDirKeepsStartupPathAcrossReload(t *testing.T) {
+	server := newTestServer(t)
+	startupDir := server.transcodeDir
+	server.watcher.Config().Playback.TranscodeDir = t.TempDir()
+
+	if got, want := server.sessionOutputDir("session-1"), filepath.Join(startupDir, "session-1"); got != want {
+		t.Fatalf("session output dir = %q, want startup path %q", got, want)
+	}
+}
+
+func TestHandleStartWaitsForForceReloadGate(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	body, err := json.Marshal(TranscodeStartRequest{
+		SessionID: "reload-gated-start", InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, RequireReady: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	server.reloadMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			server.reloadMu.Unlock()
+		}
+	}()
+	go func() {
+		server.handleStart(rr, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("start completed while force-reload gate was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+	server.reloadMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("start did not resume after force-reload gate was released")
+	}
+}
+
+func TestHandleDownloadPrepareTrackingDoesNotBlockAndRemovesAfterTrack(t *testing.T) {
+	server := newTestServer(t)
+	tracker := newBlockingSessionTracker()
+	server.tracker = tracker
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nfor last; do :; done\ntouch \"$last\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	server.watcher.Config().Playback.HWAccel = "none"
+	body, err := json.Marshal(downloadprepare.Request{
+		ArtifactID:       "artifact-tracking",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "copy",
+		TargetCodecAudio: "copy",
+		AudioTrackIndex:  -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	handlerDone := make(chan struct{})
+	go func() {
+		server.handleDownloadPrepare(rr, req)
+		close(handlerDone)
+	}()
+
+	select {
+	case <-tracker.trackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("tracking did not start")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(250 * time.Millisecond):
+		close(tracker.trackRelease)
+		<-handlerDone
+		t.Fatal("download prepare waited for session tracking")
+	}
+	if rr.Code != http.StatusOK {
+		close(tracker.trackRelease)
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	close(tracker.trackRelease)
+	select {
+	case <-tracker.removeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("tracking cleanup was not scheduled")
+	}
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if !tracker.trackHasDeadline || !tracker.removeHasDeadline {
+		t.Fatalf("tracking deadlines: track=%t remove=%t", tracker.trackHasDeadline, tracker.removeHasDeadline)
+	}
+	if got := strings.Join(tracker.events, ","); got != "track,track-done,remove" {
+		t.Fatalf("tracking order = %q", got)
+	}
+}
+
+func TestHandleDownloadPrepareRejectsInvalidArtifactID(t *testing.T) {
+	server := newTestServer(t)
+	body, err := json.Marshal(downloadprepare.Request{
+		ArtifactID:       "../artifact-2",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleDownloadPrepare(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleDownloadPrepareRejectsUnavailableConfig(t *testing.T) {
+	server := newTestServer(t)
+	server.watcher.SetConfigForTest(nil)
+	body := []byte(`{"artifact_id":"artifact-3","input_path":"/media/movie.mkv"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleDownloadPrepare(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleStartRejectsUnapprovedInputPath(t *testing.T) {
+	server := newTestServer(t)
+	server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+	body := []byte(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDownloadPrepareRouteRequiresNodeBearer(t *testing.T) {
+	server := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/downloads/prepare", strings.NewReader(`{}`))
+	rr := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
+	server := newTestServer(t)
+	root := server.artifactRoot
+	if want := filepath.Join(server.watcher.Config().Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName); root != want {
+		t.Fatalf("artifact root = %q, want %q", root, want)
+	}
+	if _, protected := server.activeSessionIDs()[downloadprepare.ArtifactDirectoryName]; !protected {
+		t.Fatal("artifact directory is not protected from the orphan transcode sweep")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "artifact-range.mp4")
+	if err := os.WriteFile(path, []byte("0123456789"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/artifact-range", nil)
+	req.Header.Set("Authorization", "Bearer "+testSecret)
+	req.Header.Set("Range", "bytes=3-6")
+	rr := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusPartialContent || rr.Body.String() != "3456" {
+		t.Fatalf("GET status=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Range"); got != "bytes 3-6/10" {
+		t.Fatalf("Content-Range = %q", got)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-range", nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+testSecret)
+	deleteRR := httptest.NewRecorder()
+	server.Handler().ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusNoContent {
+		t.Fatalf("DELETE status=%d body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("artifact still exists: %v", err)
+	}
+}
+
+func TestDownloadArtifactHeadWaitsForInFlightPrepare(t *testing.T) {
+	server := newTestServer(t)
+	const artifactID = "artifact-in-flight"
+	unlocks := server.lockSessionLifecycle("download-artifact-" + artifactID)
+	req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
+	req.SetPathValue("artifact_id", artifactID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("artifact_id", artifactID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		server.handleDownloadArtifact(rr, req)
+		close(done)
+	}()
+	select {
+	case <-done:
+		unlocks()
+		t.Fatal("HEAD reported a result while preparation held the artifact lock")
+	case <-time.After(50 * time.Millisecond):
+	}
+	path := filepath.Join(server.artifactRoot, artifactID+".mp4")
+	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
+		unlocks()
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("ready"), 0o600); err != nil {
+		unlocks()
+		t.Fatal(err)
+	}
+	unlocks()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HEAD did not resume after preparation published the artifact")
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
+	server := newTestServer(t)
+	const artifactID = "artifact-concurrent-read"
+	if err := os.MkdirAll(server.artifactRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(server.artifactRoot, artifactID+".mp4")
+	if err := os.WriteFile(path, []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := newBlockingResponseWriter()
+	releaseOnce := sync.Once{}
+	release := func() { releaseOnce.Do(func() { close(blocked.releaseWrite) }) }
+	defer release()
+	getDone := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/"+artifactID, nil)
+		req.Header.Set("Authorization", "Bearer "+testSecret)
+		server.Handler().ServeHTTP(blocked, req)
+		close(getDone)
+	}()
+
+	select {
+	case <-blocked.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GET did not begin relaying the artifact")
+	}
+
+	headDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
+		req.Header.Set("Authorization", "Bearer "+testSecret)
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr, req)
+		headDone <- rr
+	}()
+	select {
+	case rr := <-headDone:
+		if rr.Code != http.StatusOK {
+			t.Fatalf("HEAD status = %d, body = %s", rr.Code, rr.Body.String())
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("HEAD waited for a concurrent artifact relay")
+	}
+
+	release()
+	select {
+	case <-getDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GET did not finish after the response writer was released")
+	}
+}
+
+func TestDownloadArtifactRoutesRequireBearer(t *testing.T) {
+	server := newTestServer(t)
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodDelete} {
+		rr := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rr, httptest.NewRequest(method, "/downloads/artifacts/artifact-1", nil))
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status=%d body=%s", method, rr.Code, rr.Body.String())
+		}
 	}
 }
 
@@ -400,5 +872,52 @@ func TestCopyModeReconstruct_SkipsFastSeek(t *testing.T) {
 		!strings.EqualFold(card.TargetCodecVideo, "copy")
 	if !applyFastSeek {
 		t.Fatalf("encoded card must apply the seg×dur fast seek")
+	}
+}
+
+// A fresh /transcode/start must resolve this node's configured hw_device list
+// through the shared GPU pool — the same path reconstruction uses — rather
+// than bypassing it with an empty device.
+func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// This test reaches the spawn/track path, so it needs a (no-op) tracker.
+	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	cfg := server.watcher.Config()
+	cfg.Playback.FFmpegPath = ffmpegPath
+	// Neither device exists, so resolution deterministically lands on the
+	// first entry; the point is that the configured list reaches the session.
+	cfg.Playback.HWDevice = "/dev/dri/renderD888,/dev/dri/renderD889"
+
+	requestBody, err := json.Marshal(TranscodeStartRequest{
+		SessionID:        "hwdevice-start-1",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		HWAccel:          "vaapi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	server.mu.RLock()
+	session := server.sessions["hwdevice-start-1"]
+	server.mu.RUnlock()
+	if session == nil {
+		t.Fatal("session was not registered")
+	}
+	defer session.CloseProcess()
+	if got := session.Opts().HWDevice; got != "/dev/dri/renderD888" {
+		t.Fatalf("session HWDevice = %q, want one concrete device from the configured list", got)
 	}
 }

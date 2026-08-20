@@ -806,14 +806,19 @@ func buildEpisodeCatalogEntryQueryWhere(def QueryDefinition, argIdx int) (string
 	switch len(groupClauses) {
 	case 0:
 		return "", args, argIdx, true, nil
+	// The returned expression is always parenthesized, mirroring
+	// QueryBuilder.Build: a match-any group emits a top-level OR, and the
+	// callers AND library, rating, snapshot, and other access constraints
+	// onto the result. Without the parentheses, SQL precedence lets an OR
+	// arm bypass every one of them.
 	case 1:
-		return groupClauses[0], args, argIdx, true, nil
+		return "(" + groupClauses[0] + ")", args, argIdx, true, nil
 	default:
 		wrapped := make([]string, len(groupClauses))
 		for i, clause := range groupClauses {
 			wrapped[i] = "(" + clause + ")"
 		}
-		return strings.Join(wrapped, topJoiner), args, argIdx, true, nil
+		return "(" + strings.Join(wrapped, topJoiner) + ")", args, argIdx, true, nil
 	}
 }
 

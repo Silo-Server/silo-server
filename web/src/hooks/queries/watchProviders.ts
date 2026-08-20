@@ -3,11 +3,15 @@ import { api, ApiClientError } from "@/api/client";
 import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
+import type { PluginConfigSchema } from "@/api/types";
+
+export type WatchProviderConnectionConfig = Record<string, Record<string, unknown>>;
 
 export interface WatchProviderSummary {
   key: string;
   display_name: string;
   capabilities: WatchProviderCapabilities;
+  connection_config_schema?: PluginConfigSchema[];
 }
 
 export const WatchProviderAuthMethod = {
@@ -52,6 +56,7 @@ export interface WatchProviderConnection {
   sync_watchlist_order_enabled: boolean;
   scrobble_enabled: boolean;
   credentials_configured: boolean;
+  connection_config_schema?: PluginConfigSchema[];
   last_inbound_sync_at?: string;
   last_progress_sync_at?: string;
   last_outbound_sync_at?: string;
@@ -159,10 +164,14 @@ export function pollWatchProviderDeviceAuth(provider: string, authSessionId: str
   });
 }
 
-export function connectWatchProviderAPIKey(provider: string, apiKey: string) {
+export function connectWatchProviderAPIKey(
+  provider: string,
+  apiKey: string,
+  connectionConfig: WatchProviderConnectionConfig = {},
+) {
   return api<WatchProviderConnection>(`/watch-providers/${provider}/auth/api-key`, {
     method: "POST",
-    body: JSON.stringify({ api_key: apiKey }),
+    body: JSON.stringify({ api_key: apiKey, connection_config: connectionConfig }),
   });
 }
 
@@ -248,7 +257,13 @@ export function usePollWatchProviderDeviceAuth(provider: string) {
 export function useConnectWatchProviderAPIKey(provider: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (apiKey: string) => connectWatchProviderAPIKey(provider, apiKey),
+    mutationFn: ({
+      apiKey,
+      connectionConfig,
+    }: {
+      apiKey: string;
+      connectionConfig?: WatchProviderConnectionConfig;
+    }) => connectWatchProviderAPIKey(provider, apiKey, connectionConfig),
     onSuccess: (connection) => {
       const profileId = getActiveProfileId();
       queryClient.setQueryData(watchProviderKeys.connection(profileId, provider), connection);

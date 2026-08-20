@@ -98,6 +98,32 @@ describe("SchemaForm", () => {
       "true",
     );
   });
+  it("uses a controlling field default when rendering a conditional field", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "advanced_enabled",
+          label: "Advanced",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          control: "TEXT",
+          required: false,
+          secret: false,
+          multiline: false,
+          show_when: [{ field: "advanced_enabled", equals: ["true"] }],
+        },
+      ],
+    };
+    render(<SchemaForm descriptor={d} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText("Endpoint")).toBeTruthy();
+  });
   it("reports validity through onValidityChange (#14)", () => {
     const onValidityChange = vi.fn();
     const d: PluginAdminForm = {
@@ -192,6 +218,43 @@ describe("SchemaForm collapsible sections", () => {
     );
     fireEvent.click(screen.getByText("Show"));
     expect(screen.getByText("Verbose")).toBeTruthy();
+  });
+
+  it("uses a controlling field default when rendering a conditional section", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "advanced_enabled",
+          label: "Advanced",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+          default_value: true,
+        },
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          control: "TEXT",
+          required: false,
+          secret: false,
+          multiline: false,
+        },
+      ],
+      sections: [
+        {
+          key: "advanced",
+          title: "Advanced options",
+          collapsible: false,
+          collapsed_default: false,
+          field_keys: ["endpoint"],
+          show_when: [{ field: "advanced_enabled", equals: ["true"] }],
+        },
+      ],
+    };
+    render(<SchemaForm descriptor={d} values={{}} onChange={vi.fn()} />);
+    expect(screen.getByText("Advanced options")).toBeTruthy();
+    expect(screen.getByText("Endpoint")).toBeTruthy();
   });
 });
 

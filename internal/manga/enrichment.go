@@ -37,11 +37,9 @@ const (
 	defaultEnrichBatchSize = 140
 	defaultEnrichWorkers   = 4
 
-	// enrichFailureCap is the manga_enrichment_state.failures count at which
-	// a manga stops being claimed for enrichment. Combined with the
-	// failure-count-first claim ordering this prevents a head-of-line block
-	// of permanently failing items from starving newer items and hammering
-	// providers.
+	// enrichFailureCap is the manga_enrichment_state.failures count at which a
+	// deterministic failure stops being claimed. Transient and rate-limited
+	// failures remain eligible beyond the cap after their durable backoff.
 	enrichFailureCap = 5
 )
 
@@ -101,6 +99,12 @@ type enrichmentItemRow struct {
 	HasBackdrop bool
 }
 
+type mangaProviderIDRepository interface {
+	metadata.ProviderIDOwnerLookup
+	GetByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error)
+	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
+}
+
 // Enricher drives the manga metadata enrichment sweep.
 type Enricher struct {
 	pool           *pgxpool.Pool
@@ -108,7 +112,7 @@ type Enricher struct {
 	resolver       *metadata.PluginResolverAdapter
 	itemRepo       *catalog.ItemRepository
 	personRepo     *catalog.PersonRepository
-	providerIDs    *catalog.ProviderIDRepository
+	providerIDs    mangaProviderIDRepository
 	imageCacher    metadata.ImageCacher
 	imageCacheJobs metadata.ImageCacheJobEnqueuer
 	batchSize      int
@@ -190,7 +194,7 @@ func (e *Enricher) runBatch(
 	ctx context.Context,
 	items []enrichmentItemRow,
 	enrichFn func(context.Context, enrichmentItemRow) error,
-	recordFailure func(context.Context, enrichmentItemRow),
+	recordFailure func(context.Context, enrichmentItemRow, error),
 ) sweepStats {
 	workers := e.workers
 	if workers <= 0 {
@@ -234,7 +238,7 @@ func (e *Enricher) runBatch(
 					// A cancelled sweep says nothing about the item itself,
 					// so it does not count against the failure cap.
 					if recordFailure != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-						recordFailure(ctx, item)
+						recordFailure(ctx, item, err)
 					}
 					atomic.AddInt64(&stats.failed, 1)
 					continue
@@ -267,9 +271,9 @@ func (e *Enricher) runBatch(
 //     banner would otherwise be re-fetched every sweep.
 //
 // Stamping after the attempt keeps items whose provider has no banner/status
-// from being re-claimed within the same backfill. Items with fewer prior
-// failures are claimed first and items at/above enrichFailureCap are skipped
-// entirely, so a block of permanently failing items cannot occupy every sweep.
+// from being re-claimed within the same backfill. Retryable failures wait until
+// next_attempt_at; deterministic failures at/above enrichFailureCap are
+// skipped, so permanently failing items cannot occupy every sweep.
 const claimBatchQuery = `
 	SELECT
 		mi.content_id,
@@ -298,8 +302,14 @@ const claimBatchQuery = `
 	    OR (mi.backdrop_path IS NULL OR mi.backdrop_path = '')
 	    OR (mi.show_status IS NULL OR mi.show_status = ''))
 	  AND mi.last_refreshed IS NULL
-	  AND COALESCE(ees.failures, 0) < $2
-	ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC
+	  AND (
+	      COALESCE(ees.failures, 0) < $2
+	      OR ees.last_error_class IN ('transient', 'rate_limited')
+	  )
+	  AND (ees.next_attempt_at IS NULL OR ees.next_attempt_at <= now())
+	ORDER BY COALESCE(ees.next_attempt_at, '-infinity'::timestamptz) ASC,
+	         COALESCE(ees.failures, 0) ASC,
+	         mi.created_at ASC
 	LIMIT $1
 `
 
@@ -380,7 +390,21 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return fmt.Errorf("%w: no metadata providers configured for folder %d", errEnrichmentSkipped, item.FolderID)
 	}
 
-	accumulator, accumulatedIDs, providerErrs := collectMangaMetadata(ctx, item, providers)
+	var owner metadata.ProviderIDOwnerLookup
+	if e.providerIDs != nil {
+		owner = e.providerIDs
+	}
+	accumulator, accumulatedIDs, providerErrs, authorMismatch := collectMangaMetadata(ctx, item, providers, owner)
+	if authorMismatch {
+		if len(providerErrs) > 0 {
+			return fmt.Errorf("author mismatch observed after %d provider error(s): %w",
+				len(providerErrs), errors.Join(providerErrs...))
+		}
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return err
+		}
+		return errEnrichmentNoMatch
+	}
 
 	if item.HasPoster {
 		return e.enrichSecondaryOnly(ctx, item, accumulator, providerErrs)
@@ -483,9 +507,13 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 // the caller can distinguish "providers answered, no match" from "providers
 // were unreachable". The search pass is skipped when the item already carries
 // provider IDs (a previously matched item only needs the by-ID fetch).
-func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) (*metadata.MetadataResult, map[string]string, []error) {
+func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner metadata.ProviderIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error, bool) {
 	searchQuery, accumulatedIDs := buildMangaSearchQuery(item)
 	var providerErrs []error
+
+	// The title the first accepting provider settled on; later providers must
+	// agree with it before their IDs are merged in.
+	var agreedTitle string
 
 	// An item that already carries provider IDs was matched before; the by-ID
 	// fetch below is enough and re-searching would spend a rate-limited
@@ -513,12 +541,61 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if len(results) == 0 {
 			continue
 		}
-		for k, v := range results[0].ProviderIDs {
-			if v != "" {
-				if _, exists := accumulatedIDs[k]; !exists {
-					accumulatedIDs[k] = v
-				}
-			}
+		admission, admitErr := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
+			WantTitle:           item.Title,
+			WantYear:            item.Year,
+			Results:             results,
+			AgreedTitle:         agreedTitle,
+			ExistingProviderIDs: accumulatedIDs,
+			Owner:               owner,
+			ItemType:            mangaContentType(),
+			ContentID:           item.ContentID,
+		})
+		if admitErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
+			continue
+		}
+		for _, conflict := range admission.Conflicts {
+			slog.InfoContext(ctx, "manga enrichment: provider id already owned by another item; skipping", "component", "manga",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+
+		switch admission.Status {
+		case metadata.SearchMatchNoCredibleMatch:
+			// Info, not Debug: the rejection rate is what separates "threshold
+			// too strict" from "providers answering badly", and it cannot be
+			// read from a log level nobody enables.
+			slog.InfoContext(ctx, "manga enrichment: no credible match", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"candidates", len(results),
+			)
+			continue
+		case metadata.SearchMatchProviderDisagreement:
+			slog.WarnContext(ctx, "manga enrichment: provider disagreement; skipping", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"accepted_title", agreedTitle,
+				"rejected_title", admission.MatchedTitle,
+			)
+			continue
+		case metadata.SearchMatchProviderIDConflict:
+			slog.WarnContext(ctx, "manga enrichment: provider identity contradicts an existing ID; skipping", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+			)
+			continue
+		case metadata.SearchMatchNoUsableProviderIDs:
+			continue
+		}
+		agreedTitle = admission.AgreedTitle
+		for k, v := range admission.ProviderIDs {
+			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "manga enrichment: search result", "component", "manga",
 			"provider", p.Slug(),
@@ -549,6 +626,44 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if result == nil || !result.HasMetadata {
 			continue
 		}
+		if !metadata.AuthorsAgree(item.Author, result.People) {
+			slog.InfoContext(ctx, "manga enrichment: author mismatch; treating as no match", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"item_author", item.Author,
+			)
+			return accumulator, accumulator.ProviderIDs, providerErrs, true
+		}
+		identity, identityErr := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{
+			CandidateProviderIDs: filterMangaProviderIDs(result.ProviderIDs),
+			ExistingProviderIDs:  accumulator.ProviderIDs,
+			Owner:                owner,
+			ItemType:             mangaContentType(),
+			ContentID:            item.ContentID,
+		})
+		if identityErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), identityErr))
+			continue
+		}
+		if identity.ContradictsExisting {
+			slog.WarnContext(ctx, "manga enrichment: metadata identity contradicts an existing ID; skipping", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+			)
+			continue
+		}
+		for _, conflict := range identity.Conflicts {
+			slog.InfoContext(ctx, "manga enrichment: metadata provider id already owned by another item; skipping", "component", "manga",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+		admittedResult := *result
+		admittedResult.ProviderIDs = identity.ProviderIDs
+		result = &admittedResult
 		mergeEnrichmentProviderIDs(accumulator, result)
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 		// MergeMetadata does not propagate HasMetadata; without this a confident
@@ -564,7 +679,7 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		)
 	}
 
-	return accumulator, accumulator.ProviderIDs, providerErrs
+	return accumulator, accumulator.ProviderIDs, providerErrs, false
 }
 
 // cacheRemoteImages localizes the remote poster and backdrop URLs on a full
@@ -705,10 +820,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	providerIDs = filterMangaProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			slog.WarnContext(ctx, "manga enrichment: failed to persist provider IDs", "component", "manga",
-				"content_id", contentID,
-				"error", err,
-			)
+			return fmt.Errorf("persisting manga provider IDs: %w", err)
 		}
 	}
 
@@ -799,26 +911,64 @@ func (e *Enricher) stampLastRefreshed(ctx context.Context, contentID string) err
 	return err
 }
 
-// recordEnrichFailure increments the item's manga_enrichment_state failure
-// counter so claimBatch deprioritizes it on the next sweep and stops claiming
-// it at enrichFailureCap. The state is dedicated to manga enrichment;
-// media_items.refresh_failures is owned by the metadata refresh-debt system
-// and is never touched here.
-func (e *Enricher) recordEnrichFailure(ctx context.Context, item enrichmentItemRow) {
+// recordEnrichFailure classifies the provider failure and increments the
+// dedicated manga failure state. Transient and rate-limited failures receive
+// durable backoff and remain retryable beyond the deterministic-failure cap;
+// permanent failures retain the bounded five-attempt behavior.
+func (e *Enricher) recordEnrichFailure(ctx context.Context, item enrichmentItemRow, cause error) {
 	if e == nil || e.pool == nil {
 		return
 	}
+	class, retryAfter := metadata.ClassifyProviderError(cause)
+	step, ceiling := mangaEnrichmentBackoff(class, retryAfter)
 	if _, err := e.pool.Exec(ctx, `
-		INSERT INTO manga_enrichment_state (content_id, failures, updated_at)
-		VALUES ($1, 1, NOW())
+		INSERT INTO manga_enrichment_state (
+			content_id, failures, last_error_class, next_attempt_at, updated_at
+		)
+		VALUES (
+			$1, 1, $2,
+			CASE WHEN $3::double precision > 0
+				THEN now() + make_interval(secs => LEAST($3::double precision, $4::double precision))
+				ELSE NULL
+			END,
+			now()
+		)
 		ON CONFLICT (content_id) DO UPDATE SET
-			failures   = manga_enrichment_state.failures + 1,
-			updated_at = NOW()
-	`, item.ContentID); err != nil {
+			failures         = manga_enrichment_state.failures + 1,
+			last_error_class = EXCLUDED.last_error_class,
+			next_attempt_at  = CASE WHEN $3::double precision > 0
+				THEN now() + make_interval(secs => LEAST(
+					$3::double precision * (manga_enrichment_state.failures + 1),
+					$4::double precision
+				))
+				ELSE NULL
+			END,
+			updated_at       = now()
+	`, item.ContentID, string(class), step.Seconds(), ceiling.Seconds()); err != nil {
 		slog.WarnContext(ctx, "manga enrichment: failed to record enrichment failure", "component", "manga",
 			"content_id", item.ContentID,
 			"error", err,
 		)
+	}
+}
+
+func mangaEnrichmentBackoff(class metadata.ProviderErrorClass, retryAfter time.Duration) (step, ceiling time.Duration) {
+	switch class {
+	case metadata.ProviderErrorRateLimited:
+		step, ceiling = time.Hour, 24*time.Hour
+		if retryAfter > step {
+			step = retryAfter
+		}
+		if retryAfter > ceiling {
+			ceiling = retryAfter
+		}
+		return step, ceiling
+	case metadata.ProviderErrorTransient:
+		return 15 * time.Minute, 6 * time.Hour
+	default:
+		// Deterministic failures retain the existing five-attempt cap. They do
+		// not need a cooldown because the cap bounds the total work.
+		return 0, 0
 	}
 }
 

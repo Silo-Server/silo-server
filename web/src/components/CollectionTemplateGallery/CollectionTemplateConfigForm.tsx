@@ -14,6 +14,7 @@ import {
   mediaKindLabel,
 } from "@/lib/collectionTemplates";
 import type { CollectionTemplate, LibraryEligibility } from "@/lib/collectionTemplates";
+import { COLLECTION_SOURCE_ORDER, selectValueToSortConfig } from "@/lib/collectionSortConfig";
 import {
   CollectionLibraryPicker,
   parseOptionalPositiveInteger,
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
 import { SyncScheduleField } from "@/components/collections/SyncScheduleField";
 
 import { MDBListBrowser } from "./MDBListBrowser";
@@ -103,6 +105,7 @@ export function CollectionTemplateConfigForm({
     template.poster_path ? "default" : "custom",
   );
   const [customPosterUrl, setCustomPosterUrl] = useState("");
+  const [defaultSort, setDefaultSort] = useState<string>(COLLECTION_SOURCE_ORDER);
 
   // Discover- and Collection-source templates are bundle-only: the spec is
   // backend-driven and can't be edited inline. Render a read-only summary so
@@ -144,6 +147,7 @@ export function CollectionTemplateConfigForm({
       featured,
       sync_schedule: syncSchedule.trim() || undefined,
       limit: parsedLimit,
+      sort_config: selectValueToSortConfig(defaultSort),
       ...(posterMode === "custom"
         ? { poster_source_url: customPosterUrl.trim() || undefined }
         : { poster_url: template.poster_path || undefined }),
@@ -328,6 +332,12 @@ export function CollectionTemplateConfigForm({
           </div>
         </div>
       </div>
+
+      <CollectionDefaultSortField
+        value={defaultSort}
+        onChange={setDefaultSort}
+        inputId="template-default-sort"
+      />
 
       <SyncScheduleField value={syncSchedule} onChange={setSyncSchedule} />
 

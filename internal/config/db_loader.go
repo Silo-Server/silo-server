@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -316,7 +318,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
-	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", DefaultTranscodeDir)
+	cfg.Playback.TranscodeDir = stringOr(m, playbackTranscodeDirSettingKey, DefaultTranscodeDir)
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -603,8 +605,12 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	if artifactMaxBytes < 0 {
 		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
 	}
+	artifactDir := strings.TrimSpace(stringOr(m, downloadArtifactDirSettingKey, ""))
+	if artifactDir != "" && !filepath.IsAbs(artifactDir) {
+		return nil, fmt.Errorf("invalid value for %q: must be an absolute path", downloadArtifactDirSettingKey)
+	}
 	cfg.Download.TranscodeEnabled = downloadTranscodeEnabled
-	cfg.Download.ArtifactDir = stringOr(m, "download.artifact_dir", "")
+	cfg.Download.ArtifactDir = artifactDir
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
 

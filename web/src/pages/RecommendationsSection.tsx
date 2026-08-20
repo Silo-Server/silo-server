@@ -6,6 +6,8 @@ import SectionItemCard from "@/components/SectionItemCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRecommendationSection } from "@/hooks/queries/recommendations";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { cardGridClasses } from "@/lib/uiCustomization";
 
 const KIND_FALLBACK_LABEL: Record<string, (key?: string) => string> = {
   "for-you-main": () => "For You",
@@ -23,8 +25,9 @@ function fallbackTitle(kind: string, key?: string) {
 }
 
 function GridSkeleton() {
+  const { cardPresentation } = useUICustomization();
   return (
-    <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 lg:gap-5 xl:grid-cols-7">
+    <div className={cardGridClasses(cardPresentation.poster_size)}>
       {Array.from({ length: 24 }).map((_, i) => (
         <div key={i}>
           <Skeleton className="aspect-[2/3] w-full rounded-xl" />
@@ -72,6 +75,7 @@ export default function RecommendationsSection() {
 
   const { data, isLoading, isError, refetch } = useRecommendationSection(kind, key);
   const title = data?.label || fallbackTitle(kind, key);
+  const { cardPresentation } = useUICustomization();
 
   useDocumentTitle(title);
 
@@ -94,7 +98,7 @@ export default function RecommendationsSection() {
       ) : !data || data.items.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 lg:gap-5 xl:grid-cols-7">
+        <div className={cardGridClasses(cardPresentation.poster_size)}>
           {data.items.map((item) => (
             <SectionItemCard key={item.content_id} item={item} />
           ))}

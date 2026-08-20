@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   updateUserMutate: vi.fn(),
   beginImpersonation: vi.fn(),
   updateSettingMutate: vi.fn(),
+  deleteSettingMutate: vi.fn(),
   /** Rows the canonical admin settings list answers with, per test. */
   userSettings: [] as unknown[],
 }));
@@ -79,7 +80,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   useAdminUserDeviceSettings: () => ({ data: [], isLoading: false }),
   useAdminUserSettings: () => ({ data: mocks.userSettings, isLoading: false }),
   useDeleteAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
-  useDeleteAdminUserSetting: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteAdminUserSetting: () => ({ mutate: mocks.deleteSettingMutate, isPending: false }),
   useDeleteAllAdminUserDeviceSettingsForDevice: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdateAdminUserSetting: () => ({ mutate: mocks.updateSettingMutate, isPending: false }),
@@ -157,6 +158,7 @@ beforeEach(() => {
   mocks.updateUserMutate.mockReset();
   mocks.beginImpersonation.mockReset();
   mocks.updateSettingMutate.mockReset();
+  mocks.deleteSettingMutate.mockReset();
   mocks.userSettings = [];
 });
 
@@ -256,6 +258,60 @@ describe("AdminUserDetail user settings tab", () => {
     expect(mocks.updateSettingMutate.mock.calls[0]?.[0]).toMatchObject({
       key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       value: "true",
+    });
+  });
+
+  it("keeps client family in profile-client row display and mutation identity", async () => {
+    const user = userEvent.setup();
+    const value = JSON.stringify({ poster_size: "compact", caption: "title" });
+    mocks.userSettings = [
+      {
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        scope: "profile_client",
+        profile_id: "profile-1",
+        client_family: "tv",
+        value,
+      },
+      {
+        key: SETTING_KEYS.UI_CARD_PRESENTATION,
+        scope: "profile_client",
+        profile_id: "profile-1",
+        client_family: "web",
+        value,
+      },
+    ];
+    renderUserDetail();
+
+    await user.click(screen.getByRole("tab", { name: "Settings" }));
+
+    const tvIdentity = screen.getByText(/profile profile-1 · family tv$/);
+    expect(screen.getByText(/profile profile-1 · family web$/)).toBeInTheDocument();
+    const tvRow = tvIdentity.parentElement?.parentElement;
+    expect(tvRow).not.toBeNull();
+    await user.click(within(tvRow as HTMLElement).getByRole("button", { name: "Reset" }));
+    expect(mocks.deleteSettingMutate).toHaveBeenCalledWith({
+      userId: 7,
+      key: SETTING_KEYS.UI_CARD_PRESENTATION,
+      identity: {
+        scope: "profile_client",
+        profileId: "profile-1",
+        clientFamily: "tv",
+        libraryId: undefined,
+        seriesId: undefined,
+      },
+    });
+
+    await user.click(within(tvRow as HTMLElement).getByRole("button", { name: "Edit JSON" }));
+    await user.click(screen.getByRole("button", { name: "Save value" }));
+
+    await waitFor(() => expect(mocks.updateSettingMutate).toHaveBeenCalled());
+    expect(mocks.updateSettingMutate.mock.calls[0]?.[0]).toMatchObject({
+      key: SETTING_KEYS.UI_CARD_PRESENTATION,
+      identity: {
+        scope: "profile_client",
+        profileId: "profile-1",
+        clientFamily: "tv",
+      },
     });
   });
 });

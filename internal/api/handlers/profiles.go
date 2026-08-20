@@ -137,78 +137,24 @@ type verifyPINResponse struct {
 }
 
 // canManageHouseholdProfiles reports whether the caller may create/update/delete
-// profiles belonging to their user. Server admins always can. Otherwise the
-// caller's active profile must be the primary profile for the household.
+// profiles belonging to their user.
 //
-// When that primary profile has a PIN, management also requires a valid
-// X-Profile-Token from `/profiles/{id}/verify-pin`; otherwise a client could
-// bypass the profile lock by sending only X-Profile-Id.
+// The rule lives in household.go so the settings routes can apply the same one:
+// a household parent who may edit a child's profile may also edit that child's
+// device settings, and two definitions of "is this the household parent" would
+// eventually disagree.
 func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store userstore.UserStore) (bool, error) {
-	ctx := r.Context()
-	if apimw.IsAdmin(ctx) {
-		return true, nil
-	}
-	activeProfileID := apimw.GetProfileID(ctx)
-	if activeProfileID == "" {
-		activeProfileID = r.Header.Get("X-Profile-Id")
-	}
-	if activeProfileID == "" {
-		return false, nil
-	}
-	active, err := store.GetProfile(ctx, activeProfileID)
-	if err != nil {
-		return false, err
-	}
-	if active == nil {
-		return false, nil
-	}
-	if !active.IsPrimary {
-		return false, nil
-	}
-	if active.PINHash == "" {
-		return true, nil
-	}
-	if err := h.requireVerifiedProfileToken(r, active.ID); err != nil {
-		return false, err
-	}
-	return true, nil
+	return canManageHousehold(r, store, h.userLookupOrNil(), h.ProfileTokens)
 }
 
-func (h *ProfileHandler) requireVerifiedProfileToken(r *http.Request, profileID string) error {
-	if h.UserRepo == nil || h.ProfileTokens == nil {
-		return access.ErrProfileUnverified
+// userLookupOrNil returns UserRepo as the narrow interface the household check
+// wants, preserving nil-ness: a typed nil in a non-nil interface would defeat
+// the fail-closed check there.
+func (h *ProfileHandler) userLookupOrNil() userLookup {
+	if h.UserRepo == nil {
+		return nil
 	}
-
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil || claims.SessionID == "" {
-		return access.ErrProfileUnverified
-	}
-
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		return access.ErrProfileUnverified
-	}
-
-	user, err := h.UserRepo.GetByID(r.Context(), userID)
-	if err != nil {
-		return fmt.Errorf("loading user policy: %w", err)
-	}
-	if user == nil {
-		return access.ErrProfileUnverified
-	}
-
-	profileClaims, err := h.ProfileTokens.Validate(r.Header.Get("X-Profile-Token"))
-	if err != nil {
-		return err
-	}
-	if profileClaims.UserID != userID ||
-		profileClaims.SessionID != claims.SessionID ||
-		profileClaims.ProfileID != profileID ||
-		profileClaims.PolicyRevision != user.AccessPolicyRevision {
-		return access.ErrProfileUnverified
-	}
-
-	return nil
+	return h.UserRepo
 }
 
 func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {

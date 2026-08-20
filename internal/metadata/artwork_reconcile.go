@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +50,7 @@ type ArtworkReconcileStats struct {
 	SampleMissing int    `json:"sample_missing"`
 	Checked       int    `json:"checked"`
 	Verified      int    `json:"verified"`
-	Requeued      int    `json:"requeued"` // reset to provider source; re-cached by the image cache pipeline
+	Requeued      int    `json:"requeued"` // reset to provider source; an explicit backfill may cache it again
 	Cleared       int    `json:"cleared"`  // no re-downloadable source; refilled by scans/enrichment or re-uploaded by an admin
 	Errors        int    `json:"errors"`
 	// SweepErrors is the subset of Errors from the sweep itself (skipped
@@ -59,11 +60,104 @@ type ArtworkReconcileStats struct {
 	SweepErrors int `json:"sweep_errors"`
 }
 
+// Artwork reconcile modes are serialized in task result data and checkpoints.
+const (
+	ArtworkReconcileModeVerify    = "verify"
+	ArtworkReconcileModeBulkReset = "bulk_reset"
+
+	artworkReconcileCheckpointVersion = 1
+)
+
+// ArtworkReconcileCheckpoint is the durable position of a verify-mode sweep.
+// It is safe to persist after a batch because all row repairs in that batch
+// have already completed. Replaying the previous checkpoint after a crash is
+// harmless: object checks and guarded updates are idempotent.
+type ArtworkReconcileCheckpoint struct {
+	Version       int                   `json:"version"`
+	Totals        []int                 `json:"totals"`
+	ChapterTotal  int                   `json:"chapter_total"`
+	SurfaceIndex  int                   `json:"surface_index"`
+	SurfaceCursor []string              `json:"surface_cursor,omitempty"`
+	SurfaceDone   int                   `json:"surface_done"`
+	Done          int                   `json:"done"`
+	ChapterCursor int64                 `json:"chapter_cursor"`
+	ChapterDone   int                   `json:"chapter_done"`
+	Finished      bool                  `json:"finished"`
+	Stats         ArtworkReconcileStats `json:"stats"`
+}
+
+func (c *ArtworkReconcileCheckpoint) valid(surfaceCount int) bool {
+	if c == nil || c.Version != artworkReconcileCheckpointVersion || c.Stats.Mode != ArtworkReconcileModeVerify {
+		return false
+	}
+	if len(c.Totals) != surfaceCount || c.SurfaceIndex < 0 || c.SurfaceIndex > surfaceCount+1 {
+		return false
+	}
+	for _, total := range c.Totals {
+		if total < 0 {
+			return false
+		}
+	}
+	if c.Done < 0 || c.SurfaceDone < 0 || c.ChapterDone < 0 || c.ChapterTotal < 0 || c.ChapterCursor < 0 {
+		return false
+	}
+	if c.Finished != (c.SurfaceIndex == surfaceCount+1) {
+		return false
+	}
+	if c.SurfaceIndex < surfaceCount && len(c.SurfaceCursor) > 0 && len(c.SurfaceCursor) != len(artworkSweepSurfaces()[c.SurfaceIndex].keyCols) {
+		return false
+	}
+	return true
+}
+
+// Complete reports whether a checkpoint covers every regular surface and the
+// chapter-thumbnail pass.
+func (c ArtworkReconcileCheckpoint) Complete() bool { return c.Finished }
+
 // artworkSweepSurface describes one cached-path column the reconciler sweeps.
+type artworkSweepKeyKind uint8
+
+const (
+	artworkSweepKeyText artworkSweepKeyKind = iota
+	artworkSweepKeyInt32
+	artworkSweepKeyInt64
+)
+
+type artworkSweepKey struct {
+	column string
+	kind   artworkSweepKeyKind
+}
+
+func textSweepKey(column string) artworkSweepKey {
+	return artworkSweepKey{column: column, kind: artworkSweepKeyText}
+}
+
+func int32SweepKey(column string) artworkSweepKey {
+	return artworkSweepKey{column: column, kind: artworkSweepKeyInt32}
+}
+
+func int64SweepKey(column string) artworkSweepKey {
+	return artworkSweepKey{column: column, kind: artworkSweepKeyInt64}
+}
+
+func (k artworkSweepKey) parse(raw string) (any, error) {
+	switch k.kind {
+	case artworkSweepKeyText:
+		return raw, nil
+	case artworkSweepKeyInt32:
+		value, err := strconv.ParseInt(raw, 10, 32)
+		return int32(value), err
+	case artworkSweepKeyInt64:
+		return strconv.ParseInt(raw, 10, 64)
+	default:
+		return nil, fmt.Errorf("unknown artwork sweep key kind %d", k.kind)
+	}
+}
+
 type artworkSweepSurface struct {
 	name    string
 	table   string
-	keyCols []string // pagination key expressions; must form a unique order
+	keyCols []artworkSweepKey // native indexed columns; must form a unique order
 	pathCol string
 	// sourceCol holds the original source the row can be reset to. Empty for
 	// surfaces without a re-downloadable source; their rows are always cleared.
@@ -76,6 +170,40 @@ type artworkSweepSurface struct {
 	// Used for small tables holding admin/user uploads, where a blind reset
 	// would discard the last pointer to an object that survived migration.
 	alwaysVerify bool
+}
+
+func (s artworkSweepSurface) keyColumnNames() []string {
+	columns := make([]string, len(s.keyCols))
+	for i, key := range s.keyCols {
+		columns[i] = key.column
+	}
+	return columns
+}
+
+func (s artworkSweepSurface) keySelectExpressions() []string {
+	expressions := make([]string, len(s.keyCols))
+	for i, key := range s.keyCols {
+		// Cursors are serialized as strings so they can also be persisted by
+		// callers. The native column remains untouched in WHERE / ORDER BY,
+		// preserving primary-key index scans for numeric identifiers.
+		expressions[i] = fmt.Sprintf("(%s)::text", key.column)
+	}
+	return expressions
+}
+
+func (s artworkSweepSurface) parseKeys(raw []string) ([]any, error) {
+	if len(raw) != len(s.keyCols) {
+		return nil, fmt.Errorf("got %d cursor values, want %d", len(raw), len(s.keyCols))
+	}
+	values := make([]any, len(raw))
+	for i, value := range raw {
+		parsed, err := s.keyCols[i].parse(value)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s cursor %q: %w", s.keyCols[i].column, value, err)
+		}
+		values[i] = parsed
+	}
+	return values, nil
 }
 
 func (s artworkSweepSurface) cachedPredicate() string {
@@ -111,6 +239,15 @@ func (s artworkSweepSurface) resetSet() string {
 // Chapter thumbnails (JSONB on media_files) and branding assets
 // (server_settings refs) have bespoke sweeps and are not listed here.
 func artworkSweepSurfaces() []artworkSweepSurface {
+	const (
+		mediaItemsTable             = "media_items"
+		mediaItemLocalizationsTable = "media_item_localizations"
+		peopleTable                 = "people"
+		posterPathColumn            = "poster_path"
+		posterSourcePathColumn      = "poster_source_path"
+		backdropSourcePathColumn    = "backdrop_source_path"
+		logoSourcePathColumn        = "logo_source_path"
+	)
 	itemClear := func(pathCol string) string {
 		return fmt.Sprintf(`%s = '', last_refreshed = NULL, updated_at = NOW()`, pathCol)
 	}
@@ -118,26 +255,26 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		return fmt.Sprintf(`%s = '', updated_at = NOW()`, pathCol)
 	}
 	return []artworkSweepSurface{
-		{name: "item posters", table: "media_items", keyCols: []string{"content_id"}, pathCol: "poster_path", sourceCol: "poster_source_path", clearSet: itemClear("poster_path")},
-		{name: "item backdrops", table: "media_items", keyCols: []string{"content_id"}, pathCol: "backdrop_path", sourceCol: "backdrop_source_path", clearSet: itemClear("backdrop_path")},
-		{name: "item logos", table: "media_items", keyCols: []string{"content_id"}, pathCol: "logo_path", sourceCol: "logo_source_path", clearSet: itemClear("logo_path")},
-		{name: "localized item posters", table: "media_item_localizations", keyCols: []string{"content_id", "language"}, pathCol: "poster_path", sourceCol: "poster_source_path", clearSet: plainClear("poster_path")},
-		{name: "localized item backdrops", table: "media_item_localizations", keyCols: []string{"content_id", "language"}, pathCol: "backdrop_path", sourceCol: "backdrop_source_path", clearSet: plainClear("backdrop_path")},
-		{name: "localized item logos", table: "media_item_localizations", keyCols: []string{"content_id", "language"}, pathCol: "logo_path", sourceCol: "logo_source_path", clearSet: plainClear("logo_path")},
-		{name: "season posters", table: "seasons", keyCols: []string{"content_id"}, pathCol: "poster_path", sourceCol: "poster_source_path", clearSet: plainClear("poster_path")},
-		{name: "localized season posters", table: "season_localizations", keyCols: []string{"season_content_id", "language"}, pathCol: "poster_path", sourceCol: "poster_source_path", clearSet: plainClear("poster_path")},
-		{name: "episode stills", table: "episodes", keyCols: []string{"content_id"}, pathCol: "still_path", sourceCol: "still_source_path", clearSet: plainClear("still_path")},
-		{name: "person photos", table: "people", keyCols: []string{"id::text"}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
+		{name: "item posters", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: itemClear(posterPathColumn)},
+		{name: "item backdrops", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: itemClear("backdrop_path")},
+		{name: "item logos", table: mediaItemsTable, keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: itemClear("logo_path")},
+		{name: "localized item posters", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
+		{name: "localized item backdrops", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "backdrop_path", sourceCol: backdropSourcePathColumn, clearSet: plainClear("backdrop_path")},
+		{name: "localized item logos", table: mediaItemLocalizationsTable, keyCols: []artworkSweepKey{textSweepKey("content_id"), textSweepKey("language")}, pathCol: "logo_path", sourceCol: logoSourcePathColumn, clearSet: plainClear("logo_path")},
+		{name: "season posters", table: "seasons", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
+		{name: "localized season posters", table: "season_localizations", keyCols: []artworkSweepKey{textSweepKey("season_content_id"), textSweepKey("language")}, pathCol: posterPathColumn, sourceCol: posterSourcePathColumn, clearSet: plainClear(posterPathColumn)},
+		{name: "episode stills", table: "episodes", keyCols: []artworkSweepKey{textSweepKey("content_id")}, pathCol: "still_path", sourceCol: "still_source_path", clearSet: plainClear("still_path")},
+		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
 		// to the generated collage (admin collections), the generated poster
 		// (user collections), or the default tile (library posters); admins
 		// re-upload anything they want back. alwaysVerify protects surviving
 		// uploads from blind bulk resets.
-		{name: "collection posters", table: "library_collections", keyCols: []string{"id"}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
-		{name: "collection backdrops", table: "library_collections", keyCols: []string{"id"}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
-		{name: "user collection posters", table: "user_personal_collections", keyCols: []string{"id"}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
-		{name: "library posters", table: "media_folders", keyCols: []string{"id::text"}, pathCol: "poster_path", clearSet: `poster_path = ''`, alwaysVerify: true},
+		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
+		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int32SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}
 }
 
@@ -163,7 +300,19 @@ func NewArtworkCacheReconciler(pool *pgxpool.Pool, s3 ArtworkObjectChecker) *Art
 // error budget is exhausted, and never resets rows on the basis of transport
 // errors.
 func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent float64, message string)) (ArtworkReconcileStats, error) {
-	stats := ArtworkReconcileStats{Mode: "verify"}
+	return r.RunResumable(ctx, nil, nil, progress)
+}
+
+// RunResumable executes the same reconcile while persisting a safe cursor
+// after every completed verify batch. A nil checkpoint starts a fresh probe;
+// a nil saver retains the legacy in-memory-only behavior.
+func (r *ArtworkCacheReconciler) RunResumable(
+	ctx context.Context,
+	checkpoint *ArtworkReconcileCheckpoint,
+	save func(ArtworkReconcileCheckpoint) error,
+	progress func(percent float64, message string),
+) (ArtworkReconcileStats, error) {
+	stats := ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify}
 	if r == nil || r.pool == nil || r.s3 == nil {
 		return stats, fmt.Errorf("artwork reconcile: not configured")
 	}
@@ -172,6 +321,13 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 	}
 
 	surfaces := artworkSweepSurfaces()
+	if checkpoint != nil && checkpoint.valid(len(surfaces)) {
+		resumed := cloneArtworkReconcileCheckpoint(*checkpoint)
+		if resumed.Complete() {
+			return resumed.Stats, nil
+		}
+		return r.runVerifySweep(ctx, surfaces, resumed, save, progress)
+	}
 
 	// Probe before anything else: it decides the mode, and in bulk mode the
 	// per-surface count(*) queries (full scans on unindexable predicates)
@@ -186,7 +342,7 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 	}
 
 	if shouldBulkReset(stats.Sampled, stats.SampleMissing) {
-		stats.Mode = "bulk_reset"
+		stats.Mode = ArtworkReconcileModeBulkReset
 		progress(5, fmt.Sprintf("Probe found %d/%d objects missing; resetting cached artwork", stats.SampleMissing, stats.Sampled))
 		steps := len(surfaces) + 1
 		for i, s := range surfaces {
@@ -235,30 +391,178 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 		return stats, nil
 	}
 
-	done := 0
-	report := func(surfaceName string) func(int) {
-		return func(surfaceDone int) {
-			pct := 5 + 90*float64(done+surfaceDone)/float64(total)
-			progress(pct, fmt.Sprintf("Verifying %s (%d/%d overall)", surfaceName, done+surfaceDone, total))
-		}
+	checkpoint = &ArtworkReconcileCheckpoint{
+		Version:      artworkReconcileCheckpointVersion,
+		Totals:       totals,
+		ChapterTotal: chapterTotal,
+		Stats:        stats,
+	}
+	if err := saveArtworkReconcileCheckpoint(save, *checkpoint); err != nil {
+		return stats, fmt.Errorf("artwork reconcile: saving initial checkpoint: %w", err)
+	}
+	return r.runVerifySweep(ctx, surfaces, *checkpoint, save, progress)
+}
+
+func (r *ArtworkCacheReconciler) runVerifySweep(
+	ctx context.Context,
+	surfaces []artworkSweepSurface,
+	checkpoint ArtworkReconcileCheckpoint,
+	save func(ArtworkReconcileCheckpoint) error,
+	progress func(percent float64, message string),
+) (ArtworkReconcileStats, error) {
+	return runArtworkVerifySweep(ctx, r, surfaces, checkpoint, save, progress)
+}
+
+// artworkVerifySweeper separates the checkpoint state machine from its
+// database and object-storage work. Keeping that boundary small makes restart
+// behavior testable without a live PostgreSQL database.
+type artworkVerifySweeper interface {
+	sweepSurfaceFrom(
+		context.Context,
+		artworkSweepSurface,
+		*ArtworkReconcileStats,
+		[]string,
+		int,
+		func([]string, int, bool) error,
+	) error
+	sweepChapterThumbnailsFrom(
+		context.Context,
+		*ArtworkReconcileStats,
+		int64,
+		int,
+		func(int64, int, bool) error,
+	) error
+}
+
+func runArtworkVerifySweep(
+	ctx context.Context,
+	sweeper artworkVerifySweeper,
+	surfaces []artworkSweepSurface,
+	checkpoint ArtworkReconcileCheckpoint,
+	save func(ArtworkReconcileCheckpoint) error,
+	progress func(percent float64, message string),
+) (ArtworkReconcileStats, error) {
+	stats := checkpoint.Stats
+	total := checkpoint.ChapterTotal
+	for _, count := range checkpoint.Totals {
+		total += count
+	}
+	if total == 0 {
+		progress(100, "No cached artwork to verify")
+		return stats, nil
 	}
 
-	for i, s := range surfaces {
-		if totals[i] == 0 {
+	runtimeDone := checkpoint.Done
+	startSurface := checkpoint.SurfaceIndex
+	for i := startSurface; i < len(surfaces); i++ {
+		s := surfaces[i]
+		cursor := []string(nil)
+		surfaceDone := 0
+		if i == startSurface {
+			cursor = append(cursor, checkpoint.SurfaceCursor...)
+			surfaceDone = checkpoint.SurfaceDone
+		}
+		if checkpoint.Totals[i] == 0 {
+			runtimeDone += checkpoint.Totals[i]
+			checkpoint.SurfaceIndex = i + 1
+			checkpoint.SurfaceCursor = nil
+			checkpoint.SurfaceDone = 0
+			checkpoint.Done = runtimeDone
+			checkpoint.Stats = stats
+			if err := saveArtworkReconcileCheckpoint(save, checkpoint); err != nil {
+				return stats, fmt.Errorf("artwork reconcile: advancing empty %s checkpoint: %w", s.name, err)
+			}
 			continue
 		}
-		if err := r.sweepSurface(ctx, s, &stats, report(s.name)); err != nil {
+
+		if surfaceDone > 0 {
+			pct := 5 + 90*float64(runtimeDone+surfaceDone)/float64(total)
+			progress(pct, fmt.Sprintf("Resuming %s (%d/%d overall)", s.name, runtimeDone+surfaceDone, total))
+		}
+		if err := sweeper.sweepSurfaceFrom(ctx, s, &stats, cursor, surfaceDone,
+			func(batchCursor []string, batchDone int, batchCheckpointable bool) error {
+				pct := 5 + 90*float64(runtimeDone+batchDone)/float64(total)
+				progress(pct, fmt.Sprintf("Verifying %s (%d/%d overall)", s.name, runtimeDone+batchDone, total))
+				if !batchCheckpointable && save != nil {
+					return fmt.Errorf("storage errors in %s batch; stopping at the last saved checkpoint", s.name)
+				}
+				checkpoint.SurfaceIndex = i
+				checkpoint.SurfaceCursor = append([]string(nil), batchCursor...)
+				checkpoint.SurfaceDone = batchDone
+				checkpoint.Done = runtimeDone
+				checkpoint.Stats = stats
+				if err := saveArtworkReconcileCheckpoint(save, checkpoint); err != nil {
+					return fmt.Errorf("saving %s batch checkpoint: %w", s.name, err)
+				}
+				return nil
+			}); err != nil {
 			return stats, err
 		}
-		done += totals[i]
+		runtimeDone += checkpoint.Totals[i]
+		checkpoint.SurfaceIndex = i + 1
+		checkpoint.SurfaceCursor = nil
+		checkpoint.SurfaceDone = 0
+		checkpoint.Done = runtimeDone
+		checkpoint.Stats = stats
+		if err := saveArtworkReconcileCheckpoint(save, checkpoint); err != nil {
+			return stats, fmt.Errorf("artwork reconcile: completing %s checkpoint: %w", s.name, err)
+		}
 	}
 
-	if chapterTotal > 0 {
-		if err := r.sweepChapterThumbnails(ctx, &stats, report("chapter thumbnails")); err != nil {
+	chapterCursor := int64(0)
+	chapterDone := 0
+	if startSurface >= len(surfaces) {
+		chapterCursor = checkpoint.ChapterCursor
+		chapterDone = checkpoint.ChapterDone
+	}
+	if checkpoint.ChapterTotal > 0 {
+		if chapterDone > 0 {
+			pct := 5 + 90*float64(runtimeDone+chapterDone)/float64(total)
+			progress(pct, fmt.Sprintf("Resuming chapter thumbnails (%d/%d overall)", runtimeDone+chapterDone, total))
+		}
+		if err := sweeper.sweepChapterThumbnailsFrom(ctx, &stats, chapterCursor, chapterDone,
+			func(batchCursor int64, batchDone int, batchCheckpointable bool) error {
+				pct := 5 + 90*float64(runtimeDone+batchDone)/float64(total)
+				progress(pct, fmt.Sprintf("Verifying chapter thumbnails (%d/%d overall)", runtimeDone+batchDone, total))
+				if !batchCheckpointable && save != nil {
+					return fmt.Errorf("storage errors in chapter-thumbnail batch; stopping at the last saved checkpoint")
+				}
+				checkpoint.SurfaceIndex = len(surfaces)
+				checkpoint.SurfaceCursor = nil
+				checkpoint.SurfaceDone = 0
+				checkpoint.Done = runtimeDone
+				checkpoint.ChapterCursor = batchCursor
+				checkpoint.ChapterDone = batchDone
+				checkpoint.Stats = stats
+				if err := saveArtworkReconcileCheckpoint(save, checkpoint); err != nil {
+					return fmt.Errorf("saving chapter-thumbnail checkpoint: %w", err)
+				}
+				return nil
+			}); err != nil {
 			return stats, err
 		}
 	}
+	checkpoint.SurfaceIndex = len(surfaces) + 1
+	checkpoint.Done = runtimeDone
+	checkpoint.Finished = true
+	checkpoint.Stats = stats
+	if err := saveArtworkReconcileCheckpoint(save, checkpoint); err != nil {
+		return stats, fmt.Errorf("artwork reconcile: saving completed checkpoint: %w", err)
+	}
 	return stats, nil
+}
+
+func cloneArtworkReconcileCheckpoint(checkpoint ArtworkReconcileCheckpoint) ArtworkReconcileCheckpoint {
+	checkpoint.Totals = append([]int(nil), checkpoint.Totals...)
+	checkpoint.SurfaceCursor = append([]string(nil), checkpoint.SurfaceCursor...)
+	return checkpoint
+}
+
+func saveArtworkReconcileCheckpoint(save func(ArtworkReconcileCheckpoint) error, checkpoint ArtworkReconcileCheckpoint) error {
+	if save == nil {
+		return nil
+	}
+	return save(cloneArtworkReconcileCheckpoint(checkpoint))
 }
 
 // shouldBulkReset decides between a blind bulk reset and per-row
@@ -420,9 +724,9 @@ func (r *ArtworkCacheReconciler) objectExistsWithRetry(ctx context.Context, buck
 }
 
 // bulkResetSurface resets every cached row without per-row verification. Rows
-// with a re-downloadable provider source go back to that source (the enqueue
-// loop re-caches them); rows without one are cleared so their owning pipeline
-// can refill them.
+// with a re-downloadable provider source go back to that source so an explicit
+// manual backfill can cache them again. Rows without one are cleared so their
+// owning pipeline can refill them.
 func (r *ArtworkCacheReconciler) bulkResetSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats) error {
 	if s.sourceCol != "" {
 		requeue := fmt.Sprintf(
@@ -458,8 +762,21 @@ type sweptRow struct {
 }
 
 func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, onProgress func(done int)) error {
-	var cursor []string
-	done := 0
+	return r.sweepSurfaceFrom(ctx, s, stats, nil, 0,
+		func(_ []string, done int, _ bool) error {
+			onProgress(done)
+			return nil
+		})
+}
+
+func (r *ArtworkCacheReconciler) sweepSurfaceFrom(
+	ctx context.Context,
+	s artworkSweepSurface,
+	stats *ArtworkReconcileStats,
+	cursor []string,
+	done int,
+	onBatch func(cursor []string, done int, checkpointable bool) error,
+) error {
 	for {
 		rows, err := r.fetchSweepBatch(ctx, s, cursor)
 		if err != nil {
@@ -470,6 +787,7 @@ func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSwee
 		}
 		cursor = rows[len(rows)-1].keys
 
+		sweepErrorsBefore := stats.SweepErrors
 		if err := r.verifyAndReset(ctx, s, rows, stats); err != nil {
 			return err
 		}
@@ -477,27 +795,18 @@ func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSwee
 			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.SweepErrors)
 		}
 		done += len(rows)
-		onProgress(done)
+		if err := onBatch(cursor, done, stats.SweepErrors == sweepErrorsBefore); err != nil {
+			return fmt.Errorf("artwork reconcile: recording %s progress: %w", s.name, err)
+		}
 	}
 }
 
 func (r *ArtworkCacheReconciler) fetchSweepBatch(ctx context.Context, s artworkSweepSurface, cursor []string) ([]sweptRow, error) {
-	var b strings.Builder
-	args := make([]any, 0, len(cursor)+1)
-	fmt.Fprintf(&b, `SELECT %s, %s, (%s) FROM %s WHERE %s`,
-		strings.Join(s.keyCols, ", "), s.pathCol, s.remoteSourcePredicate(), s.table, s.cachedPredicate())
-	if len(cursor) > 0 {
-		placeholders := make([]string, len(cursor))
-		for i, v := range cursor {
-			args = append(args, v)
-			placeholders[i] = fmt.Sprintf("$%d", len(args))
-		}
-		fmt.Fprintf(&b, ` AND (%s) > (%s)`, strings.Join(s.keyCols, ", "), strings.Join(placeholders, ", "))
+	query, args, err := buildSweepBatchQuery(s, cursor)
+	if err != nil {
+		return nil, fmt.Errorf("artwork reconcile: invalid %s cursor: %w", s.name, err)
 	}
-	args = append(args, artworkReconcileBatchSize)
-	fmt.Fprintf(&b, ` ORDER BY %s LIMIT $%d`, strings.Join(s.keyCols, ", "), len(args))
-
-	rows, err := r.pool.Query(ctx, b.String(), args...)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("artwork reconcile: fetching %s batch: %w", s.name, err)
 	}
@@ -522,6 +831,29 @@ func (r *ArtworkCacheReconciler) fetchSweepBatch(ctx context.Context, s artworkS
 	return out, nil
 }
 
+func buildSweepBatchQuery(s artworkSweepSurface, cursor []string) (string, []any, error) {
+	var b strings.Builder
+	args := make([]any, 0, len(cursor)+1)
+	keyColumns := s.keyColumnNames()
+	fmt.Fprintf(&b, `SELECT %s, %s, (%s) FROM %s WHERE %s`,
+		strings.Join(s.keySelectExpressions(), ", "), s.pathCol, s.remoteSourcePredicate(), s.table, s.cachedPredicate())
+	if len(cursor) > 0 {
+		cursorArgs, err := s.parseKeys(cursor)
+		if err != nil {
+			return "", nil, err
+		}
+		placeholders := make([]string, len(cursor))
+		for i, value := range cursorArgs {
+			args = append(args, value)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		fmt.Fprintf(&b, ` AND (%s) > (%s)`, strings.Join(keyColumns, ", "), strings.Join(placeholders, ", "))
+	}
+	args = append(args, artworkReconcileBatchSize)
+	fmt.Fprintf(&b, ` ORDER BY %s LIMIT $%d`, strings.Join(keyColumns, ", "), len(args))
+	return b.String(), args, nil
+}
+
 func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSweepSurface, batch []sweptRow, stats *ArtworkReconcileStats) error {
 	keys := make([]string, len(batch))
 	for i, row := range batch {
@@ -543,9 +875,11 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 		case v.missing:
 			row := batch[i]
 			args := make([]any, 0, len(row.keys)+1)
-			for _, k := range row.keys {
-				args = append(args, k)
+			parsedKeys, err := s.parseKeys(row.keys)
+			if err != nil {
+				return fmt.Errorf("artwork reconcile: invalid %s row key: %w", s.name, err)
 			}
+			args = append(args, parsedKeys...)
 			args = append(args, row.path)
 			var set string
 			if row.remoteSource {
@@ -585,10 +919,10 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 	return nil
 }
 
-func keyEqualityPredicate(keyCols []string) string {
+func keyEqualityPredicate(keyCols []artworkSweepKey) string {
 	parts := make([]string, len(keyCols))
-	for i, col := range keyCols {
-		parts[i] = fmt.Sprintf("%s = $%d", col, i+1)
+	for i, key := range keyCols {
+		parts[i] = fmt.Sprintf("%s = $%d", key.column, i+1)
 	}
 	return strings.Join(parts, " AND ")
 }
@@ -648,8 +982,20 @@ type chapterFileRow struct {
 }
 
 func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, stats *ArtworkReconcileStats, onProgress func(done int)) error {
-	cursor := int64(0)
-	done := 0
+	return r.sweepChapterThumbnailsFrom(ctx, stats, 0, 0,
+		func(_ int64, done int, _ bool) error {
+			onProgress(done)
+			return nil
+		})
+}
+
+func (r *ArtworkCacheReconciler) sweepChapterThumbnailsFrom(
+	ctx context.Context,
+	stats *ArtworkReconcileStats,
+	cursor int64,
+	done int,
+	onBatch func(cursor int64, done int, checkpointable bool) error,
+) error {
 	for {
 		rows, err := r.pool.Query(ctx, `
 			SELECT id, chapters FROM media_files
@@ -677,6 +1023,7 @@ func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, sta
 		}
 		cursor = batch[len(batch)-1].id
 
+		sweepErrorsBefore := stats.SweepErrors
 		if err := r.reconcileChapterBatch(ctx, batch, stats); err != nil {
 			return err
 		}
@@ -684,7 +1031,9 @@ func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, sta
 			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.SweepErrors)
 		}
 		done += len(batch)
-		onProgress(done)
+		if err := onBatch(cursor, done, stats.SweepErrors == sweepErrorsBefore); err != nil {
+			return fmt.Errorf("artwork reconcile: recording chapter-thumbnail progress: %w", err)
+		}
 	}
 }
 

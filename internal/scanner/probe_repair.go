@@ -24,6 +24,9 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file.BaseType == "ebook" {
 		return false
 	}
+	if file.HasLegacyAttachedPictureVideo() {
+		return true
+	}
 	if strings.TrimSpace(file.ProbeSource) == "" || file.ProbeUpdatedAt == nil {
 		return true
 	}
@@ -39,10 +42,15 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
-	if strings.TrimSpace(file.CodecAudio) == "" {
+	hasVideo := strings.TrimSpace(file.CodecVideo) != "" || len(file.VideoTracks) > 0
+	hasAudio := strings.TrimSpace(file.CodecAudio) != "" || len(file.AudioTracks) > 0
+	if !hasVideo && !hasAudio {
 		return true
 	}
-	if len(file.AudioTracks) == 0 {
+	if hasAudio && (strings.TrimSpace(file.CodecAudio) == "" || len(file.AudioTracks) == 0) {
+		return true
+	}
+	if !hasVideo && hasAudio && !file.IsAudioOnly() {
 		return true
 	}
 	// Video metadata is playback-critical only for files that actually carry a
@@ -50,10 +58,11 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	// zero video tracks and an empty video codec/resolution; treating that as
 	// "needs repair" re-ran ffprobe on every playback decision (applyProbeData
 	// only populates video fields under a "video" stream), so an audio-only
-	// file would never satisfy the check. Only demand video fields when the
-	// file was found to have a video stream.
-	if len(file.VideoTracks) > 0 {
-		if strings.TrimSpace(file.CodecVideo) == "" || strings.TrimSpace(file.Resolution) == "" {
+	// file would never satisfy the check. The inverse is also valid: synthetic
+	// clips and some test assets carry video with no audio stream. Demand each
+	// stream family's fields only when that family is present.
+	if hasVideo {
+		if strings.TrimSpace(file.CodecVideo) == "" || strings.TrimSpace(file.Resolution) == "" || len(file.VideoTracks) == 0 {
 			return true
 		}
 		if videoTracksMissingColorRange(file.VideoTracks) {

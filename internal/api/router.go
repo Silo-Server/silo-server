@@ -795,6 +795,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var collectionHandler *handlers.CollectionHandler
 	var settingsHandler *handlers.SettingsHandler
 	var settingValuesHandler *handlers.SettingValuesHandler
+	var deviceHandler *handlers.DeviceHandler
 	var homeDismissalHandler *handlers.HomeDismissalHandler
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
 	var audioPrefHandler *handlers.AudioPrefHandler
@@ -853,6 +854,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
+			// Household management: a primary profile acting for another
+			// profile on its own account. Without both of these the widening
+			// is unavailable rather than unguarded.
+			if userRepo != nil {
+				settingValuesHandler.UserRepo = userRepo
+			}
+			settingValuesHandler.ProfileTokens = profileTokenService
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
 			} else if deps.DB != nil {
@@ -862,6 +870,12 @@ func NewRouter(deps Dependencies) chi.Router {
 				settingValuesHandler.SetLanguageSuggestionSource(catalog.NewBrowseRepository(deps.DB))
 			}
 		}
+		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
+		deviceHandler.EventsHub = deps.EventsHub
+		if userRepo != nil {
+			deviceHandler.UserRepo = userRepo
+		}
+		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
@@ -1023,7 +1037,22 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.MarkerUpserter = deps.FileRepo
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
-		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub)
+		// A resolver lets subtitle realtime events carry the combined ordinal
+		// the new track will hold in the next plan. Without a file repository
+		// the notifier still fires; its events just omit the track block.
+		var subtitleInventoryResolver playback.SubtitleInventoryResolver
+		if deps.FileRepo != nil {
+			// subtitleRepo is a concrete pointer: pass it only when non-nil so
+			// the resolver holds a nil interface rather than a typed nil.
+			var subtitleReader subtitles.Repository
+			if subtitleRepo != nil {
+				subtitleReader = subtitleRepo
+			}
+			if resolver := handlers.NewSubtitleInventoryResolver(deps.FileRepo, subtitleReader); resolver != nil {
+				subtitleInventoryResolver = resolver
+			}
+		}
+		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub, subtitleInventoryResolver)
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
@@ -1409,6 +1438,14 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
+		var collectionSortCleaner *userstore.CollectionSortPreferenceCleaner
+		if userRepo != nil && deps.UserStoreProvider != nil {
+			collectionSortCleaner = userstore.NewCollectionSortPreferenceCleaner(userRepo, deps.UserStoreProvider)
+		}
+		if collectionHandler != nil {
+			collectionHandler.LibraryCollections = libraryCollectionRepo
+		}
+		sectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if libraryCollectionService == nil {
 			libraryCollectionService = catalog.NewLibraryCollectionService(
 				libraryCollectionRepo,
@@ -1508,6 +1545,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.SectionRepo = sectionRepo
 		libraryCollectionHandler.UserCollectionPool = deps.DB
 		libraryCollectionHandler.EventsHub = deps.EventsHub
+		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
 			libraryCollectionHandler.FolderRepo = deps.FolderRepo
 		} else {
@@ -1642,6 +1680,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if deps.NodePlanner != nil {
+			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
+				cfg := deps.CurrentConfig()
+				if cfg == nil {
+					return ""
+				}
+				return cfg.Auth.JWTSecret
+			})
+		}
 		if profileHandler != nil {
 			// Profiles may live outside Postgres (sqlite userdb backend), so
 			// deleting one cannot FK-cascade the shared user_devices table;
@@ -1996,6 +2043,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
+					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
 
 				// User notifications: profile-scoped inbox, preferences, and
@@ -2165,6 +2213,19 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
+				// The viewer's own device registry. Distinct from the push
+				// device routes under /notifications and from the TV login
+				// pairing flow under /auth/device: this is the installation
+				// identity that carries device-scoped settings.
+				if deviceHandler != nil {
+					r.Route("/devices", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/", deviceHandler.HandleListDevices)
+						r.Delete("/{device_id}", deviceHandler.HandleForgetDevice)
+						r.Delete("/{device_id}/settings", deviceHandler.HandleClearDeviceSettings)
+					})
+				}
+
 				// Favorites, watchlist, and history routes (profile-scoped).
 				if personalDataHandler != nil && itemsHandler != nil {
 					r.Route("/watched", func(r chi.Router) {
@@ -2239,6 +2300,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", collectionHandler.HandleListCollections)
 						r.Get("/capabilities", collectionHandler.HandleCapabilities)
+						r.Put("/sort-preference", collectionHandler.HandleSetCollectionSortPreference)
+						r.Delete("/sort-preference", collectionHandler.HandleClearCollectionSortPreference)
 						if libraryCollectionHandler != nil {
 							// Aggregated server (admin-curated) collections across
 							// every accessible library. Separate from "/" (personal,
@@ -2374,6 +2437,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/values", settingValuesHandler.HandleGetValues)
 								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
 								r.Post("/values/effective", settingValuesHandler.HandlePostEffective)
+								r.Put("/values/nav.shortcuts/item", settingValuesHandler.HandleSetNavigationShortcut)
 								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
 								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)
 								r.Delete("/values/{key}", settingValuesHandler.HandleDeleteValue)
@@ -2480,6 +2544,33 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
 				}
 
+				// Viewer-facing trailer fetch. Registered beside the on-view
+				// translation trigger because it is the same shape: a
+				// non-admin, item-scoped metadata action guarded by item
+				// access plus a per-user limiter, with the real budget being
+				// the per-item cooldown the metadata service enforces.
+				//
+				// The action route is conditional (it needs the metadata
+				// service to implement the optional interface), so the
+				// capability probe beside it is not: per the v1 rules a client
+				// feature-detects rather than version-sniffs, and a probe that
+				// itself 404s would leave it interpreting the same ambiguous
+				// status it was meant to replace. Unwired, the probe answers
+				// refresh:false.
+				if itemsHandler != nil && itemRepo != nil {
+					if requester, ok := deps.MetadataService.(handlers.TrailerRefreshRequester); ok {
+						// Share the process's configured limiter so the
+						// per-user budget is one budget on Redis deployments
+						// rather than one per instance. Nil when rate limiting
+						// is disabled; the handler then keeps its private
+						// in-memory fallback.
+						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
+						itemsHandler.SetTrailerRefreshRequester(requester)
+						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
+					}
+					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
+				}
+
 				// Subtitle search + AI translation routes.
 				if subtitleSearchHandler != nil {
 					if deps.FileRepo != nil && itemRepo != nil {
@@ -2495,6 +2586,11 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 					}
 					r.Route("/subtitles", func(r chi.Router) {
+						// Capability probe for external subtitle search. Two
+						// segments on purpose: a bare /providers would shadow
+						// the /{media_file_id} route below, while
+						// /providers/status never competes with it in chi.
+						r.Get("/providers/status", subtitleSearchHandler.HandleProviderStatus)
 						r.Post("/search", subtitleSearchHandler.HandleSearch)
 						r.Post("/download", subtitleSearchHandler.HandleDownload)
 						r.Post("/upload", subtitleSearchHandler.HandleUpload)
@@ -2514,6 +2610,17 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
 						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+					})
+				} else {
+					// The whole group above is conditional (it needs the DB,
+					// S3 and the subtitle repo), so on a storage-less
+					// deployment the capability probe would 404 — leaving a
+					// client to interpret the same ambiguous status the probe
+					// exists to replace. Mount the probe alone, answering
+					// enabled:false, so feature detection always gets a real
+					// answer.
+					r.Route("/subtitles", func(r chi.Router) {
+						r.Get("/providers/status", handlers.WriteSubtitleProvidersDisabledStatus)
 					})
 				}
 
@@ -2543,9 +2650,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
 							r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
 							r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
-							r.Patch("/{session_id}/audio", playbackHandler.HandleChangeAudioTrack)
 							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
-							r.Post("/transcode/start", playbackHandler.HandleStartTranscode)
 						})
 					})
 				}
@@ -2576,6 +2681,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/stream/{session_id}", streamHandler.HandleStream)
 					r.Head("/stream/{session_id}", streamHandler.HandleStream)
 					r.Get("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
+					r.Head("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
 					r.Get("/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts)
 				}
 
@@ -2602,12 +2708,16 @@ func NewRouter(deps Dependencies) chi.Router {
 					// HEAD natively.
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
 					r.Head("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Get("/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy)
+					r.Head("/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy)
 					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
 					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
 					r.Get("/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle)
 				})
 				r.Get("/direct-download", downloadHandler.HandleDirectDownload)
 				r.Head("/direct-download", downloadHandler.HandleDirectDownload)
+				r.Get("/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy)
+				r.Head("/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy)
 
 				// Recipe gallery catalog (no profile required — purely static metadata).
 				recipeHandler := &handlers.RecipeHandler{}

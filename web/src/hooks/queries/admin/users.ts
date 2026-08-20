@@ -9,7 +9,7 @@ import type {
   LoginResponse,
   UpdateUserRequest,
 } from "@/api/types";
-import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
 import { useAdminUserProfiles } from "./history";
 import { toast } from "sonner";
@@ -39,15 +39,19 @@ interface AdminDevicesResponse {
 export type AdminSettingScope =
   | "account"
   | "profile"
+  | "profile_client"
   | "profile_device"
   | "profile_library"
   | "profile_series";
+
+export type AdminSettingClientFamily = "tv" | "mobile" | "tablet" | "desktop" | "web";
 
 /** One stored row as GET /admin/users/{id}/settings/values reports it. */
 interface AdminSettingValueRow {
   key: string;
   scope: AdminSettingScope;
   profile_id?: string;
+  client_family?: AdminSettingClientFamily;
   device_id?: string;
   library_id?: number;
   series_id?: string;
@@ -65,6 +69,7 @@ interface AdminSettingValuesResponse {
 export interface AdminSettingIdentity {
   scope: AdminSettingScope;
   profileId?: string;
+  clientFamily?: AdminSettingClientFamily;
   deviceId?: string;
   libraryId?: number;
   seriesId?: string;
@@ -75,6 +80,7 @@ export interface AdminUserSettingEntry {
   key: string;
   scope: AdminSettingScope;
   profile_id?: string;
+  client_family?: AdminSettingClientFamily;
   library_id?: number;
   series_id?: string;
   value: string;
@@ -96,6 +102,7 @@ export interface AdminDeviceSetting {
 function identityQuery(identity: AdminSettingIdentity): string {
   const params = new URLSearchParams({ scope: identity.scope });
   if (identity.profileId) params.set("profile_id", identity.profileId);
+  if (identity.clientFamily) params.set("client_family", identity.clientFamily);
   if (identity.deviceId) params.set("device_id", identity.deviceId);
   if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
   if (identity.seriesId !== undefined) params.set("series_id", identity.seriesId);
@@ -255,6 +262,7 @@ export function useAdminUserSettings(userId: number) {
           key: row.key,
           scope: row.scope,
           profile_id: row.profile_id,
+          client_family: row.client_family,
           library_id: row.library_id,
           series_id: row.series_id,
           value: settingValueToString(row.value),
@@ -304,7 +312,18 @@ export function useDeleteAdminUserSetting() {
       userId: number;
       key: string;
       identity: AdminSettingIdentity;
-    }) => api(adminSettingValuePath(userId, key, identity), { method: "DELETE" }),
+    }) => {
+      const path = adminSettingValuePath(userId, key, identity);
+      if (key === SETTING_KEYS.NAV_SHORTCUTS) {
+        // Shortcut history is revisioned and may not be erased. Its reset is
+        // the atomic empty document accepted by the canonical admin endpoint.
+        return api(path, {
+          method: "PUT",
+          body: JSON.stringify({ value: { items: [] } }),
+        });
+      }
+      return api(path, { method: "DELETE" });
+    },
     onSuccess: (_data, variables) => {
       toast.success("User setting reset");
       queryClient.invalidateQueries({ queryKey: adminKeys.userSettings(variables.userId) });

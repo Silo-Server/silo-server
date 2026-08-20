@@ -365,6 +365,11 @@ func (s *PostgresUserStore) DeleteCollection(ctx context.Context, id string) err
 	if _, err := tx.Exec(ctx, `DELETE FROM user_personal_collection_items WHERE user_id = $1 AND collection_id = $2`, s.userID, id); err != nil {
 		return fmt.Errorf("deleting collection items: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_collection_sort_preferences
+		WHERE user_id = $1 AND collection_kind = 'user' AND collection_id = $2`, s.userID, id); err != nil {
+		return fmt.Errorf("deleting collection sort preferences: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM user_personal_collections WHERE user_id = $1 AND id = $2`, s.userID, id); err != nil {
 		return fmt.Errorf("deleting collection: %w", err)
 	}

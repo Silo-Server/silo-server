@@ -34,7 +34,9 @@ type Repository interface {
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
 	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
+	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
 	UpsertListItemStates(ctx context.Context, states []ListItemState) error
 	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
 	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
@@ -50,6 +52,8 @@ type Repository interface {
 	FailConfirmedScrobbleStop(ctx context.Context, playbackSessionID string, connectionID string, progress float64, historyID string, claimVersion time.Time, lastError string) error
 	UpdateScrobbleSession(ctx context.Context, playbackSessionID string, connectionID string, action string, progress float64, historyID string, lastError string, stopSentAt *time.Time) error
 	ListOpenScrobbleSessions(ctx context.Context) ([]ScrobbleSession, error)
+	ListPendingScrobbleReconciliations(ctx context.Context) ([]ScrobbleSession, error)
+	MarkScrobbleHistoryReconciled(ctx context.Context, playbackSessionID, connectionID string, reconciledAt time.Time) error
 }
 
 type confirmedStopPreparation uint8
@@ -67,7 +71,7 @@ var errConfirmedStopClaimLost = errors.New("confirmed scrobble stop claim lost")
 // it across every read query keeps the column set and scan order in lockstep.
 const connectionColumns = `
 	id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-	access_token, refresh_token, token_expires_at, import_watched_enabled,
+	access_token, refresh_token, token_expires_at, plugin_credentials, import_watched_enabled,
 	import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
 	import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
 	import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
@@ -115,6 +119,10 @@ func TokenAAD(column, provider string, userID int, profileID string) string {
 	return secret.RowAAD("watch_provider_connections", column, provider+":"+strconv.Itoa(userID)+":"+profileID)
 }
 
+func authStateAAD(provider string, userID int, profileID string) string {
+	return secret.RowAAD("watch_provider_auth_sessions", "device_code", provider+":"+strconv.Itoa(userID)+":"+profileID)
+}
+
 func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (string, error) {
 	var value string
 	err := r.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&value)
@@ -138,6 +146,10 @@ func (r *PostgresRepository) UpsertAuthSession(
 	ctx context.Context,
 	session DeviceAuthSession,
 ) (DeviceAuthSession, error) {
+	deviceCode, err := r.cipher.Encrypt(session.DeviceCode, authStateAAD(session.Provider, session.UserID, session.ProfileID))
+	if err != nil {
+		return DeviceAuthSession{}, fmt.Errorf("encrypt watch provider authorization state: %w", err)
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO watch_provider_auth_sessions (
 			id, provider, user_id, profile_id, device_code, user_code,
@@ -166,14 +178,14 @@ func (r *PostgresRepository) UpsertAuthSession(
 		session.Provider,
 		session.UserID,
 		session.ProfileID,
-		session.DeviceCode,
+		deviceCode,
 		session.UserCode,
 		session.VerificationURL,
 		session.IntervalSeconds,
 		session.ExpiresAt,
 		session.CompletedAt,
 	)
-	saved, err := scanDeviceAuthSession(row)
+	saved, err := r.scanDeviceAuthSession(row)
 	if err != nil {
 		return DeviceAuthSession{}, fmt.Errorf("upsert watch provider auth session: %w", err)
 	}
@@ -188,7 +200,7 @@ func (r *PostgresRepository) GetAuthSession(ctx context.Context, id string) (Dev
 		FROM watch_provider_auth_sessions
 		WHERE id = $1::uuid
 	`, id)
-	session, err := scanDeviceAuthSession(row)
+	session, err := r.scanDeviceAuthSession(row)
 	if err != nil {
 		return DeviceAuthSession{}, fmt.Errorf("get watch provider auth session %q: %w", id, err)
 	}
@@ -204,10 +216,14 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
 	}
+	pluginCredentials, err := r.pluginCredentialsForConnection(conn)
+	if err != nil {
+		return Connection{}, err
+	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO watch_provider_connections (
 			id, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
+			access_token, refresh_token, token_expires_at, plugin_credentials, import_watched_enabled,
 			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
 			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
 			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
@@ -217,8 +233,8 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
-			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-			$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30::jsonb
+			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -226,6 +242,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			access_token = EXCLUDED.access_token,
 			refresh_token = EXCLUDED.refresh_token,
 			token_expires_at = EXCLUDED.token_expires_at,
+			plugin_credentials = EXCLUDED.plugin_credentials,
 			import_watched_enabled = EXCLUDED.import_watched_enabled,
 			import_progress_enabled = EXCLUDED.import_progress_enabled,
 			export_watched_enabled = EXCLUDED.export_watched_enabled,
@@ -259,6 +276,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		accessToken,
 		refreshToken,
 		conn.TokenExpiresAt,
+		pluginCredentials,
 		conn.ImportWatchedEnabled,
 		conn.ImportProgressEnabled,
 		conn.ExportWatchedEnabled,
@@ -688,7 +706,9 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 			ON CONFLICT (connection_id, history_id) DO UPDATE SET
 				provider_item_key = EXCLUDED.provider_item_key,
 				status = CASE
-					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble') THEN watch_provider_history_exports.status
+					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble', 'not_found')
+						OR watch_provider_history_exports.attempt_count >= 5
+					THEN watch_provider_history_exports.status
 					ELSE EXCLUDED.status
 				END,
 				updated_at = now()
@@ -746,6 +766,60 @@ func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, conn
 	return exports, nil
 }
 
+func (r *PostgresRepository) ListPendingHistoryExportsByHistoryIDs(
+	ctx context.Context,
+	connectionID string,
+	historyIDs []string,
+	limit int,
+) ([]HistoryExport, error) {
+	if len(historyIDs) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 || limit > len(historyIDs) {
+		limit = len(historyIDs)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
+			provider_item_key, status, attempt_count, last_attempt_at, last_error, created_at, updated_at
+		FROM watch_provider_history_exports
+		WHERE connection_id = $1::uuid
+		  AND history_id = ANY($2::text[])
+		  AND status IN ('pending', 'failed')
+		  AND attempt_count < 5
+		ORDER BY watched_at ASC
+		LIMIT $3
+	`, connectionID, historyIDs, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list pending history exports by history ids: %w", err)
+	}
+	defer rows.Close()
+	var exports []HistoryExport
+	for rows.Next() {
+		var export HistoryExport
+		if err := rows.Scan(
+			&export.ID,
+			&export.ConnectionID,
+			&export.HistoryID,
+			&export.MediaItemID,
+			&export.WatchedAt,
+			&export.ProviderItemKey,
+			&export.Status,
+			&export.AttemptCount,
+			&export.LastAttemptAt,
+			&export.LastError,
+			&export.CreatedAt,
+			&export.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending history export by history ids: %w", err)
+		}
+		exports = append(exports, export)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending history exports by history ids: %w", err)
+	}
+	return exports, nil
+}
+
 func (r *PostgresRepository) MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE watch_provider_history_exports
@@ -755,9 +829,26 @@ func (r *PostgresRepository) MarkHistoryExportStatus(ctx context.Context, id str
 			last_error = $3,
 			updated_at = now()
 		WHERE id = $1::uuid
+		  AND status NOT IN ('sent', 'satisfied_by_scrobble', 'not_found')
 	`, id, status, lastError)
 	if err != nil {
 		return fmt.Errorf("mark history export status: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_history_exports
+		SET status = 'satisfied_by_scrobble',
+			last_attempt_at = now(),
+			last_error = '',
+			updated_at = now()
+		WHERE connection_id = $1::uuid AND history_id = $2
+		  AND status NOT IN ('sent', 'not_found')
+	`, connectionID, historyID)
+	if err != nil {
+		return fmt.Errorf("mark history export satisfied by scrobble: %w", err)
 	}
 	return nil
 }
@@ -1152,7 +1243,62 @@ func (r *PostgresRepository) ListOpenScrobbleSessions(ctx context.Context) ([]Sc
 	return sessions, nil
 }
 
-func scanDeviceAuthSession(row pgx.Row) (DeviceAuthSession, error) {
+func (r *PostgresRepository) ListPendingScrobbleReconciliations(ctx context.Context) ([]ScrobbleSession, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT playback_session_id, connection_id::text, media_item_id, provider_item_key, kind,
+			imdb_id, tmdb_id, tvdb_id, series_imdb_id, series_tmdb_id, series_tvdb_id,
+			season_number, episode_number, history_id, started_at, last_progress,
+			duration_seconds, completed, last_action, stop_sent_at, history_reconciled_at, last_error
+		FROM watch_provider_scrobble_sessions
+		WHERE stop_sent_at IS NOT NULL AND completed = true AND history_id <> ''
+			AND history_reconciled_at IS NULL
+		ORDER BY stop_sent_at ASC
+		LIMIT 100
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list pending scrobble reconciliations: %w", err)
+	}
+	defer rows.Close()
+	var sessions []ScrobbleSession
+	for rows.Next() {
+		var session ScrobbleSession
+		if err := rows.Scan(
+			&session.PlaybackSessionID, &session.ConnectionID, &session.MediaItemID,
+			&session.ProviderItemKey, &session.Kind, &session.IMDbID, &session.TMDBID,
+			&session.TVDBID, &session.SeriesIMDbID, &session.SeriesTMDBID,
+			&session.SeriesTVDBID, &session.SeasonNumber, &session.EpisodeNumber,
+			&session.HistoryID, &session.StartedAt, &session.LastProgress,
+			&session.DurationSeconds, &session.Completed, &session.LastAction,
+			&session.StopSentAt, &session.HistoryReconciledAt, &session.LastError,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending scrobble reconciliation: %w", err)
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending scrobble reconciliations: %w", err)
+	}
+	return sessions, nil
+}
+
+func (r *PostgresRepository) MarkScrobbleHistoryReconciled(
+	ctx context.Context,
+	playbackSessionID string,
+	connectionID string,
+	reconciledAt time.Time,
+) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_scrobble_sessions
+		SET history_reconciled_at = $3, last_error = '', updated_at = now()
+		WHERE playback_session_id = $1 AND connection_id = $2::uuid
+	`, playbackSessionID, connectionID, reconciledAt)
+	if err != nil {
+		return fmt.Errorf("mark scrobble history reconciled: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) scanDeviceAuthSession(row pgx.Row) (DeviceAuthSession, error) {
 	var session DeviceAuthSession
 	err := row.Scan(
 		&session.ID,
@@ -1169,6 +1315,14 @@ func scanDeviceAuthSession(row pgx.Row) (DeviceAuthSession, error) {
 	if err != nil {
 		return DeviceAuthSession{}, err
 	}
+	decrypted, err := r.cipher.DecryptIfEncrypted(
+		session.DeviceCode,
+		authStateAAD(session.Provider, session.UserID, session.ProfileID),
+	)
+	if err != nil {
+		return DeviceAuthSession{}, fmt.Errorf("decrypt watch provider authorization state: %w", err)
+	}
+	session.DeviceCode = decrypted
 	return session, nil
 }
 
@@ -1211,6 +1365,7 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	var conn Connection
 	var rawSyncCursors []byte
+	var rawPluginCredentials string
 	err := row.Scan(
 		&conn.ID,
 		&conn.Provider,
@@ -1221,6 +1376,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.AccessToken,
 		&conn.RefreshToken,
 		&conn.TokenExpiresAt,
+		&rawPluginCredentials,
 		&conn.ImportWatchedEnabled,
 		&conn.ImportProgressEnabled,
 		&conn.ExportWatchedEnabled,
@@ -1256,8 +1412,87 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	if conn.RefreshToken, err = r.cipher.DecryptIfEncrypted(conn.RefreshToken, TokenAAD("refresh_token", conn.Provider, conn.UserID, conn.ProfileID)); err != nil {
 		return Connection{}, fmt.Errorf("decrypt watch refresh token: %w", err)
 	}
+	if err := r.decodePluginCredentials(&conn, rawPluginCredentials); err != nil {
+		return Connection{}, err
+	}
 	conn.SyncCursors = decodeSyncCursors(rawSyncCursors)
 	return conn, nil
+}
+
+type storedPluginCredentials struct {
+	AccessToken      string            `json:"access_token"`
+	RefreshToken     string            `json:"refresh_token,omitempty"`
+	TokenExpiresAt   *time.Time        `json:"expires_at,omitempty"`
+	TokenType        string            `json:"token_type,omitempty"`
+	Scopes           []string          `json:"scopes,omitempty"`
+	SecretAttributes map[string]string `json:"secret_attributes,omitempty"`
+}
+
+func (r *PostgresRepository) pluginCredentialsForConnection(conn Connection) (string, error) {
+	if !strings.HasPrefix(conn.Provider, providerSourcePlugin+":") {
+		// Built-in providers have legacy token writers that update the dedicated
+		// token columns directly. Keeping a second authoritative bundle for them
+		// would let that bundle become stale and overwrite freshly rotated tokens.
+		return "", nil
+	}
+	return r.encodePluginCredentials(conn)
+}
+
+func (r *PostgresRepository) encodePluginCredentials(conn Connection) (string, error) {
+	payload, err := json.Marshal(storedPluginCredentials{
+		AccessToken:      conn.AccessToken,
+		RefreshToken:     conn.RefreshToken,
+		TokenExpiresAt:   conn.TokenExpiresAt,
+		TokenType:        conn.TokenType,
+		Scopes:           conn.Scopes,
+		SecretAttributes: conn.SecretAttributes,
+	})
+	if err != nil {
+		return "", fmt.Errorf("encode watch provider credentials: %w", err)
+	}
+	encoded, err := r.cipher.Encrypt(
+		string(payload),
+		TokenAAD("plugin_credentials", conn.Provider, conn.UserID, conn.ProfileID),
+	)
+	if err != nil {
+		return "", fmt.Errorf("encrypt watch provider credentials: %w", err)
+	}
+	return encoded, nil
+}
+
+func (r *PostgresRepository) decodePluginCredentials(conn *Connection, encoded string) error {
+	if conn == nil || strings.TrimSpace(encoded) == "" {
+		return nil
+	}
+	plaintext, err := r.cipher.DecryptIfEncrypted(
+		encoded,
+		TokenAAD("plugin_credentials", conn.Provider, conn.UserID, conn.ProfileID),
+	)
+	if err != nil {
+		return fmt.Errorf("decrypt watch provider credentials: %w", err)
+	}
+	var credentials storedPluginCredentials
+	if err := json.Unmarshal([]byte(plaintext), &credentials); err != nil {
+		return fmt.Errorf("decode watch provider credentials: %w", err)
+	}
+	conn.AccessToken = credentials.AccessToken
+	conn.RefreshToken = credentials.RefreshToken
+	conn.TokenExpiresAt = credentials.TokenExpiresAt
+	conn.TokenType = credentials.TokenType
+	conn.Scopes = append([]string(nil), credentials.Scopes...)
+	conn.SecretAttributes = cloneStringMap(credentials.SecretAttributes)
+	return nil
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 type listItemStateRows interface {

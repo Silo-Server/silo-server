@@ -8,7 +8,8 @@
  * is a manifest change plus a regeneration, never a hand-written key.
  */
 
-export const SETTINGS_REVISION = 3;
+export const SETTINGS_API_VERSION = 1;
+export const SETTINGS_REVISION = 7;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -162,6 +163,10 @@ export const SETTING_KEYS = {
   DOWNLOADS_KEEP_WATCHED: "downloads.keep_watched",
   /** Download over Wi-Fi only */
   DOWNLOADS_WIFI_ONLY: "downloads.wifi_only",
+  /** Primary menu */
+  NAV_PRIMARY_MENU: "nav.primary_menu",
+  /** Navigation shortcuts */
+  NAV_SHORTCUTS: "nav.shortcuts",
   /** Show audiobooks */
   NAV_SHOW_AUDIOBOOKS: "nav.show_audiobooks",
   /** Preferred audio language */
@@ -176,6 +181,8 @@ export const SETTING_KEYS = {
   PLAYBACK_AUTO_SKIP_INTRO: "playback.auto_skip_intro",
   /** Auto-skip recaps */
   PLAYBACK_AUTO_SKIP_RECAP: "playback.auto_skip_recap",
+  /** Skip intros */
+  PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
   PLAYBACK_MAX_BITRATE_KBPS: "playback.max_bitrate_kbps",
   /** Next up prompt */
@@ -224,6 +231,8 @@ export const SETTING_KEYS = {
   SUBTITLE_MATCHES_DEVICE: "subtitle.matches_device",
   /** Poster badges */
   UI_CARD_OVERLAYS: "ui.card_overlays",
+  /** Media cards */
+  UI_CARD_PRESENTATION: "ui.card_presentation",
   /** Custom CSS */
   UI_CUSTOM_CSS: "ui.custom_css",
   /** Custom theme variables */
@@ -266,6 +275,11 @@ export interface SettingDefinition {
    * hide definitions, scopes, enum members and widened bounds introduced
    * after that revision — the server would reject them. */
   introducedIn: number;
+  /** Superseded by another definition. The key still resolves and still
+   * has to be readable, but a client must not offer it as a second control
+   * beside its replacement — editing one would silently rewrite the other
+   * through the server's compatibility mirror. */
+  deprecated?: boolean;
   scopes: readonly string[];
   /** Revision each scope became writable at, aligned with scopes. */
   scopeIntroducedIn: readonly number[];
@@ -276,6 +290,10 @@ export interface SettingDefinition {
   category: string;
   control?: string;
   unit?: string;
+  /** Advisory: platforms this setting is expected to matter on. Absent
+   * means everywhere. A client hides settings for platforms it is not,
+   * rather than disabling them without explanation. */
+  platforms?: readonly string[];
   suggestedOptions?: SettingOptionSetId;
   unsetLabel?: string;
   values?: readonly { value: unknown; label: string; introducedIn: number }[];
@@ -343,6 +361,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Quality preset used for new downloads.",
     category: "downloads",
     control: "select",
+    platforms: ["ios", "android"],
     values: [
       { value: "1mbps", label: "1 Mbps", introducedIn: 1 },
       { value: "2mbps", label: "2 Mbps", introducedIn: 1 },
@@ -367,6 +386,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Do not suggest reclaiming space from downloads you have finished.",
     category: "downloads",
     control: "switch",
+    platforms: ["ios", "android"],
   },
   "downloads.wifi_only": {
     key: "downloads.wifi_only",
@@ -382,6 +402,37 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Only download while connected to Wi-Fi.",
     category: "downloads",
     control: "switch",
+    platforms: ["ios", "android"],
+  },
+  "nav.primary_menu": {
+    key: "nav.primary_menu",
+    type: "object",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile_client", "profile_device"],
+    scopeIntroducedIn: [5, 5],
+    resolutionOrder: ["profile_device", "profile_client", "default"],
+    defaultValue: null,
+    label: "Primary menu",
+    description: "The ordered visible destinations shared by like clients.",
+    category: "navigation",
+    control: "panel",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "nav.shortcuts": {
+    key: "nav.shortcuts",
+    type: "object",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile"],
+    scopeIntroducedIn: [5],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: { items: [] },
+    label: "Navigation shortcuts",
+    description: "Libraries, sections, and collections pinned for use across navigation surfaces.",
+    category: "navigation",
   },
   "nav.show_audiobooks": {
     key: "nav.show_audiobooks",
@@ -397,6 +448,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Show the Audiobooks section in navigation.",
     category: "nav",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "playback.audio_language": {
     key: "playback.audio_language",
@@ -466,6 +518,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     nullable: false,
     persistence: "remote",
     introducedIn: 1,
+    deprecated: true,
     scopes: ["profile", "profile_device"],
     scopeIntroducedIn: [1, 1],
     resolutionOrder: ["profile_device", "profile", "default"],
@@ -489,6 +542,27 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: 'Skip "previously on" recaps automatically when Silo can detect them.',
     category: "playback",
     control: "switch",
+  },
+  "playback.intro_skip_mode": {
+    key: "playback.intro_skip_mode",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 7,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [7, 7],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: "ask",
+    label: "Skip intros",
+    description:
+      "What Silo does when an intro starts: leave it alone, offer a Skip Intro button, or skip it and offer an undo.",
+    category: "playback",
+    control: "select",
+    values: [
+      { value: "never", label: "Never", introducedIn: 7 },
+      { value: "ask", label: "Ask to skip", introducedIn: 7 },
+      { value: "always", label: "Skip automatically", introducedIn: 7 },
+    ],
   },
   "playback.max_bitrate_kbps": {
     key: "playback.max_bitrate_kbps",
@@ -581,7 +655,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       fontFamily: "sans-serif",
       fontColor: "#ffffff",
       backgroundColor: "#000000",
-      backgroundStyle: "shadow",
+      backgroundStyle: "box",
       backgroundOpacity: 75,
       textOutline: false,
       textOutlineColor: "#000000",
@@ -644,6 +718,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "slider",
     unit: "milliseconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
     minimum: -5000,
     maximum: 5000,
   },
@@ -661,6 +736,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Allow Dolby Vision output on this device.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.dv_profile7_hdr10_fallback": {
     key: "player.dv_profile7_hdr10_fallback",
@@ -676,6 +752,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Play Profile 7 sources as HDR10 when this device cannot decode them natively.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "player.hdr_enabled": {
     key: "player.hdr_enabled",
@@ -706,6 +783,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Switch the display refresh rate to match what is playing.",
     category: "player",
     control: "switch",
+    platforms: ["android", "android_tv", "tvos"],
   },
   "player.orientation_mode": {
     key: "player.orientation_mode",
@@ -721,6 +799,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Whether the player rotates with the device.",
     category: "player",
     control: "select",
+    platforms: ["ios", "android"],
     values: [
       { value: "landscapeLocked", label: "Landscape", introducedIn: 1 },
       { value: "rotateFreely", label: "Rotate freely", introducedIn: 1 },
@@ -742,6 +821,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "stepper",
     unit: "episodes",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
     minimum: 0,
     maximum: 20,
   },
@@ -759,6 +839,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Keep playing in a floating window when you leave the player.",
     category: "player",
     control: "switch",
+    platforms: ["ios", "macos", "android"],
   },
   "player.playback_speed": {
     key: "player.playback_speed",
@@ -795,6 +876,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "player",
     control: "stepper",
     unit: "seconds",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv", "web"],
     minimum: 0,
     maximum: 30,
   },
@@ -903,6 +985,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Use the operating system's caption style instead of Silo's.",
     category: "playback",
     control: "switch",
+    platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.card_overlays": {
     key: "ui.card_overlays",
@@ -917,6 +1000,23 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Poster badges",
     description: "Which badges appear on poster cards, and where.",
     category: "appearance",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "ui.card_presentation": {
+    key: "ui.card_presentation",
+    type: "object",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 5,
+    scopes: ["profile", "profile_client", "profile_device"],
+    scopeIntroducedIn: [5, 5, 5],
+    resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
+    defaultValue: { poster_size: "standard", caption: "title_metadata" },
+    label: "Media cards",
+    description: "Poster size and caption detail used by media cards.",
+    category: "appearance",
+    control: "panel",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "ui.custom_css": {
     key: "ui.custom_css",
@@ -932,6 +1032,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Raw CSS applied on top of the selected theme.",
     category: "appearance",
     control: "text",
+    platforms: ["web"],
   },
   "ui.custom_theme_vars": {
     key: "ui.custom_theme_vars",
@@ -947,6 +1048,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Per-token overrides applied on top of the selected theme.",
     category: "appearance",
     control: "panel",
+    platforms: ["web"],
   },
   "ui.date_format": {
     key: "ui.date_format",
@@ -997,6 +1099,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Increase contrast across the interface.",
     category: "appearance",
     control: "switch",
+    platforms: ["web"],
   },
   "ui.library_order": {
     key: "ui.library_order",
@@ -1025,6 +1128,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Remembered library view",
     description: "Saved browse state for each library.",
     category: "navigation",
+    platforms: ["web"],
   },
   "ui.next_up_mode": {
     key: "ui.next_up_mode",
@@ -1059,6 +1163,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Return to where you left off when reopening a library.",
     category: "navigation",
     control: "switch",
+    platforms: ["web"],
   },
   "ui.sidebar_pins": {
     key: "ui.sidebar_pins",
@@ -1073,6 +1178,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Pinned sidebar items",
     description: "Sections and collections pinned into the sidebar.",
     category: "navigation",
+    platforms: ["web"],
   },
   "ui.text_scale": {
     key: "ui.text_scale",
@@ -1088,6 +1194,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Overall interface text size.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "default", label: "Default", introducedIn: 1 },
       { value: "large", label: "Large", introducedIn: 1 },
@@ -1109,6 +1216,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Use heavier interface text for readability.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "default", label: "Default", introducedIn: 1 },
       { value: "strong", label: "Bolder", introducedIn: 1 },
@@ -1128,6 +1236,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     description: "Colour theme for the Silo interface.",
     category: "appearance",
     control: "select",
+    platforms: ["web"],
     values: [
       { value: "midnight-cinema", label: "Midnight Cinema", introducedIn: 1 },
       { value: "cinema-light", label: "Cinema Light", introducedIn: 1 },

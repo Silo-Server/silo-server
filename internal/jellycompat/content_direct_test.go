@@ -526,6 +526,15 @@ func (s *progressCountingStore) GetSeriesPlaybackPreference(context.Context, str
 func (s *progressCountingStore) DeleteSeriesPlaybackPreference(context.Context, string, string) error {
 	panic("unused")
 }
+func (s *progressCountingStore) SetCollectionSortPreference(context.Context, userstore.CollectionSortPreference) error {
+	panic("unused")
+}
+func (s *progressCountingStore) GetCollectionSortPreference(context.Context, string, string, string) (*userstore.CollectionSortPreference, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ClearCollectionSortPreference(context.Context, string, string, string) error {
+	panic("unused")
+}
 func (s *progressCountingStore) GetLibraryPlaybackPreference(context.Context, string, int) (*userstore.LibraryPlaybackPreference, error) {
 	panic("unused")
 }

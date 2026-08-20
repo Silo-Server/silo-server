@@ -193,10 +193,10 @@ func (p *Planner) PlanRuntimeValue(legacyKey, raw string) ([]RuntimeValue, error
 		for _, row := range result.Rows {
 			planned[row.Key] = row.Value
 		}
-		return []RuntimeValue{
+		return withRuntimeMirrors([]RuntimeValue{
 			{Key: keyPreferredQuality, Value: planned[keyPreferredQuality]},
 			{Key: settingskeys.PlaybackMaxBitrateKbps, Value: planned[settingskeys.PlaybackMaxBitrateKbps]},
-		}, nil
+		})
 	}
 
 	def, ok := p.contract.Lookup(key)
@@ -207,20 +207,68 @@ func (p *Planner) PlanRuntimeValue(legacyKey, raw string) ([]RuntimeValue, error
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", key, err)
 	}
-	return []RuntimeValue{{Key: key, Value: value}}, nil
+	return withRuntimeMirrors([]RuntimeValue{{Key: key, Value: value}})
+}
+
+// withRuntimeMirrors appends the companion mutation for every planned value
+// whose key has a replacement.
+//
+// It sits here rather than in the handler because three legacy write paths
+// share PlanRuntimeValue — the account-wide fan-out, the per-device setting,
+// and the inheritance a newly created profile picks up — and a mirror applied
+// at only some of them would make a preference's meaning depend on which
+// legacy route last touched it.
+//
+// A nil Value means "clear this row", and the companion is cleared with it for
+// the same reason DELETE clears both: a surviving half would go on resolving as
+// an explicit choice nobody made.
+func withRuntimeMirrors(planned []RuntimeValue) ([]RuntimeValue, error) {
+	out := make([]RuntimeValue, 0, len(planned)+1)
+	out = append(out, planned...)
+	for _, mutation := range planned {
+		if mutation.Value == nil {
+			if mirrorKey, ok := settingscontract.MirrorKey(mutation.Key); ok {
+				out = append(out, RuntimeValue{Key: mirrorKey})
+			}
+			continue
+		}
+		mirror, ok, err := settingscontract.MirrorWrite(mutation.Key, mutation.Value)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, RuntimeValue{Key: mirror.Key, Value: mirror.Value})
+		}
+	}
+	return out, nil
 }
 
 // RuntimeKeys returns every canonical row owned by a legacy generic key. It is
 // used by DELETE, where there is no value to run through PlanRuntimeValue.
 func (p *Planner) RuntimeKeys(legacyKey string) []string {
 	key := CanonicalKey(legacyKey)
-	if key == keyPreferredQuality {
-		return []string{keyPreferredQuality, settingskeys.PlaybackMaxBitrateKbps}
+	var keys []string
+	switch key {
+	case keyPreferredQuality:
+		keys = []string{keyPreferredQuality, settingskeys.PlaybackMaxBitrateKbps}
+	default:
+		if def, ok := p.contract.Lookup(key); ok && def.IsRemote() {
+			keys = []string{key}
+		}
 	}
-	if def, ok := p.contract.Lookup(key); ok && def.IsRemote() {
-		return []string{key}
+	if len(keys) == 0 {
+		return nil // the caller reads this as "no canonical target"
 	}
-	return nil
+	// Clearing through the legacy route has to reach the same rows a write
+	// through it created, mirror included.
+	out := make([]string, 0, len(keys)+1)
+	out = append(out, keys...)
+	for _, owned := range keys {
+		if mirrorKey, ok := settingscontract.MirrorKey(owned); ok {
+			out = append(out, mirrorKey)
+		}
+	}
+	return out
 }
 
 // profileColumnDefaults are the values the legacy schema wrote when nobody
@@ -346,11 +394,108 @@ func (p *Planner) Plan(in Input) Result {
 	p.planDeviceSettings(in.DeviceSettings, &res)
 	p.planSeriesPrefs(in.SeriesPrefs, &res)
 	p.planLibraryPrefs(in.LibraryPrefs, &res)
+	p.planMirroredRows(&res)
 
 	res.Rows = dedupeRows(res.Rows)
 	res.Rows = dropOrphanProfileRows(res.Rows, in.Profiles, &res)
 
 	return res
+}
+
+// planMirroredRows carries every planned row whose key has a replacement onto
+// that replacement, at the same identity.
+//
+// The SQL migration that introduced playback.intro_skip_mode copies the rows
+// that were already canonical when it ran. This is the other half: the backfill
+// converts a user's legacy storage the first time their store opens, which for
+// an install upgrading later is after that migration, so a legacy
+// auto_skip_intro would otherwise arrive with no companion and a current client
+// would read the contract default instead of the household's choice.
+//
+// It runs over the planned rows rather than inside planProfiles so it covers
+// every source a mirrored key can come from — the profile column, the account
+// table's fan-out, and per-device rows alike — and cannot fall behind when one
+// of them changes. Companions are appended, so dedupeRows keeps an explicitly
+// stored value ahead of a derived one.
+//
+// When legacy storage already holds *both* halves at one identity and they
+// disagree — a client wrote the enum through the legacy device route while the
+// boolean beside it kept the older answer — appending is not enough. Dropping
+// the derived companion would leave both originals standing, and the migration
+// would hand old and new clients opposite behavior from its first run. The
+// replacement is authoritative in that case, so its converted value overwrites
+// the deprecated row rather than being discarded. Which half is the replacement
+// comes from the manifest's deprecation flag, not from naming the keys here:
+// this pass must keep working for the next pair the contract supersedes.
+//
+// A conversion failure is dropped rather than rejected: the source row was
+// planned, which means it already validated against the contract, so the only
+// way to fail here is a defect in the pairing, and losing the companion is
+// strictly better than losing the row that produced it.
+func (p *Planner) planMirroredRows(res *Result) {
+	planned := len(res.Rows)
+
+	// Where each explicitly planned half of a mirrored pair landed, so a
+	// companion can find the row it would collide with.
+	explicit := make(map[rowIdentity]int, planned)
+	for i := 0; i < planned; i++ {
+		if _, ok := settingscontract.MirrorKey(res.Rows[i].Key); ok {
+			explicit[identityOfRow(res.Rows[i])] = i
+		}
+	}
+
+	for i := 0; i < planned; i++ {
+		row := res.Rows[i]
+		mirror, ok, err := settingscontract.MirrorWrite(row.Key, row.Value)
+		if err != nil || !ok {
+			continue
+		}
+		companion := row
+		companion.Key = mirror.Key
+		companion.Value = mirror.Value
+
+		if at, collides := explicit[identityOfRow(companion)]; collides {
+			if p.supersedes(row.Key, res.Rows[at].Key) {
+				res.Rows[at].Value = companion.Value
+			}
+			continue
+		}
+		res.Rows = append(res.Rows, companion)
+	}
+}
+
+// supersedes reports whether a value stored at key outranks one stored at
+// other when the two are halves of the same preference: the replacement wins
+// over the definition the manifest marks deprecated.
+func (p *Planner) supersedes(key, other string) bool {
+	def, ok := p.contract.Lookup(key)
+	if !ok {
+		return false
+	}
+	otherDef, otherOK := p.contract.Lookup(other)
+	if !otherOK {
+		return false
+	}
+	return !def.Deprecated && otherDef.Deprecated
+}
+
+// rowIdentity is the unique-index identity of a planned row: everything the
+// canonical table keys on.
+type rowIdentity struct {
+	key       string
+	scope     settingscontract.Scope
+	profileID string
+	deviceID  string
+	libraryID int
+	seriesID  string
+}
+
+func identityOfRow(row Row) rowIdentity {
+	return rowIdentity{
+		key: row.Key, scope: row.Scope,
+		profileID: row.ProfileID, deviceID: row.DeviceID,
+		libraryID: row.LibraryID, seriesID: row.SeriesID,
+	}
 }
 
 // dropOrphanProfileRows removes rows whose profile no longer exists.
@@ -411,23 +556,10 @@ func dropOrphanProfileRows(rows []Row, profiles []LegacyProfile, res *Result) []
 // wins. Between two rows of equal provenance the first in input order is kept,
 // which keeps the pass deterministic.
 func dedupeRows(rows []Row) []Row {
-	type identity struct {
-		key       string
-		scope     settingscontract.Scope
-		profileID string
-		deviceID  string
-		libraryID int
-		seriesID  string
-	}
-
-	kept := make(map[identity]int, len(rows))
+	kept := make(map[rowIdentity]int, len(rows))
 	out := rows[:0]
 	for _, row := range rows {
-		id := identity{
-			key: row.Key, scope: row.Scope,
-			profileID: row.ProfileID, deviceID: row.DeviceID,
-			libraryID: row.LibraryID, seriesID: row.SeriesID,
-		}
+		id := identityOfRow(row)
 		at, seen := kept[id]
 		if !seen {
 			kept[id] = len(out)

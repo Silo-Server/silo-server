@@ -1,6 +1,7 @@
 import type { Profile, WatchDetail } from "@/api/types";
 import type {
   EpisodeRef,
+  IntroSkipMode,
   PrePlaySubtitleSelection,
   PlayerSubtitleInfo,
   PlayerSubtitleTrackSignature,
@@ -259,7 +260,10 @@ export function buildWatchPageProps({
   const credits: PlayerTimeRange | null = item.credits ?? null;
   const recap: PlayerTimeRange | null = item.recap ?? null;
   const preview: PlayerTimeRange | null = item.preview ?? null;
-  const autoSkipIntro = currentProfile?.auto_skip_intro ?? false;
+  // The profile DTO is the compatibility fallback for servers before settings
+  // contract revision 7. WatchPlaybackHost replaces this with the canonical
+  // enum whenever the connected server advertises it.
+  const introSkipMode: IntroSkipMode = currentProfile?.auto_skip_intro ? "always" : "ask";
   const autoSkipRecap = currentProfile?.auto_skip_recap ?? false;
   const autoPlayNextPreview = currentProfile?.auto_play_next_preview ?? false;
   // Watched items store position 0, so any nonzero position is a live resume
@@ -310,7 +314,7 @@ export function buildWatchPageProps({
     showForcedSubtitles,
     profileLanguage,
     intro,
-    autoSkipIntro,
+    introSkipMode,
     credits,
     recap,
     preview,

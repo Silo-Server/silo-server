@@ -281,6 +281,9 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 	argIdx := builder.ArgIdx() + filterArgOffset
 
 	if filterWhere != "" {
+		// QueryBuilder.Build returns a parenthesized expression, so AND-ing
+		// access, library, and other outer constraints onto it cannot let a
+		// match-any OR arm escape them.
 		conditions = append(conditions, filterWhere)
 	}
 	if def.MediaScope != "" && !isEpisodeCatalogScope(def.MediaScope) {

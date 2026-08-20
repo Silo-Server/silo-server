@@ -2,6 +2,7 @@ package settingsmigrate
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -532,6 +533,82 @@ func TestAutoSkipColumnsMigrateOnlyWhenTrue(t *testing.T) {
 	}
 }
 
+// TestAutoSkipIntroCarriesItsReplacement: the backfill runs the first time a
+// user's store opens, which for a deployment upgrading later is after the SQL
+// migration that copied the already-canonical rows. A legacy auto_skip_intro
+// arriving after that would have no companion, and a current client would read
+// the contract default instead of the household's choice.
+func TestAutoSkipIntroCarriesItsReplacement(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1", AutoSkipIntro: boolp(true)}},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "false"},
+		},
+	})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+
+	profileRow := find(t, res, "playback.intro_skip_mode", func(row Row) bool {
+		return row.Scope == settingscontract.ScopeProfile
+	})
+	if string(profileRow.Value) != `"always"` {
+		t.Errorf("profile intro_skip_mode = %s, want \"always\"", profileRow.Value)
+	}
+
+	deviceRow := find(t, res, "playback.intro_skip_mode", func(row Row) bool {
+		return row.Scope == settingscontract.ScopeProfileDevice
+	})
+	if string(deviceRow.Value) != `"ask"` || deviceRow.DeviceID != "d1" {
+		t.Errorf("device intro_skip_mode = %s on %q, want \"ask\" on d1",
+			deviceRow.Value, deviceRow.DeviceID)
+	}
+
+	// A false column is still not a decision, so it produces neither key.
+	bare := planner(t).Plan(Input{Profiles: []LegacyProfile{{ID: "p1", AutoSkipIntro: boolp(false)}}})
+	if hasKey(bare, "playback.intro_skip_mode") {
+		t.Error("an untouched false column became a stored intro_skip_mode choice")
+	}
+}
+
+// TestAnExplicitlyStoredModeOutranksTheDerivedOne. Once a client writes the
+// enum through the legacy device route, the boolean beside it is the older
+// answer, and the backfill must not overwrite the newer one with it.
+//
+// The stale boolean must not survive either: leaving "never" beside true would
+// hand a shipped client and an updated one opposite behavior from the
+// migration's very first run, which is precisely what the mirror exists to
+// prevent. Both orderings are covered because the input order of two legacy
+// rows is not something the migration gets to choose.
+func TestAnExplicitlyStoredModeOutranksTheDerivedOne(t *testing.T) {
+	for name, rows := range map[string][]LegacyDeviceSetting{
+		"mode first": {
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.intro_skip_mode", Value: "never"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "true"},
+		},
+		"boolean first": {
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "true"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.intro_skip_mode", Value: "never"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := planner(t).Plan(Input{
+				Profiles:       []LegacyProfile{{ID: "p1"}},
+				DeviceSettings: rows,
+			})
+			row := find(t, res, "playback.intro_skip_mode", nil)
+			if string(row.Value) != `"never"` {
+				t.Errorf("intro_skip_mode = %s, want the explicitly stored \"never\"", row.Value)
+			}
+			boolean := find(t, res, "playback.auto_skip_intro", nil)
+			if string(boolean.Value) != `false` {
+				t.Errorf("auto_skip_intro = %s, want false to match the authoritative \"never\"",
+					boolean.Value)
+			}
+		})
+	}
+}
+
 // TestCardOverlaysV1DocumentsUpgrade: old web clients stored a flat
 // Record<overlayId, config> the contract schema does not accept. The planner
 // has to upgrade it the way web/src/lib/overlays/schema.ts does at read time,
@@ -727,6 +804,57 @@ func TestPlanRuntimeValueUsesMigrationAliasesAndQualityDecomposition(t *testing.
 	}
 	if len(auto) != 2 || string(auto[0].Value) != `"auto"` || auto[1].Value != nil {
 		t.Fatalf("auto plan = %+v", auto)
+	}
+}
+
+// TestRuntimePlansCarryMirroredKeys covers the legacy generic settings routes.
+// They write canonically through this planner, so without the mirror here a
+// client that saves the intro switch through /settings/{key} — the route the
+// shipped apps still use for device preferences — would leave intro_skip_mode
+// resolving to the contract default. The mirror lives in the plan rather than
+// in one handler because the account fan-out, the per-device write, and new
+// profile inheritance all share it.
+func TestRuntimePlansCarryMirroredKeys(t *testing.T) {
+	p := planner(t)
+
+	for _, tc := range []struct{ raw, wantMode string }{
+		{"true", `"always"`},
+		{"false", `"ask"`},
+	} {
+		planned, err := p.PlanRuntimeValue("playback.auto_skip_intro", tc.raw)
+		if err != nil {
+			t.Fatalf("PlanRuntimeValue(%s): %v", tc.raw, err)
+		}
+		if len(planned) != 2 {
+			t.Fatalf("plan for %s = %+v, want the boolean and its replacement", tc.raw, planned)
+		}
+		if planned[0].Key != "playback.auto_skip_intro" || string(planned[0].Value) != tc.raw {
+			t.Errorf("primary mutation = %+v, want the key that was written", planned[0])
+		}
+		if planned[1].Key != "playback.intro_skip_mode" || string(planned[1].Value) != tc.wantMode {
+			t.Errorf("companion mutation = %+v, want intro_skip_mode %s", planned[1], tc.wantMode)
+		}
+	}
+
+	// DELETE has no value to convert, so it works off the owned-key list. It
+	// has to reach every row a write through the same route created.
+	keys := p.RuntimeKeys("playback.auto_skip_intro")
+	if !slices.Equal(keys, []string{"playback.auto_skip_intro", "playback.intro_skip_mode"}) {
+		t.Errorf("RuntimeKeys = %v, want both halves of the pair", keys)
+	}
+
+	// An unpaired key is unchanged, and quality still decomposes into exactly
+	// its two axes rather than gaining a phantom third row.
+	if keys := p.RuntimeKeys("playback.auto_skip_credits"); !slices.Equal(
+		keys, []string{"playback.auto_skip_credits"}) {
+		t.Errorf("RuntimeKeys for an unpaired key = %v", keys)
+	}
+	if keys := p.RuntimeKeys("playback.preferred_quality"); !slices.Equal(
+		keys, []string{"playback.preferred_quality", "playback.max_bitrate_kbps"}) {
+		t.Errorf("RuntimeKeys for quality = %v", keys)
+	}
+	if keys := p.RuntimeKeys("totally.invented.key"); keys != nil {
+		t.Errorf("RuntimeKeys for an unknown key = %v, want nil", keys)
 	}
 }
 

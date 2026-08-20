@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -211,6 +212,70 @@ func NormalizePersonalListSort(field, order string) (QuerySort, bool) {
 		order = querySortDefs[field].defaultOrder
 	}
 	return QuerySort{Field: field, Order: order}, true
+}
+
+// NormalizeCollectionSort validates a collection's default sort (its stored
+// sort_config) or a viewer's saved override, applying the field's default order
+// when none is given. Returns false when the field or a supplied order is
+// unsupported. An empty field means the collection's own source order should
+// be kept.
+//
+// allowPersonalized gates the per-profile sort fields (progress, date viewed,
+// plays). They are legitimate for personal collections, which always resolve
+// with the owning profile in scope, but not for library collections: those
+// resolve with user scope stripped (see stripCatalogUserScope), so the query
+// builder's ensureUserScope would reject the sort at browse time.
+func NormalizeCollectionSort(field, order string, allowPersonalized bool) (QuerySort, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+	def, ok := querySortDefs[field]
+	if !ok {
+		return QuerySort{}, false
+	}
+	if def.personalized && !allowPersonalized {
+		return QuerySort{}, false
+	}
+	order = strings.ToLower(strings.TrimSpace(order))
+	if order == "" {
+		order = def.defaultOrder
+	} else if order != "asc" && order != "desc" {
+		return QuerySort{}, false
+	}
+	return QuerySort{Field: field, Order: order}, true
+}
+
+// collectionSortConfig is the shape a collection's sort_config carries when it
+// pins a default order. Everything else the column may hold (legacy `{}`, the
+// unimplemented manual-pin mode) leaves the collection on source order.
+type collectionSortConfig struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
+}
+
+// ParseCollectionDefaultSort reads the default sort a collection's creator
+// configured. An absent, empty, or unrecognized sort_config yields false,
+// meaning source order.
+func ParseCollectionDefaultSort(raw []byte, allowPersonalized bool) (QuerySort, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return QuerySort{}, false
+	}
+	var cfg collectionSortConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return QuerySort{}, false
+	}
+	return NormalizeCollectionSort(cfg.Field, cfg.Order, allowPersonalized)
+}
+
+// EncodeCollectionDefaultSort renders a validated default sort back into the
+// sort_config JSON shape. An empty field encodes as `{}` — source order.
+func EncodeCollectionDefaultSort(qs QuerySort, ok bool) (string, error) {
+	if !ok || strings.TrimSpace(qs.Field) == "" {
+		return "{}", nil
+	}
+	encoded, err := json.Marshal(collectionSortConfig(qs))
+	if err != nil {
+		return "", fmt.Errorf("encoding collection sort_config: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func (q QueryDefinition) Normalize() QueryDefinition {

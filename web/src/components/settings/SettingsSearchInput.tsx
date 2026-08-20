@@ -13,6 +13,8 @@ interface SettingsSearchInputProps {
   itemLabel?: string;
   emptyLabel?: string;
   className?: string;
+  shortcutMediaQuery?: string;
+  showShortcutHint?: boolean;
 }
 
 export function SettingsSearchInput({
@@ -24,10 +26,16 @@ export function SettingsSearchInput({
   itemLabel = "settings sections",
   emptyLabel = "No matching settings",
   className,
+  shortcutMediaQuery,
+  showShortcutHint = false,
 }: SettingsSearchInputProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const hasQuery = value.trim().length > 0;
+  const shortcutHint =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
+      ? "⌘ K"
+      : "Ctrl K";
   const status = hasQuery
     ? resultCount === 0
       ? emptyLabel
@@ -38,6 +46,7 @@ export function SettingsSearchInput({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || !(event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() !== "k") return;
+      if (shortcutMediaQuery && !window.matchMedia(shortcutMediaQuery).matches) return;
 
       event.preventDefault();
       event.stopPropagation();
@@ -52,7 +61,7 @@ export function SettingsSearchInput({
       window.removeEventListener("keydown", onKeyDown, { capture: true });
       document.removeEventListener("keydown", onKeyDown, { capture: true });
     };
-  }, []);
+  }, [shortcutMediaQuery]);
 
   return (
     <div className={cn("w-full", className)}>
@@ -71,7 +80,7 @@ export function SettingsSearchInput({
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className="h-10 rounded-xl pr-10 pl-9"
+          className={cn("h-11 rounded-xl pr-10 pl-9", showShortcutHint && !hasQuery && "sm:pr-16")}
           autoComplete="off"
         />
         {hasQuery ? (
@@ -79,10 +88,17 @@ export function SettingsSearchInput({
             type="button"
             aria-label="Clear settings search"
             onClick={() => onChange("")}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 absolute top-1/2 right-2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
+        ) : showShortcutHint ? (
+          <kbd
+            aria-hidden="true"
+            className="border-border/80 bg-surface text-muted-foreground pointer-events-none absolute top-1/2 right-2 hidden h-6 -translate-y-1/2 items-center rounded-md border px-1.5 font-sans text-[10px] font-medium sm:inline-flex"
+          >
+            {shortcutHint}
+          </kbd>
         ) : null}
       </div>
       <p className="text-muted-foreground mt-2 text-xs" aria-live="polite">

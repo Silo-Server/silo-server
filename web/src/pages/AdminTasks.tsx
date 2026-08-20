@@ -15,7 +15,9 @@ import {
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
+import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
 const CATEGORY_ORDER: TaskCategory[] = ["library", "metadata", "system"];
 const RUN_BUTTON_MIN_VISIBLE_MS = 1_000;
@@ -31,6 +33,7 @@ const REFRESH_REASON_LABELS: Record<string, string> = {
   stale_provider_id: "Stale provider ID",
   refresh_failure: "Refresh failure",
   core_metadata_incomplete: "Core metadata incomplete",
+  trailers_requested: "Trailers requested",
 };
 
 function useTaskClock() {
@@ -48,18 +51,6 @@ function useTaskClock() {
   }, [pageActivity.canApplyRealtimeUpdates]);
 
   return now;
-}
-
-function formatRelativeTime(dateStr: string, now: number): string {
-  const diff = Math.max(0, now - new Date(dateStr).getTime());
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 function formatDuration(ms: number): string {
@@ -249,7 +240,9 @@ function TaskRow({
               {!describeSchedule(task.triggers) && <span>No schedule</span>}
               {task.last_execution && (
                 <span className="ml-2">
-                  · Last run: {formatRelativeTime(task.last_execution.completed_at, now)}
+                  · Last run:{" "}
+                  {formatRelativeTime(task.last_execution.completed_at, { rounding: "floor" }) ??
+                    "—"}
                   {typeof task.last_execution.duration_ms === "number"
                     ? ` · Duration: ${formatDuration(task.last_execution.duration_ms)}`
                     : ""}
@@ -279,14 +272,19 @@ function TaskRow({
                 className={`h-full rounded-full transition-all duration-300 ${
                   task.state === "cancelling" ? "bg-yellow-500" : "bg-primary"
                 }`}
-                style={{ width: `${Math.max(task.progress, 2)}%` }}
+                style={{ width: `${Math.max(clampTaskProgress(task.progress), 2)}%` }}
               />
             </div>
-            <p className="text-muted-foreground text-xs">
-              {task.state === "cancelling"
-                ? "Cancelling..."
-                : task.progress_message || `${Math.round(task.progress)}%`}
-            </p>
+            <div className="text-muted-foreground flex items-center justify-between gap-3 text-xs">
+              <p className="min-w-0 truncate">
+                {task.state === "cancelling" ? "Cancelling..." : task.progress_message || "Running"}
+              </p>
+              {task.state !== "cancelling" && task.progress > 0 && (
+                <span className="shrink-0 font-medium tabular-nums">
+                  {formatTaskProgress(task.progress)}
+                </span>
+              )}
+            </div>
           </div>
         )}
 

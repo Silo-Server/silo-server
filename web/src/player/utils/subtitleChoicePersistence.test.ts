@@ -103,6 +103,41 @@ describe("buildSubtitleChoiceRequests", () => {
     ).toEqual([]);
   });
 
+  it("persists a realtime track before the folded inventory renders", () => {
+    const requests = buildSubtitleChoiceRequests({
+      seriesId: "series-1",
+      index: 4,
+      tracks: TRACKS,
+      inventoryTrack: {
+        track_id: "downloaded:4",
+        combined_index: 4,
+        source: "downloaded",
+        codec: "srt",
+        language: "es",
+        label: "Spanish (AI)",
+        forced: false,
+        default: false,
+        hearing_impaired: false,
+        delivery: "sidecar",
+        url: "/subtitles/4",
+      },
+    });
+
+    expect(canonicalWrites(requests)[0]?.body).toEqual({ value: "es" });
+    expect(
+      requests.find((request) => request.path.startsWith("/subtitle-prefs/"))?.body,
+    ).toMatchObject({
+      subtitle_language: "es",
+      subtitle_track_index: 4,
+      track_signature: {
+        source: "downloaded",
+        language: "es",
+        codec: "srt",
+        label: "Spanish (AI)",
+      },
+    });
+  });
+
   it("leaves the profile-scope forced-subtitle choice reachable afterwards", () => {
     // End to end through the shared resolver, which mirrors
     // internal/settingsresolve: the rows this pick stores must not shadow a

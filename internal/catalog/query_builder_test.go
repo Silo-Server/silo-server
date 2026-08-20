@@ -1048,3 +1048,54 @@ func TestUserHistoryCTESQLIncludesCompletedEbookReaderProgress(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildParenthesizesResultForSafeANDComposition(t *testing.T) {
+	// Build's callers (query_executor.go, handlers/catalog.go) AND library and
+	// access-filter constraints onto the returned expression. A match-any
+	// group emits a top-level OR, so the result must come back parenthesized —
+	// otherwise SQL precedence lets the first OR arm bypass every constraint
+	// appended afterward.
+	tests := []struct {
+		name string
+		def  QueryDefinition
+		want string
+	}{
+		{
+			name: "single match-any group",
+			def: QueryDefinition{
+				Match: "all",
+				Groups: []QueryGroup{{
+					Match: "any",
+					Rules: []QueryRule{
+						{Field: "genre", Op: "contains", Value: "Action"},
+						{Field: "genre", Op: "contains", Value: "Adventure"},
+					},
+				}},
+			},
+			want: "(mi.genres @> ARRAY[$1]::text[] OR mi.genres @> ARRAY[$2]::text[])",
+		},
+		{
+			name: "match-any top level",
+			def: QueryDefinition{
+				Match: "any",
+				Groups: []QueryGroup{
+					{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "contains", Value: "Action"}}},
+					{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "contains", Value: "Adventure"}}},
+				},
+			},
+			want: "((mi.genres @> ARRAY[$1]::text[]) OR (mi.genres @> ARRAY[$2]::text[]))",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clause, _, err := NewQueryBuilder("mi").Build(tt.def)
+			if err != nil {
+				t.Fatalf("Build returned error: %v", err)
+			}
+			if clause != tt.want {
+				t.Fatalf("Build clause = %q, want %q", clause, tt.want)
+			}
+		})
+	}
+}

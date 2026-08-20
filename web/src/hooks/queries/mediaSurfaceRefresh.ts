@@ -84,7 +84,9 @@ export function removeItemFromHomeSectionCaches(
   );
 }
 
-function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
+/** Matches both item-detail cache key shapes for one item, so optimistic
+ * updates and their rollback snapshot cover exactly the same queries. */
+export function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
   return (
     Array.isArray(queryKey) &&
     ((queryKey[0] === "catalog" &&

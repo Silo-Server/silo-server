@@ -109,6 +109,57 @@ func TestHandlePlaybackInfoReplacesDuplicateJellyfinWebNegotiation(t *testing.T)
 	}
 }
 
+func TestHandlePlaybackInfoStripsNULFromClientDeviceID(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	result := postPlaybackInfoForDevice(t, handler, routeID, "vidhub\x00device")
+
+	store := handler.playbackStore.(*PlaybackSessionStore)
+	stored, ok := store.Get(result.PlaySessionID)
+	if !ok {
+		t.Fatal("negotiated play session was not stored")
+	}
+	if stored.ClientDeviceID != "vidhubdevice" {
+		t.Fatalf("ClientDeviceID = %q, want NUL-free identifier", stored.ClientDeviceID)
+	}
+}
+
+func TestHandlePlaybackInfoIgnoresStaleRequestUserID(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{"UserId":"stale-client-user"}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
+
+	recorder := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandlePlaybackInfoFallsBackFromStaleMediaSourceID(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{"MediaSourceId":"previous-episode-source"}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1"}))
+
+	recorder := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response playbackInfoResponseDTO
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(response.MediaSources) == 0 {
+		t.Fatal("stale media source fallback returned no playable sources")
+	}
+}
+
 func postPlaybackInfoForDevice(
 	t *testing.T,
 	handler *PlaybackHandler,

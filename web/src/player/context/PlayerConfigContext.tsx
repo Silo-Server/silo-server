@@ -14,6 +14,8 @@ export interface PlayerConfig {
   getProfileId: () => string | null;
   /** Sync getter for the current verified profile token, when one exists. */
   getProfileToken?: () => string | null;
+  /** Stable device identity used for device-scoped playback settings. */
+  getDeviceId: () => string;
 }
 
 const PlayerConfigCtx = createContext<PlayerConfig | null>(null);

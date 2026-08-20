@@ -135,12 +135,18 @@ export default function AdminRequests() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
-        <TabsList variant="line" className="border-border w-full justify-start border-b">
-          <TabsTrigger value="queue">Queue</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
-          <TabsTrigger value="overrides">User Overrides</TabsTrigger>
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:thin] sm:mx-0 sm:px-0">
+          <TabsList
+            variant="line"
+            aria-label="Request administration sections"
+            className="border-border w-max min-w-full justify-start border-b"
+          >
+            <TabsTrigger value="queue">Queue</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="integrations">Integrations</TabsTrigger>
+            <TabsTrigger value="overrides">User Overrides</TabsTrigger>
+          </TabsList>
+        </div>
         <TabsContent value="queue">
           <RequestQueueTab />
         </TabsContent>

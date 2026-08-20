@@ -11,6 +11,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+// RunMarkWatchedBatch runs only the batch mark-watched conformance test. It is
+// exposed separately, like RunProgressSince, so each backend can pin the
+// series/season mark-watched path without the full suite.
+func RunMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("MarkWatchedBatch", func(t *testing.T) {
+		testMarkWatchedBatch(t, newStore)
+	})
+}
+
 // RunProgressSince runs only the offline-sync progress-reconciliation
 // conformance test (invariant 1). It is exposed separately so a backend can
 // exercise the offline-sync behavior without the full suite.
@@ -24,6 +33,134 @@ func RunProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("BatchWritesAdvanceEventAt", func(t *testing.T) {
 		testBatchWritesAdvanceEventAt(t, newStore)
 	})
+}
+
+// RunCollectionSortPreferences runs the preference timestamp and profile
+// lifecycle conformance checks against a UserStore implementation.
+func RunCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("TimestampAndProfileLifecycle", func(t *testing.T) {
+		testCollectionSortPreferences(t, newStore)
+	})
+}
+
+func testCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	const (
+		profileID       = "sort-pref-profile"
+		viewerProfileID = "sort-pref-viewer"
+		titleSortField  = "title"
+		ascendingOrder  = "asc"
+	)
+
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Sort Pref"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: viewerProfileID, Name: "Sort Pref Viewer"}); err != nil {
+		t.Fatalf("CreateProfile(viewer): %v", err)
+	}
+	if err := store.SetCollectionSortPreference(ctx, userstore.CollectionSortPreference{
+		ProfileID:      profileID,
+		CollectionKind: userstore.CollectionKindLibrary,
+		CollectionID:   "collection-1",
+		SortField:      titleSortField,
+		SortOrder:      ascendingOrder,
+	}); err != nil {
+		t.Fatalf("SetCollectionSortPreference: %v", err)
+	}
+	pref, err := store.GetCollectionSortPreference(ctx, profileID, userstore.CollectionKindLibrary, "collection-1")
+	if err != nil || pref == nil {
+		t.Fatalf("GetCollectionSortPreference = %v, err = %v", pref, err)
+	}
+	if _, err := time.Parse(time.RFC3339, pref.UpdatedAt); err != nil {
+		t.Fatalf("UpdatedAt = %q, want RFC3339 timestamp: %v", pref.UpdatedAt, err)
+	}
+
+	for _, invalid := range []userstore.CollectionSortPreference{
+		{
+			ProfileID:      profileID,
+			CollectionKind: "invalid",
+			CollectionID:   "collection-invalid-kind",
+			SortField:      titleSortField,
+			SortOrder:      ascendingOrder,
+		},
+		{
+			ProfileID:      profileID,
+			CollectionKind: userstore.CollectionKindLibrary,
+			CollectionID:   "collection-invalid-order",
+			SortField:      titleSortField,
+			SortOrder:      "sideways",
+		},
+	} {
+		if err := store.SetCollectionSortPreference(ctx, invalid); err == nil {
+			t.Fatalf("SetCollectionSortPreference accepted invalid preference: %+v", invalid)
+		}
+	}
+
+	deletedCollection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: profileID,
+		Name:             "Deleted sort preference target",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(delete target): %v", err)
+	}
+	if err := store.SetCollectionSortPreference(ctx, userstore.CollectionSortPreference{
+		ProfileID:      viewerProfileID,
+		CollectionKind: userstore.CollectionKindUser,
+		CollectionID:   deletedCollection.ID,
+		SortField:      "year",
+		SortOrder:      "desc",
+	}); err != nil {
+		t.Fatalf("SetCollectionSortPreference(delete target): %v", err)
+	}
+	if err := store.DeleteCollection(ctx, deletedCollection.ID); err != nil {
+		t.Fatalf("DeleteCollection: %v", err)
+	}
+	deletedPref, err := store.GetCollectionSortPreference(ctx, viewerProfileID, userstore.CollectionKindUser, deletedCollection.ID)
+	if err != nil {
+		t.Fatalf("GetCollectionSortPreference(deleted collection): %v", err)
+	}
+	if deletedPref != nil {
+		t.Fatalf("preference survived collection deletion: %+v", deletedPref)
+	}
+
+	profileDeletedCollection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: profileID,
+		Name:             "Profile-deleted sort preference target",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(profile delete target): %v", err)
+	}
+	if err := store.SetCollectionSortPreference(ctx, userstore.CollectionSortPreference{
+		ProfileID:      viewerProfileID,
+		CollectionKind: userstore.CollectionKindUser,
+		CollectionID:   profileDeletedCollection.ID,
+		SortField:      titleSortField,
+		SortOrder:      ascendingOrder,
+	}); err != nil {
+		t.Fatalf("SetCollectionSortPreference(profile delete target): %v", err)
+	}
+
+	if err := store.DeleteProfile(ctx, profileID); err != nil {
+		t.Fatalf("DeleteProfile: %v", err)
+	}
+	deletedPref, err = store.GetCollectionSortPreference(ctx, viewerProfileID, userstore.CollectionKindUser, profileDeletedCollection.ID)
+	if err != nil {
+		t.Fatalf("GetCollectionSortPreference(profile-deleted collection): %v", err)
+	}
+	if deletedPref != nil {
+		t.Fatalf("preference survived creator profile deletion: %+v", deletedPref)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Recreated"}); err != nil {
+		t.Fatalf("CreateProfile(recreate): %v", err)
+	}
+	pref, err = store.GetCollectionSortPreference(ctx, profileID, userstore.CollectionKindLibrary, "collection-1")
+	if err != nil {
+		t.Fatalf("GetCollectionSortPreference(recreated profile): %v", err)
+	}
+	if pref != nil {
+		t.Fatalf("stale preference survived profile recreation: %+v", pref)
+	}
 }
 
 // RunSuite runs all conformance tests against a UserStore implementation.
@@ -43,6 +180,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	})
 	t.Run("BatchWritesAdvanceEventAt", func(t *testing.T) {
 		testBatchWritesAdvanceEventAt(t, newStore)
+	})
+	t.Run("MarkWatchedBatch", func(t *testing.T) {
+		testMarkWatchedBatch(t, newStore)
 	})
 	t.Run("Favorites", func(t *testing.T) {
 		testFavorites(t, newStore)
@@ -1001,6 +1141,162 @@ func testOnlineWriteAdvancesEventAt(t *testing.T, newStore func(t *testing.T) us
 				t.Fatalf("stale offline replay won LWW: position = %v, want 500 (online write)", got.PositionSeconds)
 			}
 		})
+	}
+}
+
+// testMarkWatchedBatch pins the batch mark-watched path used by the series and
+// season mark-watched handlers. It must be equivalent to a MarkWatched +
+// AddVisibleHistory loop: per-target durations land on progress rows, exactly
+// one history row appears per target, the hidden-history watermark still
+// pushes a mark after a removal back into visibility, and a zero duration
+// leaves a known duration alone (jellycompat's mark-played supplies none).
+func testMarkWatchedBatch(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+
+	watchedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
+	targets := []userstore.MarkWatchedTarget{
+		{MediaItemID: "ep-1", DurationSeconds: 1200},
+		{MediaItemID: "ep-2", DurationSeconds: 1500},
+	}
+	entries := []userstore.WatchHistoryEntry{
+		{
+			ProfileID:       "p1",
+			MediaItemID:     "ep-1",
+			WatchedAt:       watchedAt.Format(time.RFC3339),
+			DurationSeconds: 1200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceManual,
+		},
+		{
+			ProfileID:       "p1",
+			MediaItemID:     "ep-2",
+			WatchedAt:       watchedAt.Format(time.RFC3339),
+			DurationSeconds: 1500,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceManual,
+		},
+	}
+
+	written, err := userstore.MarkWatchedBatch(ctx, store, "p1", targets, entries)
+	if err != nil {
+		t.Fatalf("MarkWatchedBatch: %v", err)
+	}
+	if len(written) != 2 {
+		t.Fatalf("MarkWatchedBatch returned %d entries, want 2", len(written))
+	}
+	for _, entry := range written {
+		if entry.ID == "" {
+			t.Fatalf("returned entry %s has no ID; callers relay these to watch providers", entry.MediaItemID)
+		}
+		if entry.WatchedAt == "" {
+			t.Fatalf("returned entry %s has no WatchedAt", entry.MediaItemID)
+		}
+	}
+
+	for _, want := range targets {
+		progress, err := store.GetProgress(ctx, "p1", want.MediaItemID)
+		if err != nil {
+			t.Fatalf("GetProgress(%s): %v", want.MediaItemID, err)
+		}
+		if progress == nil || !progress.Completed {
+			t.Fatalf("GetProgress(%s) = %+v, want completed", want.MediaItemID, progress)
+		}
+		if progress.DurationSeconds != want.DurationSeconds {
+			t.Fatalf("GetProgress(%s) duration = %v, want %v — per-target durations must survive the batch",
+				want.MediaItemID, progress.DurationSeconds, want.DurationSeconds)
+		}
+		if progress.PositionSeconds != 0 {
+			t.Fatalf("GetProgress(%s) position = %v, want 0", want.MediaItemID, progress.PositionSeconds)
+		}
+	}
+
+	history, err := store.ListHistory(ctx, "p1", 50, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	counts := map[string]int{}
+	for _, entry := range history {
+		counts[entry.MediaItemID]++
+	}
+	if counts["ep-1"] != 1 || counts["ep-2"] != 1 {
+		t.Fatalf("history counts = %v, want exactly one row per target", counts)
+	}
+
+	// A zero duration must not erase a duration the store already knows.
+	if _, err := userstore.MarkWatchedBatch(ctx, store, "p1",
+		[]userstore.MarkWatchedTarget{{MediaItemID: "ep-1"}},
+		[]userstore.WatchHistoryEntry{{
+			ProfileID:   "p1",
+			MediaItemID: "ep-1",
+			WatchedAt:   watchedAt.Add(time.Hour).Format(time.RFC3339),
+			Completed:   true,
+			Source:      userstore.WatchHistorySourceJellycompat,
+		}},
+	); err != nil {
+		t.Fatalf("MarkWatchedBatch(zero duration): %v", err)
+	}
+	progress, err := store.GetProgress(ctx, "p1", "ep-1")
+	if err != nil || progress == nil {
+		t.Fatalf("GetProgress(ep-1 after zero-duration mark) = %+v (%v)", progress, err)
+	}
+	if progress.DurationSeconds != 1200 {
+		t.Fatalf("duration = %v, want 1200 — a zero-duration mark must not clear a known duration",
+			progress.DurationSeconds)
+	}
+
+	// Marking watched after a history removal must land after the hidden
+	// watermark, otherwise the new mark is invisible.
+	removedAt := time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)
+	if err := store.RemoveHistoryItems(ctx, "p1", []string{"ep-2"}, removedAt); err != nil {
+		t.Fatalf("RemoveHistoryItems(ep-2): %v", err)
+	}
+	remarked, err := userstore.MarkWatchedBatch(ctx, store, "p1",
+		[]userstore.MarkWatchedTarget{{MediaItemID: "ep-2", DurationSeconds: 1500}},
+		[]userstore.WatchHistoryEntry{{
+			ProfileID:       "p1",
+			MediaItemID:     "ep-2",
+			WatchedAt:       watchedAt.Format(time.RFC3339), // older than the removal
+			DurationSeconds: 1500,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceManual,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("MarkWatchedBatch(after removal): %v", err)
+	}
+	if len(remarked) != 1 {
+		t.Fatalf("re-mark returned %d entries, want 1", len(remarked))
+	}
+	if remarked[0].WatchedAt <= removedAt.Format(time.RFC3339) {
+		t.Fatalf("re-marked WatchedAt = %q, want later than the %q removal watermark",
+			remarked[0].WatchedAt, removedAt.Format(time.RFC3339))
+	}
+	completed, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
+		ProfileID:    "p1",
+		MediaItemIDs: []string{"ep-2"},
+	})
+	if err != nil {
+		t.Fatalf("ListCompletedHistoryItems(ep-2): %v", err)
+	}
+	if len(completed) != 1 {
+		t.Fatalf("ep-2 completed history = %v, want the re-mark to be visible", completed)
+	}
+
+	// Blank IDs are compacted out rather than reaching SQL.
+	if _, err := userstore.MarkWatchedBatch(ctx, store, "p1",
+		[]userstore.MarkWatchedTarget{{MediaItemID: "  "}, {MediaItemID: ""}},
+		nil,
+	); err != nil {
+		t.Fatalf("MarkWatchedBatch(blank IDs): %v", err)
+	}
+	if blank, err := store.GetProgress(ctx, "p1", ""); err != nil {
+		t.Fatalf("GetProgress(blank): %v", err)
+	} else if blank != nil {
+		t.Fatalf("GetProgress(blank) = %+v, want nil", blank)
 	}
 }
 

@@ -13,6 +13,7 @@ import {
 interface SelectOption {
   value: string;
   label: string;
+  disabled?: boolean;
 }
 
 interface SettingFieldProps {
@@ -81,7 +82,7 @@ export function SettingField({
           </SelectTrigger>
           <SelectContent>
             {options.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
+              <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled}>
                 {opt.label}
               </SelectItem>
             ))}

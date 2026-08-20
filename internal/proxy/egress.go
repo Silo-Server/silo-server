@@ -77,6 +77,16 @@ func (w *meteredResponseWriter) Flush() {
 	}
 }
 
+// Unwrap lets http.ResponseController traverse to the underlying writer.
+//
+// Without it the metering wrapper is a dead end: RollingDeadlineWriter's
+// SetWriteDeadline call fails, it degrades to a plain pass-through, and since
+// the standalone proxy runs with WriteTimeout 0 there is no server-level guard
+// behind it. A client that stops reading without closing its connection would
+// then block a stream write forever, holding the tracked session, the open
+// file, the goroutine and the connection.
+func (w *meteredResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // meterEgress wraps stream handlers so their responses count toward the
 // node's measured egress bandwidth.
 func (s *Server) meterEgress(next http.Handler) http.Handler {

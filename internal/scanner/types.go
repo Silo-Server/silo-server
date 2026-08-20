@@ -59,6 +59,7 @@ type VideoTrackInfo struct {
 	Codec              string
 	DolbyVision        string
 	DVProfile          int
+	DVLevel            int
 	DVBLCompatID       int
 	DVELPresent        bool
 	DVEnhancementLayer string

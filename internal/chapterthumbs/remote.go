@@ -24,10 +24,15 @@ const (
 	authJWTSecretSetting                        = "auth.jwt_secret"
 )
 
+// remoteExtractOverheadBuffer covers HTTP transport and node-side scheduling
+// overhead on top of the extraction attempt deadlines.
+const remoteExtractOverheadBuffer = 3 * time.Second
+
 type RemoteExtractRequest struct {
-	InputPath   string  `json:"input_path"`
-	SeekSeconds float64 `json:"seek_seconds"`
-	ToneMap     bool    `json:"tone_map"`
+	InputPath            string  `json:"input_path"`
+	SeekSeconds          float64 `json:"seek_seconds"`
+	ToneMap              bool    `json:"tone_map"`
+	AllowSoftwareToneMap bool    `json:"allow_software_tone_map"`
 }
 
 type RemoteExtractErrorResponse struct {
@@ -58,10 +63,10 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return nil, "chapter_extract_failed", fmt.Errorf("chapter thumbnail remote extract: marshal request: %w", err)
+		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: marshal request: %w", err)
 	}
 
-	timeout := remoteExtractTimeout(req.ToneMap)
+	timeout := remoteExtractTimeout(req.ToneMap, req.AllowSoftwareToneMap)
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -103,22 +108,25 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: read response: %w", err)
 	}
 	if len(data) == 0 {
-		return nil, "chapter_extract_failed", fmt.Errorf("chapter thumbnail remote extract: empty response")
+		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: empty response")
 	}
 	return data, "", nil
 }
 
-func remoteExtractTimeout(toneMap bool) time.Duration {
-	timeout := extractTimeoutForAttempt(true, toneMap)
-	if !toneMap {
-		timeout += extractTimeoutForAttempt(false, false)
+func remoteExtractTimeout(toneMap bool, allowSoftwareToneMap bool) time.Duration {
+	timeout := extractTimeoutForAttempt(true, toneMap) + remoteExtractOverheadBuffer
+	if !toneMap || allowSoftwareToneMap {
+		timeout += extractTimeoutForAttempt(false, toneMap)
 	}
-	return timeout + 3*time.Second
+	if toneMap && allowSoftwareToneMap {
+		timeout += softwareToneMapProbeTimeout
+	}
+	return timeout
 }
 
 func isInfrastructureRemoteFailure(reason string) bool {
 	switch reason {
-	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason:
+	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason, reasonFFmpegProbeFailed:
 		return true
 	default:
 		return false

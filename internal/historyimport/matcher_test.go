@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 )
 
 type matcherRepoStub struct {
@@ -11,11 +12,15 @@ type matcherRepoStub struct {
 	mediaByExternal   map[string][]mediaLookupRow
 	mediaByTitleYear  map[string][]mediaLookupRow
 	episodeBySeries   *Match
+	episodesBySeries  []Match
 
 	episodeBySeriesCalls   int
 	episodeBySeriesID      string
 	episodeBySeriesSeason  int
 	episodeBySeriesEpisode int
+	episodesBySeriesID     string
+	episodesBySeriesSeason *int
+	episodesBySeriesAt     *time.Time
 	mediaByExternalCalls   int
 }
 
@@ -38,6 +43,70 @@ func (s *matcherRepoStub) MatchEpisodeBySeries(_ context.Context, seriesID strin
 	s.episodeBySeriesSeason = seasonNumber
 	s.episodeBySeriesEpisode = episodeNumber
 	return s.episodeBySeries, nil
+}
+
+func (s *matcherRepoStub) MatchEpisodesBySeries(_ context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error) {
+	s.episodesBySeriesID = seriesID
+	if seasonNumber != nil {
+		season := *seasonNumber
+		s.episodesBySeriesSeason = &season
+	}
+	if watchedAt != nil {
+		at := *watchedAt
+		s.episodesBySeriesAt = &at
+	}
+	return s.episodesBySeries, nil
+}
+
+func TestMatcherMatchLeavesExpandsWholeShowToEpisodes(t *testing.T) {
+	t.Parallel()
+
+	watchedAt := time.Date(2025, time.October, 15, 20, 0, 0, 0, time.UTC)
+	repo := &matcherRepoStub{
+		mediaByExternal: map[string][]mediaLookupRow{
+			"series:tmdb_id:1396": {{ContentID: "series-1", Title: "Breaking Bad", Year: 2008}},
+		},
+		episodesBySeries: []Match{
+			{MediaItemID: "episode-1", Kind: KindEpisode},
+			{MediaItemID: "episode-2", Kind: KindEpisode},
+		},
+	}
+
+	matches, reason, err := NewMatcher(repo).MatchLeaves(context.Background(), Record{
+		Kind: KindSeries, Title: "Breaking Bad", Year: 2008, TMDBID: "1396", LastPlayedAt: &watchedAt,
+	})
+	if err != nil || reason != "" {
+		t.Fatalf("MatchLeaves error = %v, reason = %q", err, reason)
+	}
+	if len(matches) != 2 || matches[0].MediaItemID != "episode-1" || matches[1].MediaItemID != "episode-2" {
+		t.Fatalf("matches = %#v", matches)
+	}
+	if repo.episodesBySeriesID != "series-1" || repo.episodesBySeriesSeason != nil ||
+		repo.episodesBySeriesAt == nil || !repo.episodesBySeriesAt.Equal(watchedAt) {
+		t.Fatalf("unexpected expansion scope: id=%q season=%v watched_at=%v",
+			repo.episodesBySeriesID, repo.episodesBySeriesSeason, repo.episodesBySeriesAt)
+	}
+}
+
+func TestMatcherMatchLeavesPreservesSpecialsSeasonZero(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{
+		mediaByExternal: map[string][]mediaLookupRow{
+			"series:tvdb_id:75978": {{ContentID: "series-1", Title: "Family Guy", Year: 1999}},
+		},
+		episodesBySeries: []Match{{MediaItemID: "special-1", Kind: KindEpisode}},
+	}
+	matches, reason, err := NewMatcher(repo).MatchLeaves(context.Background(), Record{
+		Kind: KindSeason, SeriesTitle: "Family Guy", SeriesYear: 1999,
+		SeriesTVDBID: "75978", SeasonNumber: 0,
+	})
+	if err != nil || reason != "" || len(matches) != 1 {
+		t.Fatalf("matches = %#v, reason = %q, err = %v", matches, reason, err)
+	}
+	if repo.episodesBySeriesSeason == nil || *repo.episodesBySeriesSeason != 0 {
+		t.Fatalf("season scope = %v, want explicit season 0", repo.episodesBySeriesSeason)
+	}
 }
 
 func TestMatcherMatchEpisode_UsesExternalIDsWithoutSeasonEpisodeNumbers(t *testing.T) {

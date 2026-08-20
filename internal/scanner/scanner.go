@@ -3203,19 +3203,29 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
-	if strings.TrimSpace(file.CodecVideo) == "" {
+	probeFacts := models.AudioOnlyProbeFacts{
+		BaseType:               file.BaseType,
+		CodecVideo:             file.CodecVideo,
+		CodecAudio:             file.CodecAudio,
+		HasVideoTracks:         file.HasVideoTracks,
+		HasAudioTracks:         file.HasAudioTracks,
+		HasNonImageVideoTracks: file.HasNonImageVideoTracks,
+	}
+	if probeFacts.HasLegacyAttachedPictureVideo() {
 		return true
 	}
-	if strings.TrimSpace(file.CodecAudio) == "" {
+	hasVideo := strings.TrimSpace(file.CodecVideo) != "" || file.HasVideoTracks
+	hasAudio := strings.TrimSpace(file.CodecAudio) != "" || file.HasAudioTracks
+	if !hasVideo && !hasAudio {
 		return true
 	}
-	if strings.TrimSpace(file.Resolution) == "" {
+	if hasVideo && (strings.TrimSpace(file.CodecVideo) == "" || strings.TrimSpace(file.Resolution) == "" || !file.HasVideoTracks) {
 		return true
 	}
-	if !file.HasVideoTracks {
+	if hasAudio && (strings.TrimSpace(file.CodecAudio) == "" || !file.HasAudioTracks) {
 		return true
 	}
-	if !file.HasAudioTracks {
+	if !hasVideo && hasAudio && !probeFacts.IsAudioOnly() {
 		return true
 	}
 	if !file.HasChapters {
@@ -3651,6 +3661,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			Codec:              vt.Codec,
 			DolbyVision:        vt.DolbyVision,
 			DVProfile:          vt.DVProfile,
+			DVLevel:            vt.DVLevel,
 			DVBLCompatID:       vt.DVBLCompatID,
 			DVELPresent:        vt.DVELPresent,
 			DVEnhancementLayer: vt.DVEnhancementLayer,

@@ -7,6 +7,8 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { buildSectionCatalogHref, isSectionBrowseSupported } from "@/pages/catalogSearchParams";
 import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 interface SectionRowProps {
   section: ResolvedSection;
@@ -23,8 +25,10 @@ function SectionPinButton({
   sectionTitle: string;
   libraryId: number;
 }) {
-  const { togglePin, isPinned } = useToggleSidebarPin();
+  const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "section", sectionId);
+
+  if (!canToggle) return null;
 
   return (
     <button
@@ -45,6 +49,8 @@ export default function SectionRow({ section, libraryId }: SectionRowProps) {
   const navigate = useViewTransitionNavigate();
   const browseSupported = isSectionBrowseSupported(section.section_type);
   const { prefs: overlayPrefs } = useOverlayPrefs();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   const handleViewAll = () => {
     if (!browseSupported) {
@@ -108,11 +114,7 @@ export default function SectionRow({ section, libraryId }: SectionRowProps) {
             ));
           })()
         : section.items.map((item) => (
-            <div
-              key={item.content_id}
-              className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]"
-              role="listitem"
-            >
+            <div key={item.content_id} className={posterWidthClasses} role="listitem">
               <SectionItemCard item={item} libraryId={libraryId} />
             </div>
           ))}

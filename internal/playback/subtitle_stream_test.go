@@ -14,6 +14,7 @@ func TestIsPGS(t *testing.T) {
 	}{
 		{"pgs", true},
 		{"hdmv_pgs_subtitle", true},
+		{"pgssub", true},
 		{"HDMV_PGS_SUBTITLE", true},
 		{"dvd_subtitle", false},
 		{"dvb_subtitle", false},
@@ -38,6 +39,7 @@ func TestStreamExtractOutput(t *testing.T) {
 		{"ssa", "copy", "ass"},
 		{"pgs", "copy", "sup"},
 		{"hdmv_pgs_subtitle", "copy", "sup"},
+		{"pgssub", "copy", "sup"},
 		{"subrip", "webvtt", "webvtt"},
 		{"mov_text", "webvtt", "webvtt"},
 	}

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/capability-response.schema.json",
+  "title": "Silo Playback Protocol v3 Capability Response",
+  "description": "Response body of GET /api/v1/playback/capability, mirroring CapabilityResponseV3 in internal/playback/protocol_v3.go. A client reads this before its first start request so it plans against what the server actually advertises instead of a compiled-in assumption. Protocol v3 is the server's only playback protocol, so enabled is always true; there is no disabled response shape.",
+  "type": "object",
+  "required": [
+    "enabled",
+    "protocol_versions",
+    "features",
+    "deliveries",
+    "transformations"
+  ],
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "const": true
+    },
+    "protocol_versions": {
+      "type": "array",
+      "description": "Protocol versions this server speaks. A client picks the highest it supports rather than assuming a single value, which is what keeps a future v4 from breaking v3 clients.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": {
+        "const": 3
+      },
+      "items": {
+        "type": "integer"
+      }
+    },
+    "features": {
+      "type": "array",
+      "description": "Server feature flags. The list grows additively within v3, so an unrecognized entry is expected and must be ignored, not treated as an error.",
+      "minItems": 8,
+      "uniqueItems": true,
+      "allOf": [
+        { "contains": { "const": "playback_plan_v3" } },
+        { "contains": { "const": "neutral_playback_v3_contract_v1" } },
+        { "contains": { "const": "layout_aware_passthrough" } },
+        { "contains": { "const": "playback_route_diagnostics" } },
+        { "contains": { "const": "device_quirks_v1" } },
+        { "contains": { "const": "seek_reanchor_v1" } },
+        { "contains": { "const": "direct_stream_resume_v1" } },
+        { "contains": { "const": "plan_source_duration_v1" } }
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "deliveries": {
+      "type": "array",
+      "description": "Serving routes the planner may return. The list contains the server's currently executable delivery classes and grows additively.",
+      "minItems": 4,
+      "uniqueItems": true,
+      "allOf": [
+        { "contains": { "const": "original_http" } },
+        { "contains": { "const": "server_remux_progressive" } },
+        { "contains": { "const": "server_remux_hls" } },
+        { "contains": { "const": "server_transcode_hls" } }
+      ],
+      "items": {
+        "type": "string",
+        "enum": [
+          "original_http",
+          "server_remux_progressive",
+          "server_remux_hls",
+          "server_transcode_hls"
+        ]
+      }
+    },
+    "transformations": {
+      "type": "array",
+      "description": "Server-executed transformations available to the planner. Client-executed transformations are declared by the client in its start request, not listed here.",
+      "items": {
+        "$ref": "#/$defs/transformation"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reserved optional diagnostic for a future non-rollout condition. It does not disable protocol v3; enabled remains true."
+    }
+  },
+  "$defs": {
+    "transformation": {
+      "type": "object",
+      "required": [
+        "name",
+        "executor",
+        "recipe_version",
+        "validated_claims"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "executor": {
+          "type": "string",
+          "description": "Capability responses advertise transformations installed on the server. Client-executed transformations are declared in requests instead.",
+          "const": "server"
+        },
+        "recipe_version": {
+          "type": "string",
+          "description": "Identity of the recipe, not a semantic version to compare. A client matches it exactly or declines the transformation.",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "validated_claims": {
+          "type": "array",
+          "description": "Neutral statements about the bytes the transformation produces, so a client reasons about the output without knowing the server's toolchain.",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

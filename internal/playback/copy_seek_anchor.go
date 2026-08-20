@@ -108,7 +108,9 @@ func resolveCopySeekAnchor(
 	interval := strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64) + "%+0.001"
 	cmd := exec.CommandContext(ctx, ffprobePathFromFFmpeg(ffmpegPath),
 		"-v", "error",
-		"-select_streams", "v:0",
+		// Match the remux transport's 0:V:0 map. Uppercase V excludes attached
+		// pictures, thumbnails, and cover art from the video stream ordinal.
+		"-select_streams", "V:0",
 		"-read_intervals", interval,
 		"-show_entries", "packet=pts_time,dts_time,flags",
 		"-of", "json",

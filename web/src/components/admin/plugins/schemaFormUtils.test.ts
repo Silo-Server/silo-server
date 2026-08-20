@@ -172,6 +172,7 @@ describe("parseFieldTypes (#15)", () => {
         root_folder: { type: "string" },
         tags: { type: "array", items: { type: "integer" } },
         labels: { type: "array", items: { type: "string" } },
+        flags: { type: "array", items: { type: "boolean" } },
         enabled: { type: "boolean" },
       },
     });
@@ -180,6 +181,7 @@ describe("parseFieldTypes (#15)", () => {
       root_folder: "string",
       tags: "array:int",
       labels: "array",
+      flags: "array:bool",
       enabled: "boolean",
     });
   });
@@ -441,5 +443,65 @@ describe("coerceFieldValue array:num coercion (CodeRabbit #5)", () => {
   it("leaves array:int as integer-only and non-numeric strings untouched", () => {
     expect(coerceFieldValue(numArrayField, ["1.5", "2"], "array:int")).toEqual(["1.5", 2]);
     expect(coerceFieldValue(numArrayField, ["abc"], "array:num")).toEqual(["abc"]);
+  });
+});
+
+describe("coerceFieldValue array:bool coercion", () => {
+  it("coerces boolean multi-select values using their declared item type", () => {
+    expect(coerceFieldValue(numArrayField, ["true", "false", true], "array:bool")).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+});
+
+describe("section visibility", () => {
+  const sectionDescriptor: PluginAdminForm = {
+    fields: [
+      {
+        key: "advanced_enabled",
+        label: "Advanced",
+        control: "SWITCH",
+        required: false,
+        secret: false,
+        multiline: false,
+        default_value: false,
+      },
+      {
+        key: "endpoint",
+        label: "Endpoint",
+        control: "TEXT",
+        required: true,
+        secret: false,
+        multiline: false,
+      },
+    ],
+    sections: [
+      {
+        key: "advanced",
+        title: "Advanced",
+        collapsible: false,
+        collapsed_default: false,
+        field_keys: ["endpoint"],
+        show_when: [{ field: "advanced_enabled", equals: ["true"] }],
+      },
+    ],
+  };
+
+  it("does not validate required fields in a hidden section", () => {
+    expect(validateSchemaValues(sectionDescriptor, { endpoint: "stale" })).toEqual({});
+    expect(validateSchemaValues(sectionDescriptor, { advanced_enabled: true }).endpoint).toMatch(
+      /required/i,
+    );
+  });
+
+  it("does not persist stale values from a hidden section", () => {
+    expect(buildSchemaValues(sectionDescriptor, { endpoint: "stale" })).toEqual({
+      advanced_enabled: false,
+    });
+    expect(
+      buildSchemaValues(sectionDescriptor, { advanced_enabled: true, endpoint: "active" }),
+    ).toEqual({ advanced_enabled: true, endpoint: "active" });
   });
 });

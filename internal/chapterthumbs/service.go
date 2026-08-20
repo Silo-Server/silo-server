@@ -31,10 +31,11 @@ const (
 	cpuExtractTimeoutSDR       = 10 * time.Second
 	cpuExtractTimeoutHDR       = 25 * time.Second
 
-	chapterThumbnailHDRPolicySetting    = "playback.chapter_thumbnail_hdr_policy"
-	chapterThumbnailHDRPolicyDefault    = "best_effort"
-	chapterThumbnailHDRPolicyDisabled   = "disabled"
-	chapterThumbnailHDRPolicyBestEffort = "best_effort"
+	chapterThumbnailHDRPolicySetting       = "playback.chapter_thumbnail_hdr_policy"
+	chapterThumbnailHDRPolicyDefault       = "best_effort"
+	chapterThumbnailHDRPolicyDisabled      = "disabled"
+	chapterThumbnailHDRPolicyBestEffort    = "best_effort"
+	chapterThumbnailSoftwareToneMapSetting = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
 
 var chapterThumbnailRetrySchedule = []time.Duration{
@@ -89,18 +90,17 @@ type ChapterThumbnailRequest struct {
 }
 
 type Service struct {
-	fileRepo         FileRepository
-	folderRepo       FolderRepository
-	probeEnsurer     ProbeEnsurer
-	settings         SettingsReader
-	store            ObjectStore
-	notifier         ThumbnailNotifier
-	ffmpegPath       string
-	hwAccel          string
-	hwDevice         string
-	hwResolveOnce    sync.Once
-	resolvedHWAccel  string
-	resolvedHWDevice string
+	fileRepo        FileRepository
+	folderRepo      FolderRepository
+	probeEnsurer    ProbeEnsurer
+	settings        SettingsReader
+	store           ObjectStore
+	notifier        ThumbnailNotifier
+	ffmpegPath      string
+	hwAccel         string
+	hwDevice        string
+	hwResolveOnce   sync.Once
+	resolvedHWAccel string
 
 	notifyNormal        chan struct{}
 	notifyPriority      chan struct{}
@@ -437,7 +437,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			mutated = true
 			failed++
 			if shouldApplyFileFailure(reason) {
-				hardFileFailure = buildPersistentFileFailure(&updated, now, reason, err)
+				hardFileFailure = buildFileFailure(&updated, now, reason, err)
 				slog.WarnContext(ctx,
 					"chapter thumbnail file marked failed", "component", "chapterthumbs",
 					"file_id",
@@ -461,11 +461,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 				"chapter_index",
 				chapter.Index,
 				"reason",
-				"chapter_extract_failed",
+				reasonChapterExtractFailed,
 				"error",
 				err,
 			)
-			recordChapterFailure(&updated.Chapters[candidate.offset], now, "chapter_extract_failed", err)
+			recordChapterFailure(&updated.Chapters[candidate.offset], now, reasonChapterExtractFailed, err)
 			mutated = true
 			failed++
 			continue
@@ -588,9 +588,10 @@ func (s *Service) extractFrame(
 		return s.extractFrameFunc(ctx, file, seekSeconds, hdrPolicy)
 	}
 	toneMap := needsTonemap(file) && hdrPolicy == chapterThumbnailHDRPolicyBestEffort
+	allowSoftwareToneMap := toneMap && s.chapterThumbnailSoftwareToneMapEnabled(ctx)
 	mode := s.chapterThumbnailExecutionMode(ctx)
 	if mode == chapterThumbnailExecutionLocal {
-		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 	}
 
 	node, release, nodeReason := s.reserveRemoteNode(ctx)
@@ -603,7 +604,7 @@ func (s *Service) extractFrame(
 				"reason",
 				nodeReason,
 			)
-			return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+			return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 		}
 		return nil, nodeReason, wrapReason(nodeReason, fmt.Errorf("no transcode node available for chapter thumbnail extraction"))
 	}
@@ -611,9 +612,10 @@ func (s *Service) extractFrame(
 
 	jwtSecret := s.chapterThumbnailJWTSecret(ctx)
 	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, jwtSecret, RemoteExtractRequest{
-		InputPath:   file.FilePath,
-		SeekSeconds: seekSeconds,
-		ToneMap:     toneMap,
+		InputPath:            file.FilePath,
+		SeekSeconds:          seekSeconds,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
 	})
 	if err == nil {
 		return data, "", nil
@@ -631,34 +633,39 @@ func (s *Service) extractFrame(
 			"error",
 			err,
 		)
-		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap)
+		return s.extractFrameLocal(ctx, file.FilePath, seekSeconds, toneMap, allowSoftwareToneMap)
 	}
 
 	return nil, reason, err
 }
 
-func (s *Service) extractFrameLocal(ctx context.Context, inputPath string, seekSeconds float64, toneMap bool) ([]byte, string, error) {
+func (s *Service) extractFrameLocal(
+	ctx context.Context,
+	inputPath string,
+	seekSeconds float64,
+	toneMap bool,
+	allowSoftwareToneMap bool,
+) ([]byte, string, error) {
 	resolvedAccel, resolvedDevice := s.resolveHWConfig()
 	return ExtractFrame(ctx, FrameExtractOptions{
-		InputPath:   inputPath,
-		SeekSeconds: seekSeconds,
-		FFmpegPath:  s.ffmpegPath,
-		HWAccel:     resolvedAccel,
-		HWDevice:    resolvedDevice,
-		ToneMap:     toneMap,
-		RunFunc:     s.runFFmpegFrameExtractFunc,
+		InputPath:            inputPath,
+		SeekSeconds:          seekSeconds,
+		FFmpegPath:           s.ffmpegPath,
+		HWAccel:              resolvedAccel,
+		HWDevice:             resolvedDevice,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
+		RunFunc:              s.runFFmpegFrameExtractFunc,
 	})
 }
 
 func (s *Service) resolveHWConfig() (string, string) {
 	s.hwResolveOnce.Do(func() {
 		s.resolvedHWAccel = playback.ResolveHWAccelWithFFmpeg(s.hwAccel, s.ffmpegPath)
-		s.resolvedHWDevice = s.hwDevice
-		if s.resolvedHWDevice == "" && (s.resolvedHWAccel == "qsv" || s.resolvedHWAccel == "vaapi") {
-			s.resolvedHWDevice = playback.PickRenderDevice("")
-		}
 	})
-	return s.resolvedHWAccel, s.resolvedHWDevice
+	// The configured device value passes through raw: ExtractFrame resolves it
+	// (multi-device balancing, empty-value auto-detection) per extraction.
+	return s.resolvedHWAccel, s.hwDevice
 }
 
 func (s *Service) chapterThumbnailExecutionMode(ctx context.Context) string {
@@ -1046,6 +1053,14 @@ func (s *Service) chapterThumbnailHDRPolicy(ctx context.Context) string {
 	}
 }
 
+func (s *Service) chapterThumbnailSoftwareToneMapEnabled(ctx context.Context) bool {
+	if s == nil || s.settings == nil {
+		return false
+	}
+	value, err := s.settings.Get(ctx, chapterThumbnailSoftwareToneMapSetting)
+	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
 func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time) bool {
 	for _, chapter := range chapters {
 		if isChapterEligible(chapter, now) {
@@ -1182,21 +1197,26 @@ func retryDurationForCount(failureCount int) time.Duration {
 
 func shouldApplyFileFailure(reason string) bool {
 	switch reason {
-	case "decode_invalid_data":
+	case reasonDecodeInvalidData, reasonFFmpegProbeFailed, reasonToneMapUnsupported:
 		return true
 	default:
 		return false
 	}
 }
 
-func buildPersistentFileFailure(
+func buildFileFailure(
 	file *models.MediaFile,
 	now time.Time,
 	reason string,
 	err error,
 ) *scanner.ChapterThumbnailFailureState {
-	failureCount := len(chapterThumbnailRetrySchedule)
-	if file != nil && file.ChapterThumbnailFailureCount >= failureCount {
+	failureCount := 1
+	if reason == reasonDecodeInvalidData {
+		failureCount = len(chapterThumbnailRetrySchedule)
+		if file != nil && file.ChapterThumbnailFailureCount >= failureCount {
+			failureCount = file.ChapterThumbnailFailureCount + 1
+		}
+	} else if file != nil {
 		failureCount = file.ChapterThumbnailFailureCount + 1
 	}
 	retryAfter := now.Add(retryDurationForCount(failureCount))

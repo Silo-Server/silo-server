@@ -60,6 +60,28 @@ func newPlanstoreFixture(t *testing.T) *planstoreFixture {
 	if !hasRevision {
 		t.Skip("test database has not applied the playback v3 attempt revision migration")
 	}
+	var hasFrozenRecipe bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'playback_v3_attempts' AND column_name = 'frozen_recipe'
+		)`).Scan(&hasFrozenRecipe); err != nil {
+		t.Fatalf("check frozen_recipe column: %v", err)
+	}
+	if !hasFrozenRecipe {
+		t.Skip("test database has not applied the playback v3 frozen recipe migration")
+	}
+	var hasStartResponse bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_name = 'playback_v3_attempts' AND column_name = 'start_response'
+		)`).Scan(&hasStartResponse); err != nil {
+		t.Fatalf("check start_response column: %v", err)
+	}
+	if !hasStartResponse {
+		t.Skip("test database has not applied the terminal playback v3 attempt migration")
+	}
 
 	f := &planstoreFixture{pool: pool}
 	unique := fmt.Sprintf("planstore-test-%d", time.Now().UnixNano())
@@ -99,7 +121,7 @@ func newPlanstoreFixture(t *testing.T) *planstoreFixture {
 }
 
 func (f *planstoreFixture) attemptRecord(sessionID, attemptID, digest string) playback.AttemptRecordV3 {
-	return playback.AttemptRecordV3{
+	record := playback.AttemptRecordV3{
 		PlaybackAttemptID:      attemptID,
 		SessionID:              sessionID,
 		UserID:                 f.userID,
@@ -116,6 +138,10 @@ func (f *planstoreFixture) attemptRecord(sessionID, attemptID, digest string) pl
 			RequestedMediaFileID: f.mediaFileID,
 			EffectiveMediaFileID: f.mediaFileID,
 		},
+		FrozenRecipe: playback.ExecutableRecipeV3{
+			Version: 1, PlanID: "plan-1", PlayMethod: playback.PlayDirect,
+			SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+		},
 		NormalizedRequest: playback.StartRequestV3{
 			ProtocolVersion:   3,
 			FileID:            f.mediaFileID,
@@ -126,6 +152,14 @@ func (f *planstoreFixture) attemptRecord(sessionID, attemptID, digest string) pl
 		RequestDigest: digest,
 		ExpiresAt:     time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond),
 	}
+	record.StartResponse = playback.DecisionResponseV3{
+		ProtocolVersion: playback.ProtocolV3,
+		ServerFeatures:  playback.ServerFeaturesV3(),
+		Outcome:         playback.OutcomePlayableV3,
+		SessionID:       sessionID,
+		PlaybackPlan:    &record.CurrentPlan,
+	}
+	return record
 }
 
 func (f *planstoreFixture) expireAttempt(t *testing.T, attemptID string) {
@@ -179,7 +213,7 @@ func TestPostgresPlanStore(t *testing.T) {
 					Event:                 name,
 					FailureClassification: "decode_error",
 					FallbackReason:        "test",
-					OutputRouteGeneration: 1,
+					OutputContextID:       "route-1",
 					Diagnostics:           map[string]string{"source": "planstore-test"},
 				},
 				UserID:        f.userID,
@@ -199,6 +233,33 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 		if count != len(names) {
 			t.Fatalf("persisted %d route events, want %d", count, len(names))
+		}
+	})
+
+	t.Run("RecordTerminalStartEventWithoutSession", func(t *testing.T) {
+		attemptID := "att-terminal-" + uuid.NewString()
+		err := store.RecordRouteEvent(ctx, playback.RouteEventRecordV3{
+			RouteEventV3: playback.RouteEventV3{
+				ProtocolVersion:   playback.ProtocolV3,
+				PlaybackAttemptID: attemptID,
+				Event:             playback.RouteEventTerminalV3,
+				FallbackReason:    "no_alternate_version",
+				OutputContextID:   "route-terminal",
+				Diagnostics:       map[string]string{"reason": "hlg_output_unsupported"},
+			},
+			UserID:    f.userID,
+			ProfileID: "profile-1",
+		})
+		if err != nil {
+			t.Fatalf("RecordRouteEvent without session: %v", err)
+		}
+		var sessionID *string
+		if err := f.pool.QueryRow(ctx, `
+			SELECT session_id::text FROM playback_route_events WHERE playback_attempt_id = $1`, attemptID).Scan(&sessionID); err != nil {
+			t.Fatalf("load terminal route event: %v", err)
+		}
+		if sessionID != nil {
+			t.Fatalf("terminal start session_id = %q, want NULL", *sessionID)
 		}
 	})
 
@@ -228,6 +289,31 @@ func TestPostgresPlanStore(t *testing.T) {
 		f.expireAttempt(t, attemptID)
 		if err := store.SaveAttempt(ctx, record); err != nil {
 			t.Fatalf("SaveAttempt after expiry should reclaim the attempt-ID: %v", err)
+		}
+	})
+
+	t.Run("SaveTerminalAttemptWithoutSession", func(t *testing.T) {
+		attemptID := "att-terminal-record-" + uuid.NewString()
+		response := playback.NewTerminalResponseV3("adaptation_unavailable", "No validated route is available.", false)
+		record := f.attemptRecord("", attemptID, "digest-terminal")
+		record.CurrentPlanID = ""
+		record.CurrentPlan = playback.PlanV3{}
+		record.FrozenRecipe = playback.ExecutableRecipeV3{}
+		record.StartResponse = response
+
+		if err := store.SaveAttempt(ctx, record); err != nil {
+			t.Fatalf("SaveAttempt terminal: %v", err)
+		}
+		got, err := store.GetAttemptByPlaybackAttemptID(ctx, attemptID)
+		if err != nil {
+			t.Fatalf("GetAttemptByPlaybackAttemptID terminal: %v", err)
+		}
+		if got.SessionID != "" || !bytes.Equal(mustJSON(t, got.StartResponse), mustJSON(t, response)) {
+			t.Fatalf("terminal attempt did not round-trip: %#v", got)
+		}
+		identity, err := store.GetAttemptIdentityByPlaybackAttemptID(ctx, attemptID)
+		if err != nil || identity.SessionID != "" || identity.UserID != f.userID {
+			t.Fatalf("terminal identity = %#v, err=%v", identity, err)
 		}
 	})
 
@@ -265,8 +351,14 @@ func TestPostgresPlanStore(t *testing.T) {
 			if !bytes.Equal(mustJSON(t, got.CurrentPlan), mustJSON(t, record.CurrentPlan)) {
 				t.Fatalf("%s plan JSON did not round-trip:\n got %s\nwant %s", name, mustJSON(t, got.CurrentPlan), mustJSON(t, record.CurrentPlan))
 			}
+			if !bytes.Equal(mustJSON(t, got.FrozenRecipe), mustJSON(t, record.FrozenRecipe)) {
+				t.Fatalf("%s frozen recipe did not round-trip:\n got %s\nwant %s", name, mustJSON(t, got.FrozenRecipe), mustJSON(t, record.FrozenRecipe))
+			}
 			if !bytes.Equal(mustJSON(t, got.NormalizedRequest), mustJSON(t, record.NormalizedRequest)) {
 				t.Fatalf("%s normalized request JSON did not round-trip", name)
+			}
+			if !bytes.Equal(mustJSON(t, got.StartResponse), mustJSON(t, record.StartResponse)) {
+				t.Fatalf("%s start response JSON did not round-trip", name)
 			}
 			if diff := got.ExpiresAt.Sub(record.ExpiresAt); diff < -time.Millisecond || diff > time.Millisecond {
 				t.Fatalf("%s expires_at drifted by %v", name, diff)
@@ -320,6 +412,7 @@ func TestPostgresPlanStore(t *testing.T) {
 		if lease.State != playback.ReplanLeaseOwnedV3 {
 			t.Fatalf("BeginReplan new state = %q, want owned", lease.State)
 		}
+		ownedLease := lease
 
 		// Same request-ID with different input.
 		if _, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-other", "", future); !errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
@@ -334,14 +427,22 @@ func TestPostgresPlanStore(t *testing.T) {
 		if lease.State != playback.ReplanLeaseInFlightV3 {
 			t.Fatalf("BeginReplan in-flight state = %q, want in_flight", lease.State)
 		}
+		if err := store.ReleaseReplan(ctx, sessionID, "rq-1", ownedLease.LeaseToken); err != nil {
+			t.Fatalf("ReleaseReplan: %v", err)
+		}
+		lease, err = store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
+		if err != nil || lease.State != playback.ReplanLeaseOwnedV3 {
+			t.Fatalf("released lease = %#v, err=%v; want owned", lease, err)
+		}
 
 		// Completed replan replays the stored response.
 		completed := f.attemptRecord(sessionID, attemptID, "digest-replan")
 		completed.CurrentPlanID = "plan-2"
 		completed.CurrentReplanRequestID = "rq-1"
 		completed.CurrentPlan.PlanID = "plan-2"
+		completed.StartResponse = playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, Outcome: playback.OutcomePlayableV3, SessionID: sessionID, PlaybackPlan: &completed.CurrentPlan}
 		response := json.RawMessage(`{"plan_id": "plan-2"}`)
-		if err := store.CompleteReplan(ctx, sessionID, "rq-1", "", response, completed); err != nil {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", lease.LeaseToken, "", response, completed); err != nil {
 			t.Fatalf("CompleteReplan: %v", err)
 		}
 		lease, err = store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
@@ -360,6 +461,13 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 		if !bytes.Equal(mustJSON(t, storedResponse), mustJSON(t, wantResponse)) {
 			t.Fatalf("replayed response = %s, want %s", lease.Response, response)
+		}
+		storedAttempt, err := store.GetAttempt(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if storedAttempt.StartResponse.PlaybackPlan == nil || storedAttempt.StartResponse.PlaybackPlan.PlanID != "plan-2" {
+			t.Fatalf("durable replay decision = %#v, want plan-2", storedAttempt.StartResponse)
 		}
 
 		// Expired lease whose base revision no longer matches the retry.
@@ -391,7 +499,8 @@ func TestPostgresPlanStore(t *testing.T) {
 			t.Fatalf("SaveAttempt: %v", err)
 		}
 		future := time.Now().Add(time.Minute)
-		if _, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future); err != nil {
+		lease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", future)
+		if err != nil {
 			t.Fatalf("BeginReplan: %v", err)
 		}
 
@@ -400,12 +509,13 @@ func TestPostgresPlanStore(t *testing.T) {
 		updated.CurrentPlanID = "plan-2"
 		updated.CurrentReplanRequestID = "rq-1"
 		updated.CurrentPlan.PlanID = "plan-2"
+		updated.FrozenRecipe.PlanID = "plan-2"
 		updated.CurrentPlan.EffectiveMediaFileID = f.altFileID
 		updated.CurrentPlan.DecisionReason = "transcode_fallback"
 		updated.ExpiresAt = time.Now().Add(2 * time.Hour).UTC().Truncate(time.Microsecond)
 		response := json.RawMessage(`{"plan_id": "plan-2", "status": "replanned"}`)
 
-		if err := store.CompleteReplan(ctx, sessionID, "rq-1", "", response, updated); err != nil {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", lease.LeaseToken, "", response, updated); err != nil {
 			t.Fatalf("CompleteReplan happy path: %v", err)
 		}
 
@@ -424,6 +534,9 @@ func TestPostgresPlanStore(t *testing.T) {
 		}
 		if !bytes.Equal(mustJSON(t, got.CurrentPlan), mustJSON(t, updated.CurrentPlan)) {
 			t.Fatalf("plan JSON mismatch after replan:\n got %s\nwant %s", mustJSON(t, got.CurrentPlan), mustJSON(t, updated.CurrentPlan))
+		}
+		if !bytes.Equal(mustJSON(t, got.FrozenRecipe), mustJSON(t, updated.FrozenRecipe)) {
+			t.Fatalf("frozen recipe mismatch after replan:\n got %s\nwant %s", mustJSON(t, got.FrozenRecipe), mustJSON(t, updated.FrozenRecipe))
 		}
 
 		// The migration's sync trigger must not fight the in-transaction CAS:
@@ -445,18 +558,63 @@ func TestPostgresPlanStore(t *testing.T) {
 
 		// A second replan whose base does not match the current revision must
 		// lose the compare-and-swap.
-		if _, err := store.BeginReplan(ctx, sessionID, "rq-2", "rq-digest-2", "rq-1", future); err != nil {
+		secondLease, err := store.BeginReplan(ctx, sessionID, "rq-2", "rq-digest-2", "rq-1", future)
+		if err != nil {
 			t.Fatalf("BeginReplan second: %v", err)
 		}
 		stale := updated
 		stale.CurrentReplanRequestID = "rq-2"
-		if err := store.CompleteReplan(ctx, sessionID, "rq-2", "wrong-base", response, stale); !errors.Is(err, playback.ErrReplanSupersededV3) {
+		if err := store.CompleteReplan(ctx, sessionID, "rq-2", secondLease.LeaseToken, "wrong-base", response, stale); !errors.Is(err, playback.ErrReplanSupersededV3) {
 			t.Fatalf("CompleteReplan wrong base: got %v, want ErrReplanSupersededV3", err)
 		}
 
 		// Unknown session.
-		if err := store.CompleteReplan(ctx, uuid.NewString(), "rq-1", "", response, updated); !errors.Is(err, playback.ErrSessionNotFound) {
+		if err := store.CompleteReplan(ctx, uuid.NewString(), "rq-1", "missing-lease", "", response, updated); !errors.Is(err, playback.ErrSessionNotFound) {
 			t.Fatalf("CompleteReplan missing session: got %v, want ErrSessionNotFound", err)
+		}
+	})
+
+	t.Run("ExpiredOwnerCannotMutateReclaimedLease", func(t *testing.T) {
+		sessionID := uuid.NewString()
+		attemptID := "att-reclaimed-" + sessionID
+		original := f.attemptRecord(sessionID, attemptID, "digest-reclaimed")
+		if err := store.SaveAttempt(ctx, original); err != nil {
+			t.Fatalf("SaveAttempt: %v", err)
+		}
+		oldLease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(-time.Second))
+		if err != nil || oldLease.State != playback.ReplanLeaseOwnedV3 {
+			t.Fatalf("old lease = %#v, err=%v", oldLease, err)
+		}
+		newLease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(time.Minute))
+		if err != nil || newLease.State != playback.ReplanLeaseOwnedV3 || newLease.LeaseToken == oldLease.LeaseToken {
+			t.Fatalf("reclaimed lease = %#v, old=%#v, err=%v", newLease, oldLease, err)
+		}
+
+		if err := store.ReleaseReplan(ctx, sessionID, "rq-1", oldLease.LeaseToken); err != nil {
+			t.Fatalf("late release: %v", err)
+		}
+		lease, err := store.BeginReplan(ctx, sessionID, "rq-1", "rq-digest-1", "", time.Now().Add(time.Minute))
+		if err != nil || lease.State != playback.ReplanLeaseInFlightV3 {
+			t.Fatalf("late release removed current lease: lease=%#v err=%v", lease, err)
+		}
+
+		updated := original
+		updated.CurrentPlanID = "plan-2"
+		updated.CurrentReplanRequestID = "rq-1"
+		updated.CurrentPlan.PlanID = "plan-2"
+		response := json.RawMessage(`{"plan_id":"plan-2"}`)
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", oldLease.LeaseToken, "", response, updated); !errors.Is(err, playback.ErrReplanSupersededV3) {
+			t.Fatalf("late completion error = %v, want ErrReplanSupersededV3", err)
+		}
+		stored, err := store.GetAttempt(ctx, sessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.CurrentPlanID != original.CurrentPlanID {
+			t.Fatalf("late completion changed plan to %q", stored.CurrentPlanID)
+		}
+		if err := store.CompleteReplan(ctx, sessionID, "rq-1", newLease.LeaseToken, "", response, updated); err != nil {
+			t.Fatalf("current owner completion: %v", err)
 		}
 	})
 

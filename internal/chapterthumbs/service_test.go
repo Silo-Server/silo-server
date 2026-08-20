@@ -66,14 +66,10 @@ func TestBuildFrameExtractArgs(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown hw accel falls back to cpu args", func(t *testing.T) {
-		args, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "none", "", false)
-		if err != nil {
-			t.Fatalf("buildFrameExtractArgs() error = %v", err)
-		}
-		want := buildCPUFrameExtractArgs("/media/movie.mkv", 42.5, false)
-		if !slices.Equal(args, want) {
-			t.Fatalf("args = %#v, want %#v", args, want)
+	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
+		_, err := buildFrameExtractArgs("/media/movie.mkv", 42.5, "nvenc", "/dev/dri/renderD128", false)
+		if err == nil || !strings.Contains(err.Error(), "does not support") {
+			t.Fatalf("buildFrameExtractArgs() error = %v, want unsupported accelerator error", err)
 		}
 	})
 }
@@ -275,21 +271,23 @@ func (r testSettingsReader) Get(_ context.Context, key string) (string, error) {
 }
 
 type testRemoteFrameExtractor struct {
-	data   []byte
-	reason string
-	err    error
-	nodes  []string
+	data     []byte
+	reason   string
+	err      error
+	nodes    []string
+	requests []RemoteExtractRequest
 }
 
 func (e *testRemoteFrameExtractor) ExtractFrame(
 	_ context.Context,
 	node *nodepool.Node,
 	_ string,
-	_ RemoteExtractRequest,
+	req RemoteExtractRequest,
 ) ([]byte, string, error) {
 	if node != nil {
 		e.nodes = append(e.nodes, node.URL)
 	}
+	e.requests = append(e.requests, req)
 	return e.data, e.reason, e.err
 }
 
@@ -426,6 +424,42 @@ func TestProcessRequestSkipsFileDuringCooldown(t *testing.T) {
 	}
 }
 
+func TestProcessRequestSkipsHDRWhenPolicyDisabled(t *testing.T) {
+	fileRepo := &testFileRepo{
+		file: &models.MediaFile{
+			ID:            42,
+			MediaFolderID: 9,
+			FilePath:      "/media/movie.mkv",
+			HDR:           true,
+			Chapters: []models.MediaChapter{
+				{Index: 0, StartSeconds: 0, EndSeconds: 10},
+			},
+		},
+	}
+	service := &Service{
+		fileRepo:   fileRepo,
+		folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+		settings: testSettingsReader{values: map[string]string{
+			chapterThumbnailHDRPolicySetting: chapterThumbnailHDRPolicyDisabled,
+		}},
+		extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+			t.Fatal("HDR extraction should not run when the policy is disabled")
+			return nil, "", nil
+		},
+	}
+
+	requeue, err := service.processRequest(context.Background(), ChapterThumbnailRequest{FileID: 42}, false)
+	if err != nil {
+		t.Fatalf("processRequest() error = %v", err)
+	}
+	if requeue {
+		t.Fatal("processRequest() requeue = true, want false")
+	}
+	if fileRepo.updateCalls != 0 {
+		t.Fatalf("updateCalls = %d, want 0", fileRepo.updateCalls)
+	}
+}
+
 func TestProcessRequestMarksDecodeInvalidDataAsFileFailure(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	fileRepo := &testFileRepo{
@@ -482,6 +516,87 @@ func TestProcessRequestMarksDecodeInvalidDataAsFileFailure(t *testing.T) {
 	}
 	if fileRepo.file.Chapters[1].ThumbnailRetryAfter != nil {
 		t.Fatalf("expected later chapters to be skipped after file-level failure")
+	}
+}
+
+func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason string
+		err    error
+	}{
+		{
+			name:   "unsupported filters",
+			reason: reasonToneMapUnsupported,
+			err:    errors.New("configured FFmpeg lacks the required zscale filter"),
+		},
+		{
+			name:   "transient probe failure",
+			reason: reasonFFmpegProbeFailed,
+			err:    errors.New("FFmpeg filter probe failed: resource temporarily unavailable"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Unix(1_700_000_000, 0).UTC()
+			fileRepo := &testFileRepo{
+				file: &models.MediaFile{
+					ID:            42,
+					MediaFolderID: 9,
+					FilePath:      "/media/movie.mkv",
+					HDR:           true,
+					Chapters: []models.MediaChapter{
+						{Index: 0, StartSeconds: 0, EndSeconds: 10},
+						{Index: 1, StartSeconds: 10, EndSeconds: 20},
+					},
+				},
+			}
+			callCount := 0
+			service := &Service{
+				fileRepo:   fileRepo,
+				folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+				clock: func() time.Time {
+					return now
+				},
+				extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+					callCount++
+					return nil, tt.reason, tt.err
+				},
+			}
+
+			requeue, err := service.processRequest(context.Background(), ChapterThumbnailRequest{FileID: 42}, false)
+			if err != nil {
+				t.Fatalf("processRequest() error = %v", err)
+			}
+			if requeue {
+				t.Fatal("processRequest() requeue = true, want false")
+			}
+			if callCount != 1 {
+				t.Fatalf("callCount = %d, want 1", callCount)
+			}
+			if fileRepo.updateCalls != 1 {
+				t.Fatalf("updateCalls = %d, want 1", fileRepo.updateCalls)
+			}
+			if fileRepo.file.ChapterThumbnailFailureCount != 1 {
+				t.Fatalf("failureCount = %d, want 1", fileRepo.file.ChapterThumbnailFailureCount)
+			}
+			if fileRepo.file.ChapterThumbnailRetryAfter == nil {
+				t.Fatal("expected file-level retry_after to be set")
+			}
+			if got, want := *fileRepo.file.ChapterThumbnailRetryAfter, now.Add(15*time.Minute); !got.Equal(want) {
+				t.Fatalf("retryAfter = %v, want %v", got, want)
+			}
+			if !strings.HasPrefix(fileRepo.file.ChapterThumbnailLastError, tt.reason+":") {
+				t.Fatalf("lastError = %q, want %s prefix", fileRepo.file.ChapterThumbnailLastError, tt.reason)
+			}
+			if fileRepo.file.Chapters[0].ThumbnailRetryAfter == nil {
+				t.Fatal("expected first chapter retry_after to be set")
+			}
+			if fileRepo.file.Chapters[1].ThumbnailRetryAfter != nil {
+				t.Fatal("expected later chapters to be skipped after file-level failure")
+			}
+		})
 	}
 }
 
@@ -566,6 +681,61 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	}
 	if len(remote.nodes) != 1 || remote.nodes[0] != "http://node-1" {
 		t.Fatalf("remote nodes = %#v, want node-1", remote.nodes)
+	}
+}
+
+func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) {
+	tests := []struct {
+		name         string
+		settingValue string
+		wantAllowed  bool
+	}{
+		{name: "disabled by default", wantAllowed: false},
+		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
+			settings := map[string]string{
+				chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
+				authJWTSecretSetting:             "secret",
+			}
+			if tt.settingValue != "" {
+				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+			}
+			service := &Service{
+				settings:           testSettingsReader{values: settings},
+				transcodePool:      &nodepool.TranscodePool{},
+				remoteReservations: make(map[string]int),
+				remoteExtractor:    remote,
+			}
+			service.transcodePool.SetNodes([]*nodepool.Node{{
+				URL:     "http://node-1",
+				Enabled: true,
+				Healthy: true,
+			}})
+
+			_, _, err := service.extractFrame(
+				context.Background(),
+				&models.MediaFile{FilePath: "/media/movie.mkv", HDR: true},
+				5,
+				chapterThumbnailHDRPolicyBestEffort,
+			)
+			if err != nil {
+				t.Fatalf("extractFrame() error = %v", err)
+			}
+			if len(remote.requests) != 1 {
+				t.Fatalf("remote requests = %d, want 1", len(remote.requests))
+			}
+			request := remote.requests[0]
+			if !request.ToneMap {
+				t.Fatal("remote request tone_map = false, want true for HDR")
+			}
+			if request.AllowSoftwareToneMap != tt.wantAllowed {
+				t.Fatalf("remote request allow_software_tone_map = %t, want %t", request.AllowSoftwareToneMap, tt.wantAllowed)
+			}
+		})
 	}
 }
 
@@ -672,5 +842,35 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 	}
 	if node == nil || node.URL != "http://node-2" {
 		t.Fatalf("reserveRemoteNode() node = %#v, want node-2", node)
+	}
+}
+
+func TestExtractFrameResolvesMultiDeviceListToOneDevice(t *testing.T) {
+	service := &Service{
+		hwAccel:  "vaapi",
+		hwDevice: "/dev/dri/renderD888,/dev/dri/renderD889",
+	}
+	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
+
+	var hwArgs []string
+	service.runFFmpegFrameExtractFunc = func(_ context.Context, _ string, args []string) ([]byte, error) {
+		if hwArgs == nil {
+			hwArgs = append([]string(nil), args...)
+		}
+		return []byte("frame"), nil
+	}
+
+	if _, _, err := service.extractFrame(context.Background(), file, 5, chapterThumbnailHDRPolicyBestEffort); err != nil {
+		t.Fatalf("extractFrame() error = %v", err)
+	}
+
+	joined := strings.Join(hwArgs, " ")
+	// Neither test device exists, so the balancer deterministically falls back
+	// to the first entry — but never passes the raw list to ffmpeg.
+	if strings.Contains(joined, "/dev/dri/renderD888,/dev/dri/renderD889") {
+		t.Fatalf("ffmpeg args contain the raw device list:\n%s", joined)
+	}
+	if !strings.Contains(joined, "/dev/dri/renderD888") {
+		t.Fatalf("ffmpeg args missing a resolved device:\n%s", joined)
 	}
 }

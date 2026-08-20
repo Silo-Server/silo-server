@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/error-response.schema.json",
+  "title": "Silo Playback Protocol v3 Error Response",
+  "description": "Common non-2xx response body for playback-v3 endpoints. Clients branch on error and may display message. The valid fixture pins the 426 response returned to a legacy start body.",
+  "type": "object",
+  "required": ["error", "message"],
+  "properties": {
+    "error": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    }
+  },
+  "additionalProperties": true
+}

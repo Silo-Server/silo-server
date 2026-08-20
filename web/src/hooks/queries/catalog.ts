@@ -310,6 +310,10 @@ export function useCatalogWindow(
       title,
       totalItems,
       pages,
+      // Collection sources report the order they actually resolved in, after
+      // the viewer's saved override and the collection's configured default.
+      // Absent means the collection kept its own source order.
+      effectiveSort: page0Result.data?.effective_sort,
     },
     isLoading,
   };

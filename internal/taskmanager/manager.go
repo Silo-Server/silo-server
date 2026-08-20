@@ -296,6 +296,9 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 	if err != nil {
 		return err
 	}
+	if task, ok := w.task.(ManualOnlyTask); ok && task.ManualOnly() && len(triggerConfigs) > 0 {
+		return ErrTaskManualOnly
+	}
 
 	if err := m.triggerRepo.SetTriggers(context.Background(), key, triggerConfigs); err != nil {
 		return err

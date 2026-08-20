@@ -292,6 +292,17 @@ func DeleteProfile(db *sql.DB, id string) error {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	// Preferences belong to viewers, not creators, so deleting only this
+	// profile's rows below would leave other profiles' overrides pointing at
+	// personal collections that are about to be removed.
+	if _, err := tx.Exec(`
+		DELETE FROM collection_sort_preferences
+		WHERE collection_kind = 'user' AND collection_id IN (
+			SELECT id FROM personal_collections WHERE creator_profile_id = ?
+		)`, id); err != nil {
+		return fmt.Errorf("deleting collection sort preferences for profile %s: %w", id, err)
+	}
+
 	// Delete personal_collection_items for collections owned by this profile.
 	_, err = tx.Exec(`
 		DELETE FROM personal_collection_items
@@ -312,6 +323,7 @@ func DeleteProfile(db *sql.DB, id string) error {
 		"favorites",
 		"watchlist",
 		"watch_progress",
+		"collection_sort_preferences",
 		"personal_collections",
 		"profile_allowed_libraries",
 		"series_playback_preferences",

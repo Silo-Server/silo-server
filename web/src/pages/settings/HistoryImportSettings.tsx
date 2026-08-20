@@ -38,7 +38,7 @@ import {
 } from "./HistoryImportSettings.utils";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
-import { formatDate } from "@/lib/datetime";
+import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
 
 const STATUS_CONFIG = {
   queued: {
@@ -987,16 +987,13 @@ function HistoryRunCard({
    ──────────────────────────────────────────────────────────── */
 
 function formatRelativeTime(dateStr: string): string {
-  const diffMs = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diffMs / 60_000);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 7) return `${days}d ago`;
-  return formatDate(dateStr);
+  return (
+    formatRelativeTimeBase(dateStr, {
+      rounding: "floor",
+      justNowLabel: "Just now",
+      absoluteAfterDays: 7,
+    }) ?? ""
+  );
 }
 
 function formatDuration(startStr: string, endStr: string): string {

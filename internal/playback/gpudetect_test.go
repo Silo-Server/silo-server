@@ -91,6 +91,12 @@ func TestExplicitNVENCBypassesFFmpegProbe(t *testing.T) {
 	}
 }
 
+func TestResolveFFmpegPathTrimsWithoutCleaningRelativeExecutable(t *testing.T) {
+	if got := ResolveFFmpegPath(" ./ffmpeg "); got != "./ffmpeg" {
+		t.Fatalf("ResolveFFmpegPath() = %q, want ./ffmpeg", got)
+	}
+}
+
 func TestFFmpegSupportsNVENCRequiresCUDAEncodersFiltersAndSmoke(t *testing.T) {
 	setupHWAccelTest(t)
 	tests := []struct {

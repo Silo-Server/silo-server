@@ -208,6 +208,11 @@ export const progressKeys = {
   list: (status?: string, libraryId?: number) => ["progress", "list", status, libraryId] as const,
 };
 
+export const deviceKeys = {
+  all: ["devices"] as const,
+  list: (scope: "own" | "household") => ["devices", "list", scope] as const,
+};
+
 export const settingsKeys = {
   // The canonical value queries live under ["settings", "values", …] and build
   // their own key (effectiveSettingsQueryKey), so one invalidation of that

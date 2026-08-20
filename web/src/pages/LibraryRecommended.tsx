@@ -17,6 +17,8 @@ import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
 import { isAudiobookLibraryType } from "./libraryPageSearchParams";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 interface LibraryRecommendedProps {
   libraryId: number;
@@ -324,13 +326,15 @@ function PinnedCollectionCarousel({
 }) {
   const { data: items, isLoading } = useLibraryCollectionItems(libraryId, collectionId);
   const { prefs: overlayPrefs } = useOverlayPrefs();
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   if (!isLoading && (!items || items.length === 0)) return null;
 
   return (
     <MediaCarousel title={name} loading={isLoading}>
       {(items ?? []).map((item) => (
-        <div key={item.content_id} className="w-[140px] shrink-0 sm:w-[160px] lg:w-[184px]">
+        <div key={item.content_id} className={posterWidthClasses}>
           <ItemCard item={item} overlayPrefs={overlayPrefs} />
         </div>
       ))}

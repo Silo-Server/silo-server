@@ -13,13 +13,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Pause, PictureInPicture2, Play, SkipBack, SkipForward, Tv, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import type { WatchDetail } from "@/api/types";
-import { getAccessToken, getProfileToken } from "@/api/client";
+import { getAccessToken, getOrCreateDeviceId, getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
-import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import {
+  settingsCapabilitiesSupportKey,
+  useEffectiveSettings,
+  useSettingsCapabilities,
+} from "@/hooks/queries/settingValues";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
@@ -30,6 +34,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { PlayerConfigProvider, WatchPage } from "@/player";
 import type {
   EpisodeRef,
+  IntroSkipMode,
   PlaybackExitState,
   PlayerConfig,
   PlayerPictureInPictureChange,
@@ -389,6 +394,17 @@ export function WatchPlaybackHost() {
   const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
+  const settingsCapabilities = useSettingsCapabilities();
+  // Three answers, not two: the connected server defines the enum, it provably
+  // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
+  // last two into false, so the query's own state is what separates them.
+  const capabilitiesKnown = settingsCapabilities.isSuccess;
+  const supportsIntroSkipMode =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -400,12 +416,17 @@ export function WatchPlaybackHost() {
   // key did and makes all three behave as the contract says they do.
   const { data: effectivePlaybackSettings } = useEffectiveSettings({
     keys: [
-      SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+      supportsIntroSkipMode
+        ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
+        : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
       SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
       // The resolution cap, which the quality picker writes canonically and
       // no longer mirrors into the profile column playback used to read.
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
+      // The bandwidth cap that pairs with it; the player keeps its startup
+      // tier under this so the setting does what its label says.
+      SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS,
     ],
   });
   const request = state.request;
@@ -449,6 +470,7 @@ export function WatchPlaybackHost() {
       getAccessToken: () => getAccessToken(),
       getProfileId: () => storage.get(storage.KEYS.PROFILE_ID),
       getProfileToken: () => getProfileToken(),
+      getDeviceId: () => getOrCreateDeviceId(),
     }),
     [],
   );
@@ -850,6 +872,8 @@ export function WatchPlaybackHost() {
 
   const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
     ?.value as string | undefined;
+  const maxBitrateKbps = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_MAX_BITRATE_KBPS]
+    ?.value as number | null | undefined;
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
@@ -870,10 +894,34 @@ export function WatchPlaybackHost() {
   const resolvedBool = (key: SettingKey, fallback: boolean | undefined) =>
     (effectivePlaybackSettings?.[key]?.value as boolean | undefined) ?? fallback ?? false;
 
-  const autoSkipIntro = resolvedBool(
-    SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
-    watchPageProps.autoSkipIntro,
-  );
+  // null means "the connected server's answer is not in yet", which the player
+  // treats as "do not prompt and do not skip".
+  //
+  // Deferring is the deliberate choice over guessing. The profile DTO cannot
+  // express `never`: the server mirrors it as auto_skip_intro=false, which
+  // reads back as `ask`. Prompting on that guess can skip an intro the viewer
+  // explicitly asked to keep, while a prompt that arrives a moment late — or
+  // not at all — costs a manual seek. So the lossy fallback is used only where
+  // it is the whole truth: against a server that provably has no enum to read.
+  const introSkipMode: IntroSkipMode | null = (() => {
+    if (supportsIntroSkipMode) {
+      return (
+        (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE]?.value as
+          | IntroSkipMode
+          | undefined) ?? null
+      );
+    }
+    if (!capabilitiesKnown) return null;
+    // Legacy server. The resolved boolean is read rather than the profile
+    // record so that a profile_device override — this browser told to skip
+    // intros while the household profile is not — keeps working; the record
+    // only carries the profile layer.
+    const legacy = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO]?.value as
+      | boolean
+      | undefined;
+    if (legacy === undefined) return watchPageProps.introSkipMode ?? null;
+    return legacy ? "always" : "ask";
+  })();
   const autoSkipRecap = resolvedBool(
     SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
     watchPageProps.autoSkipRecap,
@@ -891,7 +939,8 @@ export function WatchPlaybackHost() {
       {(isForeground || isPostRoll) && <WatchPlaybackTitle title={activeItem.title} />}
       <WatchPage
         {...watchPageProps}
-        autoSkipIntro={autoSkipIntro}
+        maxBitrateKbps={maxBitrateKbps ?? null}
+        introSkipMode={introSkipMode}
         autoSkipRecap={autoSkipRecap}
         autoPlayNextPreview={autoPlayNextPreview}
         canEditMarkers={canEditMarkers}

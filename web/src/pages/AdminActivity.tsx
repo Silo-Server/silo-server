@@ -29,6 +29,7 @@ import {
   formatSourceContainerSummary,
   formatTranscodeModeSummary,
   getSessionClientLabel,
+  getSessionClientLabelFull,
   formatVideoDetail,
   formatVideoSummary,
   normalizeContainerDecision,
@@ -149,7 +150,10 @@ export default function AdminActivity() {
           s.media_title?.toLowerCase().includes(q) ||
           s.series_name?.toLowerCase().includes(q) ||
           s.episode_name?.toLowerCase().includes(q) ||
-          getSessionClientLabel(s).toLowerCase().includes(q) ||
+          // Search the exact label, not the compact one: "which sessions are on
+          // build 5?" is the question this identity exists to answer, and the
+          // compact label deliberately omits the build.
+          getSessionClientLabelFull(s).toLowerCase().includes(q) ||
           s.client_user_agent?.toLowerCase().includes(q) ||
           s.client_ip?.toLowerCase().includes(q),
       );
@@ -528,6 +532,13 @@ function StreamRow({
   const streamMeta = [sourceContainer, streamBitrate].filter(Boolean).join(" · ");
   const clientIP = session.client_ip?.trim() || "";
   const clientLabel = getSessionClientLabel(session);
+  // The row stays compact; the exact version, build, and channel live in the
+  // tooltip and in the expanded panel's Client card.
+  const clientLabelFull = getSessionClientLabelFull(session);
+  const clientUserAgent = session.client_user_agent?.trim() || "";
+  const clientTitle = clientUserAgent
+    ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
+    : clientLabelFull || clientLabel;
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
   const activityMethod = classifyActivityMethod(session);
@@ -602,10 +613,7 @@ function StreamRow({
               <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-[10px]">
                 <JellyfinSessionPill session={session} />
                 {clientLabel ? (
-                  <span
-                    title={session.client_user_agent || clientLabel}
-                    className="max-w-[8rem] min-w-0 truncate"
-                  >
+                  <span title={clientTitle} className="max-w-[8rem] min-w-0 truncate">
                     {clientLabel}
                   </span>
                 ) : null}
@@ -801,10 +809,7 @@ function StreamRow({
           {(clientLabel || clientIP || streamMeta) && (
             <div className="text-muted-foreground mt-1 flex min-w-0 gap-1.5 text-[10px]">
               {clientLabel ? (
-                <span
-                  title={session.client_user_agent || clientLabel}
-                  className="max-w-[9rem] shrink-0 truncate"
-                >
+                <span title={clientTitle} className="max-w-[9rem] shrink-0 truncate">
                   {clientLabel}
                 </span>
               ) : null}
@@ -1051,6 +1056,7 @@ function PlaybackExpandedPanel({
             audioDecision === "transcode" && videoDecision !== "transcode" ? transcodeMode : null
           }
         />
+        <PlaybackClientCard session={session} />
       </div>
 
       {showFFmpeg ? (
@@ -1132,23 +1138,58 @@ function PlaybackDetailCard({
   mode?: string | null;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--terminal-border)]/60 bg-[var(--terminal-bg)]/60 px-3 py-2">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-[10px] font-semibold tracking-[0.18em] text-[var(--terminal-muted)] uppercase">
-          {label}
-        </span>
+    <PlaybackDetailCardShell
+      label={label}
+      badge={
         <span
           className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${decisionBadgeClass(decision)}`}
         >
           {formatDecisionLabel(decision)}
         </span>
+      }
+    >
+      <PlaybackDetailLine label="Source" value={source} />
+      <PlaybackDetailLine label="Delivered" value={delivered} />
+      {mode ? <PlaybackDetailLine label="Mode" value={mode} /> : null}
+      <PlaybackDetailLine label="Detail" value={detail} muted />
+    </PlaybackDetailCardShell>
+  );
+}
+
+/**
+ * The exact streaming client: app name, version, build, and channel, with the
+ * raw user agent underneath. This is the surface that answers "which build is
+ * this?" — the session rows only have room for the compact label.
+ */
+function PlaybackClientCard({ session }: { session: AdminSession }) {
+  const label = getSessionClientLabelFull(session) || "Unknown client";
+  const userAgent = session.client_user_agent?.trim() || "";
+  return (
+    <PlaybackDetailCardShell label="Client">
+      <PlaybackDetailLine label="App" value={label} />
+      {userAgent ? <PlaybackDetailLine label="Agent" value={userAgent} muted /> : null}
+    </PlaybackDetailCardShell>
+  );
+}
+
+function PlaybackDetailCardShell({
+  label,
+  badge,
+  children,
+}: {
+  label: string;
+  badge?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-[var(--terminal-border)]/60 bg-[var(--terminal-bg)]/60 px-3 py-2">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-semibold tracking-[0.18em] text-[var(--terminal-muted)] uppercase">
+          {label}
+        </span>
+        {badge}
       </div>
-      <div className="grid gap-1 text-[11px]">
-        <PlaybackDetailLine label="Source" value={source} />
-        <PlaybackDetailLine label="Delivered" value={delivered} />
-        {mode ? <PlaybackDetailLine label="Mode" value={mode} /> : null}
-        <PlaybackDetailLine label="Detail" value={detail} muted />
-      </div>
+      <div className="grid gap-1 text-[11px]">{children}</div>
     </div>
   );
 }

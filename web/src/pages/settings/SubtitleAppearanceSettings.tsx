@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { LanguageSelect } from "@/components/settings/LanguageSelect";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -234,34 +235,27 @@ export default function SubtitleAppearanceSettings() {
           description="Pick a subtitle language or leave subtitles off by default."
         >
           {({ id, descriptionId }) => (
-            <Select
-              value={subtitleLanguage || "none"}
-              onValueChange={(value) =>
-                // The contract spells "no preference" as null, not the empty
-                // string the legacy profile column used.
-                saveBehavior(
-                  SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
-                  value === "none" ? null : value,
-                )
-              }
-            >
-              <SelectTrigger
+            <div className="w-full sm:w-[220px]">
+              <LanguageSelect
                 id={id}
                 aria-describedby={descriptionId}
-                className="w-full sm:w-[220px]"
+                value={subtitleLanguage || "none"}
+                options={subtitleLanguageOptions}
                 disabled={behaviorPending}
+                placeholder="None"
+                className="w-full"
+                onValueChange={(value) =>
+                  // The contract spells "no preference" as null, not the empty
+                  // string the legacy profile column used.
+                  saveBehavior(
+                    SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+                    value === "none" ? null : value,
+                  )
+                }
               >
-                <SelectValue placeholder="None" />
-              </SelectTrigger>
-              <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                {subtitleLanguageOptions.map((language) => (
-                  <SelectItem key={language.value} value={language.value}>
-                    {language.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              </LanguageSelect>
+            </div>
           )}
         </SettingRow>
 

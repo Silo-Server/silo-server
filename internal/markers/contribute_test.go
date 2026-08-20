@@ -2,31 +2,62 @@ package markers
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fakeSubmitter struct {
+	mu        sync.Mutex
 	id        string
 	submitted []SubmissionRequest
 	result    SubmissionResult
 	err       error
 	required  []string
+	started   chan struct{}
+	release   chan struct{}
+	onSubmit  func()
+	deadline  chan time.Time
+	startOnce sync.Once
 }
 
 func (f *fakeSubmitter) ID() string                                            { return f.id }
 func (f *fakeSubmitter) FetchMarkers(context.Context, Request) (Result, error) { return Result{}, nil }
-func (f *fakeSubmitter) SubmitMarker(_ context.Context, req SubmissionRequest) (SubmissionResult, error) {
+func (f *fakeSubmitter) SubmitMarker(ctx context.Context, req SubmissionRequest) (SubmissionResult, error) {
+	f.mu.Lock()
 	f.submitted = append(f.submitted, req)
-	if f.err != nil {
-		return SubmissionResult{}, f.err
+	err := f.err
+	result := f.result
+	started := f.started
+	release := f.release
+	onSubmit := f.onSubmit
+	deadline := f.deadline
+	f.mu.Unlock()
+	if deadline != nil {
+		observed, _ := ctx.Deadline()
+		deadline <- observed
 	}
-	if f.result.Status == "" {
+	if started != nil {
+		f.startOnce.Do(func() { close(started) })
+	}
+	if release != nil {
+		<-release
+	}
+	if onSubmit != nil {
+		onSubmit()
+	}
+	if err != nil {
+		return SubmissionResult{}, err
+	}
+	if result.Status == "" {
 		return SubmissionResult{ID: "id1", Status: SubmissionStatusPending}, nil
 	}
-	return f.result, nil
+	return result, nil
 }
 func (f *fakeSubmitter) FetchUserStats(context.Context) (UserStats, error) { return UserStats{}, nil }
 func (f *fakeSubmitter) SubmissionRequirements() SubmissionRequirements {
@@ -44,15 +75,42 @@ type fakeConfig map[string]ProviderConfig
 func (f fakeConfig) Get(p string) (ProviderConfig, bool) { c, ok := f[p]; return c, ok }
 
 type fakeRecorder struct {
+	mu       sync.Mutex
 	already  bool
 	recorded []ContributionRow
+	claims   map[string]string
+	next     int
 }
 
-func (f *fakeRecorder) AlreadySubmitted(context.Context, int, string, string, string) (bool, error) {
-	return f.already, nil
+func (f *fakeRecorder) Claim(_ context.Context, row ContributionRow, _ time.Duration) (ContributionClaim, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := row.Provider + "|" + row.SegmentKind + "|" + row.ContentHash
+	if _, exists := f.claims[key]; f.already || exists {
+		return ContributionClaim{}, false, nil
+	}
+	if f.claims == nil {
+		f.claims = make(map[string]string)
+	}
+	f.next++
+	token := fmt.Sprintf("claim-%d", f.next)
+	f.claims[key] = token
+	return ContributionClaim{ID: key, Token: token}, true, nil
 }
-func (f *fakeRecorder) Record(_ context.Context, row ContributionRow) error {
+func (f *fakeRecorder) Record(ctx context.Context, row ContributionRow) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := row.Provider + "|" + row.SegmentKind + "|" + row.ContentHash
+	if f.claims[key] != row.ClaimToken {
+		return errors.New("claim not found")
+	}
 	f.recorded = append(f.recorded, row)
+	if row.Status == OutcomeStatusError {
+		delete(f.claims, key)
+	}
 	return nil
 }
 
@@ -153,6 +211,190 @@ func TestContributeSkipsDuplicate(t *testing.T) {
 	}
 	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
 		t.Errorf("expected skipped outcome, got %+v", outcomes)
+	}
+}
+
+func TestContributeSettlesConflictAndSkipsRetry(t *testing.T) {
+	sub := &fakeSubmitter{
+		id: "introdb",
+		err: &SubmissionConflictError{
+			Provider:   "introdb",
+			HTTPStatus: 409,
+			Message:    "already submitted",
+		},
+	}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	first, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("first ContributeFile: %v", err)
+	}
+	second, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("provider submissions = %d, want one", len(sub.submitted))
+	}
+	if len(first) != 1 || first[0].Status != OutcomeStatusConflict {
+		t.Fatalf("first outcomes = %+v, want conflict", first)
+	}
+	if len(second) != 1 || second[0].Status != OutcomeStatusSkipped {
+		t.Fatalf("second outcomes = %+v, want skipped", second)
+	}
+	if len(rec.recorded) != 1 || rec.recorded[0].Status != OutcomeStatusConflict || rec.recorded[0].HTTPStatus == nil || *rec.recorded[0].HTTPStatus != 409 {
+		t.Fatalf("recorded = %+v, want terminal HTTP 409 conflict", rec.recorded)
+	}
+}
+
+func TestContributeDeduplicatesSameTargetAcrossFiles(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb"}
+	firstFile := newContribFile()
+	firstFile.IntroStart, firstFile.IntroEnd = floatPtr(0), floatPtr(60)
+	firstFile.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	secondFile := *firstFile
+	secondFile.ID++
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	if _, err := svc.ContributeFile(context.Background(), firstFile, ContributeOptions{}); err != nil {
+		t.Fatalf("first ContributeFile: %v", err)
+	}
+	outcomes, err := svc.ContributeFile(context.Background(), &secondFile, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("provider submissions = %d, want one for identical provider payloads", len(sub.submitted))
+	}
+	if len(outcomes) != 1 || outcomes[0].Status != OutcomeStatusSkipped {
+		t.Fatalf("second outcomes = %+v, want skipped", outcomes)
+	}
+}
+
+func TestContributeClaimsSameTargetBeforeConcurrentSubmit(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	sub := &fakeSubmitter{id: "introdb", started: started, release: release}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	duplicate := *file
+	duplicate.ID++
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	type result struct {
+		outcomes []ContributionOutcome
+		err      error
+	}
+	firstDone := make(chan result, 1)
+	go func() {
+		outcomes, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+		firstDone <- result{outcomes: outcomes, err: err}
+	}()
+	<-started
+
+	second, err := svc.ContributeFile(context.Background(), &duplicate, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(second) != 1 || second[0].Status != OutcomeStatusSkipped {
+		t.Fatalf("second outcomes = %+v, want skipped while first submission is in flight", second)
+	}
+
+	close(release)
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("first ContributeFile: %v", first.err)
+	}
+	if len(first.outcomes) != 1 || first.outcomes[0].Status != SubmissionStatusPending {
+		t.Fatalf("first outcomes = %+v, want pending", first.outcomes)
+	}
+	if len(sub.submitted) != 1 {
+		t.Fatalf("provider submissions = %d, want one concurrent submission", len(sub.submitted))
+	}
+}
+
+func TestContributeBoundsProviderSubmissionBelowClaimLease(t *testing.T) {
+	deadlines := make(chan time.Time, 1)
+	sub := &fakeSubmitter{id: "introdb", deadline: deadlines}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, &fakeRecorder{})
+
+	startedAt := time.Now()
+	if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+		t.Fatalf("ContributeFile: %v", err)
+	}
+	deadline := <-deadlines
+	if deadline.IsZero() {
+		t.Fatal("provider submission context has no deadline")
+	}
+	if got := deadline.Sub(startedAt); got < contributionSubmitLimit-time.Second || got > contributionSubmitLimit+time.Second {
+		t.Fatalf("provider deadline = %v, want approximately %v", got, contributionSubmitLimit)
+	}
+	if contributionSubmitLimit >= contributionClaimLease {
+		t.Fatalf("provider timeout %v must stay below claim lease %v", contributionSubmitLimit, contributionClaimLease)
+	}
+}
+
+func TestContributeRetriesTransientErrors(t *testing.T) {
+	sub := &fakeSubmitter{id: "introdb", err: errors.New("temporary provider failure")}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	for range 2 {
+		if _, err := svc.ContributeFile(context.Background(), file, ContributeOptions{}); err != nil {
+			t.Fatalf("ContributeFile: %v", err)
+		}
+	}
+	if len(sub.submitted) != 2 {
+		t.Fatalf("provider submissions = %d, want retry after transient failure", len(sub.submitted))
+	}
+}
+
+func TestContributeReleasesClaimAfterProviderCancelsRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sub := &fakeSubmitter{id: "introdb", err: context.Canceled, onSubmit: cancel}
+	file := newContribFile()
+	file.IntroStart, file.IntroEnd = floatPtr(0), floatPtr(60)
+	file.IntroMarkersSource = strPtr(models.MarkerSourceManual)
+	rec := &fakeRecorder{}
+	svc := newContribService(sub, fakeConfig{"introdb": {Provider: "introdb", ContributeEnabled: true}}, rec)
+
+	first, err := svc.ContributeFile(ctx, file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("first ContributeFile: %v", err)
+	}
+	if len(first) != 1 || first[0].Status != OutcomeStatusError {
+		t.Fatalf("first outcomes = %+v, want retryable error", first)
+	}
+
+	second, err := svc.ContributeFile(context.Background(), file, ContributeOptions{})
+	if err != nil {
+		t.Fatalf("second ContributeFile: %v", err)
+	}
+	if len(second) != 1 || second[0].Status != OutcomeStatusError {
+		t.Fatalf("second outcomes = %+v, want a retried provider error", second)
+	}
+	if len(sub.submitted) != 2 {
+		t.Fatalf("provider submissions = %d, want retry after canceled request", len(sub.submitted))
 	}
 }
 
@@ -260,5 +502,35 @@ func TestContentHashStableAndSensitive(t *testing.T) {
 	rematched := contributionTargetParts(ExternalIDs{Kind: ItemKindEpisode, TmdbID: "9999", SeasonNumber: 1, EpisodeNumber: 3})
 	if ContentHash("intro", &s, &e, &d, rematched...) == h1 {
 		t.Error("changed resolved target should change hash")
+	}
+}
+
+func TestContributionClaimConflictMatchesOnlyGlobalClaimIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "global claim conflict",
+			err:  &pgconn.PgError{Code: "23505", ConstraintName: contributionClaimIndex},
+			want: true,
+		},
+		{
+			name: "other unique conflict",
+			err:  &pgconn.PgError{Code: "23505", ConstraintName: "marker_contributions_pkey"},
+		},
+		{
+			name: "other database error",
+			err:  &pgconn.PgError{Code: "23503", ConstraintName: contributionClaimIndex},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isContributionClaimConflict(tt.err); got != tt.want {
+				t.Fatalf("isContributionClaimConflict() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -16,7 +16,7 @@ import (
 // pgCheckViolation is the SQLSTATE Postgres returns when CREATE … PARTITION OF
 // (or ATTACH PARTITION) would move rows out of the default partition — i.e. the
 // default partition already holds a row that belongs in the new partition's
-// range. See incident docs/continuum-to-silo-postgres-migration.md.
+// range. Hit in production during the Continuum-to-Silo Postgres migration.
 const pgCheckViolation = "23514"
 
 const deleteBatchSize = 10000

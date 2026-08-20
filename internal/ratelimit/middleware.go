@@ -46,6 +46,23 @@ func (mw *Middleware) ActiveBackend() string {
 	return "redis"
 }
 
+// SharedLimiter returns the process's configured per-key limiter, so an action
+// handler that enforces its own budget (person refresh, trailer refresh) counts
+// against the same backend the middleware uses rather than a private in-memory
+// one. That distinction only matters on Redis deployments, where a private
+// limiter would give every instance an independent allowance for the same user
+// and multiply the stated budget by the instance count.
+//
+// Handlers must tolerate nil: rate limiting is disabled outright when
+// rate_limit.enabled is false or the database is unavailable, and no limiter
+// exists then.
+func (mw *Middleware) SharedLimiter() RateLimiter {
+	if mw == nil {
+		return nil
+	}
+	return mw.perKey
+}
+
 // Init loads config and seeds defaults. Call once at startup.
 func (mw *Middleware) Init(ctx context.Context) error {
 	if err := SeedDefaults(ctx, mw.store); err != nil {

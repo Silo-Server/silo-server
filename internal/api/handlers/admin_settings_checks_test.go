@@ -99,6 +99,121 @@ func TestAdminGetEffectiveSettingsReturnsRuntimeDefaultsAndRedactsSecrets(t *tes
 	}
 }
 
+func TestAdminSettingsReadsHideMachineManagedCheckpoint(t *testing.T) {
+	const checkpoint = `{"baseline_identity":"old","target_identity":"new"}`
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		"server.log_level":                          "debug",
+		config.ArtworkStorageReconcileCheckpointKey: checkpoint,
+	}}
+	handler := &AdminHandler{SettingsRepo: settings}
+
+	for _, tc := range []struct {
+		name   string
+		handle func(http.ResponseWriter, *http.Request)
+		path   string
+	}{
+		{name: "raw settings", handle: handler.HandleGetSettings, path: "/admin/settings"},
+		{name: "effective settings", handle: handler.HandleGetEffectiveSettings, path: "/admin/settings/effective"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tc.handle(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			var values map[string]string
+			if err := json.NewDecoder(rec.Body).Decode(&values); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if _, leaked := values[config.ArtworkStorageReconcileCheckpointKey]; leaked {
+				t.Fatalf("response leaked machine-managed checkpoint: %#v", values)
+			}
+			if values["server.log_level"] != "debug" {
+				t.Fatalf("server.log_level = %q, want debug", values["server.log_level"])
+			}
+		})
+	}
+
+	t.Run("single setting", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/settings/"+config.ArtworkStorageReconcileCheckpointKey, nil)
+		req = withChiParam(req, "key", config.ArtworkStorageReconcileCheckpointKey)
+		rec := httptest.NewRecorder()
+
+		handler.HandleGetSetting(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), checkpoint) {
+			t.Fatalf("response leaked machine-managed checkpoint: %s", rec.Body.String())
+		}
+	})
+}
+
+func TestAdminSettingsWritesRejectMachineManagedCheckpoint(t *testing.T) {
+	const (
+		storedCheckpoint      = `{"baseline_identity":"old","target_identity":"new"}`
+		replacementCheckpoint = `{"baseline_identity":"wrong","target_identity":"wrong"}`
+	)
+
+	t.Run("batch settings", func(t *testing.T) {
+		settings := &fakeServerSettingsStore{values: map[string]string{
+			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
+		}}
+		handler := &AdminHandler{SettingsRepo: settings}
+		body, err := json.Marshal(updateSettingsRequest{Values: map[string]string{
+			config.ArtworkStorageReconcileCheckpointKey: replacementCheckpoint,
+		}})
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		rec := httptest.NewRecorder()
+
+		handler.HandleUpdateSettings(rec, httptest.NewRequest(http.MethodPut, "/admin/settings", bytes.NewReader(body)))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
+			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
+		}
+		if settings.atomicCalls != 0 {
+			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
+		}
+	})
+
+	t.Run("single setting", func(t *testing.T) {
+		settings := &fakeServerSettingsStore{values: map[string]string{
+			config.ArtworkStorageReconcileCheckpointKey: storedCheckpoint,
+		}}
+		handler := &AdminHandler{SettingsRepo: settings}
+		body, err := json.Marshal(updateSettingRequest{Value: replacementCheckpoint})
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/admin/settings/"+config.ArtworkStorageReconcileCheckpointKey,
+			bytes.NewReader(body),
+		)
+		req = withChiParam(req, "key", config.ArtworkStorageReconcileCheckpointKey)
+		rec := httptest.NewRecorder()
+
+		handler.HandleUpdateSetting(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		if got := settings.values[config.ArtworkStorageReconcileCheckpointKey]; got != storedCheckpoint {
+			t.Fatalf("checkpoint = %q, want unchanged %q", got, storedCheckpoint)
+		}
+		if settings.atomicCalls != 0 {
+			t.Fatalf("atomic update calls = %d, want 0", settings.atomicCalls)
+		}
+	})
+}
+
 func TestAdminGetEffectiveSettingsUsesEnvironmentManagedRuntimeValue(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{
 		"clientip.trusted_proxies": "10.0.0.0/8",

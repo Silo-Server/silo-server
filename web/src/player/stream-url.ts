@@ -1,5 +1,3 @@
-import type { PlayMethod } from "./types";
-
 const preconnectedOrigins = new Set<string>();
 
 /**
@@ -29,31 +27,29 @@ export function preconnectToStreamOrigin(streamUrl: string): void {
   document.head.appendChild(link);
 }
 
+/**
+ * Makes a server-issued stream path loadable by a native media element, which
+ * cannot set an Authorization header, by appending the access token as a query
+ * parameter.
+ *
+ * Under protocol v3 the plan's `stream.url` is already fully anchored by the
+ * server — the seek position, the stream token, and every other routing
+ * decision are baked in. This helper must not add playback semantics of its
+ * own; it only carries authentication.
+ */
 export function buildPlayerStreamUrl(
   apiBaseUrl: string,
   streamPath: string,
   token: string | null,
-  playMethod: PlayMethod,
-  initialPosition: number,
 ): string {
-  const params = new URLSearchParams();
-
-  if (token) {
-    params.set("token", token);
-  }
-
-  if (playMethod === "remux" && initialPosition > 0) {
-    params.set("seek", initialPosition.toFixed(3));
-  }
-
-  const query = params.toString();
   const base =
     streamPath.startsWith("http://") || streamPath.startsWith("https://")
       ? streamPath
       : `${apiBaseUrl}${streamPath}`;
-  if (!query) {
+  if (!token) {
     return base;
   }
+  const query = new URLSearchParams({ token }).toString();
   // The backend stream URL may already carry its own query string (e.g. the
   // `?st=<streamtoken>` reconstruct token for integrated-mode direct/remux).
   // Join with `&` in that case so we don't clobber it into `st=X?token=Y`.

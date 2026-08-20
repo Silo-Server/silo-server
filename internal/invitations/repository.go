@@ -3,7 +3,7 @@
 // access decisions the admin made at send time. The invitee only chooses a
 // password; their email address becomes their username.
 //
-// Spec: docs/superpowers/specs/2026-07-27-invitations-and-onboarding-design.md
+// Design: docs/architecture/invitations-onboarding.md
 package invitations
 
 import (

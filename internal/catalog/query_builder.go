@@ -100,15 +100,20 @@ func (qb *QueryBuilder) Build(input any) (string, []any, error) {
 	if len(groupClauses) == 0 {
 		return "", nil, nil
 	}
+	// The returned expression is always parenthesized so it stays atomic when
+	// callers AND access, library, and other outer constraints onto it. A
+	// match-any group (or a match-any top level) emits a top-level OR; without
+	// the parentheses, SQL precedence lets the first OR arm bypass every
+	// constraint appended afterward.
 	if len(groupClauses) == 1 {
-		return groupClauses[0], qb.args, nil
+		return "(" + groupClauses[0] + ")", qb.args, nil
 	}
 
 	wrapped := make([]string, len(groupClauses))
 	for i, clause := range groupClauses {
 		wrapped[i] = "(" + clause + ")"
 	}
-	return strings.Join(wrapped, topJoiner), qb.args, nil
+	return "(" + strings.Join(wrapped, topJoiner) + ")", qb.args, nil
 }
 
 func normalizeBuilderInput(input any) (QueryDefinition, error) {

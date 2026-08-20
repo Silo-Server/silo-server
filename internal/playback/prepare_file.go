@@ -67,6 +67,14 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	// any stale partial first so a failed prior attempt can't be mistaken for output.
 	_ = os.Remove(partPath)
 
+	// Resolve a multi-device hw_device list to one concrete GPU for this
+	// encode. Run blocks until ffmpeg exits, so the deferred release fires at
+	// exactly the process-exit boundary.
+	opts = normalizeTranscodeOpts(opts)
+	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
+	opts.HWDevice = hwDevice
+	defer releaseHWDevice()
+
 	args := buildPrepareFileArgs(opts, partPath)
 	bin := opts.FFmpegPath
 	if bin == "" {
@@ -98,7 +106,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 // faststart MP4 instead of HLS segments. Full-file output needs no seek or
 // segment-boundary keyframes.
 func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
-	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	opts = normalizeTranscodeOpts(opts)
 	isVideoCopy := opts.TargetCodecVideo == "copy"
 	isAudioCopy := opts.TargetCodecAudio == "copy"
 

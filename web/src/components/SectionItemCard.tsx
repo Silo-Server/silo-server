@@ -14,6 +14,7 @@ import {
   upcomingBadgeLabel,
 } from "@/lib/upcomingEventPresentation";
 import type { SectionItem } from "@/api/types";
+import { useUICustomization } from "@/hooks/useUICustomization";
 
 interface SectionItemCardProps {
   item: SectionItem;
@@ -32,6 +33,9 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
   const airDateLabel = upcomingEvent ? formatUpcomingDate(upcomingEvent.air_date) : "";
   const airTimeLabel = upcomingEvent ? formatUpcomingTime(upcomingEvent.air_time) : null;
   const episodeLabels = !upcomingEvent ? buildEpisodeCardLabels(item) : null;
+  const { cardPresentation } = useUICustomization();
+  const showCaption = cardPresentation.caption !== "artwork";
+  const showMetadata = cardPresentation.caption === "title_metadata";
 
   return (
     <div className="media-card group/card">
@@ -97,45 +101,47 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
           variant="poster"
         />
       </div>
-      <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-        <div className="truncate text-[14px] font-semibold tracking-tight">
-          {episodeLabels ? episodeLabels.seriesTitle : item.title}
-        </div>
-        {upcomingEvent ? (
-          <>
-            {subtitle && (
-              <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
-                {subtitle}
+      {showCaption ? (
+        <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
+          <div className="truncate text-[14px] font-semibold tracking-tight">
+            {episodeLabels ? episodeLabels.seriesTitle : item.title}
+          </div>
+          {showMetadata && upcomingEvent ? (
+            <>
+              {subtitle && (
+                <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+                  {subtitle}
+                </div>
+              )}
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium">
+                <span className="text-foreground">{airDateLabel}</span>
+                {airTimeLabel && <span className="text-muted-foreground">{airTimeLabel}</span>}
               </div>
-            )}
-            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium">
-              <span className="text-foreground">{airDateLabel}</span>
-              {airTimeLabel && <span className="text-muted-foreground">{airTimeLabel}</span>}
+            </>
+          ) : showMetadata && episodeLabels ? (
+            <>
+              {episodeLabels.episodeTitle ? (
+                <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+                  {episodeLabels.episodeTitle}
+                </div>
+              ) : null}
+              <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+                {episodeLabels.episodeCode}
+              </div>
+            </>
+          ) : showMetadata && item.item_source === "next_in_series" && item.series_title ? (
+            <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+              {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
-          </>
-        ) : episodeLabels ? (
-          <>
-            {episodeLabels.episodeTitle ? (
-              <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
-                {episodeLabels.episodeTitle}
-              </div>
-            ) : null}
+          ) : showMetadata ? (
             <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
-              {episodeLabels.episodeCode}
+              {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}
             </div>
-          </>
-        ) : item.item_source === "next_in_series" && item.series_title ? (
-          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
-            {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
-        ) : (
-          <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
-            {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}
-          </div>
-        )}
-      </ViewTransitionLink>
+          ) : null}
+        </ViewTransitionLink>
+      ) : null}
     </div>
   );
 }

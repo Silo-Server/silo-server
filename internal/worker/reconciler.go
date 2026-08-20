@@ -29,6 +29,8 @@ type SessionSync struct {
 	ClientIP             string
 	ClientName           string
 	ClientVersion        string
+	ClientBuild          string
+	ClientChannel        string
 	ClientUserAgent      string
 	AudioTrackIndex      int
 	TranscodeAudio       bool
@@ -151,11 +153,11 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			INSERT INTO playback_sessions_sync
 				(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method,
 				 reporting_node, started_at, updated_at, last_sync_at, client_ip,
-				 client_name, client_version, client_user_agent,
+				 client_name, client_version, client_build, client_channel, client_user_agent,
 				 audio_track_index, transcode_audio, stream_bitrate_kbps, transcode_node_url,
 				 target_resolution, target_video_codec, target_audio_codec, target_bitrate_kbps,
 				 transcode_hw_accel, position_seconds, is_paused, has_websocket, compat_origin)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -168,6 +170,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				client_ip           = EXCLUDED.client_ip,
 				client_name         = EXCLUDED.client_name,
 				client_version      = EXCLUDED.client_version,
+				client_build        = EXCLUDED.client_build,
+				client_channel      = EXCLUDED.client_channel,
 				client_user_agent   = EXCLUDED.client_user_agent,
 				audio_track_index   = EXCLUDED.audio_track_index,
 				transcode_audio     = EXCLUDED.transcode_audio,
@@ -185,7 +189,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
-			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientUserAgent),
+			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientBuild),
+			nullableString(s.ClientChannel), nullableString(s.ClientUserAgent),
 			s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
 			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
 			nullableString(s.TargetAudioCodec), nullableInt(s.TargetBitrateKbps),
@@ -251,6 +256,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(HOST(client_ip), ''),
 			COALESCE(client_name, ''),
 			COALESCE(client_version, ''),
+			COALESCE(client_build, ''),
+			COALESCE(client_channel, ''),
 			COALESCE(client_user_agent, ''),
 			COALESCE(audio_track_index, 0),
 			COALESCE(transcode_audio, FALSE),
@@ -290,6 +297,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.ClientIP,
 			&s.ClientName,
 			&s.ClientVersion,
+			&s.ClientBuild,
+			&s.ClientChannel,
 			&s.ClientUserAgent,
 			&s.AudioTrackIndex,
 			&s.TranscodeAudio,
@@ -347,6 +356,8 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].ClientIP != right[i].ClientIP ||
 			left[i].ClientName != right[i].ClientName ||
 			left[i].ClientVersion != right[i].ClientVersion ||
+			left[i].ClientBuild != right[i].ClientBuild ||
+			left[i].ClientChannel != right[i].ClientChannel ||
 			left[i].ClientUserAgent != right[i].ClientUserAgent ||
 			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
 			left[i].TranscodeAudio != right[i].TranscodeAudio ||

@@ -8,9 +8,11 @@ interface GridLayout {
 interface UseGridLayoutOptions {
   gap: number;
   textAreaHeight: number;
+  /** Re-measure when the grid's responsive class set changes at the same width. */
+  layoutKey?: string;
 }
 
-export function useGridLayout({ gap, textAreaHeight }: UseGridLayoutOptions) {
+export function useGridLayout({ gap, textAreaHeight, layoutKey = "" }: UseGridLayoutOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState<GridLayout>({
     columnCount: 8,
@@ -35,11 +37,14 @@ export function useGridLayout({ gap, textAreaHeight }: UseGridLayoutOptions) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, [measure]);
+
+  useEffect(() => {
+    measure();
+  }, [layoutKey, measure]);
 
   return { containerRef, layout };
 }

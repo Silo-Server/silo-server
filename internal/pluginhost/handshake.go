@@ -23,6 +23,9 @@ const (
 	DefaultEventTimeout      = 10 * time.Second
 	DefaultAuthTimeout       = 10 * time.Second
 	DefaultRouteTimeout      = 10 * time.Second
+	// Watch-sync providers may resolve cold external metadata before applying
+	// an event. Bound that work without cutting off valid slow provider calls.
+	DefaultWatchSyncTimeout = 2 * time.Minute
 	// DefaultRequestRouterTimeout bounds a single request_router RPC.
 	// Fulfillment hits remote arr instances, so allow generous headroom.
 	DefaultRequestRouterTimeout = 60 * time.Second

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { PlayerFileVersion, WatchPageProps } from "../types";
+import type { PlayerFileVersion, PlayerPlaybackStateChange, WatchPageProps } from "../types";
 import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
+import type { SubtitleInventoryItemV3 } from "../protocol-v3";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerFetch } from "../player-fetch";
@@ -70,13 +71,14 @@ export function WatchPage({
   initialPosition,
   forceInitialPosition,
   qualityPreference,
+  maxBitrateKbps,
   explicitAudioTrackIndex,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
   profileLanguage,
-  autoSkipIntro,
+  introSkipMode,
   autoSkipRecap,
   autoPlayNextPreview,
   canEditMarkers,
@@ -123,6 +125,7 @@ export function WatchPage({
     initialPosition,
     forceInitialPosition,
     qualityPreference,
+    maxBitrateKbps,
     resumeHints,
     explicitAudioTrackIndex,
   );
@@ -167,6 +170,15 @@ export function WatchPage({
     [session],
   );
 
+  const updatePlaybackState = session.updatePlaybackState;
+  const handlePlaybackStateChange = useCallback(
+    (state: PlayerPlaybackStateChange) => {
+      updatePlaybackState(state.currentTime, state.playing);
+      onPlaybackStateChange?.(state);
+    },
+    [onPlaybackStateChange, updatePlaybackState],
+  );
+
   /**
    * Persists an in-player subtitle choice for the whole series.
    *
@@ -177,11 +189,12 @@ export function WatchPage({
    * on its own rather than one composite request that half-applies.
    */
   const handleSubtitleChanged = useCallback(
-    (index: number | null) => {
+    (index: number | null, inventoryTrack?: SubtitleInventoryItemV3) => {
       const requests = buildSubtitleChoiceRequests({
         seriesId: seriesContext?.seriesId ?? contentId,
         index,
         tracks: playableSubtitles,
+        inventoryTrack,
         showForcedSubtitles,
       });
       for (const request of requests) {
@@ -363,7 +376,9 @@ export function WatchPage({
     [session.mediaFileId],
   );
 
-  if (!session.streamUrl || !session.sessionId) {
+  // The plan is the player's contract: without one there is no transport, no
+  // timeline and no track inventory to render against.
+  if (!session.plan || !session.streamUrl || !session.sessionId) {
     if (session.loading) {
       return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
@@ -400,30 +415,6 @@ export function WatchPage({
     );
   }
 
-  if (session.error && !session.replacing) {
-    return (
-      <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
-        <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
-          <div className="space-y-2">
-            <p className="text-base font-semibold text-white">
-              {session.errorTitle ?? "Playback unavailable"}
-            </p>
-            <p className="text-sm text-white/60">{session.error}</p>
-          </div>
-          <button
-            onClick={() => {
-              void onExit();
-            }}
-            type="button"
-            className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
-          >
-            Go Back
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // Find the duration of the selected file so the player knows the total
   // length even when the stream is chunked (no Content-Length header).
   const selectedDuration =
@@ -442,8 +433,12 @@ export function WatchPage({
       title={title}
       year={year}
       streamUrl={session.streamUrl}
-      playMethod={session.playMethod!}
-      playbackInfo={session.playbackInfo}
+      plan={session.plan}
+      planRevision={session.planRevision}
+      shouldAutoPlay={session.shouldAutoPlay}
+      replanning={session.replanning}
+      replanError={session.error}
+      replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
       versions={playbackVersions}
@@ -452,14 +447,18 @@ export function WatchPage({
       onSwitchVersion={handleSwitchVersion}
       subtitleUrls={playableSubtitles}
       initialPosition={session.initialPosition}
-      transportRestart={session.transportRestart}
+      onQualitySelect={session.changeQuality}
+      onSubtitleTrackChange={session.changeSubtitleTrack}
+      onPlanFailure={session.recoverFromFailure}
+      onReanchorSeek={session.reanchorSeek}
+      onApplySubtitleTrack={session.applySubtitleTrack}
       preferredSubtitleLanguage={preferredSubtitleLanguage}
       preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
       subtitleMode={subtitleMode}
       showForcedSubtitles={showForcedSubtitles}
       profileLanguage={profileLanguage}
       intro={activeMarkers.intro}
-      autoSkipIntro={autoSkipIntro}
+      introSkipMode={introSkipMode}
       credits={activeMarkers.credits}
       recap={activeMarkers.recap}
       autoSkipRecap={autoSkipRecap}
@@ -479,13 +478,15 @@ export function WatchPage({
         )
       }
       duration={selectedDuration}
-      qualityPreference={qualityPreference}
+      // The session's preference, not the caller's: the server normalizes what
+      // was requested and the menu has to light up whatever it settled on.
+      qualityPreference={session.qualityPreference}
       seriesContext={seriesContext}
       onNavigateEpisode={onNavigateEpisode}
       displayMode={displayMode}
       onPictureInPictureChange={onPictureInPictureChange}
       autoEnterPictureInPicture={autoEnterPictureInPicture}
-      onPlaybackStateChange={onPlaybackStateChange}
+      onPlaybackStateChange={handlePlaybackStateChange}
       onPlaybackTransportReady={onPlaybackTransportReady}
       onRealtimeEvent={handleRealtimeEvent}
       onRealtimeConnectionStateChange={setRealtimeConnectionState}

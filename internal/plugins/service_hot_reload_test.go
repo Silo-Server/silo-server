@@ -237,6 +237,10 @@ func (f *fakePluginClient) HTTPRoutes(string) (*pluginhost.HTTPRoutesClient, err
 	return nil, nil
 }
 
+func (f *fakePluginClient) WatchSyncProvider(string) (*pluginhost.WatchSyncProviderClient, error) {
+	return nil, nil
+}
+
 type fakeServiceInstallationStore struct {
 	byID             map[int]*Installation
 	byPluginID       map[string][]*Installation

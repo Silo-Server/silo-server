@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 
 import {
   useAdminDeviceOverrides,
@@ -92,6 +93,7 @@ describe("admin canonical settings hooks", () => {
         key: "playback.subtitle_mode",
         scope: "profile",
         profile_id: "p1",
+        client_family: undefined,
         library_id: undefined,
         series_id: undefined,
         value: "always",
@@ -101,6 +103,7 @@ describe("admin canonical settings hooks", () => {
         key: "playback.auto_skip_intro",
         scope: "profile",
         profile_id: "p1",
+        client_family: undefined,
         library_id: undefined,
         series_id: undefined,
         value: "true",
@@ -225,6 +228,56 @@ describe("admin canonical settings hooks", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 
+  it("carries a profile-client family from listing through mutation identity", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (init?.method === "PUT") {
+        expect(url).toBe(
+          "/api/v1/admin/users/7/settings/values/ui.card_presentation?scope=profile_client&profile_id=p1&client_family=tv",
+        );
+        return jsonResponse({
+          key: SETTING_KEYS.UI_CARD_PRESENTATION,
+          scope: "profile_client",
+          profile_id: "p1",
+          client_family: "tv",
+          value: { poster_size: "large", caption: "artwork" },
+        });
+      }
+      expect(url).toBe("/api/v1/admin/users/7/settings/values");
+      return jsonResponse({
+        revision: 5,
+        values: [
+          {
+            key: SETTING_KEYS.UI_CARD_PRESENTATION,
+            scope: "profile_client",
+            profile_id: "p1",
+            client_family: "tv",
+            value: { poster_size: "compact", caption: "title" },
+            revision: 1,
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const listed = renderHook(() => useAdminUserSettings(7), { wrapper: createWrapper() });
+    await waitFor(() => expect(listed.result.current.data.length).toBe(1));
+    expect(listed.result.current.data[0]).toMatchObject({
+      scope: "profile_client",
+      profile_id: "p1",
+      client_family: "tv",
+    });
+
+    const update = renderHook(() => useUpdateAdminUserSetting(), { wrapper: createWrapper() });
+    update.result.current.mutate({
+      userId: 7,
+      key: SETTING_KEYS.UI_CARD_PRESENTATION,
+      identity: { scope: "profile_client", profileId: "p1", clientFamily: "tv" },
+      value: JSON.stringify({ poster_size: "large", caption: "artwork" }),
+    });
+    await waitFor(() => expect(update.result.current.isSuccess).toBe(true));
+  });
+
   it("deletes a user setting at its exact scope", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       expect(init?.method).toBe("DELETE");
@@ -239,6 +292,31 @@ describe("admin canonical settings hooks", () => {
     result.current.mutate({
       userId: 7,
       key: "playback.subtitle_mode",
+      identity: { scope: "profile", profileId: "p1" },
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  it("resets navigation shortcuts with the permitted atomic empty document", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      expect(init?.method).toBe("PUT");
+      expect(String(input)).toBe(
+        "/api/v1/admin/users/7/settings/values/nav.shortcuts?scope=profile&profile_id=p1",
+      );
+      expect(JSON.parse(String(init?.body))).toEqual({ value: { items: [] } });
+      return jsonResponse({
+        key: SETTING_KEYS.NAV_SHORTCUTS,
+        scope: "profile",
+        profile_id: "p1",
+        value: { items: [] },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useDeleteAdminUserSetting(), { wrapper: createWrapper() });
+    result.current.mutate({
+      userId: 7,
+      key: SETTING_KEYS.NAV_SHORTCUTS,
       identity: { scope: "profile", profileId: "p1" },
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

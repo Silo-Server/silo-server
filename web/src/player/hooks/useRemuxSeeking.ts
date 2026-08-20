@@ -1,25 +1,15 @@
-import { useCallback, useRef } from "react";
-import type { PlayMethod } from "../types";
+import { useCallback } from "react";
 
 /**
- * Provides a seek function for direct play streams.
+ * Provides a seek function for progressive streams.
  *
- * Remux streams now use HLS (via the transcode pipeline), so seeking is
- * handled natively by hls.js. This hook only handles direct play seeking
- * via video.currentTime.
+ * HLS routes seek against the plan's timeline through hls.js, so this hook only
+ * covers the progressive and direct-play cases, where the element's own
+ * `currentTime` is the whole story.
  */
-export function useRemuxSeeking(
-  videoRef: React.RefObject<HTMLVideoElement | null>,
-  _playMethod: PlayMethod,
-  _streamUrl: string,
-  _initialPosition: number,
-): {
+export function useRemuxSeeking(videoRef: React.RefObject<HTMLVideoElement | null>): {
   handleSeek: (seconds: number) => void;
-  getEffectiveTime: () => number;
-  seekOffsetRef: React.RefObject<number>;
 } {
-  const seekOffsetRef = useRef(0);
-
   const handleSeek = useCallback(
     (seconds: number) => {
       const video = videoRef.current;
@@ -29,11 +19,5 @@ export function useRemuxSeeking(
     [videoRef],
   );
 
-  const getEffectiveTime = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return 0;
-    return video.currentTime;
-  }, [videoRef]);
-
-  return { handleSeek, getEffectiveTime, seekOffsetRef };
+  return { handleSeek };
 }

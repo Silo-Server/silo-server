@@ -865,19 +865,24 @@ func listSubtitleLanguagesWithSource(
 	// `subtitle_language_codes`; external subs still need a JSONB unnest
 	// because the generated column only covers subtitle_tracks
 	// (audit 2026-05-01 §2.5b).
+	//
+	// Each arm applies its own DISTINCT before the UNION ALL so the merge
+	// only sees the handful of distinct language codes per arm. A plain
+	// UNION here forces one deduplication pass across every unnested track
+	// row — millions of rows on a large catalog.
 	query := fmt.Sprintf(`
 		SELECT DISTINCT value
 		FROM (
-			SELECT lang AS value
+			SELECT DISTINCT lang AS value
 			FROM %s
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL UNNEST(mf.subtitle_language_codes) AS lang
 			%s
 			  AND mf.missing_since IS NULL
 
-			UNION
+			UNION ALL
 
-			SELECT LOWER(COALESCE(track->>'language', '')) AS value
+			SELECT DISTINCT LOWER(COALESCE(track->>'language', '')) AS value
 			FROM %s
 			JOIN media_files mf ON %s
 			CROSS JOIN LATERAL jsonb_array_elements(COALESCE(mf.external_subtitles, '[]'::jsonb)) AS track
@@ -886,7 +891,8 @@ func listSubtitleLanguagesWithSource(
 		) languages
 		WHERE value IS NOT NULL AND value <> ''
 		ORDER BY value ASC
-	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fromClause, mediaFileJoin, browseFilterPrefix(whereClause))
+		LIMIT %d
+	`, fromClause, mediaFileJoin, browseFilterPrefix(whereClause), fromClause, mediaFileJoin, browseFilterPrefix(whereClause), catalogFacetMaxValues)
 	return queryDistinctStrings(ctx, pool, query, args)
 }
 

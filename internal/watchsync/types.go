@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -58,6 +59,13 @@ type AuthProvider interface {
 	LookupAccount(ctx context.Context, cfg ServerConfig, conn Connection) (ProviderAccount, error)
 }
 
+// authoritativeRefreshProvider marks providers whose refreshed credentials are
+// a complete replacement rather than a patch. The unexported method keeps this
+// contract internal to watchsync until all providers can share it.
+type authoritativeRefreshProvider interface {
+	authoritativeRefreshProvider()
+}
+
 // APIKeyAuthProvider is implemented by providers that authenticate via a
 // user-supplied API key rather than an OAuth device flow. The key itself is
 // stored in Connection.AccessToken; LookupAccount and RefreshToken (no-op)
@@ -65,6 +73,18 @@ type AuthProvider interface {
 // working unchanged.
 type APIKeyAuthProvider interface {
 	ConnectWithAPIKey(ctx context.Context, apiKey string) (TokenSet, ProviderAccount, error)
+}
+
+// ConnectionConfigValues contains manifest-declared, per-connection setup
+// values keyed first by config-schema key and then by field key.
+type ConnectionConfigValues map[string]map[string]any
+
+type configuredAPIKeyAuthProvider interface {
+	ConnectWithAPIKeyConfig(ctx context.Context, apiKey string, config ConnectionConfigValues) (TokenSet, ProviderAccount, error)
+}
+
+type connectionConfigProvider interface {
+	ConnectionConfigSchema() []plugins.ConfigSchemaView
 }
 
 type WatchedImporter interface {
@@ -100,6 +120,12 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
+// singleBatchWatchedExporter bounds one synchronization run to one provider
+// batch. This is used for plugin RPCs with independent per-call deadlines.
+type singleBatchWatchedExporter interface {
+	ExportBatchSize() int
+}
+
 type UnwatchedExporter interface {
 	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
@@ -112,6 +138,9 @@ type FavoriteImportBatch struct {
 	Rows           []RemoteFavorite
 	UpdatedCursors map[string]string
 	Warnings       []string
+	// Incremental means absent remote items are not deletions. The zero value is
+	// an authoritative snapshot, preserving existing built-in provider behavior.
+	Incremental bool
 }
 
 type FavoriteBatchImporter interface {
@@ -175,6 +204,9 @@ type Connection struct {
 	AccessToken                  string
 	RefreshToken                 string
 	TokenExpiresAt               *time.Time
+	TokenType                    string
+	Scopes                       []string
+	SecretAttributes             map[string]string
 	ImportWatchedEnabled         bool
 	ImportProgressEnabled        bool
 	ExportWatchedEnabled         bool
@@ -278,6 +310,19 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 	return rle, ok
 }
 
+type retryableProviderError struct {
+	message string
+}
+
+func (e retryableProviderError) Error() string {
+	return e.message
+}
+
+func isRetryableProviderError(err error) bool {
+	var retryable retryableProviderError
+	return errors.As(err, &retryable)
+}
+
 type DeviceAuthSession struct {
 	ID              string     `json:"id"`
 	Provider        string     `json:"provider"`
@@ -291,10 +336,24 @@ type DeviceAuthSession struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
+// deviceAuthorizationPendingError carries an authoritative replacement for a
+// device challenge that must be persisted before the next poll. It remains an
+// error so the existing HTTP contract continues to report an incomplete flow.
+type deviceAuthorizationPendingError struct {
+	session DeviceAuthSession
+}
+
+func (deviceAuthorizationPendingError) Error() string {
+	return "watch sync plugin device authorization is pending"
+}
+
 type TokenSet struct {
-	AccessToken    string
-	RefreshToken   string
-	TokenExpiresAt *time.Time
+	AccessToken      string
+	RefreshToken     string
+	TokenExpiresAt   *time.Time
+	TokenType        string
+	Scopes           []string
+	SecretAttributes map[string]string
 }
 
 type ProviderAccount struct {
@@ -345,20 +404,23 @@ type RemoteProgress struct {
 type RemoteFavorite struct {
 	Provider        string
 	ProviderItemKey string
-	Kind            string
-	Title           string
-	Year            int
-	IMDbID          string
-	TMDBID          string
-	TVDBID          string
-	SeriesTitle     string
-	SeriesYear      int
-	SeriesIMDbID    string
-	SeriesTMDBID    string
-	SeriesTVDBID    string
-	SeasonNumber    int
-	EpisodeNumber   int
-	FavoritedAt     time.Time
+	// Removed is an explicit provider tombstone used by incremental list syncs.
+	// Tombstones are resolved through ProviderItemKey and do not require media.
+	Removed       bool
+	Kind          string
+	Title         string
+	Year          int
+	IMDbID        string
+	TMDBID        string
+	TVDBID        string
+	SeriesTitle   string
+	SeriesYear    int
+	SeriesIMDbID  string
+	SeriesTMDBID  string
+	SeriesTVDBID  string
+	SeasonNumber  int
+	EpisodeNumber int
+	FavoritedAt   time.Time
 }
 
 type RemotePlay struct {
@@ -449,6 +511,15 @@ type LocalListEvent struct {
 	Items     []LocalFavorite
 }
 
+const (
+	historyExportStatusPending             = "pending"
+	historyExportStatusFailed              = "failed"
+	historyExportStatusSent                = "sent"
+	historyExportStatusNotFound            = "not_found"
+	historyExportStatusRemotePresent       = "remote_present"
+	historyExportStatusSatisfiedByScrobble = "satisfied_by_scrobble"
+)
+
 type HistoryExport struct {
 	ID              string
 	ConnectionID    string
@@ -490,27 +561,28 @@ type ListItemState struct {
 }
 
 type ScrobbleSession struct {
-	PlaybackSessionID string
-	ConnectionID      string
-	MediaItemID       string
-	ProviderItemKey   string
-	Kind              string
-	IMDbID            string
-	TMDBID            string
-	TVDBID            string
-	SeriesIMDbID      string
-	SeriesTMDBID      string
-	SeriesTVDBID      string
-	SeasonNumber      int
-	EpisodeNumber     int
-	HistoryID         string
-	StartedAt         time.Time
-	LastProgress      float64
-	DurationSeconds   float64
-	Completed         bool
-	LastAction        string
-	StopSentAt        *time.Time
-	LastError         string
+	PlaybackSessionID   string
+	ConnectionID        string
+	MediaItemID         string
+	ProviderItemKey     string
+	Kind                string
+	IMDbID              string
+	TMDBID              string
+	TVDBID              string
+	SeriesIMDbID        string
+	SeriesTMDBID        string
+	SeriesTVDBID        string
+	SeasonNumber        int
+	EpisodeNumber       int
+	HistoryID           string
+	StartedAt           time.Time
+	LastProgress        float64
+	DurationSeconds     float64
+	Completed           bool
+	LastAction          string
+	StopSentAt          *time.Time
+	HistoryReconciledAt *time.Time
+	LastError           string
 }
 
 type ExportResult struct {
@@ -601,38 +673,40 @@ func (f RemoteFavorite) HistoryRecord() historyimport.Record {
 }
 
 type ProviderSummary struct {
-	Key          string       `json:"key"`
-	DisplayName  string       `json:"display_name"`
-	Capabilities Capabilities `json:"capabilities"`
+	Key                    string                     `json:"key"`
+	DisplayName            string                     `json:"display_name"`
+	Capabilities           Capabilities               `json:"capabilities"`
+	ConnectionConfigSchema []plugins.ConfigSchemaView `json:"connection_config_schema,omitempty"`
 }
 
 type ConnectionStatus struct {
-	Provider                     string       `json:"provider"`
-	DisplayName                  string       `json:"display_name"`
-	Capabilities                 Capabilities `json:"capabilities"`
-	AuthMethod                   string       `json:"auth_method"`
-	Connected                    bool         `json:"connected"`
-	ProviderUsername             string       `json:"provider_username,omitempty"`
-	ImportWatchedEnabled         bool         `json:"import_watched_enabled"`
-	ImportProgressEnabled        bool         `json:"import_progress_enabled"`
-	ExportWatchedEnabled         bool         `json:"export_watched_enabled"`
-	ExportUnwatchedEnabled       bool         `json:"export_unwatched_enabled"`
-	ImportFavoritesEnabled       bool         `json:"import_favorites_enabled"`
-	ExportFavoritesEnabled       bool         `json:"export_favorites_enabled"`
-	SyncFavoriteRemovalsEnabled  bool         `json:"sync_favorite_removals_enabled"`
-	ImportWatchlistEnabled       bool         `json:"import_watchlist_enabled"`
-	ExportWatchlistEnabled       bool         `json:"export_watchlist_enabled"`
-	SyncWatchlistRemovalsEnabled bool         `json:"sync_watchlist_removals_enabled"`
-	SyncWatchlistOrderEnabled    bool         `json:"sync_watchlist_order_enabled"`
-	ScrobbleEnabled              bool         `json:"scrobble_enabled"`
-	CredentialsConfigured        bool         `json:"credentials_configured"`
-	LastInboundSyncAt            *time.Time   `json:"last_inbound_sync_at,omitempty"`
-	LastProgressSyncAt           *time.Time   `json:"last_progress_sync_at,omitempty"`
-	LastOutboundSyncAt           *time.Time   `json:"last_outbound_sync_at,omitempty"`
-	LastFavoritesSyncAt          *time.Time   `json:"last_favorites_sync_at,omitempty"`
-	LastWatchlistSyncAt          *time.Time   `json:"last_watchlist_sync_at,omitempty"`
-	LastScrobbleErrorAt          *time.Time   `json:"last_scrobble_error_at,omitempty"`
-	LastError                    string       `json:"last_error,omitempty"`
+	Provider                     string                     `json:"provider"`
+	DisplayName                  string                     `json:"display_name"`
+	Capabilities                 Capabilities               `json:"capabilities"`
+	AuthMethod                   string                     `json:"auth_method"`
+	Connected                    bool                       `json:"connected"`
+	ProviderUsername             string                     `json:"provider_username,omitempty"`
+	ImportWatchedEnabled         bool                       `json:"import_watched_enabled"`
+	ImportProgressEnabled        bool                       `json:"import_progress_enabled"`
+	ExportWatchedEnabled         bool                       `json:"export_watched_enabled"`
+	ExportUnwatchedEnabled       bool                       `json:"export_unwatched_enabled"`
+	ImportFavoritesEnabled       bool                       `json:"import_favorites_enabled"`
+	ExportFavoritesEnabled       bool                       `json:"export_favorites_enabled"`
+	SyncFavoriteRemovalsEnabled  bool                       `json:"sync_favorite_removals_enabled"`
+	ImportWatchlistEnabled       bool                       `json:"import_watchlist_enabled"`
+	ExportWatchlistEnabled       bool                       `json:"export_watchlist_enabled"`
+	SyncWatchlistRemovalsEnabled bool                       `json:"sync_watchlist_removals_enabled"`
+	SyncWatchlistOrderEnabled    bool                       `json:"sync_watchlist_order_enabled"`
+	ScrobbleEnabled              bool                       `json:"scrobble_enabled"`
+	CredentialsConfigured        bool                       `json:"credentials_configured"`
+	ConnectionConfigSchema       []plugins.ConfigSchemaView `json:"connection_config_schema,omitempty"`
+	LastInboundSyncAt            *time.Time                 `json:"last_inbound_sync_at,omitempty"`
+	LastProgressSyncAt           *time.Time                 `json:"last_progress_sync_at,omitempty"`
+	LastOutboundSyncAt           *time.Time                 `json:"last_outbound_sync_at,omitempty"`
+	LastFavoritesSyncAt          *time.Time                 `json:"last_favorites_sync_at,omitempty"`
+	LastWatchlistSyncAt          *time.Time                 `json:"last_watchlist_sync_at,omitempty"`
+	LastScrobbleErrorAt          *time.Time                 `json:"last_scrobble_error_at,omitempty"`
+	LastError                    string                     `json:"last_error,omitempty"`
 }
 
 type ConnectionUpdate struct {

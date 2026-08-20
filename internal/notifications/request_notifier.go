@@ -17,7 +17,7 @@ import (
 const (
 	// DeliveryTypeRequestFulfilled is the operational notice posted once the
 	// requested media is present in the catalog
-	// (docs/superpowers/plans/notifications/06, item 2).
+	// (docs/architecture/notifications.md, "Request notifications").
 	DeliveryTypeRequestFulfilled = "request.fulfilled"
 	// DeliveryTypeRequestApproved notifies the requesting profile that an
 	// admin (or auto-approval) approved their request.

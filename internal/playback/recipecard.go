@@ -44,10 +44,14 @@ type RecipeCard struct {
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
-	// Unused (zero) for direct/remux cards, which carry no segment-based encode.
+	// Direct cards leave them zero; remux cards use the audio targets when the
+	// selected stream must be converted.
 	InputPath              string  `json:"input_path"`
 	OutputSubdir           string  `json:"output_subdir,omitempty"`
 	SourceVideoCodec       string  `json:"source_video_codec,omitempty"`
+	SourceVideoProfile     string  `json:"source_video_profile,omitempty"`
+	SourceVideoBitDepth    int     `json:"source_video_bit_depth,omitempty"`
+	SoftwareVideoDecode    bool    `json:"software_video_decode,omitempty"`
 	VideoBitstreamFilter   string  `json:"video_bitstream_filter,omitempty"`
 	SeekSeconds            float64 `json:"seek_seconds"`
 	StreamOriginSeconds    float64 `json:"stream_origin_seconds,omitempty"`
@@ -55,6 +59,8 @@ type RecipeCard struct {
 	TargetResolution       string  `json:"target_resolution,omitempty"`
 	TargetCodecVideo       string  `json:"target_codec_video,omitempty"`
 	TargetCodecAudio       string  `json:"target_codec_audio,omitempty"`
+	TargetAudioChannels    int     `json:"target_audio_channels,omitempty"`
+	TargetAudioBitrateKbps int     `json:"target_audio_bitrate_kbps,omitempty"`
 	SegmentDuration        int     `json:"segment_duration"`
 	StartSegmentNumber     int     `json:"start_segment_number"`
 	HWAccel                string  `json:"hw_accel,omitempty"`
@@ -74,6 +80,7 @@ type RecipeCard struct {
 // re-resolved from live config on reconstruct rather than pinned here, so an
 // operator's config change applies to reconstructed sessions too.
 func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeURL string, opts TranscodeOpts) RecipeCard {
+	opts = resolveSoftwareVideoDecode(opts)
 	return RecipeCard{
 		SessionID:              opts.SessionID,
 		UserID:                 userID,
@@ -86,6 +93,9 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		InputPath:              opts.InputPath,
 		OutputSubdir:           opts.OutputSubdir,
 		SourceVideoCodec:       opts.SourceVideoCodec,
+		SourceVideoProfile:     opts.SourceVideoProfile,
+		SourceVideoBitDepth:    opts.SourceVideoBitDepth,
+		SoftwareVideoDecode:    opts.SoftwareVideoDecode,
 		VideoBitstreamFilter:   opts.VideoBitstreamFilter,
 		SeekSeconds:            opts.SeekSeconds,
 		StreamOriginSeconds:    opts.StreamOriginSeconds,
@@ -93,6 +103,8 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		TargetResolution:       opts.TargetResolution,
 		TargetCodecVideo:       opts.TargetCodecVideo,
 		TargetCodecAudio:       opts.TargetCodecAudio,
+		TargetAudioChannels:    opts.TargetAudioChannels,
+		TargetAudioBitrateKbps: opts.TargetAudioBitrateKbps,
 		SegmentDuration:        opts.SegmentDuration,
 		StartSegmentNumber:     opts.StartSegmentNumber,
 		HWAccel:                opts.HWAccel,
@@ -152,6 +164,9 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SessionID:              c.SessionID,
 		TranscodeTransportID:   c.TranscodeTransportID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,
@@ -159,6 +174,8 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		TargetResolution:       c.TargetResolution,
 		TargetCodecVideo:       c.TargetCodecVideo,
 		TargetCodecAudio:       c.TargetCodecAudio,
+		TargetAudioChannels:    c.TargetAudioChannels,
+		TargetAudioBitrateKbps: c.TargetAudioBitrateKbps,
 		SegmentDuration:        c.SegmentDuration,
 		StartSegmentNumber:     c.StartSegmentNumber,
 		FFmpegPath:             ffmpegPath,
@@ -207,6 +224,9 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ProfileID:              c.ProfileID,
 		MediaFileID:            c.MediaFileID,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,
@@ -220,6 +240,8 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		TotalDuration:          c.TotalDuration,
 		FastStart:              c.FastStart,
 		TargetCodecAudio:       c.TargetCodecAudio,
+		TargetAudioChannels:    c.TargetAudioChannels,
+		TargetAudioBitrateKbps: c.TargetAudioBitrateKbps,
 	}
 }
 
@@ -248,6 +270,9 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		InputPath:              c.MediaPath,
 		OutputSubdir:           c.OutputSubdir,
 		SourceVideoCodec:       c.SourceVideoCodec,
+		SourceVideoProfile:     c.SourceVideoProfile,
+		SourceVideoBitDepth:    c.SourceVideoBitDepth,
+		SoftwareVideoDecode:    c.SoftwareVideoDecode,
 		VideoBitstreamFilter:   c.VideoBitstreamFilter,
 		SeekSeconds:            c.SeekSeconds,
 		StreamOriginSeconds:    c.StreamOriginSeconds,
@@ -255,6 +280,8 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		TargetResolution:       c.TargetRes,
 		TargetCodecVideo:       c.TargetCodec,
 		TargetCodecAudio:       c.TargetCodecAudio,
+		TargetAudioChannels:    c.TargetAudioChannels,
+		TargetAudioBitrateKbps: c.TargetAudioBitrateKbps,
 		SegmentDuration:        c.SegmentDuration,
 		StartSegmentNumber:     c.StartSegmentNumber,
 		SubtitleTrackIndex:     c.SubtitleTrackIndex,

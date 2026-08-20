@@ -75,7 +75,13 @@ func (o *HistoryImportObserver) RunUpdated(run historyimport.Run) {
 		o.mu.Unlock()
 		return
 	}
-	o.state[run.ID] = now
+	if historyImportTerminal(run.Status) {
+		// Run IDs are unique per import, so throttle state for finished runs
+		// is dead weight the map would otherwise carry forever.
+		delete(o.state, run.ID)
+	} else {
+		o.state[run.ID] = now
+	}
 	o.mu.Unlock()
 
 	_ = o.Hub.PublishJSON(
@@ -85,6 +91,15 @@ func (o *HistoryImportObserver) RunUpdated(run historyimport.Run) {
 		run,
 		PublishOptions{UserID: run.UserID, ProfileID: run.ProfileID},
 	)
+}
+
+func historyImportTerminal(status string) bool {
+	switch status {
+	case historyimport.RunStatusCompleted, historyimport.RunStatusFailed, historyimport.RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func historyImportEvent(run historyimport.Run) (string, bool) {

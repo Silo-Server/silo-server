@@ -14,6 +14,12 @@ import (
 )
 
 const cloudflareURLMode = "cloudflare_token"
+const chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
+
+// ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
+// stored alongside server settings for durability but must not be exposed or
+// edited through the administrator settings API.
+const ArtworkStorageReconcileCheckpointKey = "s3.public_storage_reconcile_checkpoint"
 
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
@@ -49,7 +55,7 @@ var adminSettingDefaults = map[string]string{
 	"markers.lazy_playback": "false",
 
 	"playback.ffmpeg_path":                     "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-	"playback.transcode_dir":                   DefaultTranscodeDir,
+	playbackTranscodeDirSettingKey:             DefaultTranscodeDir,
 	"playback.hw_accel":                        "auto",
 	"playback.transcode_enabled":               "true",
 	"playback.local_transcode_fallback":        "true",
@@ -57,6 +63,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.chapter_thumbnail_execution":     "local",
 	"playback.chapter_thumbnail_node_capacity": "1",
 	"playback.chapter_thumbnail_hdr_policy":    "best_effort",
+	chapterThumbnailSoftwareToneMapKey:         "false",
 	"playback.watched_threshold":               "90",
 	"playback.min_resume_threshold":            "5",
 	"allow_4k_transcode":                       "false",
@@ -267,6 +274,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", "playback.local_transcode_fallback",
+		chapterThumbnailSoftwareToneMapKey,
 		"allow_4k_transcode", "enable_transcode_throttle", "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",

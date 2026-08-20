@@ -105,6 +105,7 @@ type ffprobeChapter struct {
 type ffprobeSideData struct {
 	SideDataType string `json:"side_data_type"`
 	DVProfile    int    `json:"dv_profile"`
+	DVLevel      int    `json:"dv_level"`
 	DVBlPresent  int    `json:"dv_bl_present"`
 	DVElPresent  int    `json:"dv_el_present"`
 	DVBLCompatID int    `json:"dv_bl_signal_compatibility_id"`
@@ -186,6 +187,17 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	for _, s := range raw.Streams {
 		switch s.CodecType {
 		case "video":
+			// Embedded cover art is a "video" stream to ffprobe, but it is a
+			// still image, not a playable video track. Recording it as one
+			// misreports the file twice: an audio file with a cover picks up a
+			// video track and stops satisfying MediaFile.IsAudioOnly, so the
+			// planner routes an audiobook through the video path; and when the
+			// picture is ordered ahead of the real stream, the flat
+			// codec_video/resolution/hdr columns describe the poster instead of
+			// the movie.
+			if !isMainVideoStream(s) {
+				continue
+			}
 			dvProfile := dolbyVisionProfileNumber(s.SideDataList)
 			// ffprobe omits unspecified optional fields by default; "unknown" is
 			// FFmpeg's canonical name for AVCOL_RANGE_UNSPECIFIED.
@@ -195,6 +207,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				Codec:              s.CodecName,
 				DolbyVision:        dolbyVisionProfile(s.SideDataList),
 				DVProfile:          dvProfile,
+				DVLevel:            dolbyVisionLevel(s.SideDataList),
 				DVBLCompatID:       dolbyVisionBLCompatID(s.SideDataList),
 				DVELPresent:        dolbyVisionELPresent(s.SideDataList),
 				DVEnhancementLayer: dolbyVisionEnhancementLayer(dolbyVisionELPresent(s.SideDataList)),
@@ -266,10 +279,18 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 
 const (
 	maxReasonableMediaDurationSeconds = 100_000
+	// Corroborated metadata and packet-derived durations have stronger evidence
+	// than a lone container timestamp, so they may use the same bounded ceiling
+	// as long-form audio. This supports multi-day video without accepting the
+	// multi-year timelines seen in malformed containers.
+	maxValidatedMediaDurationSeconds = 1_000_000
 	// Audio-only files (audiobooks, podcasts) legitimately exceed the video
 	// ceiling, but still need a cap so malformed containers cannot persist
 	// multi-year durations.
-	maxReasonableAudioDurationSeconds = 1_000_000
+	maxReasonableAudioDurationSeconds = maxValidatedMediaDurationSeconds
+
+	longVideoDurationAbsoluteToleranceSeconds = 1
+	longVideoDurationRelativeTolerance        = 0.001
 )
 
 // A video duration is implausible when it is either far too short in absolute
@@ -346,7 +367,88 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if duration > 0 && !durationLooksImplausible(raw, duration) {
 		return truncatedDuration(duration), true
 	}
+	if duration, ok := corroboratedLongVideoDuration(raw, formatDuration); ok {
+		return truncatedDuration(duration), true
+	}
 	return 0, false
+}
+
+// corroboratedLongVideoDuration accepts an extended-range video duration only
+// when the container and the primary video stream independently report nearly the
+// same value. A small absolute/relative tolerance covers container rounding
+// and stream-boundary differences without trusting a lone malformed timeline.
+func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
+	if raw == nil {
+		return 0, false
+	}
+
+	for _, stream := range raw.Streams {
+		if !isMainVideoStream(stream) {
+			continue
+		}
+		streamDuration := parseFloat(stream.Duration)
+		formatStart := parseFloat(raw.Format.StartTime)
+		streamStart := parseFloat(stream.StartTime)
+
+		// Some MPEG-TS/HLS timelines report duration as an absolute end
+		// timestamp. Use normalized spans to reconcile raw end timestamps that
+		// disagree, or when matching timestamps have a dominant start offset that
+		// strongly indicates the absolute-end shape. Ordinary non-zero starts remain
+		// part of an already corroborated raw duration.
+		normalizedFormatDuration := durationAfterStartWithinValidatedLimit(
+			formatDuration,
+			formatStart,
+		)
+		normalizedStreamDuration := durationAfterStartWithinValidatedLimit(
+			streamDuration,
+			streamStart,
+		)
+		rawDurationsAgree := longVideoDurationsAgree(formatDuration, streamDuration)
+		normalizedDurationsAgree := longVideoDurationsAgree(normalizedFormatDuration, normalizedStreamDuration)
+		matchingAbsoluteEnds := rawDurationsAgree &&
+			durationHasDominantStartOffset(formatDuration, formatStart) &&
+			durationHasDominantStartOffset(streamDuration, streamStart)
+		if normalizedDurationsAgree && (!rawDurationsAgree || matchingAbsoluteEnds) &&
+			!durationLooksImplausible(raw, normalizedFormatDuration) {
+			return normalizedFormatDuration, true
+		}
+		if matchingAbsoluteEnds {
+			// Dominant starts identify the raw values as absolute end
+			// timestamps. If their normalized spans do not corroborate, reject
+			// the metadata for packet repair instead of persisting an inflated
+			// raw end timestamp.
+			return 0, false
+		}
+
+		if rawDurationsAgree &&
+			!durationLooksImplausible(raw, formatDuration) {
+			return formatDuration, true
+		}
+		return 0, false
+	}
+
+	return 0, false
+}
+
+func longVideoDurationsAgree(first, second float64) bool {
+	if first <= maxReasonableMediaDurationSeconds ||
+		!durationIsWithinValidatedLimit(first) ||
+		!durationIsWithinValidatedLimit(second) {
+		return false
+	}
+	tolerance := max(
+		longVideoDurationAbsoluteToleranceSeconds,
+		max(first, second)*longVideoDurationRelativeTolerance,
+	)
+	return math.Abs(first-second) <= tolerance
+}
+
+// durationHasDominantStartOffset identifies the conservative absolute-end
+// shape where the start timestamp occupies at least half of the reported end.
+// Smaller starts are common media offsets and cannot disambiguate a duration
+// field from an absolute end timestamp.
+func durationHasDominantStartOffset(end, start float64) bool {
+	return start > 0 && end > start && start >= end-start
 }
 
 func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
@@ -368,8 +470,23 @@ func durationAfterStart(end, start float64) float64 {
 	return duration
 }
 
+func durationAfterStartWithinValidatedLimit(end, start float64) float64 {
+	if start <= 0 || end <= start {
+		return 0
+	}
+	duration := end - start
+	if !durationIsWithinValidatedLimit(duration) {
+		return 0
+	}
+	return duration
+}
+
 func durationIsReasonable(duration float64) bool {
 	return durationIsPositiveFinite(duration) && duration <= maxReasonableMediaDurationSeconds
+}
+
+func durationIsWithinValidatedLimit(duration float64) bool {
+	return durationIsPositiveFinite(duration) && duration <= maxValidatedMediaDurationSeconds
 }
 
 func durationIsPositiveFinite(duration float64) bool {
@@ -458,18 +575,30 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 		maxTimestamp = max(maxTimestamp, timestamp)
 	}
 
-	best := 0.0
+	packetSpan := 0.0
 	if !math.IsInf(minTimestamp, 1) && !math.IsInf(maxTimestamp, -1) {
 		span := maxTimestamp - minTimestamp
-		if durationIsReasonable(span) {
-			best = span
+		if durationIsWithinValidatedLimit(span) {
+			packetSpan = span
 		}
 	}
+
+	frameDuration := 0.0
 	if fps := parseFrameRate(frameRate); fps > 0 && packetCount > 0 {
-		frameDuration := float64(packetCount) / fps
-		if durationIsReasonable(frameDuration) && frameDuration > best {
-			best = frameDuration
-		}
+		frameDuration = float64(packetCount) / fps
+	}
+
+	best := packetSpan
+	if packetSpan > maxReasonableMediaDurationSeconds &&
+		durationIsReasonable(frameDuration) &&
+		!longVideoDurationsAgree(packetSpan, frameDuration) {
+		// A long PTS span is strong evidence only when a sane frame-count
+		// estimate contradicts it. Malformed frame rates can produce finite but
+		// unusable estimates and must not veto an otherwise valid packet span.
+		best = 0
+	}
+	if durationIsReasonable(frameDuration) && frameDuration > best {
+		best = frameDuration
 	}
 	if best <= 0 {
 		return 0
@@ -661,6 +790,15 @@ func dolbyVisionProfileNumber(sideData []ffprobeSideData) int {
 	for _, data := range sideData {
 		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVProfile > 0 {
 			return data.DVProfile
+		}
+	}
+	return 0
+}
+
+func dolbyVisionLevel(sideData []ffprobeSideData) int {
+	for _, data := range sideData {
+		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVLevel > 0 {
+			return data.DVLevel
 		}
 	}
 	return 0

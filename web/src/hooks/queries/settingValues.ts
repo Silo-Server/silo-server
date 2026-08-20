@@ -1,10 +1,22 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  api,
+  ApiClientError,
+  apiWithProfileRequestContext,
+  isProfileRequestContextCurrent,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import { storage } from "@/utils/storage";
-import { SETTING_DEFINITIONS, SETTINGS_REVISION, type SettingKey } from "@/lib/settingsContract";
+import {
+  SETTING_DEFINITIONS,
+  SETTING_KEYS,
+  SETTINGS_API_VERSION,
+  type SettingKey,
+} from "@/lib/settingsContract";
 import { useEventChannel } from "@/components/realtimeEventsContext";
-import { settingsKeys } from "./keys";
+import type { ShortcutTarget } from "@/lib/uiCustomization";
+import { deviceKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -16,11 +28,12 @@ import { settingsKeys } from "./keys";
  * cannot be expressed because SettingKey is generated from it.
  */
 
-/** The five scopes a value can live at. */
+/** The remote scopes a value can live at. */
 export type SettingScope =
   | "account"
   | "profile"
   | "profile_device"
+  | "profile_client"
   | "profile_library"
   | "profile_series";
 
@@ -33,7 +46,24 @@ export interface SettingIdentity {
   libraryId?: number;
   /** Required for profile_series. */
   seriesId?: string;
+  /**
+   * A device other than the one this browser is. Omit to address the current
+   * device, which is what every screen except "your devices" wants.
+   */
+  deviceId?: string;
+  /**
+   * A profile other than the signed-in one. Only the household parent may set
+   * this; the server answers 403 for anyone else.
+   */
+  profileId?: string;
 }
+
+/**
+ * Profile authorization captured as one synchronous snapshot when an intent is
+ * created. A queued write must not combine one profile id with another
+ * profile's PIN token after the active profile changes.
+ */
+export type ProfileAuthSnapshot = ProfileRequestContextSnapshot;
 
 export interface EffectiveSetting<T = unknown> {
   key: SettingKey;
@@ -47,6 +77,7 @@ export interface EffectiveSetting<T = unknown> {
   suggested_values?: string[];
   /** The scope holding the value, so a reset can target it exactly. */
   scope?: SettingScope;
+  client_family?: "tv" | "mobile" | "tablet" | "desktop" | "web";
   library_id?: number;
   series_id?: string;
 }
@@ -63,6 +94,8 @@ function identityQuery(identity: SettingIdentity): string {
   const params = new URLSearchParams({ scope: identity.scope });
   if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
   if (identity.seriesId !== undefined) params.set("series_id", identity.seriesId);
+  if (identity.deviceId !== undefined) params.set("device_id", identity.deviceId);
+  if (identity.profileId !== undefined) params.set("profile_id", identity.profileId);
   return params.toString();
 }
 
@@ -79,13 +112,20 @@ export function effectiveSettingsQueryKey(options?: {
   keys?: readonly SettingKey[];
   libraryIds?: readonly number[];
   seriesIds?: readonly string[];
+  deviceId?: string;
+  profileId?: string;
 }) {
-  const { keys, libraryIds, seriesIds } = options ?? {};
+  const { keys, libraryIds, seriesIds, deviceId, profileId } = options ?? {};
   return [
     ...settingsKeys.all,
     "values",
     "effective",
-    activeProfileId(),
+    // The device and profile a read resolved for are part of the identity of
+    // the answer, not just of the request. Without them a read of the Apple
+    // TV's values would land on the same cache entry as this browser's and
+    // serve one device's settings as another's.
+    profileId ?? activeProfileId(),
+    deviceId ?? "",
     keys ? [...keys].sort().join(",") : "*",
     libraryIds ? [...libraryIds].sort().join(",") : "",
     seriesIds ? [...seriesIds].sort().join(",") : "",
@@ -104,19 +144,27 @@ export function useEffectiveSettings(options?: {
   keys?: readonly SettingKey[];
   libraryIds?: readonly number[];
   seriesIds?: readonly string[];
+  /** Resolve for a device other than this browser. */
+  deviceId?: string;
+  /** Resolve for another profile on the account (household parent only). */
+  profileId?: string;
   enabled?: boolean;
 }) {
   const keys = options?.keys;
   const libraryIds = options?.libraryIds;
   const seriesIds = options?.seriesIds;
+  const deviceId = options?.deviceId;
+  const profileId = options?.profileId;
 
   return useQuery({
-    queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds }),
+    queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds, deviceId, profileId }),
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keys?.length) params.set("keys", keys.join(","));
       if (libraryIds?.length) params.set("library_ids", libraryIds.join(","));
       if (seriesIds?.length) params.set("series_ids", seriesIds.join(","));
+      if (deviceId) params.set("device_id", deviceId);
+      if (profileId) params.set("profile_id", profileId);
       const query = params.toString();
       const result = await api<EffectiveResponse>(
         `/settings/values/effective${query ? `?${query}` : ""}`,
@@ -156,6 +204,38 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+export function isDefinitiveSettingMutationRejection(error: unknown): boolean {
+  // Ordinary 4xx responses reject the request before applying it. A 408 or
+  // 5xx can be emitted by the server or a gateway after the mutation reached
+  // the handler, so those remain ambiguous and require reconciliation.
+  return (
+    error instanceof ApiClientError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408
+  );
+}
+
+function shouldReconcileAfterMutationError(error: unknown): boolean {
+  return !isDefinitiveSettingMutationRejection(error);
+}
+
+function invalidateSettingValueQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  identity: SettingIdentity,
+) {
+  const invalidations = [
+    queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+  ];
+  // A device-scoped write changes that device's "how many things differ"
+  // count, which the device list shows. Without this the badge stays stale
+  // until the list's own staleTime expires.
+  if (identity.scope === "profile_device") {
+    invalidations.push(queryClient.invalidateQueries({ queryKey: deviceKeys.all }));
+  }
+  return Promise.all(invalidations).then(() => undefined);
+}
+
 /** Write one value at one scope. */
 export function useSetSettingValue() {
   const qc = useQueryClient();
@@ -172,6 +252,13 @@ export function useSetSettingValue() {
       identity: SettingIdentity;
       /** Optional idempotency key; a retry with the same id replays rather than re-applying. */
       mutationId?: string;
+      /**
+       * Whole-document editors may serialize several optimistic writes and
+       * invalidate once their queue drains. Intermediate refetches would
+       * otherwise replace the newest optimistic document with an older server
+       * value. Ordinary callers should leave this enabled.
+       */
+      invalidateOnSettled?: boolean;
     }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, {
         method: "PUT",
@@ -181,10 +268,75 @@ export function useSetSettingValue() {
         },
         body: JSON.stringify({ value }),
       }),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    onSuccess: (_data, variables) => {
+      if (variables.invalidateOnSettled === false) return;
+      // Keep ordinary controls pending until their active effective-value
+      // reads reconcile. Otherwise a rapid follow-up edit can spread a stale
+      // object and silently undo the first field that was just saved.
+      return invalidateSettingValueQueries(qc, variables.identity);
+    },
+    onError: (error, variables) => {
+      if (variables.invalidateOnSettled === false) return;
+      if (shouldReconcileAfterMutationError(error)) {
+        return invalidateSettingValueQueries(qc, variables.identity);
+      }
     },
   });
+}
+
+/**
+ * Ensure one profile-wide navigation shortcut is present or absent.
+ *
+ * This semantic endpoint is intentionally separate from useSetSettingValue:
+ * nav.shortcuts is shared by every client family, so replacing its whole
+ * document can erase a shortcut another device added from the same base.
+ */
+export function useSetNavigationShortcutPresence() {
+  const qc = useQueryClient();
+
+  const mutateAsync = useCallback(
+    async ({
+      item,
+      present,
+      mutationId,
+      profileAuth,
+      invalidateOnSettled,
+    }: {
+      item: ShortcutTarget;
+      present: boolean;
+      /** Stable across retries of this desired-state operation. */
+      mutationId: string;
+      /** Profile id and matching PIN token captured with this intent. */
+      profileAuth: ProfileAuthSnapshot;
+      /** A local serialized editor can defer refetching until its queue drains. */
+      invalidateOnSettled?: boolean;
+    }) => {
+      try {
+        return await apiWithProfileRequestContext(
+          `/settings/values/nav.shortcuts/item`,
+          profileAuth,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Silo-Mutation-Id": mutationId,
+            },
+            body: JSON.stringify({ item, present }),
+          },
+        );
+      } finally {
+        if (invalidateOnSettled !== false && isProfileRequestContextCurrent(profileAuth)) {
+          void qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+        }
+      }
+    },
+    [qc],
+  );
+
+  // This deliberately is not a TanStack mutation. Mutation variables remain
+  // in the mutation cache after settlement; the PIN token should live only in
+  // the in-memory serialized queue/request closure that needs it.
+  return { mutateAsync };
 }
 
 /** Clear the value at one scope, so the setting inherits again. */
@@ -194,8 +346,18 @@ export function useClearSettingValue() {
   return useMutation({
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    onSuccess: (_data, variables) => {
+      return invalidateSettingValueQueries(qc, variables.identity);
+    },
+    onError: (error, variables) => {
+      // DELETE is idempotent for reset callers: a 404 means another client
+      // already cleared the value, so stale effective caches must catch up.
+      if (
+        shouldReconcileAfterMutationError(error) ||
+        (error instanceof ApiClientError && error.status === 404)
+      ) {
+        return invalidateSettingValueQueries(qc, variables.identity);
+      }
     },
   });
 }
@@ -205,22 +367,50 @@ export function useClearSettingValue() {
  * client built against a newer manifest hides definitions the connected server
  * does not know rather than offering a choice it will refuse.
  */
+export interface SettingsCapabilities {
+  api_version: number;
+  revision: number;
+  contract_etag: string;
+  /** Effective reads can resolve the provider's key batch atomically. */
+  supports_batched_effective?: boolean;
+  /** Persisted/retried writes can replay one mutation id without re-applying. */
+  supports_idempotent_writes?: boolean;
+  /** Added alongside the semantic nav.shortcuts item endpoint. */
+  supports_atomic_shortcuts?: boolean;
+}
+
+/** Whether this server can safely read and write one vendored definition. */
+export function settingsCapabilitiesSupportKey(
+  capabilities: SettingsCapabilities | undefined,
+  key: SettingKey,
+) {
+  return (
+    capabilities?.api_version === SETTINGS_API_VERSION &&
+    capabilities.revision >= SETTING_DEFINITIONS[key].introducedIn &&
+    capabilities.supports_batched_effective === true &&
+    capabilities.supports_idempotent_writes === true
+  );
+}
+
+/**
+ * Atomic shortcut mutations need both the revision-5 definition and the
+ * semantic endpoint capability. Missing flags from older servers fail closed.
+ */
+export function settingsCapabilitiesSupportAtomicShortcuts(
+  capabilities: SettingsCapabilities | undefined,
+) {
+  return (
+    settingsCapabilitiesSupportKey(capabilities, SETTING_KEYS.NAV_SHORTCUTS) &&
+    capabilities?.supports_atomic_shortcuts === true
+  );
+}
+
 export function useSettingsCapabilities() {
   return useQuery({
     queryKey: [...settingsKeys.all, "capabilities"] as const,
-    queryFn: () =>
-      api<{ api_version: number; revision: number; contract_etag: string }>(
-        "/settings/contract/capabilities",
-      ),
+    queryFn: () => api<SettingsCapabilities>("/settings/contract/capabilities"),
     staleTime: 30 * 60 * 1000,
   });
-}
-
-/** Whether this build's contract is newer than the connected server's. */
-export function useContractIsAheadOfServer() {
-  const { data } = useSettingsCapabilities();
-  if (!data) return false;
-  return SETTINGS_REVISION > data.revision;
 }
 
 /** The user_settings.changed payload. Identity only — never a value. */

@@ -35,6 +35,21 @@ func TestLoadFromDBMetadataPresignExpiryRejectsInvalidDuration(t *testing.T) {
 	}
 }
 
+func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "/mnt/silo-downloads"})
+	if err != nil {
+		t.Fatalf("LoadFromDB() with absolute artifact dir: %v", err)
+	}
+	if cfg.Download.ArtifactDir != "/mnt/silo-downloads" {
+		t.Fatalf("artifact dir = %q", cfg.Download.ArtifactDir)
+	}
+
+	_, err = LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "relative/downloads"})
+	if err == nil || !strings.Contains(err.Error(), downloadArtifactDirSettingKey) {
+		t.Fatalf("relative artifact dir error = %v", err)
+	}
+}
+
 func TestLoadFromDBJellyfinWebEnabledDefaultsToTrue(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {

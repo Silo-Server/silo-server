@@ -3,7 +3,7 @@
 // deliberately does NOT build or register a MeterProvider — metrics stay on the
 // existing Prometheus rail. Leaving the global MeterProvider as the built-in
 // no-op is what prevents the trace instrumentation libraries from double-emitting
-// metrics. See docs/superpowers/plans/2026-07-02-opentelemetry-observability.md.
+// metrics. See docs/architecture/observability.md.
 package telemetry
 
 import (

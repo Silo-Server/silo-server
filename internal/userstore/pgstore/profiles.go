@@ -282,6 +282,16 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// Preferences belong to viewers, not creators, so remove every override
+	// for collections owned by the profile before those collections disappear.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_collection_sort_preferences
+		WHERE user_id = $1 AND collection_kind = 'user' AND collection_id IN (
+			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
+		)`, s.userID, id); err != nil {
+		return fmt.Errorf("deleting collection sort preferences for profile %s: %w", id, err)
+	}
+
 	_, err = tx.Exec(ctx, `
 		DELETE FROM user_personal_collection_items
 		WHERE user_id = $1 AND collection_id IN (
@@ -299,6 +309,7 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		"user_favorites",
 		"user_watchlist",
 		"user_watch_progress",
+		"user_collection_sort_preferences",
 		"user_personal_collections",
 		"user_series_playback_preferences",
 		"user_library_playback_preferences",

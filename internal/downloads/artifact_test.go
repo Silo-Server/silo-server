@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestParamsHashStableAndDistinct(t *testing.T) {
@@ -46,6 +49,83 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 	}
 	if !strings.Contains(p1, "42_transcode_") {
 		t.Fatalf("output path missing identity components: %q", p1)
+	}
+}
+
+type lifecycleTestPreparer struct {
+	deleted       string
+	prepared      PreparedArtifact
+	resolveErr    error
+	resolvedNode  int
+	resolvedURL   string
+	resolvedGroup string
+	stat          downloadprepare.Result
+	statError     error
+	statIDs       []string
+	statStarted   atomic.Int32
+	statWait      bool
+	deleteErr     error
+	deleteStarted chan struct{}
+	deleteWait    bool
+}
+
+func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
+	return p.prepared, nil
+}
+func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {
+	if p.resolvedNode != 0 {
+		artifact.OriginNodeID = p.resolvedNode
+	}
+	if p.resolvedURL != "" {
+		artifact.OriginNodeURL = p.resolvedURL
+		artifact.OriginNodeGroup = p.resolvedGroup
+	}
+	return p.resolveErr
+}
+func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
+	if p.statWait {
+		p.statStarted.Add(1)
+		select {
+		case <-ctx.Done():
+			return downloadprepare.Result{}, ctx.Err()
+		case <-time.After(2 * time.Second):
+			return downloadprepare.Result{}, context.DeadlineExceeded
+		}
+	}
+	p.statIDs = append(p.statIDs, artifact.ID)
+	return p.stat, p.statError
+}
+func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
+	p.deleted = artifact.OriginArtifactID
+	if p.deleteStarted != nil {
+		close(p.deleteStarted)
+	}
+	if p.deleteWait {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return p.deleteErr
+}
+
+func TestArtifactManagerDeletesRemoteBytesThroughOwningNode(t *testing.T) {
+	preparer := &lifecycleTestPreparer{}
+	m := &ArtifactManager{preparer: preparer}
+	artifact := &Artifact{ID: "row-1", OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1"}
+	if !m.deleteArtifactBytes(context.Background(), artifact) {
+		t.Fatal("remote cleanup failed")
+	}
+	if preparer.deleted != "opaque-1" {
+		t.Fatalf("deleted = %q", preparer.deleted)
+	}
+}
+
+func TestRemoteArtifactRequeueRejectsNonPositiveNodeID(t *testing.T) {
+	manager := &ArtifactManager{repo: &ArtifactRepository{}}
+	_, err := manager.requeueRemoteArtifactNow(context.Background(), &Artifact{
+		ID: "row-1", OriginNodeID: -1, OriginNodeURL: "http://transcode", OriginArtifactID: "opaque-1",
+	}, "invalid node")
+	if err == nil {
+		t.Fatal("expected invalid remote locator error")
 	}
 }
 

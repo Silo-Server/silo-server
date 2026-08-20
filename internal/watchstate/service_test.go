@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -674,5 +675,161 @@ func createWatchstateProfile(t *testing.T, store userstore.UserStore) {
 	t.Helper()
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-1", Name: "Profile"}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
+	}
+}
+
+// batchTestEpisodeRepo is testEpisodeRepo plus the GetByIDs batch capability,
+// so the bulk identity path is what gets exercised. It counts calls to prove
+// a series mark no longer issues one lookup per episode.
+type batchTestEpisodeRepo struct {
+	testEpisodeRepo
+	batchCalls int
+}
+
+func (r *batchTestEpisodeRepo) GetByIDs(_ context.Context, contentIDs []string) ([]*models.Episode, error) {
+	r.batchCalls++
+	found := make([]*models.Episode, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if episode, ok := r.episodes[contentID]; ok {
+			found = append(found, episode)
+		}
+	}
+	return found, nil
+}
+
+// batchTestProviderIDRepo adds the GetByContentIDs batch capability and counts
+// calls, pinning that a whole series resolves in one provider-ID query.
+type batchTestProviderIDRepo struct {
+	testProviderIDRepo
+	batchCalls int
+}
+
+func (r *batchTestProviderIDRepo) GetByContentIDs(_ context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error) {
+	r.batchCalls++
+	out := make(map[string][]*models.MediaItemProviderID, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if rows, ok := r.ids[contentID]; ok {
+			out[contentID] = rows
+		}
+	}
+	return out, nil
+}
+
+// TestManualMarkWatchedSeriesResolvesIdentitiesInBulk marks a whole series and
+// pins both halves of the fix: every episode gets its own history row with a
+// resolved identity, and the catalog lookups are batched rather than repeated
+// per episode.
+func TestManualMarkWatchedSeriesResolvesIdentitiesInBulk(t *testing.T) {
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+
+	const episodeCount = 25
+	episodes := make(map[string]*models.Episode, episodeCount)
+	targets := make([]LeafWatchTarget, 0, episodeCount)
+	for i := 1; i <= episodeCount; i++ {
+		contentID := fmt.Sprintf("episode-%d", i)
+		episodes[contentID] = &models.Episode{
+			ContentID:     contentID,
+			SeriesID:      "series-1",
+			SeasonNumber:  1,
+			EpisodeNumber: i,
+		}
+		targets = append(targets, LeafWatchTarget{MediaItemID: contentID, DurationSeconds: 1800})
+	}
+
+	episodeRepo := &batchTestEpisodeRepo{testEpisodeRepo: testEpisodeRepo{episodes: episodes}}
+	providerRepo := &batchTestProviderIDRepo{testProviderIDRepo: testProviderIDRepo{
+		ids: map[string][]*models.MediaItemProviderID{
+			"series-1": {{ContentID: "series-1", ItemType: "series", Provider: "tvdb", ProviderID: "765"}},
+		},
+	}}
+	service := NewService(testStoreProvider{store: store}).WithStableIdentityResolver(
+		NewStableIdentityResolver(testItemRepo{}, episodeRepo, providerRepo),
+	)
+
+	result, err := service.RecordManualMarkWatchedWithResult(
+		context.Background(), 1, "profile-1", targets,
+		time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("RecordManualMarkWatchedWithResult: %v", err)
+	}
+	if len(result.Entries) != episodeCount {
+		t.Fatalf("result entries = %d, want %d; watch-provider dispatch reads these",
+			len(result.Entries), episodeCount)
+	}
+
+	history, err := store.ListHistory(context.Background(), "profile-1", episodeCount*2, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != episodeCount {
+		t.Fatalf("history len = %d, want %d", len(history), episodeCount)
+	}
+	for _, entry := range history {
+		if entry.Identity.StableType != "episode" {
+			t.Fatalf("%s identity = %q, want episode", entry.MediaItemID, entry.Identity.StableType)
+		}
+		if got := entry.Identity.SeriesProviderIDs["tvdb"]; got != "765" {
+			t.Fatalf("%s SeriesProviderIDs[tvdb] = %q, want 765", entry.MediaItemID, got)
+		}
+	}
+	for _, target := range targets {
+		progress, err := store.GetProgress(context.Background(), "profile-1", target.MediaItemID)
+		if err != nil || progress == nil || !progress.Completed {
+			t.Fatalf("GetProgress(%s) = %+v (%v), want completed", target.MediaItemID, progress, err)
+		}
+	}
+
+	// The whole point of the bulk path: constant lookups, not O(episodes).
+	if episodeRepo.batchCalls != 1 {
+		t.Fatalf("episode batch lookups = %d, want 1", episodeRepo.batchCalls)
+	}
+	if providerRepo.batchCalls != 1 {
+		t.Fatalf("provider-ID batch lookups = %d, want 1", providerRepo.batchCalls)
+	}
+}
+
+// TestManualMarkWatchedSeriesIsAtomicOnCancel is the regression test for the
+// reported bug: marking a large series while the client disconnects used to
+// leave the series partially watched, because each episode committed on its
+// own. The mark must now be all-or-nothing.
+func TestManualMarkWatchedSeriesIsAtomicOnCancel(t *testing.T) {
+	store, db := newTestUserStore(t)
+	t.Cleanup(func() { _ = db.Close() })
+
+	targets := make([]LeafWatchTarget, 0, 40)
+	for i := 1; i <= 40; i++ {
+		targets = append(targets, LeafWatchTarget{
+			MediaItemID:     fmt.Sprintf("episode-%d", i),
+			DurationSeconds: 1800,
+		})
+	}
+
+	service := NewService(testStoreProvider{store: store})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the tab closed before the write could run
+
+	if _, err := service.RecordManualMarkWatchedWithResult(
+		ctx, 1, "profile-1", targets, time.Date(2026, 4, 25, 12, 0, 0, 0, time.UTC),
+	); err == nil {
+		t.Fatal("RecordManualMarkWatchedWithResult on a canceled context returned nil error")
+	}
+
+	history, err := store.ListHistory(context.Background(), "profile-1", 100, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("history len = %d, want 0 — a canceled series mark must roll back, not leave a partial mark", len(history))
+	}
+	for _, target := range targets {
+		progress, err := store.GetProgress(context.Background(), "profile-1", target.MediaItemID)
+		if err != nil {
+			t.Fatalf("GetProgress(%s): %v", target.MediaItemID, err)
+		}
+		if progress != nil && progress.Completed {
+			t.Fatalf("%s is completed after a canceled mark; the write must be all-or-nothing", target.MediaItemID)
+		}
 	}
 }

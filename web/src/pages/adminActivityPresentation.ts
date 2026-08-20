@@ -245,6 +245,18 @@ export function getSessionClientLabel(session: AdminSession): string {
   return clientName || "";
 }
 
+/**
+ * The exact client identity — version, build, and non-release channel — for
+ * surfaces that can afford the width (expanded session details, tooltips).
+ * `getSessionClientLabel` stays the compact list label; this one must never
+ * replace it in a fixed-width row.
+ */
+export function getSessionClientLabelFull(session: AdminSession): string {
+  // The server omits client_label_full when it would repeat client_label, and
+  // older servers never send it at all — both degrade to the compact label.
+  return session.client_label_full?.trim() || getSessionClientLabel(session);
+}
+
 export function formatSourceContainerSummary(session: AdminSession): string {
   return formatContainer(session.source_container) || "Unknown source";
 }

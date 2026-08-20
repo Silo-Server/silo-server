@@ -5,12 +5,13 @@ import type {
   CollectionCapabilitiesResponse,
   CollectionGroup,
   CollectionItem,
+  CollectionSortConfig,
   CollectionsListResponse,
   CreateCollectionRequest,
   ServerCollectionsResponse,
   UpdateCollectionRequest,
 } from "@/api/types";
-import { collectionKeys } from "./keys";
+import { catalogKeys, collectionKeys } from "./keys";
 import { toast } from "sonner";
 import { invalidateUserCollectionQueries } from "./collectionSurfaceRefresh";
 
@@ -372,6 +373,41 @@ export function useDeleteUserCollectionImage() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to remove poster");
+    },
+  });
+}
+
+/**
+ * Persists the sort a viewer picked while browsing a collection, so the choice
+ * survives leaving and re-entering it. Sending an empty field pins the viewer
+ * to the collection's own source order — distinct from clearing the preference,
+ * which returns them to whatever default the collection's creator configured.
+ *
+ * Failures are deliberately silent: the sort is already applied to the current
+ * view through the URL, and a toast for a preference that will be re-sent on
+ * the next change would be noise.
+ */
+export function useSetCollectionSortPreference() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // TanStack Query runs mutations sharing a scope serially. This prevents an
+    // earlier, slower request from completing after a later choice and
+    // overwriting the preference the viewer actually selected last.
+    scope: { id: "collection-sort-preference" },
+    mutationFn: (body: {
+      collection_kind: "library" | "user";
+      collection_id: string;
+      field: string;
+      order: NonNullable<CollectionSortConfig["order"]> | "";
+    }) =>
+      api("/collections/sort-preference", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      // The next visit resolves through the server, so drop cached catalog
+      // pages that were built against the previous effective sort.
+      queryClient.invalidateQueries({ queryKey: catalogKeys.all });
     },
   });
 }

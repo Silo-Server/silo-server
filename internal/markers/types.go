@@ -145,6 +145,28 @@ type SubmissionResult struct {
 	Weight float64
 }
 
+// SubmissionConflictError marks a provider refusal that cannot succeed when
+// the exact same payload is retried. A changed marker produces a different
+// content hash and remains eligible for a later submission.
+type SubmissionConflictError struct {
+	Provider   string
+	HTTPStatus int
+	Message    string
+}
+
+func (e *SubmissionConflictError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	if e.Provider != "" {
+		return fmt.Sprintf("%s: submission conflict", e.Provider)
+	}
+	return "submission conflict"
+}
+
 // UserStats is a contribution-account summary used to validate a key and show
 // contribution totals in the admin UI.
 type UserStats struct {

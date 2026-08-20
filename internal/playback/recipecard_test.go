@@ -13,6 +13,9 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		OutputDir:              "/tmp/silo-transcode/abc",
 		SessionID:              "abc",
 		SourceVideoCodec:       "hevc",
+		SourceVideoProfile:     "Main 10",
+		SourceVideoBitDepth:    10,
+		SoftwareVideoDecode:    true,
 		VideoBitstreamFilter:   "dovi_rpu=strip=1",
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -20,6 +23,8 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		TargetResolution:       "1080p",
 		TargetCodecVideo:       "h264",
 		TargetCodecAudio:       "aac",
+		TargetAudioChannels:    1,
+		TargetAudioBitrateKbps: 96,
 		SegmentDuration:        2,
 		StartSegmentNumber:     450,
 		HWAccel:                "qsv",
@@ -61,8 +66,17 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.TargetCodecVideo != "h264" || got.TargetBitrateKbps != 8000 {
 		t.Errorf("encode params wrong: %+v", got)
 	}
+	if got.TargetAudioChannels != 1 || got.TargetAudioBitrateKbps != 96 {
+		t.Errorf("audio encode params wrong: %+v", got)
+	}
 	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
+	}
+	if !got.SoftwareVideoDecode {
+		t.Error("SoftwareVideoDecode lost in round trip")
+	}
+	if got.SourceVideoProfile != "Main 10" || got.SourceVideoBitDepth != 10 {
+		t.Errorf("source video facts lost in round trip: profile=%q bit_depth=%d", got.SourceVideoProfile, got.SourceVideoBitDepth)
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
@@ -204,6 +218,9 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		InputPath:              "/media/movie.mkv",
 		SessionID:              "abc",
 		SourceVideoCodec:       "hevc",
+		SourceVideoProfile:     "Main 10",
+		SourceVideoBitDepth:    10,
+		SoftwareVideoDecode:    true,
 		VideoBitstreamFilter:   "dovi_rpu=strip=1",
 		SeekSeconds:            900,
 		StreamOriginSeconds:    896,
@@ -211,6 +228,8 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		TargetResolution:       "1080p",
 		TargetCodecVideo:       "h264",
 		TargetCodecAudio:       "aac",
+		TargetAudioChannels:    6,
+		TargetAudioBitrateKbps: 320,
 		SegmentDuration:        2,
 		StartSegmentNumber:     450,
 		SubtitleTrackIndex:     3,
@@ -233,10 +252,13 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	}
 	// Byte-affecting encode parameters.
 	if got.InputPath != card.InputPath || got.SourceVideoCodec != card.SourceVideoCodec ||
+		got.SourceVideoProfile != card.SourceVideoProfile || got.SourceVideoBitDepth != card.SourceVideoBitDepth ||
+		got.SoftwareVideoDecode != card.SoftwareVideoDecode ||
 		got.VideoBitstreamFilter != card.VideoBitstreamFilter ||
 		got.SeekSeconds != card.SeekSeconds || got.StreamOriginSeconds != card.StreamOriginSeconds ||
 		got.CopySeekAnchorResolved != card.CopySeekAnchorResolved || got.TargetResolution != card.TargetResolution ||
 		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
+		got.TargetAudioChannels != card.TargetAudioChannels || got.TargetAudioBitrateKbps != card.TargetAudioBitrateKbps ||
 		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||
 		got.SubtitleTrackIndex != card.SubtitleTrackIndex || got.SubtitleBurnIn != card.SubtitleBurnIn ||
 		got.SubtitleCodec != card.SubtitleCodec ||

@@ -1,11 +1,19 @@
-export function toMediaTime(playerTimeSeconds: number, streamOriginSeconds = 0): number {
-  return Math.max(0, playerTimeSeconds + streamOriginSeconds);
+export function toMediaTime(playerTimeSeconds: number, timelineOffsetSeconds = 0): number {
+  return Math.max(0, playerTimeSeconds + timelineOffsetSeconds);
 }
 
-export function toPlayerTime(mediaTimeSeconds: number, streamOriginSeconds = 0): number {
+export function toPlayerTime(mediaTimeSeconds: number, timelineOffsetSeconds = 0): number {
   // Preserve negative offsets so callers can distinguish a target before the
   // current HLS window from the locally seekable position at zero.
-  return mediaTimeSeconds - streamOriginSeconds;
+  return mediaTimeSeconds - timelineOffsetSeconds;
+}
+
+export function subtitleStartPositionSeconds(
+  readyState: number,
+  currentTimeSeconds: number,
+  fetchAnchorSeconds: number | null | undefined,
+): number {
+  return readyState > 0 ? currentTimeSeconds : (fetchAnchorSeconds ?? 0);
 }
 
 /**

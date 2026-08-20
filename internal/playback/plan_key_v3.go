@@ -40,7 +40,7 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 	return "plan:" + hex.EncodeToString(sum[:16])
 }
 
-func PlanAttemptKeyV3(plan PlanV3, outputRouteGeneration int64, localMutations []string) string {
+func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []string) string {
 	transformations := make([]string, 0, len(plan.Transformations))
 	for _, transformation := range plan.Transformations {
 		transformations = append(transformations, transformation.Executor+":"+transformation.Name+":"+transformation.RecipeVersion)
@@ -48,22 +48,24 @@ func PlanAttemptKeyV3(plan PlanV3, outputRouteGeneration int64, localMutations [
 	sort.Strings(transformations)
 	mutations := append([]string(nil), localMutations...)
 	sort.Strings(mutations)
+	// The canonical string is a server implementation detail built from
+	// lowercase wire tokens; clients treat the resulting key as opaque.
 	parts := []string{
 		plan.PlanID,
-		plan.Delivery.KotlinName(),
-		plan.Stream.Protocol.KotlinName(),
+		string(plan.Delivery),
+		string(plan.Stream.Protocol),
 		strings.ToLower(plan.Stream.Container),
 		strings.ToLower(plan.EffectiveRecipe.VideoCodec),
 		strings.ToLower(plan.EffectiveRecipe.AudioCodec),
 		optionalIntV3(plan.EffectiveRecipe.Width) + "x" + optionalIntV3(plan.EffectiveRecipe.Height),
 		optionalIntV3(plan.EffectiveRecipe.BitrateKbps),
 		strings.ToLower(plan.EffectiveRecipe.DynamicRange),
-		plan.Subtitle.Mode.KotlinName(),
+		string(plan.Subtitle.Mode),
 		strings.Join(transformations, ","),
 	}
 	parts = appendQuirkIdentityV3(parts, plan)
 	parts = append(parts,
-		strconv.FormatInt(outputRouteGeneration, 10),
+		outputContextID,
 		strings.Join(mutations, ","),
 	)
 	canonical := strings.Join(parts, "|")

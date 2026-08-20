@@ -42,6 +42,10 @@ type mediaMatcher interface {
 	Match(ctx context.Context, record historyimport.Record) (*historyimport.Match, string, error)
 }
 
+type watchedLeafMatcher interface {
+	MatchLeaves(ctx context.Context, record historyimport.Record) ([]historyimport.Match, string, error)
+}
+
 type watchStateImporter interface {
 	RecordImportedWatchIfNewerWithSource(ctx context.Context, userID int, profileID, targetID string, duration, position float64, completed bool, updatedAt time.Time, watchedAt *time.Time, source userstore.WatchHistorySource) (bool, error)
 }
@@ -49,11 +53,13 @@ type watchStateImporter interface {
 const (
 	manualSyncCooldown = time.Hour
 	manualSyncTimeout  = 10 * time.Minute
-	// Built-in providers bind requests to this context and use HTTP client
-	// timeouts of at most 20 seconds. Keep dispatch below the reclaim lease;
-	// the per-session queue remains occupied until the worker itself exits.
-	confirmedStopDispatchTimeout = 25 * time.Second
-	confirmedStopLease           = time.Minute
+	// A completed stop may require a cold metadata lookup in a provider plugin.
+	// Match the plugin-host watch-sync deadline so the durable confirmation path
+	// does not cancel valid provider work before the RPC can finish. The reclaim
+	// lease must remain longer than that entire dispatch and finalization window
+	// so a second request cannot take over while the first is still valid.
+	confirmedStopDispatchTimeout = 2 * time.Minute
+	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
 )
 
 var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
@@ -102,6 +108,9 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	}
 	authMethod := authMethodOf(provider)
 	credentialsConfigured := authMethod == AuthMethodAPIKey
+	if _, pluginConfig := provider.(interface{ usesHostPluginConfig() }); pluginConfig {
+		credentialsConfigured = true
+	}
 	if !credentialsConfigured {
 		cfg, _ := s.serverConfig(ctx, providerKey)
 		credentialsConfigured = cfg.Configured()
@@ -130,6 +139,9 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		SyncWatchlistRemovalsEnabled: false,
 		SyncWatchlistOrderEnabled:    true,
 		ScrobbleEnabled:              true,
+	}
+	if configurable, ok := provider.(connectionConfigProvider); ok {
+		status.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
 	}
 	if connected {
 		status.ProviderUsername = conn.ProviderUsername
@@ -374,7 +386,13 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 				continue
 			}
 			if err := s.exportLocalPlays(ctx, conn, cfg, exporter, event.Plays); err != nil {
-				s.recordLocalWatchEventError(ctx, conn, err)
+				if limited, ok := AsRateLimited(err); ok {
+					if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
+						s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
+					}
+				} else {
+					s.recordLocalWatchEventError(ctx, conn, err)
+				}
 			}
 		case LocalWatchEventMarkedUnwatched:
 			if !provider.Capabilities().ExportUnwatched {
@@ -490,10 +508,26 @@ func (s *Service) PollDeviceAuth(
 	}
 	tokens, err := authProvider.PollDeviceAuth(ctx, cfg, session)
 	if err != nil {
+		var pending deviceAuthorizationPendingError
+		if errors.As(err, &pending) {
+			updated := pending.session
+			// Keep host-owned scope and identity authoritative even if a provider
+			// accidentally copied or zeroed those fields in its pending state.
+			updated.ID = session.ID
+			updated.Provider = session.Provider
+			updated.UserID = session.UserID
+			updated.ProfileID = session.ProfileID
+			updated.UserCode = session.UserCode
+			updated.VerificationURL = session.VerificationURL
+			updated.CompletedAt = session.CompletedAt
+			if _, persistErr := s.repo.UpsertAuthSession(ctx, updated); persistErr != nil {
+				return Connection{}, errors.Join(err, fmt.Errorf("persist pending auth session: %w", persistErr))
+			}
+		}
 		return Connection{}, err
 	}
 
-	account, err := authProvider.LookupAccount(ctx, cfg, Connection{AccessToken: tokens.AccessToken})
+	account, err := authProvider.LookupAccount(ctx, cfg, connectionWithTokens(Connection{}, tokens))
 	if err != nil {
 		return Connection{}, err
 	}
@@ -518,6 +552,17 @@ func (s *Service) ConnectAPIKey(
 	providerKey string,
 	apiKey string,
 ) (Connection, error) {
+	return s.ConnectAPIKeyWithConfig(ctx, userID, profileID, providerKey, apiKey, nil)
+}
+
+func (s *Service) ConnectAPIKeyWithConfig(
+	ctx context.Context,
+	userID int,
+	profileID string,
+	providerKey string,
+	apiKey string,
+	connectionConfig ConnectionConfigValues,
+) (Connection, error) {
 	if userID <= 0 {
 		return Connection{}, fmt.Errorf("user id is required")
 	}
@@ -537,11 +582,24 @@ func (s *Service) ConnectAPIKey(
 		return Connection{}, fmt.Errorf("provider %q does not support api-key auth", providerKey)
 	}
 
-	tokens, account, err := authProvider.ConnectWithAPIKey(ctx, apiKey)
+	var tokens TokenSet
+	var account ProviderAccount
+	var err error
+	if configured, ok := provider.(configuredAPIKeyAuthProvider); ok {
+		tokens, account, err = configured.ConnectWithAPIKeyConfig(ctx, apiKey, connectionConfig)
+	} else {
+		if len(connectionConfig) > 0 {
+			return Connection{}, fmt.Errorf("provider %q does not accept connection configuration", providerKey)
+		}
+		tokens, account, err = authProvider.ConnectWithAPIKey(ctx, apiKey)
+	}
 	if err != nil {
 		return Connection{}, err
 	}
 	if strings.TrimSpace(tokens.AccessToken) == "" {
+		if sourced, ok := provider.(sourcedProvider); ok && sourced.ProviderSource() == providerSourcePlugin {
+			return Connection{}, errors.New("watch sync plugin returned no access token")
+		}
 		tokens.AccessToken = apiKey
 	}
 	return s.persistConnection(ctx, providerKey, userID, profileID, tokens, account)
@@ -578,11 +636,10 @@ func (s *Service) persistConnection(
 	conn.Provider = providerKey
 	conn.UserID = userID
 	conn.ProfileID = profileID
-	conn.AccessToken = tokens.AccessToken
-	conn.RefreshToken = tokens.RefreshToken
-	conn.TokenExpiresAt = tokens.TokenExpiresAt
+	conn = connectionWithTokens(conn, tokens)
 	conn.ProviderAccountID = account.ID
 	conn.ProviderUsername = account.Username
+	conn.LastError = ""
 
 	return s.repo.UpsertConnection(ctx, conn)
 }
@@ -843,9 +900,15 @@ func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connectio
 		return err
 	}
 	retryAfter := rle.RetryAfter
-	if retryAfter <= 0 {
+	switch {
+	case retryAfter <= 0:
 		retryAfter = time.Hour
+	case retryAfter < time.Second:
+		retryAfter = time.Second
+	case retryAfter > 24*time.Hour:
+		retryAfter = 24 * time.Hour
 	}
+	rle.RetryAfter = retryAfter
 	until := s.now().Add(retryAfter)
 	lastError := fmt.Sprintf("%s; sync deferred until %s", rle.Error(), until.Format(time.RFC3339))
 	deferred := 1
@@ -987,6 +1050,11 @@ type ImportWatchedResult struct {
 	Warnings  []string
 }
 
+type matchedWatchedLeaf struct {
+	match     historyimport.Match
+	watchedAt time.Time
+}
+
 func (s *Service) ImportWatched(
 	ctx context.Context,
 	conn Connection,
@@ -1005,12 +1073,13 @@ func (s *Service) ImportWatched(
 	}
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	matchedLeaves := make(map[string]matchedWatchedLeaf)
 	for _, row := range rows {
-		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
+		matches, reason, err := s.matchWatchedLeaves(ctx, row)
 		if err != nil {
 			return result, err
 		}
-		if match == nil {
+		if len(matches) == 0 {
 			result.Unmatched++
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
@@ -1020,17 +1089,35 @@ func (s *Service) ImportWatched(
 		if row.LastWatchedAt == nil {
 			continue
 		}
-		duration, _ := s.mediaDuration(ctx, match.MediaItemID)
+		for _, match := range matches {
+			existing, ok := matchedLeaves[match.MediaItemID]
+			if !ok || row.LastWatchedAt.After(existing.watchedAt) {
+				matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{
+					match:     match,
+					watchedAt: *row.LastWatchedAt,
+				}
+			}
+		}
+	}
+	mediaItemIDs := make([]string, 0, len(matchedLeaves))
+	for mediaItemID := range matchedLeaves {
+		mediaItemIDs = append(mediaItemIDs, mediaItemID)
+	}
+	sort.Strings(mediaItemIDs)
+	for _, mediaItemID := range mediaItemIDs {
+		leaf := matchedLeaves[mediaItemID]
+		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
+		watchedAt := leaf.watchedAt
 		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
 			conn.ProfileID,
-			match.MediaItemID,
+			leaf.match.MediaItemID,
 			duration,
 			0,
 			true,
-			*row.LastWatchedAt,
-			row.LastWatchedAt,
+			watchedAt,
+			&watchedAt,
 			historySourceForProvider(importer),
 		)
 		if err != nil {
@@ -1048,6 +1135,22 @@ func (s *Service) ImportWatched(
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch) ([]historyimport.Match, string, error) {
+	record := row.HistoryRecord()
+	if row.Kind == historyimport.KindSeries || row.Kind == historyimport.KindSeason {
+		matcher, ok := s.matcher.(watchedLeafMatcher)
+		if !ok {
+			return nil, "watch provider matcher cannot expand aggregate watched state", nil
+		}
+		return matcher.MatchLeaves(ctx, record)
+	}
+	match, reason, err := s.matcher.Match(ctx, record)
+	if err != nil || match == nil {
+		return nil, reason, err
+	}
+	return []historyimport.Match{*match}, "", nil
 }
 
 func fetchWatchedImportBatch(
@@ -1246,20 +1349,47 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provid
 		return Connection{}, fmt.Errorf("provider %q does not support token refresh", conn.Provider)
 	}
 	tokens, err := authProvider.RefreshToken(ctx, cfg, conn)
+	_, authoritative := provider.(authoritativeRefreshProvider)
+	if authoritative && strings.TrimSpace(tokens.AccessToken) != "" {
+		conn = connectionWithTokens(conn, tokens)
+	} else if err == nil {
+		if tokens.AccessToken != "" {
+			conn.AccessToken = tokens.AccessToken
+		}
+		if tokens.RefreshToken != "" {
+			conn.RefreshToken = tokens.RefreshToken
+		}
+		if tokens.TokenExpiresAt != nil {
+			conn.TokenExpiresAt = tokens.TokenExpiresAt
+		}
+	}
+	if err != nil && isWatchSyncInvalidCredentialError(err) {
+		conn.LastError = err.Error()
+	} else if err == nil {
+		conn.LastError = ""
+	}
+	credentialsReturned := authoritative && strings.TrimSpace(tokens.AccessToken) != ""
+	if err == nil || credentialsReturned || isWatchSyncInvalidCredentialError(err) {
+		persisted, persistErr := s.repo.UpsertConnection(ctx, conn)
+		if persistErr != nil {
+			return Connection{}, fmt.Errorf("persist refreshed %s connection: %w", conn.Provider, persistErr)
+		}
+		conn = persisted
+	}
 	if err != nil {
 		return Connection{}, fmt.Errorf("refresh %s token: %w", conn.Provider, err)
 	}
-	if tokens.AccessToken != "" {
-		conn.AccessToken = tokens.AccessToken
-	}
-	if tokens.RefreshToken != "" {
-		conn.RefreshToken = tokens.RefreshToken
-	}
-	if tokens.TokenExpiresAt != nil {
-		conn.TokenExpiresAt = tokens.TokenExpiresAt
-	}
-	conn.LastError = ""
-	return s.repo.UpsertConnection(ctx, conn)
+	return conn, nil
+}
+
+func connectionWithTokens(conn Connection, tokens TokenSet) Connection {
+	conn.AccessToken = tokens.AccessToken
+	conn.RefreshToken = tokens.RefreshToken
+	conn.TokenExpiresAt = tokens.TokenExpiresAt
+	conn.TokenType = tokens.TokenType
+	conn.Scopes = append([]string(nil), tokens.Scopes...)
+	conn.SecretAttributes = cloneStringMap(tokens.SecretAttributes)
+	return conn
 }
 
 type ExportWatchedResult struct {
@@ -1309,9 +1439,10 @@ func (s *Service) ExportWatched(
 
 	exports := reconcileHistoryExports(conn.ID, local, remote)
 	for _, export := range exports {
-		if export.Status == "remote_present" {
+		switch export.Status {
+		case historyExportStatusRemotePresent:
 			result.RemotePresent++
-		} else if export.Status == "pending" {
+		case historyExportStatusPending:
 			result.Queued++
 		}
 	}
@@ -1337,7 +1468,7 @@ func (s *Service) ExportWatched(
 		for _, export := range pending {
 			play, ok := localByHistoryID[export.HistoryID]
 			if !ok {
-				if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "local history entry not found"); err != nil {
+				if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "local history entry not found"); err != nil {
 					return result, err
 				}
 				progressed = true
@@ -1349,26 +1480,36 @@ func (s *Service) ExportWatched(
 		if len(pendingPlays) == 0 {
 			continue
 		}
+		pendingPlays, singleBatch := limitWatchedExportBatch(exporter, pendingPlays)
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
-		if err != nil {
-			// Rate-limited plays are not failures: leave them pending so the
-			// next run (after the deferral) retries without churning state.
-			if _, limited := AsRateLimited(err); limited {
-				return result, err
-			}
-			for _, export := range pending {
-				_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
-			}
-			result.Failed += len(pending)
-			return result, err
+		_, limited := AsRateLimited(err)
+		retryable := isRetryableProviderError(err)
+		if err != nil && isWatchSyncInvalidCredentialError(err) {
+			return result, errors.Join(err, s.persistConnectionError(ctx, conn, err.Error()))
 		}
+		if err != nil && !limited && !retryable {
+			var markErr error
+			for _, play := range pendingPlays {
+				export := exportByHistoryID[play.HistoryID]
+				if export.ID != "" {
+					if statusErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error()); statusErr != nil {
+						markErr = errors.Join(markErr, statusErr)
+					}
+				}
+			}
+			result.Failed += len(pendingPlays)
+			return result, errors.Join(err, markErr)
+		}
+		// Commit per-event outcomes even when the provider also returned a
+		// connection-wide rate limit so successfully applied events are not
+		// retried after the deferral.
 		for _, historyID := range exportResult.Sent {
 			export := exportByHistoryID[historyID]
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "sent", ""); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusSent, ""); markErr != nil {
+				return result, markErr
 			}
 			result.Sent++
 			progressed = true
@@ -1378,8 +1519,8 @@ func (s *Service) ExportWatched(
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "provider item not found"); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "provider item not found"); markErr != nil {
+				return result, markErr
 			}
 			progressed = true
 		}
@@ -1388,13 +1529,17 @@ func (s *Service) ExportWatched(
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", message); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, message); markErr != nil {
+				return result, markErr
 			}
 			result.Failed++
 			progressed = true
 		}
-		if !progressed {
+		if limited || retryable {
+			// Leave unmentioned events pending for a later retry.
+			return result, err
+		}
+		if !progressed || singleBatch {
 			break
 		}
 	}
@@ -1426,7 +1571,7 @@ func (s *Service) exportLocalPlays(
 			MediaItemID:     play.MediaItemID,
 			WatchedAt:       play.WatchedAt,
 			ProviderItemKey: play.ProviderItemKey,
-			Status:          "pending",
+			Status:          historyExportStatusPending,
 		})
 	}
 	if len(exports) == 0 {
@@ -1435,7 +1580,19 @@ func (s *Service) exportLocalPlays(
 	if err := s.repo.UpsertHistoryExports(ctx, exports); err != nil {
 		return err
 	}
-	pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, 100)
+	historyIDs := make([]string, 0, len(exports))
+	for _, export := range exports {
+		historyIDs = append(historyIDs, export.HistoryID)
+	}
+	// A live watch event must not wait behind a connection's historical
+	// backlog. Scheduled sync still drains that backlog oldest-first, while
+	// this path selects only the events the user just created.
+	pending, err := s.repo.ListPendingHistoryExportsByHistoryIDs(
+		ctx,
+		conn.ID,
+		historyIDs,
+		watchedExportBatchSize(exporter, len(historyIDs)),
+	)
 	if err != nil {
 		return err
 	}
@@ -1456,24 +1613,32 @@ func (s *Service) exportLocalPlays(
 	if len(pendingPlays) == 0 {
 		return nil
 	}
+	pendingPlays, _ = limitWatchedExportBatch(exporter, pendingPlays)
 	exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
-	if err != nil {
-		// Leave rate-limited plays pending; the next scheduled sync retries.
-		if _, limited := AsRateLimited(err); limited {
-			return err
+	_, limited := AsRateLimited(err)
+	retryable := isRetryableProviderError(err)
+	if err != nil && isWatchSyncInvalidCredentialError(err) {
+		return errors.Join(err, s.persistConnectionError(ctx, conn, err.Error()))
+	}
+	if err != nil && !limited && !retryable {
+		var markErr error
+		for _, play := range pendingPlays {
+			export := exportByHistoryID[play.HistoryID]
+			if export.ID != "" {
+				if statusErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error()); statusErr != nil {
+					markErr = errors.Join(markErr, statusErr)
+				}
+			}
 		}
-		for _, export := range exportByHistoryID {
-			_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
-		}
-		return err
+		return errors.Join(err, markErr)
 	}
 	for _, historyID := range exportResult.Sent {
 		export := exportByHistoryID[historyID]
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "sent", ""); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusSent, ""); markErr != nil {
+			return markErr
 		}
 	}
 	for _, historyID := range exportResult.NotFound {
@@ -1481,8 +1646,8 @@ func (s *Service) exportLocalPlays(
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "provider item not found"); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "provider item not found"); markErr != nil {
+			return markErr
 		}
 	}
 	for historyID, message := range exportResult.Failed {
@@ -1490,9 +1655,12 @@ func (s *Service) exportLocalPlays(
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", message); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, message); markErr != nil {
+			return markErr
 		}
+	}
+	if limited || retryable {
+		return err
 	}
 	now := s.now()
 	conn.LastOutboundSyncAt = &now
@@ -1503,6 +1671,39 @@ func (s *Service) exportLocalPlays(
 	return nil
 }
 
+func (s *Service) persistConnectionError(ctx context.Context, conn Connection, message string) error {
+	if conn.ID != "" {
+		fresh, err := s.reloadConnection(ctx, conn)
+		if err != nil {
+			return err
+		}
+		conn = fresh
+	}
+	conn.LastError = message
+	_, err := s.repo.UpsertConnection(ctx, conn)
+	return err
+}
+
+func limitWatchedExportBatch(exporter WatchedExporter, plays []LocalPlay) ([]LocalPlay, bool) {
+	_, ok := exporter.(singleBatchWatchedExporter)
+	if !ok {
+		return plays, false
+	}
+	limit := watchedExportBatchSize(exporter, len(plays))
+	if len(plays) > limit {
+		plays = plays[:limit]
+	}
+	return plays, true
+}
+
+func watchedExportBatchSize(exporter WatchedExporter, fallback int) int {
+	bounded, ok := exporter.(singleBatchWatchedExporter)
+	if !ok {
+		return max(1, fallback)
+	}
+	return max(1, bounded.ExportBatchSize())
+}
+
 func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []RemotePlay) []HistoryExport {
 	remoteExact := make(map[string]struct{}, len(remote))
 	for _, play := range remote {
@@ -1510,9 +1711,9 @@ func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []Re
 	}
 	exports := make([]HistoryExport, 0, len(local))
 	for _, play := range local {
-		status := "pending"
+		status := historyExportStatusPending
 		if _, ok := remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt)]; ok {
-			status = "remote_present"
+			status = historyExportStatusRemotePresent
 		}
 		exports = append(exports, HistoryExport{
 			ConnectionID:    connectionID,
@@ -1683,6 +1884,8 @@ func parseInt(value string) int {
 	return parsed
 }
 
+const scrobbleActionStop = "stop"
+
 func (s *Service) ScrobbleStart(ctx context.Context, event ScrobbleEvent) error {
 	return s.scrobble(ctx, event, "start", false)
 }
@@ -1692,7 +1895,7 @@ func (s *Service) ScrobblePause(ctx context.Context, event ScrobbleEvent) error 
 }
 
 func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
-	return s.scrobble(ctx, event, "stop", false)
+	return s.scrobble(ctx, event, scrobbleActionStop, false)
 }
 
 // ScrobbleStopConfirmed waits for each provider dispatch and reports provider
@@ -1753,6 +1956,19 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 				return err
 			}
 		}
+		// Persist completed playback before provider I/O. Immediate scrobbling
+		// remains the low-latency path; the normal history-export reconciliation
+		// retries this desired state after crashes, plugin downtime, or uncertain
+		// upstream outcomes.
+		if action == scrobbleActionStop && event.Completed && provider.Capabilities().ExportWatched {
+			if err := s.persistCompletedScrobbleExport(ctx, conn, event); err != nil {
+				if confirm {
+					dispatchErrors = append(dispatchErrors, err)
+					continue
+				}
+				return err
+			}
+		}
 		if confirm {
 			confirmedTargets = append(confirmedTargets, confirmedScrobbleTarget{
 				provider: provider, scrobbler: scrobbler, connection: conn,
@@ -1793,6 +2009,38 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		}
 	}
 	return errors.Join(dispatchErrors...)
+}
+
+func (s *Service) persistCompletedScrobbleExport(ctx context.Context, conn Connection, event ScrobbleEvent) error {
+	if event.HistoryID == "" {
+		return nil
+	}
+	providerItemKey := event.ProviderItemKey
+	if providerItemKey == "" {
+		providerItemKey = providerItemKeyForLocalPlay(LocalPlay{
+			MediaItemID:   event.MediaItemID,
+			Kind:          event.Kind,
+			IMDbID:        event.IMDbID,
+			TMDBID:        event.TMDBID,
+			TVDBID:        event.TVDBID,
+			SeriesIMDbID:  event.SeriesIMDbID,
+			SeriesTMDBID:  event.SeriesTMDBID,
+			SeriesTVDBID:  event.SeriesTVDBID,
+			SeasonNumber:  event.SeasonNumber,
+			EpisodeNumber: event.EpisodeNumber,
+		})
+	}
+	if providerItemKey == "" {
+		return nil
+	}
+	return s.repo.UpsertHistoryExports(ctx, []HistoryExport{{
+		ConnectionID:    conn.ID,
+		HistoryID:       event.HistoryID,
+		MediaItemID:     event.MediaItemID,
+		WatchedAt:       event.OccurredAt,
+		ProviderItemKey: providerItemKey,
+		Status:          historyExportStatusPending,
+	}})
 }
 
 func (s *Service) dispatchScrobbleAsync(scrobbler Scrobbler, cfg ServerConfig, conn Connection, event ScrobbleEvent, action string) {
@@ -1879,12 +2127,21 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 	switch action {
 	case "pause":
 		err = scrobbler.Pause(ctx, cfg, conn, event)
-	case "stop":
+	case scrobbleActionStop:
 		err = scrobbler.Stop(ctx, cfg, conn, event)
 	default:
 		err = scrobbler.Start(ctx, cfg, conn, event)
 	}
 	if err != nil {
+		if limited, ok := AsRateLimited(err); ok {
+			if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
+				err = errors.Join(err, deferErr)
+			}
+		}
+		var persistErr error
+		if isWatchSyncInvalidCredentialError(err) {
+			persistErr = s.persistConnectionError(ctx, conn, err.Error())
+		}
 		if confirmedClaim != nil {
 			_ = s.repo.FailConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,
@@ -1893,27 +2150,46 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 		} else {
 			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, err.Error(), nil)
 		}
-		return err
+		return errors.Join(err, persistErr)
 	}
-	if action == "stop" {
+	if action == scrobbleActionStop {
 		stopSentAt := s.now()
 		if confirmedClaim != nil {
-			return s.repo.CompleteConfirmedScrobbleStop(
+			if err := s.repo.CompleteConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,
 				event.PositionSeconds, event.HistoryID, *confirmedClaim, stopSentAt,
-			)
-		}
-		if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, "", &stopSentAt); err != nil {
+			); err != nil {
+				return err
+			}
+		} else if err := s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, "", &stopSentAt); err != nil {
 			return err
+		}
+		if event.Completed && event.HistoryID != "" {
+			return s.reconcileScrobbleHistory(ctx, ScrobbleSession{
+				PlaybackSessionID: event.PlaybackSessionID,
+				ConnectionID:      conn.ID,
+				HistoryID:         event.HistoryID,
+			})
 		}
 	}
 	return nil
 }
 
 func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
+	var reconciliationErr error
+	pending, err := s.repo.ListPendingScrobbleReconciliations(ctx)
+	if err != nil {
+		reconciliationErr = err
+	} else {
+		for _, session := range pending {
+			if err := s.reconcileScrobbleHistory(ctx, session); err != nil {
+				reconciliationErr = errors.Join(reconciliationErr, err)
+			}
+		}
+	}
 	sessions, err := s.repo.ListOpenScrobbleSessions(ctx)
 	if err != nil {
-		return err
+		return errors.Join(reconciliationErr, err)
 	}
 	for _, session := range sessions {
 		conn, ok, err := s.repo.GetConnectionByID(ctx, session.ConnectionID)
@@ -1943,6 +2219,19 @@ func (s *Service) SweepOpenScrobbles(ctx context.Context) error {
 		}
 		_ = s.dispatchScrobble(ctx, scrobbler, cfg, conn, scrobbleEventFromSession(session, conn, s.now()), "stop", nil)
 	}
+	return reconciliationErr
+}
+
+func (s *Service) reconcileScrobbleHistory(ctx context.Context, session ScrobbleSession) error {
+	if session.PlaybackSessionID == "" || session.ConnectionID == "" || session.HistoryID == "" {
+		return errors.New("scrobble history reconciliation identity is incomplete")
+	}
+	if err := s.repo.MarkHistoryExportSatisfiedByScrobble(ctx, session.ConnectionID, session.HistoryID); err != nil {
+		return fmt.Errorf("mark history export satisfied by scrobble: %w", err)
+	}
+	if err := s.repo.MarkScrobbleHistoryReconciled(ctx, session.PlaybackSessionID, session.ConnectionID, s.now()); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1971,6 +2260,9 @@ func scrobbleEventFromSession(session ScrobbleSession, conn Connection, occurred
 }
 
 func authMethodOf(provider Provider) string {
+	if provider, ok := provider.(interface{ AuthMethod() string }); ok {
+		return provider.AuthMethod()
+	}
 	if _, ok := provider.(APIKeyAuthProvider); ok {
 		return AuthMethodAPIKey
 	}
@@ -1978,6 +2270,11 @@ func authMethodOf(provider Provider) string {
 }
 
 func (s *Service) serverConfig(ctx context.Context, providerKey string) (ServerConfig, error) {
+	if provider, ok := s.registry.Get(providerKey); ok {
+		if _, pluginConfig := provider.(interface{ usesHostPluginConfig() }); pluginConfig {
+			return ServerConfig{}, nil
+		}
+	}
 	if provider, ok := s.registry.Get(providerKey); ok && authMethodOf(provider) == AuthMethodAPIKey {
 		// API-key providers carry their credential on the connection itself
 		// and don't consult server settings. Return a zero config so sync

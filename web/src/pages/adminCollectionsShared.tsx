@@ -17,6 +17,12 @@ import {
 } from "@/hooks/queries/admin/collections";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { ImageUploadField } from "@/components/ImageUploadField";
+import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
+import {
+  COLLECTION_SOURCE_ORDER,
+  selectValueToSortConfig,
+  sortConfigToSelectValue,
+} from "@/lib/collectionSortConfig";
 import CollectionBuilder, {
   createCollectionBuilderValue,
   type CollectionBuilderValue,
@@ -692,6 +698,7 @@ export function TMDBPresetForm({
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
   const [tmdbSyncSchedule, setTmdbSyncSchedule] = useState("");
+  const [tmdbDefaultSort, setTmdbDefaultSort] = useState<string>(COLLECTION_SOURCE_ORDER);
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const hasInvalidLimit = limit.trim().length > 0 && parsedLimit === undefined;
   const allowedMediaTypes = getTMDBAllowedMediaTypes(preset);
@@ -720,6 +727,7 @@ export function TMDBPresetForm({
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
           sync_schedule: tmdbSyncSchedule.trim() || undefined,
+          sort_config: selectValueToSortConfig(tmdbDefaultSort),
         },
         poster: posterFile,
         backdrop: backdropFile,
@@ -882,6 +890,12 @@ export function TMDBPresetForm({
           />
         </div>
 
+        <CollectionDefaultSortField
+          value={tmdbDefaultSort}
+          onChange={setTmdbDefaultSort}
+          inputId="tmdb-default-sort"
+        />
+
         <SyncScheduleField value={tmdbSyncSchedule} onChange={setTmdbSyncSchedule} />
 
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
@@ -934,6 +948,7 @@ export function TraktPresetForm({
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
   const [syncSchedule, setSyncSchedule] = useState("");
+  const [defaultSort, setDefaultSort] = useState<string>(COLLECTION_SOURCE_ORDER);
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const hasInvalidLimit = limit.trim().length > 0 && parsedLimit === undefined;
   const isListMode = sourceKind === "list";
@@ -969,6 +984,7 @@ export function TraktPresetForm({
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
           sync_schedule: syncSchedule.trim() || undefined,
+          sort_config: selectValueToSortConfig(defaultSort),
         },
         poster: posterFile,
         backdrop: backdropFile,
@@ -1153,6 +1169,12 @@ export function TraktPresetForm({
           />
         </div>
 
+        <CollectionDefaultSortField
+          value={defaultSort}
+          onChange={setDefaultSort}
+          inputId="trakt-default-sort"
+        />
+
         <SyncScheduleField value={syncSchedule} onChange={setSyncSchedule} />
 
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
@@ -1206,6 +1228,7 @@ export function MDBListImportForm({
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
   const [backdropSourceUrl, setBackdropSourceUrl] = useState("");
   const [syncSchedule, setSyncSchedule] = useState("");
+  const [defaultSort, setDefaultSort] = useState<string>(COLLECTION_SOURCE_ORDER);
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const hasInvalidLimit = limit.trim().length > 0 && parsedLimit === undefined;
 
@@ -1223,6 +1246,7 @@ export function MDBListImportForm({
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
           sync_schedule: syncSchedule.trim() || undefined,
+          sort_config: selectValueToSortConfig(defaultSort),
         },
         poster: posterFile,
         backdrop: backdropFile,
@@ -1325,6 +1349,12 @@ export function MDBListImportForm({
           />
         </div>
 
+        <CollectionDefaultSortField
+          value={defaultSort}
+          onChange={setDefaultSort}
+          inputId="mdblist-default-sort"
+        />
+
         <SyncScheduleField value={syncSchedule} onChange={setSyncSchedule} />
 
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
@@ -1368,6 +1398,9 @@ export function CollectionEditForm({
   });
   const [title, setTitle] = useState(collection.title ?? "");
   const [description, setDescription] = useState(collection.description ?? "");
+  const [defaultSort, setDefaultSort] = useState<string>(() =>
+    sortConfigToSelectValue(collection.sort_config),
+  );
   const [featured, setFeatured] = useState(collection.featured ?? false);
   const [visibility, setVisibility] = useState<"visible" | "hidden">(collection.visibility);
   const [posterFile, setPosterFile] = useState<File | null>(null);
@@ -1487,6 +1520,7 @@ export function CollectionEditForm({
       source_url: sourceUrlValue,
       source_config: sourceConfig,
       sync_schedule: editSyncSchedule.trim(),
+      sort_config: selectValueToSortConfig(defaultSort),
     };
 
     updateMutation.mutate(
@@ -1624,6 +1658,12 @@ export function CollectionEditForm({
             </div>
           </div>
         ) : null}
+
+        <CollectionDefaultSortField
+          value={defaultSort}
+          onChange={setDefaultSort}
+          inputId="collection-edit-default-sort"
+        />
 
         <SyncScheduleField value={editSyncSchedule} onChange={setEditSyncSchedule} />
 

@@ -515,7 +515,7 @@ ASCII blocks render anywhere.
 
 ```text
                          ┌─────────────────────────── CENTRAL (mode=server) ───────────────────────────┐
-   Client                │  RequireAuth  /playback/start  /playback/transcode/start  (mint token)       │
+   Client                │  RequireAuth  /playback/start  /playback/{sid}/replan  (mint token)         │
   (web / android /       │  native serve: /playback/transcode/{sid}/master.m3u8?st=  /stream/{sid}?st=  │
    apple / jellyfin)     │  Admin Stop/Terminate → write session-deny marker (event, not a timer)      │
                          └───────────┬──────────────────────────┬───────────────────────┬──────────────┘
@@ -564,12 +564,13 @@ sequenceDiagram
     participant C as Client
     participant S as Central server (integrated)
     participant PG as Postgres (access)
-    Note over C,S: transcode start
-    C->>S: POST /playback/transcode/start  (RequireAuth)
+    Note over C,S: start — the plan decides this is a transcode
+    C->>S: POST /playback/start  (RequireAuth, protocol_version 3)
     S->>PG: resolve file + access
+    S->>S: PlanPlaybackV3 → delivery = server_transcode_hls
     S->>S: StartTranscode (ffmpeg) + RegisterTranscodeSession
     S->>S: card = NewRecipeCard(opts); token = Sign(card.ToClaims(), 24h)
-    S-->>C: 202  manifestURL = /playback/transcode/{sid}/master.m3u8?st=TOKEN
+    S-->>C: 201  plan.url = /playback/transcode/{sid}/master.m3u8?st=TOKEN
     Note over C,S: hot path — NO Postgres, NO lease (live session in memory)
     C->>S: GET .../master.m3u8?st=TOKEN
     S->>S: LoadOrReconstructSession → live hit → BuildPlaybackManifest (segments carry ?st)
@@ -599,9 +600,9 @@ sequenceDiagram
     participant N as Proxy node
     participant T as Transcode node
     participant R as Redis
-    C->>S: POST /playback/transcode/start (RequireAuth)
+    C->>S: POST /playback/start (RequireAuth, protocol_version 3)
     S->>S: card(full recipe, tnode=T); token = Sign(card.ToClaims())
-    S-->>C: manifestURL = {N}/stream/transcode/TOKEN/master.m3u8
+    S-->>C: plan.url = {N}/stream/transcode/TOKEN/master.m3u8
     loop manifest + segments
         C->>N: GET /stream/transcode/TOKEN/...
         N->>N: verifyToken(TOKEN)

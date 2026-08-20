@@ -35,6 +35,23 @@ const (
 	imageCacheLeaseDuration = 15 * time.Minute
 	imageCacheMaxAttempts   = 8
 	imageCacheDeferredRetry = 7 * 24 * time.Hour
+
+	// imageCacheFailedCooldown is how long a job that spent its attempt budget
+	// (or its lease-expiry budget) stays parked in 'failed' before catalog
+	// discovery may re-admit it. Long enough that permanently broken artwork
+	// costs one retry cycle a week instead of one every couple of hours, short
+	// enough that an hours-long provider or storage outage cannot tombstone the
+	// whole queue.
+	imageCacheFailedCooldown = 7 * 24 * time.Hour
+
+	// imageCachePermanentPark parks a failure that cannot heal on its own: the
+	// row is a deduplication tombstone and rediscovery must not pick it up
+	// again. Recovery stays possible through the source_path-change branch of
+	// the enqueue upsert, which is the only event that can make the artwork
+	// usable again.
+	imageCachePermanentPark = 100 * 365 * 24 * time.Hour
+
+	imageCacheEmptyResolvedURLError = "image resolver returned empty URL"
 )
 
 type EnqueueImageCacheJobInput struct {
@@ -55,8 +72,43 @@ type ImageCacheJobRepository struct {
 	pool *pgxpool.Pool
 }
 
+// ImageCacheBacklog is a point-in-time count of the jobs still outstanding:
+// queued and running. It deliberately carries no succeeded/failed/total
+// breakdown — those need an unindexed full-table aggregate, while both counts
+// here are served by the queue's partial status indexes.
+type ImageCacheBacklog struct {
+	Known   bool
+	Queued  int64
+	Running int64
+}
+
+func (b ImageCacheBacklog) Outstanding() int64 {
+	return b.Queued + b.Running
+}
+
 func NewImageCacheJobRepository(pool *pgxpool.Pool) *ImageCacheJobRepository {
 	return &ImageCacheJobRepository{pool: pool}
+}
+
+// GetBacklog counts the outstanding queue so a run can report progress against
+// the work it set out to do. Keeping this query on the repository ensures
+// callers do not duplicate queue status semantics or reach around the data
+// layer. Callers should sample it once per run, not per batch.
+func (r *ImageCacheJobRepository) GetBacklog(ctx context.Context) (ImageCacheBacklog, error) {
+	var backlog ImageCacheBacklog
+	if r == nil || r.pool == nil {
+		return backlog, nil
+	}
+	err := r.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM metadata_image_cache_jobs WHERE status = 'queued'),
+			(SELECT COUNT(*) FROM metadata_image_cache_jobs WHERE status = 'running')
+	`).Scan(&backlog.Queued, &backlog.Running)
+	if err != nil {
+		return ImageCacheBacklog{}, fmt.Errorf("counting outstanding metadata image cache jobs: %w", err)
+	}
+	backlog.Known = true
+	return backlog, nil
 }
 
 func imageCacheRetryDelay(attempt int) time.Duration {
@@ -75,6 +127,45 @@ func imageCacheFailureRetryDelay(attempt int, errText string) time.Duration {
 		return imageCacheDeferredRetry
 	}
 	return imageCacheRetryDelay(attempt)
+}
+
+type imageCacheFailureDisposition struct {
+	status     string
+	attempt    int
+	retryDelay time.Duration
+}
+
+// classifyImageCacheFailure decides what one failed attempt does to the row.
+//
+// A job that still has attempts left goes back to 'queued' with backoff. Once
+// the attempt budget is spent the row parks in 'failed', and next_attempt_at
+// decides whether it can ever come back: a failure that cannot heal unless the
+// source path changes is parked past any recovery window and acts as a
+// deduplication tombstone, while every other exhausted row parks for a cooldown
+// so that a long outage does not permanently kill artwork caching.
+//
+// Note that an empty resolved URL is *not* treated as permanent: the resolver
+// also returns "" while a plugin is disabled, upgrading, or still loading, and
+// this layer cannot tell that apart from artwork the provider no longer has.
+func classifyImageCacheFailure(attemptCount int, errText string) imageCacheFailureDisposition {
+	nextAttempt := attemptCount + 1
+	if nextAttempt < imageCacheMaxAttempts {
+		return imageCacheFailureDisposition{
+			status:     ImageCacheStatusQueued,
+			attempt:    nextAttempt,
+			retryDelay: imageCacheFailureRetryDelay(nextAttempt, errText),
+		}
+	}
+
+	park := imageCacheFailedCooldown
+	if isStableProviderImageFailure(errText) {
+		park = imageCachePermanentPark
+	}
+	return imageCacheFailureDisposition{
+		status:     ImageCacheStatusFailed,
+		attempt:    nextAttempt,
+		retryDelay: park,
+	}
 }
 
 func isStableProviderImageFailure(errText string) bool {
@@ -296,8 +387,24 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 	return int(tag.RowsAffected()), nil
 }
 
-func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) error {
-	_, err := r.pool.Exec(ctx, `
+// imageCacheTargetScope matches every job an interactive refresh of one
+// content ID is responsible for: the target's own rows plus the rows of its
+// children. Season, episode, and localization jobs are enqueued under their
+// own content ID with series_id pointing at the series, so a series-level
+// refresh only reaches them through series_id. Item and item_localization
+// rows carry series_id = the item's own content ID, so a movie or a
+// season/episode target still matches on target_content_id alone. Person
+// jobs have an empty series_id and stay out of scope.
+func imageCacheTargetScope(param string) string {
+	return "(target_content_id = " + param + " OR series_id = " + param + ")"
+}
+
+// recoverExpiredRunning releases jobs whose worker lease expired, burning one
+// attempt each. A job that runs out of attempts this way parks for the failure
+// cooldown rather than forever: repeated lease expiry means workers kept dying,
+// which says nothing about whether the artwork itself is usable.
+func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context, targetContentID string) error {
+	query := `
 		UPDATE metadata_image_cache_jobs
 		SET status = CASE
 				WHEN attempt_count + 1 >= $2 THEN 'failed'
@@ -305,7 +412,7 @@ func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) err
 			END,
 			attempt_count = attempt_count + 1,
 			next_attempt_at = CASE
-				WHEN attempt_count + 1 >= $2 THEN next_attempt_at
+				WHEN attempt_count + 1 >= $2 THEN NOW() + $3::interval
 				ELSE NOW()
 			END,
 			locked_at = NULL,
@@ -317,7 +424,17 @@ func (r *ImageCacheJobRepository) recoverExpiredRunning(ctx context.Context) err
 			updated_at = NOW()
 		WHERE status = 'running'
 		  AND locked_at < NOW() - $1::interval
-	`, intervalLiteral(imageCacheLeaseDuration), imageCacheMaxAttempts)
+	`
+	args := []any{
+		intervalLiteral(imageCacheLeaseDuration),
+		imageCacheMaxAttempts,
+		intervalLiteral(imageCacheFailedCooldown),
+	}
+	if targetContentID != "" {
+		query += " AND " + imageCacheTargetScope("$4")
+		args = append(args, targetContentID)
+	}
+	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("recovering expired metadata image cache jobs: %w", err)
 	}
@@ -328,15 +445,94 @@ func (r *ImageCacheJobRepository) ClaimDue(ctx context.Context, workerID string,
 	if r == nil || r.pool == nil || limit <= 0 {
 		return nil, nil
 	}
-	if err := r.recoverExpiredRunning(ctx); err != nil {
+	if err := r.recoverExpiredRunning(ctx, ""); err != nil {
 		return nil, err
 	}
-	rows, err := r.pool.Query(ctx, `
+	return r.claimDue(ctx, workerID, "", limit)
+}
+
+func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetContentID string) error {
+	if r == nil || r.pool == nil {
+		return nil
+	}
+	targetContentID = strings.TrimSpace(targetContentID)
+	if targetContentID == "" {
+		return nil
+	}
+	if err := r.recoverExpiredRunning(ctx, targetContentID); err != nil {
+		return err
+	}
+	// attempt_count is preserved: a manual refresh buys the target one
+	// immediate retry, it does not reset the retry budget a background worker
+	// already spent on artwork that keeps failing. Failed rows are requeued
+	// regardless of their timer; queued rows are only pulled forward while
+	// they are still deferred, so the reset stays a small, one-off write.
+	// CacheTargetArtwork runs this once per refresh, not once per poll.
+	_, err := r.pool.Exec(ctx, `
+		UPDATE metadata_image_cache_jobs
+		SET status = 'queued',
+			next_attempt_at = NOW(),
+			locked_at = NULL,
+			locked_by = '',
+			completed_at = NULL,
+			updated_at = NOW()
+		WHERE `+imageCacheTargetScope("$1")+`
+		  AND status IN ('queued', 'failed')
+		  AND (status = 'failed' OR next_attempt_at > NOW())
+	`, targetContentID)
+	if err != nil {
+		return fmt.Errorf("retrying target metadata image cache jobs: %w", err)
+	}
+	return nil
+}
+
+func (r *ImageCacheJobRepository) claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+	targetContentID = strings.TrimSpace(targetContentID)
+	if targetContentID == "" {
+		return nil, nil
+	}
+	return r.claimDue(ctx, workerID, targetContentID, limit)
+}
+
+func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, nil
+	}
+	targetContentID = strings.TrimSpace(targetContentID)
+	if targetContentID == "" {
+		return false, nil
+	}
+	var running bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM metadata_image_cache_jobs
+			WHERE `+imageCacheTargetScope("$1")+`
+			  AND status = 'running'
+		)
+	`, targetContentID).Scan(&running); err != nil {
+		return false, fmt.Errorf("checking running metadata image cache jobs: %w", err)
+	}
+	return running, nil
+}
+
+func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return nil, nil
+	}
+	query := `
 		WITH due AS (
 			SELECT id
 			FROM metadata_image_cache_jobs
 			WHERE status = 'queued'
 			  AND next_attempt_at <= NOW()
+	`
+	args := []any{limit, workerID}
+	if targetContentID != "" {
+		query += " AND " + imageCacheTargetScope("$3")
+		args = append(args, targetContentID)
+	}
+	query += `
 			ORDER BY next_attempt_at ASC, id ASC
 			LIMIT $1
 			FOR UPDATE SKIP LOCKED
@@ -354,7 +550,8 @@ func (r *ImageCacheJobRepository) ClaimDue(ctx context.Context, workerID string,
 			j.content_type, j.image_type, j.season_number, j.episode_number,
 			j.status, j.attempt_count, j.next_attempt_at, j.locked_at,
 			j.locked_by, j.last_error, j.created_at, j.updated_at, j.completed_at
-	`, limit, workerID)
+	`
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("claiming metadata image cache jobs: %w", err)
 	}
@@ -404,15 +601,11 @@ func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64, l
 	return nil
 }
 
-// MarkFailed records a failed attempt with backoff, guarded by lease ownership
-// for the same reason as MarkSucceeded.
+// MarkFailed records a failed attempt, parking known-terminal failures and
+// applying backoff to retryable failures. Lease ownership is guarded for the
+// same reason as MarkSucceeded.
 func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, attemptCount int, lockedBy string, errText string) error {
-	nextAttempt := attemptCount + 1
-	status := ImageCacheStatusQueued
-	if nextAttempt >= imageCacheMaxAttempts {
-		status = ImageCacheStatusFailed
-	}
-	delay := imageCacheFailureRetryDelay(nextAttempt, errText)
+	disposition := classifyImageCacheFailure(attemptCount, errText)
 
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
@@ -426,7 +619,7 @@ func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, atte
 		WHERE id = $1
 		  AND status = 'running'
 		  AND locked_by = $6
-	`, id, status, nextAttempt, intervalLiteral(delay), errText, lockedBy)
+	`, id, disposition.status, disposition.attempt, intervalLiteral(disposition.retryDelay), errText, lockedBy)
 	if err != nil {
 		return fmt.Errorf("marking metadata image cache job failed: %w", err)
 	}

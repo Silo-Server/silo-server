@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+const (
+	mediaBaseTypeAudiobook = "audiobook"
+	mediaBaseTypePodcast   = "podcast"
+	mediaCodecMJPEG        = "mjpeg"
+)
+
 // MediaFolder represents a row in the media_folders table.
 type MediaFolder struct {
 	ID                       int
@@ -153,6 +159,87 @@ func (f *MediaFile) PrimaryDVProfile() int {
 	return f.VideoTracks[0].DVProfile
 }
 
+// AudioOnlyProbeFacts is the compact probe shape needed to distinguish known
+// audio media from incomplete video probes and legacy attached cover art.
+type AudioOnlyProbeFacts struct {
+	BaseType               string
+	CodecVideo             string
+	CodecAudio             string
+	HasVideoTracks         bool
+	HasAudioTracks         bool
+	HasNonImageVideoTracks bool
+}
+
+func isImageVideoCodec(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case mediaCodecMJPEG, "jpeg", "png", "webp", "gif", "bmp":
+		return true
+	default:
+		return false
+	}
+}
+
+// HasLegacyAttachedPictureVideo reports the stale shape in which every video
+// track on known audio media is embedded cover art.
+func (f AudioOnlyProbeFacts) HasLegacyAttachedPictureVideo() bool {
+	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
+	hasAudio := f.HasAudioTracks || strings.TrimSpace(f.CodecAudio) != ""
+	if !knownAudioType || !hasAudio {
+		return false
+	}
+	if !f.HasVideoTracks {
+		return isImageVideoCodec(f.CodecVideo)
+	}
+	if f.HasNonImageVideoTracks {
+		return false
+	}
+	return strings.TrimSpace(f.CodecVideo) == "" || isImageVideoCodec(f.CodecVideo)
+}
+
+// IsAudioOnly reports whether these facts contain positive evidence for known
+// audio media with no playable video stream.
+func (f AudioOnlyProbeFacts) IsAudioOnly() bool {
+	knownAudioType := f.BaseType == mediaBaseTypeAudiobook || f.BaseType == mediaBaseTypePodcast
+	hasAudio := f.HasAudioTracks || strings.TrimSpace(f.CodecAudio) != ""
+	return (knownAudioType && hasAudio && !f.HasVideoTracks && strings.TrimSpace(f.CodecVideo) == "") || f.HasLegacyAttachedPictureVideo()
+}
+
+// AudioOnlyProbeFacts returns the compact stream evidence for this media file.
+func (f *MediaFile) AudioOnlyProbeFacts() AudioOnlyProbeFacts {
+	if f == nil {
+		return AudioOnlyProbeFacts{}
+	}
+	facts := AudioOnlyProbeFacts{
+		BaseType:       f.BaseType,
+		CodecVideo:     f.CodecVideo,
+		CodecAudio:     f.CodecAudio,
+		HasVideoTracks: len(f.VideoTracks) > 0,
+		HasAudioTracks: len(f.AudioTracks) > 0,
+	}
+	for _, track := range f.VideoTracks {
+		if !isImageVideoCodec(track.Codec) {
+			facts.HasNonImageVideoTracks = true
+			break
+		}
+	}
+	return facts
+}
+
+// HasLegacyAttachedPictureVideo reports the stale catalog shape produced when
+// older probes recorded embedded cover art as a video track. BaseType and
+// audio evidence keep genuine MJPEG video from being normalized away.
+func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
+	return f.AudioOnlyProbeFacts().HasLegacyAttachedPictureVideo()
+}
+
+// IsAudioOnly reports whether a probed file carries no playable video stream —
+// audiobooks and podcasts, as opposed to a video file whose probe is incomplete.
+// It also normalizes legacy audiobook/podcast cover-art rows until a repair
+// probe removes their stale image-only video metadata.
+func (f *MediaFile) IsAudioOnly() bool {
+	return f.AudioOnlyProbeFacts().IsAudioOnly()
+}
+
 // NormalizeVideoBitDepth returns an explicit probe value when available and
 // otherwise derives the bit depth from stable ffprobe fields. FFprobe commonly
 // omits bits_per_raw_sample for HEVC even though the pixel format and profile
@@ -205,6 +292,7 @@ type VideoTrack struct {
 	Codec              string `json:"codec,omitempty"`
 	DolbyVision        string `json:"dolby_vision,omitempty"`
 	DVProfile          int    `json:"dv_profile,omitempty"`
+	DVLevel            int    `json:"dv_level,omitempty"`
 	DVBLCompatID       int    `json:"dv_bl_compat_id,omitempty"`
 	DVELPresent        bool   `json:"dv_el_present,omitempty"`
 	DVEnhancementLayer string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown
@@ -356,6 +444,11 @@ type Person struct {
 	PlexGUID        string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	// MetadataRefreshAttemptedAt is when a provider lookup was last attempted
+	// for this person, whether or not it returned anything. nil means never
+	// attempted. Only the whole-row people loaders in catalog populate it;
+	// credit listings (ItemPerson) leave it nil.
+	MetadataRefreshAttemptedAt *time.Time
 }
 
 // ItemPerson represents a person's credit on a specific media item.

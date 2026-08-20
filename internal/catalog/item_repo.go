@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1684,6 +1685,26 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 // setting only the non-nil fields in upd. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin metadata update tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := r.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit metadata update tx: %w", err)
+	}
+	return nil
+}
+
+// UpdateMetadataTx applies the same metadata update using the caller's
+// transaction. It lets workflows that also replace durable identity keep the
+// identity, scalar metadata, search-index event, and terminal timestamp in one
+// atomic write.
+func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, contentID string, upd *MetadataUpdate) error {
 	var setClauses []string
 	var args []any
 	argIdx := 1
@@ -1787,12 +1808,6 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 		strings.Join(setClauses, ", "), argIdx)
 	args = append(args, contentID)
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin metadata update tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("updating media item metadata: %w", err)
@@ -1802,9 +1817,6 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit metadata update tx: %w", err)
 	}
 	return nil
 }
@@ -1873,6 +1885,126 @@ func (r *ItemRepository) IncrementRefreshFailure(ctx context.Context, contentID 
 		return ErrItemNotFound
 	}
 	return nil
+}
+
+// TryClaimTrailersRefresh atomically consumes an item's trailer-refresh
+// cooldown slot. The UPDATE is the gate: it writes NOW() only when the stored
+// timestamp is NULL or older than the cooldown window, so concurrent callers
+// cannot both win.
+//
+// Either way the returned timestamp is the value now stored in the column. A
+// winner needs it to release its own claim later (see
+// ReleaseTrailersRefreshClaim); a loser needs it to compute the next-allowed
+// time. Losing the gate means either the item is in cooldown or it no longer
+// exists, which the follow-up read distinguishes — a missing row yields
+// ErrItemNotFound.
+//
+// The classification spans two statements, so a concurrent release can land
+// between them: the UPDATE loses to another request's claim, that request's
+// refresh fails and NULLs the column, and the follow-up SELECT then reads a
+// free slot. Reporting that as cooldown would be a cooldown with no
+// next-allowed time and no refresh actually running, so a NULL read retries
+// the claim once — the slot is demonstrably free, and this caller may take it.
+//
+// Contract for the three outcomes, which callers rely on to avoid emitting an
+// undateable cooldown:
+//   - (true, ts, nil): claimed; ts is the stored timestamp to release on.
+//   - (false, ts, nil): in cooldown until ts plus the window.
+//   - (false, nil, nil): lost the gate twice while the slot kept being freed,
+//     so another request is claiming it right now. Not a cooldown — the caller
+//     should treat it as "an equivalent refresh is already in flight", the same
+//     answer it gives when it loses the in-process dedup claim.
+func (r *ItemRepository) TryClaimTrailersRefresh(ctx context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var claimedAt time.Time
+		err := r.pool.QueryRow(ctx, `
+			UPDATE media_items
+			SET trailers_refresh_requested_at = NOW()
+			WHERE content_id = $1
+			  AND (trailers_refresh_requested_at IS NULL
+			       OR trailers_refresh_requested_at < NOW() - $2::interval)
+			RETURNING trailers_refresh_requested_at`,
+			contentID, fmt.Sprintf("%d seconds", int64(cooldown.Seconds())),
+		).Scan(&claimedAt)
+		switch {
+		case err == nil:
+			return true, &claimedAt, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return false, nil, fmt.Errorf("claiming trailers refresh: %w", err)
+		}
+
+		var requestedAt *time.Time
+		err = r.pool.QueryRow(ctx, `
+			SELECT trailers_refresh_requested_at
+			FROM media_items
+			WHERE content_id = $1`,
+			contentID,
+		).Scan(&requestedAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, nil, ErrItemNotFound
+			}
+			return false, nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+		}
+		if requestedAt != nil {
+			return false, requestedAt, nil
+		}
+		// The slot was released underneath us; go around and try to take it.
+	}
+	// Both attempts lost the gate and both read a freed slot. Rather than
+	// report a cooldown we cannot date, treat it as contention lost to whoever
+	// is claiming and releasing in a tight loop: no timestamp, no claim.
+	return false, nil, nil
+}
+
+// ReleaseTrailersRefreshClaim hands an item's trailer-refresh cooldown slot
+// back after the refresh it started failed, so the viewer can retry instead of
+// waiting out the whole window for work that never happened.
+//
+// claimedAt is the timestamp TryClaimTrailersRefresh wrote, and the equality
+// guard is what makes this safe to run from a detached goroutine: if the window
+// has since lapsed and another request claimed the slot, this UPDATE matches no
+// row and the newer claim survives untouched. Zero rows affected is therefore a
+// normal outcome, not an error.
+func (r *ItemRepository) ReleaseTrailersRefreshClaim(ctx context.Context, contentID string, claimedAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_items
+		SET trailers_refresh_requested_at = NULL
+		WHERE content_id = $1
+		  AND trailers_refresh_requested_at = $2`,
+		contentID, claimedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("releasing trailers refresh claim: %w", err)
+	}
+	return nil
+}
+
+// TrailersRefreshRequestedAt reads the timestamp of the trailer-refresh
+// cooldown claim currently held for an item, or nil when the slot is free.
+//
+// The durable recovery path needs it: when the process that consumed a slot
+// dies mid-refresh, the refresh-debt queue re-runs the work in a worker that
+// never saw the claim and so has no timestamp to release it on. Reading the
+// claim before the refresh starts gives that worker the same exact key the
+// original request had, so ReleaseTrailersRefreshClaim's equality guard keeps
+// working: a slot re-claimed in the meantime is left alone.
+func (r *ItemRepository) TrailersRefreshRequestedAt(ctx context.Context, contentID string) (*time.Time, error) {
+	var requestedAt *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT trailers_refresh_requested_at
+		FROM media_items
+		WHERE content_id = $1`,
+		contentID,
+	).Scan(&requestedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrItemNotFound
+		}
+		return nil, fmt.Errorf("reading trailers refresh timestamp: %w", err)
+	}
+	return requestedAt, nil
 }
 
 // MediaTMDBRow is a single result row from LookupTMDBIDs, containing the

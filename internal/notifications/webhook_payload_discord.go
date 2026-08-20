@@ -48,9 +48,10 @@ type discordEmbedMedia struct {
 // imdb.com, thetvdb.com and their image CDNs) by default, plus presigned
 // server-storage URLs only under the explicit "server" opt-in — Discord
 // fetches thumbnail URLs and the raw payload is visible to channel members,
-// so a self-hosted URL reveals the server's address (docs/superpowers/plans/
-// notifications/04, "Server URL leakage"). Builders never derive artwork
-// URLs themselves; they render the PosterURL the sender layer resolved.
+// so a self-hosted URL reveals the server's address
+// (docs/architecture/notifications.md, "Server URL leakage"). Builders never
+// derive artwork URLs themselves; they render the PosterURL the sender layer
+// resolved.
 type discordEmbed struct {
 	Title       string              `json:"title"`
 	URL         string              `json:"url,omitempty"`

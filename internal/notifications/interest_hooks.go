@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -38,11 +39,27 @@ func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (use
 		return store, err
 	}
 	tracked := &interestTrackingStore{UserStore: store, userID: userID, system: p.system, updater: p.system.Interest}
-	// Preserve the DeviceRegistry interface upgrade some callers probe for.
-	if registry, ok := store.(userstore.DeviceRegistry); ok {
+	// Preserve the interface upgrades callers probe for. Both are conditional
+	// on the backing store: advertising a capability it does not have would
+	// send callers down a fast path that can only fail.
+	registry, hasDevices := store.(userstore.DeviceRegistry)
+	rollup, hasRollup := store.(userstore.SeriesEpisodeRollupStore)
+	switch {
+	case hasDevices && hasRollup:
+		return &interestTrackingStoreWithDevicesAndRollup{
+			interestTrackingStore:    tracked,
+			DeviceRegistry:           registry,
+			SeriesEpisodeRollupStore: rollup,
+		}, nil
+	case hasDevices:
 		return &interestTrackingStoreWithDevices{
 			interestTrackingStore: tracked,
 			DeviceRegistry:        registry,
+		}, nil
+	case hasRollup:
+		return &interestTrackingStoreWithRollup{
+			interestTrackingStore:    tracked,
+			SeriesEpisodeRollupStore: rollup,
 		}, nil
 	}
 	return tracked, nil
@@ -64,6 +81,48 @@ type interestTrackingStoreWithDevices struct {
 	userstore.DeviceRegistry
 }
 
+// interestTrackingStoreWithRollup adds the series-rollup capability only when
+// the backing store actually has it. Unlike the other capabilities, this one
+// cannot be forwarded unconditionally: the per-user SQLite backend has no
+// catalog tables and genuinely cannot answer the query, and callers treat
+// "implements the interface" as "can do this". Advertising it anyway would
+// send every jellycompat series request down the fast path to fail, logging a
+// warning each time before falling back — turning an expected capability
+// absence into recurring noise on successful requests.
+type interestTrackingStoreWithRollup struct {
+	*interestTrackingStore
+	userstore.SeriesEpisodeRollupStore
+}
+
+type interestTrackingStoreWithDevicesAndRollup struct {
+	*interestTrackingStore
+	userstore.DeviceRegistry
+	userstore.SeriesEpisodeRollupStore
+}
+
+var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStore)(nil)
+var _ userstore.SettingMutationTransactioner = (*interestTrackingStore)(nil)
+var _ userstore.SettingValueCompareAndSetter = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.SettingMutationTransactioner = (*interestTrackingStoreWithDevices)(nil)
+
+// Optional store capabilities must survive the decorator. Embedding the
+// UserStore interface promotes only that interface's methods, so each of these
+// needs an explicit forward below; the assertions make a missing one a compile
+// error instead of a silent production slowdown.
+//
+// SeriesEpisodeRollupStore is deliberately absent here: it is conditional on
+// the backing store, so it lives on the wrapper types above rather than being
+// forwarded unconditionally.
+var _ userstore.WatchedBatchWriter = (*interestTrackingStore)(nil)
+var _ userstore.VisibleHistoryAdder = (*interestTrackingStore)(nil)
+var _ userstore.HistoryVisibilityStore = (*interestTrackingStore)(nil)
+var _ userstore.WatchedBatchWriter = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.VisibleHistoryAdder = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.HistoryVisibilityStore = (*interestTrackingStoreWithDevices)(nil)
+var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithRollup)(nil)
+var _ userstore.SeriesEpisodeRollupStore = (*interestTrackingStoreWithDevicesAndRollup)(nil)
+var _ userstore.DeviceRegistry = (*interestTrackingStoreWithDevicesAndRollup)(nil)
+
 // WithPreferenceSettingsTransaction preserves the optional atomic-settings
 // capability of the wrapped store. Preference writes do not affect interest
 // signals, so the transaction can pass through unchanged; keeping the method
@@ -78,6 +137,37 @@ func (s *interestTrackingStore) WithPreferenceSettingsTransaction(
 		return fmt.Errorf("wrapped user store does not support atomic preference settings synchronization")
 	}
 	return transactioner.WithPreferenceSettingsTransaction(ctx, fn)
+}
+
+// CompareAndSetSettingValue preserves the semantic-document CAS capability of
+// the wrapped store. Settings writes do not affect notification interests, so
+// this decorator must not intercept or downgrade the backend primitive.
+func (s *interestTrackingStore) CompareAndSetSettingValue(
+	ctx context.Context,
+	id userstore.SettingIdentity,
+	value json.RawMessage,
+	expectedRevision int64,
+) (*userstore.SettingValue, error) {
+	cas, ok := s.UserStore.(userstore.SettingValueCompareAndSetter)
+	if !ok {
+		return nil, fmt.Errorf("wrapped user store does not support atomic setting updates")
+	}
+	return cas.CompareAndSetSettingValue(ctx, id, value, expectedRevision)
+}
+
+// WithSettingMutationTransaction preserves the durable setting+receipt
+// transaction used by mutation IDs. Passing the transaction-scoped writer
+// through unchanged keeps both operations on the concrete backend transaction.
+func (s *interestTrackingStore) WithSettingMutationTransaction(
+	ctx context.Context,
+	mutationID string,
+	fn func(userstore.SettingMutationWriter) error,
+) error {
+	transactioner, ok := s.UserStore.(userstore.SettingMutationTransactioner)
+	if !ok {
+		return fmt.Errorf("wrapped user store does not support atomic idempotent setting mutations")
+	}
+	return transactioner.WithSettingMutationTransaction(ctx, mutationID, fn)
 }
 
 // progressState is the transition-relevant projection of a progress row.
@@ -259,6 +349,84 @@ func (s *interestTrackingStore) RemoveHistoryItems(ctx context.Context, profileI
 		}
 	}
 	return err
+}
+
+// --- Optional store capabilities.
+//
+// This decorator embeds the userstore.UserStore *interface*, which promotes
+// only the methods declared on that interface. Any optional capability the
+// backing store implements is invisible through the wrapper unless it is
+// forwarded explicitly here — and because callers reach these via type
+// assertion with a working fallback, a missing forward is silent: no error, no
+// test failure, just a much slower path in production. Marking a series
+// watched regressed exactly this way. When adding a new optional capability to
+// userstore, forward it here and extend the compile-time assertions below.
+
+// MarkWatchedBatch forwards the transactional batch mark-watched write, whose
+// whole purpose is that a large series commits as one unit. Falling through to
+// the per-target loop would restore the partial-write window it removes.
+func (s *interestTrackingStore) MarkWatchedBatch(
+	ctx context.Context,
+	profileID string,
+	targets []userstore.MarkWatchedTarget,
+	entries []userstore.WatchHistoryEntry,
+) ([]userstore.WatchHistoryEntry, error) {
+	writer, ok := s.UserStore.(userstore.WatchedBatchWriter)
+	if !ok {
+		// The helper runs against the inner store, so this decorator's own
+		// MarkWatched hook never fires; queue here or the recompute is lost.
+		// A mid-loop error still leaves earlier targets written, so queue
+		// regardless of err — a redundant queue only costs one recompute,
+		// while a missing one leaves profile_series_interest stale until some
+		// unrelated mutation or the rebuild task touches the series.
+		written, err := userstore.MarkWatchedBatch(ctx, s.UserStore, profileID, targets, entries)
+		s.queueTargetMutations(profileID, targets)
+		return written, err
+	}
+	written, err := writer.MarkWatchedBatch(ctx, profileID, targets, entries)
+	// The batch write is one transaction: on error nothing landed, so there is
+	// nothing to recompute.
+	if err == nil {
+		s.queueItemMutations(profileID, written)
+	}
+	return written, err
+}
+
+// queueItemMutations records one interest mutation per written entry, matching
+// what the per-target path queues through MarkWatched.
+func (s *interestTrackingStore) queueItemMutations(profileID string, entries []userstore.WatchHistoryEntry) {
+	for _, entry := range entries {
+		s.updater.QueueItemMutation(s.userID, profileID, entry.MediaItemID)
+	}
+}
+
+// queueTargetMutations queues by requested target rather than written entry,
+// for the non-transactional path where a partial write may have occurred.
+func (s *interestTrackingStore) queueTargetMutations(profileID string, targets []userstore.MarkWatchedTarget) {
+	for _, target := range targets {
+		s.updater.QueueItemMutation(s.userID, profileID, target.MediaItemID)
+	}
+}
+
+// AddVisibleHistory forwards the watermark-aware history insert. The generic
+// fallback needs two round-trips (timestamp lookup, then insert) to do the
+// same job.
+func (s *interestTrackingStore) AddVisibleHistory(ctx context.Context, entry userstore.WatchHistoryEntry) (userstore.WatchHistoryEntry, error) {
+	adder, ok := s.UserStore.(userstore.VisibleHistoryAdder)
+	if !ok {
+		return userstore.AddVisibleHistory(ctx, s.UserStore, entry)
+	}
+	return adder.AddVisibleHistory(ctx, entry)
+}
+
+// VisibleHistoryTimestamps forwards the batched watermark lookup; without it
+// callers assume a single wall-clock timestamp for every item.
+func (s *interestTrackingStore) VisibleHistoryTimestamps(ctx context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error) {
+	visibility, ok := s.UserStore.(userstore.HistoryVisibilityStore)
+	if !ok {
+		return userstore.VisibleHistoryTimestamps(ctx, s.UserStore, profileID, mediaItemIDs, at)
+	}
+	return visibility.VisibleHistoryTimestamps(ctx, profileID, mediaItemIDs, at)
 }
 
 func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profileID string, mediaItemIDs []string, source userstore.WatchHistorySource) error {

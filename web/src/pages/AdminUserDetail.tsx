@@ -566,6 +566,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
     const identity = {
       scope: entry.scope,
       profileId: entry.profile_id,
+      clientFamily: entry.client_family,
       libraryId: entry.library_id,
       seriesId: entry.series_id,
     };
@@ -573,11 +574,13 @@ function UserSettingsTab({ userId }: { userId: number }) {
       entry.key,
       entry.scope,
       entry.profile_id ?? "",
+      entry.client_family ?? "",
       entry.library_id ?? "",
       entry.series_id ?? "",
     ].join(":");
     const scopeDetail = [
       entry.profile_id ? `profile ${entry.profile_id}` : null,
+      entry.client_family ? `family ${entry.client_family}` : null,
       entry.library_id ? `library ${entry.library_id}` : null,
       entry.series_id ? `series ${entry.series_id}` : null,
     ]

@@ -37,6 +37,7 @@ type pluginClient interface {
 	EventConsumer(capabilityID string) (*pluginhost.EventConsumerClient, error)
 	AuthProvider(capabilityID string) (*pluginhost.AuthProviderClient, error)
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
+	WatchSyncProvider(capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 }
 
 type Host interface {
@@ -646,6 +647,18 @@ func (s *Service) ScanSourceClientByPluginID(
 		return nil, fmt.Errorf("scan source plugin %q is disabled", pluginID)
 	}
 	return s.ScanSourceClient(ctx, matches[0].ID, capabilityID)
+}
+
+func (s *Service) WatchSyncProviderClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.WatchSyncProviderClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.WatchSyncProvider(capabilityID)
 }
 
 func (s *Service) EventConsumerClient(

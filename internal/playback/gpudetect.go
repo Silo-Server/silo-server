@@ -36,12 +36,13 @@ var nvencProbeCache = struct {
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
-	Resolved        string             `json:"resolved"`
-	RenderDevices   []string           `json:"render_devices"`
-	IntelDetected   bool               `json:"intel_detected"`
-	Source          string             `json:"source"`
-	NodeURL         string             `json:"node_url,omitempty"`
-	Transformations []TransformationV3 `json:"transformations,omitempty"`
+	Resolved            string             `json:"resolved"`
+	RenderDevices       []string           `json:"render_devices"`
+	RenderDeviceDetails []RenderDeviceInfo `json:"render_device_details"`
+	IntelDetected       bool               `json:"intel_detected"`
+	Source              string             `json:"source"`
+	NodeURL             string             `json:"node_url,omitempty"`
+	Transformations     []TransformationV3 `json:"transformations,omitempty"`
 }
 
 // DetectHWAccel probes this host's GPU hardware and returns structured info.
@@ -60,15 +61,18 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 		}
 	}
 	return HWAccelInfo{
-		Resolved:      ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
-		RenderDevices: devices,
-		IntelDetected: intel,
-		Source:        "local",
+		Resolved:            ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
+		RenderDevices:       devices,
+		RenderDeviceDetails: renderDeviceDetails(devices),
+		IntelDetected:       intel,
+		Source:              "local",
 	}
 }
 
 // PickRenderDevice returns the GPU render device path to use.
-// If explicit is non-empty, it is returned as-is.
+// If explicit is non-empty, it is returned as-is — multi-device lists are
+// resolved to one device by AcquireHWDevice before args are built, so this
+// never sees a list on a live path.
 // Otherwise, it attempts to discover a render device under /dev/dri/.
 // Returns empty string if no device is found (caller should fall back to CPU).
 func PickRenderDevice(explicit string) string {
@@ -177,13 +181,13 @@ func normalizeFFmpegPath(ffmpegPath string) string {
 
 func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
-		return nvencProbeResult{reason: "hwaccels probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "cuda") {
 		return nvencProbeResult{reason: "cuda hwaccel unavailable"}
 	}
 
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-encoders"); err != nil {
-		return nvencProbeResult{reason: "encoders probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "h264_nvenc") {
 		return nvencProbeResult{reason: "h264_nvenc encoder unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hevc_nvenc") {
@@ -191,7 +195,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 	}
 
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-filters"); err != nil {
-		return nvencProbeResult{reason: "filters probe failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "filters probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "scale_cuda") {
 		return nvencProbeResult{reason: "scale_cuda filter unavailable"}
 	} else if !ffmpegOutputHasToken(output, "hwupload_cuda") {
@@ -209,7 +213,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 		"-f", "null",
 		"-",
 	); err != nil {
-		return nvencProbeResult{reason: "h264_nvenc smoke encode failed: " + probeFailure(err, output)}
+		return nvencProbeResult{reason: "h264_nvenc smoke encode failed: " + FormatFFmpegProbeFailure(err, output)}
 	}
 
 	return nvencProbeResult{available: true}
@@ -230,7 +234,8 @@ func ffmpegOutputHasToken(output []byte, token string) bool {
 	return false
 }
 
-func probeFailure(err error, output []byte) string {
+// FormatFFmpegProbeFailure combines a probe error with bounded command output.
+func FormatFFmpegProbeFailure(err error, output []byte) string {
 	message := strings.TrimSpace(err.Error())
 	if trimmed := strings.TrimSpace(string(output)); trimmed != "" {
 		if len(trimmed) > 240 {
@@ -311,4 +316,54 @@ func detectRenderDevice(driDir string) string {
 		return devices[0]
 	}
 	return ""
+}
+
+// RenderDeviceInfo describes one render device for operator-facing surfaces.
+type RenderDeviceInfo struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
+// describeRenderDevice builds a short human label for a render device from
+// its sysfs PCI vendor/device ids; best-effort, never fails.
+func describeRenderDevice(renderDevPath string) string {
+	name := filepath.Base(renderDevPath)
+	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
+	label := ""
+	switch vendor {
+	case "0x8086":
+		label = "Intel GPU"
+	case "0x10de":
+		label = "NVIDIA GPU"
+	case "0x1002":
+		label = "AMD GPU"
+	case "":
+		return "GPU"
+	default:
+		label = "GPU (vendor " + vendor + ")"
+	}
+	if device := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "device")); device != "" && vendor != "0x1002" {
+		label += " (" + device + ")"
+	}
+	return label
+}
+
+func readSysfsID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// renderDeviceDetails describes every listed device.
+func renderDeviceDetails(devices []string) []RenderDeviceInfo {
+	details := make([]RenderDeviceInfo, 0, len(devices))
+	for _, device := range devices {
+		details = append(details, RenderDeviceInfo{
+			Path:        device,
+			Description: describeRenderDevice(device),
+		})
+	}
+	return details
 }

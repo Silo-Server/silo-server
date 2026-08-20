@@ -6,9 +6,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations, merge requ
 
 ## Prerequisites
 
-- **Go** 1.24+
-- **Bun** 1.0+
-- **PostgreSQL** 18+
+- **Go** 1.26.4+
+- **Node.js** 22+ with **pnpm** 10.32.1
+- **PostgreSQL** 18 with pgvector
+- **Redis**
 - **FFmpeg** (for transcoding support)
 
 ## Local Development
@@ -16,6 +17,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations, merge requ
 Local development remains intentionally separate from the deploy-oriented compose setup. Use [docker-compose.yml](docker-compose.yml) for local services and the source-build workflow below.
 
 ```sh
+# Create the local bootstrap configuration
+cp .env.example .env
+printf '\nSECRET_KEY=%s\nDATABASE_URL=%s\nREDIS_URL=%s\n' \
+  "$(openssl rand -base64 48)" \
+  'postgres://silo:silo@localhost:5432/silo?sslmode=disable' \
+  'redis://localhost:6379' >> .env
+
 # Start local PostgreSQL and Redis
 docker compose up -d postgres redis
 
@@ -26,11 +34,12 @@ make dev-frontend
 make dev-backend
 ```
 
-The main compose file expects `MEDIA_ROOT` to be set even if you only want the bundled PostgreSQL and Redis services, so set that in `.env` first (`cp .env.example .env`).
+The template supplies a non-empty `MEDIA_ROOT` because Compose validates the whole file even when
+you start only PostgreSQL and Redis. Change it before testing libraries against real media.
 
 If you are developing `Silo` and `silo-plugin-sdk` together, keep using the local [`go.work`](go.work) workspace. That workspace is a developer convenience only. CI and release builds run with `GOWORK=off`, so any new SDK helper used here must be pushed and tagged in `silo-plugin-sdk` before this repo can merge or release the change.
 
-Plugin authors should start with [docs/architecture/plugin-development.md](docs/architecture/plugin-development.md), which covers the RPC plugin package format, generated proto workflow, SDK import paths, route and asset exposure, and auth or user-config integration points.
+Plugin authors should start with the `silo-plugin-sdk` repository (usually checked out side-by-side with this one), which owns the RPC plugin package format, protobuf contracts, generated plugin API, SDK import paths, and manifest helpers.
 
 ## Make Targets
 
@@ -79,7 +88,7 @@ database URL should be read from a non-default env file.
 go test ./...
 
 # Frontend tests
-cd web && bun test
+cd web && pnpm test
 ```
 
 ## Linting
@@ -89,8 +98,8 @@ cd web && bun test
 golangci-lint run
 
 # Frontend
-cd web && bun run lint
-cd web && bun run format:check
+cd web && pnpm run lint
+cd web && pnpm run format:check
 ```
 
 ## Project Structure

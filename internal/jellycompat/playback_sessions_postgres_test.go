@@ -2,14 +2,42 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestMarshalPlaybackSessionStripsNestedNUL(t *testing.T) {
+	wantLiteral := `literal\u0000text`
+	data, err := marshalPlaybackSession(PlaybackSession{
+		ClientDeviceID: "device\x00id",
+		MediaSources: []PlaybackMediaSource{{
+			Version: catalog.FileVersion{
+				FileName:   "episode\x00name.mkv",
+				EditionRaw: wantLiteral,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal playback session: %v", err)
+	}
+	var got PlaybackSession
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal sanitized playback session: %v", err)
+	}
+	if got.ClientDeviceID != "deviceid" || got.MediaSources[0].Version.FileName != "episodename.mkv" {
+		t.Fatalf("nested NUL was retained: %#v", got)
+	}
+	if got.MediaSources[0].Version.EditionRaw != wantLiteral {
+		t.Fatalf("literal escape changed: %q", got.MediaSources[0].Version.EditionRaw)
+	}
+}
 
 func newCompatTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()

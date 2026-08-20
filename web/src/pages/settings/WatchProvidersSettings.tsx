@@ -32,18 +32,18 @@ import {
   type WatchProviderSyncRun,
 } from "@/hooks/queries/watchProviders";
 import { Input } from "@/components/ui/input";
+import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
+import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
+import type { PluginConfigSchema } from "@/api/types";
+import type { WatchProviderConnectionConfig } from "@/hooks/queries/watchProviders";
+import {
+  buildConnectionConfig,
+  connectionSchemasAreValid,
+  renderableConnectionSchemas,
+} from "./watchProviderConnectionConfig";
 
 function formatRelativeTime(value?: string) {
-  if (!value) return "Never";
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Never";
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return "Just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return formatRelativeTimeBase(value, { rounding: "floor", justNowLabel: "Just now" }) ?? "Never";
 }
 
 function formatRetryAfter(seconds?: number) {
@@ -214,17 +214,29 @@ function AuthCodeBlock({
 
 function APIKeyBlock({
   displayName,
+  providerKey,
+  configSchemas,
   pending,
   onSubmit,
   onCancel,
 }: {
   displayName: string;
+  providerKey: string;
+  configSchemas: PluginConfigSchema[];
   pending: boolean;
-  onSubmit: (apiKey: string) => void;
+  onSubmit: (apiKey: string, connectionConfig: WatchProviderConnectionConfig) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState("");
+  const [connectionConfig, setConnectionConfig] = useState<WatchProviderConnectionConfig>({});
+  const [configValidity, setConfigValidity] = useState<Record<string, boolean>>({});
   const trimmed = value.trim();
+  const renderableSchemas = renderableConnectionSchemas(configSchemas);
+  const configValid = connectionSchemasAreValid(
+    renderableSchemas,
+    connectionConfig,
+    configValidity,
+  );
 
   return (
     <div className="border-primary/30 bg-primary/5 rounded-xl border border-dashed p-4">
@@ -245,6 +257,29 @@ function APIKeyBlock({
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {renderableSchemas.map((schema) => (
+        <div key={schema.key} className="mt-4 space-y-2">
+          <div>
+            <div className="text-sm font-medium">{schema.title || schema.key}</div>
+            {schema.description ? (
+              <div className="text-muted-foreground mt-0.5 text-xs leading-snug">
+                {schema.description}
+              </div>
+            ) : null}
+          </div>
+          <SchemaForm
+            descriptor={schema.admin_form}
+            values={connectionConfig[schema.key] ?? {}}
+            onChange={(next) =>
+              setConnectionConfig((current) => ({ ...current, [schema.key]: next }))
+            }
+            idPrefix={`watch-provider-${providerKey}-${schema.key}`}
+            onValidityChange={(valid) =>
+              setConfigValidity((current) => ({ ...current, [schema.key]: valid }))
+            }
+          />
+        </div>
+      ))}
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <Input
           type="password"
@@ -258,8 +293,10 @@ function APIKeyBlock({
         <Button
           type="button"
           size="sm"
-          disabled={pending || trimmed.length === 0}
-          onClick={() => onSubmit(trimmed)}
+          disabled={pending || trimmed.length === 0 || !configValid}
+          onClick={() =>
+            onSubmit(trimmed, buildConnectionConfig(renderableSchemas, connectionConfig))
+          }
           className="sm:flex-none"
         >
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -454,12 +491,15 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
     });
   };
 
-  const handleSubmitAPIKey = (apiKey: string) => {
-    connectAPIKey.mutate(apiKey, {
-      onSuccess: () => {
-        setApiKeyPrompt(false);
+  const handleSubmitAPIKey = (apiKey: string, connectionConfig: WatchProviderConnectionConfig) => {
+    connectAPIKey.mutate(
+      { apiKey, connectionConfig },
+      {
+        onSuccess: () => {
+          setApiKeyPrompt(false);
+        },
       },
-    });
+    );
   };
 
   const handleCancelAPIKey = () => {
@@ -549,6 +589,8 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
         <div className="mt-4">
           <APIKeyBlock
             displayName={displayName}
+            providerKey={providerKey}
+            configSchemas={connection.connection_config_schema ?? []}
             pending={connectAPIKey.isPending}
             onSubmit={handleSubmitAPIKey}
             onCancel={handleCancelAPIKey}
@@ -622,14 +664,18 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
               disabled={isBusy}
               onChange={(checked) => updateConnection.mutate({ export_watched_enabled: checked })}
             />
-            <ToggleRow
-              id={`watch-provider-${providerKey}-export-unwatched`}
-              label="Send unwatched changes"
-              description="When you mark something unwatched, remove matching history from this provider."
-              checked={connection.export_unwatched_enabled}
-              disabled={isBusy}
-              onChange={(checked) => updateConnection.mutate({ export_unwatched_enabled: checked })}
-            />
+            {connection.capabilities.export_unwatched ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-export-unwatched`}
+                label="Send unwatched changes"
+                description="When you mark something unwatched, remove matching history from this provider."
+                checked={connection.export_unwatched_enabled}
+                disabled={isBusy}
+                onChange={(checked) =>
+                  updateConnection.mutate({ export_unwatched_enabled: checked })
+                }
+              />
+            ) : null}
             {connection.capabilities.import_favorites ||
             connection.capabilities.export_favorites ? (
               <ToggleRow

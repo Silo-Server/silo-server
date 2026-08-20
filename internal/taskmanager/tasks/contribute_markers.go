@@ -119,7 +119,7 @@ func (t *ContributeMarkersTask) Execute(ctx context.Context, progress taskmanage
 			}
 			for _, o := range outcomes {
 				switch o.Status {
-				case markers.OutcomeStatusSkipped:
+				case markers.OutcomeStatusSkipped, markers.OutcomeStatusConflict:
 					skipped++
 				case markers.OutcomeStatusRateLimited:
 					failed++

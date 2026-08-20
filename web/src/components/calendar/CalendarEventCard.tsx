@@ -8,11 +8,15 @@ import {
   upcomingBadgeLabel,
 } from "@/lib/upcomingEventPresentation";
 import type { CalendarEvent } from "@/hooks/queries/calendar";
+import { useUICustomization } from "@/hooks/useUICustomization";
 
 export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
   const [loaded, setLoaded] = useState(false);
   const thumbhashUrl = event.poster_thumbhash ? decodeThumbhash(event.poster_thumbhash) : "";
   const watched = event.watched === true;
+  const { cardPresentation } = useUICustomization();
+  const showCaption = cardPresentation.caption !== "artwork";
+  const showMetadata = cardPresentation.caption === "title_metadata";
 
   const href =
     event.type === "movie"
@@ -75,21 +79,23 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
           )}
         </div>
       </ViewTransitionLink>
-      <ViewTransitionLink to={href} className="block px-1 pt-3">
-        <div
-          className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
-        >
-          {event.title}
-        </div>
-        {subtitle && (
-          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
-            {subtitle}
+      {showCaption ? (
+        <ViewTransitionLink to={href} className="block px-1 pt-3">
+          <div
+            className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
+          >
+            {event.title}
           </div>
-        )}
-        {airTime && (
-          <div className="text-muted-foreground mt-0.5 text-[11px] font-medium">{airTime}</div>
-        )}
-      </ViewTransitionLink>
+          {showMetadata && subtitle ? (
+            <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+              {subtitle}
+            </div>
+          ) : null}
+          {showMetadata && airTime ? (
+            <div className="text-muted-foreground mt-0.5 text-[11px] font-medium">{airTime}</div>
+          ) : null}
+        </ViewTransitionLink>
+      ) : null}
     </div>
   );
 }

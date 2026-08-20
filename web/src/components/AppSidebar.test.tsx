@@ -21,6 +21,22 @@ import {
 const mockLogout = vi.fn();
 const mockClearProfile = vi.fn();
 const mockTogglePin = vi.fn();
+let mockPrimaryMenu: {
+  items: Array<
+    | {
+        type: "builtin";
+        destination: "home" | "movies" | "series" | "music" | "audiobooks";
+      }
+    | { type: "section"; library_id: number; section_id: string; label: string }
+    | {
+        type: "collection";
+        library_id?: number;
+        collection_id: string;
+        label: string;
+      }
+  >;
+} | null = null;
+let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -39,7 +55,7 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
 
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
-    data: [{ id: 7, name: "Movies", type: "movies" }],
+    data: mockLibraries,
   }),
 }));
 
@@ -51,6 +67,16 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
   }),
   useToggleSidebarPin: () => ({
     togglePin: mockTogglePin,
+    canToggle: true,
+  }),
+}));
+
+vi.mock("@/hooks/useUICustomization", () => ({
+  useUICustomization: () => ({
+    primaryMenu: mockPrimaryMenu,
+    shortcuts: { items: [] },
+    cardPresentation: { poster_size: "standard", caption: "title_metadata" },
+    isLoading: false,
   }),
 }));
 
@@ -161,6 +187,8 @@ describe("AppSidebar", () => {
     mockClearProfile.mockReset();
     mockTogglePin.mockReset();
     mockPluginInstallations = [];
+    mockPrimaryMenu = null;
+    mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {
@@ -226,6 +254,124 @@ describe("AppSidebar", () => {
 
     expect(markup).toContain("text-sidebar-accent-foreground bg-sidebar-accent");
     expect(markup).not.toContain("text-sidebar-primary-foreground bg-sidebar-accent");
+  });
+
+  it("drops library-scoped menu targets when their library is not visible", () => {
+    mockPrimaryMenu = {
+      items: [
+        { type: "builtin", destination: "home" },
+        {
+          type: "section",
+          library_id: 99,
+          section_id: "hidden-section",
+          label: "Hidden section",
+        },
+        {
+          type: "collection",
+          library_id: 99,
+          collection_id: "hidden-collection",
+          label: "Hidden collection",
+        },
+        {
+          type: "collection",
+          collection_id: "global-collection",
+          label: "Global collection",
+        },
+      ],
+    };
+
+    const markup = renderSidebar("/");
+
+    expect(markup).not.toContain("Hidden section");
+    expect(markup).not.toContain("Hidden collection");
+    expect(markup).toContain("Global collection");
+  });
+
+  it("does not reinterpret global media built-ins as the first matching library", () => {
+    mockLibraries = [
+      { id: 7, name: "Movies A", type: "movies" },
+      { id: 8, name: "Movies B", type: "movie" },
+      { id: 9, name: "TV A", type: "series" },
+      { id: 10, name: "TV B", type: "shows" },
+      { id: 11, name: "Books A", type: "audiobooks" },
+      { id: 12, name: "Books B", type: "audiobook" },
+      { id: 13, name: "Music A", type: "music" },
+      { id: 14, name: "Music B", type: "music" },
+    ];
+    mockPrimaryMenu = {
+      items: [
+        { type: "builtin", destination: "home" },
+        { type: "builtin", destination: "movies" },
+        { type: "builtin", destination: "series" },
+        { type: "builtin", destination: "audiobooks" },
+        { type: "builtin", destination: "music" },
+      ],
+    };
+
+    const document = parseMarkup(renderSidebar("/"));
+    const primaryMenu = document.querySelector('nav[aria-label="Main navigation"] > ul');
+    const primaryHrefs = [...(primaryMenu?.querySelectorAll("a") ?? [])].map((link) =>
+      link.getAttribute("href"),
+    );
+
+    expect(primaryHrefs).toEqual(["/"]);
+    expect(document.querySelector('a[href="/library/7"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/library/14"]')).not.toBeNull();
+  });
+
+  it("keeps a custom section active while sort and filter params change", () => {
+    mockPrimaryMenu = {
+      items: [
+        {
+          type: "section",
+          library_id: 7,
+          section_id: "recent",
+          label: "Custom Recently Added",
+        },
+      ],
+    };
+
+    const document = parseMarkup(
+      renderSidebar(
+        "/catalog?source=section&scope=library&library_id=7&section_id=recent&sort=title&order=asc&genre=Drama",
+      ),
+    );
+    const link = [...document.querySelectorAll("a")].find((candidate) =>
+      candidate.textContent?.includes("Custom Recently Added"),
+    );
+
+    expect(link?.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("matches custom collections by source, library, and collection id", () => {
+    mockPrimaryMenu = {
+      items: [
+        {
+          type: "collection",
+          library_id: 7,
+          collection_id: "favorites",
+          label: "Custom Favorites",
+        },
+      ],
+    };
+
+    const filtered = parseMarkup(
+      renderSidebar(
+        "/catalog?source=library_collection&library_id=7&collection_id=favorites&type=movie&sort=year&order=desc",
+      ),
+    );
+    const otherLibrary = parseMarkup(
+      renderSidebar(
+        "/catalog?source=library_collection&library_id=8&collection_id=favorites&sort=year",
+      ),
+    );
+    const findCustomLink = (document: Document) =>
+      [...document.querySelectorAll("a")].find((candidate) =>
+        candidate.textContent?.includes("Custom Favorites"),
+      );
+
+    expect(findCustomLink(filtered)?.getAttribute("aria-current")).toBe("page");
+    expect(findCustomLink(otherLibrary)?.hasAttribute("aria-current")).toBe(false);
   });
 
   it("preserves the current library query when linking to the active library", () => {

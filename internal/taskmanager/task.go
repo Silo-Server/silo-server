@@ -10,6 +10,7 @@ var (
 	ErrTaskAlreadyRunning = errors.New("task is already running")
 	ErrTaskNotRunning     = errors.New("task is not running")
 	ErrTaskNotFound       = errors.New("task not found")
+	ErrTaskManualOnly     = errors.New("manual-only task does not accept scheduled triggers")
 )
 
 // TaskState represents the current runtime state of a task.
@@ -46,6 +47,12 @@ type Task interface {
 // admins can force a check and see a result.
 type ScheduledConditionalTask interface {
 	ShouldRun(ctx context.Context) (bool, error)
+}
+
+// ManualOnlyTask marks a task that may be invoked through RunTask but must
+// never accept scheduled triggers.
+type ManualOnlyTask interface {
+	ManualOnly() bool
 }
 
 // ProgressReporter allows tasks to report progress and result data during execution.

@@ -98,6 +98,62 @@ func (h *SubtitleSearchHandler) authorizeMediaFile(w http.ResponseWriter, r *htt
 	return authorizeMediaFileAccess(w, r, h.FileAuthorizer, fileID)
 }
 
+// subtitleProviderStatusResponse tells a client whether this deployment can
+// search external subtitle providers at all, following the per-subsystem
+// capability convention (/subtitles/ai/status, /items/trailers/capability).
+//
+// Without it a search on a server with no providers configured answers exactly
+// like a search that ran and matched nothing, so a player has no way to tell
+// "this server cannot do that" from "nothing found for this file" and ends up
+// offering an entry point that can never succeed. A client that finds enabled
+// false should disable the search action and say why rather than let the user
+// run a query that is guaranteed to come back empty.
+//
+// Provider names are safe to return to any authenticated viewer: they already
+// travel in every SubtitleResult.provider and DownloadedSubtitle.provider. The
+// credentials behind them stay in the admin-only provider config.
+type subtitleProviderStatusResponse struct {
+	SchemaVersion int `json:"schema_version"`
+	// Enabled reports that at least one provider is registered, so
+	// POST /subtitles/search can actually reach an upstream.
+	Enabled bool `json:"enabled"`
+	// Providers is the registered provider identifiers, sorted. Always a
+	// list — empty rather than null — so clients can iterate it unguarded.
+	Providers []string `json:"providers"`
+}
+
+// HandleProviderStatus reports whether external subtitle search is available
+// here, so the player can show or hide the entry point.
+// GET /api/v1/subtitles/providers/status
+//
+// It answers even when the subtitle subsystem is unwired, because enabled:false
+// is the answer in that case; the router registers a fallback so a client never
+// has to interpret a 404 on the probe itself.
+func (h *SubtitleSearchHandler) HandleProviderStatus(w http.ResponseWriter, _ *http.Request) {
+	providers := []string{}
+	if h != nil && h.manager != nil {
+		providers = h.manager.ProviderNames()
+	}
+	writeJSON(w, http.StatusOK, subtitleProviderStatusResponse{
+		SchemaVersion: 1,
+		Enabled:       len(providers) > 0,
+		Providers:     providers,
+	})
+}
+
+// WriteSubtitleProvidersDisabledStatus answers the subtitle provider capability
+// probe with a 200 {"enabled": false, "providers": []} when no subtitle handler
+// is wired, so the client gets a clean negative instead of a 404 (the 2-segment
+// /providers/status path is not shadowed by the 1-segment /{media_file_id}
+// route — they never compete in chi's router).
+func WriteSubtitleProvidersDisabledStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, subtitleProviderStatusResponse{
+		SchemaVersion: 1,
+		Enabled:       false,
+		Providers:     []string{},
+	})
+}
+
 // HandleSearch handles POST /api/v1/subtitles/search
 func (h *SubtitleSearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 	var req searchSubtitlesRequest

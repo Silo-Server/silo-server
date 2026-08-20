@@ -14,7 +14,7 @@ func TestResolveSubtitlePolicyV3RendersCEA608AsTextArtifact(t *testing.T) {
 	index := 0
 	req.SubtitleTrackIndex = &index
 
-	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
 
 	if result.Terminal != nil || result.RequiresBurn || result.Decision.Mode != SubtitleRenderV3 {
 		t.Fatalf("CEA-608 should render as a client-styled text artifact: %#v", result)
@@ -32,7 +32,7 @@ func TestResolveSubtitlePolicyV3DoesNotOfferDVBTeletextAsClientBitmap(t *testing
 	index := 0
 	req.SubtitleTrackIndex = &index
 
-	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
 
 	if result.Terminal != nil || !result.RequiresBurn || result.Decision.Mode != SubtitleBurnInV3 {
 		t.Fatalf("DVB teletext must stay on the server fallback: %#v", result)
@@ -51,7 +51,7 @@ func TestResolveSubtitlePolicyV3UnknownCodecIsExplicitlyUnsupported(t *testing.T
 	req.SubtitleTrackIndex = &index
 
 	for _, transcodeAllowed := range []bool{true, false} {
-		result := ResolveSubtitlePolicyV3(file, req, transcodeAllowed, EngineMedia3DirectV3, nil)
+		result := ResolveSubtitlePolicyV3(file, req, transcodeAllowed, DeliveryClassOriginalHTTPV3, nil)
 		if result.Terminal == nil || result.Terminal.Reason != "subtitle_codec_unsupported" {
 			t.Fatalf("transcodeAllowed=%v: unknown codec must be explicitly unsupported, got %#v", transcodeAllowed, result)
 		}
@@ -66,13 +66,13 @@ func TestResolveSubtitlePolicyV3BurnsFFmpegBitmapAliases(t *testing.T) {
 	index := 0
 	req.SubtitleTrackIndex = &index
 
-	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, DeliveryClassOriginalHTTPV3, nil)
 	if result.Terminal != nil || !result.RequiresBurn || result.Decision.Mode != SubtitleBurnInV3 || !result.Claims.BitmapOverlay {
 		t.Fatalf("dvdsub alias must burn in like dvd_subtitle: %#v", result)
 	}
 }
 
-func TestPlanPlaybackV3TranscodeUsesHLSEngineSubtitleCapabilities(t *testing.T) {
+func TestPlanPlaybackV3TranscodeUsesHLSDeliverySubtitleCapabilities(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
@@ -80,10 +80,8 @@ func TestPlanPlaybackV3TranscodeUsesHLSEngineSubtitleCapabilities(t *testing.T) 
 	file.SubtitleTracks = []models.SubtitleTrack{{Codec: "srt"}}
 	req := validStartRequestV3()
 	// A fixed rung forces the HLS transcode route; the fixture's direct
-	// engine renders embedded text while the HLS engine cannot.
+	// original HTTP renders embedded text while the HLS delivery cannot.
 	req.QualityPreference = "1080p"
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	index := 0
 	req.SubtitleTrackIndex = &index

@@ -88,6 +88,9 @@ func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDi
 	}
 	byPath := make(map[string]*models.MediaFile, len(existing))
 	for _, mf := range existing {
+		if mf == nil || mf.HasLegacyAttachedPictureVideo() {
+			return false
+		}
 		byPath[mf.FilePath] = mf
 	}
 	for _, d := range onDisk {

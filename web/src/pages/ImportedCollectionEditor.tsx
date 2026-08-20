@@ -50,6 +50,8 @@ import {
   displayFiltersToQueryDefinition,
   queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
+import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
+import { changedSortConfig, sortConfigToSelectValue } from "@/lib/collectionSortConfig";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
@@ -123,12 +125,14 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   );
   const initialWatchFilter = initialDisplayFilters.watch;
   const initialMediaFilter = initialDisplayFilters.media;
+  const initialDefaultSort = sortConfigToSelectValue(collection.sort_config);
 
   const [name, setName] = useState(collection.name);
   const [description, setDescription] = useState(initialDescription);
   const [libraryIds, setLibraryIds] = useState<number[]>(initialLibraryIds);
   const [watchFilter, setWatchFilter] = useState<UserCollectionWatchFilter>(initialWatchFilter);
   const [mediaFilter, setMediaFilter] = useState<UserCollectionMediaFilter>(initialMediaFilter);
+  const [defaultSort, setDefaultSort] = useState<string>(initialDefaultSort);
   const [isShared, setIsShared] = useState(collection.is_shared);
   const [allowedProfileIds, setAllowedProfileIds] = useState<string[]>(
     collection.allowed_profile_ids ?? [],
@@ -186,6 +190,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     !arraysEqual(libraryIds, initialLibraryIds),
     watchFilter !== initialWatchFilter,
     mediaFilter !== initialMediaFilter,
+    defaultSort !== initialDefaultSort,
     isShared !== collection.is_shared,
     !arraysEqual(allowedProfileIds, collection.allowed_profile_ids ?? []),
     includeOnServer !== (collection.include_in_server_collections ?? false),
@@ -210,6 +215,10 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
       include_in_server_collections: includeOnServer,
       poster_source_url: trimmedPosterSource || undefined,
     };
+    const sortConfig = changedSortConfig(initialDefaultSort, defaultSort);
+    if (sortConfig !== undefined) {
+      body.sort_config = sortConfig;
+    }
     if (descriptionDirty) {
       body.description = description;
     }
@@ -236,6 +245,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     setLibraryIds(initialLibraryIds);
     setWatchFilter(initialWatchFilter);
     setMediaFilter(initialMediaFilter);
+    setDefaultSort(initialDefaultSort);
     setIsShared(collection.is_shared);
     setAllowedProfileIds(collection.allowed_profile_ids ?? []);
     setIncludeOnServer(collection.include_in_server_collections ?? false);
@@ -364,6 +374,15 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+            <div className="pt-1">
+              <CollectionDefaultSortField
+                value={defaultSort}
+                onChange={setDefaultSort}
+                allowPersonalized
+                inputId="imported-collection-default-sort"
+                disabled={readOnly}
+              />
             </div>
             <p className="text-muted-foreground text-xs leading-relaxed">
               Uses the active profile&rsquo;s watched state. Shared profiles may see different

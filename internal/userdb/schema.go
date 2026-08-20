@@ -124,6 +124,18 @@ CREATE TABLE IF NOT EXISTS personal_collections (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS collection_sort_preferences (
+    profile_id TEXT NOT NULL,
+    collection_kind TEXT NOT NULL,
+    collection_id TEXT NOT NULL,
+    sort_field TEXT NOT NULL DEFAULT '',
+    sort_order TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, collection_kind, collection_id),
+    CHECK (collection_kind IN ('library', 'user')),
+    CHECK (sort_order IN ('', 'asc', 'desc'))
+);
+
 CREATE TABLE IF NOT EXISTS personal_collection_items (
     collection_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
@@ -301,6 +313,7 @@ CREATE TABLE IF NOT EXISTS user_setting_values (
     key         TEXT NOT NULL,
     scope       TEXT NOT NULL,
     profile_id  TEXT,
+    client_family TEXT,
     device_id   TEXT,
     library_id  INTEGER,
     series_id   TEXT,
@@ -308,13 +321,15 @@ CREATE TABLE IF NOT EXISTS user_setting_values (
     revision    INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    CHECK (scope IN ('account', 'profile', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (scope IN ('account', 'profile', 'profile_client', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (client_family IS NULL OR client_family IN ('tv', 'mobile', 'tablet', 'desktop', 'web')),
     CHECK (
-      (scope = 'account' AND profile_id IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_device' AND profile_id IS NOT NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
-      (scope = 'profile_library' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
-      (scope = 'profile_series' AND profile_id IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+      (scope = 'account' AND profile_id IS NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_client' AND profile_id IS NOT NULL AND client_family IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
     )
 );
 
@@ -367,6 +382,9 @@ func InitSchema(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureSettingValuesClientFamily(db); err != nil {
+		return err
+	}
 	if err := ensureProfileSectionOverridesRemovedColumn(db); err != nil {
 		return err
 	}
@@ -397,8 +415,166 @@ func InitSchema(db *sql.DB) error {
 	if err := migratePlaybackSettingsToDeviceScope(db); err != nil {
 		return err
 	}
+	if err := migrateAutoSkipIntroToIntroSkipMode(db); err != nil {
+		return err
+	}
 	return backfillUserDevices(db)
 }
+
+// migrateAutoSkipIntroToIntroSkipMode is this backend's half of the revision-7
+// intro-skip cutover, matching the Goose migration that does the same for
+// PostgreSQL's user_setting_values.
+//
+// Only already-canonical rows are its business. A store whose legacy tables
+// have not been converted yet gets its companion rows from
+// settingsmigrate.Planner when migrateSettingsToCanonical runs, which is where
+// both backends share the conversion rules; this covers the rows a previous
+// open already wrote, which that pass will never look at again.
+//
+// The NOT EXISTS guard, not just INSERT OR IGNORE, is what makes a re-run cheap
+// and — more importantly — keeps it from ever contradicting an enum a client
+// wrote itself. Nobody can hold "never" yet, so no choice is lost on the way in.
+func migrateAutoSkipIntroToIntroSkipMode(db *sql.DB) error {
+	_, err := db.Exec(`
+		INSERT OR IGNORE INTO user_setting_values (
+			key, scope, profile_id, client_family, device_id, library_id, series_id,
+			value, revision, created_at, updated_at
+		)
+		SELECT
+			'playback.intro_skip_mode',
+			legacy.scope,
+			legacy.profile_id,
+			legacy.client_family,
+			legacy.device_id,
+			legacy.library_id,
+			legacy.series_id,
+			CASE WHEN json(legacy.value) = json('true') THEN '"always"' ELSE '"ask"' END,
+			1,
+			legacy.created_at,
+			legacy.updated_at
+		FROM user_setting_values AS legacy
+		WHERE legacy.key = 'playback.auto_skip_intro'
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_setting_values AS existing
+			WHERE existing.key = 'playback.intro_skip_mode'
+			  AND existing.scope = legacy.scope
+			  AND existing.profile_id IS legacy.profile_id
+			  AND existing.client_family IS legacy.client_family
+			  AND existing.device_id IS legacy.device_id
+			  AND existing.library_id IS legacy.library_id
+			  AND existing.series_id IS legacy.series_id
+		  )`)
+	if err != nil {
+		return fmt.Errorf("backfilling playback.intro_skip_mode from playback.auto_skip_intro: %w", err)
+	}
+	return nil
+}
+
+// ensureSettingValuesClientFamily upgrades the canonical settings table before
+// runMigrations reads it. InitSchema runs first on every open, and SQLite
+// cannot widen a table CHECK constraint with ALTER TABLE, so an existing table
+// must be rebuilt here rather than merely gaining a nullable column. The
+// rebuild is transactional and preserves ids, revisions, values, and
+// timestamps verbatim.
+func ensureSettingValuesClientFamily(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow(
+		"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+		"user_setting_values", "client_family",
+	).Scan(&count); err != nil {
+		return fmt.Errorf("checking user_setting_values.client_family column: %w", err)
+	}
+	if count > 0 {
+		_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS user_setting_values_profile_client_uq
+			ON user_setting_values (profile_id, client_family, key) WHERE scope = 'profile_client'`)
+		if err != nil {
+			return fmt.Errorf("creating profile_client setting index: %w", err)
+		}
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning profile_client settings migration: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`
+CREATE TABLE user_setting_values_profile_client_new (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    key           TEXT NOT NULL,
+    scope         TEXT NOT NULL,
+    profile_id    TEXT,
+    client_family TEXT,
+    device_id     TEXT,
+    library_id    INTEGER,
+    series_id     TEXT,
+    value         TEXT NOT NULL CHECK (json_valid(value)),
+    revision      INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    CHECK (scope IN ('account', 'profile', 'profile_client', 'profile_device', 'profile_library', 'profile_series')),
+    CHECK (client_family IS NULL OR client_family IN ('tv', 'mobile', 'tablet', 'desktop', 'web')),
+    CHECK (
+      (scope = 'account' AND profile_id IS NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_client' AND profile_id IS NOT NULL AND client_family IS NOT NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_device' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NOT NULL AND library_id IS NULL AND series_id IS NULL) OR
+      (scope = 'profile_library' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NOT NULL AND series_id IS NULL) OR
+      (scope = 'profile_series' AND profile_id IS NOT NULL AND client_family IS NULL AND device_id IS NULL AND library_id IS NULL AND series_id IS NOT NULL)
+    )
+);
+INSERT INTO user_setting_values_profile_client_new
+    (id, key, scope, profile_id, client_family, device_id, library_id, series_id,
+     value, revision, created_at, updated_at)
+SELECT id, key, scope, profile_id, NULL, device_id, library_id, series_id,
+       value, revision, created_at, updated_at
+  FROM user_setting_values;
+DROP TABLE user_setting_values;
+ALTER TABLE user_setting_values_profile_client_new RENAME TO user_setting_values;
+CREATE UNIQUE INDEX user_setting_values_account_uq
+    ON user_setting_values (key) WHERE scope = 'account';
+CREATE UNIQUE INDEX user_setting_values_profile_uq
+    ON user_setting_values (profile_id, key) WHERE scope = 'profile';
+CREATE UNIQUE INDEX user_setting_values_profile_client_uq
+    ON user_setting_values (profile_id, client_family, key) WHERE scope = 'profile_client';
+CREATE UNIQUE INDEX user_setting_values_profile_device_uq
+    ON user_setting_values (profile_id, device_id, key) WHERE scope = 'profile_device';
+CREATE UNIQUE INDEX user_setting_values_profile_library_uq
+    ON user_setting_values (profile_id, library_id, key) WHERE scope = 'profile_library';
+CREATE UNIQUE INDEX user_setting_values_profile_series_uq
+    ON user_setting_values (profile_id, series_id, key) WHERE scope = 'profile_series';
+CREATE INDEX user_setting_values_resolution_idx
+    ON user_setting_values (profile_id, key, scope);
+CREATE INDEX user_setting_values_series_idx
+    ON user_setting_values (profile_id, series_id);
+CREATE INDEX user_setting_values_library_idx
+    ON user_setting_values (profile_id, library_id);
+`); err != nil {
+		return fmt.Errorf("rebuilding user_setting_values for profile_client: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing profile_client settings migration: %w", err)
+	}
+	return nil
+}
+
+// collectionSortPreferencesSchema is kept as its own const (rather than only
+// inlined in Schema) so migrateToV19 can create the table on databases that
+// predate it. collection_kind separates the 'library' and 'user' id spaces.
+const collectionSortPreferencesSchema = `
+CREATE TABLE IF NOT EXISTS collection_sort_preferences (
+    profile_id TEXT NOT NULL,
+    collection_kind TEXT NOT NULL,
+    collection_id TEXT NOT NULL,
+    sort_field TEXT NOT NULL DEFAULT '',
+    sort_order TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, collection_kind, collection_id),
+    CHECK (collection_kind IN ('library', 'user')),
+    CHECK (sort_order IN ('', 'asc', 'desc'))
+);`
 
 // watchProgressSyncTriggers stamps the server-owned cursor (synced_seq) on every
 // watch_progress write and owns the LWW key: event_at defaults to the write

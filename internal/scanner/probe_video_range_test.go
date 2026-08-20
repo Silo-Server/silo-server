@@ -47,6 +47,7 @@ func TestConvertProbeDataVideoRangeTypes(t *testing.T) {
 		wantRange     string
 		wantRangeType string
 		wantProfile   int
+		wantLevel     int
 		wantCompatID  int
 		wantEL        bool
 		wantHDR10Plus bool
@@ -92,12 +93,14 @@ func TestConvertProbeDataVideoRangeTypes(t *testing.T) {
 				SideDataList: []ffprobeSideData{{
 					SideDataType: "DOVI configuration record",
 					DVProfile:    8,
+					DVLevel:      6,
 					DVBLCompatID: 1,
 				}},
 			},
 			wantRange:     "DolbyVision",
 			wantRangeType: "DOVIWithHDR10",
 			wantProfile:   8,
+			wantLevel:     6,
 			wantCompatID:  1,
 		},
 		{
@@ -175,6 +178,9 @@ func TestConvertProbeDataVideoRangeTypes(t *testing.T) {
 			}
 			if track.DVProfile != tt.wantProfile {
 				t.Fatalf("DVProfile = %d, want %d", track.DVProfile, tt.wantProfile)
+			}
+			if track.DVLevel != tt.wantLevel {
+				t.Fatalf("DVLevel = %d, want %d", track.DVLevel, tt.wantLevel)
 			}
 			if track.DVBLCompatID != tt.wantCompatID {
 				t.Fatalf("DVBLCompatID = %d, want %d", track.DVBLCompatID, tt.wantCompatID)

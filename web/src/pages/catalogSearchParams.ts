@@ -23,6 +23,9 @@ export interface CatalogSearchState {
   person_id?: string;
   type_override?: string;
   uses_source_order?: boolean;
+  // True when the UI is displaying a collection sort resolved by the server,
+  // rather than an explicit sort read from the URL or chosen by the viewer.
+  sort_from_server?: boolean;
   query_definition: QueryDefinition;
 }
 
@@ -176,6 +179,32 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
   return baseState;
 }
 
+/**
+ * Compares the stable destination identity represented by two catalog URLs.
+ * Presentation overlays such as title, sort, order, filters, and pagination
+ * intentionally do not participate in navigation active state.
+ */
+export function sameCatalogDestination(
+  left: CatalogSearchState,
+  right: CatalogSearchState,
+): boolean {
+  if (left.source !== right.source) return false;
+  if (left.source === "section" && right.source === "section") {
+    return (
+      left.scope === right.scope &&
+      left.library_id === right.library_id &&
+      left.section_id === right.section_id
+    );
+  }
+  if (left.source === "library_collection" && right.source === "library_collection") {
+    return left.library_id === right.library_id && left.collection_id === right.collection_id;
+  }
+  if (left.source === "user_collection" && right.source === "user_collection") {
+    return left.collection_id === right.collection_id;
+  }
+  return false;
+}
+
 export function buildCatalogHref(state: CatalogSearchState): string {
   const params = buildCatalogApiSearchParams(state);
   return `/catalog?${params.toString()}`;
@@ -234,10 +263,15 @@ export function buildSectionCatalogHref(destination: SectionCatalogDestination):
   });
 }
 
-export function buildLibraryCollectionCatalogHref(collectionId: string, title?: string): string {
+export function buildLibraryCollectionCatalogHref(
+  collectionId: string,
+  title?: string,
+  libraryId?: number,
+): string {
   return buildCatalogHref({
     source: "library_collection",
     collection_id: collectionId,
+    library_id: libraryId,
     title,
     uses_source_order: true,
     query_definition: createEmptyQueryDefinition(),
@@ -354,6 +388,7 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     params.set("order", state.query_definition.sort.order);
   } else if (
     !state.uses_source_order &&
+    !state.sort_from_server &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
       (state.source === "query" && effectiveLibraryID != null) ||

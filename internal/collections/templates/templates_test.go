@@ -677,8 +677,8 @@ func TestPhase3FranchiseTemplatesUseExpectedBands(t *testing.T) {
 }
 
 // TestPhase1MDBListTemplatesHaveSortOrderInExpectedBands verifies that the
-// Phase-1 MDBList-backed templates land in the sort-order bands documented in
-// docs/superpowers/plans/2026-05-22-collection-templates-expansion.md. The
+// Phase-1 MDBList-backed templates land in their assigned sort-order bands
+// (the band table below is the authoritative record of the scheme). The
 // banding scheme drives apply-time ordering for the resulting collections, so
 // regressing a band (e.g. assigning a streaming template into the 9000s) would
 // silently reorder a user's library — make that loud.

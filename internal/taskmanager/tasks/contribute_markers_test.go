@@ -116,3 +116,22 @@ func TestContributeMarkersTaskStopsOnRateLimit(t *testing.T) {
 		t.Fatalf("retry_after_seconds = %d, want 90", data["retry_after_seconds"])
 	}
 }
+
+func TestContributeMarkersTaskCountsConflictAsSkipped(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{Status: markers.OutcomeStatusConflict}}}
+	cands := &fakeCandidates{ids: []int{10}}
+	cfg := fakeAutoConfig{{Provider: "introdb", ContributeEnabled: true, ContributeAutoLocal: true}}
+	task := NewContributeMarkersTask(runner, cfg, cands, fakeFileLoader{})
+
+	prog := &contribTestProgress{}
+	if err := task.Execute(context.Background(), prog); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var data map[string]int
+	if err := json.Unmarshal(prog.data, &data); err != nil {
+		t.Fatalf("decode result data: %v", err)
+	}
+	if data["submitted"] != 0 || data["skipped"] != 1 || data["failed"] != 0 {
+		t.Fatalf("result = %v, want one skipped conflict", data)
+	}
+}

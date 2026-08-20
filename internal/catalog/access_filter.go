@@ -8,6 +8,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const LibraryCollectionVisibilityVisible = "visible"
+
 // AccessFilter captures effective viewer access constraints for catalog reads.
 type AccessFilter struct {
 	AllowedLibraryIDs     []int
@@ -30,6 +32,9 @@ type AccessFilter struct {
 	SelectedFileID               int
 	UserID                       int
 	ProfileID                    string
+	// DeviceID identifies the requesting client for device-scoped setting
+	// resolution. It does not participate in catalog access control.
+	DeviceID string
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so
@@ -40,6 +45,29 @@ type AccessFilter struct {
 	// "podcast" — they're served by the ABS-compat API instead). Applied by
 	// every query builder that consumes an AccessFilter.
 	ExcludedMediaTypes []string
+}
+
+// CanAccessLibraryCollection reports whether a visible server collection is
+// reachable through at least one library in the viewer's effective scope.
+// Collections without explicit library scope retain their legacy unrestricted
+// visibility, but restricted viewers cannot address them by ID.
+func CanAccessLibraryCollection(collection *models.LibraryCollection, filter AccessFilter) bool {
+	if collection == nil || collection.Visibility != LibraryCollectionVisibilityVisible {
+		return false
+	}
+	if len(collection.LibraryIDs) == 0 {
+		return filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0
+	}
+	for _, libraryID := range collection.LibraryIDs {
+		if filter.AllowedLibraryIDs != nil && !intInSlice(libraryID, filter.AllowedLibraryIDs) {
+			continue
+		}
+		if intInSlice(libraryID, filter.DisabledLibraryIDs) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {

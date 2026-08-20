@@ -11,7 +11,8 @@ import (
 )
 
 const artifactColumns = `id, media_file_id, format, params_hash, container, codec_video, codec_audio,
-	resolution, audio_track_index, target_bitrate_kbps, output_path, file_size, status, error_message,
+	resolution, audio_track_index, target_bitrate_kbps, output_path,
+	origin_node_id, origin_node_url, origin_node_group, origin_artifact_id, file_size, status, error_message,
 	attempts, max_attempts, lease_owner, lease_expires_at, next_retry_at,
 	created_at, completed_at, last_used_at`
 
@@ -19,6 +20,18 @@ const artifactColumns = `id, media_file_id, format, params_hash, container, code
 // download_artifacts.
 type ArtifactRepository struct {
 	pool *pgxpool.Pool
+}
+
+// RemoteArtifactOrphan is a node-local cleanup candidate. The durable queue
+// retains abandoned locators and verifies indeterminate readiness writes before
+// deleting bytes, so transient failures cannot leak or delete a winning file.
+type RemoteArtifactOrphan struct {
+	ID                 int64
+	DownloadArtifactID string
+	OriginNodeID       int
+	OriginNodeURL      string
+	OriginArtifactID   string
+	Attempts           int
 }
 
 // NewArtifactRepository creates an ArtifactRepository.
@@ -31,7 +44,8 @@ func scanArtifact(row pgx.Row) (*Artifact, error) {
 	var leaseOwner *string
 	if err := row.Scan(
 		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio,
-		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.OutputPath, &a.FileSize, &a.Status, &a.ErrorMessage,
+		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.OutputPath,
+		&a.OriginNodeID, &a.OriginNodeURL, &a.OriginNodeGroup, &a.OriginArtifactID, &a.FileSize, &a.Status, &a.ErrorMessage,
 		&a.Attempts, &a.MaxAttempts, &leaseOwner, &a.LeaseExpiresAt, &a.NextRetryAt,
 		&a.CreatedAt, &a.CompletedAt, &a.LastUsedAt,
 	); err != nil {
@@ -149,14 +163,15 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 // another node — cannot flip a row it no longer owns. Returns false when the
 // fence rejected the write (the lease was lost); the caller must then NOT flip
 // linked downloads, leaving that to the current owner.
-func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, fileSize int64) (bool, error) {
+func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, originNodeID int, originNodeURL, originNodeGroup, originArtifactID string, fileSize int64) (bool, error) {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
-		 SET status = 'ready', output_path = $2, file_size = $3, error_message = '',
+		 SET status = 'ready', output_path = $2, origin_node_id = $3, origin_node_url = $4,
+		     origin_node_group = $5, origin_artifact_id = $6, file_size = $7, error_message = '',
 		     completed_at = now(), last_used_at = now(),
 		     lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL
-		 WHERE id = $1 AND lease_owner = $4 AND status = 'running'`,
-		id, outputPath, fileSize, owner,
+		 WHERE id = $1 AND lease_owner = $8 AND status = 'running'`,
+		id, outputPath, originNodeID, originNodeURL, originNodeGroup, originArtifactID, fileSize, owner,
 	)
 	if err != nil {
 		return false, fmt.Errorf("marking artifact ready: %w", err)
@@ -237,7 +252,8 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = 'queued', attempts = 0, error_message = '', next_retry_at = NULL,
-		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
+		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
+		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
 		 WHERE id = $1`,
 		id,
 	)
@@ -250,6 +266,79 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	return nil
 }
 
+// RequeueRemote atomically transfers a ready remote locator into the cleanup
+// queue and clears it from the artifact row. The locator can therefore never
+// be deleted while the row still advertises it if either database write fails.
+// applied is false when the row changed concurrently or no longer exists.
+func (r *ArtifactRepository) RequeueRemote(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+	return r.requeueRemote(ctx, artifact, false)
+}
+
+// RequeueRemoteExactLocator additionally fences on the origin URL. Proxy miss
+// reports use it so an older signed URL cannot requeue a row after an
+// administrator has moved the same node/artifact locator to a new endpoint.
+func (r *ArtifactRepository) RequeueRemoteExactLocator(ctx context.Context, artifact *Artifact) (linked []*Download, applied bool, err error) {
+	return r.requeueRemote(ctx, artifact, true)
+}
+
+func (r *ArtifactRepository) requeueRemote(ctx context.Context, artifact *Artifact, fenceURL bool) (linked []*Download, applied bool, err error) {
+	if artifact == nil {
+		return nil, false, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("beginning remote artifact requeue: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	query := `UPDATE download_artifacts
+		 SET status = 'queued', attempts = 0, error_message = '', next_retry_at = NULL,
+		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL,
+		     origin_node_id = 0, origin_node_url = '', origin_node_group = '', origin_artifact_id = ''
+		 WHERE id = $1 AND status = 'ready' AND origin_node_id = $2 AND origin_artifact_id = $3`
+	args := []any{artifact.ID, artifact.OriginNodeID, artifact.OriginArtifactID}
+	if fenceURL {
+		query += ` AND origin_node_url = $4`
+		args = append(args, artifact.OriginNodeURL)
+	}
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("requeuing remote artifact: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, false, nil
+	}
+	rows, err := tx.Query(ctx,
+		`UPDATE downloads
+		 SET status = 'preparing', bytes_sent = 0, completed_at = NULL,
+		     error_message = '', updated_at = now()
+		 WHERE artifact_id = $1 AND status NOT IN ('cancelled', 'failed', 'revoked')
+		 RETURNING `+downloadColumns,
+		artifact.ID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("resetting linked downloads for remote artifact requeue: %w", err)
+	}
+	linked, err = scanDownloads(rows)
+	rows.Close()
+	if err != nil {
+		return nil, false, fmt.Errorf("scanning reset downloads for remote artifact requeue: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO download_artifact_orphans (download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (origin_node_id, origin_artifact_id) DO UPDATE
+		 SET download_artifact_id = EXCLUDED.download_artifact_id,
+		     origin_node_url = EXCLUDED.origin_node_url, next_retry_at = NULL`,
+		artifact.ID, artifact.OriginNodeID, artifact.OriginNodeURL, artifact.OriginArtifactID,
+	); err != nil {
+		return nil, false, fmt.Errorf("enqueueing remote artifact cleanup during requeue: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("committing remote artifact requeue: %w", err)
+	}
+	return linked, true, nil
+}
+
 // TouchLastUsed bumps last_used_at for LRU accounting (called on serve).
 func (r *ArtifactRepository) TouchLastUsed(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx, `UPDATE download_artifacts SET last_used_at = now() WHERE id = $1`, id)
@@ -257,6 +346,26 @@ func (r *ArtifactRepository) TouchLastUsed(ctx context.Context, id string) error
 		return fmt.Errorf("touching artifact: %w", err)
 	}
 	return nil
+}
+
+// RefreshRemoteLocator persists an enabled node's current URL/group while
+// fencing against a concurrent requeue or replacement locator.
+func (r *ArtifactRepository) RefreshRemoteLocator(ctx context.Context, artifact *Artifact) (bool, error) {
+	if artifact == nil {
+		return false, nil
+	}
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET origin_node_url = $2, origin_node_group = $3
+		 WHERE id = $1 AND status = 'ready'
+		   AND origin_node_id = $4 AND origin_artifact_id = $5`,
+		artifact.ID, artifact.OriginNodeURL, artifact.OriginNodeGroup,
+		artifact.OriginNodeID, artifact.OriginArtifactID,
+	)
+	if err != nil {
+		return false, fmt.Errorf("refreshing remote artifact locator: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // ListReady returns ready artifacts ordered by least-recently-used first.
@@ -343,6 +452,114 @@ func (r *ArtifactRepository) DeleteArtifact(ctx context.Context, id string) erro
 	_, err := r.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("deleting artifact: %w", err)
+	}
+	return nil
+}
+
+// EnqueueRemoteOrphan durably records an abandoned attempt before its owning
+// artifact lease or locator is discarded.
+func (r *ArtifactRepository) EnqueueRemoteOrphan(ctx context.Context, downloadArtifactID string, nodeID int, nodeURL, artifactID string) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO download_artifact_orphans (download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, next_retry_at)
+		 VALUES ($1, $2, $3, $4, now() + interval '30 seconds')
+		 ON CONFLICT (origin_node_id, origin_artifact_id) DO UPDATE
+		 SET download_artifact_id = EXCLUDED.download_artifact_id,
+		     origin_node_url = EXCLUDED.origin_node_url,
+		     next_retry_at = EXCLUDED.next_retry_at`,
+		downloadArtifactID, nodeID, nodeURL, artifactID,
+	)
+	if err != nil {
+		return fmt.Errorf("enqueueing remote artifact cleanup: %w", err)
+	}
+	return nil
+}
+
+// ListRemoteOrphansDue interleaves due candidates across origins so a large
+// unreachable-node backlog cannot starve cleanup for healthy origins while a
+// single healthy origin can still use the full batch.
+func (r *ArtifactRepository) ListRemoteOrphansDue(ctx context.Context, limit int) ([]RemoteArtifactOrphan, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx,
+		`WITH due AS (
+		    SELECT id, download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, attempts,
+		           row_number() OVER (
+		               PARTITION BY origin_node_id, origin_node_url
+		               ORDER BY attempts, created_at, id
+		           ) AS origin_rank,
+		           created_at
+		    FROM download_artifact_orphans
+		    WHERE next_retry_at IS NULL OR next_retry_at <= now()
+		 )
+		 SELECT id, download_artifact_id, origin_node_id, origin_node_url, origin_artifact_id, attempts
+		 FROM due
+		 ORDER BY origin_rank, attempts, created_at, id
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing remote artifact cleanup queue: %w", err)
+	}
+	defer rows.Close()
+	out := make([]RemoteArtifactOrphan, 0, limit)
+	for rows.Next() {
+		var orphan RemoteArtifactOrphan
+		if err := rows.Scan(&orphan.ID, &orphan.DownloadArtifactID, &orphan.OriginNodeID, &orphan.OriginNodeURL, &orphan.OriginArtifactID, &orphan.Attempts); err != nil {
+			return nil, fmt.Errorf("scanning remote artifact cleanup row: %w", err)
+		}
+		out = append(out, orphan)
+	}
+	return out, rows.Err()
+}
+
+// PrepareRemoteOrphanCleanup serializes cleanup against requeue and verifies
+// that a locator from an indeterminate MarkReady result did not actually win
+// the artifact row. owned locators have their stale cleanup row removed;
+// abandoned locators are retry-leased before the caller performs remote I/O.
+func (r *ArtifactRepository) PrepareRemoteOrphanCleanup(ctx context.Context, orphan RemoteArtifactOrphan) (owned, claimed bool, err error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, false, fmt.Errorf("beginning remote artifact cleanup claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var originNodeID int
+	var originArtifactID string
+	err = tx.QueryRow(ctx,
+		`SELECT origin_node_id, origin_artifact_id
+		 FROM download_artifacts WHERE id = $1 FOR UPDATE`,
+		orphan.DownloadArtifactID,
+	).Scan(&originNodeID, &originArtifactID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, false, fmt.Errorf("checking remote artifact ownership: %w", err)
+	}
+	var present int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM download_artifact_orphans WHERE id = $1 FOR UPDATE`, orphan.ID).Scan(&present); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("locking remote artifact cleanup row: %w", err)
+	}
+	owned = originNodeID == orphan.OriginNodeID && originArtifactID == orphan.OriginArtifactID
+	if owned {
+		if _, err := tx.Exec(ctx, `DELETE FROM download_artifact_orphans WHERE id = $1`, orphan.ID); err != nil {
+			return false, false, fmt.Errorf("clearing owned remote artifact cleanup row: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx,
+			`UPDATE download_artifact_orphans
+			 SET attempts = attempts + 1, next_retry_at = now() + interval '2 minutes'
+			 WHERE id = $1`, orphan.ID); err != nil {
+			return false, false, fmt.Errorf("claiming remote artifact cleanup row: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, false, fmt.Errorf("committing remote artifact cleanup claim: %w", err)
+	}
+	return owned, true, nil
+}
+
+func (r *ArtifactRepository) DeleteRemoteOrphan(ctx context.Context, id int64) error {
+	if _, err := r.pool.Exec(ctx, `DELETE FROM download_artifact_orphans WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("deleting remote artifact cleanup row: %w", err)
 	}
 	return nil
 }

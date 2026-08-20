@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/route-event.schema.json",
+  "title": "Silo Playback Protocol v3 Route Event",
+  "description": "Request body of POST /api/v1/playback/route-event: one event object, not a batch. Bounds mirror validRouteEventV3 in internal/api/handlers/playback_v3.go. The endpoint is telemetry, so the server rejects a malformed event rather than half-recording it; every bound here is a rejection, and the two behaviours that are not rejections — unknown diagnostics keys being dropped, long diagnostics values being truncated — are described rather than constrained.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "playback_attempt_id",
+    "event"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "playback_attempt_id": {
+      "type": "string",
+      "description": "The attempt this event belongs to, correlating every plan the client tried for one user-visible playback start.",
+      "minLength": 8,
+      "maxLength": 128
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "plan_id": {
+      "type": "string",
+      "description": "Echoed from the plan being reported on. Opaque to clients.",
+      "maxLength": 128
+    },
+    "plan_attempt_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "plan_attempt_key": {
+      "type": "string",
+      "description": "Echoed from the plan being reported on. Opaque to clients: never computed on the client side.",
+      "maxLength": 128
+    },
+    "event": {
+      "type": "string",
+      "description": "The complete v3 telemetry contract. New names are added additively within v3; the server rejects a name it does not know, so a client must not invent one.",
+      "enum": [
+        "plan_selected",
+        "plan_invalidated",
+        "plan_failed",
+        "first_frame",
+        "terminal",
+        "stopped",
+        "runtime_correction_applied",
+        "runtime_correction_succeeded",
+        "runtime_correction_failed",
+        "seek_reanchor_requested",
+        "seek_reanchored"
+      ]
+    },
+    "failure_classification": {
+      "type": "string",
+      "description": "Neutral failure class, not a client-framework error string.",
+      "maxLength": 64
+    },
+    "fallback_reason": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "applied_quirk_ids": {
+      "type": "array",
+      "description": "Quirks the client actually applied, so a registry entry can be measured against real outcomes rather than assumed to work.",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "quirk_registry_revision": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "output_context_id": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Free-form key/value detail. The server keeps only keys on its allowlist and silently drops the rest, and trims each surviving value to 256 characters, so an unknown key or a long value is not a rejection — but more than 32 entries is.",
+      "maxProperties": 32,
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -7,6 +7,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "./SettingField";
 import { SaveBar } from "./SaveBar";
 import { FieldGroup } from "./FieldGroup";
+import { USER_DATABASE_BACKEND_OPTIONS } from "./databaseSettingOptions";
 
 const REDIS_KEYS = ["redis.url"];
 
@@ -128,10 +129,7 @@ export default function DatabaseSettings() {
           <SettingField
             label="User DB Backend"
             type="select"
-            options={[
-              { value: "postgres", label: "PostgreSQL" },
-              { value: "sqlite", label: "SQLite" },
-            ]}
+            options={USER_DATABASE_BACKEND_OPTIONS}
             value={form.getValue("userdb.backend")}
             onChange={(v) => form.setValue("userdb.backend", v)}
           />

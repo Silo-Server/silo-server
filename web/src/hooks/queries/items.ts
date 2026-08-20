@@ -20,7 +20,11 @@ import {
   getCachedWatchedInvalidationKeys,
   getWatchedToastMessage,
 } from "@/pages/ItemDetail/watchedState";
-import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import {
+  invalidateMediaSurfaceQueries,
+  isItemDetailQueryKey,
+  updateCatalogItemDetail,
+} from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 function itemPathID(id: string): string {
@@ -64,15 +68,29 @@ interface ItemRefreshJobResult {
   detail_content_id?: string;
   scan_path?: string;
   matched_files?: number;
+  // Set when the metadata refresh committed but its artwork did not finish
+  // caching. The refresh itself succeeded, so this is a warning, not an error.
+  artwork_cache_warning?: string;
   scan_result?: {
     new?: number;
   };
+}
+
+interface RefreshItemMetadataContext {
+  toastID: string | number;
 }
 
 export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
+    onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
+      toastID: toast.loading(
+        mode === "complete"
+          ? "Complete metadata refresh running…"
+          : "Quick metadata refresh running…",
+      ),
+    }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
       const job = await api<AdminJob>(
         `/admin/items/${itemPathID(item.content_id)}/refresh-metadata`,
@@ -84,20 +102,27 @@ export function useRefreshItemMetadata() {
       const completed = await awaitAdminJob(job.id);
       return { job: completed };
     },
-    onSuccess: async ({ job }, { item, mode, onReplaced }) => {
+    onSuccess: async ({ job }, { item, mode, onReplaced }, context) => {
       const result = (job.result_payload ?? {}) as ItemRefreshJobResult;
       const refreshContentID = result.refresh_content_id;
       const detailContentID = result.detail_content_id;
       const newFiles = result.scan_result?.new ?? 0;
+      const artworkWarning = result.artwork_cache_warning;
 
-      if (mode === "complete") {
-        toast.success("Complete refresh finished");
+      if (artworkWarning) {
+        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+          id: context?.toastID,
+          description: artworkWarning,
+        });
+      } else if (mode === "complete") {
+        toast.success("Complete refresh finished", { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(
           `Metadata refreshed. Found ${newFiles} new file version${newFiles === 1 ? "" : "s"}`,
+          { id: context?.toastID },
         );
       } else {
-        toast.success("Metadata refreshed");
+        toast.success("Metadata refreshed", { id: context?.toastID });
       }
 
       await Promise.all([
@@ -169,8 +194,10 @@ export function useRefreshItemMetadata() {
         await onReplaced(detailContentID);
       }
     },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+    onError: (err, _variables, context) => {
+      toast.error(err instanceof Error ? err.message : "Refresh failed", {
+        id: context?.toastID,
+      });
     },
   });
 }
@@ -267,8 +294,38 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
     mutationFn: (nextPlayed: boolean) =>
       api(`/watched/${itemPathID(item.content_id)}`, {
         method: nextPlayed ? "POST" : "DELETE",
+        // Marking a series expands to every episode server-side. keepalive
+        // lets the browser finish the request after a navigation or tab close,
+        // so a large series no longer depends on the user staying on the page.
+        // The server applies the mark in one transaction, so a request that
+        // never arrives leaves nothing marked rather than a partial subset.
+        keepalive: true,
       }),
-    onError: (err) => {
+    onMutate: async (nextPlayed: boolean) => {
+      // Cancel and snapshot over the same predicate: an in-flight detail query
+      // on either key shape would otherwise land after the optimistic write
+      // and revert the button.
+      const itemDetailQueries = {
+        predicate: (query: { queryKey: unknown }) =>
+          isItemDetailQueryKey(query.queryKey, item.content_id),
+      };
+      await queryClient.cancelQueries(itemDetailQueries);
+      const previous = queryClient.getQueriesData(itemDetailQueries);
+      updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
+        ...detail,
+        ...(detail.user_data ? { user_data: { ...detail.user_data, played: nextPlayed } } : {}),
+        user_state: {
+          played: nextPlayed,
+          is_favorite: detail.user_state?.is_favorite ?? false,
+          in_watchlist: detail.user_state?.in_watchlist ?? false,
+        },
+      }));
+      return { previous };
+    },
+    onError: (err, _nextPlayed, context) => {
+      for (const [queryKey, value] of context?.previous ?? []) {
+        queryClient.setQueryData(queryKey, value);
+      }
       toast.error(err instanceof Error ? err.message : "Failed to update watched state");
     },
     onSuccess: (_data, nextPlayed) => {

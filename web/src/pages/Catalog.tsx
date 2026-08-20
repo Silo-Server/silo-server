@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
+import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
+import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
 import { useRequestSearch } from "@/hooks/queries/useRequests";
@@ -29,6 +31,7 @@ import {
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
 } from "./catalogSearchParams";
+import type { CatalogSearchState } from "./catalogSearchParams";
 
 const REQUEST_SEARCH_DEBOUNCE_MS = 100;
 
@@ -157,6 +160,50 @@ function CatalogResults({
     visibleRange,
     includeTotal: showExactResultCount,
   });
+  // The server resolves a collection's effective order (viewer override, then
+  // the collection's default, then source order) when the URL carries no sort.
+  // Reflect that back into the filter bar so the menu shows what is actually
+  // applied, without writing it into the URL — leaving it out of the URL is what
+  // lets a later change to the saved preference take effect on the next visit.
+  const effectiveSort = catalogQuery.data?.effectiveSort;
+  const sortedState = useMemo(() => {
+    if (!isCollectionSource || !effectiveState.uses_source_order || !effectiveSort?.field) {
+      return effectiveState;
+    }
+    return {
+      ...effectiveState,
+      uses_source_order: false,
+      sort_from_server: true,
+      query_definition: {
+        ...effectiveState.query_definition,
+        sort: { field: effectiveSort.field, order: effectiveSort.order },
+      },
+    };
+  }, [effectiveSort, effectiveState, isCollectionSource]);
+
+  const setCollectionSortPreference = useSetCollectionSortPreference();
+  const rememberCollectionSort = useCallback(
+    (nextState: CatalogSearchState) => {
+      const collectionId = nextState.collection_id?.trim();
+      if (!isCollectionSource || !collectionId) return;
+      const nextValue = nextState.uses_source_order
+        ? ""
+        : querySortToSelectValue(nextState.query_definition.sort);
+      const currentValue = sortedState.uses_source_order
+        ? ""
+        : querySortToSelectValue(sortedState.query_definition.sort);
+      if (nextValue === currentValue) return;
+      const [field, order] = nextValue ? nextValue.split(":") : ["", ""];
+      setCollectionSortPreference.mutate({
+        collection_kind: nextState.source === "library_collection" ? "library" : "user",
+        collection_id: collectionId,
+        field: field ?? "",
+        order: order === "asc" || order === "desc" ? order : "",
+      });
+    },
+    [isCollectionSource, setCollectionSortPreference, sortedState],
+  );
+
   const canRequest = useCanRequest();
   // Add a short TMDB debounce on top of SearchBar's input debounce so the
   // TMDB plugin isn't hit at the same cadence as the local library query.
@@ -273,9 +320,17 @@ function CatalogResults({
       ) : null}
 
       <CatalogFiltersPanel
-        state={effectiveState}
+        state={sortedState}
         onStateChange={(nextState) => {
-          const nextSearchParams = buildCatalogFilterSearchParams(nextState);
+          const sortChanged =
+            nextState.uses_source_order !== sortedState.uses_source_order ||
+            querySortToSelectValue(nextState.query_definition.sort) !==
+              querySortToSelectValue(sortedState.query_definition.sort);
+          const stateForNavigation = sortChanged
+            ? { ...nextState, sort_from_server: false }
+            : nextState;
+          rememberCollectionSort(stateForNavigation);
+          const nextSearchParams = buildCatalogFilterSearchParams(stateForNavigation);
           if (nextSearchParams.toString() !== searchParams.toString()) {
             setSearchParams(nextSearchParams);
           }

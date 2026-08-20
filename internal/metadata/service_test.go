@@ -32,6 +32,26 @@ const (
 type fakeItemRepo struct {
 	mu    sync.Mutex
 	items map[string]*models.MediaItem
+
+	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
+	trailersRequestedAt    map[string]time.Time
+	trailersRequestedAtErr error
+	trailersClaims         int
+	trailersClaimErr       error
+	trailersClaimResult    *trailersClaimResult
+	trailersReleases       int
+	trailersReleased       chan struct{}
+	trailersReleaseGate    chan struct{}
+	now                    func() time.Time
+}
+
+// trailersClaimResult forces a fixed answer out of the cooldown gate, for the
+// outcomes the in-memory model cannot reach on its own — notably the real
+// repository's "lost the gate but the slot kept being freed" answer, which
+// carries no timestamp.
+type trailersClaimResult struct {
+	claimed     bool
+	requestedAt *time.Time
 }
 
 func newFakeItemRepo() *fakeItemRepo {
@@ -122,6 +142,118 @@ func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ i
 	return nil, nil
 }
 
+// TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the
+// claim succeeds only when no timestamp is stored or the stored one predates
+// the cooldown window, and either way the caller reads back the timestamp now
+// stored in the column.
+func (r *fakeItemRepo) TryClaimTrailersRefresh(_ context.Context, contentID string, cooldown time.Duration) (bool, *time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok {
+		return false, nil, catalog.ErrItemNotFound
+	}
+	now := time.Now().UTC()
+	if r.now != nil {
+		now = r.now()
+	}
+	if r.trailersClaimErr != nil {
+		return false, nil, r.trailersClaimErr
+	}
+	if forced := r.trailersClaimResult; forced != nil {
+		return forced.claimed, forced.requestedAt, nil
+	}
+	stored, ok := r.trailersRequestedAt[contentID]
+	if !ok || stored.Before(now.Add(-cooldown)) {
+		if r.trailersRequestedAt == nil {
+			r.trailersRequestedAt = make(map[string]time.Time)
+		}
+		r.trailersRequestedAt[contentID] = now
+		r.trailersClaims++
+		claimed := now
+		return true, &claimed, nil
+	}
+	blocked := stored
+	return false, &blocked, nil
+}
+
+// ReleaseTrailersRefreshClaim mirrors the equality-guarded UPDATE: a slot that
+// has since been re-claimed by a newer request is left alone.
+//
+// trailersReleaseGate, when set, holds the release until the test closes it,
+// which lets a test interleave a newer claim with a late-arriving release.
+func (r *fakeItemRepo) ReleaseTrailersRefreshClaim(_ context.Context, contentID string, claimedAt time.Time) error {
+	r.mu.Lock()
+	gate := r.trailersReleaseGate
+	r.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.trailersReleases++
+	if stored, ok := r.trailersRequestedAt[contentID]; ok && stored.Equal(claimedAt) {
+		delete(r.trailersRequestedAt, contentID)
+	}
+	if r.trailersReleased != nil {
+		close(r.trailersReleased)
+		r.trailersReleased = nil
+	}
+	return nil
+}
+
+// TrailersRefreshRequestedAt reads back the stored claim the way the durable
+// recovery path does, so a refresh that inherits a claim can release it on the
+// same key the original request wrote.
+func (r *fakeItemRepo) TrailersRefreshRequestedAt(_ context.Context, contentID string) (*time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.items[contentID]; !ok {
+		return nil, catalog.ErrItemNotFound
+	}
+	if r.trailersRequestedAtErr != nil {
+		return nil, r.trailersRequestedAtErr
+	}
+	if stored, ok := r.trailersRequestedAt[contentID]; ok {
+		return &stored, nil
+	}
+	return nil, nil
+}
+
+// expectTrailersRelease arms a channel closed by the next
+// ReleaseTrailersRefreshClaim, so a test can wait for the detached refresh's
+// failure path instead of polling.
+func (r *fakeItemRepo) expectTrailersRelease() chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	released := make(chan struct{})
+	r.trailersReleased = released
+	return released
+}
+
+func (r *fakeItemRepo) trailersClaimCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trailersClaims
+}
+
+func (r *fakeItemRepo) trailersReleaseCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trailersReleases
+}
+
+// trailersStoredAt reports the timestamp currently stored for the item, or nil
+// when the slot is free.
+func (r *fakeItemRepo) trailersStoredAt(contentID string) *time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if stored, ok := r.trailersRequestedAt[contentID]; ok {
+		return &stored
+	}
+	return nil
+}
+
 type fakeRefreshDebtRepo struct {
 	mu    sync.Mutex
 	debts map[string]*models.MetadataRefreshDebt
@@ -179,8 +311,13 @@ func (r *fakeRefreshDebtRepo) UpsertTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
+// RequestDue mirrors the repository's merge semantics rather than overwriting:
+// the real statement ORs the reason mask, keeps the greater priority and the
+// earlier next_refresh_at. Callers reason about all three (a trailer request
+// adds its reason to whatever debt an item already has, and must not push
+// genuinely-due work out), so a fake that replaced the row would hide that.
 func (r *fakeRefreshDebtRepo) RequestDue(
-	ctx context.Context,
+	_ context.Context,
 	targetType string,
 	contentID string,
 	priority int,
@@ -188,7 +325,29 @@ func (r *fakeRefreshDebtRepo) RequestDue(
 	nextRefreshAt time.Time,
 	_ time.Duration,
 ) error {
-	return r.UpsertTargetDebt(ctx, targetType, contentID, priority, reasonMask, nextRefreshAt)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	targetType = NormalizeRefreshTargetType(targetType)
+	key := fakeRefreshDebtKey(targetType, contentID)
+	if key == "" || contentID == "" || reasonMask == 0 {
+		return nil
+	}
+	if existing, ok := r.debts[key]; ok {
+		existing.ReasonMask |= reasonMask
+		existing.Priority = max(existing.Priority, priority)
+		if nextRefreshAt.Before(existing.NextRefreshAt) {
+			existing.NextRefreshAt = nextRefreshAt
+		}
+		return nil
+	}
+	r.debts[key] = &models.MetadataRefreshDebt{
+		TargetType:    targetType,
+		ContentID:     contentID,
+		Priority:      priority,
+		ReasonMask:    reasonMask,
+		NextRefreshAt: nextRefreshAt,
+	}
+	return nil
 }
 
 func (r *fakeRefreshDebtRepo) MarkFailure(
@@ -729,14 +888,21 @@ func (r *fakeLibraryRepo) CountFoldersForItem(ctx context.Context, contentID str
 
 type fakeMetadataFolderRepo struct {
 	folders map[int]*models.MediaFolder
+	// lookupErrs forces a transient failure for a folder that otherwise
+	// exists. Callers distinguish "this library is gone" from "this library
+	// could not be read", so the fake has to be able to produce both.
+	lookupErrs map[int]error
 }
 
 func (r *fakeMetadataFolderRepo) GetByID(_ context.Context, id int) (*models.MediaFolder, error) {
+	if err, ok := r.lookupErrs[id]; ok {
+		return nil, err
+	}
 	if folder, ok := r.folders[id]; ok {
 		cp := *folder
 		return &cp, nil
 	}
-	return nil, fmt.Errorf("folder not found: %d", id)
+	return nil, catalog.ErrFolderNotFound
 }
 
 // fakeRootClaimRepo implements metadataRootClaimRepo.

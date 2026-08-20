@@ -4,12 +4,31 @@ import { useReportMediaProgress } from "@/hooks/queries/progress";
 import { buildPlayerChapters, nextChapterStart, prevChapterStart } from "@/lib/audiobooks/chapters";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import { getPersistedVolume, persistVolume } from "@/player/components/VolumeControl";
+import {
+  buildClientCapabilitiesV3,
+  buildClientPlaybackContextV3,
+  detectBandwidthEstimateKbpsV3,
+  detectMeteredV3,
+} from "@/player/client-context-v3";
 import { usePlayerConfig } from "@/player/context/PlayerConfigContext";
 import { playerFetch } from "@/player/player-fetch";
+import { randomUUID } from "@/lib/uuid";
+import { describePlanTerminal } from "@/player/playback-errors";
+import {
+  MAX_ATTEMPT_COUNT_V3,
+  MAX_ATTEMPTED_PLAN_KEYS_V3,
+  QUALITY_ORIGINAL_V3,
+  type DecisionResponseV3,
+  type FailureV3,
+  type PlanV3,
+} from "@/player/protocol-v3";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
+import { reportRouteEventV3 } from "@/player/route-events-v3";
 import { buildPlayerStreamUrl } from "@/player/stream-url";
-import type { PlaybackSessionResponse, PlayerChapter } from "@/player/types";
+import type { PlayerChapter } from "@/player/types";
+import { useCodecDetection } from "@/player/hooks/useCodecDetection";
 import { usePlaybackRealtime } from "@/player/hooks/usePlaybackRealtime";
+import { buildReplanRequestV3, buildStartRequestV3 } from "@/player/playback-session-wire-v3";
 import type { SleepSetting } from "@/player/components/SleepTimerMenu";
 import { smartRewindSeconds } from "./smartRewind";
 import { clampAudiobookRate, getBookRate, setBookRate } from "./useAudiobookPrefs";
@@ -65,6 +84,15 @@ function safeNumber(value: number): number {
   return Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
+export function audiobookAbsoluteTime(
+  partStartSeconds: number,
+  timelineOffsetSeconds: number,
+  playerSeconds: number,
+): number {
+  const timelineOffset = Number.isFinite(timelineOffsetSeconds) ? timelineOffsetSeconds : 0;
+  return Math.max(0, safeNumber(partStartSeconds) + timelineOffset + safeNumber(playerSeconds));
+}
+
 function buildParts(files: AudiobookFile[]): AudiobookPart[] {
   const parts: AudiobookPart[] = [];
   let offset = 0;
@@ -118,14 +146,22 @@ function absoluteBufferedRanges(
   ranges: TimeRanges,
   part: AudiobookPart | undefined,
   bookDuration: number,
+  timelineOffsetSeconds = 0,
 ): TimeRanges {
   if (!part) {
     return { length: 0, start: () => 0, end: () => 0 } as TimeRanges;
   }
+  const timelineOffset = Number.isFinite(timelineOffsetSeconds) ? timelineOffsetSeconds : 0;
   const out: Array<{ start: number; end: number }> = [];
   for (let i = 0; i < ranges.length; i++) {
-    const start = Math.min(bookDuration, part.start + safeNumber(ranges.start(i)));
-    const end = Math.min(bookDuration, part.start + safeNumber(ranges.end(i)));
+    const start = Math.max(
+      0,
+      Math.min(bookDuration, part.start + timelineOffset + safeNumber(ranges.start(i))),
+    );
+    const end = Math.max(
+      0,
+      Math.min(bookDuration, part.start + timelineOffset + safeNumber(ranges.end(i))),
+    );
     if (end > start) {
       out.push({ start, end });
     }
@@ -178,6 +214,18 @@ export function useAudiobookPlayback({
   onStopRequested,
 }: UseAudiobookPlaybackOptions): AudiobookPlayback {
   const config = usePlayerConfig();
+  // The same probe the video player uses: its audio codecs are already tested
+  // against `audio/mp4` as well as `video/mp4`, so an audio-only source is
+  // described honestly without a second detection path.
+  const capabilityProbe = useCodecDetection();
+  const clientCapabilities = useMemo(
+    () => buildClientCapabilitiesV3(capabilityProbe),
+    [capabilityProbe],
+  );
+  const clientPlaybackContext = useMemo(
+    () => buildClientPlaybackContextV3(capabilityProbe),
+    [capabilityProbe],
+  );
   const audioRef = useRef<HTMLAudioElement>(null);
   const parts = useMemo(() => buildParts(files), [files]);
   const duration = useMemo(() => totalDuration(parts), [parts]);
@@ -197,6 +245,7 @@ export function useAudiobookPlayback({
     sessionId: null,
     streamUrl: "",
   });
+  const [sourceRevision, setSourceRevision] = useState(0);
 
   const { mutate: reportProgress } = useReportMediaProgress();
   const activePart = activeFileIndex >= 0 ? parts[activeFileIndex] : undefined;
@@ -204,6 +253,15 @@ export function useAudiobookPlayback({
   const currentTimeRef = useRef(currentTime);
   const activePartRef = useRef<AudiobookPart | undefined>(activePart);
   const sessionIdRef = useRef<string | null>(null);
+  const planRef = useRef<PlanV3 | null>(null);
+  const playbackAttemptIdRef = useRef<string | null>(null);
+  const planAttemptIdRef = useRef(randomUUID());
+  const attemptedPlanKeysRef = useRef<string[]>([]);
+  const attemptCountRef = useRef(1);
+  const replanInFlightPlanKeyRef = useRef<string | null>(null);
+  const failedPlanKeyRef = useRef<string | null>(null);
+  const timelineOffsetSecondsRef = useRef(0);
+  const canSeekAnywhereRef = useRef(true);
   const reportRef = useRef<(pos: number) => void>(() => {});
   const reportSessionRef = useRef<(pos: number, isPaused: boolean, keepalive?: boolean) => void>(
     () => {},
@@ -213,6 +271,7 @@ export function useAudiobookPlayback({
   );
   const playAfterSourceSwitchRef = useRef(false);
   const autoPlayPendingRef = useRef(autoPlay);
+  const playingRef = useRef(false);
   // Wall-clock time playback last paused, for smart rewind on resume. Cleared
   // by explicit seeks so a hand-picked position is never second-guessed.
   const pausedAtRef = useRef<number | null>(null);
@@ -255,6 +314,159 @@ export function useAudiobookPlayback({
       });
     },
     [buildKeepaliveHeaders, config.apiBaseUrl],
+  );
+
+  const adoptPlan = useCallback(
+    (decision: DecisionResponseV3, playbackAttemptId: string): string | null => {
+      const plan = decision.playback_plan;
+      if (!plan) return null;
+
+      const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
+      const planAttemptId = randomUUID();
+      planRef.current = plan;
+      playbackAttemptIdRef.current = playbackAttemptId;
+      planAttemptIdRef.current = planAttemptId;
+      sessionIdRef.current = sessionId ?? null;
+      failedPlanKeyRef.current = null;
+      timelineOffsetSecondsRef.current = plan.timeline.timeline_offset_seconds;
+      canSeekAnywhereRef.current = plan.timeline.can_seek_anywhere;
+      // The plan owns where the stream is anchored. On a converted part the
+      // server anchors the stream at the seek position and restarts the player
+      // clock at zero, so replaying the requested position would seek twice.
+      pendingLocalSeekRef.current = plan.timeline.player_start_seconds;
+      setSessionState({
+        sessionId: sessionId ?? null,
+        streamUrl: buildPlayerStreamUrl(
+          config.apiBaseUrl,
+          plan.stream.url,
+          config.getAccessToken(),
+        ),
+      });
+      void reportRouteEventV3(config, {
+        event: "plan_selected",
+        playbackAttemptId,
+        ...(sessionId ? { sessionId } : {}),
+        planId: plan.plan_id,
+        planAttemptId,
+        planAttemptKey: plan.plan_attempt_key,
+      });
+      return sessionId ?? null;
+    },
+    [config],
+  );
+
+  const recoverFromPlanFailure = useCallback(
+    async (failure: FailureV3) => {
+      const plan = planRef.current;
+      const sessionId = sessionIdRef.current;
+      const playbackAttemptId = playbackAttemptIdRef.current;
+      if (!plan || !sessionId || !playbackAttemptId || replanInFlightPlanKeyRef.current) return;
+      if (failedPlanKeyRef.current === plan.plan_attempt_key) return;
+      if (attemptCountRef.current > MAX_ATTEMPT_COUNT_V3) {
+        toast.error("Playback failed", {
+          description: "Audiobook playback failed after repeated recovery attempts.",
+        });
+        return;
+      }
+
+      const expectedPlanKey = plan.plan_attempt_key;
+      const planAttemptId = planAttemptIdRef.current;
+      const attemptedPlanKeys = [...attemptedPlanKeysRef.current, expectedPlanKey].slice(
+        -MAX_ATTEMPTED_PLAN_KEYS_V3,
+      );
+      const attemptCount = attemptCountRef.current;
+      const positionSeconds = localTimeForPart(activePartRef.current, currentTimeRef.current);
+      failedPlanKeyRef.current = expectedPlanKey;
+      replanInFlightPlanKeyRef.current = expectedPlanKey;
+
+      void reportRouteEventV3(config, {
+        event: "plan_failed",
+        playbackAttemptId,
+        sessionId,
+        planId: plan.plan_id,
+        planAttemptId,
+        planAttemptKey: expectedPlanKey,
+        failureClassification: failure.classification,
+        ...(failure.message ? { diagnostics: { message: failure.message } } : {}),
+      });
+
+      try {
+        const decision = await playerFetch<DecisionResponseV3>(
+          config,
+          `/playback/${sessionId}/replan`,
+          {
+            method: "POST",
+            body: JSON.stringify(
+              buildReplanRequestV3({
+                operation: "failure_recovery",
+                positionSeconds,
+                failure,
+                plan,
+                playbackAttemptId,
+                replanRequestId: randomUUID(),
+                planAttemptId,
+                qualityPreference: QUALITY_ORIGINAL_V3,
+                attemptedPlanKeys,
+                attemptCount,
+                metered: detectMeteredV3(),
+                bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+                clientCapabilities,
+                clientPlaybackContext,
+              }),
+            ),
+          },
+        );
+
+        if (
+          planRef.current?.plan_attempt_key !== expectedPlanKey ||
+          playbackAttemptIdRef.current !== playbackAttemptId
+        ) {
+          return;
+        }
+        attemptedPlanKeysRef.current = attemptedPlanKeys;
+        attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
+
+        if (!decision.playback_plan) {
+          const terminal = decision.terminal
+            ? describePlanTerminal(decision.terminal)
+            : {
+                title: "Playback unavailable",
+                message: "This server could not recover audiobook playback.",
+              };
+          void reportRouteEventV3(config, {
+            event: "terminal",
+            playbackAttemptId,
+            sessionId,
+            planId: plan.plan_id,
+            planAttemptId,
+            planAttemptKey: expectedPlanKey,
+            ...(decision.terminal ? { fallbackReason: decision.terminal.reason } : {}),
+          });
+          toast.error(terminal.title, { description: terminal.message });
+          return;
+        }
+
+        playAfterSourceSwitchRef.current =
+          playingRef.current || autoPlayPendingRef.current || !(audioRef.current?.paused ?? true);
+        setBuffered(null);
+        adoptPlan(decision, playbackAttemptId);
+      } catch (err) {
+        if (
+          planRef.current?.plan_attempt_key === expectedPlanKey &&
+          playbackAttemptIdRef.current === playbackAttemptId &&
+          failedPlanKeyRef.current === expectedPlanKey
+        ) {
+          failedPlanKeyRef.current = null;
+        }
+        console.error("audiobook playback recovery failed", err);
+        toast.error(err instanceof Error ? err.message : "Failed to recover audiobook playback");
+      } finally {
+        if (replanInFlightPlanKeyRef.current === expectedPlanKey) {
+          replanInFlightPlanKeyRef.current = null;
+        }
+      }
+    },
+    [adoptPlan, clientCapabilities, clientPlaybackContext, config],
   );
 
   useEffect(() => {
@@ -301,6 +513,8 @@ export function useAudiobookPlayback({
     const target = clampedBookTime(initialPositionSeconds, duration);
     const index = findPartIndex(parts, target);
     pendingLocalSeekRef.current = localTimeForPart(parts[index], target);
+    timelineOffsetSecondsRef.current = 0;
+    canSeekAnywhereRef.current = true;
     autoPlayPendingRef.current = autoPlay;
     setBuffered(null);
     setActiveFileIndex(index);
@@ -312,6 +526,8 @@ export function useAudiobookPlayback({
     if (!fileId || !activePart) {
       setSessionState({ sessionId: null, streamUrl: "" });
       sessionIdRef.current = null;
+      planRef.current = null;
+      playbackAttemptIdRef.current = null;
       return;
     }
 
@@ -322,48 +538,79 @@ export function useAudiobookPlayback({
 
     setSessionState({ sessionId: null, streamUrl: "" });
 
+    const playbackAttemptId = randomUUID();
+    playbackAttemptIdRef.current = playbackAttemptId;
+    planRef.current = null;
+    attemptedPlanKeysRef.current = [];
+    attemptCountRef.current = 1;
+    replanInFlightPlanKeyRef.current = null;
+    failedPlanKeyRef.current = null;
+
     (async () => {
       const profileId = config.getProfileId();
       if (!profileId) {
         throw new Error("Missing active profile");
       }
 
-      const session = await playerFetch<PlaybackSessionResponse>(config, "/playback/start", {
+      const decision = await playerFetch<DecisionResponseV3>(config, "/playback/start", {
         method: "POST",
-        body: JSON.stringify({
-          file_id: fileId,
-          profile_id: profileId,
-          play_method: "direct",
-          start_position: localStart,
-          disable_progress_persistence: true,
-          codecs_video: [],
-          codecs_audio: [],
-          containers: [],
-          max_resolution: "",
-          hdr: false,
-        }),
+        body: JSON.stringify(
+          buildStartRequestV3({
+            fileId,
+            profileId,
+            playbackAttemptId,
+            // An audiobook has one rung. Asking for anything else would only
+            // invite the planner to consider a ladder that does not exist.
+            qualityPreference: QUALITY_ORIGINAL_V3,
+            position: localStart,
+            // The book's absolute position is already resolved to this part's
+            // local clock, so zero means "the start of this part" rather than
+            // "resume wherever the server last saw us".
+            forceStartPosition: true,
+            progressPersistence: "client",
+            metered: detectMeteredV3(),
+            bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3() ?? null,
+            clientCapabilities,
+            clientPlaybackContext,
+          }),
+        ),
       });
 
-      if (canceled) {
-        stopSession(session.session_id, true);
+      const plan = decision.playback_plan;
+      if (!plan) {
+        if (!canceled) {
+          const failure = decision.terminal
+            ? describePlanTerminal(decision.terminal)
+            : {
+                title: "Playback unavailable",
+                message: "This server is not accepting playback requests right now.",
+              };
+          void reportRouteEventV3(config, {
+            event: "terminal",
+            playbackAttemptId,
+            ...(decision.session_id ? { sessionId: decision.session_id } : {}),
+            ...(decision.terminal ? { fallbackReason: decision.terminal.reason } : {}),
+          });
+          toast.error(failure.title, { description: failure.message });
+        }
         return;
       }
 
-      startedSessionId = session.session_id;
-      sessionIdRef.current = session.session_id;
-      setSessionState({
-        sessionId: session.session_id,
-        streamUrl: buildPlayerStreamUrl(
-          config.apiBaseUrl,
-          session.stream_url,
-          config.getAccessToken(),
-          session.play_method,
-          localStart,
-        ),
-      });
+      const sessionId = plan.session_id ?? decision.session_id ?? null;
+      if (canceled) {
+        if (sessionId) stopSession(sessionId, true);
+        return;
+      }
+
+      startedSessionId = adoptPlan(decision, playbackAttemptId);
     })().catch((err) => {
       if (!canceled) {
         console.error("audiobook playback session failed", err);
+        void reportRouteEventV3(config, {
+          event: "plan_failed",
+          playbackAttemptId,
+          failureClassification: "transport_error",
+        });
         toast.error(err instanceof Error ? err.message : "Failed to start audiobook playback");
       }
     });
@@ -377,20 +624,48 @@ export function useAudiobookPlayback({
           sessionIdRef.current = null;
         }
       }
+      if (playbackAttemptIdRef.current === playbackAttemptId) {
+        playbackAttemptIdRef.current = null;
+        planRef.current = null;
+      }
     };
-  }, [activePart, config, fileId, stopSession]);
+  }, [
+    activePart,
+    adoptPlan,
+    clientCapabilities,
+    clientPlaybackContext,
+    config,
+    fileId,
+    sourceRevision,
+    stopSession,
+  ]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !fileId || !activePart) return;
 
-    const absoluteFromAudio = () => activePart.start + safeNumber(audio.currentTime);
+    const absoluteFromAudio = () =>
+      audiobookAbsoluteTime(activePart.start, timelineOffsetSecondsRef.current, audio.currentTime);
 
     const onTimeUpdate = () => setAbsoluteTime(absoluteFromAudio());
     const onProgress = () =>
-      setBuffered(absoluteBufferedRanges(audio.buffered, activePart, duration));
+      setBuffered(
+        absoluteBufferedRanges(
+          audio.buffered,
+          activePart,
+          duration,
+          timelineOffsetSecondsRef.current,
+        ),
+      );
     const onDurationChange = () =>
-      setBuffered(absoluteBufferedRanges(audio.buffered, activePart, duration));
+      setBuffered(
+        absoluteBufferedRanges(
+          audio.buffered,
+          activePart,
+          duration,
+          timelineOffsetSecondsRef.current,
+        ),
+      );
     const onLoadedMetadata = () => {
       audio.playbackRate = rate;
       const pending = pendingLocalSeekRef.current;
@@ -410,10 +685,12 @@ export function useAudiobookPlayback({
       }
     };
     const onPlay = () => {
+      playingRef.current = true;
       setPlaying(true);
       reportSessionRef.current(absoluteFromAudio(), false);
     };
     const onPause = () => {
+      playingRef.current = false;
       pausedAtRef.current = performance.now();
       setPlaying(false);
       reportRef.current(absoluteFromAudio());
@@ -438,11 +715,13 @@ export function useAudiobookPlayback({
       }
       currentTimeRef.current = duration;
       setCurrentTime(duration);
+      playingRef.current = false;
       setPlaying(false);
       reportRef.current(duration);
     };
     const onError = () => {
       const err = audio.error;
+      const message = err?.message || "The browser rejected the audiobook stream.";
       console.error("audiobook audio error", {
         code: err?.code,
         message: err?.message,
@@ -450,6 +729,7 @@ export function useAudiobookPlayback({
         readyState: audio.readyState,
         src: audio.currentSrc,
       });
+      void recoverFromPlanFailure({ classification: "decoder_error", message });
     };
 
     audio.addEventListener("timeupdate", onTimeUpdate);
@@ -473,7 +753,16 @@ export function useAudiobookPlayback({
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
     };
-  }, [activeFileIndex, activePart, duration, fileId, parts, rate, setAbsoluteTime]);
+  }, [
+    activeFileIndex,
+    activePart,
+    duration,
+    fileId,
+    parts,
+    rate,
+    recoverFromPlanFailure,
+    setAbsoluteTime,
+  ]);
 
   useEffect(() => {
     if (!playing) return;
@@ -517,8 +806,13 @@ export function useAudiobookPlayback({
         playAfterSourceSwitchRef.current = shouldContinuePlaying;
         setBuffered(null);
         setActiveFileIndex(nextIndex);
-      } else if (audio) {
-        audio.currentTime = local;
+      } else if (audio && canSeekAnywhereRef.current) {
+        audio.currentTime = Math.max(0, local - timelineOffsetSecondsRef.current);
+      } else {
+        pendingLocalSeekRef.current = local;
+        playAfterSourceSwitchRef.current = shouldContinuePlaying;
+        setBuffered(null);
+        setSourceRevision((revision) => revision + 1);
       }
 
       currentTimeRef.current = target;

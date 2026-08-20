@@ -243,6 +243,11 @@ func DeleteCollection(db *sql.DB, id string) error {
 	if _, err := tx.Exec(`DELETE FROM personal_collection_items WHERE collection_id = ?`, id); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`
+		DELETE FROM collection_sort_preferences
+		WHERE collection_kind = 'user' AND collection_id = ?`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM personal_collections WHERE id = ?`, id); err != nil {
 		return err
 	}

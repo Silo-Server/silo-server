@@ -130,13 +130,15 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 	page := mdblistPageState{}
 	for {
 		var payload mdblistWatchedResponse
-		path := page.path("/sync/watched")
+		// Request concrete play history. MDBList documents plays=all as returning
+		// movie and episode leaves only, avoiding ambiguous show/season rollups.
+		path := page.path("/sync/watched") + "&plays=all"
 		if err := p.do(ctx, http.MethodGet, path, conn.AccessToken, nil, &payload); err != nil {
 			return nil, err
 		}
 		pageRows := watchedRowsFromPayload(p.Key(), payload)
 		rows = append(rows, pageRows...)
-		fetched := len(payload.Movies) + len(payload.Episodes)
+		fetched := len(payload.Movies) + len(payload.Shows) + len(payload.Seasons) + len(payload.Episodes)
 		done, err := page.advance(payload.Pagination, fetched)
 		if err != nil {
 			return nil, fmt.Errorf("mdblist watched pagination: %w", err)
@@ -149,9 +151,13 @@ func (p *Provider) FetchWatched(ctx context.Context, _ watchsync.ServerConfig, c
 }
 
 func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) []watchsync.RemoteWatch {
+	// The shows and seasons arrays are rollups of episode watched state, not
+	// independent proof that every episode in that scope was watched. Import
+	// only the playable leaves; Silo derives season and series completion from
+	// their episode state.
 	rows := make([]watchsync.RemoteWatch, 0, len(payload.Movies)+len(payload.Episodes))
 	for _, movie := range payload.Movies {
-		watchedAt := movie.WatchedAt
+		watchedAt := movie.LastWatchedAt
 		if watchedAt == nil {
 			continue
 		}
@@ -173,7 +179,7 @@ func watchedRowsFromPayload(providerKey string, payload mdblistWatchedResponse) 
 		})
 	}
 	for _, episode := range payload.Episodes {
-		watchedAt := episode.WatchedAt
+		watchedAt := episode.LastWatchedAt
 		if watchedAt == nil {
 			continue
 		}
@@ -272,8 +278,8 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 	}, true
 }
 
-// MDBList exposes a watched snapshot rather than a per-play history, so each
-// watched record surfaces once with its last_watched_at as the play timestamp.
+// FetchWatched requests MDBList's per-play history, so preserve each returned
+// movie or episode play and its watched timestamp for exact export reconciliation.
 func (p *Provider) FetchHistory(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemotePlay, error) {
 	rows, err := p.FetchWatched(ctx, cfg, conn)
 	if err != nil {
@@ -703,42 +709,76 @@ type mdblistShow struct {
 }
 
 type mdblistEpisode struct {
-	Title  string     `json:"title"`
-	Season int        `json:"season"`
-	Number int        `json:"number"`
-	IDs    mdblistIDs `json:"ids"`
+	Title  string      `json:"title"`
+	Name   string      `json:"name"`
+	Season int         `json:"season"`
+	Number int         `json:"number"`
+	IDs    mdblistIDs  `json:"ids"`
+	Show   mdblistShow `json:"show"`
 }
 
 type mdblistWatchedMovie struct {
-	WatchedAt *time.Time   `json:"watched_at"`
-	Movie     mdblistMovie `json:"movie"`
+	LastWatchedAt *time.Time   `json:"last_watched_at"`
+	Movie         mdblistMovie `json:"movie"`
+}
+
+func (m *mdblistWatchedMovie) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		LastWatchedAt *time.Time   `json:"last_watched_at"`
+		WatchedAt     *time.Time   `json:"watched_at"`
+		Movie         mdblistMovie `json:"movie"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.LastWatchedAt = firstTimestamp(raw.LastWatchedAt, raw.WatchedAt)
+	m.Movie = raw.Movie
+	return nil
+}
+
+type mdblistWatchedShow struct {
+	LastWatchedAt *time.Time  `json:"last_watched_at"`
+	Show          mdblistShow `json:"show"`
+}
+
+type mdblistSeason struct {
+	Number int         `json:"number"`
+	Name   string      `json:"name"`
+	IDs    mdblistIDs  `json:"ids"`
+	Show   mdblistShow `json:"show"`
+}
+
+type mdblistWatchedSeason struct {
+	LastWatchedAt *time.Time    `json:"last_watched_at"`
+	Season        mdblistSeason `json:"season"`
 }
 
 // mdblistWatchedEpisode tolerates both shapes MDBList uses for episode rows:
 // season/number inlined on the row, or nested under an `episode` object.
 type mdblistWatchedEpisode struct {
-	WatchedAt *time.Time  `json:"watched_at"`
-	Season    int         `json:"season"`
-	Number    int         `json:"number"`
-	Title     string      `json:"title"`
-	IDs       mdblistIDs  `json:"ids"`
-	Show      mdblistShow `json:"show"`
+	LastWatchedAt *time.Time
+	Season        int
+	Number        int
+	Title         string
+	IDs           mdblistIDs
+	Show          mdblistShow
 }
 
 func (e *mdblistWatchedEpisode) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		WatchedAt *time.Time      `json:"watched_at"`
-		Season    int             `json:"season"`
-		Number    int             `json:"number"`
-		Title     string          `json:"title"`
-		IDs       mdblistIDs      `json:"ids"`
-		Show      mdblistShow     `json:"show"`
-		Episode   *mdblistEpisode `json:"episode"`
+		LastWatchedAt *time.Time      `json:"last_watched_at"`
+		WatchedAt     *time.Time      `json:"watched_at"`
+		Season        int             `json:"season"`
+		Number        int             `json:"number"`
+		Title         string          `json:"title"`
+		IDs           mdblistIDs      `json:"ids"`
+		Show          mdblistShow     `json:"show"`
+		Episode       *mdblistEpisode `json:"episode"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	e.WatchedAt = raw.WatchedAt
+	e.LastWatchedAt = firstTimestamp(raw.LastWatchedAt, raw.WatchedAt)
 	e.Season = raw.Season
 	e.Number = raw.Number
 	e.Title = raw.Title
@@ -753,16 +793,31 @@ func (e *mdblistWatchedEpisode) UnmarshalJSON(data []byte) error {
 		}
 		if e.Title == "" {
 			e.Title = raw.Episode.Title
+			if e.Title == "" {
+				e.Title = raw.Episode.Name
+			}
 		}
 		if e.IDs == (mdblistIDs{}) {
 			e.IDs = raw.Episode.IDs
+		}
+		if e.Show == (mdblistShow{}) {
+			e.Show = raw.Episode.Show
 		}
 	}
 	return nil
 }
 
+func firstTimestamp(preferred, fallback *time.Time) *time.Time {
+	if preferred != nil {
+		return preferred
+	}
+	return fallback
+}
+
 type mdblistWatchedResponse struct {
 	Movies     []mdblistWatchedMovie   `json:"movies"`
+	Shows      []mdblistWatchedShow    `json:"shows"`
+	Seasons    []mdblistWatchedSeason  `json:"seasons"`
 	Episodes   []mdblistWatchedEpisode `json:"episodes"`
 	Pagination *mdblistPagination      `json:"pagination"`
 }

@@ -672,6 +672,19 @@ func TestAudiobookFolderUnchangedAllMatch(t *testing.T) {
 	}
 }
 
+func TestAudiobookFolderUnchangedRepairsLegacyCoverArtRows(t *testing.T) {
+	now := time.Now().UTC()
+	files := []*models.MediaFile{{
+		FilePath: "/lib/Author/Book/a.m4b", FileSize: 100, FileModifiedAt: &now,
+		BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "aac",
+		VideoTracks: []models.VideoTrack{{Codec: "mjpeg"}}, AudioTracks: []models.AudioTrack{{Codec: "aac"}},
+	}}
+	onDisk := []audiobookDiskFile{{Path: files[0].FilePath, Size: files[0].FileSize, ModTime: now}}
+	if audiobookFolderUnchanged(files, onDisk) {
+		t.Fatal("legacy cover-art rows must bypass the unchanged fast path")
+	}
+}
+
 func TestAudiobookFolderUnchangedSizeDiffers(t *testing.T) {
 	now := time.Now().UTC()
 	files := []*models.MediaFile{

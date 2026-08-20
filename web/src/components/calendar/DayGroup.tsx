@@ -2,6 +2,8 @@ import MediaCarousel from "@/components/MediaCarousel";
 import { formatDayHeading, isToday } from "@/lib/calendarWeek";
 import CalendarEventCard from "./CalendarEventCard";
 import type { CalendarDay } from "@/hooks/queries/calendar";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 
 interface DayGroupProps {
   day: CalendarDay;
@@ -11,6 +13,8 @@ interface DayGroupProps {
 export default function DayGroup({ day, isSelected }: DayGroupProps) {
   const today = isToday(day.date);
   const title = formatDayHeading(day.date);
+  const { cardPresentation } = useUICustomization();
+  const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   return (
     // scroll-mt offsets the sticky header so the title isn't hidden when scrolled into view
@@ -38,7 +42,7 @@ export default function DayGroup({ day, isSelected }: DayGroupProps) {
         }
       >
         {day.items.map((event) => (
-          <div key={event.content_id} className="w-[140px] shrink-0 sm:w-[160px] lg:w-[185px]">
+          <div key={event.content_id} className={posterWidthClasses}>
             <CalendarEventCard event={event} />
           </div>
         ))}

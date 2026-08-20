@@ -11,10 +11,11 @@ import (
 )
 
 // genericWebhookBody is the canonical Silo webhook JSON
-// (docs/superpowers/plans/notifications/04, "Generic"). The HMAC signature is
-// computed over the literal bytes Silo sends; receivers verify against the
-// literal bytes they received, so no canonicalization is required on either
-// side. No server URL, no absolute artwork URLs, no library name.
+// (docs/architecture/notifications.md, "Generic payload and HMAC signing").
+// The HMAC signature is computed over the literal bytes Silo sends;
+// receivers verify against the literal bytes they received, so no
+// canonicalization is required on either side. No server URL, no absolute
+// artwork URLs, no library name.
 type genericWebhookBody struct {
 	Event      string                 `json:"event"`
 	DeliveryID string                 `json:"delivery_id"`

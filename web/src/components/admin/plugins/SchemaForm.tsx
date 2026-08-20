@@ -97,11 +97,13 @@ function ChipsSkeleton() {
 function SchemaFormSection({
   section,
   values,
+  fields,
   forceOpen,
   renderFields,
 }: {
   section: PluginAdminFormSection;
   values: Record<string, unknown>;
+  fields: PluginAdminFormField[];
   forceOpen: boolean;
   renderFields: (keys: string[]) => React.ReactNode;
 }) {
@@ -109,7 +111,7 @@ function SchemaFormSection({
   // (the section has unresolved errors) always wins so setup can't be hidden.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
-  if (!evaluateShowWhen(section.show_when, values)) {
+  if (!evaluateShowWhen(section.show_when, values, fields)) {
     return null;
   }
 
@@ -331,7 +333,9 @@ export function SchemaForm({
   // bordered, divided container so toggles read as a cohesive group instead of
   // a column of separate boxes. Honors show_when on each field.
   function renderFieldList(fields: PluginAdminFormField[]): React.ReactNode {
-    const visible = fields.filter((field) => evaluateShowWhen(field.show_when, values));
+    const visible = fields.filter((field) =>
+      evaluateShowWhen(field.show_when, values, descriptor.fields),
+    );
     const nodes: React.ReactNode[] = [];
     let run: PluginAdminFormField[] = [];
     // Key switch groups by their position in the list, not by their first
@@ -389,6 +393,7 @@ export function SchemaForm({
           key={section.key}
           section={section}
           values={values}
+          fields={descriptor.fields}
           forceOpen={section.field_keys.some((key) => mergedErrors[key] != null)}
           renderFields={(keys) => renderFieldList(resolveKeys(keys))}
         />

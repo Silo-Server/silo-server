@@ -1,8 +1,82 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 3,
+  "manifest_revision": 7,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
+    {
+      "name": "profile_client_sits_between_device_and_profile",
+      "description": "Presentation values roam across like clients, while an exact-device override remains more specific and a profile value remains the cross-family fallback.",
+      "keys": ["ui.card_presentation"],
+      "context": { "profile_id": "p1", "client_family": "tv", "device_id": "living-room" },
+      "stored": [
+        {
+          "key": "ui.card_presentation",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": { "poster_size": "standard", "caption": "title" }
+        },
+        {
+          "key": "ui.card_presentation",
+          "scope": "profile_client",
+          "profile_id": "p1",
+          "client_family": "tv",
+          "value": { "poster_size": "large", "caption": "artwork" }
+        },
+        {
+          "key": "ui.card_presentation",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "living-room",
+          "value": { "poster_size": "compact", "caption": "title_metadata" }
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_presentation",
+          "value": { "poster_size": "compact", "caption": "title_metadata" },
+          "source": "profile_device"
+        }
+      ]
+    },
+    {
+      "name": "profile_client_roams_only_within_its_family",
+      "description": "A television menu applies to another television identity but not to mobile; the family is explicit resolution context rather than inferred from device metadata.",
+      "keys": ["nav.primary_menu"],
+      "context": { "profile_id": "p1", "client_family": "tv", "device_id": "bedroom-tv" },
+      "stored": [
+        {
+          "key": "nav.primary_menu",
+          "scope": "profile_client",
+          "profile_id": "p1",
+          "client_family": "mobile",
+          "value": { "items": [{ "type": "builtin", "destination": "home" }] }
+        },
+        {
+          "key": "nav.primary_menu",
+          "scope": "profile_client",
+          "profile_id": "p1",
+          "client_family": "tv",
+          "value": {
+            "items": [
+              { "type": "builtin", "destination": "home" },
+              { "type": "builtin", "destination": "movies" }
+            ]
+          }
+        }
+      ],
+      "expected": [
+        {
+          "key": "nav.primary_menu",
+          "value": {
+            "items": [
+              { "type": "builtin", "destination": "home" },
+              { "type": "builtin", "destination": "movies" }
+            ]
+          },
+          "source": "profile_client"
+        }
+      ]
+    },
     {
       "name": "resolution_order_series_wins",
       "description": "The full ladder: with values stored at every scope a content key allows, profile_series beats profile_library, profile_device, and profile.",
@@ -591,6 +665,72 @@
           "key": "playback.subtitle_appearance",
           "value": { "fontSize": "medium", "fontColor": "#ffcc00" },
           "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "intro_skip_mode_defaults_to_ask",
+      "description": "A profile that has never chosen an intro behaviour gets the contract default, which is the same prompt the old auto_skip_intro=false produced.",
+      "keys": ["playback.intro_skip_mode"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "playback.intro_skip_mode",
+          "value": "ask",
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "intro_skip_mode_device_override_beats_profile",
+      "description": "A living-room television set to skip intros automatically does not change the profile-wide choice to leave them alone.",
+      "keys": ["playback.intro_skip_mode"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "playback.intro_skip_mode",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "never"
+        },
+        {
+          "key": "playback.intro_skip_mode",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "always"
+        }
+      ],
+      "expected": [
+        {
+          "key": "playback.intro_skip_mode",
+          "value": "always",
+          "source": "profile_device"
+        }
+      ]
+    },
+    {
+      "name": "subtitle_appearance_uses_shared_default",
+      "description": "With no stored profile or device value, every client receives the contract's shared Box 75% subtitle appearance.",
+      "keys": ["playback.subtitle_appearance"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "playback.subtitle_appearance",
+          "value": {
+            "fontSize": "large",
+            "fontFamily": "sans-serif",
+            "fontColor": "#ffffff",
+            "backgroundColor": "#000000",
+            "backgroundStyle": "box",
+            "backgroundOpacity": 75,
+            "textOutline": false,
+            "textOutlineColor": "#000000",
+            "position": "bottom"
+          },
+          "source": "default"
         }
       ]
     }

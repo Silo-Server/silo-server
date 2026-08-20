@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type matcherRepository interface {
@@ -11,6 +12,7 @@ type matcherRepository interface {
 	MatchMediaByTitleYear(ctx context.Context, kind, title string, year int) ([]mediaLookupRow, error)
 	MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error)
 	MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error)
+	MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error)
 }
 
 type Matcher struct {
@@ -29,6 +31,54 @@ func (m *Matcher) Match(ctx context.Context, record Record) (*Match, string, err
 		return m.matchEpisode(ctx, record)
 	case KindSeries:
 		return m.matchSeries(ctx, record)
+	default:
+		return nil, "unsupported item kind", nil
+	}
+}
+
+// MatchLeaves resolves a provider watched marker to concrete playable items.
+// Movies and episodes have one leaf. Whole-show and whole-season markers must
+// expand to the local episodes that existed when the provider marker was
+// recorded; Silo derives series/season completion from those episode leaves.
+func (m *Matcher) MatchLeaves(ctx context.Context, record Record) ([]Match, string, error) {
+	switch record.Kind {
+	case KindMovie, KindEpisode:
+		match, reason, err := m.Match(ctx, record)
+		if err != nil || match == nil {
+			return nil, reason, err
+		}
+		return []Match{*match}, "", nil
+	case KindSeries, KindSeason:
+		seriesRecord := record
+		var seasonNumber *int
+		if record.Kind == KindSeason {
+			seriesRecord = Record{
+				Kind:   KindSeries,
+				Title:  record.SeriesTitle,
+				Year:   record.SeriesYear,
+				IMDbID: record.SeriesIMDbID,
+				TMDBID: record.SeriesTMDBID,
+				TVDBID: record.SeriesTVDBID,
+			}
+			season := record.SeasonNumber
+			seasonNumber = &season
+		}
+		seriesRecord.Kind = KindSeries
+		series, reason, err := m.matchSeries(ctx, seriesRecord)
+		if err != nil || series == nil {
+			return nil, reason, err
+		}
+		matches, err := m.repo.MatchEpisodesBySeries(ctx, series.MediaItemID, seasonNumber, record.LastPlayedAt)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(matches) == 0 {
+			if seasonNumber != nil {
+				return nil, fmt.Sprintf("no available episodes matched for season %d", *seasonNumber), nil
+			}
+			return nil, "no available episodes matched for series", nil
+		}
+		return matches, "", nil
 	default:
 		return nil, "unsupported item kind", nil
 	}

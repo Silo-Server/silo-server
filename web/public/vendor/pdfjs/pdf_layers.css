@@ -1,0 +1,640 @@
+/* Copyright 2014 Mozilla Foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Extracted from pdfjs-dist 6.2.108 web/pdf_viewer.css for Silo's embedded
+ * reader. This file intentionally contains only the .textLayer,
+ * .textLayerImages, and .annotationLayer blocks used by foliate-js/pdf.js.
+ */
+
+.textLayer{
+  color-scheme:only light;
+
+  position:absolute;
+  text-align:initial;
+  inset:0;
+  overflow:clip;
+  opacity:1;
+  line-height:1;
+  letter-spacing:normal;
+  word-spacing:normal;
+  -webkit-text-size-adjust:none;
+     -moz-text-size-adjust:none;
+          text-size-adjust:none;
+  forced-color-adjust:none;
+  transform-origin:0 0;
+  caret-color:CanvasText;
+  z-index:0;
+
+  &.highlighting{
+    touch-action:none;
+  }
+
+  :is(span, br){
+    color:transparent;
+    position:absolute;
+    white-space:pre;
+    cursor:text;
+    transform-origin:0% 0%;
+    -webkit-user-select:text;
+       -moz-user-select:text;
+            user-select:text;
+  }
+  --min-font-size:1;
+  --text-scale-factor:calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv:calc(1 / var(--min-font-size));
+
+  > :not(.markedContent),
+  .markedContent span:not(.markedContent){
+    z-index:1;
+
+    --font-height:0;
+    font-size:calc(var(--text-scale-factor) * var(--font-height));
+
+    --scale-x:1;
+    --rotate:0deg;
+    transform:rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+  }
+
+  .markedContent{
+    display:contents;
+  }
+
+  span[role="img"]{
+    -webkit-user-select:none;
+       -moz-user-select:none;
+            user-select:none;
+    cursor:default;
+  }
+
+  .highlight{
+    --highlight-bg-color:rgb(180 0 170 / 0.25);
+    --highlight-selected-bg-color:rgb(0 100 0 / 0.25);
+    --highlight-backdrop-filter:none;
+    --highlight-selected-backdrop-filter:none;
+
+    @media screen and (forced-colors: active){
+      --highlight-bg-color:transparent;
+      --highlight-selected-bg-color:transparent;
+      --highlight-backdrop-filter:var(--hcm-highlight-filter);
+      --highlight-selected-backdrop-filter:var(
+        --hcm-highlight-selected-filter
+      );
+    }
+
+    margin:-1px;
+    padding:1px;
+    background-color:var(--highlight-bg-color);
+    backdrop-filter:var(--highlight-backdrop-filter);
+    border-radius:4px;
+
+    &.appended{
+      position:initial;
+    }
+
+    &.begin{
+      border-radius:4px 0 0 4px;
+    }
+
+    &.end{
+      border-radius:0 4px 4px 0;
+    }
+
+    &.middle{
+      border-radius:0;
+    }
+
+    &.selected{
+      background-color:var(--highlight-selected-bg-color);
+      backdrop-filter:var(--highlight-selected-backdrop-filter);
+      scroll-margin-top:50px;
+    }
+  }
+
+  ::-moz-selection{
+    background:rgba(0 0 255 / 0.25);
+    background:color-mix(in srgb, AccentColor, transparent 50%);
+    color:transparent;
+  }
+
+  ::selection{
+    background:rgba(0 0 255 / 0.25);
+    background:color-mix(in srgb, AccentColor, transparent 50%);
+    color:transparent;
+  }
+
+  &.selectionRendering{
+    ::-moz-selection{
+      background:transparent;
+      color:transparent;
+    }
+    ::selection{
+      background:transparent;
+      color:transparent;
+    }
+  }
+  br::-moz-selection{
+    background:transparent;
+  }
+  br::selection{
+    background:transparent;
+  }
+
+  .endOfContent{
+    display:block;
+    position:absolute;
+    inset:100% 0 0;
+    z-index:0;
+    cursor:default;
+    -webkit-user-select:none;
+       -moz-user-select:none;
+            user-select:none;
+  }
+
+  &.selecting .endOfContent{
+    top:0;
+  }
+}
+
+.textLayerImages{
+  position:absolute;
+  inset:0;
+  -webkit-user-select:none;
+     -moz-user-select:none;
+          user-select:none;
+
+  canvas{
+    position:absolute;
+    transform-origin:0% 0%;
+  }
+}
+
+.annotationLayer{
+  color-scheme:only light;
+
+  --annotation-unfocused-field-background:url("data:image/svg+xml;charset=UTF-8,<svg width='1px' height='1px' xmlns='http://www.w3.org/2000/svg'><rect width='100%' height='100%' style='fill:rgba(0, 54, 255, 0.13);'/></svg>");
+  --annotation-unfocused-field-filter:url("data:image/svg+xml;charset=UTF-8,<svg xmlns='http://www.w3.org/2000/svg'><filter id='pdfjsFillableField' x='0%' y='0%' width='100%' height='100%' color-interpolation-filters='sRGB'><feFlood flood-color='rgb(0,54,255)' flood-opacity='0.13' result='f'/><feComposite in='f' in2='SourceGraphic' operator='over'/></filter></svg>#pdfjsFillableField");
+  --input-focus-border-color:Highlight;
+  --input-focus-outline:1px solid Canvas;
+  --input-unfocused-border-color:transparent;
+  --input-disabled-border-color:transparent;
+  --input-hover-border-color:black;
+  --link-outline:none;
+
+  @media screen and (forced-colors: active){
+    --input-focus-border-color:CanvasText;
+    --input-unfocused-border-color:ActiveText;
+    --input-disabled-border-color:GrayText;
+    --input-hover-border-color:Highlight;
+    --link-outline:1.5px solid LinkText;
+
+    .textWidgetAnnotation :is(input, textarea):required,
+    .choiceWidgetAnnotation select:required,
+    .buttonWidgetAnnotation:is(.checkBox, .radioButton) input:required{
+      outline:1.5px solid selectedItem;
+    }
+
+    .linkAnnotation{
+      outline:var(--link-outline);
+
+      &:hover{
+        backdrop-filter:var(--hcm-highlight-filter);
+      }
+
+      & > a:hover{
+        opacity:0 !important;
+        background:none !important;
+        box-shadow:none;
+      }
+    }
+
+    .popupAnnotation .popup{
+      outline:calc(1.5px * var(--total-scale-factor)) solid CanvasText !important;
+      background-color:ButtonFace !important;
+      color:ButtonText !important;
+    }
+
+    .highlightArea:hover::after{
+      position:absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      backdrop-filter:var(--hcm-highlight-filter);
+      content:"";
+      pointer-events:none;
+    }
+
+    .popupAnnotation.focused .popup{
+      outline:calc(3px * var(--total-scale-factor)) solid Highlight !important;
+    }
+  }
+
+  position:absolute;
+  top:0;
+  left:0;
+  pointer-events:none;
+  transform-origin:0 0;
+
+  &[data-main-rotation="90"] .norotate{
+    transform:rotate(270deg) translateX(-100%);
+  }
+  &[data-main-rotation="180"] .norotate{
+    transform:rotate(180deg) translate(-100%, -100%);
+  }
+  &[data-main-rotation="270"] .norotate{
+    transform:rotate(90deg) translateY(-100%);
+  }
+
+  &.disabled{
+    section,
+    .popup{
+      pointer-events:none;
+    }
+  }
+
+  .annotationContent{
+    position:absolute;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+
+    &.freetext{
+      background:transparent;
+      border:none;
+      inset:0;
+      overflow:visible;
+      white-space:nowrap;
+      font:10px sans-serif;
+      line-height:1.35;
+    }
+  }
+
+  section{
+    position:absolute;
+    text-align:initial;
+    pointer-events:auto;
+    box-sizing:border-box;
+    transform-origin:0 0;
+    -webkit-user-select:none;
+       -moz-user-select:none;
+            user-select:none;
+
+    &:has(div.annotationContent){
+      canvas.annotationContent{
+        display:none;
+      }
+    }
+
+    .overlaidText{
+      position:absolute;
+      top:0;
+      left:0;
+      width:0;
+      height:0;
+      display:inline-block;
+      overflow:hidden;
+    }
+  }
+  .hasOwnCanvas:not(.sandboxModified) :is(input, textarea){
+    display:none;
+  }
+
+  .hasOwnCanvas.sandboxModified canvas.annotationContent{
+    display:none;
+  }
+
+  .textLayer.selecting ~ & section{
+    pointer-events:none;
+  }
+
+  :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton) > a{
+    position:absolute;
+    font-size:1em;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+  }
+
+  :is(.linkAnnotation, .buttonWidgetAnnotation.pushButton):not(.hasBorder)
+    > a:hover{
+    opacity:0.2;
+    background-color:rgb(255 255 0);
+  }
+
+  .linkAnnotation.hasBorder:hover{
+    background-color:rgb(255 255 0 / 0.2);
+  }
+
+  .hasBorder{
+    background-size:100% 100%;
+  }
+
+  .textAnnotation img{
+    position:absolute;
+    cursor:pointer;
+    width:100%;
+    height:100%;
+    top:0;
+    left:0;
+  }
+
+  .textWidgetAnnotation :is(input, textarea),
+  .choiceWidgetAnnotation select,
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) input{
+    background-image:var(--annotation-unfocused-field-background);
+    border:2px solid var(--input-unfocused-border-color);
+    box-sizing:border-box;
+    font:calc(9px * var(--total-scale-factor)) sans-serif;
+    height:100%;
+    margin:0;
+    vertical-align:top;
+    width:100%;
+  }
+
+  .textWidgetAnnotation :is(input, textarea):required,
+  .choiceWidgetAnnotation select:required,
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) input:required{
+    outline:1.5px solid red;
+  }
+
+  .choiceWidgetAnnotation select option{
+    padding:0;
+  }
+
+  .textWidgetAnnotation textarea{
+    resize:none;
+  }
+
+  .textWidgetAnnotation :is(input, textarea)[disabled],
+  .choiceWidgetAnnotation select[disabled],
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) input[disabled]{
+    background:none;
+    border:2px solid var(--input-disabled-border-color);
+    cursor:not-allowed;
+  }
+
+  .textWidgetAnnotation :is(input, textarea):hover,
+  .choiceWidgetAnnotation select:hover,
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) input:hover{
+    border:2px solid var(--input-hover-border-color);
+  }
+  .textWidgetAnnotation :is(input, textarea):hover,
+  .choiceWidgetAnnotation select:hover,
+  .buttonWidgetAnnotation.checkBox input:hover{
+    border-radius:2px;
+  }
+
+  .textWidgetAnnotation :is(input, textarea):focus,
+  .choiceWidgetAnnotation select:focus{
+    background:none;
+    border:2px solid var(--input-focus-border-color);
+    border-radius:2px;
+    outline:var(--input-focus-outline);
+  }
+
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) :focus{
+    background-image:none;
+    background-color:transparent;
+  }
+
+  .buttonWidgetAnnotation.checkBox :focus{
+    border:2px solid var(--input-focus-border-color);
+    border-radius:2px;
+    outline:var(--input-focus-outline);
+  }
+
+  .buttonWidgetAnnotation.radioButton :focus{
+    border:2px solid var(--input-focus-border-color);
+    outline:var(--input-focus-outline);
+  }
+
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton){
+    [data-canvas-name]{
+      filter:var(--annotation-unfocused-field-filter);
+    }
+
+    &:focus-within [data-canvas-name]{
+      filter:none;
+    }
+
+    [data-canvas-name="checked"]{
+      &:has(~ input:checked){
+        display:block;
+      }
+
+      &:has(~ input:not(:checked)){
+        display:none;
+      }
+    }
+
+    [data-canvas-name="unchecked"]{
+      &:has(~ input:checked){
+        display:none;
+      }
+
+      &:has(~ input:not(:checked)){
+        display:block;
+      }
+    }
+  }
+
+  .textWidgetAnnotation input.comb{
+    --comb-width:0px;
+    --comb-letter-spacing:calc(var(--comb-width) - 1ch);
+
+    font-family:monospace;
+    letter-spacing:var(--comb-letter-spacing);
+    overflow-x:hidden;
+    padding:0;
+    text-indent:calc(
+      var(--comb-offset, 0) * var(--comb-width) + var(--comb-letter-spacing) / 2
+    );
+  }
+
+  .textWidgetAnnotation input.comb:focus{
+    background-image:repeating-linear-gradient(
+      to right,
+      transparent 0 calc(var(--comb-width) - 1px),
+      var(--input-focus-border-color) calc(var(--comb-width) - 1px)
+        var(--comb-width)
+    );
+  }
+
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton) input{
+    -webkit-appearance:none;
+       -moz-appearance:none;
+            appearance:none;
+  }
+
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton):has(
+      [data-canvas-name="checked"]
+    )
+    input:checked,
+  .buttonWidgetAnnotation:is(.checkBox, .radioButton):has(
+      [data-canvas-name="unchecked"]
+    )
+    input:not(:checked){
+    background-image:none;
+  }
+
+  .fileAttachmentAnnotation .popupTriggerArea{
+    height:100%;
+    width:100%;
+  }
+
+  .mediaAnnotation{
+    pointer-events:auto;
+
+    .mediaContent{
+      width:100%;
+    }
+
+    video.mediaContent{
+      height:100%;
+      -o-object-fit:contain;
+         object-fit:contain;
+    }
+
+    audio.mediaContent{
+      position:absolute;
+      bottom:0;
+    }
+
+    .mediaPlayButton{
+      height:100%;
+      width:100%;
+      margin:0;
+      padding:0;
+      border:none;
+      cursor:pointer;
+      background-color:transparent;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='rgba(0,0,0,0.55)'/%3E%3Cpath d='M40 32 L70 50 L40 68 Z' fill='white'/%3E%3C/svg%3E");
+      background-position:center;
+      background-repeat:no-repeat;
+      background-size:calc(48px * var(--total-scale-factor));
+
+      &:hover{
+        background-color:rgba(255 255 255 / 0.1);
+      }
+    }
+  }
+
+  .popupAnnotation{
+    position:absolute;
+    font-size:calc(9px * var(--total-scale-factor));
+    pointer-events:none;
+    width:-moz-max-content;
+    width:max-content;
+    max-width:45%;
+    height:auto;
+  }
+
+  .popup{
+    background-color:rgb(255 255 153);
+    color:black;
+    box-shadow:0 calc(2px * var(--total-scale-factor)) calc(5px * var(--total-scale-factor)) rgb(136 136 136);
+    border-radius:calc(2px * var(--total-scale-factor));
+    outline:1.5px solid rgb(255 255 74);
+    padding:calc(6px * var(--total-scale-factor));
+    cursor:pointer;
+    font:message-box;
+    white-space:normal;
+    word-wrap:break-word;
+    pointer-events:auto;
+    -webkit-user-select:text;
+       -moz-user-select:text;
+            user-select:text;
+  }
+
+  .popupAnnotation.focused .popup{
+    outline-width:3px;
+  }
+
+  .popup *{
+    font-size:calc(9px * var(--total-scale-factor));
+  }
+
+  .popup > .header{
+    display:inline-block;
+  }
+
+  .popup > .header > .title{
+    display:inline;
+    font-weight:bold;
+  }
+
+  .popup > .header .popupDate{
+    display:inline-block;
+    margin-left:calc(5px * var(--total-scale-factor));
+    width:-moz-fit-content;
+    width:fit-content;
+  }
+
+  .popupContent{
+    border-top:1px solid rgb(51 51 51);
+    margin-top:calc(2px * var(--total-scale-factor));
+    padding-top:calc(2px * var(--total-scale-factor));
+  }
+
+  .richText > *{
+    white-space:pre-wrap;
+    font-size:calc(9px * var(--total-scale-factor));
+  }
+
+  .popupTriggerArea{
+    cursor:pointer;
+
+    &:hover{
+      backdrop-filter:var(--hcm-highlight-filter);
+    }
+  }
+
+  section svg{
+    position:absolute;
+    width:100%;
+    height:100%;
+    top:0;
+    left:0;
+  }
+
+  .annotationTextContent{
+    position:absolute;
+    width:100%;
+    height:100%;
+    opacity:0;
+    color:transparent;
+    -webkit-user-select:none;
+       -moz-user-select:none;
+            user-select:none;
+    pointer-events:none;
+
+    span{
+      width:100%;
+      display:inline-block;
+    }
+  }
+
+  svg.quadrilateralsContainer{
+    contain:strict;
+    width:0;
+    height:0;
+    position:absolute;
+    top:0;
+    left:0;
+    z-index:-1;
+  }
+}

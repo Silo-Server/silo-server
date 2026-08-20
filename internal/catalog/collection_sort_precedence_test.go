@@ -1,0 +1,189 @@
+package catalog
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
+)
+
+// sortPrefStore is a UserStore that only answers collection-sort-preference
+// lookups; every other method panics so a test that strays off this path fails
+// loudly rather than silently exercising unrelated behavior.
+type sortPrefStore struct {
+	userstore.UserStore
+	pref *userstore.CollectionSortPreference
+	err  error
+	// calls records the lookups made, so tests can assert the store is not
+	// consulted when there is no user scope to consult it with.
+	calls int
+}
+
+func (s *sortPrefStore) GetCollectionSortPreference(_ context.Context, _, _, _ string) (*userstore.CollectionSortPreference, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.pref, nil
+}
+
+type sortPrefProvider struct {
+	store *sortPrefStore
+	err   error
+}
+
+func (p *sortPrefProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.store, nil
+}
+
+func (p *sortPrefProvider) Close() error { return nil }
+
+func TestEffectiveCollectionSortPrecedence(t *testing.T) {
+	const (
+		libraryDefault = `{"field":"added_at","order":"desc"}`
+		noDefault      = `{}`
+	)
+	scopedAccess := AccessFilter{UserID: 7, ProfileID: "profile-1"}
+
+	cases := []struct {
+		name       string
+		access     AccessFilter
+		sortConfig string
+		pref       *userstore.CollectionSortPreference
+		storeErr   error
+		wantOK     bool
+		wantField  string
+		wantOrder  string
+		wantCalls  int
+	}{
+		{
+			name:       "no override falls back to the collection default",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			wantOK:     true,
+			wantField:  "added_at",
+			wantOrder:  "desc",
+			wantCalls:  1,
+		},
+		{
+			// The reported behavior: admin defaults to Date Added, the viewer
+			// switches to Title, and Title is what they get from then on.
+			name:       "viewer override beats the collection default",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			pref:       &userstore.CollectionSortPreference{SortField: "title", SortOrder: "asc"},
+			wantOK:     true,
+			wantField:  "title",
+			wantOrder:  "asc",
+			wantCalls:  1,
+		},
+		{
+			// An empty stored field is a deliberate "put it back to the list's
+			// own order" and must not fall through to the creator's default.
+			name:       "override pinned to source order suppresses the default",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			pref:       &userstore.CollectionSortPreference{SortField: "", SortOrder: ""},
+			wantCalls:  1,
+		},
+		{
+			name:       "no override and no default means source order",
+			access:     scopedAccess,
+			sortConfig: noDefault,
+			wantCalls:  1,
+		},
+		{
+			name:       "personalized viewer override is valid on a library collection",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			pref:       &userstore.CollectionSortPreference{SortField: "progress", SortOrder: "desc"},
+			wantOK:     true,
+			wantField:  "progress",
+			wantOrder:  "desc",
+			wantCalls:  1,
+		},
+		{
+			name:       "unusable override falls back to the default",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			pref:       &userstore.CollectionSortPreference{SortField: "retired_sort", SortOrder: "desc"},
+			wantOK:     true,
+			wantField:  "added_at",
+			wantOrder:  "desc",
+			wantCalls:  1,
+		},
+		{
+			name:       "store failure degrades to the default",
+			access:     scopedAccess,
+			sortConfig: libraryDefault,
+			storeErr:   errors.New("boom"),
+			wantOK:     true,
+			wantField:  "added_at",
+			wantOrder:  "desc",
+			wantCalls:  1,
+		},
+		{
+			// Unauthenticated / profile-less reads (jellycompat, public paths)
+			// have no override to look up and must not query for one.
+			name:       "no user scope skips the override lookup",
+			access:     AccessFilter{},
+			sortConfig: libraryDefault,
+			pref:       &userstore.CollectionSortPreference{SortField: "title", SortOrder: "asc"},
+			wantOK:     true,
+			wantField:  "added_at",
+			wantOrder:  "desc",
+			wantCalls:  0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &sortPrefStore{pref: tc.pref, err: tc.storeErr}
+			resolver := &CatalogResolver{storeProvider: &sortPrefProvider{store: store}}
+
+			qs, ok := resolver.EffectiveCollectionSort(
+				context.Background(),
+				tc.access,
+				userstore.CollectionKindLibrary,
+				"collection-1",
+				[]byte(tc.sortConfig),
+			)
+
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if store.calls != tc.wantCalls {
+				t.Fatalf("override lookups = %d, want %d", store.calls, tc.wantCalls)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if qs.Field != tc.wantField || qs.Order != tc.wantOrder {
+				t.Fatalf("got %q/%q, want %q/%q", qs.Field, qs.Order, tc.wantField, tc.wantOrder)
+			}
+		})
+	}
+}
+
+func TestEffectiveCollectionSortAllowsPersonalizedOnUserCollections(t *testing.T) {
+	store := &sortPrefStore{pref: &userstore.CollectionSortPreference{SortField: "progress", SortOrder: "desc"}}
+	resolver := &CatalogResolver{storeProvider: &sortPrefProvider{store: store}}
+
+	qs, ok := resolver.EffectiveCollectionSort(
+		context.Background(),
+		AccessFilter{UserID: 7, ProfileID: "profile-1"},
+		userstore.CollectionKindUser,
+		"collection-1",
+		[]byte(`{}`),
+	)
+	if !ok {
+		t.Fatal("personalized override rejected on a personal collection")
+	}
+	if qs.Field != "progress" || qs.Order != "desc" {
+		t.Fatalf("got %q/%q, want progress/desc", qs.Field, qs.Order)
+	}
+}

@@ -52,6 +52,24 @@ func (m *Manager) RemoveProvider(name string) {
 	delete(m.providers, name)
 }
 
+// ProviderNames returns the names of every currently registered provider,
+// sorted for a stable response. Empty when none are configured.
+//
+// The slice is always non-nil so callers can hand it straight to a JSON
+// response without it marshalling as null — clients feature-detecting subtitle
+// search read an empty list as "no providers here", not as a missing field.
+func (m *Manager) ProviderNames() []string {
+	m.mu.RLock()
+	names := make([]string, 0, len(m.providers))
+	for name := range m.providers {
+		names = append(names, name)
+	}
+	m.mu.RUnlock()
+
+	sort.Strings(names)
+	return names
+}
+
 // Search fans out to all registered providers concurrently.
 func (m *Manager) Search(ctx context.Context, req SearchRequest) (*SearchResponse, error) {
 	m.mu.RLock()

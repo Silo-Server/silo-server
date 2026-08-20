@@ -20,6 +20,7 @@ export function useKeyboardShortcuts(
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented) return;
       // Don't intercept keys when typing in inputs.
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {

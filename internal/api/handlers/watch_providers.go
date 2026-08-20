@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -15,7 +16,7 @@ type WatchProviderService interface {
 	ListProviders() []watchsync.ProviderSummary
 	StartDeviceAuth(ctx context.Context, userID int, profileID string, providerKey string) (watchsync.DeviceAuthSession, error)
 	PollDeviceAuth(ctx context.Context, userID int, profileID string, providerKey string, sessionID string) (watchsync.Connection, error)
-	ConnectAPIKey(ctx context.Context, userID int, profileID string, providerKey string, apiKey string) (watchsync.Connection, error)
+	ConnectAPIKeyWithConfig(ctx context.Context, userID int, profileID string, providerKey string, apiKey string, connectionConfig watchsync.ConnectionConfigValues) (watchsync.Connection, error)
 	GetConnectionStatus(ctx context.Context, userID int, profileID string, provider string) (watchsync.ConnectionStatus, error)
 	UpdateConnection(ctx context.Context, userID int, profileID string, provider string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error)
 	DeleteConnection(ctx context.Context, userID int, profileID string, provider string) error
@@ -25,6 +26,15 @@ type WatchProviderService interface {
 
 type WatchProviderHandler struct {
 	service WatchProviderService
+}
+
+type watchProviderDeviceAuthResponse struct {
+	ID              string    `json:"id"`
+	Provider        string    `json:"provider"`
+	UserCode        string    `json:"user_code"`
+	VerificationURL string    `json:"verification_url"`
+	IntervalSeconds int       `json:"interval_seconds"`
+	ExpiresAt       time.Time `json:"expires_at"`
 }
 
 func NewWatchProviderHandler(service WatchProviderService) *WatchProviderHandler {
@@ -97,7 +107,14 @@ func (h *WatchProviderHandler) HandleStartDeviceAuth(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, session)
+	writeJSON(w, http.StatusOK, watchProviderDeviceAuthResponse{
+		ID:              session.ID,
+		Provider:        session.Provider,
+		UserCode:        session.UserCode,
+		VerificationURL: session.VerificationURL,
+		IntervalSeconds: session.IntervalSeconds,
+		ExpiresAt:       session.ExpiresAt,
+	})
 }
 
 func (h *WatchProviderHandler) HandlePollDeviceAuth(w http.ResponseWriter, r *http.Request) {
@@ -130,13 +147,14 @@ func (h *WatchProviderHandler) HandleConnectAPIKey(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		APIKey string `json:"api_key"`
+		APIKey           string                           `json:"api_key"`
+		ConnectionConfig watchsync.ConnectionConfigValues `json:"connection_config"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if _, err := h.service.ConnectAPIKey(r.Context(), userID, profileID, provider, req.APIKey); err != nil {
+	if _, err := h.service.ConnectAPIKeyWithConfig(r.Context(), userID, profileID, provider, req.APIKey, req.ConnectionConfig); err != nil {
 		writeError(w, http.StatusBadRequest, "watch_provider_error", err.Error())
 		return
 	}

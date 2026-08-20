@@ -144,19 +144,19 @@ describe("buildWatchPageProps", () => {
       subtitleMode: "off",
       showForcedSubtitles: false,
       profileLanguage: "en",
-      autoSkipIntro: false,
+      introSkipMode: "ask",
     });
     expect(props.versions[0]?.effective_audio_language).toBe("ja");
   });
 
-  it("passes the profile auto-skip intro preference to the player", () => {
+  it("maps the legacy profile auto-skip preference onto the intro mode fallback", () => {
     const props = buildWatchPageProps({
       request: makeRequest(),
       item: makeWatchDetail(),
       currentProfile: { ...profile, auto_skip_intro: true },
     });
 
-    expect(props.autoSkipIntro).toBe(true);
+    expect(props.introSkipMode).toBe("always");
   });
 
   it("passes an explicit empty subtitle override through to the player", () => {

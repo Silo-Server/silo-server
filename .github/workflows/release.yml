@@ -1,0 +1,81 @@
+name: Release
+run-name: Prepare ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version tag (vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD])
+        required: true
+        type: string
+      prerelease:
+        description: Mark this release as a prerelease
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Prepare draft GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release request
+        shell: bash
+        env:
+          PRERELEASE: ${{ inputs.prerelease }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Releases must be created from the main branch."
+            exit 1
+          fi
+
+          core_identifier='(0|[1-9][0-9]*)'
+          prerelease_identifier='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          build_identifier='[0-9A-Za-z-]+'
+          version_pattern="^v${core_identifier}\\.${core_identifier}\\.${core_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?(\\+${build_identifier}(\\.${build_identifier})*)?$"
+
+          if [[ ! "$VERSION" =~ $version_pattern ]]; then
+            echo "::error::Version must use vMAJOR.MINOR.PATCH with optional prerelease and build metadata."
+            exit 1
+          fi
+
+          version_without_build="${VERSION%%+*}"
+
+          if [[ "$version_without_build" == *-* && "$PRERELEASE" != "true" ]]; then
+            echo "::error::A version with a prerelease suffix must be marked as a prerelease."
+            exit 1
+          fi
+
+          if [[ "$version_without_build" != *-* && "$PRERELEASE" == "true" ]]; then
+            echo "::error::A stable version cannot be marked as a prerelease."
+            exit 1
+          fi
+
+      - name: Create release with generated notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          args=(
+            --repo "$GITHUB_REPOSITORY"
+            --target "$GITHUB_SHA"
+            --draft
+            --generate-notes
+            --fail-on-no-commits
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "$VERSION" "${args[@]}"

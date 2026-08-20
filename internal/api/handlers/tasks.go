@@ -123,6 +123,10 @@ func (h *TaskHandler) HandleUpdateTriggers(w http.ResponseWriter, r *http.Reques
 			http.Error(w, `{"error":"task not found"}`, http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, taskmanager.ErrTaskManualOnly) {
+			http.Error(w, `{"error":"manual-only task does not accept scheduled triggers"}`, http.StatusBadRequest)
+			return
+		}
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}

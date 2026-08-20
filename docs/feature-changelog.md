@@ -10,6 +10,39 @@ Audiobookshelf-compatible clients can browse, search, open, and synchronize eboo
 - Preserves official-client progress fields and supports explicitly marking a completed ebook unfinished without allowing routine autosaves to regress completion.
 - Applies profile-aware catalog access and metadata-curation permission checks, redacts operational access errors, and keeps bookmarks, collections, playlists, playback, and RSS feeds audiobook-only.
 
+### Give each profile its own watch-provider server
+Plugin watch providers can now ask for connection details per profile instead of forcing every profile on a Silo server to share one installation-wide configuration.
+- Lets a self-hosted provider give each household member their own server URL and credentials.
+- Renders the provider's own setup fields beside the API key on the profile's watch-provider screen, so connecting stays a single step.
+- Encrypts every field the provider declares as a secret and keeps submitted setup data out of admin-facing plugin configuration.
+- Prefers a profile's own values over installation-wide values of the same name, so existing connections keep working until they are reconnected.
+
+## 2026-08-19
+
+### Make published server builds easy to compare
+Every successful default-branch container build now carries an ordered build number alongside its exact source revision.
+- Publishes `build-N` beside the existing mutable `latest` and short-commit-SHA image tags.
+- Shows `Build N · SHA` in the admin sidebar, with the build timestamp available on hover.
+- Keeps build identifiers separate from deliberate Semantic Versioning releases; skipped workflow numbers simply leave harmless gaps.
+
+### Make metadata refresh finish with the right artwork
+Manual Quick and Complete Refresh now finish the selected item's artwork before reporting success instead of leaving it behind the global image-cache backlog.
+- Chooses a text-bearing poster in the library's metadata language, then English, another language, and finally textless artwork.
+- Honors an optional `includes_text` signal from metadata plugins so a language-tagged but textless poster cannot outrank one that actually carries a title.
+- Claims only the refreshed item's cache jobs — including its seasons, episodes, and localizations — retries delayed ones once, and waits briefly on a worker that already holds a job without draining unrelated artwork.
+- Keeps the refresh itself successful when artwork cannot be cached in time: the item, its new artwork paths, and the page it lives on still update, and the leftover artwork is reported as a warning and finishes on the background queue.
+- Replaces the web app's refresh spinner with the final success, warning, or failure message.
+
+## 2026-08-16
+
+### Let viewers turn the intro prompt off
+Skipping intros stops being a switch and becomes a choice of three: leave intros alone, offer a Skip Intro button, or skip automatically and offer an undo.
+- Adds `playback.intro_skip_mode` (`never` / `ask` / `always`, default `ask`) at contract revision 7 and deprecates `playback.auto_skip_intro`, which could not express "never".
+- Migrates every stored auto-skip-intro preference onto the new key, on both the PostgreSQL and per-user SQLite backends, so nobody's existing choice changes.
+- Mirrors the two keys at write time for one release, so a preference set on an older phone, TV, or browser still shows up correctly on an updated one.
+- Replaces the web profile and device switches with a three-way selector, while retaining the old switch only against servers older than contract revision 7.
+- Gives the web player a timed Skip Intro prompt for **Ask**, no overlay for **Never**, and an immediate skip with a five-second **Watch Intro** undo for **Always**.
+
 ## 2026-04-09
 
 Covers commits from 2026-04-08 22:32 EDT through 2026-04-09 20:02 EDT.

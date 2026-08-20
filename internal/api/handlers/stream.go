@@ -20,6 +20,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
+const (
+	subtitleFormatASS = "ass"
+	subtitleFormatSSA = "ssa"
+	subtitleFormatSUP = "sup"
+)
+
 // FilePathResolver looks up a media file by its ID.
 type FilePathResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
@@ -159,7 +165,18 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
-		if err := playback.ServeRemuxWithDVMode(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
+		// An audio-only source muxes an audio-only fMP4. The v3 plan promises
+		// audio/mp4 for it, and a declared-tier client refuses to attach a
+		// source buffer whose advertised type its probe rejected — so the
+		// response has to keep the same promise the plan made.
+		if err := playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
+			DVMode:                 session.RemuxDVMode,
+			FFmpegPath:             h.ffmpegPath(),
+			ContentType:            playback.RemuxContentType(file.IsAudioOnly()),
+			AudioOnly:              file.IsAudioOnly(),
+			TargetAudioChannels:    session.TargetAudioChannels,
+			TargetAudioBitrateKbps: session.TargetAudioBitrateKbps,
+		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 
@@ -219,9 +236,58 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// trackIndex is a combined ordinal, resolved through the same three
+	// consecutive ranges playback.BuildSubtitleInventoryV3 assigns them from:
+	// externals, then embedded container tracks, then downloaded ones. The
+	// ranges cover the full track arrays — including bitmap tracks that have no
+	// sidecar shape — so an ordinal always names the same track here as it does
+	// in the published inventory.
+	// Downloaded subtitle URLs additionally bind that ordinal to a stable row
+	// identity. The path ordinal remains for compatibility and display, but it
+	// must not be re-resolved against a mutable inventory after a seek reanchor.
+	if rawID := strings.TrimSpace(r.URL.Query().Get(playback.DownloadedSubtitleIDParamV3)); rawID != "" {
+		downloadedID, parseErr := strconv.Atoi(rawID)
+		if parseErr != nil || downloadedID <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid downloaded subtitle identity")
+			return
+		}
+		if h.SubtitleRepo == nil || h.S3Client == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
+			return
+		}
+		downloaded, lookupErr := h.SubtitleRepo.GetDownloadedSubtitle(r.Context(), downloadedID)
+		if lookupErr != nil {
+			slog.ErrorContext(r.Context(), "get downloaded subtitle failed", "component", "api",
+				"file_id", file.ID,
+				"downloaded_subtitle_id", downloadedID,
+				"error", lookupErr,
+			)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load downloaded subtitle")
+			return
+		}
+		if downloaded == nil || downloaded.MediaFileID != file.ID {
+			writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
+			return
+		}
+		if r.Method == http.MethodHead {
+			writeSubtitleRepresentationHead(w, requestedFormat)
+			return
+		}
+		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
+		return
+	}
 	externalCount := len(file.ExternalSubtitles)
 	if trackIndex < externalCount {
 		sub := file.ExternalSubtitles[trackIndex]
+		if !subtitleSidecarFormatSupported(sub.Format, requestedFormat, false) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Requested subtitle extension does not match the selected track")
+			return
+		}
+		if r.Method == http.MethodHead {
+			writeSubtitleRepresentationHead(w, requestedFormat)
+			return
+		}
 
 		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
 		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
@@ -231,7 +297,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 					"Failed to load external subtitle")
 				return
 			}
-			playback.ServeSubtitle(w, data, "ass")
+			playback.ServeSubtitle(w, data, subtitleFormatASS)
 			return
 		}
 
@@ -256,6 +322,15 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"Bitmap subtitle tracks cannot be extracted as text")
+			return
+		}
+		if !subtitleSidecarFormatSupported(track.Codec, requestedFormat, true) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Requested subtitle extension does not match the selected track")
+			return
+		}
+		if r.Method == http.MethodHead && requestedFormat != subtitleFormatSUP {
+			writeSubtitleRepresentationHead(w, requestedFormat)
 			return
 		}
 
@@ -287,37 +362,83 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
 		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
-			dl := downloaded[downloadedIndex]
-			data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
-			if err != nil {
-				writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
+			if r.Method == http.MethodHead {
+				writeSubtitleRepresentationHead(w, requestedFormat)
 				return
 			}
-
-			// Serve ASS/SSA downloaded subtitles as raw data.
-			if playback.IsASS(string(dl.Format)) && requestedFormat != "vtt" {
-				playback.ServeSubtitle(w, data, "ass")
-				return
-			}
-
-			// If the subtitle is already VTT, serve directly.
-			if dl.Format == subtitles.FormatVTT {
-				playback.ServeSubtitle(w, data, "vtt")
-				return
-			}
-
-			// Convert to VTT using the playback conversion pipeline.
-			vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.ffmpegPath())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
-				return
-			}
-			playback.ServeSubtitle(w, vttData, "vtt")
+			h.serveDownloadedSubtitle(w, r, downloaded[downloadedIndex], requestedFormat)
 			return
 		}
 	}
 
 	writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
+}
+
+func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.Request, subtitle subtitles.DownloadedSubtitle, requestedFormat string) {
+	if !subtitleSidecarFormatSupported(string(subtitle.Format), requestedFormat, false) {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+			"Requested subtitle extension does not match the selected track")
+		return
+	}
+	data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, subtitle.S3Key)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
+		return
+	}
+
+	// Serve ASS/SSA downloaded subtitles as raw data.
+	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
+		playback.ServeSubtitle(w, data, subtitleFormatASS)
+		return
+	}
+
+	// If the subtitle is already VTT, serve directly.
+	if subtitle.Format == subtitles.FormatVTT {
+		playback.ServeSubtitle(w, data, "vtt")
+		return
+	}
+
+	// Convert other text formats to VTT using the playback conversion pipeline.
+	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(subtitle.Format), h.ffmpegPath())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
+		return
+	}
+	playback.ServeSubtitle(w, vttData, "vtt")
+}
+
+// subtitleSidecarFormatSupported keeps bitmap and styled-text requests within
+// the representations the server can produce. Plain text tracks preserve the
+// v1 endpoint's permissive extension behavior and are always returned as VTT;
+// ASS/SSA may also be served losslessly, and only an embedded PGS track has a
+// binary .sup representation.
+func subtitleSidecarFormatSupported(codec, requestedFormat string, embeddedPGS bool) bool {
+	requestedFormat = strings.ToLower(strings.TrimSpace(requestedFormat))
+	if requestedFormat == "" {
+		return true
+	}
+	if playback.IsPGS(codec) {
+		return embeddedPGS && requestedFormat == subtitleFormatSUP
+	}
+	if playback.NeedsBurnIn(codec) {
+		return false
+	}
+	if playback.IsASS(codec) {
+		return requestedFormat == subtitleFormatASS || requestedFormat == subtitleFormatSSA || requestedFormat == "vtt"
+	}
+	return true
+}
+
+func writeSubtitleRepresentationHead(w http.ResponseWriter, requestedFormat string) {
+	switch strings.ToLower(strings.TrimSpace(requestedFormat)) {
+	case subtitleFormatASS, subtitleFormatSSA:
+		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	case subtitleFormatSUP:
+		w.Header().Set("Content-Type", "application/octet-stream")
+	default:
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // subtitleSourceFileID pins a subtitle URL to the file whose track list was
@@ -493,9 +614,9 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	outFormat := "vtt"
 	switch {
 	case playback.IsASS(track.Codec):
-		outFormat = "ass"
+		outFormat = subtitleFormatASS
 	case playback.IsPGS(track.Codec):
-		outFormat = "sup"
+		outFormat = subtitleFormatSUP
 	}
 
 	// ASS is fetched exactly once and consumed whole by its client-side
@@ -515,7 +636,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	case "vtt":
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
-	case "sup":
+	case subtitleFormatSUP:
 		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
 	}
 	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
@@ -560,14 +681,14 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	// cached full track when present (warming it in the background when
 	// not). All other formats stream uncached: VTT is already windowed
 	// and fast, ASS is small.
-	if outFormat == "sup" {
+	if outFormat == subtitleFormatSUP {
 		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
 		return
 	}
 
 	switch outFormat {
-	case "ass":
+	case subtitleFormatASS:
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
 	default:
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")

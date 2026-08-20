@@ -14,9 +14,9 @@ import (
 )
 
 // webhookRetrySchedule holds the cumulative delay since the first attempt
-// (docs/superpowers/plans/notifications/04, "Retry schedule"). Index N is the
-// delay before attempt N+1; after the last attempt fails, the webhook is
-// auto-disabled.
+// (docs/architecture/notifications.md, "Retry schedule and auto-disable").
+// Index N is the delay before attempt N+1; after the last attempt fails, the
+// webhook is auto-disabled.
 var webhookRetrySchedule = []time.Duration{
 	0,
 	30 * time.Second,

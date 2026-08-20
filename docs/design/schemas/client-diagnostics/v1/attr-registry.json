@@ -39,6 +39,22 @@
       "audio_underruns": {
         "type": "integer",
         "description": "Audio underrun count."
+      },
+      "session_id": {
+        "type": "string",
+        "description": "Playback session identifier for correlation with operational logs."
+      },
+      "play_method": {
+        "type": "string",
+        "description": "Selected playback delivery method such as direct, remux, or transcode."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Playback route, interruption, or lifecycle reason."
+      },
+      "position_ms": {
+        "type": "integer",
+        "description": "Current playback position in milliseconds."
       }
     },
     "focus": {
@@ -67,12 +83,44 @@
       "duration_ms": {
         "type": "integer",
         "description": "Request duration in milliseconds."
+      },
+      "outcome": {
+        "type": "string",
+        "description": "Request outcome such as success, http_error, transport_error, or cancelled."
+      },
+      "error_code": {
+        "type": "string",
+        "description": "Stable error classification for a failed request."
+      },
+      "attempt": {
+        "type": "integer",
+        "description": "Attempt ordinal for a retried request."
       }
     },
     "lifecycle": {
       "state": {
         "type": "string",
         "description": "App lifecycle state."
+      },
+      "phase": {
+        "type": "string",
+        "description": "Startup or lifecycle phase identifier."
+      },
+      "duration_ms": {
+        "type": "integer",
+        "description": "Elapsed duration for the phase in milliseconds."
+      },
+      "outcome": {
+        "type": "string",
+        "description": "Result of the phase, such as success, failure, or skipped."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Classification for the phase outcome."
+      },
+      "launch_type": {
+        "type": "string",
+        "description": "Launch classification, such as cold or warm."
       }
     },
     "crash": {

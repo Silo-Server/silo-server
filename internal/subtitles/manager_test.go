@@ -116,6 +116,53 @@ func (m *mockS3Client) DeleteObject(_ context.Context, _, key string) error {
 	return nil
 }
 
+type stubProvider struct {
+	name string
+}
+
+func (s stubProvider) Name() string { return s.name }
+
+func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, error) {
+	return nil, nil
+}
+
+func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
+	return nil, FormatSRT, nil
+}
+
+func TestManagerProviderNames(t *testing.T) {
+	manager := NewManager(newMockSubtitleRepo(), newMockS3Client(), "test-bucket")
+
+	names := manager.ProviderNames()
+	if names == nil {
+		t.Fatal("ProviderNames() = nil, want non-nil empty slice")
+	}
+	if len(names) != 0 {
+		t.Fatalf("ProviderNames() = %v, want empty", names)
+	}
+
+	manager.RegisterProvider(stubProvider{name: "subdl"})
+	manager.RegisterProvider(stubProvider{name: "opensubtitles"})
+	manager.RegisterProvider(stubProvider{name: "subsource"})
+
+	want := []string{"opensubtitles", "subdl", "subsource"}
+	names = manager.ProviderNames()
+	if len(names) != len(want) {
+		t.Fatalf("ProviderNames() = %v, want %v", names, want)
+	}
+	for i, name := range want {
+		if names[i] != name {
+			t.Fatalf("ProviderNames() = %v, want %v (sorted)", names, want)
+		}
+	}
+
+	manager.RemoveProvider("subdl")
+	names = manager.ProviderNames()
+	if len(names) != 2 || names[0] != "opensubtitles" || names[1] != "subsource" {
+		t.Fatalf("ProviderNames() after removal = %v, want [opensubtitles subsource]", names)
+	}
+}
+
 func TestManagerUploadStoresSubtitle(t *testing.T) {
 	repo := newMockSubtitleRepo()
 	s3 := newMockS3Client()

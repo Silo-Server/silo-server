@@ -16,6 +16,8 @@ import {
   classifyActivityMethod,
   compareActivityMethods,
 } from "@/pages/adminActivityPresentation";
+import { cn } from "@/lib/utils";
+import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -25,6 +27,7 @@ const ACTIVE_SCAN_SNAPSHOT_LIMIT = 500;
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
   hideWhenEmpty?: boolean;
+  className?: string;
 }
 
 // ── Data hook ────────────────────────────────────────────────
@@ -99,7 +102,7 @@ function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   return isNonLive && connectionProblemState;
 }
 
-export default function ServerActivity({ hideWhenEmpty = false }: ServerActivityProps) {
+export default function ServerActivity({ hideWhenEmpty = false, className }: ServerActivityProps) {
   const [open, setOpen] = useState(false);
   const location = useLocation();
 
@@ -132,7 +135,10 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
               ? `Server activity: ${activeScansMayBeTruncated ? "at least " : ""}${totalActive} active`
               : "Server activity"
           }
-          className="hover:bg-accent/60 relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors"
+          className={cn(
+            "hover:bg-accent/60 relative flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+            className,
+          )}
         >
           <Activity
             className={`h-[18px] w-[18px] ${
@@ -326,20 +332,31 @@ function StreamCountRow({ method, count }: { method: string; count: number }) {
 }
 
 function TaskRow({ task }: { task: TaskInfo }) {
+  const hasDeterminateProgress = task.progress > 0;
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <span className="truncate text-[12px] font-medium">{task.name}</span>
-        <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
-          {Math.round(task.progress)}%
-        </span>
+        {hasDeterminateProgress ? (
+          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+            {formatTaskProgress(task.progress)}
+          </span>
+        ) : (
+          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+            <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
+            Running
+          </span>
+        )}
       </div>
-      <div className="bg-muted h-1.5 overflow-hidden rounded-full">
-        <div
-          className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
-          style={{ width: `${Math.min(100, Math.max(0, task.progress))}%` }}
-        />
-      </div>
+      {hasDeterminateProgress && (
+        <div className="bg-muted h-1.5 overflow-hidden rounded-full">
+          <div
+            className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{ width: `${clampTaskProgress(task.progress)}%` }}
+          />
+        </div>
+      )}
       {task.progress_message && (
         <div className="text-muted-foreground truncate text-[10px]">{task.progress_message}</div>
       )}

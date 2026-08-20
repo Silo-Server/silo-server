@@ -19,9 +19,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -148,8 +145,9 @@ type Enricher struct {
 	itemTimeout    time.Duration
 	queue          enrichmentQueue
 
-	loadClaimedItemsFn  func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error)
-	enrichClaimedItemFn func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error)
+	loadClaimedItemsFn   func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error)
+	enrichClaimedItemFn  func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error)
+	markMatchedLocallyFn func(context.Context, string) error
 }
 
 type literaryWorkLinker interface {
@@ -716,6 +714,15 @@ func (e *Enricher) enrichClaimedItem(ctx context.Context, item enrichmentItemRow
 			"component", "ebooks",
 			"content_id", item.ContentID,
 		)
+		// No provider is consulted here, but the item is identified all the
+		// same, so it still has to leave 'pending'. Skipping this promotion is
+		// what left locally complete ebooks counted as unmatched forever.
+		if err := requireEnrichmentClaim(ctx); err != nil {
+			return "", err
+		}
+		if err := e.markMatchedLocallyOrDefault(ctx, item.ContentID); err != nil {
+			return "", fmt.Errorf("promoting locally complete ebook %s: %w", item.ContentID, err)
+		}
 		return EnrichmentOutcomeSuccess, nil
 	}
 	slog.DebugContext(ctx, "ebook enrichment: remote metadata required",
@@ -777,11 +784,24 @@ func (e *Enricher) enrichWithProvidersOutcome(
 		return EnrichmentOutcomeSkipped, nil
 	}
 
-	var owner providerIDOwnerLookup
+	var owner metadata.ProviderIDOwnerLookup
 	if e.providerIDs != nil {
 		owner = e.providerIDs
 	}
-	accumulator, accumulatedIDs, providerErrs := collectEbookMetadata(ctx, item, providers, owner)
+	accumulator, accumulatedIDs, providerErrs, authorMismatch := collectEbookMetadata(ctx, item, providers, owner)
+	if authorMismatch {
+		if len(providerErrs) > 0 {
+			return "", fmt.Errorf("author mismatch observed after %d provider error(s): %w",
+				len(providerErrs), errors.Join(providerErrs...))
+		}
+		if err := requireEnrichmentClaim(ctx); err != nil {
+			return "", err
+		}
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return "", err
+		}
+		return EnrichmentOutcomeNoMatch, nil
+	}
 
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
 		if err := ctx.Err(); err != nil {
@@ -900,35 +920,15 @@ func ebookArtworkOwnedByRemoteProvider(path string) bool {
 }
 
 func classifyEnrichmentError(err error) (EnrichmentErrorClass, time.Duration) {
-	grpcStatus, ok := status.FromError(err)
-	if !ok {
-		return EnrichmentErrorTransient, 0
-	}
-
-	switch grpcStatus.Code() {
-	case codes.ResourceExhausted:
-		for _, detail := range grpcStatus.Details() {
-			if retry, ok := detail.(*errdetails.RetryInfo); ok && retry.GetRetryDelay() != nil {
-				return EnrichmentErrorRateLimited, retry.GetRetryDelay().AsDuration()
-			}
-		}
-		return EnrichmentErrorRateLimited, 0
-	case codes.InvalidArgument,
-		codes.NotFound,
-		codes.PermissionDenied,
-		codes.Unauthenticated,
-		codes.FailedPrecondition,
-		codes.Unimplemented:
-		return EnrichmentErrorPermanent, 0
+	class, retryAfter := metadata.ClassifyProviderError(err)
+	switch class {
+	case metadata.ProviderErrorRateLimited:
+		return EnrichmentErrorRateLimited, retryAfter
+	case metadata.ProviderErrorPermanent:
+		return EnrichmentErrorPermanent, retryAfter
 	default:
-		return EnrichmentErrorTransient, 0
+		return EnrichmentErrorTransient, retryAfter
 	}
-}
-
-// providerIDOwnerLookup reports the content item (if any) that already owns a
-// given set of durable provider IDs. *catalog.ProviderIDRepository satisfies it.
-type providerIDOwnerLookup interface {
-	FindContentIDByProviderIDs(ctx context.Context, providerIDs map[string]string, itemType, excludeContentID string) (string, error)
 }
 
 // collectEbookMetadata queries every provider in the chain and accumulates
@@ -939,9 +939,13 @@ type providerIDOwnerLookup interface {
 // the same provider work (e.g. two series volumes searched as the bare series
 // name) must not steal each other's identity, which would mis-tag the loser and
 // violate the (provider, provider_id, item_type) uniqueness constraint on persist.
-func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner providerIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error) {
+func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner metadata.ProviderIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error, bool) {
 	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
 	var providerErrs []error
+
+	// The title the first accepting provider settled on; later providers must
+	// agree with it before their IDs are merged in.
+	var agreedTitle string
 
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
@@ -961,32 +965,60 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if len(results) == 0 {
 			continue
 		}
-		for k, v := range results[0].ProviderIDs {
-			if v == "" {
-				continue
-			}
-			if _, exists := accumulatedIDs[k]; exists {
-				continue
-			}
-			if owner != nil {
-				ownerID, ownErr := owner.FindContentIDByProviderIDs(ctx, map[string]string{k: v}, ebookContentType(), item.ContentID)
-				if ownErr != nil {
-					// Don't claim an ID we couldn't verify is free, and surface
-					// the error so the item retries rather than terminally
-					// stamping as "no match".
-					providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
-					continue
-				}
-				if ownerID != "" {
-					slog.InfoContext(ctx, "ebook enrichment: provider id already owned by another item; skipping match", "component", "ebooks",
-						"provider", k,
-						"provider_id", v,
-						"content_id", item.ContentID,
-						"owned_by", ownerID,
-					)
-					continue
-				}
-			}
+		admission, admitErr := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
+			WantTitle:           item.Title,
+			WantYear:            item.Year,
+			Results:             results,
+			AgreedTitle:         agreedTitle,
+			ExistingProviderIDs: accumulatedIDs,
+			Owner:               owner,
+			ItemType:            ebookContentType(),
+			ContentID:           item.ContentID,
+		})
+		if admitErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
+			continue
+		}
+		for _, conflict := range admission.Conflicts {
+			slog.InfoContext(ctx, "ebook enrichment: provider id already owned by another item; skipping match", "component", "ebooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+
+		switch admission.Status {
+		case metadata.SearchMatchNoCredibleMatch:
+			// Info, not Debug: during a backlog drain the rejection rate is
+			// what separates "threshold too strict" from "providers answering
+			// badly", and it cannot be read from a log level nobody enables.
+			slog.InfoContext(ctx, "ebook enrichment: no credible match", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"candidates", len(results),
+			)
+			continue
+		case metadata.SearchMatchProviderDisagreement:
+			slog.WarnContext(ctx, "ebook enrichment: provider disagreement; skipping", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"accepted_title", agreedTitle,
+				"rejected_title", admission.MatchedTitle,
+			)
+			continue
+		case metadata.SearchMatchProviderIDConflict:
+			slog.WarnContext(ctx, "ebook enrichment: provider identity contradicts an existing ID; skipping", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+			)
+			continue
+		case metadata.SearchMatchNoUsableProviderIDs:
+			continue
+		}
+		agreedTitle = admission.AgreedTitle
+		for k, v := range admission.ProviderIDs {
 			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "ebook enrichment: search result", "component", "ebooks",
@@ -1018,6 +1050,44 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if result == nil || !result.HasMetadata {
 			continue
 		}
+		if !metadata.AuthorsAgree(item.Author, result.People) {
+			slog.InfoContext(ctx, "ebook enrichment: author mismatch; treating as no match", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"item_author", item.Author,
+			)
+			return accumulator, accumulator.ProviderIDs, providerErrs, true
+		}
+		identity, identityErr := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{
+			CandidateProviderIDs: filterEbookProviderIDs(result.ProviderIDs),
+			ExistingProviderIDs:  accumulator.ProviderIDs,
+			Owner:                owner,
+			ItemType:             ebookContentType(),
+			ContentID:            item.ContentID,
+		})
+		if identityErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), identityErr))
+			continue
+		}
+		if identity.ContradictsExisting {
+			slog.WarnContext(ctx, "ebook enrichment: metadata identity contradicts an existing ID; skipping", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+			)
+			continue
+		}
+		for _, conflict := range identity.Conflicts {
+			slog.InfoContext(ctx, "ebook enrichment: metadata provider id already owned by another item; skipping", "component", "ebooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+		admittedResult := *result
+		admittedResult.ProviderIDs = identity.ProviderIDs
+		result = &admittedResult
 		accumulator.HasMetadata = true
 		mergeEnrichmentProviderIDs(accumulator, result)
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
@@ -1030,7 +1100,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		)
 	}
 
-	return accumulator, accumulator.ProviderIDs, providerErrs
+	return accumulator, accumulator.ProviderIDs, providerErrs, false
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
@@ -1203,10 +1273,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	providerIDs = filterEbookProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			slog.WarnContext(ctx, "ebook enrichment: failed to persist provider IDs", "component", "ebooks",
-				"content_id", contentID,
-				"error", err,
-			)
+			return fmt.Errorf("persisting ebook provider IDs: %w", err)
 		}
 	}
 
@@ -1235,6 +1302,36 @@ func (e *Enricher) updateMetadataAndTimestamps(ctx context.Context, contentID st
 		return fmt.Errorf("UpdateMetadata: %w", err)
 	}
 	return e.stampLastRefreshed(ctx, contentID)
+}
+
+// markEbookMatchedLocallyQuery promotes an item whose embedded metadata already
+// satisfies every field enrichment would have fetched.
+//
+// last_refreshed is deliberately left alone: no provider was consulted, and the
+// column gates the admin quick-refresh sweep
+// (adminjob.PGLibraryRefreshItemLister), so stamping it here would make these
+// items permanently ineligible for a later refresh that could still attach a
+// provider identity.
+const markEbookMatchedLocallyQuery = `
+	UPDATE media_items
+	SET matched_at = COALESCE(matched_at, $1),
+	    status = CASE WHEN status = 'pending' THEN 'matched' ELSE status END
+	WHERE content_id = $2
+`
+
+func (e *Enricher) markMatchedLocallyOrDefault(ctx context.Context, contentID string) error {
+	if e.markMatchedLocallyFn != nil {
+		return e.markMatchedLocallyFn(ctx, contentID)
+	}
+	return e.markMatchedLocally(ctx, contentID)
+}
+
+func (e *Enricher) markMatchedLocally(ctx context.Context, contentID string) error {
+	if e.pool == nil {
+		return nil
+	}
+	_, err := e.pool.Exec(ctx, markEbookMatchedLocallyQuery, time.Now().UTC(), contentID)
+	return err
 }
 
 func (e *Enricher) stampLastRefreshed(ctx context.Context, contentID string) error {
@@ -1329,9 +1426,21 @@ func filterEbookPeople(people []models.ItemPerson) []models.ItemPerson {
 // ebookTrailingGroupRE matches a single trailing (...) or [...] group.
 var ebookTrailingGroupRE = regexp.MustCompile(`\s*[\(\[]([^\)\]]*)[\)\]]\s*$`)
 
-// ebookSeriesNoiseRE flags a parenthetical as series/edition noise rather than
-// part of the real title: a book/volume/part marker, a "#N", or a bare year.
-var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(book|bk|vol|volume|series|part|saga|edition|novella?)\b|#\s*\d|^\s*\d{1,4}\s*$|\b(19|20)\d{2}\b`)
+// ebookSeriesNoiseRE flags a parenthetical as series/volume noise rather than
+// part of the real title. It requires actual volume syntax -- a marker word
+// followed by a number ("Book 4", "Vol. 2"), a "#N", a bare number, or a bare
+// year -- not merely a marker word. The word alone is not evidence: matching
+// bare "book" discarded meaningful suffixes like "(The Book Thief)", which is
+// a title, not furniture.
+var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(?:book|bk|vol|volume|series|part|saga|novella?)\b\.?\s*#?\s*\d{1,4}\b|#\s*\d|^\s*\d{1,4}\s*$`)
+
+// ebookEditionNoiseRE flags a parenthetical as retail edition furniture that
+// providers never carry in their titles: anything ending in "Edition(s)" or
+// "Classics" ("AmazonClassics Edition", "Penguin Classics"), plus "Kindle
+// Single" and the ubiquitous "(A Novel)". Deliberately narrower than a
+// general noise filter — a lone "(Illustrated)" or "(Annotated)" survives,
+// consistent with the meaningful-parenthetical rule above.
+var ebookEditionNoiseRE = regexp.MustCompile(`(?i)^(?:[\w'&.\s-]*\b)?(?:editions?|classics)$|^kindle\s+single$|^a\s+novel$`)
 
 // ebookYearOnlyRE matches a parenthetical that is nothing but a year. Years are
 // already carried by SearchQuery.Year, so they are dropped from the text rather
@@ -1349,11 +1458,23 @@ func cleanEbookSearchTitle(title, author string) string {
 	}
 	// Normalize trailing series/edition parentheticals. A bare year ("(2019)")
 	// is dropped because SearchQuery.Year already carries it. A series/volume
-	// marker ("(The Raven Brothers Book 4)", "[#3]") is UNWRAPPED — its words
-	// are kept, only the brackets removed — because the volume number is the
-	// per-volume disambiguator: dropping it makes every entry in a series search
-	// as the bare series name and collapse onto a single provider work. Other
+	// marker ("(The Raven Brothers Book 4)", "[#3]") is DROPPED too. Other
 	// parentheticals ("(Illustrated)") are meaningful title text and survive.
+	//
+	// The marker used to be unwrapped — brackets removed, words kept — so that
+	// distinct volumes searched distinctly rather than collapsing onto one
+	// provider work. That cost far more than it bought: retail furniture like
+	// "Second Skin Book 1" is not in provider catalogs, so it did not
+	// disambiguate the search, it broke it. Sampling 40 parked no_match ebooks
+	// against Open Library, the unwrapped form this function used to emit
+	// matched 0 while the bare title matched 24.
+	//
+	// Dropping it is safe now because the disambiguation moved to where it can
+	// actually work: metadata.BestMatch scores candidates against the raw
+	// item.Title, which still carries the volume, and treats a volume
+	// disagreement as fatal. So "Mad Dog" can be searched while a returned
+	// "Mad Dog (Savage Saints MC Book 2)" is still rejected for a Book 5 item.
+	// The series text never had to be in the query — it had to be in the check.
 	for {
 		m := ebookTrailingGroupRE.FindStringSubmatch(title)
 		if m == nil {
@@ -1369,8 +1490,12 @@ func cleanEbookSearchTitle(title, author string) string {
 			continue // peel stacked groups (e.g. a year behind a series marker)
 		}
 		if ebookSeriesNoiseRE.MatchString(inner) {
-			title = base + " " + inner
-			break
+			title = base
+			continue // peel stacked markers, e.g. "(Book 4) (2019)"
+		}
+		if ebookEditionNoiseRE.MatchString(inner) {
+			title = base
+			continue // peel retail edition suffixes, e.g. "(AmazonClassics Edition)"
 		}
 		break // meaningful parenthetical — leave intact
 	}

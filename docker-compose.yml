@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-silo}
       POSTGRES_DB: ${POSTGRES_DB:-silo}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}/postgres:/var/lib/postgresql
     command: ["postgres", "-c", "listen_addresses=*"]
@@ -22,7 +22,7 @@ services:
     image: redis:alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - ${SILO_DATA_ROOT:-/opt/silo}/redis:/data
     healthcheck:
@@ -56,6 +56,10 @@ services:
     restart: unless-stopped
     environment:
       MODE: integrated
+      # Keep the container listeners fixed. PORT and JF_PORT in .env are
+      # host-side published-port overrides.
+      PORT: "8080"
+      JF_PORT: "8096"
       # Master key for at-rest credential encryption. Required — the server
       # refuses to start without it. Generate with: openssl rand -base64 48
       # Back it up SEPARATELY from your database dumps; losing it makes encrypted
@@ -71,12 +75,10 @@ services:
       - "${ABS_PORT:-13378}:13378"
     volumes:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
-      - ${MEDIA_BOOKS_ROOT:-${MEDIA_ROOT}}:${MEDIA_BOOKS_CONTAINER_ROOT:-${MEDIA_CONTAINER_ROOT:-/mnt/media}/books}:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
-      - ${SILO_DATA_ROOT:-/opt/silo}/audiobook-covers:/var/lib/silo/audiobook-covers
       - /proc/meminfo:/host/proc/meminfo:ro
     depends_on:
       postgres:
@@ -86,9 +88,6 @@ services:
     env_file:
       - path: .env
         required: false
-    devices:
-      - /dev/dri:/dev/dri
-
   # Optional distributed-mode example. Most single-host installs should
   # just use the integrated service above.
   # silo-proxy:

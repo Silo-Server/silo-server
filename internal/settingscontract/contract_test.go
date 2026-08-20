@@ -49,6 +49,29 @@ func TestEmbeddedManifestLoads(t *testing.T) {
 	}
 }
 
+func TestSubtitleAppearanceDefaultUsesBoxBackground(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	def, ok := manifest.Lookup(keySubtitleAppearance)
+	if !ok {
+		t.Fatal("playback.subtitle_appearance is not registered")
+	}
+
+	var appearance struct {
+		BackgroundStyle   string `json:"backgroundStyle"`
+		BackgroundOpacity int    `json:"backgroundOpacity"`
+	}
+	if err := json.Unmarshal(def.DefaultValue, &appearance); err != nil {
+		t.Fatalf("decoding subtitle appearance default: %v", err)
+	}
+	if appearance.BackgroundStyle != "box" || appearance.BackgroundOpacity != 75 {
+		t.Errorf("subtitle background default = %s %d%%, want box 75%%",
+			appearance.BackgroundStyle, appearance.BackgroundOpacity)
+	}
+}
+
 // TestEveryCurrentServerKeyIsRegistered pins the inventory. The design makes an
 // unregistered official key a release blocker, so a key that exists in the
 // legacy registry but not in the manifest has to fail here rather than be
@@ -1583,6 +1606,119 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 			}
 			if err := def.ValueSchema.ValidateValue(json.RawMessage(value), objSchemas); err == nil {
 				t.Fatalf("%s was accepted", value)
+			}
+		})
+	}
+}
+
+func TestUICustomizationObjectSchemasAreStrict(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+
+	valid := map[string]string{
+		"nav.primary_menu": `{"items":[` +
+			`{"type":"builtin","destination":"home"},` +
+			`{"type":"library","library_id":7,"label":"Movies"},` +
+			`{"type":"section","library_id":7,"section_id":"recently-added","label":"Recently Added"},` +
+			`{"type":"collection","collection_id":"horror","library_id":7,"label":"Horror"}]}`,
+		"nav.shortcuts": `{"items":[` +
+			`{"type":"library","library_id":7,"label":"Movies"},` +
+			`{"type":"section","library_id":7,"section_id":"recently-added","label":"Recently Added"},` +
+			`{"type":"collection","collection_id":"horror","label":"Horror"}]}`,
+		"ui.card_presentation": `{"poster_size":"large","caption":"artwork"}`,
+	}
+	for key, value := range valid {
+		t.Run(key+" accepts canonical shape", func(t *testing.T) {
+			def, ok := manifest.Lookup(key)
+			if !ok {
+				t.Fatalf("%s is not registered", key)
+			}
+			if err := def.ValueSchema.ValidateValue(json.RawMessage(value), objSchemas); err != nil {
+				t.Fatalf("valid %s value rejected: %v", key, err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{
+			name:  "primary menu requires home",
+			key:   "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"movies"}]}`,
+		},
+		{
+			name:  "primary menu allows home exactly once",
+			key:   "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"home"},{"type":"builtin","destination":"home"}]}`,
+		},
+		{
+			name:  "menu labels cannot be empty",
+			key:   "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"home"},{"type":"library","library_id":7,"label":""}]}`,
+		},
+		{
+			name:  "menu labels cannot be only whitespace",
+			key:   "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"home"},{"type":"library","library_id":7,"label":"   "}]}`,
+		},
+		{
+			name:  "menu target ids cannot be only whitespace",
+			key:   "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"home"},{"type":"section","library_id":7,"section_id":"   ","label":"Recent"}]}`,
+		},
+		{
+			name: "menu destination identity ignores labels",
+			key:  "nav.primary_menu",
+			value: `{"items":[{"type":"builtin","destination":"home"},` +
+				`{"type":"library","library_id":7,"label":"Movies"},` +
+				`{"type":"library","library_id":7,"label":"Films"}]}`,
+		},
+		{
+			name:  "shortcuts cannot contain builtins",
+			key:   "nav.shortcuts",
+			value: `{"items":[{"type":"builtin","destination":"home"}]}`,
+		},
+		{
+			name:  "shortcuts require positive library ids",
+			key:   "nav.shortcuts",
+			value: `{"items":[{"type":"library","library_id":0,"label":"Movies"}]}`,
+		},
+		{
+			name:  "shortcut target ids cannot be only whitespace",
+			key:   "nav.shortcuts",
+			value: `{"items":[{"type":"collection","collection_id":"\t ","label":"Collection"}]}`,
+		},
+		{
+			name: "shortcut destination identity includes collection context",
+			key:  "nav.shortcuts",
+			value: `{"items":[` +
+				`{"type":"collection","collection_id":"horror","library_id":7,"label":"Horror"},` +
+				`{"type":"collection","collection_id":"horror","library_id":7,"label":"Scary"}]}`,
+		},
+		{
+			name:  "card presets reject unknown sizes",
+			key:   "ui.card_presentation",
+			value: `{"poster_size":"huge","caption":"artwork"}`,
+		},
+		{
+			name:  "card presets reject extension fields",
+			key:   "ui.card_presentation",
+			value: `{"poster_size":"large","caption":"artwork","columns":8}`,
+		},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			def, ok := manifest.Lookup(tc.key)
+			if !ok {
+				t.Fatalf("%s is not registered", tc.key)
+			}
+			if err := def.ValueSchema.ValidateValue(json.RawMessage(tc.value), objSchemas); err == nil {
+				t.Fatalf("invalid %s value was accepted: %s", tc.key, tc.value)
 			}
 		})
 	}

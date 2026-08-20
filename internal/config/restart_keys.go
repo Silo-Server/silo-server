@@ -8,7 +8,7 @@ import "strings"
 //
 // Keys absent from this map and from restartRequiredPrefixes apply without a
 // restart: they are either read live from the settings repo at request time
-// (overlays, branding, markers, download.*, ...) or hot-reloaded through the
+// (overlays, branding, markers, download limits, ...) or hot-reloaded through the
 // nodeconfig watcher. When converting a frozen consumer to the live config,
 // remove its key here — the admin UI restart banner is driven by this
 // registry.
@@ -34,11 +34,15 @@ var restartRequiredKeys = map[string]bool{
 	// ffmpeg path and hwaccel live (new transcode sessions), but several
 	// startup-built consumers still freeze them (scanner ffprobe, chapter
 	// thumbnails, audiobook enricher) — keep restart-required until those
-	// convert. transcode_dir is fully live (only the playback handler reads
-	// it). The chapter-thumbnail worker pool is sized at construction.
+	// convert. transcode_dir is also captured by dedicated transcode nodes for
+	// session and prepared-download storage. A configured download.artifact_dir is
+	// likewise captured by both API and transcode-node artifact managers. The
+	// chapter-thumbnail worker pool is sized at construction.
 	"playback.ffmpeg_path":               true,
 	"playback.hw_accel":                  true,
 	"playback.hw_device":                 true,
+	playbackTranscodeDirSettingKey:       true,
+	downloadArtifactDirSettingKey:        true,
 	"playback.chapter_thumbnail_workers": true,
 
 	// Scanner / matcher toggles captured at construction. Worker counts,

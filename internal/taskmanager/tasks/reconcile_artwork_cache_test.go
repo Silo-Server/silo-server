@@ -41,6 +41,41 @@ func (f *fakeReconcileRunner) Run(context.Context, func(float64, string)) (metad
 	return f.stats, f.err
 }
 
+type fakeResumableReconcileRunner struct {
+	received         *metadata.ArtworkReconcileCheckpoint
+	checkpointToSave *metadata.ArtworkReconcileCheckpoint
+	stats            metadata.ArtworkReconcileStats
+	err              error
+	legacyRuns       int
+	saveProvided     bool
+}
+
+func (f *fakeResumableReconcileRunner) Run(context.Context, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
+	f.legacyRuns++
+	return f.stats, f.err
+}
+
+func (f *fakeResumableReconcileRunner) RunResumable(
+	_ context.Context,
+	checkpoint *metadata.ArtworkReconcileCheckpoint,
+	save func(metadata.ArtworkReconcileCheckpoint) error,
+	_ func(float64, string),
+) (metadata.ArtworkReconcileStats, error) {
+	f.saveProvided = save != nil
+	if checkpoint != nil {
+		copied := *checkpoint
+		copied.Totals = append([]int(nil), checkpoint.Totals...)
+		copied.SurfaceCursor = append([]string(nil), checkpoint.SurfaceCursor...)
+		f.received = &copied
+	}
+	if f.checkpointToSave != nil && save != nil {
+		if err := save(*f.checkpointToSave); err != nil {
+			return f.stats, err
+		}
+	}
+	return f.stats, f.err
+}
+
 type fakeBrandingReconciler struct {
 	checked int
 	cleared int
@@ -101,8 +136,11 @@ func TestReconcileArtworkCacheShouldRun(t *testing.T) {
 	}
 
 	store.values[ArtworkStorageIdentityKey] = "old-endpoint|bucket|prefix"
-	if run, err := task.ShouldRun(context.Background()); err != nil || !run {
-		t.Fatalf("ShouldRun with changed fingerprint = %v, %v; want true, nil", run, err)
+	if run, err := task.ShouldRun(context.Background()); run || !errors.Is(err, ErrArtworkReconcileManualRunRequired) {
+		t.Fatalf("ShouldRun with changed fingerprint = %v, %v; want false, manual-run-required", run, err)
+	}
+	if runner.runs != 0 {
+		t.Fatalf("scheduled preflight ran reconciler %d times, want 0", runner.runs)
 	}
 }
 
@@ -129,6 +167,145 @@ func TestReconcileArtworkCacheExecutePersistsFingerprintOnlyOnSuccess(t *testing
 	}
 	if progress.resultData == nil {
 		t.Fatal("Execute did not record result data")
+	}
+}
+
+func TestReconcileArtworkCacheExecuteResumesMatchingCheckpoint(t *testing.T) {
+	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "old"}}
+	checkpoint := metadata.ArtworkReconcileCheckpoint{
+		Version:       1,
+		Totals:        make([]int, 14),
+		SurfaceIndex:  9,
+		SurfaceCursor: []string{"128111764822294558"},
+		SurfaceDone:   500,
+		Done:          21500,
+		Stats:         metadata.ArtworkReconcileStats{Mode: "verify", Verified: 500},
+	}
+	interrupted := &fakeResumableReconcileRunner{
+		checkpointToSave: &checkpoint,
+		stats:            checkpoint.Stats,
+		err:              errors.New("interrupted"),
+	}
+	if err := NewReconcileArtworkCacheTask(interrupted, store, nil, "new").Execute(context.Background(), &fakeProgress{}); err == nil {
+		t.Fatal("interrupted Execute returned nil error")
+	}
+	if got := store.values[ArtworkStorageIdentityKey]; got != "old" {
+		t.Fatalf("fingerprint after interruption = %q, want old", got)
+	}
+	if strings.TrimSpace(store.values[ArtworkStorageReconcileCheckpointKey]) == "" {
+		t.Fatal("interrupted Execute did not retain its checkpoint")
+	}
+
+	resumed := &fakeResumableReconcileRunner{stats: metadata.ArtworkReconcileStats{Mode: "verify", Verified: 1000}}
+	resumeTask := NewReconcileArtworkCacheTask(resumed, store, nil, "new")
+	rawCheckpoint := store.values[ArtworkStorageReconcileCheckpointKey]
+	if run, err := resumeTask.ShouldRun(context.Background()); run || !errors.Is(err, ErrArtworkReconcileManualRunRequired) {
+		t.Fatalf("scheduled resume preflight = %v, %v; want false, manual-run-required", run, err)
+	}
+	if got := store.values[ArtworkStorageReconcileCheckpointKey]; got != rawCheckpoint {
+		t.Fatal("scheduled preflight changed the saved checkpoint")
+	}
+	if resumed.received != nil || resumed.legacyRuns != 0 {
+		t.Fatal("scheduled preflight invoked the resumable runner")
+	}
+	if err := resumeTask.Execute(context.Background(), &fakeProgress{}); err != nil {
+		t.Fatalf("resumed Execute: %v", err)
+	}
+	if resumed.received == nil || resumed.received.SurfaceIndex != checkpoint.SurfaceIndex ||
+		len(resumed.received.SurfaceCursor) != 1 || resumed.received.SurfaceCursor[0] != checkpoint.SurfaceCursor[0] {
+		t.Fatalf("resumed checkpoint = %#v, want %#v", resumed.received, checkpoint)
+	}
+	if resumed.legacyRuns != 0 {
+		t.Fatalf("legacy Run called %d times, want 0", resumed.legacyRuns)
+	}
+	if got := store.values[ArtworkStorageIdentityKey]; got != "new" {
+		t.Fatalf("fingerprint after resumed completion = %q, want new", got)
+	}
+	if got := store.values[ArtworkStorageReconcileCheckpointKey]; got != "" {
+		t.Fatalf("checkpoint after completion = %q, want empty", got)
+	}
+}
+
+func TestReconcileArtworkCacheCheckpointIsScopedToStorageMove(t *testing.T) {
+	checkpoint := metadata.ArtworkReconcileCheckpoint{
+		Version:      1,
+		Totals:       make([]int, 14),
+		SurfaceIndex: 3,
+		Stats:        metadata.ArtworkReconcileStats{Mode: "verify"},
+	}
+	envelope, err := json.Marshal(artworkReconcileCheckpointEnvelope{
+		BaselineIdentity: "older",
+		TargetIdentity:   "different-target",
+		Checkpoint:       checkpoint,
+	})
+	if err != nil {
+		t.Fatalf("marshal checkpoint: %v", err)
+	}
+	store := &fakeSettingsStore{values: map[string]string{
+		ArtworkStorageIdentityKey:            "old",
+		ArtworkStorageReconcileCheckpointKey: string(envelope),
+	}}
+	runner := &fakeResumableReconcileRunner{stats: metadata.ArtworkReconcileStats{Mode: "verify"}}
+	if err := NewReconcileArtworkCacheTask(runner, store, nil, "new").Execute(context.Background(), &fakeProgress{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if runner.received != nil {
+		t.Fatalf("received checkpoint from a different storage move: %#v", runner.received)
+	}
+}
+
+func TestReconcileArtworkCacheIgnoresMalformedCheckpoint(t *testing.T) {
+	store := &fakeSettingsStore{values: map[string]string{
+		ArtworkStorageIdentityKey:            "old",
+		ArtworkStorageReconcileCheckpointKey: "{not-json",
+	}}
+	runner := &fakeResumableReconcileRunner{stats: metadata.ArtworkReconcileStats{Mode: metadata.ArtworkReconcileModeVerify}}
+
+	if err := NewReconcileArtworkCacheTask(runner, store, nil, "new").Execute(context.Background(), &fakeProgress{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if runner.received != nil {
+		t.Fatalf("received malformed checkpoint: %#v", runner.received)
+	}
+	if !runner.saveProvided {
+		t.Fatal("fresh storage-move sweep did not receive a checkpoint saver")
+	}
+	if got := store.values[ArtworkStorageIdentityKey]; got != "new" {
+		t.Fatalf("fingerprint after completion = %q, want new", got)
+	}
+	if got := store.values[ArtworkStorageReconcileCheckpointKey]; got != "" {
+		t.Fatalf("checkpoint after completion = %q, want empty", got)
+	}
+}
+
+func TestReconcileArtworkCacheManualRunIgnoresSameIdentityCheckpoint(t *testing.T) {
+	checkpoint := metadata.ArtworkReconcileCheckpoint{
+		Version:      1,
+		Totals:       make([]int, 14),
+		SurfaceIndex: 3,
+		Stats:        metadata.ArtworkReconcileStats{Mode: metadata.ArtworkReconcileModeVerify},
+	}
+	envelope, err := json.Marshal(artworkReconcileCheckpointEnvelope{
+		BaselineIdentity: "current",
+		TargetIdentity:   "current",
+		Checkpoint:       checkpoint,
+	})
+	if err != nil {
+		t.Fatalf("marshal checkpoint: %v", err)
+	}
+	store := &fakeSettingsStore{values: map[string]string{
+		ArtworkStorageIdentityKey:            "current",
+		ArtworkStorageReconcileCheckpointKey: string(envelope),
+	}}
+	runner := &fakeResumableReconcileRunner{stats: metadata.ArtworkReconcileStats{Mode: metadata.ArtworkReconcileModeVerify}}
+	if err := NewReconcileArtworkCacheTask(runner, store, nil, "current").Execute(context.Background(), &fakeProgress{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if runner.received != nil {
+		t.Fatalf("manual run resumed a stale same-identity checkpoint: %#v", runner.received)
+	}
+	if runner.saveProvided {
+		t.Fatal("manual same-identity run received a checkpoint saver")
 	}
 }
 

@@ -10,10 +10,13 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
+import { adminFormForConfigSchema, humanizeConfigKey } from "./configSchemaAdminForm";
 import { SchemaForm } from "./SchemaForm";
 import { buildSchemaValues } from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
+
+const EMPTY_FIELDS: PluginAdminFormField[] = [];
 
 type Props = {
   schema: PluginConfigSchema;
@@ -29,82 +32,7 @@ type Props = {
   isTesting?: boolean;
 };
 
-type SupportedField = PluginAdminFormField & {
-  inferredType?: "string" | "number" | "integer" | "boolean";
-};
-
-type ParsedObjectSchema = {
-  supported: boolean;
-  fields: SupportedField[];
-};
-
-function humanizeKey(value: string) {
-  return value
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
-  try {
-    const parsed = JSON.parse(schema.json_schema) as {
-      type?: string;
-      required?: string[];
-      properties?: Record<
-        string,
-        {
-          type?: string;
-          title?: string;
-          description?: string;
-          writeOnly?: boolean;
-          format?: string;
-        }
-      >;
-    };
-    if (parsed.type !== "object" || !parsed.properties) {
-      return { supported: false, fields: [] };
-    }
-
-    const fields = Object.entries(parsed.properties).map(([key, property]) => {
-      const propertyType = property.type;
-      if (!propertyType || !["string", "number", "integer", "boolean"].includes(propertyType)) {
-        return null;
-      }
-      const isSensitive = property.writeOnly === true || property.format === "password";
-      const control =
-        propertyType === "boolean"
-          ? "SWITCH"
-          : propertyType === "number" || propertyType === "integer"
-            ? "NUMBER"
-            : isSensitive
-              ? "PASSWORD"
-              : "TEXT";
-      return {
-        key,
-        label: property.title || humanizeKey(key),
-        description: property.description,
-        control,
-        placeholder: "",
-        required: parsed.required?.includes(key) ?? false,
-        secret: isSensitive,
-        multiline: false,
-        options: [],
-        rows: 0,
-        inferredType: propertyType as "string" | "number" | "integer" | "boolean",
-      } satisfies SupportedField;
-    });
-
-    if (fields.some((field) => field == null)) {
-      return { supported: false, fields: [] };
-    }
-    return { supported: true, fields: fields.filter(Boolean) as SupportedField[] };
-  } catch {
-    return { supported: false, fields: [] };
-  }
-}
-
-function defaultValueForField(field: SupportedField): string | boolean {
+function defaultValueForField(field: PluginAdminFormField): string | boolean {
   if (field.default_value !== undefined) {
     if (typeof field.default_value === "boolean") {
       return field.default_value;
@@ -122,7 +50,10 @@ function defaultValueForField(field: SupportedField): string | boolean {
   return "";
 }
 
-function valueForField(field: SupportedField, configValue?: PluginConfigValue): string | boolean {
+function valueForField(
+  field: PluginAdminFormField,
+  configValue?: PluginConfigValue,
+): string | boolean {
   const raw = configValue?.[field.key];
   if (typeof raw === "boolean") {
     return raw;
@@ -145,19 +76,12 @@ export function PluginConfigForm({
   isSaving = false,
   isTesting = false,
 }: Props) {
-  const parsedFallback = useMemo(() => parseJSONSchema(schema), [schema]);
-  const fields = useMemo<SupportedField[]>(() => {
-    if (schema.admin_form?.fields?.length) {
-      return schema.admin_form.fields;
-    }
-    return parsedFallback.fields;
-  }, [parsedFallback.fields, schema.admin_form?.fields]);
-
-  const supported =
-    fields.length > 0 && (schema.admin_form?.fields?.length ? true : parsedFallback.supported);
+  const inferredDescriptor = useMemo(() => adminFormForConfigSchema(schema), [schema]);
+  const fields = inferredDescriptor?.fields ?? EMPTY_FIELDS;
+  const supported = inferredDescriptor != null;
 
   const descriptor = useMemo<PluginAdminForm>(() => {
-    const base = schema.admin_form ?? { fields };
+    const base = inferredDescriptor ?? { fields };
     const configured = new Set(configuredSecrets);
     return {
       ...base,
@@ -167,7 +91,7 @@ export function PluginConfigForm({
           : field,
       ),
     };
-  }, [configuredSecrets, fields, schema.admin_form]);
+  }, [configuredSecrets, fields, inferredDescriptor]);
 
   const [values, setValues] = useState<PluginConfigValue>(() =>
     Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])),
@@ -248,7 +172,7 @@ export function PluginConfigForm({
             return (
               <div key={key} className="flex items-center justify-between gap-3 text-xs">
                 <span className={clearing ? "text-destructive" : "text-muted-foreground"}>
-                  {field?.label || humanizeKey(key)}: {clearing ? "will be cleared" : "saved"}
+                  {field?.label || humanizeConfigKey(key)}: {clearing ? "will be cleared" : "saved"}
                   {required ? " (required)" : ""}
                 </span>
                 {!required ? (

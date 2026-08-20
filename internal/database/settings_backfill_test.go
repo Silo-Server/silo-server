@@ -19,7 +19,7 @@ import (
 // The planner's rules are unit-tested in internal/settingsmigrate. What this
 // covers is everything only a live database can show: that the Go migration is
 // registered and actually runs, that the rows satisfy the scope CHECK, the
-// composite profile foreign key and the five partial unique indexes, and that
+// composite profile foreign key and the six partial unique indexes, and that
 // jsonb accepts the values the planner encodes.
 func TestPostgresSettingsBackfill(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -108,6 +108,20 @@ SELECT COUNT(*) FROM user_setting_values
 		}
 		if count != 0 {
 			t.Error("an untouched false auto_skip_credits column became a row")
+		}
+	})
+
+	t.Run("auto_skip_intro carries its revision-7 replacement", func(t *testing.T) {
+		var value string
+		err := pool.QueryRow(ctx, `
+SELECT value::text FROM user_setting_values
+ WHERE key = 'playback.intro_skip_mode' AND scope = 'profile' AND profile_id = 'mp1'`).
+			Scan(&value)
+		if err != nil {
+			t.Fatalf("reading migrated intro_skip_mode: %v", err)
+		}
+		if value != `"always"` {
+			t.Errorf("intro_skip_mode = %s, want \"always\"", value)
 		}
 	})
 

@@ -5,8 +5,11 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+const adminNavigationShortcutRepairMessage = "Use whole-document PUT on this admin resource to clear or replace navigation shortcuts"
 
 // Admin projections of the canonical settings API. These replace the string
 // registry's /admin/users/{id}/settings* and device-settings* routes with the
@@ -81,6 +84,11 @@ func (h *SettingValuesHandler) HandleAdminDeleteUserSettingValue(w http.Response
 	if !ok {
 		return
 	}
+	if identity.Key == settingskeys.NavShortcuts {
+		writeError(w, http.StatusBadRequest, "atomic_update_required",
+			adminNavigationShortcutRepairMessage)
+		return
+	}
 	h.deleteValueAt(w, r, store, userID, identity)
 }
 
@@ -125,6 +133,14 @@ func (h *SettingValuesHandler) adminIdentityFromRequest(
 		if identity.ProfileID == "" {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"profile_id is required for this scope")
+			return userstore.SettingIdentity{}, false
+		}
+	}
+	if scope == settingscontract.ScopeProfileClient {
+		identity.ClientFamily = settingscontract.ClientFamily(strings.TrimSpace(query.Get("client_family")))
+		if !identity.ClientFamily.Valid() {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"client_family must be one of tv, mobile, tablet, desktop or web")
 			return userstore.SettingIdentity{}, false
 		}
 	}

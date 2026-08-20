@@ -1,6 +1,7 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -171,14 +172,9 @@ func SetProgressIfNewer(db *sql.DB, profileID, mediaItemID string, position, dur
 	return rows > 0, nil
 }
 
-// MarkWatched creates or replaces progress with a completed entry.
-func MarkWatched(db *sql.DB, profileID, mediaItemID string, duration float64) error {
-	if duration < 0 {
-		duration = 0
-	}
-
-	now := nowUTC()
-	query := `
+// markWatchedProgressSQL upserts one completed progress row, honoring the
+// hidden-history watermark.
+const markWatchedProgressSQL = `
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		SELECT ?, ?, 0, ?, 1, ` + visibleTimestampSQL + `
 		FROM (SELECT 1) seed
@@ -193,7 +189,133 @@ func MarkWatched(db *sql.DB, profileID, mediaItemID string, duration float64) er
 			updated_at = excluded.updated_at,
 			event_at = excluded.updated_at
 	`
-	_, err := db.Exec(query, profileID, mediaItemID, duration, now, now, profileID, mediaItemID)
+
+// markWatchedBatchProgressSQL is markWatchedProgressSQL with one difference: a
+// zero duration leaves any known duration in place. The batch path now also
+// serves jellycompat's series mark-played, which supplies no durations and
+// previously ran through MarkProgressBatch without touching the column.
+const markWatchedBatchProgressSQL = `
+		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		SELECT ?, ?, 0, ?, 1, ` + visibleTimestampSQL + `
+		FROM (SELECT 1) seed
+		LEFT JOIN hidden_history_items hhi
+		  ON hhi.profile_id = ?
+		 AND hhi.media_item_id = ?
+		WHERE true
+		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
+			position_seconds = 0,
+			duration_seconds = CASE
+				WHEN excluded.duration_seconds > 0 THEN excluded.duration_seconds
+				ELSE watch_progress.duration_seconds
+			END,
+			completed = 1,
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
+	`
+
+// addVisibleHistorySQL inserts one history row at a watermark-adjusted
+// timestamp and returns the timestamp actually stored.
+const addVisibleHistorySQL = `
+		INSERT INTO watch_history (id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
+		SELECT ?, ?, ?, ` + visibleTimestampSQL + `, ?, ?, ?, ?
+		FROM (SELECT 1) seed
+		LEFT JOIN hidden_history_items hhi
+		  ON hhi.profile_id = ?
+		 AND hhi.media_item_id = ?
+		WHERE true
+		RETURNING watched_at
+	`
+
+// MarkWatchedBatch marks every target watched and records its history entry
+// inside a single transaction, so a canceled series mark rolls back to
+// "nothing marked" rather than stranding a partial subset. SQLite round-trips
+// are local and cheap, so this reuses the same per-row statements as the
+// single-item path and buys atomicity rather than fewer queries.
+//
+// Unlike most of this package it honors ctx: cancellation safety is the whole
+// point of the transaction, and a caller that disconnects mid-mark must leave
+// the series untouched rather than half-watched.
+func MarkWatchedBatch(
+	ctx context.Context,
+	db *sql.DB,
+	profileID string,
+	targets []userstore.MarkWatchedTarget,
+	entries []userstore.WatchHistoryEntry,
+) ([]userstore.WatchHistoryEntry, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin mark watched batch: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // rollback after commit is a no-op
+
+	now := nowUTC()
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		mediaItemID := strings.TrimSpace(target.MediaItemID)
+		if mediaItemID == "" {
+			continue
+		}
+		if _, ok := seen[mediaItemID]; ok {
+			continue
+		}
+		seen[mediaItemID] = struct{}{}
+		duration := target.DurationSeconds
+		if duration < 0 {
+			duration = 0
+		}
+		if _, err := tx.ExecContext(ctx, markWatchedBatchProgressSQL,
+			profileID, mediaItemID, duration, now, now, profileID, mediaItemID,
+		); err != nil {
+			return nil, fmt.Errorf("marking watched batch: %w", err)
+		}
+	}
+
+	written := make([]userstore.WatchHistoryEntry, 0, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.MediaItemID) == "" {
+			continue
+		}
+		if entry.ID == "" {
+			entry.ID = generateUUID()
+		}
+		if entry.WatchedAt == "" {
+			entry.WatchedAt = now
+		}
+		if entry.Source == "" {
+			entry.Source = userstore.WatchHistorySourceLegacy
+		}
+		identityJSON, err := json.Marshal(entry.Identity)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling watch identity: %w", err)
+		}
+		if err := tx.QueryRowContext(ctx, addVisibleHistorySQL,
+			entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.WatchedAt,
+			entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
+			entry.ProfileID, entry.MediaItemID,
+		).Scan(&entry.WatchedAt); err != nil {
+			return nil, fmt.Errorf("adding visible history batch: %w", err)
+		}
+		written = append(written, entry)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit mark watched batch: %w", err)
+	}
+	return written, nil
+}
+
+// MarkWatched creates or replaces progress with a completed entry.
+func MarkWatched(db *sql.DB, profileID, mediaItemID string, duration float64) error {
+	if duration < 0 {
+		duration = 0
+	}
+
+	now := nowUTC()
+	_, err := db.Exec(markWatchedProgressSQL, profileID, mediaItemID, duration, now, now, profileID, mediaItemID)
 	if err != nil {
 		return fmt.Errorf("marking watched: %w", err)
 	}
@@ -584,16 +706,11 @@ func AddVisibleHistory(db *sql.DB, entry WatchHistoryEntry) (WatchHistoryEntry, 
 	if err != nil {
 		return entry, fmt.Errorf("marshaling watch identity: %w", err)
 	}
-	if err := db.QueryRow(`
-		INSERT INTO watch_history (id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
-		SELECT ?, ?, ?, `+visibleTimestampSQL+`, ?, ?, ?, ?
-		FROM (SELECT 1) seed
-		LEFT JOIN hidden_history_items hhi
-		  ON hhi.profile_id = ?
-		 AND hhi.media_item_id = ?
-		WHERE true
-		RETURNING watched_at
-	`, entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON), entry.ProfileID, entry.MediaItemID).Scan(&entry.WatchedAt); err != nil {
+	if err := db.QueryRow(addVisibleHistorySQL,
+		entry.ID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.WatchedAt,
+		entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
+		entry.ProfileID, entry.MediaItemID,
+	).Scan(&entry.WatchedAt); err != nil {
 		return entry, fmt.Errorf("adding visible history entry: %w", err)
 	}
 	return entry, nil

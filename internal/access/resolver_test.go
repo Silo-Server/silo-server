@@ -278,6 +278,15 @@ func (s stubStore) GetSeriesPlaybackPreference(context.Context, string, string) 
 func (s stubStore) DeleteSeriesPlaybackPreference(context.Context, string, string) error {
 	panic("unused")
 }
+func (s stubStore) SetCollectionSortPreference(context.Context, userstore.CollectionSortPreference) error {
+	panic("unused")
+}
+func (s stubStore) GetCollectionSortPreference(context.Context, string, string, string) (*userstore.CollectionSortPreference, error) {
+	panic("unused")
+}
+func (s stubStore) ClearCollectionSortPreference(context.Context, string, string, string) error {
+	panic("unused")
+}
 func (s stubStore) GetLibraryPlaybackPreference(context.Context, string, int) (*userstore.LibraryPlaybackPreference, error) {
 	panic("unused")
 }

@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -23,7 +23,9 @@ JELLYFIN_WEB_VERSION ?= 10.11.6
 BUILDINFO_PKG := github.com/Silo-Server/silo-server/internal/buildinfo
 BUILD_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)
 BUILD_DIRTY ?= $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo true || echo false)
-GO_LDFLAGS := -X $(BUILDINFO_PKG).revisionOverride=$(BUILD_REVISION) -X $(BUILDINFO_PKG).dirtyOverride=$(BUILD_DIRTY)
+BUILD_NUMBER ?=
+BUILD_DATE ?=
+GO_LDFLAGS := -X $(BUILDINFO_PKG).revisionOverride=$(BUILD_REVISION) -X $(BUILDINFO_PKG).dirtyOverride=$(BUILD_DIRTY) -X $(BUILDINFO_PKG).buildNumberOverride=$(BUILD_NUMBER) -X $(BUILDINFO_PKG).builtAtOverride=$(BUILD_DATE)
 
 # Build the frontend (requires pnpm)
 frontend:
@@ -62,7 +64,6 @@ WEBTEST_KNOWN_FAILURES := \
 	--exclude src/pages/Catalog.test.tsx \
 	--exclude src/pages/ItemDetail/SeasonContent.test.tsx \
 	--exclude src/pages/LibraryRecommended.test.tsx \
-	--exclude src/pages/audiobooks/player/useAudiobookPlayback.test.ts \
 	--exclude src/pages/setup-wizard/steps/ServerStorageStep.test.tsx \
 	--exclude src/player/hooks/useASSSubtitles.test.tsx
 
@@ -144,6 +145,36 @@ verify-settings-bindings-web:
 	@echo "web settings binding is current"
 
 verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-web
+
+# Regenerate the protocol-v3 golden contract fixtures from the live types and planner.
+#
+# The server owns the playback contract and the clients prove conformance
+# against these bodies, so they are only trustworthy while the code that emits
+# them is the code that serves traffic. Editing one by hand instead of running
+# this would let the contract and the implementation drift apart in silence.
+PLAYBACK_FIXTURE_DIR := internal/playback/testdata/protocol_v3
+PLAYBACK_SCHEMA_FIXTURE_DIR := docs/design/schemas/playback-v3/v3/fixtures/valid
+PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json capability_response.json error_response.json route_event.json
+
+playback-fixtures:
+	go run ./cmd/playbackfixtures -out $(PLAYBACK_FIXTURE_DIR)
+	@set -e; for fixture in $(PLAYBACK_WIRE_FIXTURES); do \
+		cp "$(PLAYBACK_FIXTURE_DIR)/$$fixture" "$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture"; \
+	done
+
+# Fail when the committed fixtures disagree with the contract types. A change
+# that does not regenerate leaves every client testing against a body the server
+# no longer produces, which is exactly the drift the fixtures exist to catch.
+verify-playback-fixtures:
+	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
+	go run ./cmd/playbackfixtures -out "$$CHECK_DIR" && \
+	diff -ur $(PLAYBACK_FIXTURE_DIR) "$$CHECK_DIR" \
+		|| { echo "::error::$(PLAYBACK_FIXTURE_DIR) is stale; run make playback-fixtures"; exit 1; }; \
+	for fixture in $(PLAYBACK_WIRE_FIXTURES); do \
+		cmp -s "$$CHECK_DIR/$$fixture" "$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture" \
+			|| { echo "::error::$(PLAYBACK_SCHEMA_FIXTURE_DIR)/$$fixture is stale; run make playback-fixtures"; exit 1; }; \
+	done
+	@echo "playback fixtures are current"
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

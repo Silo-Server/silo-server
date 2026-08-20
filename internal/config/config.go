@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -157,9 +158,21 @@ func (c MatcherConfig) TVSeriesRootQueueEnabled() bool {
 
 // PlaybackConfig holds transcoding and playback settings.
 type PlaybackConfig struct {
-	FFmpegPath                   string `yaml:"ffmpeg_path"`
-	TranscodeDir                 string `yaml:"transcode_dir"`
-	HWAccel                      string `yaml:"hw_accel"`
+	FFmpegPath   string `yaml:"ffmpeg_path"`
+	TranscodeDir string `yaml:"transcode_dir"`
+	HWAccel      string `yaml:"hw_accel"`
+	// HWDevice is the GPU render device for hardware transcodes. A single
+	// path pins every GPU workload to that device; a comma-separated list
+	// (e.g. "/dev/dri/renderD128,/dev/dri/renderD129") balances workloads
+	// least-loaded across the listed devices. Empty auto-detects.
+	//
+	// Supported topology: balancing applies to QSV/VAAPI render devices
+	// only (NVENC identifies GPUs by CUDA index/UUID and always uses the
+	// first entry). The value is cluster-wide — every transcode node reads
+	// it — so multi-node deployments must expose the listed devices at
+	// identical paths on every node; devices absent on a node fall out of
+	// that node's rotation. The admin hw-accel endpoint reports each node's
+	// inventory so the UI can flag divergence.
 	HWDevice                     string `yaml:"hw_device"`
 	ChapterThumbnailWorkers      int    `yaml:"chapter_thumbnail_workers"`
 	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
@@ -395,9 +408,25 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 	[]byte("https://silo.local/jellycompat"),
 ).String()
 
+const playbackTranscodeDirSettingKey = "playback.transcode_dir"
+const downloadArtifactDirSettingKey = "download.artifact_dir"
+
 // DefaultTranscodeDir is the fallback playback.transcode_dir; download
-// artifacts default to a sibling directory (see downloads.effectiveArtifactDir).
+// artifacts default to a sibling directory (see EffectiveDownloadArtifactDir).
 const DefaultTranscodeDir = "/tmp/silo-transcode"
+
+// EffectiveDownloadArtifactDir resolves the shared prepared-download artifact
+// root. Keeping this path rule in config lets API and transcode-node processes
+// independently derive the same destination from the same live settings.
+func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
+	if artifactDir != "" {
+		return artifactDir
+	}
+	if transcodeDir == "" {
+		transcodeDir = DefaultTranscodeDir
+	}
+	return filepath.Join(filepath.Dir(transcodeDir), "silo-download-artifacts")
+}
 
 const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"

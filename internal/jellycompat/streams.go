@@ -133,7 +133,10 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*source); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
-		_ = playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile())
+		_ = playback.ServeRemuxWithOptions(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile(), playback.RemuxServeOptions{
+			ContentType: playback.RemuxContentType(file.IsAudioOnly()),
+			AudioOnly:   file.IsAudioOnly(),
+		})
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
 	}
@@ -246,7 +249,8 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to bind transcode node")
 					return
 				}
-				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
+				initialSeekSeconds, _ := compatInitialTranscodePosition(*source, h.compatSegmentDuration(), playSession.InitialSeekSeconds)
+				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL); err != nil {
 					failRemoteStart()
 					if errors.Is(err, errTranscode4KDisallowed) {
 						writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -279,7 +283,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	}
 
 	// Ensure the transcode process is running.
-	_, err = h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
+	manifest, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
 		if errors.Is(err, errTranscode4KDisallowed) {
 			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -299,7 +303,9 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 
 	segDuration := h.compatSegmentDuration()
 
-	manifest := generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	if manifest == nil {
+		manifest = generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	}
 
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.WriteHeader(http.StatusOK)
@@ -329,7 +335,7 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Ensure the transcode process is running.
-	_, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
+	manifest, err := h.ensureTranscodeManifest(r.Context(), session, playSession.ID, *source)
 	if err != nil {
 		if errors.Is(err, errTranscode4KDisallowed) {
 			writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
@@ -349,7 +355,9 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 
 	segDuration := h.compatSegmentDuration()
 
-	manifest := generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	if manifest == nil {
+		manifest = generateFullManifest(source.Version.Duration, segDuration, source.TranscodeAudio, playSession.InitialSeekSeconds)
+	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(rewriteManifest(manifest, playSession.RouteItemID, playSession.ID, source.ID))
@@ -911,6 +919,13 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// the sync from request cancellation to keep the admin view accurate.
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
 }
+
+// The compat transcode ladder always lands on H.264/AAC; these name the
+// target codecs the Jellyfin-compat pipeline hands to ffmpeg.
+const (
+	compatTargetVideoCodec = "h264"
+	compatTargetAudioCodec = "aac"
+)
 
 const (
 	compatTerminalClaimLease           = 10 * time.Second
@@ -1564,10 +1579,11 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 		return nil, err
 	}
 
-	// When duration is known, Jellycompat serves its own synthetic VOD manifest.
-	// We only need ffmpeg running; waiting for startup segments here adds
-	// unnecessary latency before the player can request the actual target segment.
-	if source.Version.Duration > 0 {
+	// When the duration fits the shared segment-count bound, Jellycompat serves
+	// its own synthetic VOD manifest. Longer media waits for FFmpeg's bounded
+	// real playlist so one request cannot allocate hundreds of thousands of
+	// segment entries.
+	if shouldGenerateCompatFullManifest(source, h.compatSegmentDuration()) {
 		return nil, nil
 	}
 
@@ -1579,7 +1595,7 @@ func (h *PlaybackHandler) ensureTranscodeManifest(ctx context.Context, compatSes
 	for {
 		manifest, err := transcodeSession.GetManifest()
 		if err == nil {
-			return manifest, nil
+			return playback.AlignRealManifestToSourceTimeline(manifest, transcodeSession.Opts(), "")
 		}
 		if !errors.Is(err, playback.ErrManifestNotReady) {
 			return nil, err
@@ -1624,29 +1640,34 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("prepare transcode dir: %w", err)
 	}
+	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
 
 	initialSeekSeconds := 0.0
 	startSegmentNumber := 0
 	if playSession, ok := h.playbackStore.Get(playSessionID); ok {
-		initialSeekSeconds = playSession.InitialSeekSeconds
-		segDuration := h.compatSegmentDuration()
-		if initialSeekSeconds > 0 && segDuration > 0 {
-			startSegmentNumber = int(initialSeekSeconds / float64(segDuration))
-		}
+		initialSeekSeconds, startSegmentNumber = compatInitialTranscodePosition(
+			source,
+			h.compatSegmentDuration(),
+			playSession.InitialSeekSeconds,
+		)
 	}
 
 	opts := playback.TranscodeOpts{
-		SessionID:          upstreamSessionID,
-		InputPath:          file.FilePath,
-		OutputDir:          filepath.Join(h.TranscodeDir, upstreamSessionID),
-		SeekSeconds:        initialSeekSeconds,
-		StartSegmentNumber: startSegmentNumber,
-		TargetCodecVideo:   "h264",
-		TargetCodecAudio:   "aac",
-		FFmpegPath:         h.FFmpegPath,
-		HWAccel:            h.HWAccel,
-		AudioTrackIndex:    compatAudioTrackIndexOrDefault(source),
-		FastStart:          true,
+		SessionID:           upstreamSessionID,
+		InputPath:           file.FilePath,
+		SourceVideoCodec:    sourceVideoCodec,
+		SourceVideoProfile:  sourceVideoProfile,
+		SourceVideoBitDepth: sourceVideoBitDepth,
+		OutputDir:           filepath.Join(h.TranscodeDir, upstreamSessionID),
+		SeekSeconds:         initialSeekSeconds,
+		StartSegmentNumber:  startSegmentNumber,
+		TargetCodecVideo:    compatTargetVideoCodec,
+		TargetCodecAudio:    compatTargetAudioCodec,
+		FFmpegPath:          h.FFmpegPath,
+		HWAccel:             h.HWAccel,
+		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
+		TotalDuration:       float64(source.Version.Duration),
+		FastStart:           true,
 	}
 	if source.TranscodeAudio {
 		opts.TargetCodecVideo = "copy"
@@ -1687,6 +1708,26 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	}
 
 	return transcodeSession, nil
+}
+
+func shouldGenerateCompatFullManifest(source PlaybackMediaSource, segmentDuration int) bool {
+	return playback.CanGenerateSyntheticManifest(float64(source.Version.Duration), segmentDuration)
+}
+
+// compatInitialTranscodePosition keeps FFmpeg close to the requested resume
+// position. Bounded synthetic manifests list the omitted source segments;
+// seeked real manifests receive an EXT-X-GAP timeline anchor before serving.
+func compatInitialTranscodePosition(source PlaybackMediaSource, segmentDuration int, requested float64) (float64, int) {
+	if requested <= 0 {
+		return 0, 0
+	}
+	if duration := float64(source.Version.Duration); duration > 0 && requested > duration {
+		requested = duration
+	}
+	if segmentDuration <= 0 {
+		segmentDuration = compatSegmentDuration
+	}
+	return requested, int(requested / float64(segmentDuration))
 }
 
 // audioSelectionChanged reports whether an incoming AudioStreamIndex differs

@@ -79,6 +79,12 @@ type HTTPRoutesClient struct {
 	timeout time.Duration
 }
 
+type WatchSyncProviderClient struct {
+	client              pluginv1.WatchSyncProviderClient
+	deviceAuthorization pluginv1.WatchSyncDeviceAuthorizationServiceClient
+	timeout             time.Duration
+}
+
 func newClient(installationID int, rpc *sdkruntime.Client, manifest *pluginv1.PluginManifest) *Client {
 	capabilities := make(map[string]*pluginv1.CapabilityDescriptor, len(manifest.GetCapabilities()))
 	for _, capability := range manifest.GetCapabilities() {
@@ -205,6 +211,17 @@ func (c *Client) HTTPRoutes(capabilityID string) (*HTTPRoutesClient, error) {
 	return &HTTPRoutesClient{
 		client:  c.rpc.HttpRoutes(),
 		timeout: DefaultRouteTimeout,
+	}, nil
+}
+
+func (c *Client) WatchSyncProvider(capabilityID string) (*WatchSyncProviderClient, error) {
+	if err := c.requireCapability("watch_sync_provider.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &WatchSyncProviderClient{
+		client:              c.rpc.WatchSyncProvider(),
+		deviceAuthorization: c.rpc.WatchSyncDeviceAuthorization(),
+		timeout:             DefaultWatchSyncTimeout,
 	}, nil
 }
 
@@ -383,6 +400,48 @@ func (c *HTTPRoutesClient) Handle(ctx context.Context, req *pluginv1.HandleHTTPR
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.Handle(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) ExchangeAPIKey(ctx context.Context, req *pluginv1.WatchSyncExchangeAPIKeyRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ExchangeAPIKey(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) StartDeviceAuthorization(ctx context.Context, req *pluginv1.WatchSyncDeviceAuthorizationServiceStartRequest) (*pluginv1.WatchSyncDeviceAuthorizationServiceStartResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.deviceAuthorization.Start(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) PollDeviceAuthorization(ctx context.Context, req *pluginv1.WatchSyncDeviceAuthorizationServicePollRequest) (*pluginv1.WatchSyncDeviceAuthorizationServicePollResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.deviceAuthorization.Poll(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) RefreshCredentials(ctx context.Context, req *pluginv1.WatchSyncRefreshCredentialsRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.RefreshCredentials(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) GetAccount(ctx context.Context, req *pluginv1.WatchSyncGetAccountRequest) (*pluginv1.WatchSyncGetAccountResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.GetAccount(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) ApplyEvents(ctx context.Context, req *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ApplyEvents(callCtx, req)
+}
+
+func (c *WatchSyncProviderClient) ListRemoteState(ctx context.Context, req *pluginv1.WatchSyncListRemoteStateRequest) (*pluginv1.WatchSyncListRemoteStateResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ListRemoteState(callCtx, req)
 }
 
 func ensureDeadline(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {

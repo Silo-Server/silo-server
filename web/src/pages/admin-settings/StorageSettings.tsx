@@ -26,8 +26,9 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_ttl",
 ] as const;
 
-// Changing any of these moves where cached artwork objects live; the server
-// reconciles the artwork cache after a restart (see reconcile_artwork_cache).
+// Changing any of these moves where cached artwork objects live. Silo detects
+// that change after restart but requires an explicit manual reconcile so an
+// incomplete bucket migration cannot rewrite the artwork catalog.
 const PUBLIC_S3_IDENTITY_KEYS = [
   "s3.public_endpoint",
   "s3.public_bucket",
@@ -205,10 +206,13 @@ export default function StorageSettings() {
                 <div className="text-[13px] leading-relaxed">
                   <p className="font-medium text-amber-500">Storage location change</p>
                   <p className="text-muted-foreground mt-1">
-                    Artwork is cached in this bucket. After the server restarts, Silo verifies the
-                    cache against the new storage and automatically re-caches anything missing.
-                    Uploaded images (custom posters, collection artwork, branding) cannot be
-                    re-downloaded — migrate your bucket contents if you want to keep them.
+                    Artwork is cached in this bucket. Silo will not change artwork cache records
+                    automatically after restart. Copy or migrate the existing bucket objects first,
+                    then manually run Reconcile Artwork Cache only if you intend every missing
+                    record to be reset or cleared. Re-downloading those reset provider images is a
+                    separate, manual Backfill Metadata Images action; normal scheduled caching only
+                    processes artwork queued by new or changed metadata. Uploaded images (custom
+                    posters, collection artwork, branding) cannot be re-downloaded.
                   </p>
                 </div>
               </div>

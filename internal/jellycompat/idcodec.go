@@ -105,6 +105,15 @@ func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) strin
 	}
 	encoded := uuid.NewSHA1(namespace, []byte(value))
 
+	// Play-session ids are minted from a fresh random UUID on every
+	// PlaybackInfo/stream-open and are never decoded back: clients echo the
+	// encoded id and it is matched as an opaque string. Recording them would
+	// grow the reverse map by one permanent entry per playback for the life
+	// of the process.
+	if kind == EncodedIDPlaySession {
+		return encoded.String()
+	}
+
 	c.mu.Lock()
 	c.reverse[encoded.String()] = registeredID{kind: kind, value: value}
 	c.mu.Unlock()

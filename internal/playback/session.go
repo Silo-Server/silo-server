@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -26,6 +28,8 @@ type Session struct {
 	ClientIP             string // resolved client IP for the playback session
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
+	ClientBuild          string // opaque reported client build identifier, when available
+	ClientChannel        string // opaque reported client distribution channel, when available
 	ClientUserAgent      string // trimmed request user agent for the playback session
 	IsJellyfinCompat     bool   // immutable origin identity for Jellyfin compatibility sessions
 
@@ -33,17 +37,20 @@ type Session struct {
 	TranscodeTransportID string // remote node process identity; empty means session ID
 	AudioTrackIndex      int
 
-	StreamBitrateKbps int    // currently delivered bitrate, when known
-	TargetResolution  string // requested output resolution for transcodes
-	TargetVideoCodec  string // requested output video codec for transcodes
-	TargetAudioCodec  string // requested output audio codec when audio is transcoded
-	TargetBitrateKbps int    // requested output bitrate cap for transcodes
-	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
+	StreamBitrateKbps      int    // currently delivered bitrate, when known
+	TargetResolution       string // requested output resolution for transcodes
+	TargetVideoCodec       string // requested output video codec for transcodes
+	TargetAudioCodec       string // requested output audio codec when audio is transcoded
+	TargetAudioChannels    int    // requested encoded audio channel count
+	TargetAudioBitrateKbps int    // requested encoded audio bitrate cap
+	TargetBitrateKbps      int    // requested output bitrate cap for transcodes
+	TranscodeHWAccel       string // effective hardware acceleration mode for transcodes
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
 	// these from the live ts.Opts(); offloaded transcodes own no local runtime, so
-	// the session is the only place to recover them (see HandleChangeAudioTrack).
+	// the session is the only place to recover them (see the track_change replan
+	// operation in internal/api/handlers/playback_v3.go).
 	SubtitleTrackIndex int // -1 = no subtitles
 	SubtitleBurnIn     bool
 	SegmentDuration    int // HLS segment length in seconds (cadence)
@@ -59,30 +66,36 @@ type Session struct {
 	activeTransportCount       int
 	replacementPlayMethod      PlayMethod
 	streamRevision             uint64
+	// remoteTransport marks a session whose media bytes are served by another
+	// node, so this server never sees the transport request that would
+	// otherwise keep it alive. See SetRemoteTransport.
+	remoteTransport bool
 }
 
 // SessionStreamState stores the mutable stream-specific details that can
 // change after a session is created (audio track, client IP, transcode target,
 // and reported bitrate).
 type SessionStreamState struct {
-	PlayMethod           PlayMethod
-	BasePlayMethod       PlayMethod
-	AudioTrackIndex      int
-	TranscodeAudio       bool
-	RemuxDVMode          RemuxDVMode
-	ClientIP             string
-	ClientName           string
-	ClientVersion        string
-	ClientUserAgent      string
-	StreamBitrateKbps    int
-	TargetResolution     string
-	TargetVideoCodec     string
-	TargetAudioCodec     string
-	TargetBitrateKbps    int
-	TranscodeHWAccel     string
-	TranscodeNodeURL     string
-	TranscodeTransportID string
-	TranscodeRouteSet    bool
+	PlayMethod             PlayMethod
+	BasePlayMethod         PlayMethod
+	AudioTrackIndex        int
+	TranscodeAudio         bool
+	RemuxDVMode            RemuxDVMode
+	ClientIP               string
+	ClientName             string
+	ClientVersion          string
+	ClientUserAgent        string
+	StreamBitrateKbps      int
+	TargetResolution       string
+	TargetVideoCodec       string
+	TargetAudioCodec       string
+	TargetAudioChannels    int
+	TargetAudioBitrateKbps int
+	TargetBitrateKbps      int
+	TranscodeHWAccel       string
+	TranscodeNodeURL       string
+	TranscodeTransportID   string
+	TranscodeRouteSet      bool
 
 	// Byte-affecting transcode recipe fields preserved so an offloaded restart
 	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
@@ -138,10 +151,74 @@ type clientInfoContextKey struct{}
 // ClientInfo carries best-effort client metadata from request handling into
 // the playback session manager.
 type ClientInfo struct {
-	Name      string
-	Version   string
+	Name    string
+	Version string
+	// Build is the client's opaque per-platform build identifier (Android
+	// versionCode, Apple CFBundleVersion, …). The server never parses or
+	// compares it; it exists so an admin can name the exact build.
+	Build string
+	// Channel is the client's opaque distribution channel ("release", "beta",
+	// "sideload", "dev", …). Stored verbatim — deliberately not validated
+	// against an enum so a new channel needs no server change.
+	Channel   string
 	UserAgent string
 	IsCompat  bool
+}
+
+// Normalized returns the identity with every field trimmed and clamped to the
+// bound published for it (docs/settings-api.md, and maxLength in the v3 request
+// schemas). This is the single definition of those bounds, and callers apply it
+// at the request boundary: a session stamps normalized values, but the decision
+// logs and playback_route_events are written straight from the resolved
+// identity, so clamping only at session creation would let a client's oversized
+// header through to both.
+func (c ClientInfo) Normalized() ClientInfo {
+	c.Name = normalizeClientMetadataValue(c.Name, 128)
+	c.Version = normalizeClientMetadataValue(c.Version, 64)
+	c.Build = normalizeClientMetadataValue(c.Build, 64)
+	c.Channel = normalizeClientMetadataValue(c.Channel, 32)
+	c.UserAgent = normalizeClientMetadataValue(c.UserAgent, 512)
+	return c
+}
+
+// LogAttrs renders the app identity as slog key/value pairs, skipping the
+// fields the client did not report. This is the single definition of those log
+// keys — every playback decision and the session-expiry line share it, so a
+// rename cannot leave one surface keyed differently from another. Skipping
+// empty values matters as much: browsers and Jellyfin-ecosystem clients report
+// none of them, and opslog persists the attrs it is handed, so emitting four
+// empty keys per decision would grow /admin/logs for no diagnostic value.
+func (c ClientInfo) LogAttrs() []any {
+	attrs := make([]any, 0, 8)
+	for _, pair := range [...]struct{ key, value string }{
+		{"client_name", c.Name},
+		{"client_version", c.Version},
+		{"client_build", c.Build},
+		{"client_channel", c.Channel},
+	} {
+		if pair.value != "" {
+			attrs = append(attrs, pair.key, pair.value)
+		}
+	}
+	return attrs
+}
+
+// ClientInfo returns the app identity stamped on the session when it was
+// created. Surfaces that only hold a session — expiry logging, route events
+// posted out of band — recover the reporting client through this instead of
+// re-reading request headers that may no longer be present.
+func (s *Session) ClientInfo() ClientInfo {
+	if s == nil {
+		return ClientInfo{}
+	}
+	return ClientInfo{
+		Name:      s.ClientName,
+		Version:   s.ClientVersion,
+		Build:     s.ClientBuild,
+		Channel:   s.ClientChannel,
+		UserAgent: s.ClientUserAgent,
+		IsCompat:  s.IsJellyfinCompat,
+	}
 }
 
 // WithClientInfo stores playback client metadata on a context.
@@ -226,6 +303,12 @@ const (
 	// observed playback activity before it stops counting toward limits.
 	DefaultActiveSessionGrace = 45 * time.Second
 
+	// remoteTransportIdleGrace is the floor on the idle windows for a session
+	// whose media is served by another node. See remoteTransportGrace: it must
+	// outlast a heartbeat gap on an otherwise healthy proxy stream, while still
+	// reaping a session whose client vanished without stopping.
+	remoteTransportIdleGrace = 5 * time.Minute
+
 	// DefaultPausedSessionGrace is the longer grace period for paused
 	// sessions. It must comfortably cover an intentional pause (dinner
 	// break, phone call): reaping a paused session kills its transcode
@@ -287,9 +370,41 @@ func (m *SessionManager) SetExpirationHook(fn func(*Session)) {
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
+	// A text column takes neither invalid UTF-8 nor a NUL, and Postgres refuses
+	// the whole statement for either. The per-node session upserts share one
+	// transaction, so a single malformed client string would stop that entire
+	// node from reconciling — not just its own row — until the session goes
+	// away. Both scrubs are needed: NUL is perfectly valid UTF-8, so
+	// ToValidUTF8 leaves it, and a v3 start body can carry one as the JSON
+	// escape (headers cannot — net/http rejects bytes below 0x20).
+	// Control characters are stripped wholesale rather than just NUL: none of
+	// them belong in an identity label rendered in the admin UI and written to
+	// structured logs.
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "")
+	}
+	if strings.ContainsFunc(value, unicode.IsControl) {
+		value = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, value)
+	}
 	value = strings.TrimSpace(value)
-	if maxLen > 0 && len(value) > maxLen {
-		value = value[:maxLen]
+	if maxLen <= 0 || len(value) <= maxLen {
+		return value
+	}
+	// Clamp by runes, not bytes. These bounds are published to clients as JSON
+	// Schema maxLength, which counts characters — a byte clamp would silently
+	// cut a value the contract calls valid, and cutting mid-rune would produce
+	// exactly the invalid UTF-8 scrubbed above.
+	runes := 0
+	for offset := range value {
+		if runes == maxLen {
+			return value[:offset]
+		}
+		runes++
 	}
 	return value
 }
@@ -424,7 +539,10 @@ func newSession(
 	transcodeAudio bool,
 ) *Session {
 	now := time.Now()
-	clientInfo := ClientInfoFromContext(ctx)
+	// Normalize here as well as at the request boundary: identities also reach
+	// the manager from the Jellyfin and Audiobookshelf compat surfaces, which
+	// build a ClientInfo from their own header vocabularies.
+	clientInfo := ClientInfoFromContext(ctx).Normalized()
 	return &Session{
 		ID:                   uuid.New().String(),
 		UserID:               userID,
@@ -436,9 +554,11 @@ func newSession(
 		TranscodeAudio:       transcodeAudio,
 		Position:             0,
 		IsPaused:             false,
-		ClientName:           normalizeClientMetadataValue(clientInfo.Name, 128),
-		ClientVersion:        normalizeClientMetadataValue(clientInfo.Version, 64),
-		ClientUserAgent:      normalizeClientMetadataValue(clientInfo.UserAgent, 512),
+		ClientName:           clientInfo.Name,
+		ClientVersion:        clientInfo.Version,
+		ClientBuild:          clientInfo.Build,
+		ClientChannel:        clientInfo.Channel,
+		ClientUserAgent:      clientInfo.UserAgent,
 		IsJellyfinCompat:     clientInfo.IsCompat,
 		StartedAt:            now,
 		UpdatedAt:            now,
@@ -768,6 +888,8 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.TargetAudioChannels = state.TargetAudioChannels
+	s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	if state.TranscodeRouteSet {
@@ -787,27 +909,29 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 
 func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 	return SessionStreamState{
-		PlayMethod:           s.PlayMethod,
-		BasePlayMethod:       s.BasePlayMethod,
-		AudioTrackIndex:      s.AudioTrackIndex,
-		TranscodeAudio:       s.TranscodeAudio,
-		RemuxDVMode:          s.RemuxDVMode,
-		ClientIP:             s.ClientIP,
-		ClientName:           s.ClientName,
-		ClientVersion:        s.ClientVersion,
-		ClientUserAgent:      s.ClientUserAgent,
-		StreamBitrateKbps:    s.StreamBitrateKbps,
-		TargetResolution:     s.TargetResolution,
-		TargetVideoCodec:     s.TargetVideoCodec,
-		TargetAudioCodec:     s.TargetAudioCodec,
-		TargetBitrateKbps:    s.TargetBitrateKbps,
-		TranscodeHWAccel:     s.TranscodeHWAccel,
-		TranscodeNodeURL:     s.TranscodeNodeURL,
-		TranscodeTransportID: s.TranscodeTransportID,
-		TranscodeRouteSet:    true,
-		SubtitleTrackIndex:   s.SubtitleTrackIndex,
-		SubtitleBurnIn:       s.SubtitleBurnIn,
-		SegmentDuration:      s.SegmentDuration,
+		PlayMethod:             s.PlayMethod,
+		BasePlayMethod:         s.BasePlayMethod,
+		AudioTrackIndex:        s.AudioTrackIndex,
+		TranscodeAudio:         s.TranscodeAudio,
+		RemuxDVMode:            s.RemuxDVMode,
+		ClientIP:               s.ClientIP,
+		ClientName:             s.ClientName,
+		ClientVersion:          s.ClientVersion,
+		ClientUserAgent:        s.ClientUserAgent,
+		StreamBitrateKbps:      s.StreamBitrateKbps,
+		TargetResolution:       s.TargetResolution,
+		TargetVideoCodec:       s.TargetVideoCodec,
+		TargetAudioCodec:       s.TargetAudioCodec,
+		TargetAudioChannels:    s.TargetAudioChannels,
+		TargetAudioBitrateKbps: s.TargetAudioBitrateKbps,
+		TargetBitrateKbps:      s.TargetBitrateKbps,
+		TranscodeHWAccel:       s.TranscodeHWAccel,
+		TranscodeNodeURL:       s.TranscodeNodeURL,
+		TranscodeTransportID:   s.TranscodeTransportID,
+		TranscodeRouteSet:      true,
+		SubtitleTrackIndex:     s.SubtitleTrackIndex,
+		SubtitleBurnIn:         s.SubtitleBurnIn,
+		SegmentDuration:        s.SegmentDuration,
 	}
 }
 
@@ -825,6 +949,8 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec
 	s.TargetAudioCodec = state.TargetAudioCodec
+	s.TargetAudioChannels = state.TargetAudioChannels
+	s.TargetAudioBitrateKbps = state.TargetAudioBitrateKbps
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.TranscodeNodeURL = state.TranscodeNodeURL
@@ -1084,6 +1210,34 @@ func (m *SessionManager) BeginTransport(sessionID string) error {
 	return nil
 }
 
+// SetRemoteTransport records whether this session's media bytes are served by
+// another node (a proxy), rather than by a transport request this server
+// handles itself.
+//
+// A locally-served stream is protected from the idle reaper by
+// BeginTransport/EndTransport around the serve call. A proxy-served stream
+// never enters that path: the client talks to the proxy directly, so from this
+// server's point of view a healthy multi-hour stream looks identical to an
+// abandoned session, and a heartbeat gap longer than the active grace would
+// reap it mid-playback — after which progress, stop, and replan all fail with
+// session-not-found while bytes are still flowing.
+//
+// This marks the session as remotely transported for its whole lifetime rather
+// than per-request, because there is no request to bracket. Progress
+// heartbeats still drive UI liveness; this only prevents reaping.
+func (m *SessionManager) SetRemoteTransport(sessionID string, remote bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.remoteTransport = remote
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // EndTransport decrements the count of in-flight media transport requests for
 // the session and refreshes its activity timestamp.
 func (m *SessionManager) EndTransport(sessionID string) error {
@@ -1264,6 +1418,7 @@ func (m *SessionManager) CleanInactive(activeIdle, pausedIdle time.Duration) []*
 		if s.activeTransportCount > 0 {
 			continue
 		}
+		activeIdle, pausedIdle := remoteTransportGrace(s, activeIdle, pausedIdle)
 		if m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle) {
 			cp := *s
 			expired = append(expired, &cp)
@@ -1294,7 +1449,32 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	return !m.sessionIsInactiveLocked(s, now, m.activeGrace, m.pausedGrace)
+	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace)
+}
+
+// remoteTransportGrace widens the idle windows for a session whose bytes are
+// served by another node.
+//
+// A locally-served stream is held open by an in-flight transport request. A
+// proxy-served one has no such request here, so it is protected only by the
+// client's progress heartbeats — and a gap longer than the active grace would
+// reap it while media is still flowing. The windows are widened rather than
+// made infinite: there is no absolute session lifetime cap in this manager, so
+// unconditional immunity would leak a session forever whenever a client
+// disappears without stopping. A client that has gone quiet for this long has
+// genuinely stopped watching.
+func remoteTransportGrace(s *Session, activeIdle, pausedIdle time.Duration) (time.Duration, time.Duration) {
+	if s == nil || !s.remoteTransport {
+		return activeIdle, pausedIdle
+	}
+	if activeIdle > 0 && activeIdle < remoteTransportIdleGrace {
+		activeIdle = remoteTransportIdleGrace
+	}
+	if pausedIdle > 0 && pausedIdle < remoteTransportIdleGrace {
+		pausedIdle = remoteTransportIdleGrace
+	}
+	return activeIdle, pausedIdle
 }
 
 func (m *SessionManager) sessionIsInactiveLocked(s *Session, now time.Time, activeIdle, pausedIdle time.Duration) bool {

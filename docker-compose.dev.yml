@@ -123,7 +123,6 @@ services:
       - silo-dev-plugins:/var/lib/silo/plugins
       - silo-dev-compat:/var/lib/silo/compat
       - silo-dev-transcode:/tmp/silo-transcode
-      - silo-dev-audiobook-covers:/var/lib/silo/audiobook-covers
       - ${MEDIA_ROOT:-/tmp/silo-dev-media}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
     depends_on:
       postgres:
@@ -169,7 +168,6 @@ services:
 
 volumes:
   silo-dev-air-tmp:
-  silo-dev-audiobook-covers:
   silo-dev-compat:
   silo-dev-go-build:
   silo-dev-go-mod:

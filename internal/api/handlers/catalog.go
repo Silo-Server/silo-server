@@ -59,6 +59,16 @@ type catalogResponse struct {
 	Items             []itemListResponse `json:"items"`
 	Snapshot          string             `json:"snapshot,omitempty"`
 	SearchDiagnostics *searchDiagnostics `json:"search_diagnostics,omitempty"`
+	// EffectiveSort reports the order a collection source actually resolved in
+	// once the viewer's saved override and the collection's configured default
+	// were applied. Omitted for non-collection sources and when the collection
+	// resolved in its own source order.
+	EffectiveSort *effectiveSortResponse `json:"effective_sort,omitempty"`
+}
+
+type effectiveSortResponse struct {
+	Field string `json:"field"`
+	Order string `json:"order"`
 }
 
 // searchDiagnostics is an additive, per-query observability object emitted on
@@ -244,6 +254,11 @@ func (h *CatalogHandler) writeCatalogResponse(w http.ResponseWriter, result *cat
 		}
 	}
 
+	var effectiveSort *effectiveSortResponse
+	if field := strings.TrimSpace(result.EffectiveSort.Field); field != "" {
+		effectiveSort = &effectiveSortResponse{Field: field, Order: result.EffectiveSort.Order}
+	}
+
 	writeJSON(w, http.StatusOK, catalogResponse{
 		Total:             result.Total,
 		TotalExact:        result.TotalExact && !groupedByWork,
@@ -251,6 +266,7 @@ func (h *CatalogHandler) writeCatalogResponse(w http.ResponseWriter, result *cat
 		Items:             items,
 		Snapshot:          snapshot,
 		SearchDiagnostics: diag,
+		EffectiveSort:     effectiveSort,
 	})
 }
 

@@ -200,7 +200,7 @@ func (r *LibraryCollectionRepository) Create(ctx context.Context, input CreateLi
 		input.SortConfig = json.RawMessage(`{}`)
 	}
 	if input.Visibility == "" {
-		input.Visibility = "visible"
+		input.Visibility = LibraryCollectionVisibilityVisible
 	}
 	if input.CollectionType == "" {
 		input.CollectionType = "manual"

@@ -10,8 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // withCompatSession attaches a compat session carrying tok to req, so the
@@ -78,6 +81,77 @@ func TestGenerateFullManifest_HLSVersionForResumeStartTag(t *testing.T) {
 				t.Fatalf("EXT-X-START presence = %v, want %v; manifest:\n%s", hasStart, tc.wantStart, got)
 			}
 		})
+	}
+}
+
+func TestShouldGenerateCompatFullManifestBoundsSegmentCount(t *testing.T) {
+	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
+	if !shouldGenerateCompatFullManifest(short, 2) {
+		t.Fatal("historical 50,000-segment compatibility manifest should remain supported")
+	}
+
+	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
+	if shouldGenerateCompatFullManifest(long, 2) {
+		t.Fatal("long compatibility playback should use FFmpeg's bounded real manifest")
+	}
+}
+
+func TestCompatInitialTranscodePositionKeepsResumeNearRequestedSegment(t *testing.T) {
+	short := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 100_000}}
+	seek, segment := compatInitialTranscodePosition(short, 2, 17.3)
+	if seek != 17.3 || segment != 8 {
+		t.Fatalf("bounded manifest position = (%v, %d), want (17.3, 8)", seek, segment)
+	}
+
+	long := PlaybackMediaSource{Version: catalog.FileVersion{Duration: 1_000_000}}
+	seek, segment = compatInitialTranscodePosition(long, 2, 17.3)
+	if seek != 17.3 || segment != 8 {
+		t.Fatalf("real manifest position = (%v, %d), want (17.3, 8)", seek, segment)
+	}
+}
+
+func TestBuildProxyRedirectURLRequestsSourceAlignedCompatManifest(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	redirectURL, err := h.buildProxyRedirectURL(
+		"play-1",
+		"upstream-1",
+		string(playback.PlayTranscode),
+		&models.MediaFile{FilePath: "/media/movie.mkv"},
+		PlaybackMediaSource{},
+		"http://transcode-1",
+		0,
+		&nodepool.Node{URL: "http://proxy-1"},
+	)
+	if err != nil {
+		t.Fatalf("buildProxyRedirectURL: %v", err)
+	}
+	if !strings.HasSuffix(redirectURL, "/master.m3u8?"+playback.SourceTimelineQueryParam+"=1") {
+		t.Fatalf("redirect URL = %q, want source-timeline opt-in", redirectURL)
+	}
+}
+
+func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	redirectURL, err := h.buildProxyRedirectURL(
+		"play-1",
+		"upstream-1",
+		string(playback.PlayRemux),
+		&models.MediaFile{FilePath: "/media/book.m4b", BaseType: "audiobook", CodecAudio: "aac"},
+		PlaybackMediaSource{},
+		"",
+		0,
+		&nodepool.Node{URL: "http://proxy-1"},
+	)
+	if err != nil {
+		t.Fatalf("buildProxyRedirectURL: %v", err)
+	}
+	token := strings.TrimPrefix(redirectURL, "http://proxy-1/stream/remux/")
+	claims, err := streamtoken.Verify(token, h.JWTSecret)
+	if err != nil {
+		t.Fatalf("verify redirect token: %v", err)
+	}
+	if !claims.AudioOnly {
+		t.Fatalf("audio-only remux claim = false: %#v", claims)
 	}
 }
 

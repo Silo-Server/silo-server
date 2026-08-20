@@ -3,6 +3,9 @@ import {
   createSidebarPinsOptimisticMutation,
   parseSidebarPins,
   rollbackSidebarPinsOptimisticMutation,
+  setNavigationShortcutPresence,
+  sidebarPinsToShortcuts,
+  toggleNavigationShortcut,
   toggleSidebarPins,
 } from "./sidebarPins";
 
@@ -28,6 +31,94 @@ describe("sidebar pin helpers", () => {
       parseSidebarPins('{"42":[{"type":"collection","id":"col-1","label":"Pinned Horror"}]}'),
     ).toEqual({
       "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }],
+    });
+  });
+
+  it("groups the canonical cross-client shortcut catalog for the web sidebar", () => {
+    expect(
+      parseSidebarPins({
+        items: [
+          { type: "library", library_id: 42, label: "Movies" },
+          { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
+          {
+            type: "collection",
+            library_id: 42,
+            collection_id: "horror",
+            label: "Horror",
+          },
+          { type: "collection", collection_id: "global", label: "Global" },
+        ],
+      }),
+    ).toEqual({
+      "42": [
+        { type: "section", id: "recent", label: "Recent" },
+        { type: "collection", id: "horror", label: "Horror" },
+      ],
+    });
+  });
+
+  it("serializes grouped sidebar pins into canonical shortcuts", () => {
+    expect(
+      sidebarPinsToShortcuts({
+        "42": [
+          { type: "section", id: "recent", label: "Recent" },
+          { type: "collection", id: "horror", label: "Horror" },
+        ],
+      }),
+    ).toEqual({
+      items: [
+        { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
+        {
+          type: "collection",
+          library_id: 42,
+          collection_id: "horror",
+          label: "Horror",
+        },
+      ],
+    });
+  });
+
+  it("toggles one sidebar target without dropping other shared shortcuts", () => {
+    const current = {
+      items: [
+        { type: "library", library_id: 42, label: "Movies" },
+        { type: "collection", collection_id: "global", label: "Global" },
+      ],
+    };
+    expect(
+      toggleNavigationShortcut(current, 42, {
+        type: "section",
+        id: "recent",
+        label: "Recent",
+      }),
+    ).toEqual({
+      items: [
+        { type: "library", library_id: 42, label: "Movies" },
+        { type: "collection", collection_id: "global", label: "Global" },
+        { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
+      ],
+    });
+  });
+
+  it("sets desired presence and refreshes a label without reordering", () => {
+    const target = {
+      type: "section" as const,
+      library_id: 42,
+      section_id: "recent",
+      label: "Recently Added",
+    };
+    const current = {
+      items: [
+        { type: "library", library_id: 42, label: "Movies" },
+        { ...target, label: "Recent" },
+      ],
+    };
+
+    expect(setNavigationShortcutPresence(current, target, true)).toEqual({
+      items: [{ type: "library", library_id: 42, label: "Movies" }, target],
+    });
+    expect(setNavigationShortcutPresence(current, target, false)).toEqual({
+      items: [{ type: "library", library_id: 42, label: "Movies" }],
     });
   });
 

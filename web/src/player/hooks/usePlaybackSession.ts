@@ -1,21 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import { PlayerFetchError, playerFetch } from "../player-fetch";
-import { describeTranscodingPolicyError } from "../playback-errors";
+import type { PlayerConfig } from "../context/PlayerConfigContext";
+import { playerFetch } from "../player-fetch";
+import { describePlanTerminal, describePlaybackTransportError } from "../playback-errors";
+import { useCodecDetection } from "./useCodecDetection";
 import {
-  useCodecDetection,
-  QUALITY_TO_RESOLUTION,
-  RESOLUTION_ORDER,
-  matchByTraits,
-  getPlaybackEnvironmentSnapshot,
-} from "./useCodecDetection";
+  buildClientCapabilitiesV3,
+  buildClientPlaybackContextV3,
+  detectBandwidthEstimateKbpsV3,
+  detectMeteredV3,
+} from "../client-context-v3";
+import { reportRouteEventV3 } from "../route-events-v3";
 import { buildPlayerStreamUrl } from "../stream-url";
+import { randomUUID } from "@/lib/uuid";
+import {
+  FEATURE_OUTPUT_CHANGE_V3,
+  MAX_ATTEMPT_COUNT_V3,
+  MAX_ATTEMPTED_PLAN_KEYS_V3,
+  QUALITY_ORIGINAL_V3,
+  type DecisionResponseV3,
+  type FailureV3,
+  type PlanV3,
+  type RouteEventNameV3,
+  type SubtitleInventoryItemV3,
+} from "../protocol-v3";
+import {
+  buildReplanRequestV3,
+  buildStartRequestV3,
+  routeEventPlanIdentityV3,
+  type ReplanOptions,
+} from "../playback-session-wire-v3";
 import type {
-  ChangeAudioResponse,
-  PlaybackSessionPlaybackInfo,
-  PlaybackSessionResponse,
-  PlaybackTransportRestart,
-  PlayMethod,
   PlayerFileVersion,
   PlayerPlaybackVariant,
   PlayerSubtitleInfo,
@@ -23,18 +38,30 @@ import type {
 } from "../types";
 
 interface PlaybackSessionState {
+  /**
+   * The server's plan, verbatim. It is the single source of truth for the
+   * stream URL, the timeline, the selected tracks, the subtitle inventory and
+   * the quality menu — the client derives none of those itself any more.
+   */
+  plan: PlanV3 | null;
+  /**
+   * Bumped every time a new plan is adopted. Consumers key stream-reload
+   * effects on it rather than on object identity.
+   */
+  planRevision: number;
   streamUrl: string | null;
-  playMethod: PlayMethod | null;
   sessionId: string | null;
+  playbackAttemptId: string | null;
   mediaFileId: number | null;
   initialPosition: number;
   audioTrackIndex: number;
   durationSeconds: number | null;
   subtitleUrls: PlayerSubtitleInfo[];
-  playbackInfo: PlaybackSessionPlaybackInfo | null;
-  transportRestart: PlaybackTransportRestart | null;
+  qualityPreference: string;
+  shouldAutoPlay: boolean;
   loading: boolean;
   replacing: boolean;
+  replanning: boolean;
   errorTitle: string | null;
   error: string | null;
 }
@@ -44,135 +71,150 @@ interface PlaybackSessionErrorState {
   message: string;
 }
 
-interface DownloadedSubtitle {
-  id: number;
-  media_file_id: number;
-  provider: string;
-  language: string;
-  format: string;
-  release_name: string;
-  score: number;
-  hearing_impaired: boolean;
-}
-
-interface UsePlaybackSessionResult extends PlaybackSessionState {
+export interface UsePlaybackSessionResult extends PlaybackSessionState {
+  /** Starts a fresh session against another file (edition/version switch). */
   switchVersion: (fileId: number, currentPosition: number) => void;
+  /** `track_change` replan selecting another audio track by combined index. */
   switchAudioTrack: (index: number, currentPosition: number) => void;
-  refreshSubtitles: () => void;
+  /**
+   * `track_change` replan selecting (or clearing) the server-side subtitle
+   * track. Only needed for tracks the server has to render — burn-in and
+   * conversion. Sidecar tracks are fetched from the plan's inventory and drawn
+   * by the client without involving the server.
+   */
+  changeSubtitleTrack: (combinedIndex: number | null, currentPosition: number) => void;
+  /** `quality_change` replan for a label taken from `plan.available_qualities`. */
+  changeQuality: (label: string, currentPosition: number) => void;
+  /** `failure_recovery` replan after the client could not play the plan. */
+  recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
+  /** `seek_reanchor` replan when the target lies outside the seekable window. */
+  reanchorSeek: (positionSeconds: number) => void;
+  /** Re-reads the subtitle inventory by replanning with the selection unchanged. */
+  refreshSubtitles: (currentPosition: number) => void;
+  /** Folds a realtime-delivered inventory entry in without a server round trip. */
+  applySubtitleTrack: (track: SubtitleInventoryItemV3) => void;
+  /** Keeps transport state current for output-capability replans. */
+  updatePlaybackState: (positionSeconds: number, playing: boolean) => void;
+  /** Reports a playback route event as a diagnostic. Never affects playback. */
+  reportEvent: (
+    event: RouteEventNameV3,
+    extra?: {
+      failureClassification?: string;
+      fallbackReason?: string;
+      diagnostics?: Record<string, string | number | boolean | undefined | null>;
+    },
+  ) => void;
 }
 
-export interface StartPlaybackRequestPayload {
-  file_id: number;
-  profile_id: string;
-  start_position?: number;
-  audio_track_index?: number;
-  codecs_video: string[];
-  codecs_audio: string[];
-  containers: string[];
-  max_resolution: string;
-  hdr: boolean;
-  supports_bitmap_subtitle_burn_in: boolean;
+function subtitleSourceOf(source: string): PlayerSubtitleInfo["source"] {
+  switch (source) {
+    case "external":
+    case "embedded":
+    case "downloaded":
+      return source;
+    default:
+      return undefined;
+  }
 }
 
-export function buildStartPlaybackRequestPayload({
-  targetFileId,
-  profileId,
-  position,
-  forceInitialPosition,
-  codecsVideo,
-  codecsAudio,
-  containers,
-  maxResolution,
-  hdr,
-  explicitAudioTrackIndex,
-}: {
-  targetFileId: number;
-  profileId: string;
-  position: number;
-  forceInitialPosition: boolean;
-  codecsVideo: string[];
-  codecsAudio: string[];
-  containers: string[];
-  maxResolution: string;
-  hdr: boolean;
-  explicitAudioTrackIndex?: number | null;
-}): StartPlaybackRequestPayload {
-  const payload: StartPlaybackRequestPayload = {
-    file_id: targetFileId,
-    profile_id: profileId,
-    codecs_video: codecsVideo,
-    codecs_audio: codecsAudio,
-    containers,
-    max_resolution: maxResolution,
-    hdr,
-    supports_bitmap_subtitle_burn_in: true,
+/**
+ * Maps the plan's subtitle inventory onto the player's track shape.
+ *
+ * `index` is the server's combined ordinal, copied verbatim: it is the identity
+ * the client echoes back on a track change, and the key every subtitle consumer
+ * in the player looks tracks up by. Entries the server publishes as
+ * `burn_in_only` have no URL and are kept anyway — they are selectable, and
+ * selecting one is what asks the server to burn them in.
+ */
+function mapSubtitleInventory(
+  inventory: SubtitleInventoryItemV3[],
+  mediaFileId: number,
+  config: PlayerConfig,
+): PlayerSubtitleInfo[] {
+  const token = config.getAccessToken();
+  return inventory.map((item) => ({
+    index: item.combined_index,
+    media_file_id: mediaFileId,
+    track_id: item.track_id,
+    burn_in_only: item.delivery === "burn_in_only",
+    language: item.language ?? "",
+    codec: item.codec,
+    label: item.label ?? item.language ?? `Track ${item.combined_index + 1}`,
+    source: subtitleSourceOf(item.source),
+    forced: item.forced,
+    hearing_impaired: item.hearing_impaired,
+    url: item.url ? buildPlayerStreamUrl(config.apiBaseUrl, item.url, token) : "",
+    font_bundle_url: item.font_bundle_url
+      ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
+      : undefined,
+  }));
+}
+
+/**
+ * Projects a plan onto the session state consumers render from.
+ *
+ * `durationSeconds` comes from `plan.source.duration_seconds` and nowhere else:
+ * the spec forbids substituting the playback engine's reported duration, which
+ * on an HLS copy remux is only the length produced so far.
+ */
+function planToSessionState(
+  plan: PlanV3,
+  sessionId: string | null,
+  playbackAttemptId: string,
+  planRevision: number,
+  qualityPreference: string,
+  shouldAutoPlay: boolean,
+  config: PlayerConfig,
+): PlaybackSessionState {
+  return {
+    plan,
+    planRevision,
+    streamUrl: buildPlayerStreamUrl(config.apiBaseUrl, plan.stream.url, config.getAccessToken()),
+    sessionId,
+    playbackAttemptId,
+    mediaFileId: plan.effective_media_file_id,
+    initialPosition: plan.timeline.player_start_seconds,
+    audioTrackIndex: plan.selected_tracks.audio?.index ?? 0,
+    durationSeconds: plan.source.duration_seconds ?? null,
+    subtitleUrls: mapSubtitleInventory(
+      plan.subtitle.inventory,
+      plan.effective_media_file_id,
+      config,
+    ),
+    qualityPreference,
+    shouldAutoPlay,
+    loading: false,
+    replacing: false,
+    replanning: false,
+    errorTitle: null,
+    error: null,
   };
+}
 
-  if (forceInitialPosition || position > 0) {
-    payload.start_position = position;
+/**
+ * Turns a v3 decision into an error state.
+ *
+ * A conforming decision has exactly two shapes: a plan or a terminal. The
+ * fallback below is defensive handling for a malformed or future response; it
+ * is not a third protocol outcome.
+ */
+function describeDecisionWithoutPlan(decision: DecisionResponseV3): PlaybackSessionErrorState {
+  if (decision.terminal) {
+    return describePlanTerminal(decision.terminal);
   }
-  if (explicitAudioTrackIndex != null && explicitAudioTrackIndex >= 0) {
-    payload.audio_track_index = explicitAudioTrackIndex;
-  }
-
-  return payload;
+  return {
+    title: "Playback unavailable",
+    message: "This server is not accepting playback requests right now.",
+  };
 }
 
 function describePlaybackSessionError(
   error: unknown,
   fallbackMessage: string,
 ): PlaybackSessionErrorState {
-  const policyError = describeTranscodingPolicyError(error);
-  if (policyError) {
-    return policyError;
-  }
-
-  if (error instanceof PlayerFetchError) {
-    if (
-      error.status === 404 &&
-      error.code === "not_found" &&
-      error.message === "Source media file is missing"
-    ) {
-      return {
-        title: "This video is no longer available",
-        message:
-          "The file needed to play it can't be found right now. Go back and try another version if one is available.",
-      };
-    }
-
-    if (error.status === 404 && error.code === "not_found") {
-      return {
-        title: "This item is no longer available",
-        message:
-          "The file needed to play this item can't be found right now. Go back and try another version if one is available.",
-      };
-    }
-
-    if (error.status === 403) {
-      return {
-        title: "Playback unavailable",
-        message: "You do not have permission to play this item.",
-      };
-    }
-
-    if (error.status >= 500) {
-      return {
-        title: "Playback unavailable",
-        message: "Silo could not start playback right now. Please try again.",
-      };
-    }
-
-    return {
-      title: "Playback unavailable",
-      message: error.message || fallbackMessage,
-    };
-  }
-
-  if (error instanceof Error && error.message === "No compatible file version found") {
-    return {
-      title: "No compatible version found",
-      message: "Silo could not find a playable version for this device.",
-    };
+  const transportError = describePlaybackTransportError(error);
+  if (transportError) {
+    return transportError;
   }
 
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -189,10 +231,14 @@ function describePlaybackSessionError(
 }
 
 /**
- * Manages the playback session lifecycle:
- * 1. On mount: detect codecs → select best version → POST /playback/start → get stream_url
- * 2. switchVersion(): stop current session → start new session at same position
- * 3. On unmount: DELETE /playback/{session_id} + keepalive fallback
+ * Owns the v3 playback session: the start decision, the plan it produced, and
+ * every replan that supersedes it.
+ *
+ * 1. On mount: probe the browser → POST `/playback/start` with a v3 request →
+ *    adopt the returned plan.
+ * 2. Quality, track and recovery changes go to `/playback/{id}/replan`; each
+ *    answers with a whole new plan, never a patch.
+ * 3. On unmount: DELETE `/playback/{session_id}` with a keepalive fallback.
  */
 export function usePlaybackSession(
   requestKey: string,
@@ -202,120 +248,194 @@ export function usePlaybackSession(
   initialPosition = 0,
   forceInitialPosition = false,
   qualityPreference?: string | null,
+  maxBitrateKbps?: number | null,
   resumeHints?: ResumeHints,
   explicitAudioTrackIndex?: number | null,
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
-  const { capabilities, selectBestVersion } = useCodecDetection();
+  const probe = useCodecDetection();
+  const clientCapabilities = useMemo(() => buildClientCapabilitiesV3(probe), [probe]);
+  const clientPlaybackContext = useMemo(() => buildClientPlaybackContextV3(probe), [probe]);
+  const capabilityRequestKey = useMemo(
+    () => JSON.stringify([clientCapabilities, clientPlaybackContext]),
+    [clientCapabilities, clientPlaybackContext],
+  );
+
   const [state, setState] = useState<PlaybackSessionState>({
+    plan: null,
+    planRevision: 0,
     streamUrl: null,
-    playMethod: null,
     sessionId: null,
+    playbackAttemptId: null,
     mediaFileId: null,
     initialPosition: 0,
     audioTrackIndex: 0,
     durationSeconds: null,
     subtitleUrls: [],
-    playbackInfo: null,
-    transportRestart: null,
+    qualityPreference: qualityPreference?.trim() || "auto",
+    shouldAutoPlay: true,
     loading: true,
     replacing: false,
+    replanning: false,
     errorTitle: null,
     error: null,
   });
 
   const sessionIdRef = useRef<string | null>(null);
-  const audioSwitchRevisionRef = useRef(0);
+  const planRef = useRef<PlanV3 | null>(null);
+  const planRevisionRef = useRef(0);
+  const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
   const activeRequestKeyRef = useRef<string | null>(null);
+  const activeCapabilityRequestKeyRef = useRef<string | null>(null);
+  const playbackPositionRef = useRef(initialPosition);
+  const startIntentRef = useRef({
+    position: initialPosition,
+    forceStartPosition: forceInitialPosition,
+  });
+  const hasAdoptedPlanRef = useRef(false);
+  const awaitingInitialPlayerPositionRef = useRef(false);
+  const playbackPlayingRef = useRef(true);
+  const playbackStartedRef = useRef(false);
   const switchingRef = useRef(false);
   const loadSequenceRef = useRef(0);
+
+  // v3 identity. `playback_attempt_id` spans one whole attempt chain (a start
+  // and every replan that follows it); `plan_attempt_id` identifies the single
+  // plan currently on screen. Both are minted by the client — the server mints
+  // `plan_id` and `plan_attempt_key`, which the client only ever echoes.
+  const playbackAttemptIdRef = useRef<string | null>(null);
+  const planAttemptIdRef = useRef<string>(randomUUID());
+  const attemptedPlanKeysRef = useRef<string[]>([]);
+  const attemptCountRef = useRef(1);
+  const replanInFlightRef = useRef(false);
+  const pendingReplanRef = useRef<{
+    options: ReplanOptions;
+    loadSequence: number;
+    retireSessionOnRefusal: boolean;
+    resolve: (adopted: boolean) => void;
+    planId: string;
+  } | null>(null);
+  const issueReplanRef = useRef<
+    (options: ReplanOptions, retireSessionOnRefusal?: boolean) => Promise<boolean>
+  >(async () => false);
+  const qualityRef = useRef(qualityPreference?.trim() || "auto");
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  const createSessionState = useCallback(
-    async (targetFileId: number, position: number, forceStartPosition: boolean) => {
-      const profileId = config.getProfileId();
+  const reportEvent = useCallback(
+    (
+      event: RouteEventNameV3,
+      extra?: {
+        failureClassification?: string;
+        fallbackReason?: string;
+        diagnostics?: Record<string, string | number | boolean | undefined | null>;
+      },
+    ) => {
+      const attemptId = playbackAttemptIdRef.current;
+      if (!attemptId) return;
+      const plan = planRef.current;
+      void reportRouteEventV3(config, {
+        event,
+        playbackAttemptId: attemptId,
+        ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
+        ...extra,
+      });
+    },
+    [config],
+  );
 
-      // Cap max_resolution with quality preference (use the lower of the two).
-      let effectiveMaxRes = capabilities.max_resolution;
-      if (qualityPreference && qualityPreference !== "auto") {
-        const prefRes = QUALITY_TO_RESOLUTION[qualityPreference];
-        if (prefRes) {
-          const screenRank = RESOLUTION_ORDER[effectiveMaxRes] ?? 0;
-          const prefRank = RESOLUTION_ORDER[prefRes] ?? 0;
-          if (prefRank > 0 && prefRank < screenRank) {
-            effectiveMaxRes = prefRes;
-          }
+  /**
+   * Adopts a decision as the live session, or surfaces its terminal.
+   * Returns whether a plan was adopted.
+   */
+  const adoptDecision = useCallback(
+    (decision: DecisionResponseV3): boolean => {
+      serverFeaturesRef.current = decision.server_features;
+      const plan = decision.playback_plan;
+      if (!plan) {
+        const failure = describeDecisionWithoutPlan(decision);
+        if (decision.terminal) {
+          reportEvent("terminal", { failureClassification: decision.terminal.reason });
         }
+        // The plan already on screen is left alone. A refused replan surfaces
+        // its reason without taking away the stream that is still playing; a
+        // refused start had no stream to take away in the first place.
+        setState((current) => ({
+          ...current,
+          loading: false,
+          replacing: false,
+          replanning: false,
+          errorTitle: failure.title,
+          error: failure.message,
+        }));
+        return false;
       }
 
-      const body = JSON.stringify(
-        buildStartPlaybackRequestPayload({
-          targetFileId,
-          profileId: profileId ?? "",
-          position,
-          forceInitialPosition: forceStartPosition,
-          codecsVideo: capabilities.codecs_video,
-          codecsAudio: capabilities.codecs_audio,
-          containers: capabilities.containers,
-          maxResolution: effectiveMaxRes,
-          hdr: capabilities.hdr,
-          explicitAudioTrackIndex,
-        }),
-      );
+      const sessionId = plan.session_id ?? decision.session_id ?? sessionIdRef.current;
+      planAttemptIdRef.current = randomUUID();
+      planRef.current = plan;
+      sessionIdRef.current = sessionId ?? null;
+      planRevisionRef.current += 1;
+      hasAdoptedPlanRef.current = true;
+      if (
+        Number.isFinite(plan.timeline.source_start_seconds) &&
+        plan.timeline.source_start_seconds >= 0
+      ) {
+        // Replan positions use the source timeline. Seed it immediately so an
+        // output refresh before the first timeupdate preserves server-resolved
+        // resume state instead of falling back to the caller's default zero.
+        playbackPositionRef.current = plan.timeline.source_start_seconds;
+        awaitingInitialPlayerPositionRef.current = plan.timeline.source_start_seconds > 0;
+      }
 
-      const environment = getPlaybackEnvironmentSnapshot();
-      console.info("[playback/start] client capabilities", {
-        targetFileId,
-        qualityPreference: qualityPreference ?? "auto",
-        effectiveMaxRes,
-        capabilities,
-        environment,
-      });
-
-      const session = await playerFetch<PlaybackSessionResponse>(config, "/playback/start", {
-        method: "POST",
-        body,
-      });
-
-      // Append token as query param for native media elements
-      // that can't set Authorization headers.
-      const token = config.getAccessToken();
-      const restoredPosition = session.position ?? 0;
-
-      return {
-        streamUrl: buildPlayerStreamUrl(
-          config.apiBaseUrl,
-          session.stream_url,
-          token,
-          session.play_method,
-          restoredPosition,
+      setState(
+        planToSessionState(
+          plan,
+          sessionId ?? null,
+          playbackAttemptIdRef.current ?? "",
+          planRevisionRef.current,
+          qualityRef.current,
+          playbackPlayingRef.current,
+          config,
         ),
-        playMethod: session.play_method,
-        sessionId: session.session_id,
-        mediaFileId: session.media_file_id,
-        initialPosition: restoredPosition,
-        audioTrackIndex: session.audio_track_index ?? 0,
-        durationSeconds: session.duration_seconds ?? null,
-        subtitleUrls: (session.subtitle_urls ?? []).map((s) => ({
-          ...s,
-          url: buildPlayerStreamUrl(config.apiBaseUrl, s.url, token, "direct", 0),
-          font_bundle_url: s.font_bundle_url
-            ? buildPlayerStreamUrl(config.apiBaseUrl, s.font_bundle_url, token, "direct", 0)
-            : undefined,
-        })),
-        playbackInfo: session.playback_info ?? null,
-        transportRestart: null,
-        loading: false,
-        replacing: false,
-        errorTitle: null,
-        error: null,
-      } satisfies PlaybackSessionState;
+      );
+      reportEvent("plan_selected");
+      return true;
     },
-    [config, capabilities, explicitAudioTrackIndex, qualityPreference],
+    [config, reportEvent],
+  );
+
+  const requestStart = useCallback(
+    async (
+      targetFileId: number,
+      position: number,
+      forceStartPosition: boolean,
+      playbackAttemptId: string,
+    ): Promise<DecisionResponseV3> => {
+      const body = buildStartRequestV3({
+        fileId: targetFileId,
+        profileId: config.getProfileId() ?? "",
+        playbackAttemptId,
+        qualityPreference: qualityRef.current,
+        position,
+        forceStartPosition,
+        explicitAudioTrackIndex,
+        metered: detectMeteredV3(),
+        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthCapKbps: maxBitrateKbps,
+        clientCapabilities,
+        clientPlaybackContext,
+      });
+
+      return playerFetch<DecisionResponseV3>(config, "/playback/start", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+    [clientCapabilities, clientPlaybackContext, config, explicitAudioTrackIndex, maxBitrateKbps],
   );
 
   const stopSession = useCallback(
@@ -327,37 +447,54 @@ export function usePlaybackSession(
     [config],
   );
 
+  const retireActiveSession = useCallback(
+    (expectedSessionId: string) => {
+      if (sessionIdRef.current !== expectedSessionId) return;
+      loadSequenceRef.current += 1;
+      void stopSession(expectedSessionId).catch(() => {
+        // Best effort — stale session will time out server-side.
+      });
+      planRef.current = null;
+      sessionIdRef.current = null;
+      planAttemptIdRef.current = randomUUID();
+      setState((current) => {
+        if (current.sessionId !== expectedSessionId) return current;
+        return {
+          ...current,
+          plan: null,
+          streamUrl: null,
+          sessionId: null,
+          mediaFileId: null,
+          initialPosition: 0,
+          audioTrackIndex: 0,
+          durationSeconds: null,
+          subtitleUrls: [],
+          loading: false,
+          replacing: false,
+          replanning: false,
+        };
+      });
+    },
+    [stopSession],
+  );
+
+  /**
+   * Picks which file to *request*. The server owns adaptation — this only
+   * expresses which edition the viewer is resuming, which is knowledge the
+   * server does not have.
+   */
   const selectFileId = useCallback(
     (preferredFileId?: number) => {
-      let selectedFileId: number | null | undefined = preferredFileId;
-      if (!selectedFileId && resumeHints?.lastFileId) {
+      if (preferredFileId) return preferredFileId;
+      if (resumeHints?.lastFileId) {
         const exact = versions.find((v) => v.file_id === resumeHints.lastFileId);
-        if (exact) selectedFileId = exact.file_id;
+        if (exact) return exact.file_id;
       }
-      if (!selectedFileId && resumeHints) {
-        const traitMatch = matchByTraits(versions, resumeHints);
-        if (traitMatch) selectedFileId = traitMatch.file_id;
-      }
-      if (!selectedFileId) {
-        selectedFileId = selectDefaultVariantFile(
-          playbackVariants,
-          versions,
-          resumeHints,
-          qualityPreference,
-          selectBestVersion,
-        );
-      }
-      if (!selectedFileId) {
-        const best = selectBestVersion(versions, qualityPreference);
-        if (!best) {
-          return null;
-        }
-        selectedFileId = best.file_id;
-      }
-
-      return selectedFileId;
+      const variantFileId = selectDefaultVariantFile(playbackVariants, versions, resumeHints);
+      if (variantFileId) return variantFileId;
+      return versions[0]?.file_id ?? null;
     },
-    [playbackVariants, qualityPreference, resumeHints, selectBestVersion, versions],
+    [playbackVariants, resumeHints, versions],
   );
 
   const loadSession = useCallback(
@@ -380,6 +517,18 @@ export function usePlaybackSession(
       const previousSessionId = sessionIdRef.current;
       const hasExistingSession = !!previousState.sessionId && !!previousState.streamUrl;
       const loadSequence = ++loadSequenceRef.current;
+      const previousAttempt = {
+        playbackAttemptId: playbackAttemptIdRef.current,
+        planAttemptId: planAttemptIdRef.current,
+        attemptedPlanKeys: [...attemptedPlanKeysRef.current],
+        attemptCount: attemptCountRef.current,
+      };
+      const restorePreviousAttempt = () => {
+        playbackAttemptIdRef.current = previousAttempt.playbackAttemptId;
+        planAttemptIdRef.current = previousAttempt.planAttemptId;
+        attemptedPlanKeysRef.current = previousAttempt.attemptedPlanKeys;
+        attemptCountRef.current = previousAttempt.attemptCount;
+      };
 
       setState((current) => ({
         ...current,
@@ -389,25 +538,80 @@ export function usePlaybackSession(
         error: hasExistingSession ? current.error : null,
       }));
 
+      // A start begins a new attempt chain: fresh attempt id, empty loop guard.
+      const playbackAttemptId = randomUUID();
+      playbackAttemptIdRef.current = playbackAttemptId;
+      attemptedPlanKeysRef.current = [];
+      attemptCountRef.current = 1;
+
+      const retirePreviousSession = (nextError?: { title: string; message: string }) => {
+        if (previousSessionId) {
+          void stopSession(previousSessionId).catch(() => {
+            // Best effort — stale session will time out server-side.
+          });
+        }
+        planRef.current = null;
+        sessionIdRef.current = null;
+        planAttemptIdRef.current = randomUUID();
+        setState((current) => ({
+          ...current,
+          plan: null,
+          streamUrl: null,
+          sessionId: null,
+          playbackAttemptId,
+          mediaFileId: null,
+          initialPosition: 0,
+          audioTrackIndex: 0,
+          durationSeconds: null,
+          subtitleUrls: [],
+          loading: false,
+          replacing: false,
+          replanning: false,
+          errorTitle: nextError?.title ?? current.errorTitle,
+          error: nextError?.message ?? current.error,
+        }));
+      };
+
       try {
         const selectedFileId = selectFileId(preferredFileId);
         if (!selectedFileId) {
-          throw new Error("No compatible file version found");
+          throw new Error("No playable version found");
         }
 
-        const nextState = await createSessionState(selectedFileId, position, forceStartPosition);
+        const decision = await requestStart(
+          selectedFileId,
+          position,
+          forceStartPosition,
+          playbackAttemptId,
+        );
 
         if (loadSequence !== loadSequenceRef.current) {
-          await stopSession(nextState.sessionId!).catch(() => {
-            // Best effort cleanup for stale session starts.
-          });
+          const staleSessionId = decision.playback_plan?.session_id ?? decision.session_id;
+          if (staleSessionId) {
+            await stopSession(staleSessionId).catch(() => {
+              // Best effort cleanup for stale session starts.
+            });
+          }
           return;
         }
 
-        sessionIdRef.current = nextState.sessionId;
-        setState(nextState);
-
-        if (previousSessionId && previousSessionId !== nextState.sessionId) {
+        const adopted = adoptDecision(decision);
+        if (!adopted && hasExistingSession && allowPreserveExistingSessionOnError) {
+          restorePreviousAttempt();
+          setState((current) => ({
+            ...current,
+            loading: false,
+            replacing: false,
+            errorTitle: previousState.errorTitle,
+            error: previousState.error,
+          }));
+          return;
+        }
+        if (!adopted) {
+          retirePreviousSession();
+          return;
+        }
+        if (adopted && previousSessionId && previousSessionId !== sessionIdRef.current) {
           void stopSession(previousSessionId).catch(() => {
             // Best effort — stale session will time out server-side.
           });
@@ -419,6 +623,7 @@ export function usePlaybackSession(
 
         if (hasExistingSession && allowPreserveExistingSessionOnError) {
           console.error(replacementErrorMessage, err);
+          restorePreviousAttempt();
           setState((current) => ({
             ...current,
             loading: false,
@@ -428,16 +633,10 @@ export function usePlaybackSession(
         }
 
         const nextError = describePlaybackSessionError(err, initialErrorMessage);
-        setState((current) => ({
-          ...current,
-          loading: false,
-          replacing: false,
-          errorTitle: nextError.title,
-          error: nextError.message,
-        }));
+        retirePreviousSession(nextError);
       }
     },
-    [createSessionState, selectFileId, stopSession],
+    [adoptDecision, requestStart, selectFileId, stopSession],
   );
 
   useEffect(() => {
@@ -445,6 +644,17 @@ export function usePlaybackSession(
       return;
     }
     activeRequestKeyRef.current = requestKey;
+    activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+    qualityRef.current = qualityPreference?.trim() || "auto";
+    playbackPositionRef.current = initialPosition;
+    startIntentRef.current = {
+      position: initialPosition,
+      forceStartPosition: forceInitialPosition,
+    };
+    hasAdoptedPlanRef.current = false;
+    awaitingInitialPlayerPositionRef.current = false;
+    playbackPlayingRef.current = true;
+    playbackStartedRef.current = false;
 
     void loadSession({
       preferredFileId: fileId,
@@ -454,7 +664,15 @@ export function usePlaybackSession(
       replacementErrorMessage: "Failed to replace playback request",
       initialErrorMessage: "Failed to start playback",
     });
-  }, [fileId, forceInitialPosition, initialPosition, loadSession, requestKey]);
+  }, [
+    capabilityRequestKey,
+    fileId,
+    forceInitialPosition,
+    initialPosition,
+    loadSession,
+    qualityPreference,
+    requestKey,
+  ]);
 
   // Clean up session on unmount.
   useEffect(() => {
@@ -483,101 +701,386 @@ export function usePlaybackSession(
     };
   }, [config]);
 
-  const refreshSubtitles = useCallback(() => {
-    const mediaFile = state.mediaFileId;
-    const sid = sessionIdRef.current;
-    if (!mediaFile || !sid) return;
-
-    (async () => {
-      try {
-        const resp = await playerFetch<{ subtitles: DownloadedSubtitle[] }>(
-          config,
-          `/subtitles/${mediaFile}`,
-        );
-        const downloaded = resp.subtitles ?? [];
-        if (downloaded.length === 0) return;
-
-        setState((prev) => {
-          // Filter out any previously added downloaded tracks
-          const existing = prev.subtitleUrls.filter((s) => s.source !== "downloaded");
-          const baseIndex = existing.length > 0 ? Math.max(...existing.map((s) => s.index)) + 1 : 0;
-          const token = config.getAccessToken();
-          const newTracks: PlayerSubtitleInfo[] = downloaded.map((dl, i) => ({
-            index: baseIndex + i,
-            media_file_id: mediaFile,
-            id: dl.id,
-            language: dl.language,
-            codec: dl.format,
-            label: `${dl.release_name} (${dl.provider})`,
-            source: "downloaded" as const,
-            hearing_impaired: dl.hearing_impaired,
-            url: buildPlayerStreamUrl(
-              config.apiBaseUrl,
-              `/stream/${sid}/subtitles/${baseIndex + i}`,
-              token,
-              "direct",
-              0,
-            ),
-          }));
-          return { ...prev, subtitleUrls: [...existing, ...newTracks] };
-        });
-      } catch {
-        // Best effort — subtitle refresh failure shouldn't disrupt playback.
+  /**
+   * Issues one replan and adopts whatever plan comes back.
+   *
+   * Replans are serialized server-side behind a lease, so a second concurrent
+   * request would earn a `409 replan_in_progress`; the in-flight guard here
+   * means the client never asks for one.
+   */
+  const replan = useCallback(
+    async function issueReplan(
+      options: ReplanOptions,
+      retireSessionOnRefusal = false,
+    ): Promise<boolean> {
+      const plan = planRef.current;
+      const sessionId = sessionIdRef.current;
+      const playbackAttemptId = playbackAttemptIdRef.current;
+      if (!plan || !sessionId || !playbackAttemptId) return false;
+      if (replanInFlightRef.current) {
+        const isPendingFailureRecovery =
+          options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
+        const isPendingOutputChange = options.operation === "output_change";
+        const queuedOperation = pendingReplanRef.current?.options.operation;
+        const hasQueuedFailureRecovery =
+          queuedOperation === "failure_recovery" || queuedOperation === "seek_failure_recovery";
+        const hasQueuedOutputChange = queuedOperation === "output_change";
+        if (
+          options.operation === "seek_reanchor" &&
+          hasQueuedOutputChange &&
+          pendingReplanRef.current
+        ) {
+          // The output refresh will open a fresh route at its position anyway;
+          // fold a later seek into that queued intent rather than silently
+          // dropping the viewer's newest target.
+          pendingReplanRef.current = {
+            ...pendingReplanRef.current,
+            options: {
+              ...pendingReplanRef.current.options,
+              positionSeconds: options.positionSeconds,
+            },
+          };
+          return false;
+        }
+        const isPendingUserIntent =
+          options.operation === "track_change" || options.operation === "quality_change";
+        const hasQueuedUserIntent =
+          queuedOperation === "track_change" || queuedOperation === "quality_change";
+        const shouldQueue =
+          isPendingFailureRecovery ||
+          (isPendingUserIntent && !hasQueuedFailureRecovery) ||
+          (isPendingOutputChange && !hasQueuedFailureRecovery && !hasQueuedUserIntent) ||
+          (options.operation === "seek_reanchor" &&
+            !hasQueuedFailureRecovery &&
+            !hasQueuedOutputChange &&
+            !hasQueuedUserIntent);
+        if (shouldQueue) {
+          pendingReplanRef.current?.resolve(false);
+          return new Promise<boolean>((resolve) => {
+            pendingReplanRef.current = {
+              options,
+              loadSequence: loadSequenceRef.current,
+              retireSessionOnRefusal,
+              resolve,
+              planId: plan.plan_id,
+            };
+          });
+        }
+        return false;
       }
-    })();
-  }, [config, state.mediaFileId]);
+
+      const isFailureRecovery =
+        options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
+      if (isFailureRecovery && attemptCountRef.current > MAX_ATTEMPT_COUNT_V3) {
+        setState((current) => ({
+          ...current,
+          replanning: false,
+          errorTitle: "Playback failed",
+          error: "Playback failed after repeated recovery attempts.",
+        }));
+        return false;
+      }
+
+      // On an intent change nothing failed, so the previous route stays
+      // eligible: the loop guard and the recovery counter reset. Only a
+      // recovery accumulates them.
+      const attemptedPlanKeys = isFailureRecovery
+        ? [...attemptedPlanKeysRef.current, plan.plan_attempt_key].slice(
+            -MAX_ATTEMPTED_PLAN_KEYS_V3,
+          )
+        : [];
+      const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
+
+      const body = buildReplanRequestV3({
+        ...options,
+        plan,
+        playbackAttemptId,
+        replanRequestId: randomUUID(),
+        planAttemptId: planAttemptIdRef.current,
+        qualityPreference: qualityRef.current,
+        attemptedPlanKeys,
+        attemptCount,
+        metered: detectMeteredV3(),
+        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthCapKbps: maxBitrateKbps,
+        clientCapabilities,
+        clientPlaybackContext,
+      });
+
+      const loadSequence = loadSequenceRef.current;
+      replanInFlightRef.current = true;
+      setState((current) => ({
+        ...current,
+        replanning: true,
+        errorTitle: null,
+        error: null,
+      }));
+
+      try {
+        const decision = await playerFetch<DecisionResponseV3>(
+          config,
+          `/playback/${sessionId}/replan`,
+          { method: "POST", body: JSON.stringify(body) },
+        );
+
+        // A version switch or a fresh start that landed while this was in
+        // flight owns the session now; this plan is already superseded.
+        if (loadSequence !== loadSequenceRef.current) return false;
+
+        if (isFailureRecovery) {
+          attemptedPlanKeysRef.current = attemptedPlanKeys;
+          attemptCountRef.current = Math.min(attemptCount + 1, MAX_ATTEMPT_COUNT_V3 + 1);
+        } else {
+          attemptedPlanKeysRef.current = [];
+          attemptCountRef.current = 1;
+        }
+
+        const adopted = adoptDecision(decision);
+        if (!adopted && retireSessionOnRefusal) {
+          const pending = pendingReplanRef.current;
+          const pendingCanValidateOutput =
+            pending?.loadSequence === loadSequence &&
+            pending.options.operation !== "seek_reanchor" &&
+            pending.options.operation !== "seek_failure_recovery";
+          if (pending && pendingCanValidateOutput) {
+            // The output refusal proves the predecessor route is incompatible.
+            // Let a queued planner-backed intent try the latest output evidence,
+            // but require it to retire the session too if it is refused. Frozen
+            // seek replans cannot validate new output evidence, so they must not
+            // postpone retirement.
+            pendingReplanRef.current = {
+              ...pending,
+              retireSessionOnRefusal: true,
+            };
+          } else {
+            retireActiveSession(sessionId);
+          }
+        }
+        return adopted;
+      } catch (err) {
+        if (loadSequence !== loadSequenceRef.current) return false;
+        if (retireSessionOnRefusal) {
+          console.error("Failed to refresh playback output", err);
+          return false;
+        }
+        const nextError = describePlaybackSessionError(err, "Failed to update playback");
+        setState((current) => ({
+          ...current,
+          replanning: false,
+          errorTitle: nextError.title,
+          error: nextError.message,
+        }));
+        return false;
+      } finally {
+        replanInFlightRef.current = false;
+        setState((current) => (current.replanning ? { ...current, replanning: false } : current));
+
+        const pendingReplan = pendingReplanRef.current;
+        pendingReplanRef.current = null;
+        if (pendingReplan?.loadSequence === loadSequenceRef.current) {
+          const recoveryAppliesToCurrentPlan =
+            pendingReplan.options.operation !== "failure_recovery" &&
+            pendingReplan.options.operation !== "seek_failure_recovery"
+              ? true
+              : pendingReplan.planId === planRef.current?.plan_id;
+          if (recoveryAppliesToCurrentPlan) {
+            // A capability change can queue behind a replan created by an older
+            // render. Dispatch through the latest callback so its request carries
+            // the current output evidence rather than the closed-over snapshot.
+            void issueReplanRef
+              .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
+              .then(pendingReplan.resolve);
+          } else {
+            pendingReplan.resolve(false);
+          }
+        } else {
+          pendingReplan?.resolve(false);
+        }
+      }
+    },
+    [
+      adoptDecision,
+      clientCapabilities,
+      clientPlaybackContext,
+      config,
+      maxBitrateKbps,
+      retireActiveSession,
+    ],
+  );
+  issueReplanRef.current = replan;
+
+  useEffect(() => {
+    if (
+      activeRequestKeyRef.current !== requestKey ||
+      activeCapabilityRequestKeyRef.current === capabilityRequestKey
+    ) {
+      return;
+    }
+    activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+
+    const plan = planRef.current;
+    const sessionId = sessionIdRef.current;
+    if (!plan || !sessionId) {
+      const startIntent = startIntentRef.current;
+      const resumeFromAdoptedPlan = hasAdoptedPlanRef.current;
+      void loadSession({
+        preferredFileId: fileId,
+        position: resumeFromAdoptedPlan ? playbackPositionRef.current : startIntent.position,
+        forceStartPosition: resumeFromAdoptedPlan ? true : startIntent.forceStartPosition,
+        allowPreserveExistingSessionOnError: false,
+        replacementErrorMessage: "Failed to refresh playback output",
+        initialErrorMessage: "Failed to refresh playback output",
+      });
+      return;
+    }
+
+    if (!serverFeaturesRef.current.includes(FEATURE_OUTPUT_CHANGE_V3)) {
+      return;
+    }
+
+    void replan(
+      {
+        operation: "output_change",
+        positionSeconds: playbackPositionRef.current,
+      },
+      true,
+    );
+  }, [capabilityRequestKey, fileId, loadSession, replan, requestKey, retireActiveSession]);
 
   const switchAudioTrack = useCallback(
     (index: number, currentPosition: number) => {
-      const sid = sessionIdRef.current;
-      if (!sid) return;
+      const plan = planRef.current;
+      if (!plan) return;
+      if (plan.selected_tracks.audio?.index === index) return;
+      void replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+        // Sending the index alone lets the server resolve the identity against
+        // the effective file; sending a mismatched pair would be rejected.
+        audio: { id: "", index },
+      });
+    },
+    [replan],
+  );
 
-      (async () => {
-        try {
-          const resp = await playerFetch<ChangeAudioResponse>(config, `/playback/${sid}/audio`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              audio_track_index: index,
-              position: currentPosition,
-            }),
-          });
+  const changeSubtitleTrack = useCallback(
+    (combinedIndex: number | null, currentPosition: number) => {
+      const plan = planRef.current;
+      if (!plan) return;
+      void replan({
+        operation: "track_change",
+        positionSeconds: currentPosition,
+        subtitle: combinedIndex == null ? null : { id: "", index: combinedIndex },
+      });
+    },
+    [replan],
+  );
 
-          const token = config.getAccessToken();
-          const nextStreamUrl = buildPlayerStreamUrl(
-            config.apiBaseUrl,
-            resp.stream_url,
-            token,
-            resp.play_method,
-            currentPosition,
+  const changeQuality = useCallback(
+    (label: string, currentPosition: number) => {
+      const normalized = label.trim() || QUALITY_ORIGINAL_V3;
+      const previousPreference = qualityRef.current;
+      qualityRef.current = normalized;
+      setState((current) => ({ ...current, qualityPreference: normalized }));
+      void replan({ operation: "quality_change", positionSeconds: currentPosition }).then(
+        (adopted) => {
+          if (adopted || qualityRef.current !== normalized) return;
+          qualityRef.current = previousPreference;
+          setState((current) =>
+            current.qualityPreference === normalized
+              ? { ...current, qualityPreference: previousPreference }
+              : current,
           );
-          audioSwitchRevisionRef.current += 1;
-          setState((prev) => ({
-            ...prev,
-            streamUrl: nextStreamUrl,
-            playMethod: resp.play_method,
-            audioTrackIndex: resp.audio_track_index,
-            playbackInfo: resp.playback_info ?? prev.playbackInfo,
-            initialPosition: currentPosition,
-            transportRestart: {
-              revision: audioSwitchRevisionRef.current,
-              streamUrl: nextStreamUrl,
-              playerStartSeconds: resp.player_start_seconds ?? currentPosition,
-              streamOriginSeconds: resp.stream_origin_seconds ?? resp.timeline_offset_seconds ?? 0,
-              canSeekAnywhere: resp.can_seek_anywhere ?? true,
-            },
-          }));
-        } catch (err) {
-          console.error("Failed to switch audio track:", err);
-        }
-      })();
+        },
+      );
+    },
+    [replan],
+  );
+
+  const recoverFromFailure = useCallback(
+    (failure: FailureV3, currentPosition: number) => {
+      reportEvent("plan_failed", {
+        failureClassification: failure.classification,
+        ...(failure.message ? { diagnostics: { message: failure.message } } : {}),
+      });
+      void replan({ operation: "failure_recovery", positionSeconds: currentPosition, failure });
+    },
+    [replan, reportEvent],
+  );
+
+  const reanchorSeek = useCallback(
+    (positionSeconds: number) => {
+      playbackPositionRef.current = positionSeconds;
+      awaitingInitialPlayerPositionRef.current = false;
+      reportEvent("seek_reanchor_requested");
+      void replan({ operation: "seek_reanchor", positionSeconds });
+    },
+    [replan, reportEvent],
+  );
+
+  /**
+   * Re-reads the subtitle inventory.
+   *
+   * There is no "refresh" operation in v3, and there does not need to be: a
+   * `track_change` that changes nothing returns a fresh plan — inventory
+   * included — without excluding the route already playing.
+   */
+  const refreshSubtitles = useCallback(
+    (currentPosition: number) => {
+      if (!planRef.current) return;
+      void replan({ operation: "track_change", positionSeconds: currentPosition });
+    },
+    [replan],
+  );
+
+  /**
+   * Folds a track the server pushed over the realtime socket into the plan's
+   * inventory at the ordinal the server assigned it. The ordinal is never
+   * derived client-side, which is why the payload carries the whole entry.
+   */
+  const applySubtitleTrack = useCallback(
+    (track: SubtitleInventoryItemV3) => {
+      const plan = planRef.current;
+      if (!plan) return;
+      const inventory = [
+        ...plan.subtitle.inventory.filter((item) => item.combined_index !== track.combined_index),
+        track,
+      ].sort((a, b) => a.combined_index - b.combined_index);
+      const nextPlan: PlanV3 = { ...plan, subtitle: { ...plan.subtitle, inventory } };
+      planRef.current = nextPlan;
+      setState((current) => ({
+        ...current,
+        plan: nextPlan,
+        subtitleUrls: mapSubtitleInventory(inventory, nextPlan.effective_media_file_id, config),
+      }));
     },
     [config],
   );
 
+  const updatePlaybackState = useCallback((positionSeconds: number, playing: boolean) => {
+    if (Number.isFinite(positionSeconds) && positionSeconds >= 0) {
+      const isUninitializedPlayerZero =
+        awaitingInitialPlayerPositionRef.current &&
+        !playing &&
+        positionSeconds === 0 &&
+        playbackPositionRef.current > 0;
+      if (!isUninitializedPlayerZero) {
+        playbackPositionRef.current = positionSeconds;
+        awaitingInitialPlayerPositionRef.current = false;
+      }
+    }
+    if (playing) {
+      playbackStartedRef.current = true;
+      playbackPlayingRef.current = true;
+    } else if (playbackStartedRef.current) {
+      playbackPlayingRef.current = false;
+    }
+  }, []);
+
   const switchVersion = useCallback(
     (newFileId: number, currentPosition: number) => {
       if (switchingRef.current) return;
-      if (newFileId === state.mediaFileId) return;
+      if (newFileId === stateRef.current.mediaFileId) return;
       switchingRef.current = true;
 
       (async () => {
@@ -585,8 +1088,11 @@ export function usePlaybackSession(
           await loadSession({
             preferredFileId: newFileId,
             position: currentPosition,
-            forceStartPosition: false,
-            allowPreserveExistingSessionOnError: true,
+            forceStartPosition: true,
+            // The server retires the old session before it attempts a
+            // replacement start. A failed response therefore cannot leave the
+            // old plan active on the client.
+            allowPreserveExistingSessionOnError: false,
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",
           });
@@ -595,21 +1101,35 @@ export function usePlaybackSession(
         }
       })();
     },
-    [loadSession, state.mediaFileId],
+    [loadSession],
   );
 
-  return { ...state, switchVersion, switchAudioTrack, refreshSubtitles };
+  return {
+    ...state,
+    switchVersion,
+    switchAudioTrack,
+    changeSubtitleTrack,
+    changeQuality,
+    recoverFromFailure,
+    reanchorSeek,
+    refreshSubtitles,
+    applySubtitleTrack,
+    updatePlaybackState,
+    reportEvent,
+  };
 }
 
+/**
+ * Resolves the default file for the variant the viewer is resuming.
+ *
+ * This is edition/part selection, not adaptation: it answers "which cut of this
+ * item" from client-held resume state. Which encode of that cut plays is the
+ * server's decision.
+ */
 function selectDefaultVariantFile(
   playbackVariants: PlayerPlaybackVariant[],
   versions: PlayerFileVersion[],
   resumeHints?: ResumeHints,
-  qualityPreference?: string | null,
-  selectBestVersionFn?: (
-    versions: PlayerFileVersion[],
-    qualityPreference?: string | null,
-  ) => PlayerFileVersion | null,
 ): number | null {
   if (playbackVariants.length === 0) {
     return null;
@@ -627,42 +1147,20 @@ function selectDefaultVariantFile(
     candidateVariants = playbackVariants.filter((variant) => !variant.edition_key);
   }
 
-  let selectedVariant: PlayerPlaybackVariant | null = null;
-  let selectedVersion: PlayerFileVersion | null = null;
-
   for (const variant of candidateVariants) {
     const firstPart = [...(variant.parts ?? [])].sort((a, b) => a.part_index - b.part_index)[0];
     if (!firstPart) {
       continue;
     }
 
-    let candidateVersion: PlayerFileVersion | null =
-      firstPart.default_file_id != null
-        ? (versions.find((version) => version.file_id === firstPart.default_file_id) ?? null)
-        : null;
-    if (!candidateVersion && selectBestVersionFn) {
-      candidateVersion = selectBestVersionFn(firstPart.versions ?? [], qualityPreference);
-    }
-    if (!candidateVersion) {
-      continue;
+    if (firstPart.default_file_id != null) {
+      const known = versions.find((version) => version.file_id === firstPart.default_file_id);
+      if (known) return known.file_id;
     }
 
-    if (!selectedVariant || !selectedVersion) {
-      selectedVariant = variant;
-      selectedVersion = candidateVersion;
-      continue;
-    }
-
-    if (variant.edition_key && !selectedVariant.edition_key) {
-      continue;
-    }
-
-    const winner = selectBestVersionFn?.([selectedVersion, candidateVersion], qualityPreference);
-    if (winner?.file_id === candidateVersion.file_id) {
-      selectedVariant = variant;
-      selectedVersion = candidateVersion;
-    }
+    const firstVersion = (firstPart.versions ?? [])[0];
+    if (firstVersion) return firstVersion.file_id;
   }
 
-  return selectedVersion?.file_id ?? null;
+  return null;
 }

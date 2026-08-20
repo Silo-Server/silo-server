@@ -20,6 +20,8 @@ import {
   COLLECTION_WATCH_FILTER_OPTIONS,
   displayFiltersToQueryDefinition,
 } from "@/lib/collectionDisplayFilters";
+import { COLLECTION_SOURCE_ORDER, selectValueToSortConfig } from "@/lib/collectionSortConfig";
+import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
 import {
   COLLECTION_MAX_ITEMS,
   libraryEligibilityForMediaKind,
@@ -107,6 +109,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
     template.poster_path ? "default" : "custom",
   );
   const [customPosterUrl, setCustomPosterUrl] = useState("");
+  const [defaultSort, setDefaultSort] = useState<string>(COLLECTION_SOURCE_ORDER);
 
   const eligibility = libraryEligibilityForMediaKind(template.media_kind);
   const pickerLibraries = libraries.map((lib) => ({
@@ -137,6 +140,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           : template.poster_path || undefined,
       library_ids: libraryIds.length > 0 ? libraryIds : undefined,
       display_query_definition: displayFiltersToQueryDefinition(watchFilter, mediaFilter),
+      sort_config: selectValueToSortConfig(defaultSort),
     };
 
     if (template.source === "tmdb" && template.tmdb) {
@@ -341,6 +345,13 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           </Select>
         </div>
       </div>
+
+      <CollectionDefaultSortField
+        value={defaultSort}
+        onChange={setDefaultSort}
+        allowPersonalized
+        inputId="user-template-default-sort"
+      />
 
       <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
         <div className="space-y-0.5">

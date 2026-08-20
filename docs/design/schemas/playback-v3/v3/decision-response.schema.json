@@ -1,0 +1,798 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/schemas/playback-v3/v3/decision-response.schema.json",
+  "title": "Silo Playback Protocol v3 Decision Response",
+  "description": "Response body of POST /api/v1/playback/start and POST /api/v1/playback/{session_id}/replan. Shapes mirror DecisionResponseV3 and PlanV3 in internal/playback/protocol_v3.go. A playable outcome carries playback_plan; adaptation_unavailable carries terminal. Enum lists are the values the server emits today and grow additively within v3, so a client must tolerate an unrecognized member of a described-but-open list rather than treating the plan as unusable.",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "server_features",
+    "outcome"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "server_features": {
+      "type": "array",
+      "description": "Additive feature tokens supported by this server. Unknown entries must be ignored.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "playable",
+        "adaptation_unavailable"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "playback_plan": {
+      "$ref": "#/$defs/plan"
+    },
+    "terminal": {
+      "$ref": "#/$defs/terminal"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "const": "playable"
+        }
+      },
+      "required": [
+        "session_id",
+        "playback_plan"
+      ],
+      "not": {
+        "required": [
+          "terminal"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "const": "adaptation_unavailable"
+        }
+      },
+      "required": [
+        "terminal"
+      ],
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "session_id"
+            ]
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "playback_plan"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "terminal": {
+      "type": "object",
+      "description": "Why no route exists. `retryable` distinguishes a condition that may clear (a missing toolchain, incomplete metadata) from one that will not for this client and source.",
+      "required": [
+        "reason",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "track_identity": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Combined-ordinal track identity `file:{file_id}:{audio|subtitle}:{ordinal}`."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "transformation": {
+      "type": "object",
+      "required": [
+        "name",
+        "executor",
+        "recipe_version",
+        "validated_claims"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executor": {
+          "type": "string",
+          "description": "Who runs it: `server` before the bytes leave the server, `client` as the client's own responsibility.",
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "recipe_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "validated_claims": {
+          "type": "array",
+          "description": "Neutral statements about the produced bytes, not client-framework decoder names.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "plan": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "plan_id",
+        "plan_attempt_key",
+        "delivery",
+        "stream",
+        "timeline",
+        "selected_tracks",
+        "effective_recipe",
+        "claims",
+        "subtitle",
+        "transformations",
+        "applied_quirks",
+        "runtime_corrections",
+        "available_qualities",
+        "degradation_warnings",
+        "decision_reason",
+        "requested_media_file_id",
+        "effective_media_file_id",
+        "source",
+        "subtitle_fidelity_policy"
+      ],
+      "properties": {
+        "protocol_version": {
+          "type": "integer",
+          "const": 3
+        },
+        "plan_id": {
+          "type": "string",
+          "description": "Deterministic server-computed plan identity, `plan:` followed by 32 hex characters. Opaque to clients: echo it, never parse or recompute it.",
+          "pattern": "^plan:[0-9a-f]{32}$"
+        },
+        "plan_attempt_key": {
+          "type": "string",
+          "description": "Server-computed opaque loop-prevention token, always `v3:` prefixed. Clients store the keys of attempted plans and echo them in attempted_plan_keys on replan; they never compute keys themselves.",
+          "pattern": "^v3:",
+          "minLength": 8
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "delivery": {
+          "type": "string",
+          "description": "The plan's serving route. Clients negotiate the coarser delivery classes (original_http, progressive, hls); these are the finer-grained plan outcomes those classes fold onto.",
+          "enum": [
+            "original_http",
+            "server_remux_progressive",
+            "server_remux_hls",
+            "server_transcode_hls"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/stream"
+        },
+        "timeline": {
+          "$ref": "#/$defs/timeline"
+        },
+        "selected_tracks": {
+          "type": "object",
+          "properties": {
+            "audio": {
+              "$ref": "#/$defs/track_identity"
+            },
+            "subtitle": {
+              "$ref": "#/$defs/track_identity"
+            }
+          },
+          "additionalProperties": true
+        },
+        "effective_recipe": {
+          "$ref": "#/$defs/effective_recipe"
+        },
+        "claims": {
+          "$ref": "#/$defs/claims"
+        },
+        "subtitle": {
+          "$ref": "#/$defs/subtitle_decision"
+        },
+        "transformations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/transformation"
+          }
+        },
+        "applied_quirks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/applied_quirk"
+          }
+        },
+        "runtime_corrections": {
+          "type": "array",
+          "description": "Client-executed corrections this plan depends on. A client that cannot run a listed correction must not select the plan.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "available_qualities": {
+          "type": "array",
+          "description": "Server ladder rungs valid for this source and client, so a client renders a quality menu without owning a bitrate table. The entry with preserves_source true pins the source rung.",
+          "minItems": 1,
+          "contains": {
+            "type": "object",
+            "required": ["label", "preserves_source"],
+            "properties": {
+              "label": { "const": "original" },
+              "preserves_source": { "const": true }
+            }
+          },
+          "items": {
+            "$ref": "#/$defs/available_quality"
+          }
+        },
+        "degradation_warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/degradation_warning"
+          }
+        },
+        "decision_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requested_media_file_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "effective_media_file_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Differs from requested_media_file_id when the server routed to an alternate edition of the same title. Track identities in this plan belong to the effective file."
+        },
+        "source": {
+          "$ref": "#/$defs/source_descriptor"
+        },
+        "subtitle_fidelity_policy": {
+          "type": "string",
+          "enum": [
+            "require_authored_fidelity",
+            "allow_simplified_rendering"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "stream": {
+      "type": "object",
+      "required": [
+        "url",
+        "protocol",
+        "headers",
+        "header_refresh"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "http_progressive",
+            "hls"
+          ]
+        },
+        "container": {
+          "type": "string"
+        },
+        "mime_type": {
+          "type": "string",
+          "description": "What the transport will actually serve. A declared-tier client probes this before attaching a source buffer, so an audio-only remux advertises audio/mp4 rather than video/mp4."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "header_refresh": {
+          "type": "string",
+          "enum": [
+            "none",
+            "session"
+          ]
+        },
+        "header_refresh_url": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "timeline": {
+      "type": "object",
+      "description": "Anchoring for the delivered stream. source_start_seconds is the position in the source, player_start_seconds where the player should start within the delivered timeline; the two differ when the stream is re-anchored at a seek point.",
+      "required": [
+        "source_start_seconds",
+        "stream_origin_seconds",
+        "player_start_seconds",
+        "timeline_offset_seconds",
+        "can_seek_anywhere",
+        "seek_restoration"
+      ],
+      "properties": {
+        "source_start_seconds": {
+          "type": "number"
+        },
+        "stream_origin_seconds": {
+          "type": "number"
+        },
+        "player_start_seconds": {
+          "type": "number"
+        },
+        "timeline_offset_seconds": {
+          "type": "number"
+        },
+        "seek_window_start_seconds": {
+          "type": "number"
+        },
+        "seek_window_end_seconds": {
+          "type": "number"
+        },
+        "can_seek_anywhere": {
+          "type": "boolean"
+        },
+        "seek_restoration": {
+          "type": "string",
+          "description": "Which clock a resume position is expressed in: `player_position` for a full-timeline stream, `source_position` for one re-anchored at a seek point.",
+          "enum": [
+            "player_position",
+            "source_position"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "effective_recipe": {
+      "type": "object",
+      "description": "What the delivered bytes actually are, after any adaptation. Fields the server has no value for are omitted rather than sent as zero.",
+      "properties": {
+        "video_codec": {
+          "type": "string"
+        },
+        "audio_codec": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "frame_rate": {
+          "type": "number"
+        },
+        "bitrate_kbps": {
+          "type": "integer"
+        },
+        "dynamic_range": {
+          "type": "string"
+        },
+        "audio_channels": {
+          "type": "integer"
+        },
+        "audio_layout": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "claims": {
+      "type": "object",
+      "description": "What the server promises about the delivered bytes. A client renders its HDR/passthrough/subtitle affordances from these rather than re-deriving them from the source descriptor.",
+      "required": [
+        "video",
+        "audio",
+        "subtitles"
+      ],
+      "properties": {
+        "video": {
+          "type": "object",
+          "required": [
+            "hdr10",
+            "hdr10_plus",
+            "hlg",
+            "dolby_vision"
+          ],
+          "properties": {
+            "hdr10": {
+              "type": "boolean"
+            },
+            "hdr10_plus": {
+              "type": "boolean"
+            },
+            "hlg": {
+              "type": "boolean"
+            },
+            "dolby_vision": {
+              "type": "boolean"
+            },
+            "dolby_vision_reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "audio": {
+          "type": "object",
+          "required": [
+            "passthrough",
+            "atmos_preserved"
+          ],
+          "properties": {
+            "codec": {
+              "type": "string"
+            },
+            "passthrough": {
+              "type": "boolean"
+            },
+            "atmos_preserved": {
+              "type": "boolean"
+            },
+            "dts_variant": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "subtitles": {
+          "type": "object",
+          "required": [
+            "ass_styling_preserved",
+            "bitmap_overlay",
+            "bitmap_sidecar"
+          ],
+          "properties": {
+            "ass_styling_preserved": {
+              "type": "boolean"
+            },
+            "bitmap_overlay": {
+              "type": "boolean"
+            },
+            "bitmap_sidecar": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "subtitle_decision": {
+      "type": "object",
+      "required": [
+        "mode",
+        "inventory"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "render",
+            "convert",
+            "burn_in"
+          ]
+        },
+        "track_id": {
+          "type": "string"
+        },
+        "artifact": {
+          "type": "object",
+          "description": "The prepared sidecar for the selected track. timing_origin_seconds is the source position the artifact's cue timestamps are relative to.",
+          "required": [
+            "url",
+            "mime_type",
+            "format",
+            "timing_origin_seconds"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mime_type": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string"
+            },
+            "timing_origin_seconds": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": true
+        },
+        "inventory": {
+          "type": "array",
+          "description": "Authoritative, dense, gap-free combined-ordinal track list for the effective source: external tracks first, then embedded, then downloaded. A client selects by echoing an entry's track_id or combined_index and never derives an ordinal by counting, summing track arrays, or taking max(index)+1.",
+          "items": {
+            "$ref": "#/$defs/subtitle_inventory_item"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "subtitle_inventory_item": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "combined_index",
+        "source",
+        "forced",
+        "default",
+        "hearing_impaired",
+        "delivery"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "combined_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "external",
+            "embedded",
+            "downloaded"
+          ]
+        },
+        "codec": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "forced": {
+          "type": "boolean"
+        },
+        "default": {
+          "type": "boolean"
+        },
+        "hearing_impaired": {
+          "type": "boolean"
+        },
+        "delivery": {
+          "type": "string",
+          "description": "`sidecar` tracks are fetchable from their published url. A `burn_in_only` track has no client-fetchable representation and carries no url, but still occupies its ordinal and stays selectable — omitting it would leave a hole that makes every later ordinal wrong.",
+          "enum": [
+            "sidecar",
+            "burn_in_only"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "font_bundle_url": {
+          "type": "string",
+          "description": "Attachment bundle needed to render an embedded ASS/SSA track with its authored typesetting."
+        }
+      },
+      "additionalProperties": true
+    },
+    "applied_quirk": {
+      "type": "object",
+      "description": "A device-specific decision the planner made on top of the generic route. registry_revision identifies the quirk registry the decision came from.",
+      "required": [
+        "id",
+        "registry_revision",
+        "action"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "registry_revision": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "action": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "available_quality": {
+      "type": "object",
+      "required": [
+        "label",
+        "preserves_source"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "height": {
+          "type": "integer"
+        },
+        "bitrate_kbps": {
+          "type": "integer"
+        },
+        "preserves_source": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "degradation_warning": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "source_descriptor": {
+      "type": "object",
+      "required": [
+        "media_file_id",
+        "hdr10_plus",
+        "dv_enhancement_layer"
+      ],
+      "properties": {
+        "media_file_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration_seconds": {
+          "type": "number",
+          "description": "Full runtime of this source, independent of where the delivery's timeline is anchored. Absent means the server does not know the runtime; it is omitted rather than null so clients that coerce null to a numeric default do not read it as zero. Do not substitute the playback engine's reported duration — on an HLS copy remux the engine reports the length produced so far."
+        },
+        "container": {
+          "type": "string"
+        },
+        "video_codec": {
+          "type": "string"
+        },
+        "video_profile": {
+          "type": "string"
+        },
+        "video_level": {
+          "type": "integer"
+        },
+        "bit_depth": {
+          "type": "integer"
+        },
+        "color_range": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "frame_rate": {
+          "type": "number"
+        },
+        "bitrate_kbps": {
+          "type": "integer"
+        },
+        "dynamic_range": {
+          "type": "string",
+          "description": "Values the server emits today: sdr, hdr10, hdr10_plus, hlg, dolby_vision, and hdr_unknown for legacy rows that recorded only a file-level HDR flag."
+        },
+        "hdr10_plus": {
+          "type": "boolean"
+        },
+        "dolby_vision_profile": {
+          "type": "integer"
+        },
+        "dolby_vision_level": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 13
+        },
+        "dv_bl_compat_id": {
+          "type": "integer"
+        },
+        "dv_enhancement_layer": {
+          "type": "string",
+          "enum": [
+            "none",
+            "mel",
+            "fel",
+            "unknown"
+          ]
+        },
+        "audio_codec": {
+          "type": "string"
+        },
+        "audio_channels": {
+          "type": "integer"
+        },
+        "audio_layout": {
+          "type": "string"
+        },
+        "video_copy_unsafe": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,4 +1,6 @@
 .git
+.claude
+.superpowers
 .env
 .env.*
 docs/

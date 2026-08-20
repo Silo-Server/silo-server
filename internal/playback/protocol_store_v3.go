@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var ErrIdempotencyKeyReusedV3 = errors.New("idempotency key reused")
@@ -27,7 +29,12 @@ type AttemptRecordV3 struct {
 	CurrentPlanID          string
 	CurrentReplanRequestID string
 	CurrentPlan            PlanV3
+	FrozenRecipe           ExecutableRecipeV3
 	NormalizedRequest      StartRequestV3
+	// StartResponse is the latest durable decision for this attempt. It begins
+	// as the exact start response and advances atomically with each completed
+	// replan so an idempotent start retry never resurrects a superseded plan.
+	StartResponse DecisionResponseV3
 	// RequestDigest fingerprints the normalized start request so an attempt-ID
 	// reused with different input is a detectable idempotency violation rather
 	// than a silent replay of the old plan.
@@ -50,6 +57,10 @@ type RouteEventRecordV3 struct {
 	ProfileID     string
 	ClientName    string
 	ClientVersion string
+	// ClientBuild and ClientChannel are opaque client-reported identifiers,
+	// recorded so a route decision can be attributed to an exact app build.
+	ClientBuild   string
+	ClientChannel string
 	ClientModel   string
 }
 
@@ -62,8 +73,11 @@ const (
 )
 
 type ReplanLeaseV3 struct {
-	State    ReplanLeaseStateV3
-	Response json.RawMessage
+	State ReplanLeaseStateV3
+	// LeaseToken identifies one ownership generation of an active replan. It
+	// is opaque to callers and must accompany release and completion writes.
+	LeaseToken string
+	Response   json.RawMessage
 }
 
 type PlanStoreV3 interface {
@@ -74,20 +88,26 @@ type PlanStoreV3 interface {
 	GetAttemptIdentity(context.Context, string) (*AttemptIdentityV3, error)
 	GetAttemptIdentityByPlaybackAttemptID(context.Context, string) (*AttemptIdentityV3, error)
 	BeginReplan(context.Context, string, string, string, string, time.Time) (ReplanLeaseV3, error)
+	// ReleaseReplan abandons an owned, incomplete lease after the handler fails
+	// before producing a durable response. The token prevents cleanup from an
+	// expired owner deleting a lease that has since been reclaimed.
+	ReleaseReplan(context.Context, string, string, string) error
 	// CompleteReplan commits a replan atomically; the attempt row is only
-	// updated while its current_replan_request_id still equals the caller's
-	// base revision, otherwise ErrReplanSupersededV3 is returned.
-	CompleteReplan(ctx context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error
+	// updated while the caller still owns the lease and its
+	// current_replan_request_id equals the caller's base revision, otherwise
+	// ErrReplanSupersededV3 is returned.
+	CompleteReplan(ctx context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error
 	RecordRouteEvent(context.Context, RouteEventRecordV3) error
 	CleanupExpired(context.Context, time.Time) (int64, error)
 }
 
 type memoryReplanV3 struct {
-	digest    string
-	base      string
-	lease     time.Time
-	completed bool
-	response  json.RawMessage
+	digest     string
+	base       string
+	lease      time.Time
+	leaseToken string
+	completed  bool
+	response   json.RawMessage
 }
 
 type MemoryPlanStoreV3 struct {
@@ -116,16 +136,16 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 	now := time.Now()
 	// Expired rows are replaceable, mirroring the Postgres pre-delete: they
 	// linger until the hourly cleanup and must not wedge a legitimate retry.
-	for sessionID, existing := range s.attempts {
+	for attemptID, existing := range s.attempts {
 		if existing.ExpiresAt.After(now) {
 			continue
 		}
-		if existing.PlaybackAttemptID == record.PlaybackAttemptID || sessionID == record.SessionID {
-			s.deleteAttemptLocked(sessionID)
+		if existing.PlaybackAttemptID == record.PlaybackAttemptID || (record.SessionID != "" && existing.SessionID == record.SessionID) {
+			s.deleteAttemptLocked(attemptID)
 		}
 	}
-	for sessionID, existing := range s.attempts {
-		if existing.PlaybackAttemptID != record.PlaybackAttemptID && sessionID != record.SessionID {
+	for _, existing := range s.attempts {
+		if existing.PlaybackAttemptID != record.PlaybackAttemptID && (record.SessionID == "" || existing.SessionID != record.SessionID) {
 			continue
 		}
 		if existing.PlaybackAttemptID == record.PlaybackAttemptID &&
@@ -134,7 +154,7 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 		}
 		return ErrPlaybackAttemptExistsV3
 	}
-	s.attempts[record.SessionID] = record
+	s.attempts[record.PlaybackAttemptID] = record
 	return nil
 }
 
@@ -144,13 +164,24 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 func (s *MemoryPlanStoreV3) ReplaceAttempt(_ context.Context, record AttemptRecordV3) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.attempts[record.SessionID] = record
+	for attemptID, existing := range s.attempts {
+		if existing.PlaybackAttemptID == record.PlaybackAttemptID || (record.SessionID != "" && existing.SessionID == record.SessionID) {
+			// ReplaceAttempt simulates a mixed-version writer in tests. Preserve
+			// its replan rows just as an UPDATE of the durable attempt would.
+			delete(s.attempts, attemptID)
+		}
+	}
+	s.attempts[record.PlaybackAttemptID] = record
 }
 
-func (s *MemoryPlanStoreV3) deleteAttemptLocked(sessionID string) {
-	delete(s.attempts, sessionID)
+func (s *MemoryPlanStoreV3) deleteAttemptLocked(attemptID string) {
+	record, ok := s.attempts[attemptID]
+	delete(s.attempts, attemptID)
+	if !ok || record.SessionID == "" {
+		return
+	}
 	for key := range s.replans {
-		if strings.HasPrefix(key, sessionID+":") {
+		if strings.HasPrefix(key, record.SessionID+":") {
 			delete(s.replans, key)
 		}
 	}
@@ -159,11 +190,10 @@ func (s *MemoryPlanStoreV3) deleteAttemptLocked(sessionID string) {
 func (s *MemoryPlanStoreV3) GetAttemptByPlaybackAttemptID(_ context.Context, attemptID string) (*AttemptRecordV3, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, record := range s.attempts {
-		if record.PlaybackAttemptID == attemptID && record.ExpiresAt.After(time.Now()) {
-			copy := record
-			return &copy, nil
-		}
+	record, ok := s.attempts[attemptID]
+	if ok && record.ExpiresAt.After(time.Now()) {
+		copy := record
+		return &copy, nil
 	}
 	return nil, ErrSessionNotFound
 }
@@ -171,12 +201,13 @@ func (s *MemoryPlanStoreV3) GetAttemptByPlaybackAttemptID(_ context.Context, att
 func (s *MemoryPlanStoreV3) GetAttempt(_ context.Context, sessionID string) (*AttemptRecordV3, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.attempts[sessionID]
-	if !ok || !record.ExpiresAt.After(time.Now()) {
-		return nil, ErrSessionNotFound
+	for _, record := range s.attempts {
+		if record.SessionID == sessionID && record.ExpiresAt.After(time.Now()) {
+			copy := record
+			return &copy, nil
+		}
 	}
-	copy := record
-	return &copy, nil
+	return nil, ErrSessionNotFound
 }
 
 func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (ReplanLeaseV3, error) {
@@ -185,8 +216,9 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 	key := sessionID + ":" + requestID
 	existing, ok := s.replans[key]
 	if !ok {
-		s.replans[key] = memoryReplanV3{digest: digest, base: baseReplanRequestID, lease: leaseUntil}
-		return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
+		leaseToken := uuid.NewString()
+		s.replans[key] = memoryReplanV3{digest: digest, base: baseReplanRequestID, lease: leaseUntil, leaseToken: leaseToken}
+		return ReplanLeaseV3{State: ReplanLeaseOwnedV3, LeaseToken: leaseToken}, nil
 	}
 	if existing.digest != digest {
 		return ReplanLeaseV3{}, ErrIdempotencyKeyReusedV3
@@ -201,15 +233,34 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 		return ReplanLeaseV3{}, ErrStaleReplanLeaseV3
 	}
 	existing.lease = leaseUntil
+	existing.leaseToken = uuid.NewString()
 	s.replans[key] = existing
-	return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
+	return ReplanLeaseV3{State: ReplanLeaseOwnedV3, LeaseToken: existing.leaseToken}, nil
 }
 
-func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
+func (s *MemoryPlanStoreV3) ReleaseReplan(_ context.Context, sessionID, requestID, leaseToken string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	existing, ok := s.attempts[sessionID]
-	if !ok {
+	key := sessionID + ":" + requestID
+	entry, ok := s.replans[key]
+	if ok && !entry.completed && entry.leaseToken == leaseToken {
+		delete(s.replans, key)
+	}
+	return nil
+}
+
+func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, requestID, leaseToken, baseReplanRequestID string, response json.RawMessage, record AttemptRecordV3) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var attemptID string
+	var existing AttemptRecordV3
+	for candidateID, candidate := range s.attempts {
+		if candidate.SessionID == sessionID {
+			attemptID, existing = candidateID, candidate
+			break
+		}
+	}
+	if attemptID == "" {
 		return ErrSessionNotFound
 	}
 	if existing.CurrentReplanRequestID != baseReplanRequestID {
@@ -220,10 +271,13 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	if !ok {
 		return ErrSessionNotFound
 	}
+	if entry.completed || entry.leaseToken != leaseToken {
+		return ErrReplanSupersededV3
+	}
 	entry.completed = true
 	entry.response = append(json.RawMessage(nil), response...)
 	s.replans[key] = entry
-	s.attempts[sessionID] = record
+	s.attempts[attemptID] = record
 	return nil
 }
 
@@ -254,14 +308,9 @@ func (s *MemoryPlanStoreV3) CleanupExpired(_ context.Context, now time.Time) (in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var count int64
-	for sessionID, record := range s.attempts {
+	for attemptID, record := range s.attempts {
 		if !record.ExpiresAt.After(now) {
-			delete(s.attempts, sessionID)
-			for key := range s.replans {
-				if strings.HasPrefix(key, sessionID+":") {
-					delete(s.replans, key)
-				}
-			}
+			s.deleteAttemptLocked(attemptID)
 			count++
 		}
 	}

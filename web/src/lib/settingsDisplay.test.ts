@@ -5,6 +5,7 @@ import {
   ALL_DEVICE_SETTING_KEYS,
   controlKindFor,
   defaultValueToString,
+  deviceSettingKeysForRevision,
   formatSettingValue,
   getSettingDefinition,
   isStructuredSetting,
@@ -37,6 +38,23 @@ describe("settingsDisplay", () => {
     // by the player, so both must be editable as device overrides.
     expect(ALL_DEVICE_SETTING_KEYS).toContain(SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP);
     expect(ALL_DEVICE_SETTING_KEYS).toContain(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW);
+  });
+
+  it("filters device batches to keys the connected server revision understands", () => {
+    const revisionFour = deviceSettingKeysForRevision(4);
+    expect(revisionFour).not.toContain(SETTING_KEYS.NAV_PRIMARY_MENU);
+    expect(revisionFour).not.toContain(SETTING_KEYS.UI_CARD_PRESENTATION);
+    expect(
+      revisionFour.every((key) => {
+        const definition = SETTING_DEFINITIONS[key];
+        const scopeIndex = definition.scopes.indexOf("profile_device");
+        return (definition.scopeIntroducedIn[scopeIndex] ?? Number.POSITIVE_INFINITY) <= 4;
+      }),
+    ).toBe(true);
+
+    const revisionFive = deviceSettingKeysForRevision(5);
+    expect(revisionFive).toContain(SETTING_KEYS.NAV_PRIMARY_MENU);
+    expect(revisionFive).toContain(SETTING_KEYS.UI_CARD_PRESENTATION);
   });
 
   it("falls back to the value type when a definition names no control", () => {

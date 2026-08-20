@@ -46,6 +46,7 @@ const (
 	deviceIDHeader       = "X-Silo-Device-Id"
 	deviceNameHeader     = "X-Silo-Device-Name"
 	devicePlatformHeader = "X-Silo-Device-Platform"
+	clientFamilyHeader   = "X-Silo-Client-Family"
 )
 
 // ServerSettingReader reads individual keys from the server_settings table.

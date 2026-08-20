@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 3
+const Revision = 7
 
 // Setting keys, one constant per definition.
 const (
@@ -23,6 +23,10 @@ const (
 	DownloadsKeepWatched = "downloads.keep_watched"
 	// Download over Wi-Fi only
 	DownloadsWifiOnly = "downloads.wifi_only"
+	// Primary menu
+	NavPrimaryMenu = "nav.primary_menu"
+	// Navigation shortcuts
+	NavShortcuts = "nav.shortcuts"
 	// Show audiobooks
 	NavShowAudiobooks = "nav.show_audiobooks"
 	// Preferred audio language
@@ -37,6 +41,8 @@ const (
 	PlaybackAutoSkipIntro = "playback.auto_skip_intro"
 	// Auto-skip recaps
 	PlaybackAutoSkipRecap = "playback.auto_skip_recap"
+	// Skip intros
+	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
 	PlaybackMaxBitrateKbps = "playback.max_bitrate_kbps"
 	// Next up prompt
@@ -85,6 +91,8 @@ const (
 	SubtitleMatchesDevice = "subtitle.matches_device"
 	// Poster badges
 	UiCardOverlays = "ui.card_overlays"
+	// Media cards
+	UiCardPresentation = "ui.card_presentation"
 	// Custom CSS
 	UiCustomCss = "ui.custom_css"
 	// Custom theme variables
@@ -119,12 +127,15 @@ const (
 var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
+	NavPrimaryMenu,
+	NavShortcuts,
 	PlaybackAudioLanguage,
 	PlaybackAutoPlayNext,
 	PlaybackAutoPlayNextPreview,
 	PlaybackAutoSkipCredits,
 	PlaybackAutoSkipIntro,
 	PlaybackAutoSkipRecap,
+	PlaybackIntroSkipMode,
 	PlaybackMaxBitrateKbps,
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
@@ -145,6 +156,7 @@ var Remote = []string{
 	PlayerVideoGravity,
 	SearchMediaScope,
 	UiCardOverlays,
+	UiCardPresentation,
 	UiCustomCss,
 	UiCustomThemeVars,
 	UiDateFormat,
@@ -171,4 +183,13 @@ var ClientLocal = []string{
 	PlayerPictureInPictureEnabled,
 	PlayerResumeRewindSeconds,
 	SubtitleMatchesDevice,
+}
+
+// Deprecated lists keys another definition has superseded. They still resolve
+// and still have to be readable — shipped clients write them — but a client
+// must not offer one as a second control beside its replacement: the server
+// mirrors the pair at write time, so editing either would silently rewrite the
+// other.
+var Deprecated = []string{
+	PlaybackAutoSkipIntro,
 }

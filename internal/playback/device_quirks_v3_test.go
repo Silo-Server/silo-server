@@ -42,7 +42,7 @@ func TestAFTKRTEAC3HLSCorrectionTranscodesAudioOnly(t *testing.T) {
 	req.Capabilities.Containers = []string{"mkv"}
 	req.Capabilities.CodecsAudio = []string{"aac", "eac3"}
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{42}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
-	req.ClientPlaybackContext.Engines[string(EngineMedia3ProgressiveRemuxV3)] = EngineCapabilityV3{}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{}
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != "copy" || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.Plan.EffectiveRecipe.VideoCodec != "h264" {
@@ -84,9 +84,9 @@ func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HDR10Plus: true, DolbyVisionProfiles: []int{8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
 	direct.Features = append(direct.Features, ClientDV8HDR10PlusSanitizerV3)
-	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.RuntimeCorrections) != 1 || result.Plan.RuntimeCorrections[0] != ClientDV8HDR10PlusSanitizerV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVDV8HDR10PlusV3 {
@@ -94,14 +94,14 @@ func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	}
 
 	direct.Features = nil
-	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = direct
 	withoutRuntime := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if withoutRuntime.Plan == nil || len(withoutRuntime.Plan.AppliedQuirks) != 0 || len(withoutRuntime.Plan.RuntimeCorrections) != 0 {
 		t.Fatalf("unadvertised correction applied: %#v", withoutRuntime.Plan)
 	}
 }
 
-func TestDeviceQuirkProtocolAcceptsEitherFeatureLocation(t *testing.T) {
+func TestDeviceQuirkProtocolRequiresTopLevelFeature(t *testing.T) {
 	file := &models.MediaFile{
 		ID: 42, FilePath: "/media/high10.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
 		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
@@ -111,30 +111,20 @@ func TestDeviceQuirkProtocolAcceptsEitherFeatureLocation(t *testing.T) {
 	req := quirkRequestV3()
 	req.Capabilities.Containers = []string{"mkv"}
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
-	// Advertise the quirk protocol in the top-level client features only.
-	req.ClientPlaybackContext.Features = []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDetailedDecodeV3}
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVAFTKRTHigh10V3 {
-		t.Fatalf("client-features-only advertisement: %#v", result)
+		t.Fatalf("top-level advertisement: %#v", result)
 	}
 
-	// Context-only advertisement is equally sufficient.
-	contextOnly := quirkRequestV3()
-	contextOnly.ClientFeatures = []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDetailedDecodeV3}
-	if !deviceQuirkProtocolAvailableV3(contextOnly) {
-		t.Fatal("context-only quirk feature must enable the quirk protocol")
-	}
-
-	neither := quirkRequestV3()
-	neither.ClientFeatures = []string{FeaturePlaybackPlanV3, FeatureMedia3Only}
-	neither.ClientPlaybackContext.Features = neither.ClientFeatures
-	if deviceQuirkProtocolAvailableV3(neither) {
-		t.Fatal("quirk protocol enabled without any advertisement")
+	without := quirkRequestV3()
+	without.ClientFeatures = []string{FeaturePlaybackPlanV3}
+	if deviceQuirkProtocolAvailableV3(without) {
+		t.Fatal("quirk protocol enabled without advertisement")
 	}
 }
 
-func TestPlanAttemptKeyV3DeviceQuirkMatchesKotlin(t *testing.T) {
+func TestPlanAttemptKeyV3DeviceQuirkIsStable(t *testing.T) {
 	width, height, bitrate := 3840, 2160, 60_000
 	plan := PlanV3{
 		PlanID: "plan:quirk", Delivery: DeliveryOriginalHTTPV3,
@@ -144,15 +134,14 @@ func TestPlanAttemptKeyV3DeviceQuirkMatchesKotlin(t *testing.T) {
 		AppliedQuirks:      []AppliedQuirkV3{{ID: QuirkFireTVDV8HDR10PlusV3, RegistryRevision: DeviceQuirkRegistryRevisionV3, Action: "client_runtime_correction"}},
 		RuntimeCorrections: []string{ClientDV8HDR10PlusSanitizerV3},
 	}
-	if got := PlanAttemptKeyV3(plan, 9, nil); got != "v3:8d843bfffeb3adc3" {
+	if got := PlanAttemptKeyV3(plan, "9", nil); got != "v3:32a3a37d71bc4f43" {
 		t.Fatalf("key = %q", got)
 	}
 }
 
 func quirkRequestV3() StartRequestV3 {
 	req := validStartRequestV3()
-	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3, FeatureDeviceQuirksV3)
-	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3, FeatureDeviceQuirksV3)
-	req.ClientPlaybackContext.Device = DeviceContextV3{Manufacturer: "Amazon", Brand: "Amazon", Model: "AFTKRT", SDKInt: 30}
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDeviceQuirksV3)
+	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "android", Manufacturer: "Amazon", Model: "AFTKRT", PlatformDetails: map[string]string{"sdk_int": "30"}}
 	return req
 }

@@ -333,12 +333,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const selectProfile = useCallback((p: Profile, profileToken?: string) => {
-    setProfileId(p.id);
-    setProfileToken(profileToken ?? null);
-    storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(p));
-    setProfile(p);
-  }, []);
+  const selectProfile = useCallback(
+    (p: Profile, profileToken?: string) => {
+      const profileChanged = profile?.id !== p.id;
+
+      setProfileId(p.id);
+      setProfileToken(profileToken ?? null);
+      if (profileChanged) {
+        queryClient.clear();
+      }
+      storage.set(storage.KEYS.CURRENT_PROFILE, JSON.stringify(p));
+      setProfile(p);
+    },
+    [profile?.id],
+  );
 
   useEffect(() => {
     onProfileUnverified(clearProfile);

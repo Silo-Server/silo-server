@@ -6,8 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsPath('pdf.worker.min.mjs')
 
 const fetchText = async url => await (await fetch(url)).text()
 
-let textLayerBuilderCSS = null
-let annotationLayerBuilderCSS = null
+let pdfLayerCSS = null
 
 // Track active render tasks per iframe document to cancel superseded renders
 const activeRenderTasks = new WeakMap()
@@ -130,7 +129,7 @@ const setupPanningEvents = (doc) => {
     container.style.cursor = 'grab'
 }
 
-const render = async (page, doc, zoom, pageColors) => {
+const render = async (page, doc, zoom, pageColors, getAttachmentContent) => {
     if (!doc) return
 
     // Increment generation to invalidate any in-progress render for this doc
@@ -158,8 +157,7 @@ const render = async (page, doc, zoom, pageColors) => {
     const canvas = document.createElement('canvas')
     canvas.height = viewport.height
     canvas.width = viewport.width
-    const canvasContext = canvas.getContext('2d')
-    const renderTask = page.render({ canvasContext, viewport, pageColors })
+    const renderTask = page.render({ canvas, viewport, pageColors })
     activeRenderTasks.set(doc, renderTask)
 
     try {
@@ -237,20 +235,20 @@ const render = async (page, doc, zoom, pageColors) => {
         goToDestination: () => {},
         getDestinationHash: dest => JSON.stringify(dest),
         addLinkAttributes: (link, url) => link.href = url,
+        getAttachmentContent,
     }
     await new pdfjsLib.AnnotationLayer({ page, viewport, div, linkService }).render({
         annotations: await page.getAnnotations(),
     })
 }
 
-const renderPage = async (page, getImageBlob) => {
+const renderPage = async (page, getImageBlob, getAttachmentContent) => {
     const viewport = page.getViewport({ scale: 1 })
     if (getImageBlob) {
         const canvas = document.createElement('canvas')
         canvas.height = viewport.height
         canvas.width = viewport.width
-        const canvasContext = canvas.getContext('2d')
-        await page.render({ canvasContext, viewport }).promise
+        await page.render({ canvas, viewport }).promise
         return new Promise(resolve => canvas.toBlob(blob => {
             // Release canvas bitmap memory after extracting the blob
             canvas.width = 0
@@ -258,13 +256,8 @@ const renderPage = async (page, getImageBlob) => {
             resolve(blob)
         }))
     }
-    // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/text_layer_builder.css
-    if (textLayerBuilderCSS == null) {
-        textLayerBuilderCSS = await fetchText(pdfjsPath('text_layer_builder.css'))
-    }
-    // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/annotation_layer_builder.css
-    if (annotationLayerBuilderCSS == null) {
-        annotationLayerBuilderCSS = await fetchText(pdfjsPath('annotation_layer_builder.css'))
+    if (pdfLayerCSS == null) {
+        pdfLayerCSS = await fetchText(pdfjsPath('pdf_layers.css'))
     }
     const data = `
         <!DOCTYPE html>
@@ -276,15 +269,15 @@ const renderPage = async (page, getImageBlob) => {
             margin: 0;
             padding: 0;
         }
-        ${textLayerBuilderCSS}
-        ${annotationLayerBuilderCSS}
+        ${pdfLayerCSS}
         </style>
         <div id="canvas"></div>
         <div class="textLayer"></div>
         <div class="annotationLayer"></div>
     `
     const src = URL.createObjectURL(new Blob([data], { type: 'text/html' }))
-    const onZoom = ({ doc, scale, pageColors }) => render(page, doc, scale, pageColors)
+    const onZoom = ({ doc, scale, pageColors }) =>
+        render(page, doc, scale, pageColors, getAttachmentContent)
     return { src, data, onZoom }
 }
 
@@ -352,13 +345,23 @@ export const makePDF = async file => {
             transport.onDataRange(begin, chunk)
         })
     }
-    const pdf = await pdfjsLib.getDocument({
+    const loadingTask = pdfjsLib.getDocument({
         range: transport,
         wasmUrl: pdfjsPath(''),
         cMapUrl: pdfjsPath('cmaps/'),
         standardFontDataUrl: pdfjsPath('standard_fonts/'),
+        enableScripting: false,
         isEvalSupported: false,
-    }).promise
+    })
+    const pdf = await loadingTask.promise
+    const getAttachmentContent = async id => {
+        try {
+            return await pdf.getAttachmentContent(id)
+        } catch (error) {
+            console.warn(`Unable to load PDF attachment content: ${error}`)
+            return null
+        }
+    }
 
     // Get viewport dimensions from first page for fixed-layout rendering
     const firstPage = await pdf.getPage(1)
@@ -422,7 +425,7 @@ export const makePDF = async file => {
                 cache.set(i, cached)
                 return cached
             }
-            const url = await renderPage(await getPage(i))
+            const url = await renderPage(await getPage(i), false, getAttachmentContent)
             cache.set(i, url)
 
             // Evict oldest render results when over limit
@@ -507,7 +510,7 @@ export const makePDF = async file => {
             page?.cleanup()
         }
         pageCache.clear()
-        pdf.destroy()
+        return loadingTask.destroy()
     }
     return book
 }

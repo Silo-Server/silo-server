@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -717,9 +718,19 @@ func main() {
 		var handler http.Handler
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
+			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
+				downloads.NewArtifactRepository(pool),
+				downloads.NewRepository(pool),
+				nil,
+				downloads.NewPlaybackPreparer(),
+				nodeID,
+				watcher.Config,
+				nil,
+			))
 			handler = srv.Handler()
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
+			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
 			// start, so this node can rebuild a Jellyfin transcode after its own
@@ -893,8 +904,10 @@ func main() {
 		)
 	}
 	var watchProviderService *watchsync.Service
+	var watchProviderRegistry *watchsync.Registry
+	var watchProviderRepo *watchsync.PostgresRepository
 	if deps.DB != nil {
-		watchProviderRegistry := watchsync.NewRegistry()
+		watchProviderRegistry = watchsync.NewRegistry()
 		if err := watchProviderRegistry.Register(trakt.NewProvider(nil, "")); err != nil {
 			log.Fatalf("register watch provider: %v", err)
 		}
@@ -904,10 +917,8 @@ func main() {
 		if err := watchProviderRegistry.Register(watchmdblist.NewProvider(nil, "")); err != nil {
 			log.Fatalf("register watch provider: %v", err)
 		}
-		watchProviderService = watchsync.NewService(
-			watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher),
-			watchProviderRegistry,
-		)
+		watchProviderRepo = watchsync.NewPostgresRepository(deps.DB, deps.SecretCipher)
+		watchProviderService = watchsync.NewService(watchProviderRepo, watchProviderRegistry)
 		deps.WatchProviderService = watchProviderService
 	}
 
@@ -919,8 +930,14 @@ func main() {
 		proxyPool := nodepool.NewProxyPool()
 		transcodePool := nodepool.NewTranscodePool()
 
-		proxyNodes, _ := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
-		transcodeNodes, _ := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
+		proxyNodes, err := nodeRepo.ListEnabled(appCtx, nodepool.NodeTypeProxy)
+		if err != nil {
+			log.Fatalf("load enabled proxy nodes: %v", err)
+		}
+		transcodeNodes, err := nodeRepo.ListEnabled(appCtx, nodepool.NodeTypeTranscode)
+		if err != nil {
+			log.Fatalf("load enabled transcode nodes: %v", err)
+		}
 		proxyPool.SetNodes(proxyNodes)
 		transcodePool.SetNodes(transcodeNodes)
 
@@ -1119,6 +1136,15 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		if watchProviderRegistry != nil {
+			reloadWatchProviders := func(ctx context.Context) {
+				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService, watchProviderRepo); err != nil {
+					slog.WarnContext(ctx, "failed to reload watch sync plugin providers", "component", "app", "error", err)
+				}
+			}
+			pluginService.AddLifecycleHook(reloadWatchProviders)
+			reloadWatchProviders(appCtx)
+		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
 			pluginService.AddLifecycleHook(func(ctx context.Context) {
@@ -1567,6 +1593,9 @@ func main() {
 				deps.EventBus,
 				deps.RealtimeHub,
 			)
+			if metadataImageCacheProcessor != nil {
+				itemRefreshExecutor.SetArtworkCacher(metadataImageCacheProcessor)
+			}
 		}
 	}
 
@@ -2050,20 +2079,29 @@ func main() {
 			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
 			// queue hosted on the task manager. Built here (before Start) and shared
 			// with the API via deps so the download service can enqueue jobs.
+			liveDownloadConfig := func() *config.Config {
+				if deps.LiveConfig != nil {
+					if c := deps.LiveConfig(); c != nil {
+						return c
+					}
+				}
+				return deps.Config
+			}
+			var downloadWorkPlanner nodepool.TranscodeWorkPlanner
+			if deps.NodePlanner != nil {
+				downloadWorkPlanner = deps.NodePlanner
+			}
+			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), downloadWorkPlanner, liveDownloadConfig)
+			if deps.NodeRepo != nil {
+				preparer.SetOriginLookup(deps.NodeRepo)
+			}
 			artifactMgr := downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(deps.DB),
 				downloads.NewRepository(deps.DB),
 				deps.FileRepo,
-				downloads.NewPlaybackPreparer(),
+				preparer,
 				deps.NodeID,
-				func() *config.Config {
-					if deps.LiveConfig != nil {
-						if c := deps.LiveConfig(); c != nil {
-							return c
-						}
-					}
-					return deps.Config
-				},
+				liveDownloadConfig,
 				func(ctx context.Context, d *downloads.Download) {
 					if deps.EventsHub == nil {
 						return
@@ -2099,13 +2137,14 @@ func main() {
 		}
 		if metadataImageCacheProcessor != nil {
 			taskMgr.Register(tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor))
+			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
 		}
 		if deps.S3Public != nil {
 			identity := tasks.ArtworkStorageIdentity(cfg.S3.Public.Endpoint, cfg.S3.Public.Bucket, cfg.S3.Public.KeyPrefix)
-			// Seed the fingerprint on first boot so an unchanged storage
-			// identity never triggers a sweep. On the boot after a provider
-			// change the stored (old) identity survives this call and the
-			// startup trigger runs the reconcile.
+			// Seed the fingerprint on first boot. After a provider change the
+			// stored (old) identity survives this call, so the startup preflight
+			// can warn without mutating artwork; an administrator must migrate
+			// objects and run the reconcile task explicitly.
 			if _, err := settingsRepo.SetIfAbsent(appCtx, tasks.ArtworkStorageIdentityKey, identity); err != nil {
 				slog.Warn("artwork reconcile: seeding storage identity failed", "error", err)
 			}
@@ -3088,9 +3127,98 @@ func metadataInt(value any) int {
 	}
 }
 
+var watchSyncPluginReloadMu sync.Mutex
+
 type markerPluginCapabilityStore interface {
 	ListEnabled(ctx context.Context) ([]*plugins.Installation, error)
 	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
+}
+
+func reloadWatchSyncPluginProviders(
+	ctx context.Context,
+	registry *watchsync.Registry,
+	store markerPluginCapabilityStore,
+	service *plugins.Service,
+	repository watchsync.PluginCredentialRepository,
+) error {
+	if registry == nil {
+		return nil
+	}
+	watchSyncPluginReloadMu.Lock()
+	defer watchSyncPluginReloadMu.Unlock()
+
+	var providers []watchsync.Provider
+	if store == nil || service == nil {
+		return registry.ReplacePluginProviders(providers)
+	}
+	installations, err := store.ListEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled watch sync plugin installations: %w", err)
+	}
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
+		return installations[i].ID < installations[j].ID
+	})
+	for _, installation := range installations {
+		if installation == nil || installation.IsBuiltin() {
+			continue
+		}
+		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "skip watch sync plugin with unreadable capabilities",
+				"component", "app",
+				"installation_id", installation.ID,
+				"error", err,
+			)
+			continue
+		}
+		for _, capability := range capabilities {
+			if capability == nil || capability.Type != sdkcapability.WatchSyncProvider {
+				continue
+			}
+			descriptor, err := plugins.DecodeCapability(capability)
+			if err != nil {
+				slog.WarnContext(ctx, "skip invalid watch sync plugin capability",
+					"component", "app",
+					"installation_id", installation.ID,
+					"capability_id", capability.ID,
+					"error", err,
+				)
+				continue
+			}
+			provider, err := watchsync.NewPluginProvider(watchsync.PluginProviderOptions{
+				InstallationID:         installation.ID,
+				ProviderKey:            fmt.Sprintf("plugin:%d:%s", installation.ID, capability.ID),
+				CapabilityID:           capability.ID,
+				DisplayName:            descriptor.GetDisplayName(),
+				Descriptor:             descriptor.GetWatchSyncProvider(),
+				ConnectionConfigSchema: descriptor.GetConfigSchema(),
+				ResolveClient: func(callCtx context.Context, installationID int, capabilityID string) (watchsync.WatchSyncPluginClient, error) {
+					return service.WatchSyncProviderClient(callCtx, installationID, capabilityID)
+				},
+				ResolveConfig: func(callCtx context.Context, installationID int) (*pluginv1.WatchSyncProviderConfig, error) {
+					return service.WatchSyncProviderConfig(callCtx, installationID)
+				},
+				Repository: repository,
+			})
+			if err != nil {
+				slog.WarnContext(ctx, "skip unsupported watch sync plugin capability",
+					"component", "app",
+					"installation_id", installation.ID,
+					"capability_id", capability.ID,
+					"error", err,
+				)
+				continue
+			}
+			providers = append(providers, provider)
+		}
+	}
+	return registry.ReplacePluginProviders(providers)
 }
 
 type markerPluginRuntimeConfigStore interface {

@@ -14,6 +14,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
+import { cn } from "@/lib/utils";
 
 interface SidebarItem extends AdminNavItem {
   badge?: ReactNode;
@@ -26,6 +27,7 @@ interface SidebarSection extends Omit<AdminNavGroup, "items"> {
 
 interface AdminSidebarProps {
   onNavigate?: () => void;
+  embedded?: boolean;
 }
 
 function useSessionCount() {
@@ -33,7 +35,7 @@ function useSessionCount() {
   return sessions.length;
 }
 
-export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
+export default function AdminSidebar({ onNavigate, embedded = false }: AdminSidebarProps) {
   const location = useLocation();
   const sessionCount = useSessionCount();
   const buildInfo = useBuildInfo();
@@ -47,7 +49,9 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   } else if (buildInfo.isError) {
     buildDisplay = "load failed";
   } else if (buildInfo.data?.available) {
-    buildDisplay = buildInfo.data.display;
+    const buildNumber = buildInfo.data.build_number ?? 0;
+    buildDisplay =
+      buildNumber > 0 ? `${buildNumber} · ${buildInfo.data.display}` : buildInfo.data.display;
   }
 
   const activityBadge =
@@ -78,7 +82,15 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   }
 
   return (
-    <aside className="border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 flex w-[240px] flex-col border-r backdrop-blur-2xl">
+    <aside
+      data-layout={embedded ? "drawer" : "desktop"}
+      className={cn(
+        "border-sidebar-border/70 bg-sidebar/92 flex w-[240px] flex-col border-r backdrop-blur-2xl",
+        embedded
+          ? "relative h-full w-full border-r-0 [&_nav_a]:min-h-11 [&_nav_button]:min-h-11"
+          : "fixed top-0 bottom-0 left-0 z-40",
+      )}
+    >
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 pt-6 pb-4">
         <Link
@@ -135,7 +147,10 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
           <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.18em] uppercase">
             Build
           </div>
-          <div className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5">
+          <div
+            className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5"
+            title={buildInfo.data?.built_at ? `Built ${buildInfo.data.built_at}` : undefined}
+          >
             {buildDisplay}
           </div>
         </div>

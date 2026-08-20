@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,36 @@ var (
 	_ CompatPlaybackStore = (*PlaybackSessionStore)(nil)
 	_ CompatPlaybackStore = (*DurableCompatPlaybackStore)(nil)
 )
+
+var jsonNULCodePoint = []byte(`\u0000`)
+
+// marshalPlaybackSession removes NUL code points from every nested string in
+// the JSON document. PostgreSQL JSONB rejects U+0000 even when Go's encoder
+// represents it as \u0000. Escaped literal text (\\u0000) remains unchanged.
+func marshalPlaybackSession(session PlaybackSession) ([]byte, error) {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return nil, err
+	}
+	cleaned := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			cleaned = append(cleaned, data[i])
+			continue
+		}
+		if i+1 < len(data) && data[i+1] == '\\' {
+			cleaned = append(cleaned, data[i], data[i+1])
+			i++
+			continue
+		}
+		if i+len(jsonNULCodePoint) <= len(data) && bytes.Equal(data[i:i+len(jsonNULCodePoint)], jsonNULCodePoint) {
+			i += len(jsonNULCodePoint) - 1
+			continue
+		}
+		cleaned = append(cleaned, data[i])
+	}
+	return cleaned, nil
+}
 
 // DurableCompatPlaybackStore is a CompatPlaybackStore that persists compat
 // playback sessions to Postgres so the PlaySessionId -> upstream-session mapping
@@ -220,7 +251,7 @@ func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
 		rows.Close()
 	}
 
-	data, err := json.Marshal(session)
+	data, err := marshalPlaybackSession(session)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +490,7 @@ func (d *DurableCompatPlaybackStore) stageTerminalDB(
 	}
 	session.Terminal = true
 	session.UpdatedAt = d.now()
-	data, err := json.Marshal(session)
+	data, err := marshalPlaybackSession(session)
 	if err != nil {
 		return nil, err
 	}
@@ -806,7 +837,7 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 	}
 	session.UpdatedAt = d.now()
 
-	data, err := json.Marshal(session)
+	data, err := marshalPlaybackSession(session)
 	if err != nil {
 		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", id)
 		return nil, err
@@ -1021,7 +1052,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 	if d.pool == nil {
 		return nil
 	}
-	data, err := json.Marshal(session)
+	data, err := marshalPlaybackSession(session)
 	if err != nil {
 		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
 		return err
@@ -1040,7 +1071,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 // insertIfAbsent repairs a session whose initial upsert failed without reviving
 // a row that another process created or terminalized in the meantime.
 func (d *DurableCompatPlaybackStore) insertIfAbsent(session *PlaybackSession) (bool, error) {
-	data, err := json.Marshal(session)
+	data, err := marshalPlaybackSession(*session)
 	if err != nil {
 		return false, err
 	}

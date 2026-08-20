@@ -316,6 +316,209 @@ func (s *PostgresUserStore) ClearProgress(ctx context.Context, profileID, mediaI
 	return nil
 }
 
+// MarkWatchedBatch marks every target watched and inserts its history row in
+// one transaction, so a series mark either lands whole or not at all. The
+// prior per-episode loop committed each episode separately, which left a large
+// series half-marked whenever the client disconnected mid-request.
+//
+// Two statements rather than a reuse of MarkProgressBatch: that one hardcodes
+// duration_seconds = 0, and the manual mark-watched path must preserve each
+// episode's real duration. Both statements carry the same
+// user_history_hidden_items watermark logic as their single-row counterparts
+// (MarkWatched, AddVisibleHistory) so a mark after a history removal stays
+// visible.
+func (s *PostgresUserStore) MarkWatchedBatch(
+	ctx context.Context,
+	profileID string,
+	targets []userstore.MarkWatchedTarget,
+	entries []userstore.WatchHistoryEntry,
+) ([]userstore.WatchHistoryEntry, error) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
+	mediaItemIDs := make([]string, 0, len(targets))
+	durations := make([]float64, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		mediaItemID := strings.TrimSpace(target.MediaItemID)
+		if mediaItemID == "" {
+			continue
+		}
+		if _, ok := seen[mediaItemID]; ok {
+			continue
+		}
+		seen[mediaItemID] = struct{}{}
+		duration := target.DurationSeconds
+		if duration < 0 {
+			duration = 0
+		}
+		mediaItemIDs = append(mediaItemIDs, mediaItemID)
+		durations = append(durations, duration)
+	}
+	if len(mediaItemIDs) == 0 {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+
+	historyIDs := make([]string, 0, len(entries))
+	historyItemIDs := make([]string, 0, len(entries))
+	historyWatchedAt := make([]time.Time, 0, len(entries))
+	historyDurations := make([]float64, 0, len(entries))
+	historyCompleted := make([]bool, 0, len(entries))
+	historySources := make([]string, 0, len(entries))
+	historyIdentities := make([]string, 0, len(entries))
+	// Entries with a blank media ID are dropped, so keep an explicit map back
+	// to the caller's slice rather than assuming positional alignment.
+	historySourceIndex := make([]int, 0, len(entries))
+	for entryIndex, entry := range entries {
+		mediaItemID := strings.TrimSpace(entry.MediaItemID)
+		if mediaItemID == "" {
+			continue
+		}
+		id := entry.ID
+		if id == "" {
+			id = generateUUID()
+		}
+		watchedAt := now
+		if entry.WatchedAt != "" {
+			parsed, err := time.Parse(time.RFC3339, entry.WatchedAt)
+			if err != nil {
+				return nil, fmt.Errorf("parsing watched_at for %s: %w", mediaItemID, err)
+			}
+			watchedAt = parsed.UTC()
+		}
+		source := entry.Source
+		if source == "" {
+			source = userstore.WatchHistorySourceLegacy
+		}
+		identityJSON, err := json.Marshal(entry.Identity)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling watch identity: %w", err)
+		}
+		historyIDs = append(historyIDs, id)
+		historyItemIDs = append(historyItemIDs, mediaItemID)
+		historyWatchedAt = append(historyWatchedAt, watchedAt)
+		historyDurations = append(historyDurations, entry.DurationSeconds)
+		historyCompleted = append(historyCompleted, entry.Completed)
+		historySources = append(historySources, string(source))
+		historyIdentities = append(historyIdentities, string(identityJSON))
+		historySourceIndex = append(historySourceIndex, entryIndex)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin mark watched batch: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, `
+		WITH target(media_item_id, duration_seconds) AS (
+			SELECT * FROM unnest($3::text[], $4::double precision[])
+		),
+		visible AS (
+			SELECT
+				t.media_item_id,
+				t.duration_seconds,
+				CASE
+					WHEN hhi.hidden_before IS NOT NULL AND $5::timestamptz <= hhi.hidden_before
+					THEN hhi.hidden_before + interval '1 second'
+					ELSE $5::timestamptz
+				END AS updated_at
+			FROM target t
+			LEFT JOIN user_history_hidden_items hhi
+			  ON hhi.user_id = $1
+			 AND hhi.profile_id = $2
+			 AND hhi.media_item_id = t.media_item_id
+		)
+		INSERT INTO user_watch_progress
+			(user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
+		SELECT $1, $2, media_item_id, 0, duration_seconds, TRUE, updated_at
+		FROM visible
+		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET
+			position_seconds = 0,
+			-- Keep a known duration when the caller has none: jellycompat's
+			-- series mark-played passes 0 for every target, and its previous
+			-- MarkProgressBatch path left duration_seconds untouched.
+			duration_seconds = CASE
+				WHEN EXCLUDED.duration_seconds > 0 THEN EXCLUDED.duration_seconds
+				ELSE user_watch_progress.duration_seconds
+			END,
+			completed = TRUE,
+			updated_at = EXCLUDED.updated_at,
+			event_at = EXCLUDED.updated_at`,
+		s.userID, profileID, mediaItemIDs, durations, now,
+	); err != nil {
+		return nil, fmt.Errorf("marking watched batch: %w", err)
+	}
+
+	written := make([]userstore.WatchHistoryEntry, 0, len(historyIDs))
+	if len(historyIDs) > 0 {
+		rows, err := tx.Query(ctx, `
+			WITH entry(id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity, ord) AS (
+				SELECT * FROM unnest(
+					$3::text[], $4::text[], $5::timestamptz[], $6::double precision[],
+					$7::boolean[], $8::text[], $9::jsonb[]
+				) WITH ORDINALITY
+			)
+			INSERT INTO user_watch_history
+				(id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
+			SELECT
+				e.id, $1, $2, e.media_item_id,
+				CASE
+					WHEN hhi.hidden_before IS NOT NULL AND e.watched_at <= hhi.hidden_before
+					THEN hhi.hidden_before + interval '1 second'
+					ELSE e.watched_at
+				END,
+				e.duration_seconds, e.completed, e.source, e.watch_identity
+			FROM entry e
+			LEFT JOIN user_history_hidden_items hhi
+			  ON hhi.user_id = $1
+			 AND hhi.profile_id = $2
+			 AND hhi.media_item_id = e.media_item_id
+			ORDER BY e.ord
+			RETURNING id, media_item_id, watched_at`,
+			s.userID, profileID, historyIDs, historyItemIDs, historyWatchedAt,
+			historyDurations, historyCompleted, historySources, historyIdentities,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("adding visible history batch: %w", err)
+		}
+		resolved := make(map[string]time.Time, len(historyIDs))
+		for rows.Next() {
+			var id, mediaItemID string
+			var watchedAt time.Time
+			if err := rows.Scan(&id, &mediaItemID, &watchedAt); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scanning inserted history: %w", err)
+			}
+			resolved[id] = watchedAt
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterating inserted history: %w", err)
+		}
+		for i, id := range historyIDs {
+			entry := entries[historySourceIndex[i]]
+			entry.ID = id
+			entry.MediaItemID = historyItemIDs[i]
+			if entry.Source == "" {
+				entry.Source = userstore.WatchHistorySource(historySources[i])
+			}
+			if watchedAt, ok := resolved[id]; ok {
+				entry.WatchedAt = timeToString(watchedAt)
+			}
+			written = append(written, entry)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit mark watched batch: %w", err)
+	}
+	return written, nil
+}
+
 // MarkProgressBatch upserts a `completed = TRUE` progress row for every entry
 // in mediaItemIDs in a single statement. Used by the jellycompat series
 // mark-played path so a 200-episode mark collapses to one INSERT.

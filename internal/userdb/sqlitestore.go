@@ -24,6 +24,7 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 // Compile-time interface check.
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
 var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
+var _ userstore.WatchedBatchWriter = (*SQLiteUserStore)(nil)
 
 // --- Profiles ---
 
@@ -79,6 +80,12 @@ func (s *SQLiteUserStore) MarkWatched(_ context.Context, profileID, mediaItemID 
 
 func (s *SQLiteUserStore) ClearProgress(_ context.Context, profileID, mediaItemID string) error {
 	return ClearProgress(s.db, profileID, mediaItemID)
+}
+
+// MarkWatchedBatch is one of the few paths here that forwards ctx: the write
+// is transactional precisely so a canceled request marks nothing.
+func (s *SQLiteUserStore) MarkWatchedBatch(ctx context.Context, profileID string, targets []userstore.MarkWatchedTarget, entries []userstore.WatchHistoryEntry) ([]userstore.WatchHistoryEntry, error) {
+	return MarkWatchedBatch(ctx, s.db, profileID, targets, entries)
 }
 
 func (s *SQLiteUserStore) MarkProgressBatch(_ context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
@@ -346,6 +353,14 @@ func (s *SQLiteUserStore) ListDevices(_ context.Context) ([]userstore.DeviceEntr
 	return ListDevices(s.db)
 }
 
+func (s *SQLiteUserStore) DeviceExists(_ context.Context, profileID, deviceID string) (bool, error) {
+	return DeviceExists(s.db, profileID, deviceID)
+}
+
+func (s *SQLiteUserStore) ForgetDevice(_ context.Context, profileID, deviceID string) error {
+	return ForgetDevice(s.db, profileID, deviceID)
+}
+
 func (s *SQLiteUserStore) SetDeviceSetting(_ context.Context, entry userstore.DeviceSettingEntry) error {
 	return SetDeviceSetting(s.db, entry)
 }
@@ -414,6 +429,18 @@ func (s *SQLiteUserStore) DeleteSeriesPlaybackPreference(_ context.Context, prof
 	return DeleteSeriesPlaybackPreference(s.db, profileID, seriesID)
 }
 
+func (s *SQLiteUserStore) SetCollectionSortPreference(_ context.Context, pref userstore.CollectionSortPreference) error {
+	return SetCollectionSortPreference(s.db, pref)
+}
+
+func (s *SQLiteUserStore) GetCollectionSortPreference(_ context.Context, profileID, collectionKind, collectionID string) (*userstore.CollectionSortPreference, error) {
+	return GetCollectionSortPreference(s.db, profileID, collectionKind, collectionID)
+}
+
+func (s *SQLiteUserStore) ClearCollectionSortPreference(_ context.Context, profileID, collectionKind, collectionID string) error {
+	return ClearCollectionSortPreference(s.db, profileID, collectionKind, collectionID)
+}
+
 func (s *SQLiteUserStore) GetLibraryPlaybackPreference(_ context.Context, profileID string, libraryID int) (*userstore.LibraryPlaybackPreference, error) {
 	return GetLibraryPlaybackPreference(s.db, profileID, libraryID)
 }
@@ -456,6 +483,10 @@ func (s *SQLiteUserStore) ListAllSettingValues(_ context.Context) ([]userstore.S
 
 func (s *SQLiteUserStore) UpsertSettingValue(_ context.Context, id userstore.SettingIdentity, value json.RawMessage) (*userstore.SettingValue, error) {
 	return UpsertSettingValue(s.db, id, value)
+}
+
+func (s *SQLiteUserStore) CompareAndSetSettingValue(ctx context.Context, id userstore.SettingIdentity, value json.RawMessage, expectedRevision int64) (*userstore.SettingValue, error) {
+	return CompareAndSetSettingValue(ctx, s.db, id, value, expectedRevision)
 }
 
 func (s *SQLiteUserStore) DeleteSettingValue(_ context.Context, id userstore.SettingIdentity) (bool, error) {

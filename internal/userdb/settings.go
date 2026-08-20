@@ -131,6 +131,39 @@ func ListDevices(db *sql.DB) ([]userstore.DeviceEntry, error) {
 	return entries, rows.Err()
 }
 
+// DeviceExists carries no user_id predicate: this backend keeps one database
+// per user, so the table is already scoped to the account.
+func DeviceExists(db *sql.DB, profileID, deviceID string) (bool, error) {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return false, nil
+	}
+	var exists bool
+	err := db.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM user_devices
+			WHERE profile_id = ? AND device_id = ?)`,
+		profileID, deviceID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking device %q: %w", deviceID, err)
+	}
+	return exists, nil
+}
+
+func ForgetDevice(db *sql.DB, profileID, deviceID string) error {
+	if strings.TrimSpace(profileID) == "" || strings.TrimSpace(deviceID) == "" {
+		return nil
+	}
+	_, err := db.Exec(
+		`DELETE FROM user_devices WHERE profile_id = ? AND device_id = ?`,
+		profileID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("forgetting device %q: %w", deviceID, err)
+	}
+	return nil
+}
+
 func SetDeviceSetting(db *sql.DB, entry userstore.DeviceSettingEntry) error {
 	if err := RegisterDevice(db, userstore.DeviceEntry{
 		ProfileID:      entry.ProfileID,

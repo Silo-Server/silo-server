@@ -130,3 +130,16 @@ export const ALL_DEVICE_SETTING_KEYS: SettingKey[] = (
   const definition = SETTING_DEFINITIONS[key];
   return definition.persistence === "remote" && definition.scopes.includes("profile_device");
 });
+
+/** Device-setting keys understood by a connected server contract revision. */
+export function deviceSettingKeysForRevision(revision: number | undefined): SettingKey[] {
+  if (revision === undefined) return [];
+  return ALL_DEVICE_SETTING_KEYS.filter((key) => {
+    const definition = SETTING_DEFINITIONS[key];
+    const scopeIndex = definition.scopes.indexOf("profile_device");
+    return (
+      scopeIndex >= 0 &&
+      (definition.scopeIntroducedIn[scopeIndex] ?? Number.POSITIVE_INFINITY) <= revision
+    );
+  });
+}

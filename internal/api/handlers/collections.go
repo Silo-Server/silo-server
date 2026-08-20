@@ -22,11 +22,12 @@ import (
 
 // CollectionHandler handles personal collection CRUD endpoints.
 type CollectionHandler struct {
-	storeProvider userstore.UserStoreProvider
-	Executor      *catalog.QueryExecutor
-	S3GP          *s3client.Client
-	HTTPClient    *http.Client
-	PresignTTL    time.Duration
+	storeProvider      userstore.UserStoreProvider
+	LibraryCollections collectionPreferenceLibraryReader
+	Executor           *catalog.QueryExecutor
+	S3GP               *s3client.Client
+	HTTPClient         *http.Client
+	PresignTTL         time.Duration
 }
 
 // NewCollectionHandler creates a new CollectionHandler.
@@ -106,8 +107,11 @@ type collectionCapabilitiesResponse struct {
 	// DisplayFilterFields are the catalog query fields a personal-collection
 	// display filter may use. Clients build a display_query_definition fragment
 	// from these rather than a bespoke enum.
-	DisplayFilterFields  []string                       `json:"display_filter_fields"`
-	DisplayFilterPresets collectionDisplayFilterPresets `json:"display_filter_presets"`
+	DisplayFilterFields       []string                       `json:"display_filter_fields"`
+	DisplayFilterPresets      collectionDisplayFilterPresets `json:"display_filter_presets"`
+	CollectionDefaultSort     bool                           `json:"collection_default_sort"`
+	CollectionSortPreferences bool                           `json:"collection_sort_preferences"`
+	EffectiveCollectionSort   bool                           `json:"effective_collection_sort"`
 }
 
 type collectionDisplayFilterPresets struct {
@@ -233,6 +237,9 @@ func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Re
 			Watched: []string{"all", "watched", "unwatched"},
 			Media:   []string{"all", "movie", "series"},
 		},
+		CollectionDefaultSort:     true,
+		CollectionSortPreferences: true,
+		EffectiveCollectionSort:   true,
 	})
 }
 
@@ -274,7 +281,11 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		}
 	}
 	queryDefinition := string(queryDefinitionJSON)
-	sortConfig := string(defaultJSON(req.SortConfig))
+	sortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, true)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
@@ -358,7 +369,11 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		input.QueryDefinition = &value
 	}
 	if len(req.SortConfig) > 0 {
-		value := string(req.SortConfig)
+		value, err := NormalizeCollectionSortConfig(req.SortConfig, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
 		input.SortConfig = &value
 	}
 	input.IsShared = req.IsShared

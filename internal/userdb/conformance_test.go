@@ -2,7 +2,7 @@ package userdb
 
 import (
 	"context"
-	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,15 +12,12 @@ import (
 
 func newConformanceStore(t *testing.T) userstore.UserStore {
 	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
 	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+		t.Fatalf("open user database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := InitSchema(db); err != nil {
-		t.Fatalf("InitSchema: %v", err)
-	}
-	return NewSQLiteUserStore(db)
+	return NewSQLiteUserStore(db.DB)
 }
 
 // TestSQLiteProgressSince runs the offline-sync progress-reconciliation
@@ -28,6 +25,14 @@ func newConformanceStore(t *testing.T) userstore.UserStore {
 // synced_seq stamping triggers and event_at LWW comparison.
 func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
+}
+
+// TestSQLiteMarkWatchedBatch runs the batch mark-watched conformance test
+// (series/season mark-watched) against the real SQLite backend. The Postgres
+// backend runs the same suite in internal/userstore/pgstore, which is what
+// keeps the two transactional implementations from drifting.
+func TestSQLiteMarkWatchedBatch(t *testing.T) {
+	storetest.RunMarkWatchedBatch(t, newConformanceStore)
 }
 
 // TestSQLiteSettingValues runs the canonical settings-contract storage
@@ -43,6 +48,10 @@ func TestSQLiteSettingValues(t *testing.T) {
 // backend runs the same suite in internal/userstore/pgstore.
 func TestSQLiteJellycompatDisplayPrefs(t *testing.T) {
 	storetest.RunJellycompatDisplayPrefs(t, newConformanceStore)
+}
+
+func TestSQLiteCollectionSortPreferences(t *testing.T) {
+	storetest.RunCollectionSortPreferences(t, newConformanceStore)
 }
 
 func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {

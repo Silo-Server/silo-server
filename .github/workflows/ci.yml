@@ -99,6 +99,14 @@ jobs:
       - name: Verify settings bindings are current
         run: make verify-settings-bindings
 
+      # The server defines the playback protocol and the clients prove
+      # conformance against these fixtures. A contract change that does not
+      # regenerate leaves every client testing against a stale body, so the
+      # drift surfaces as a playback bug on three platforms rather than as a
+      # failure here.
+      - name: Verify playback protocol fixtures are current
+        run: make verify-playback-fixtures
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and

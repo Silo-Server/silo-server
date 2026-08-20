@@ -1943,6 +1943,26 @@ func (r *FileRepository) GetByPath(ctx context.Context, path string) (*models.Me
 	return scanMediaFile(r.pool.QueryRow(ctx, query, path))
 }
 
+// IsActivePath reports whether path is the exact logical path of a media file
+// that is still active in the catalog. Scanner paths are authoritative here:
+// they deliberately preserve readable symlinks instead of replacing them with
+// their physical targets.
+func (r *FileRepository) IsActivePath(ctx context.Context, path string) (bool, error) {
+	var active bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM media_files
+			WHERE file_path = $1
+			  AND missing_since IS NULL
+		)
+	`, path).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("checking active media file path: %w", err)
+	}
+	return active, nil
+}
+
 // GetByHash retrieves a media file by its file hash.
 func (r *FileRepository) GetByHash(ctx context.Context, hash string) (*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files WHERE file_hash = $1 LIMIT 1`

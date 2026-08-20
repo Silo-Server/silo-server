@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -127,18 +125,34 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		profileID string
 		seriesID  string
 	}
+	// Resolve every queued item to its series in one query. Marking or
+	// unmarking a whole series queues one mutation per episode, and those
+	// thousands of items collapse to a single series — resolving them
+	// one-at-a-time cost thousands of round-trips before the dedupe below
+	// could discard them.
+	itemIDs := make([]string, 0, len(batch))
+	for mutation := range batch {
+		itemIDs = append(itemIDs, mutation.itemID)
+	}
+	seriesByItem, resolveErr := u.resolveSeriesIDs(ctx, itemIDs)
+	if resolveErr != nil {
+		u.logger.WarnContext(ctx, "interest series resolution failed",
+			"item_count", len(itemIDs), "error", resolveErr)
+	}
+
 	seen := make(map[recomputeKey]struct{}, len(batch))
 	for mutation, failures := range batch {
 		if ctx.Err() != nil {
 			return // shutting down; the rebuild task repairs anything dropped
 		}
-		seriesID, ok, err := u.resolveSeriesID(ctx, mutation.itemID)
-		if err != nil {
-			u.logger.WarnContext(ctx, "interest series resolution failed",
-				"item_id", mutation.itemID, "error", err)
+		if resolveErr != nil {
+			// The lookup failed for the whole batch, so no item can be
+			// classified as "not a series". Requeue rather than silently
+			// dropping interest updates.
 			requeue[mutation] = failures + 1
 			continue
 		}
+		seriesID, ok := seriesByItem[mutation.itemID]
 		if !ok {
 			continue // movies and unknown items have no series interest
 		}
@@ -149,7 +163,7 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		seen[key] = struct{}{}
 
 		recomputeCtx, cancel := context.WithTimeout(ctx, interestRecomputeTime)
-		err = u.RecomputeSeries(recomputeCtx, mutation.userID, mutation.profileID, seriesID)
+		err := u.RecomputeSeries(recomputeCtx, mutation.userID, mutation.profileID, seriesID)
 		cancel()
 		if err != nil {
 			u.logger.WarnContext(ctx, "interest recompute failed",
@@ -178,26 +192,60 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 	u.mu.Unlock()
 }
 
-// resolveSeriesID maps a media item ID (series, season, or episode) to its
-// series content ID. Returns ok=false for movies and unknown items.
-func (u *InterestUpdater) resolveSeriesID(ctx context.Context, itemID string) (string, bool, error) {
-	var seriesID string
-	err := u.pool.QueryRow(ctx, `
-		SELECT series_id FROM episodes WHERE content_id = $1
-		UNION ALL
-		SELECT series_id FROM seasons WHERE content_id = $1
-		UNION ALL
-		SELECT content_id FROM media_items WHERE content_id = $1 AND type = 'series'
-		LIMIT 1`,
-		itemID,
-	).Scan(&seriesID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, nil
+// resolveSeriesIDs maps many media item IDs (series, season, or episode) to
+// their series content IDs in one query. Items with no series — movies and
+// unknown IDs — are absent from the result, which is what lets the caller keep
+// treating "missing" as "no series interest". Semantics match resolveSeriesID
+// per item; only the number of round-trips differs.
+func (u *InterestUpdater) resolveSeriesIDs(ctx context.Context, itemIDs []string) (map[string]string, error) {
+	result := make(map[string]string, len(itemIDs))
+	ids := make([]string, 0, len(itemIDs))
+	seen := make(map[string]struct{}, len(itemIDs))
+	for _, itemID := range itemIDs {
+		if itemID == "" {
+			continue
+		}
+		if _, dup := seen[itemID]; dup {
+			continue
+		}
+		seen[itemID] = struct{}{}
+		ids = append(ids, itemID)
 	}
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	// One branch per item kind, unioned, mirroring the single-item lookup.
+	rows, err := u.pool.Query(ctx, `
+		SELECT content_id, series_id FROM episodes WHERE content_id = ANY($1::text[])
+		UNION ALL
+		SELECT content_id, series_id FROM seasons WHERE content_id = ANY($1::text[])
+		UNION ALL
+		SELECT content_id, content_id FROM media_items WHERE content_id = ANY($1::text[]) AND type = 'series'`,
+		ids,
+	)
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
-	return seriesID, seriesID != "", nil
+	defer rows.Close()
+	for rows.Next() {
+		var itemID, seriesID string
+		if err := rows.Scan(&itemID, &seriesID); err != nil {
+			return nil, err
+		}
+		if seriesID == "" {
+			continue
+		}
+		// An ID matching more than one branch keeps the first row, matching
+		// the single-item query's UNION ALL ... LIMIT 1 ordering.
+		if _, exists := result[itemID]; !exists {
+			result[itemID] = seriesID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // RecomputeSeries rebuilds the (profile, series) interest rows from
