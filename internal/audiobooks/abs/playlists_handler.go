@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // playlistBody is the JSON body for POST and PATCH /playlists[/{id}].
@@ -81,7 +83,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Add any items the client sent on the same POST — real-ABS mobile
@@ -97,7 +99,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		// audiobook-only-hydration policy. Audiobook items get a
 		// MediaStore lookup so typos don't create orphan rows.
 		if it.EpisodeID == "" {
-			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil {
+			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil || mi.Type != mediaTypeAudiobook {
 				slog.DebugContext(r.Context(), "abs playlist create-items: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}
@@ -143,9 +145,22 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		return []map[string]any{}
 	}
 	access, _, _ := h.accessFilterFromRequest(r)
-	lib := h.resolveDefaultLibrary(r.Context(), access)
-	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
+	mediaItems := make([]*models.MediaItem, 0, len(rows))
+	for _, it := range rows {
+		if it.EpisodeID != "" {
+			continue
+		}
+		item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
+		if lookupErr == nil && item != nil && item.Type == mediaTypeAudiobook {
+			mediaItems = append(mediaItems, item)
+		}
+	}
+	mappedItems := h.mapLibraryItems(r.Context(), mediaItems, baseURL, access)
+	mappedByID := make(map[string]LibraryItem, len(mappedItems))
+	for _, item := range mappedItems {
+		mappedByID[item.ID] = item
+	}
 	out := make([]map[string]any, 0, len(rows))
 	for _, it := range rows {
 		entry := map[string]any{
@@ -154,10 +169,12 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 		}
 		if it.EpisodeID != "" {
 			entry[episodeIDKey] = it.EpisodeID
-		} else if item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); err == nil && item != nil {
-			entry[libraryIDKey] = libID
-			entry[titleKey] = item.Title
-			entry["libraryItem"] = siloItemToLibraryItem(item, lib, baseURL)
+		} else if item, ok := mappedByID[it.LibraryItemID]; ok {
+			entry[libraryIDKey] = item.LibraryID
+			entry[titleKey] = item.Media.Metadata.Title
+			entry["libraryItem"] = item
+		} else {
+			continue
 		}
 		out = append(out, entry)
 	}
@@ -361,11 +378,11 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 	if body.EpisodeID == "" {
 		access, err := h.accessFilterForAuth(r.Context(), a)
 		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			h.writeAccessResolutionError(w, r, err)
 			return
 		}
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), body.LibraryItemID, access)
-		if err != nil || item == nil {
+		if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
 		}
@@ -470,7 +487,7 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 				continue
 			}
 			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
-			if lookupErr != nil || item == nil {
+			if lookupErr != nil || item == nil || item.Type != mediaTypeAudiobook {
 				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}

@@ -28,7 +28,7 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
@@ -43,10 +43,15 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 	}
 	var toggleErr error
 	if item.Type == mediaTypeEbook {
-		if h.deps.EbookProgressStore != nil {
-			toggleErr = h.deps.EbookProgressStore.SetEbookHidden(r.Context(), a.UserID, a.ProfileID, itemID, hide)
+		if h.deps.EbookProgressStore == nil {
+			http.Error(w, "ebook progress unavailable", http.StatusServiceUnavailable)
+			return
 		}
-	} else if h.deps.ProgressStore != nil {
+		toggleErr = h.deps.EbookProgressStore.SetEbookHidden(r.Context(), a.UserID, a.ProfileID, itemID, hide)
+	} else if h.deps.ProgressStore == nil {
+		http.Error(w, "progress unavailable", http.StatusServiceUnavailable)
+		return
+	} else {
 		toggleErr = h.deps.ProgressStore.SetHideFromContinue(r.Context(), a.UserID, a.ProfileID, itemID, hide)
 	}
 	if toggleErr != nil {

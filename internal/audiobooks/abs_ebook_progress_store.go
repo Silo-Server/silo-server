@@ -74,28 +74,28 @@ func (s *ABSEbookProgressStore) UpsertEbookProgress(ctx context.Context, p abs.E
 	if err != nil {
 		return nil, fmt.Errorf("invalid user id: %w", err)
 	}
-	query := fmt.Sprintf(`INSERT INTO ebook_reader_progress (user_id, profile_id, content_id, file_id, location, progress, updated_at)
+	const query = `INSERT INTO ebook_reader_progress (user_id, profile_id, content_id, file_id, location, progress, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, now())
 		ON CONFLICT (user_id, profile_id, content_id) DO UPDATE SET
 			file_id = CASE
-				WHEN ebook_reader_progress.progress >= %[1]v AND EXCLUDED.progress < %[1]v
+				WHEN NOT $8 AND ebook_reader_progress.progress >= $7 AND EXCLUDED.progress < $7
 				THEN ebook_reader_progress.file_id
 				ELSE EXCLUDED.file_id
 			END,
 			location = CASE
-				WHEN ebook_reader_progress.progress >= %[1]v AND EXCLUDED.progress < %[1]v
+				WHEN NOT $8 AND ebook_reader_progress.progress >= $7 AND EXCLUDED.progress < $7
 				THEN ebook_reader_progress.location
 				ELSE EXCLUDED.location
 			END,
 			progress = CASE
-				WHEN ebook_reader_progress.progress >= %[1]v AND EXCLUDED.progress < %[1]v
+				WHEN NOT $8 AND ebook_reader_progress.progress >= $7 AND EXCLUDED.progress < $7
 				THEN ebook_reader_progress.progress
 				ELSE EXCLUDED.progress
 			END,
 			updated_at = now()
-		RETURNING file_id, location, progress, updated_at`, models.EbookFinishedProgressThreshold)
+		RETURNING file_id, location, progress, updated_at`
 	committed := p
-	err = s.Pool.QueryRow(ctx, query, uid, p.ProfileID, p.ContentID, p.FileID, p.Location, p.Progress).
+	err = s.Pool.QueryRow(ctx, query, uid, p.ProfileID, p.ContentID, p.FileID, p.Location, p.Progress, models.EbookFinishedProgressThreshold, p.AllowFinishedRegression).
 		Scan(&committed.FileID, &committed.Location, &committed.Progress, &committed.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("upsert ebook progress: %w", err)

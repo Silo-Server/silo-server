@@ -1,5 +1,15 @@
 # Feature Changelog
 
+## 2026-08-20
+
+### Expand Audiobookshelf compatibility to ebooks
+
+Audiobookshelf-compatible clients can browse, search, open, and synchronize ebooks alongside audiobooks while keeping audiobook-only features unambiguous.
+
+- Adds ebook libraries, files, metadata filters, author and series detail, reader progress, and primary-file selection to the ABS compatibility API.
+- Preserves official-client progress fields and supports explicitly marking a completed ebook unfinished without allowing routine autosaves to regress completion.
+- Applies profile-aware catalog access and metadata-curation permission checks, redacts operational access errors, and keeps bookmarks, collections, playlists, playback, and RSS feeds audiobook-only.
+
 ## 2026-04-09
 
 Covers commits from 2026-04-08 22:32 EDT through 2026-04-09 20:02 EDT.

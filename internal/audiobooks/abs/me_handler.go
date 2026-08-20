@@ -25,7 +25,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	defaultLibID := VirtualLibraryID
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)

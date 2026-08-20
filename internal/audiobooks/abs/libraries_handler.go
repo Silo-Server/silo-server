@@ -39,7 +39,7 @@ const (
 func (h *Handler) handleLibraries(w http.ResponseWriter, r *http.Request) {
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
@@ -204,7 +204,7 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 
@@ -215,7 +215,7 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	// progress/tag filters still need the Go post-filter and the full fetch.
 	pushDown := hasFilter &&
 		(filter.Kind == FilterAuthors || filter.Kind == FilterSeries || filter.Kind == FilterNarrators ||
-			filter.Kind == FilterGenres || filter.Kind == FilterLanguages)
+			filter.Kind == FilterGenres || filter.Kind == FilterLanguages || filter.Kind == FilterPublishers)
 	sqlFilter := Filter{}
 	if pushDown {
 		sqlFilter = filter
@@ -387,7 +387,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	sortDesc := r.URL.Query().Get("desc") == "1"
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Reads the precomputed author materialized view: indexed paginated read +
@@ -442,7 +442,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	}
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Paginate in SQL with a separate COUNT so large libraries aren't truncated
@@ -519,7 +519,7 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	}
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	items, err := h.deps.MediaStore.SearchAudiobooks(r.Context(), lib.ID, q, limit, access)
@@ -641,7 +641,7 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	const shelfLimit = 10
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 
@@ -770,7 +770,7 @@ func (h *Handler) resolveLibrary(w http.ResponseWriter, r *http.Request) (Audiob
 
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return AudiobookLibrary{}, false
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)

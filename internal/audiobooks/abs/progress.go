@@ -58,13 +58,14 @@ type EbookProgressStore interface {
 }
 
 type EbookProgress struct {
-	UserID    string
-	ProfileID string
-	ContentID string
-	FileID    int
-	Location  string
-	Progress  float64
-	UpdatedAt time.Time
+	UserID                  string
+	ProfileID               string
+	ContentID               string
+	FileID                  int
+	Location                string
+	Progress                float64
+	UpdatedAt               time.Time
+	AllowFinishedRegression bool
 }
 
 // ABSPlaybackSessionStore tracks the active /abs/api/items/{id}/play sessions
@@ -174,7 +175,7 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	ids := make([]string, 0, len(rows)+len(ebookRows))
@@ -221,7 +222,7 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
@@ -244,6 +245,10 @@ func (h *Handler) handleGetItemProgress(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		writeJSON(w, http.StatusOK, ebookProgressToABS(*p))
+		return
+	}
+	if h.deps.ProgressStore == nil {
+		http.Error(w, "progress not found", http.StatusNotFound)
 		return
 	}
 	p, err := h.deps.ProgressStore.GetProgress(r.Context(), a.UserID, a.ProfileID, contentID)
@@ -318,7 +323,7 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
@@ -386,22 +391,24 @@ func (h *Handler) handleSetEbookProgress(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	current := EbookProgress{UserID: a.UserID, ProfileID: a.ProfileID, ContentID: contentID}
-	previousProgress := 0.0
 	if existing, err := h.deps.EbookProgressStore.GetEbookProgress(r.Context(), a.UserID, a.ProfileID, contentID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	} else if existing != nil {
 		current = *existing
-		previousProgress = existing.Progress
 	}
 	if body.EbookProgress != nil {
 		current.Progress = *body.EbookProgress
 	}
-	if body.IsFinished != nil && *body.IsFinished {
-		current.Progress = 1
-	}
-	if previousProgress >= models.EbookFinishedProgressThreshold && current.Progress < models.EbookFinishedProgressThreshold {
-		current.Progress = previousProgress
+	if body.IsFinished != nil {
+		if *body.IsFinished {
+			current.Progress = 1
+		} else {
+			current.AllowFinishedRegression = true
+			if body.EbookProgress == nil || current.Progress >= models.EbookFinishedProgressThreshold {
+				current.Progress = 0
+			}
+		}
 	}
 	if body.EbookLocation != nil {
 		current.Location = *body.EbookLocation
@@ -413,7 +420,7 @@ func (h *Handler) handleSetEbookProgress(w http.ResponseWriter, r *http.Request,
 	if current.FileID == 0 {
 		access, err := h.accessFilterForAuth(r.Context(), a)
 		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			h.writeAccessResolutionError(w, r, err)
 			return
 		}
 		files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
@@ -452,8 +459,17 @@ func (h *Handler) handleSetEbookProgress(w http.ResponseWriter, r *http.Request,
 }
 
 func ebookProgressToABS(p EbookProgress) map[string]any {
+	lastUpdate := int64(0)
+	if !p.UpdatedAt.IsZero() {
+		lastUpdate = p.UpdatedAt.UnixMilli()
+	}
+	var finishedAt any
+	if p.Progress >= models.EbookFinishedProgressThreshold {
+		finishedAt = lastUpdate
+	}
 	return map[string]any{
 		"id":             p.UserID + "-" + p.ContentID,
+		userIDKey:        p.UserID,
 		libraryItemIDKey: p.ContentID,
 		episodeIDKey:     nil,
 		durationKey:      0,
@@ -462,6 +478,9 @@ func ebookProgressToABS(p EbookProgress) map[string]any {
 		isFinishedKey:    p.Progress >= models.EbookFinishedProgressThreshold,
 		"ebookLocation":  p.Location,
 		"ebookProgress":  p.Progress,
+		lastUpdateKey:    lastUpdate,
+		"startedAt":      lastUpdate,
+		"finishedAt":     finishedAt,
 	}
 }
 
@@ -521,7 +540,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), sess.ContentID, access)

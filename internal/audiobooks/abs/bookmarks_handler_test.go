@@ -446,6 +446,17 @@ func TestMissingItem_404(t *testing.T) {
 	}
 }
 
+func TestBookmarkRejectsEbookItem(t *testing.T) {
+	hb := newBookmarksHarness(t)
+	hb.H.deps.MediaStore = &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	rec := dispatchBookmark(hb.H, http.MethodPost, "/api/me/item/ebook-1/bookmark", testEbookID, "", []byte(`{"title":"page","time":1}`), "1", "", hb.H.handleUpsertBookmark("bookmark_created"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestItemLookup_ErrorFromMediaStore_500(t *testing.T) {
 	hb := newBookmarksHarness(t, testBookID)
 	hb.H.deps.MediaStore = &stubMediaStore{

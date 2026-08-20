@@ -44,7 +44,7 @@ func (h *Handler) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access", http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	ids := make([]string, 0, len(rows))
@@ -59,7 +59,7 @@ func (h *Handler) handleListBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]any, 0, len(rows))
 	for _, b := range rows {
-		if _, ok := allowed[b.LibraryItemID]; ok {
+		if item, ok := allowed[b.LibraryItemID]; ok && item.Type == mediaTypeAudiobook {
 			out = append(out, bookmarkToABS(b))
 		}
 	}
@@ -104,7 +104,7 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 		// longer exists. Skipped on DELETE (see handleDeleteBookmark).
 		access, err := h.accessFilterForAuth(r.Context(), a)
 		if err != nil {
-			http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+			h.writeAccessResolutionError(w, r, err)
 			return
 		}
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
@@ -113,7 +113,7 @@ func (h *Handler) handleUpsertBookmark(reason string) http.HandlerFunc {
 			http.Error(w, "item lookup failed", http.StatusInternalServerError)
 			return
 		}
-		if item == nil {
+		if item == nil || item.Type != mediaTypeAudiobook {
 			http.Error(w, "item not found", http.StatusNotFound)
 			return
 		}

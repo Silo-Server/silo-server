@@ -10,6 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // collectionBody is the JSON body for POST and PATCH /collections[/{id}].
@@ -80,8 +82,9 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 }
 
 // collectionFullShape renders a Collection in full-shape, hydrating
-// books[] via MediaStore. Errors during hydration degrade to bare
-// {id, libraryId} entries so the response always reflects DB truth.
+// books[] via MediaStore. Missing and non-audiobook rows are omitted: ABS
+// collections are audiobook-only, and a success-shaped ebook stub would make
+// strict clients attempt audio playback against a reader file.
 func (h *Handler) collectionFullShape(r *http.Request, c Collection) map[string]any {
 	books := h.collectionBooks(r, c.ID)
 	return collectionToABS(c, books)
@@ -102,26 +105,20 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 		slog.WarnContext(r.Context(), "abs collection list-items failed", "component", "audiobooks", "err", err, "collection", collectionID)
 		return []map[string]any{}
 	}
-	lib := h.resolveDefaultLibrary(r.Context())
 	baseURL := h.absBaseURL(r)
 	access, _, _ := h.accessFilterFromRequest(r)
-	out := make([]map[string]any, 0, len(rows))
+	items := make([]*models.MediaItem, 0, len(rows))
 	for _, it := range rows {
 		item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
-		if err != nil || item == nil {
-			// Defensive: include a stub so the client still sees the
-			// item count, but with empty media so it falls through to
-			// the placeholder cover instead of crashing on
-			// `media.coverPath`.
-			out = append(out, map[string]any{
-				"id":         it.LibraryItemID,
-				libraryIDKey: audiobookLibraryID(lib),
-				mediaTypeKey: LibraryMediaType,
-				mediaKey:     map[string]any{metadataKey: map[string]any{titleKey: ""}, coverPathKey: ""},
-			})
+		if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 			continue
 		}
-		out = append(out, libraryItemToWireMap(siloItemToLibraryItem(item, lib, baseURL)))
+		items = append(items, item)
+	}
+	mapped := h.mapLibraryItems(r.Context(), items, baseURL, access)
+	out := make([]map[string]any, 0, len(mapped))
+	for _, item := range mapped {
+		out = append(out, libraryItemToWireMap(item))
 	}
 	return out
 }
@@ -335,11 +332,11 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	// Item validation — avoid orphan refs.
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), bookID, access)
-	if err != nil || item == nil {
+	if err != nil || item == nil || item.Type != mediaTypeAudiobook {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}

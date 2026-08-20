@@ -89,3 +89,15 @@ func TestContinue_MediaLookupError_500(t *testing.T) {
 		t.Errorf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestContinue_EbookWithoutProgressStore_503(t *testing.T) {
+	media := &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	h := New(Dependencies{MediaStore: media})
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/progress/ebook-1/remove-from-continue-listening",
+		map[string]string{itemIDParam: testEbookID}, nil, "1", testProfileID, h.handleRemoveFromContinueListening)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+}

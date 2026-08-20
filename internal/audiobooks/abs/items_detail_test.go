@@ -152,6 +152,9 @@ func TestHandleSimilarItemsUsesEachItemsActualLibrary(t *testing.T) {
 			testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook, Title: "Reader Test"},
 		},
 		libraryByID: map[string]int64{testBookID: 1, testEbookID: 18},
+		files: map[string][]*models.MediaFile{
+			testEbookID: {{ID: 7, FilePath: "/books/reader.epub"}},
+		},
 	}
 	h := New(Dependencies{MediaStore: media, Recommender: staticRecommender{ids: []string{testEbookID, testBookID}}})
 	rec := dispatchABSWithParams(http.MethodGet, "/api/items/source/similar",
@@ -171,6 +174,10 @@ func TestHandleSimilarItemsUsesEachItemsActualLibrary(t *testing.T) {
 	second, _ := results[1].(map[string]any)
 	if first["libraryId"] != "18" || second["libraryId"] != "1" {
 		t.Fatalf("library IDs = (%v, %v), want (18, 1)", first["libraryId"], second["libraryId"])
+	}
+	mediaBlock := first["media"].(map[string]any)
+	if mediaBlock["ebookFormat"] != "epub" {
+		t.Fatalf("similar ebook format = %v, want epub", mediaBlock["ebookFormat"])
 	}
 }
 

@@ -79,7 +79,7 @@ func (h *Handler) handleSyncLocalSession(w http.ResponseWriter, r *http.Request)
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	res := h.syncOneLocalSession(r.Context(), a, access, sess)
@@ -113,7 +113,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	results := make([]localSyncResult, 0, len(body.Sessions))

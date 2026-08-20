@@ -43,8 +43,8 @@ type absCountEntry struct {
 const absCountCacheTTL = 60 * time.Second
 
 const (
-	absMediaTypeAudiobook = "audiobook"
-	absMediaTypeEbook     = "ebook"
+	absMediaTypeAudiobook = abs.MediaTypeAudiobook
+	absMediaTypeEbook     = abs.MediaTypeEbook
 	absLibraryTypeEbooks  = "ebooks"
 )
 
@@ -329,6 +329,11 @@ func appendAudiobookFilterConditions(itemType string, filter abs.Filter, conditi
 	case abs.FilterLanguages:
 		*conditions = append(*conditions, fmt.Sprintf(
 			`LOWER(COALESCE(NULLIF(BTRIM(mi.original_language), ''), NULLIF(BTRIM(mi.default_metadata_language), ''), 'en')) = LOWER($%d)`, *argIdx))
+		*args = append(*args, filter.Value)
+		*argIdx = *argIdx + 1
+	case abs.FilterPublishers:
+		*conditions = append(*conditions, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM unnest(COALESCE(mi.studios, ARRAY[]::text[])) AS publisher WHERE LOWER(publisher) = LOWER($%d))`, *argIdx))
 		*args = append(*args, filter.Value)
 		*argIdx = *argIdx + 1
 	}
@@ -1435,7 +1440,7 @@ func (s *ABSMediaStore) GetAuthorByID(ctx context.Context, authorID string, acce
 		return abs.Author{}, fmt.Errorf("abs_media_store: get author: %w", err)
 	}
 	author := abs.Author{ID: authorID, Name: name, PosterPath: photo}
-	conditions := []string{`ip.person_id = $1`, `ip.kind = 7`, `mi.type = 'audiobook'`}
+	conditions := []string{`ip.person_id = $1`, `ip.kind = 7`, `mi.type IN ('audiobook', 'ebook')`}
 	args := []any{id}
 	argIdx := 2
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
@@ -1459,7 +1464,11 @@ func (s *ABSMediaStore) GetSeriesByName(ctx context.Context, seriesName string, 
 	}
 	var canonicalName string
 	row := s.Pool.QueryRow(ctx, `
-		SELECT series_name FROM audiobook_series
+		SELECT series_name FROM (
+			SELECT series_name FROM audiobook_series
+			UNION ALL
+			SELECT series_name FROM ebook_series
+		) book_series
 		WHERE LOWER(series_name) = LOWER($1)
 		LIMIT 1`, seriesName,
 	)
@@ -1470,16 +1479,20 @@ func (s *ABSMediaStore) GetSeriesByName(ctx context.Context, seriesName string, 
 		return abs.Series{}, fmt.Errorf("abs_media_store: get series: %w", err)
 	}
 	series := abs.Series{ID: strings.ToLower(canonicalName), Name: canonicalName}
-	conditions := []string{`LOWER(asx.series_name) = LOWER($1)`, `mi.type = 'audiobook'`}
+	conditions := []string{`LOWER(book_series.series_name) = LOWER($1)`, `mi.type IN ('audiobook', 'ebook')`}
 	args := []any{seriesName}
 	argIdx := 2
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
 	items, err := s.listAudiobookIDs(ctx, `
 		SELECT mi.content_id
-		FROM audiobook_series asx
-		JOIN media_items mi ON mi.content_id = asx.content_id
+		FROM (
+			SELECT content_id, series_name, series_index FROM audiobook_series
+			UNION ALL
+			SELECT content_id, series_name, series_index FROM ebook_series
+		) book_series
+		JOIN media_items mi ON mi.content_id = book_series.content_id
 		WHERE `+strings.Join(conditions, " AND ")+`
-		ORDER BY asx.series_index NULLS LAST, LOWER(mi.title)`, args)
+		ORDER BY book_series.series_index NULLS LAST, LOWER(mi.title)`, args)
 	if err != nil {
 		return abs.Series{}, fmt.Errorf("abs_media_store: get series books: %w", err)
 	}

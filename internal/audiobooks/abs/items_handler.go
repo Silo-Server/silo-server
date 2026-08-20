@@ -79,6 +79,33 @@ func resolveFallbackLibrary(itemType string) AudiobookLibrary {
 	return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}
 }
 
+// mapLibraryItems attaches every item to its actual source library and fills
+// ebookFile/ebookFormat for reader-capable entries. Global aggregate surfaces
+// can contain both audiobooks and ebooks, so one default library is not a safe
+// mapping input.
+func (h *Handler) mapLibraryItems(ctx context.Context, items []*models.MediaItem, baseURL string, access catalog.AccessFilter) []LibraryItem {
+	libraries := h.resolveLibrariesForItems(ctx, items, access)
+	entries := make([]LibraryItem, 0, len(items))
+	ebookIndexes := make([]int, 0, len(items))
+	ebookEntries := make([]LibraryItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		entry := siloItemToLibraryItem(item, libraries[item.ContentID], baseURL)
+		entries = append(entries, entry)
+		if item.Type == mediaTypeEbook {
+			ebookIndexes = append(ebookIndexes, len(entries)-1)
+			ebookEntries = append(ebookEntries, entry)
+		}
+	}
+	ebookEntries = h.enrichEbookLibraryItems(ctx, ebookEntries, access)
+	for i, entryIndex := range ebookIndexes {
+		entries[entryIndex] = ebookEntries[i]
+	}
+	return entries
+}
+
 // handleItem — GET /abs/api/items/{id} (and /api/items/{id})
 //
 // Returns the full ABS LibraryItem with audio track details for the given
@@ -100,7 +127,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
@@ -177,7 +204,7 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	baseURL := h.absBaseURL(r)
@@ -194,11 +221,7 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 		}
 		ordered = append(ordered, si)
 	}
-	libraries := h.resolveLibrariesForItems(r.Context(), ordered, access)
-	out := make([]LibraryItem, 0, len(ordered))
-	for _, si := range ordered {
-		out = append(out, siloItemToLibraryItem(si, libraries[si.ContentID], baseURL))
-	}
+	out := h.mapLibraryItems(r.Context(), ordered, baseURL, access)
 	writeJSON(w, http.StatusOK, pagedEnvelope(out, len(out), limit, 0, "relevance", true, "", false, ""))
 }
 
@@ -244,7 +267,7 @@ func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) 
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	baseURL := h.absBaseURL(r)

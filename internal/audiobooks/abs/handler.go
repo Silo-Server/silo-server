@@ -11,6 +11,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -212,6 +213,18 @@ type ProfileCredentialValidator interface {
 type AccessResolver interface {
 	ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error)
 }
+
+// MetadataCurationAuthorizer is an optional capability implemented by the
+// production access resolver. Ebook primary-file selection changes shared
+// catalog metadata, so read access alone is insufficient.
+type MetadataCurationAuthorizer interface {
+	CanCurateMetadata(ctx context.Context, userID, profileID string) (bool, error)
+}
+
+// ErrAccessDenied distinguishes an invalid/unauthorized ABS principal from an
+// operational access-resolution failure. Handlers must not expose resolver
+// details or turn database failures into a misleading 403.
+var ErrAccessDenied = errors.New("ABS access denied")
 
 // EventPublisher delivers a realtime event to Socket.io clients. May be nil;
 // handlers guard with publish/broadcast nil-safe wrappers.
@@ -636,6 +649,21 @@ func (h *Handler) accessFilterFromRequest(r *http.Request) (catalog.AccessFilter
 		slog.WarnContext(r.Context(), "abs access resolution failed", "component", "audiobooks", "user_id", a.UserID, "profile_id", a.ProfileID, "path", r.URL.Path, "err", err)
 	}
 	return filter, true, err
+}
+
+func (h *Handler) writeAccessResolutionError(w http.ResponseWriter, r *http.Request, err error) {
+	status := http.StatusInternalServerError
+	message := "access resolution failed"
+	if errors.Is(err, ErrAccessDenied) {
+		status = http.StatusForbidden
+		message = "forbidden"
+	}
+	slog.WarnContext(r.Context(), "abs access resolution failed",
+		"component", "audiobooks",
+		"path", r.URL.Path,
+		"err", err,
+	)
+	http.Error(w, message, status)
 }
 
 func emptyAccessFilter() catalog.AccessFilter {

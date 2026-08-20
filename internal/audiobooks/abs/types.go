@@ -11,8 +11,10 @@ const (
 	LibraryMediaType     = "book"
 	ServerVersion        = "2.35.0"
 	ServerSourceTag      = "silo"
-	mediaTypeAudiobook   = "audiobook"
-	mediaTypeEbook       = "ebook"
+	MediaTypeAudiobook   = "audiobook"
+	MediaTypeEbook       = "ebook"
+	mediaTypeAudiobook   = MediaTypeAudiobook
+	mediaTypeEbook       = MediaTypeEbook
 	libraryTypeEbooks    = "ebooks"
 	ebookEPUBMimeType    = "application/epub+zip"
 	bookmarksKey         = "bookmarks"

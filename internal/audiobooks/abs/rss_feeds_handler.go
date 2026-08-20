@@ -62,7 +62,7 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, itemIDParam)
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)

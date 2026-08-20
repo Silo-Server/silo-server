@@ -540,6 +540,19 @@ func TestCollection_AddBook_UnknownItem_404(t *testing.T) {
 	}
 }
 
+func TestCollectionAddRejectsEbookItem(t *testing.T) {
+	hb := newCollectionsHarness(t)
+	id := createCollectionForUser(t, hb, "1", "", `{"name":"audio only"}`)
+	hb.H.deps.MediaStore = &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	rec := dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/ebook-1",
+		map[string]string{"id": id, bookIDKey: testEbookID}, nil, "1", "", hb.H.handleAddCollectionBook)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCollection_AddBook_NonOwner_404(t *testing.T) {
 	hb := newCollectionsHarness(t, testBookID)
 	id := createCollectionForUser(t, hb, "1", "", `{"name":"mine"}`)

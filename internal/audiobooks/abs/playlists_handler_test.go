@@ -498,6 +498,19 @@ func TestPlaylist_AddItem_UnknownAudiobook_404(t *testing.T) {
 	}
 }
 
+func TestPlaylistAddRejectsEbookItem(t *testing.T) {
+	hb := newPlaylistsHarness(t)
+	id := createPlaylistForUser(t, hb, "1", "", `{"name":"audio only"}`)
+	hb.H.deps.MediaStore = &stubMediaStore{known: map[string]*models.MediaItem{
+		testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+	}}
+	rec := dispatchABSWithParams(http.MethodPost, "/api/playlists/"+id+"/item",
+		map[string]string{"id": id}, []byte(`{"libraryItemId":"ebook-1"}`), "1", "", hb.H.handleAddPlaylistItem)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPlaylist_AddItem_LibraryItemIdRequired_400(t *testing.T) {
 	hb := newPlaylistsHarness(t, testBookID)
 	id := createPlaylistForUser(t, hb, "1", "", `{"name":"q"}`)

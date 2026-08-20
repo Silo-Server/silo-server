@@ -9,13 +9,14 @@ import (
 type FilterKind string
 
 const (
-	FilterAuthors   FilterKind = "authors"
-	FilterSeries    FilterKind = "series"
-	FilterNarrators FilterKind = "narrators"
-	FilterGenres    FilterKind = "genres"
-	FilterProgress  FilterKind = "progress"
-	FilterTags      FilterKind = "tags"
-	FilterLanguages FilterKind = "languages"
+	FilterAuthors    FilterKind = "authors"
+	FilterSeries     FilterKind = "series"
+	FilterNarrators  FilterKind = "narrators"
+	FilterGenres     FilterKind = "genres"
+	FilterProgress   FilterKind = "progress"
+	FilterTags       FilterKind = "tags"
+	FilterLanguages  FilterKind = "languages"
+	FilterPublishers FilterKind = "publishers"
 )
 
 // SentinelNoSeries is the literal value real ABS clients send for "books
@@ -123,6 +124,8 @@ func (f Filter) Matches(item LibraryItem, inProgress, finished bool, hasProgress
 		return false
 	case FilterLanguages:
 		return strings.EqualFold(item.Media.Metadata.Language, f.Value)
+	case FilterPublishers:
+		return strings.EqualFold(item.Media.Metadata.Publisher, f.Value)
 	case FilterProgress:
 		switch f.Value {
 		case "in-progress":

@@ -121,7 +121,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	}
 	libraryAccess, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: userID, ProfileID: profileID})
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 
@@ -415,7 +415,7 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	libraryAccess, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	// Mint a NEW access token. ABS v2.26.0+ clients check whether the
@@ -529,7 +529,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	libraryAccess, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: claims.UserID, ProfileID: claims.ProfileID})
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)

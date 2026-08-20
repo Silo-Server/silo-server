@@ -22,6 +22,16 @@ type ebookPrimaryTestStore struct {
 	setID      int
 }
 
+type metadataAuthorizerStub struct{ allowed bool }
+
+func (s metadataAuthorizerStub) ResolveABSAccess(context.Context, string, string) (catalog.AccessFilter, error) {
+	return catalog.AccessFilter{}, nil
+}
+
+func (s metadataAuthorizerStub) CanCurateMetadata(context.Context, string, string) (bool, error) {
+	return s.allowed, nil
+}
+
 func (s *ebookPrimaryTestStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
 	return s.files, nil
 }
@@ -78,7 +88,7 @@ func TestEbookStatusToggleClearsEffectivePrimary(t *testing.T) {
 		}},
 		files: []*models.MediaFile{{ID: 2, FilePath: "/books/primary.epub"}},
 	}
-	h := New(Dependencies{MediaStore: store})
+	h := New(Dependencies{MediaStore: store, AccessResolver: metadataAuthorizerStub{allowed: true}})
 	rec := dispatchABSWithParams(http.MethodPatch, "/api/items/ebook-1/ebook/2/status",
 		map[string]string{"id": testEbookID, "fileid": "2"}, nil, "1", testProfileID, h.handleEbookStatus)
 	if rec.Code != http.StatusOK {
@@ -89,6 +99,24 @@ func TestEbookStatusToggleClearsEffectivePrimary(t *testing.T) {
 	}
 	if store.setID != 0 {
 		t.Fatalf("SetPrimaryEbookFileID called with %d", store.setID)
+	}
+}
+
+func TestEbookStatusRequiresMetadataCuration(t *testing.T) {
+	store := &ebookPrimaryTestStore{
+		stubMediaStore: &stubMediaStore{known: map[string]*models.MediaItem{
+			testEbookID: {ContentID: testEbookID, Type: mediaTypeEbook},
+		}},
+		files: []*models.MediaFile{{ID: 2, FilePath: "/books/primary.epub"}},
+	}
+	h := New(Dependencies{MediaStore: store, AccessResolver: metadataAuthorizerStub{}})
+	rec := dispatchABSWithParams(http.MethodPatch, "/api/items/ebook-1/ebook/2/status",
+		map[string]string{"id": testEbookID, "fileid": "2"}, nil, "1", testProfileID, h.handleEbookStatus)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if store.cleared || store.setID != 0 {
+		t.Fatal("unauthorized request mutated the server-global primary ebook selection")
 	}
 }
 

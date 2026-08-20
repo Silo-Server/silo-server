@@ -44,7 +44,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)

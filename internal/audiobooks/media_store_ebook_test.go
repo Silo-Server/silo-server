@@ -16,6 +16,7 @@ func TestEbookFilterConditionsUseEbookMetadata(t *testing.T) {
 		{name: "series", filter: abs.Filter{Kind: abs.FilterSeries, Value: "Saga"}, want: "FROM ebook_series"},
 		{name: "genre", filter: abs.Filter{Kind: abs.FilterGenres, Value: "Fantasy"}, want: "LOWER(genre) = LOWER($1)"},
 		{name: "language", filter: abs.Filter{Kind: abs.FilterLanguages, Value: "jpn"}, want: "LOWER(COALESCE"},
+		{name: "publisher", filter: abs.Filter{Kind: abs.FilterPublishers, Value: "Tor Books"}, want: "LOWER(publisher) = LOWER($1)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

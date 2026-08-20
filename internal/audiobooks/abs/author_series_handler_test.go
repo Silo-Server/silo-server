@@ -12,8 +12,12 @@ import (
 
 type authorSeriesStubMediaStore struct {
 	noopMediaStore
-	author Author
-	series Series
+	author      Author
+	series      Series
+	libraries   []AudiobookLibrary
+	memberships map[string]int64
+	filesByID   map[string][]*models.MediaFile
+	primaryByID map[string]EbookPrimarySelection
 }
 
 func (s *authorSeriesStubMediaStore) GetAuthorByID(_ context.Context, id string, _ catalog.AccessFilter) (Author, error) {
@@ -28,6 +32,22 @@ func (s *authorSeriesStubMediaStore) GetSeriesByName(_ context.Context, name str
 		return Series{}, ErrNotFound
 	}
 	return s.series, nil
+}
+
+func (s *authorSeriesStubMediaStore) ListAudiobookLibraries(context.Context, catalog.AccessFilter) ([]AudiobookLibrary, error) {
+	return s.libraries, nil
+}
+
+func (s *authorSeriesStubMediaStore) GetItemLibraryIDs(context.Context, []string, catalog.AccessFilter) (map[string]int64, error) {
+	return s.memberships, nil
+}
+
+func (s *authorSeriesStubMediaStore) GetMediaFilesByContentIDs(context.Context, []string, catalog.AccessFilter) (map[string][]*models.MediaFile, error) {
+	return s.filesByID, nil
+}
+
+func (s *authorSeriesStubMediaStore) GetPrimaryEbookFileIDs(context.Context, []string) (map[string]EbookPrimarySelection, error) {
+	return s.primaryByID, nil
 }
 
 func TestAuthor_Detail_ReturnsBooks(t *testing.T) {
@@ -71,6 +91,45 @@ func TestAuthor_Detail_ReturnsBooks(t *testing.T) {
 		if _, ok := b0["ino"]; !ok {
 			t.Errorf("author libraryItem missing minified key 'ino' (thin stub regression)")
 		}
+	}
+}
+
+func TestAuthorDetailMapsMixedBookTypesToTheirSourceLibraries(t *testing.T) {
+	media := &authorSeriesStubMediaStore{
+		author: Author{ID: "42", Name: "Mixed Author", Books: []*models.MediaItem{
+			{ContentID: testBookID, Type: mediaTypeAudiobook, Title: "Audio"},
+			{ContentID: testEbookID, Type: mediaTypeEbook, Title: "Reader"},
+		}},
+		libraries: []AudiobookLibrary{
+			{ID: 10, Name: "Audio", Type: mediaTypeAudiobook},
+			{ID: 20, Name: "Books", Type: mediaTypeEbook},
+		},
+		memberships: map[string]int64{testBookID: 10, testEbookID: 20},
+		filesByID: map[string][]*models.MediaFile{
+			testEbookID: {{ID: 7, FilePath: "/books/reader.epub"}},
+		},
+		primaryByID: map[string]EbookPrimarySelection{
+			testEbookID: {FileID: 7, Configured: true, HasPrimary: true},
+		},
+	}
+	h := New(Dependencies{MediaStore: media})
+	rec := dispatchABSWithParams(http.MethodGet, "/api/authors/42", map[string]string{"id": "42"}, nil, "1", "", h.handleAuthorDetail)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	items := got["libraryItems"].([]any)
+	audio := items[0].(map[string]any)
+	ebook := items[1].(map[string]any)
+	if audio["libraryId"] != "10" || ebook["libraryId"] != "20" {
+		t.Fatalf("library IDs = (%v, %v), want (10, 20)", audio["libraryId"], ebook["libraryId"])
+	}
+	ebookMedia := ebook["media"].(map[string]any)
+	if ebookMedia["ebookFormat"] != "epub" {
+		t.Fatalf("ebook format = %v, want epub", ebookMedia["ebookFormat"])
 	}
 }
 

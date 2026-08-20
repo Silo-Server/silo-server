@@ -140,11 +140,16 @@ func (h *Handler) handleDeleteItemProgress(w http.ResponseWriter, r *http.Reques
 	contentID := chi.URLParam(r, libraryItemIDKey)
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), contentID, access)
-	if err != nil || item == nil {
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs delete progress item lookup failed", "component", "audiobooks", "err", err, "content", contentID)
+		http.Error(w, "item lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if item == nil {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -217,7 +222,7 @@ func (h *Handler) handleEbookFile(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
@@ -290,7 +295,7 @@ func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
+		h.writeAccessResolutionError(w, r, err)
 		return
 	}
 	files, err := h.deps.MediaStore.GetMediaFiles(r.Context(), contentID, access)
@@ -300,6 +305,21 @@ func (h *Handler) handleEbookStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if selectEbookFile(files, fileID) == nil {
 		http.Error(w, "invalid ebook file id", http.StatusBadRequest)
+		return
+	}
+	authorizer, ok := h.deps.AccessResolver.(MetadataCurationAuthorizer)
+	if !ok {
+		http.Error(w, "ebook primary selection unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	allowed, err := authorizer.CanCurateMetadata(r.Context(), a.UserID, a.ProfileID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "abs ebook primary authorization failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", contentID)
+		http.Error(w, "ebook primary authorization failed", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "metadata curation permission required", http.StatusForbidden)
 		return
 	}
 	store, ok := h.deps.MediaStore.(ebookPrimaryStore)
