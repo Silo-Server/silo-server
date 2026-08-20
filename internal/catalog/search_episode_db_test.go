@@ -98,8 +98,14 @@ func TestEpisodeSearchPostgresAndDocumentSource(t *testing.T) {
 	if len(docs[0].LibraryIDs) != 1 || int(docs[0].LibraryIDs[0]) != folderID {
 		t.Fatalf("episode library ids = %v, want [%d]", docs[0].LibraryIDs, folderID)
 	}
-	if docs[0].Vectors != nil {
-		t.Fatalf("episode document unexpectedly has vectors: %#v", docs[0].Vectors)
+	// Episodes are keyword-only, but a userProvided embedder rejects any
+	// document that omits _vectors entirely and fails the whole indexing task
+	// with it, so an episode document opts out explicitly with a null vector
+	// rather than carrying no _vectors key at all.
+	vector, ok := docs[0].Vectors[DefaultMeilisearchEmbedder]
+	if len(docs[0].Vectors) != 1 || !ok || vector != nil {
+		t.Fatalf("episode document vectors = %#v, want an explicit %s null opt-out",
+			docs[0].Vectors, DefaultMeilisearchEmbedder)
 	}
 }
 

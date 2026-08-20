@@ -3,9 +3,11 @@ package notifications
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -278,10 +280,23 @@ func TestPushDeviceAPNsTokenEncryptionUsesRowAAD(t *testing.T) {
 	}
 }
 
+// pushDeviceFixture owns a slice of the migrated push_devices table. Every
+// identifier it hands out ends in the same nanosecond suffix, so binaries
+// sharing one database never collide and cleanup deletes exactly the rows this
+// test created.
+type pushDeviceFixture struct {
+	repo   *PushDeviceRepository
+	pool   *pgxpool.Pool
+	suffix string
+}
+
+// id returns name scoped to this fixture's run, so identifiers are unique
+// across binaries sharing one database.
+func (f pushDeviceFixture) id(name string) string { return name + "-" + f.suffix }
+
 // newPushDeviceTestRepo connects to SILO_TEST_DATABASE_URL (skipping when
-// unset) and shadows push_devices with a session-local temp table, pinning the
-// pool to one connection so every query sees it.
-func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) {
+// unset) and returns a fixture over the migrated push_devices table.
+func newPushDeviceTestRepo(t *testing.T) pushDeviceFixture {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -289,54 +304,35 @@ func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) 
 	}
 
 	ctx := context.Background()
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatalf("parse db config: %v", err)
-	}
-	config.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect db: %v", err)
 	}
 	t.Cleanup(pool.Close)
 
-	if _, err := pool.Exec(ctx, `
-		CREATE TEMP TABLE push_devices (
-			id text PRIMARY KEY,
-			user_id integer NOT NULL,
-			profile_id text NOT NULL,
-			device_id varchar(128) NOT NULL,
-			platform text NOT NULL,
-			provider text NOT NULL,
-			apns_environment text,
-			apns_topic text,
-			apns_token_ciphertext text,
-			apns_token_hash text,
-			server_device_id text NOT NULL,
-			push_mode text NOT NULL DEFAULT 'private_push',
-			enabled boolean NOT NULL DEFAULT true,
-			last_seen_at timestamptz,
-			last_success_at timestamptz,
-			last_failure_at timestamptz,
-			last_failure_code text,
-			created_at timestamptz NOT NULL DEFAULT now(),
-			updated_at timestamptz NOT NULL DEFAULT now(),
-			CONSTRAINT push_devices_profile_device_platform_key UNIQUE (profile_id, device_id, platform),
-			CONSTRAINT push_devices_server_device_id_key UNIQUE (server_device_id)
-		) ON COMMIT PRESERVE ROWS`); err != nil {
-		t.Fatalf("create temp push_devices table: %v", err)
+	fixture := pushDeviceFixture{
+		repo:   NewPushDeviceRepository(pool),
+		pool:   pool,
+		suffix: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
-	return NewPushDeviceRepository(pool), pool
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`DELETE FROM push_devices WHERE profile_id LIKE '%-' || $1`, fixture.suffix); err != nil {
+			t.Errorf("clean up push devices: %v", err)
+		}
+	})
+	return fixture
 }
 
 func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 	ctx := context.Background()
-	repo, pool := newPushDeviceTestRepo(t)
+	fixture := newPushDeviceTestRepo(t)
+	repo, pool := fixture.repo, fixture.pool
 	cipher := testPushCipher(t)
 	registration := ApplePushDeviceRegistration{
 		UserID:          42,
-		ProfileID:       "profile-1",
-		DeviceID:        "local-device",
+		ProfileID:       fixture.id("profile-1"),
+		DeviceID:        fixture.id("local-device"),
 		APNsToken:       strings.Repeat("a", 64),
 		APNsEnvironment: APNsEnvironmentProd,
 		APNsTopic:       ApplePushTopicSilo,
@@ -378,7 +374,9 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 	}
 
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM push_devices`).Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM push_devices WHERE profile_id LIKE '%-' || $1`,
+		fixture.suffix).Scan(&count); err != nil {
 		t.Fatalf("count rows: %v", err)
 	}
 	if count != 1 {
@@ -388,13 +386,14 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 
 func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
 	ctx := context.Background()
-	repo, pool := newPushDeviceTestRepo(t)
+	fixture := newPushDeviceTestRepo(t)
+	repo, pool := fixture.repo, fixture.pool
 	cipher := testPushCipher(t)
 
 	registration := ApplePushDeviceRegistration{
 		UserID:          42,
-		ProfileID:       "profile-parent",
-		DeviceID:        "shared-phone",
+		ProfileID:       fixture.id("profile-parent"),
+		DeviceID:        fixture.id("shared-phone"),
 		APNsToken:       strings.Repeat("a", 64),
 		APNsEnvironment: APNsEnvironmentProd,
 		APNsTopic:       ApplePushTopicSilo,
@@ -404,26 +403,29 @@ func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
 		t.Fatalf("register under first profile: %v", err)
 	}
 
-	// A different install on another profile must be untouched by the purge.
+	// A second install on the same profile must survive the purge below: the
+	// purge keys on device_id, so only the reassigned install is removed.
 	other := registration
-	other.ProfileID = "profile-parent"
-	other.DeviceID = "other-phone"
+	other.DeviceID = fixture.id("other-phone")
 	if _, err := repo.UpsertApple(ctx, other, cipher); err != nil {
 		t.Fatalf("register unrelated device: %v", err)
 	}
 
 	// The shared phone switches profiles and re-registers: the old profile's
 	// row for that install must be gone, not left enabled.
-	registration.ProfileID = "profile-kid"
+	registration.ProfileID = fixture.id("profile-kid")
 	device, err := repo.UpsertApple(ctx, registration, cipher)
 	if err != nil {
 		t.Fatalf("register under second profile: %v", err)
 	}
-	if device.ProfileID != "profile-kid" {
-		t.Fatalf("profile = %q, want profile-kid", device.ProfileID)
+	if device.ProfileID != fixture.id("profile-kid") {
+		t.Fatalf("profile = %q, want %q", device.ProfileID, fixture.id("profile-kid"))
 	}
 
-	rows, err := pool.Query(ctx, `SELECT profile_id, device_id FROM push_devices ORDER BY profile_id`)
+	rows, err := pool.Query(ctx,
+		`SELECT profile_id, device_id FROM push_devices
+		 WHERE profile_id LIKE '%-' || $1
+		 ORDER BY profile_id`, fixture.suffix)
 	if err != nil {
 		t.Fatalf("list rows: %v", err)
 	}
@@ -439,8 +441,9 @@ func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows: %v", err)
 	}
-	want := map[string]string{"profile-kid": "shared-phone", "profile-parent": "other-phone"}
-	if len(got) != len(want) || got["profile-kid"] != want["profile-kid"] || got["profile-parent"] != want["profile-parent"] {
+	kid, parent := fixture.id("profile-kid"), fixture.id("profile-parent")
+	want := map[string]string{kid: fixture.id("shared-phone"), parent: fixture.id("other-phone")}
+	if len(got) != len(want) || got[kid] != want[kid] || got[parent] != want[parent] {
 		t.Fatalf("rows after reassignment = %v, want %v", got, want)
 	}
 }

@@ -3,7 +3,9 @@ package downloads
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,7 +54,12 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 	}
 }
 
+// lifecycleTestPreparer is called from the goroutines cleanupRemoteOrphans
+// fans out over, so its recorded state is mutex-guarded and deleteStarted is
+// closed at most once. Without that, a second concurrent delete panics the test
+// binary on a closed channel and takes the package's cleanup down with it.
 type lifecycleTestPreparer struct {
+	mu            sync.Mutex
 	deleted       string
 	prepared      PreparedArtifact
 	resolveErr    error
@@ -66,12 +73,30 @@ type lifecycleTestPreparer struct {
 	statWait      bool
 	deleteErr     error
 	deleteStarted chan struct{}
+	deleteOnce    sync.Once
 	deleteWait    bool
 }
 
+// lastDeleted reports the most recent OriginArtifactID passed to DeleteArtifact.
+func (p *lifecycleTestPreparer) lastDeleted() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.deleted
+}
+
+// probedIDs reports the artifact IDs passed to StatArtifact, in call order.
+func (p *lifecycleTestPreparer) probedIDs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.statIDs)
+}
+
+// PrepareFile returns the canned PreparedArtifact the test configured.
 func (p *lifecycleTestPreparer) PrepareFile(context.Context, string, playback.TranscodeOpts, string) (PreparedArtifact, error) {
 	return p.prepared, nil
 }
+
+// ResolveArtifact stamps the origin locator the test configured onto artifact.
 func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Artifact) error {
 	if p.resolvedNode != 0 {
 		artifact.OriginNodeID = p.resolvedNode
@@ -82,6 +107,10 @@ func (p *lifecycleTestPreparer) ResolveArtifact(_ context.Context, artifact *Art
 	}
 	return p.resolveErr
 }
+
+// StatArtifact records the artifact it was asked about and returns the canned
+// result. With statWait set it blocks until the context ends, standing in for an
+// origin that never answers.
 func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Artifact) (downloadprepare.Result, error) {
 	if p.statWait {
 		p.statStarted.Add(1)
@@ -92,13 +121,22 @@ func (p *lifecycleTestPreparer) StatArtifact(ctx context.Context, artifact *Arti
 			return downloadprepare.Result{}, context.DeadlineExceeded
 		}
 	}
+	p.mu.Lock()
 	p.statIDs = append(p.statIDs, artifact.ID)
-	return p.stat, p.statError
+	stat, statErr := p.stat, p.statError
+	p.mu.Unlock()
+	return stat, statErr
 }
+
+// DeleteArtifact records the delete and signals deleteStarted on the first call.
+// With deleteWait set it then blocks until the context ends, which is how the
+// budget tests observe a delete that outlives its deadline.
 func (p *lifecycleTestPreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
+	p.mu.Lock()
 	p.deleted = artifact.OriginArtifactID
+	p.mu.Unlock()
 	if p.deleteStarted != nil {
-		close(p.deleteStarted)
+		p.deleteOnce.Do(func() { close(p.deleteStarted) })
 	}
 	if p.deleteWait {
 		<-ctx.Done()
@@ -114,8 +152,8 @@ func TestArtifactManagerDeletesRemoteBytesThroughOwningNode(t *testing.T) {
 	if !m.deleteArtifactBytes(context.Background(), artifact) {
 		t.Fatal("remote cleanup failed")
 	}
-	if preparer.deleted != "opaque-1" {
-		t.Fatalf("deleted = %q", preparer.deleted)
+	if preparer.lastDeleted() != "opaque-1" {
+		t.Fatalf("deleted = %q", preparer.lastDeleted())
 	}
 }
 
