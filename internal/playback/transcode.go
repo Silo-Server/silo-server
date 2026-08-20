@@ -759,6 +759,15 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 				"target_codec", opts.TargetCodecVideo, "reason", reason)
 			return transcodeHWNone
 		}
+		// A fully unconstrained request (no ladder rung, no bitrate cap —
+		// e.g. the jellycompat paths) has always encoded with quality-based
+		// CRF. VideoToolbox has no portable constant-quality mode and a flat
+		// bitrate fallback visibly degrades high-resolution sources, so keep
+		// these on the software encoder.
+		if opts.TargetBitrateKbps <= 0 && opts.TargetResolution == "" {
+			slog.Info("VideoToolbox skipped for unconstrained transcode; using quality-based software encoding")
+			return transcodeHWNone
+		}
 	}
 	// The bundled CUDA software-decode upload path has not been validated.
 	// Prefer the established libx264 fallback over selecting a decoder known

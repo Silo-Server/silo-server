@@ -1130,9 +1130,10 @@ func TestResolveEffectiveTranscodeHWAccelVideoToolboxChecksTargetEncoder(t *test
 	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, smokeOK: true})
 
 	base := TranscodeOpts{
-		FFmpegPath:       ffmpeg.path,
-		HWAccel:          "videotoolbox",
-		SourceVideoCodec: "h264",
+		FFmpegPath:        ffmpeg.path,
+		HWAccel:           "videotoolbox",
+		SourceVideoCodec:  "h264",
+		TargetBitrateKbps: 2000,
 	}
 
 	h264 := base
@@ -1145,6 +1146,34 @@ func TestResolveEffectiveTranscodeHWAccelVideoToolboxChecksTargetEncoder(t *test
 	hevc.TargetCodecVideo = "hevc"
 	if got := resolveEffectiveTranscodeHWAccel(hevc); got != "none" {
 		t.Fatalf("HEVC target resolved to %q, want software fallback", got)
+	}
+}
+
+func TestResolveEffectiveTranscodeHWAccelVideoToolboxUnconstrainedUsesSoftware(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+
+	unconstrained := TranscodeOpts{
+		FFmpegPath:       ffmpeg.path,
+		HWAccel:          "videotoolbox",
+		SourceVideoCodec: "h264",
+		TargetCodecVideo: "h264",
+	}
+	if got := resolveEffectiveTranscodeHWAccel(unconstrained); got != "none" {
+		t.Fatalf("unconstrained transcode resolved to %q, want software (quality-based CRF)", got)
+	}
+
+	withResolution := unconstrained
+	withResolution.TargetResolution = "720p"
+	if got := resolveEffectiveTranscodeHWAccel(withResolution); got != "videotoolbox" {
+		t.Fatalf("resolution-constrained transcode resolved to %q, want videotoolbox", got)
+	}
+
+	withBitrate := unconstrained
+	withBitrate.TargetBitrateKbps = 2000
+	if got := resolveEffectiveTranscodeHWAccel(withBitrate); got != "videotoolbox" {
+		t.Fatalf("bitrate-constrained transcode resolved to %q, want videotoolbox", got)
 	}
 }
 
@@ -1433,6 +1462,7 @@ func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
 		TargetCodecAudio: "copy",
 		SegmentDuration:  2,
 		HWAccel:          "videotoolbox",
+		TargetResolution: "1080p",
 	})
 
 	joined := strings.Join(args, " ")
