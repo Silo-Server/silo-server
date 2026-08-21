@@ -158,6 +158,10 @@ const (
 	libraryCollectionLifecycleLockSQL      = `SELECT pg_advisory_xact_lock(hashtextextended('library_collection_lifecycle:' || $1::text, 0))`
 )
 
+// Package variable only so the PostgreSQL integration test can use a short
+// bound. Production code never mutates it.
+var libraryCollectionPosterLockTimeout = 15 * time.Second
+
 func acquireLibraryCollectionAdvisoryTransaction(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -203,6 +207,10 @@ func (r *LibraryCollectionRepository) AcquirePosterMutationLock(ctx context.Cont
 	tx, release, err := acquireLibraryCollectionAdvisoryTransaction(ctx, r.pool)
 	if err != nil {
 		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, libraryCollectionPosterLockTimeout.String()); err != nil {
+		release()
+		return nil, fmt.Errorf("setting library collection poster lock timeout: %w", err)
 	}
 	if _, err := tx.Exec(ctx, libraryCollectionPosterAdvisoryLockSQL, collectionID); err != nil {
 		release()
@@ -564,6 +572,9 @@ func libraryCollectionLifecycleLockIDs(oldLibraryID, newLibraryID int) []int {
 	return ids
 }
 
+// When LibraryIDs is non-nil, Update acquires the local poster lock followed by
+// the database poster lock. Callers must not hold either non-reentrant lock when
+// invoking Update with LibraryIDs set.
 func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
 	var (
 		updatedLibraryIDs []int

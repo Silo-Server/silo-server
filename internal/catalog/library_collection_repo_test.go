@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -17,6 +19,63 @@ func TestLibraryCollectionColumnsKeepPosterSuppressionInScanOrder(t *testing.T) 
 	if !strings.Contains(libraryCollectionColumns, want) {
 		t.Fatalf("library collection scan columns do not contain %q in order", want)
 	}
+}
+
+func TestAcquirePosterMutationLockTimesOutAndReleasesResources(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	holder, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire lock-holder connection: %v", err)
+	}
+	t.Cleanup(holder.Release)
+	holderTx, err := holder.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin lock-holder transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = holderTx.Rollback(ctx) })
+
+	collectionID := fmt.Sprintf("poster-lock-timeout-%d", time.Now().UnixNano())
+	if _, err := holderTx.Exec(ctx, libraryCollectionPosterAdvisoryLockSQL, collectionID); err != nil {
+		t.Fatalf("hold poster advisory lock: %v", err)
+	}
+
+	oldTimeout := libraryCollectionPosterLockTimeout
+	libraryCollectionPosterLockTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { libraryCollectionPosterLockTimeout = oldTimeout })
+
+	repo := NewLibraryCollectionRepository(pool)
+	started := time.Now()
+	release, err := repo.AcquirePosterMutationLock(ctx, collectionID)
+	if release != nil {
+		release()
+		t.Fatal("contended poster lock unexpectedly returned a release function")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("lock error = %v, want PostgreSQL lock timeout (55P03)", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("poster lock timeout took %s, want a bounded failure", elapsed)
+	}
+
+	if err := holderTx.Rollback(ctx); err != nil {
+		t.Fatalf("release held poster lock: %v", err)
+	}
+	release, err = repo.AcquirePosterMutationLock(ctx, collectionID)
+	if err != nil {
+		t.Fatalf("acquire poster lock after timeout cleanup: %v", err)
+	}
+	release()
 }
 
 func TestLibraryCollectionPosterSuppressionRoundTrip(t *testing.T) {

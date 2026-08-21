@@ -374,54 +374,77 @@ func (h *SectionHandler) HandleDeleteSection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	collectionID := strings.TrimSpace(sections.ParseCollectionConfig(existing.Config).LibraryCollectionID)
+	var releaseCollectionLock func()
+	if collectionID != "" && h.CollectionRepo != nil {
+		unlockLocal := catalog.LockLibraryCollectionPosterMutation(collectionID)
+		unlockDatabase, err := h.CollectionRepo.AcquirePosterMutationLock(r.Context(), collectionID)
+		if err != nil {
+			unlockLocal()
+			slog.ErrorContext(r.Context(), "failed to lock section-managed collection before section delete",
+				"component", "api", "section_id", id, "collection_id", collectionID, "error", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to lock section-managed collection")
+			return
+		}
+		releaseCollectionLock = func() {
+			unlockDatabase()
+			unlockLocal()
+		}
+		defer func() {
+			if releaseCollectionLock != nil {
+				releaseCollectionLock()
+			}
+		}()
+	}
 
 	if err := h.repo.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Section not found")
 		return
 	}
-	h.deleteUnreferencedSectionManagedCollection(r.Context(), collectionID)
+	collectionDeleted := h.deleteUnreferencedSectionManagedCollectionLocked(r.Context(), collectionID)
+	if releaseCollectionLock != nil {
+		releaseCollectionLock()
+		releaseCollectionLock = nil
+	}
+	if collectionDeleted && h.SortPreferenceCleaner != nil {
+		h.SortPreferenceCleaner.DeleteForCollection(r.Context(), userstore.CollectionKindLibrary, collectionID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.Context, collectionID string) {
+// deleteUnreferencedSectionManagedCollectionLocked removes the collection
+// created solely for a deleted section. HandleDeleteSection holds both poster
+// mutation locks so a lock failure can never happen after the section delete.
+func (h *SectionHandler) deleteUnreferencedSectionManagedCollectionLocked(ctx context.Context, collectionID string) bool {
 	if collectionID == "" || h.CollectionRepo == nil {
-		return
+		return false
 	}
-	unlockLocal := catalog.LockLibraryCollectionPosterMutation(collectionID)
-	unlockDatabase, err := h.CollectionRepo.AcquirePosterMutationLock(ctx, collectionID)
-	if err != nil {
-		unlockLocal()
-		slog.WarnContext(ctx, "failed to lock section-managed collection during section delete", "component", "api", "collection_id", collectionID, "error", err)
-		return
-	}
-	defer func() {
-		unlockDatabase()
-		unlockLocal()
-	}()
 
 	collection, err := h.CollectionRepo.GetByID(ctx, collectionID)
 	if err != nil {
 		if !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
 			slog.WarnContext(ctx, "failed to load section-managed collection during section delete", "component", "api", "collection_id", collectionID, "error", err)
 		}
-		return
+		return false
 	}
 	if collection.ManagementMode != "section" {
-		return
+		return false
 	}
 	refs, err := h.repo.CountLibraryCollectionReferences(ctx, collectionID, "")
 	if err != nil {
 		slog.WarnContext(ctx, "failed to count section-managed collection references", "component", "api", "collection_id", collectionID, "error", err)
-		return
+		return false
 	}
 	if refs > 0 {
-		return
+		return false
 	}
-	if err := h.CollectionRepo.Delete(ctx, collectionID); err != nil && !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+	err = h.CollectionRepo.Delete(ctx, collectionID)
+	if err == nil {
+		return true
+	}
+	if !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
 		slog.WarnContext(ctx, "failed to delete unreferenced section-managed collection", "component", "api", "collection_id", collectionID, "error", err)
-	} else if err == nil && h.SortPreferenceCleaner != nil {
-		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
+	return false
 }
 
 // HandleReorderSections handles PUT /admin/sections/reorder

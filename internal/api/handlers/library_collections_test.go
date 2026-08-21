@@ -64,19 +64,21 @@ func TestApplyCollectionPosterURLUpdate(t *testing.T) {
 	tests := []struct {
 		name           string
 		posterURL      string
+		wantURL        string
 		wantSuppressed bool
 	}{
-		{name: "empty suppresses automatic poster", posterURL: "", wantSuppressed: true},
-		{name: "whitespace suppresses automatic poster", posterURL: "  ", wantSuppressed: true},
-		{name: "nonempty restores custom poster", posterURL: "https://example.test/poster.jpg", wantSuppressed: false},
+		{name: "empty suppresses automatic poster", posterURL: "", wantURL: "", wantSuppressed: true},
+		{name: "whitespace suppresses automatic poster", posterURL: "  ", wantURL: "", wantSuppressed: true},
+		{name: "nonempty restores custom poster", posterURL: "https://example.test/poster.jpg", wantURL: "https://example.test/poster.jpg", wantSuppressed: false},
+		{name: "nonempty URL is canonicalized", posterURL: "  https://example.test/poster.jpg  ", wantURL: "https://example.test/poster.jpg", wantSuppressed: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := catalog.UpdateLibraryCollectionInput{}
 			applyCollectionPosterURLUpdate(&input, &tt.posterURL)
-			if tt.wantSuppressed && (input.PosterURL == nil || *input.PosterURL != "") {
-				t.Fatalf("poster URL = %v, want canonical empty string", input.PosterURL)
+			if input.PosterURL == nil || *input.PosterURL != tt.wantURL {
+				t.Fatalf("poster URL = %v, want %q", input.PosterURL, tt.wantURL)
 			}
 			if input.PosterSuppressed == nil || *input.PosterSuppressed != tt.wantSuppressed {
 				t.Fatalf("poster suppressed = %v, want %t", input.PosterSuppressed, tt.wantSuppressed)

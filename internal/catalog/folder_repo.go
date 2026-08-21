@@ -15,13 +15,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// Retry parameters for transient serialization/deadlock failures. They are
-// package vars (not consts) only so tests can shrink them; production code
-// never mutates them.
+// Retry parameters are package vars (not consts) only so tests can shrink
+// them; production code never mutates them.
 var (
-	deadlockMaxAttempts = 5
-	deadlockBaseBackoff = 50 * time.Millisecond
+	deadlockMaxAttempts                = 5
+	deadlockBaseBackoff                = 50 * time.Millisecond
+	folderCollectionLockSetMaxAttempts = 5
+	folderCollectionLockSetBaseBackoff = 10 * time.Millisecond
 )
+
+var errFolderCollectionLockSetNeverStable = errors.New("library collection set kept changing during folder delete")
 
 const (
 	// orphanDeleteBatch is small because each media_items row cascades across
@@ -714,14 +717,10 @@ func (r *FolderRepository) DeleteWithStats(
 // holding a pooled connection; after the lifecycle lock makes the child set
 // stable, the set is re-read and the attempt is retried if a new child appeared.
 func (r *FolderRepository) deleteFolderRowWithCollectionPosterLocks(ctx context.Context, folderID int) ([]string, error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
+	return retryFolderCollectionLockSet(ctx, folderID, func() (bool, []string, error) {
 		collectionIDs, err := r.listOwnedLibraryCollectionIDs(ctx, folderID)
 		if err != nil {
-			return nil, err
+			return false, nil, err
 		}
 		unlockLocal := make([]func(), 0, len(collectionIDs))
 		for _, collectionID := range collectionIDs {
@@ -733,11 +732,41 @@ func (r *FolderRepository) deleteFolderRowWithCollectionPosterLocks(ctx context.
 			unlockLocal[i]()
 		}
 		if err != nil {
+			return false, nil, err
+		}
+		return retry, deletedIDs, nil
+	})
+}
+
+// retryFolderCollectionLockSet bounds stabilization when concurrent creates or
+// reparents change the child set between its initial read and lifecycle-lock
+// acquisition. It never permits deletion without every discovered poster lock.
+func retryFolderCollectionLockSet(
+	ctx context.Context,
+	folderID int,
+	attempt func() (retry bool, deletedIDs []string, err error),
+) ([]string, error) {
+	backoff := folderCollectionLockSetBaseBackoff
+	for attemptNumber := 1; ; attemptNumber++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		retry, deletedIDs, err := attempt()
+		if err != nil {
 			return nil, err
 		}
 		if !retry {
 			return deletedIDs, nil
 		}
+		if attemptNumber >= folderCollectionLockSetMaxAttempts {
+			return nil, fmt.Errorf("folder %d: %w after %d attempts", folderID, errFolderCollectionLockSetNeverStable, attemptNumber)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
 	}
 }
 

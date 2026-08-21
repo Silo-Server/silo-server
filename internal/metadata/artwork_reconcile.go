@@ -290,10 +290,14 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 // bucket and resets rows whose objects are missing, so the existing pipelines
 // (image cache queue, book enrichment, chapter thumbnail backfill, collection
 // collage generation) rebuild them in the currently configured storage.
+type collectionPosterMutationLocker interface {
+	AcquirePosterMutationLock(ctx context.Context, collectionID string) (func(), error)
+}
+
 type ArtworkCacheReconciler struct {
 	pool           *pgxpool.Pool
 	s3             ArtworkObjectChecker
-	collectionRepo *catalog.LibraryCollectionRepository
+	collectionRepo collectionPosterMutationLocker
 }
 
 func NewArtworkCacheReconciler(pool *pgxpool.Pool, s3 ArtworkObjectChecker) *ArtworkCacheReconciler {
@@ -775,9 +779,10 @@ type sweptRow struct {
 }
 
 type coordinatedPosterResetResult struct {
-	present    bool
-	reset      bool
-	storageErr error
+	present         bool
+	reset           bool
+	storageErr      error
+	coordinationErr error
 }
 
 func (r *ArtworkCacheReconciler) resetCollectionPosterIfStillMissing(
@@ -793,7 +798,12 @@ func (r *ArtworkCacheReconciler) resetCollectionPosterIfStillMissing(
 	unlockDatabase, err := r.collectionRepo.AcquirePosterMutationLock(ctx, collectionID)
 	if err != nil {
 		unlockLocal()
-		return coordinatedPosterResetResult{}, fmt.Errorf("artwork reconcile: locking collection poster %s: %w", collectionID, err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return coordinatedPosterResetResult{}, ctxErr
+		}
+		return coordinatedPosterResetResult{
+			coordinationErr: fmt.Errorf("artwork reconcile: locking collection poster %s: %w", collectionID, err),
+		}, nil
 	}
 	defer func() {
 		unlockDatabase()
@@ -947,6 +957,11 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 					return err
 				}
 				switch {
+				case result.coordinationErr != nil:
+					stats.Errors++
+					stats.SweepErrors++
+					slog.WarnContext(ctx, "artwork reconcile: collection poster lock failed; leaving row untouched",
+						"surface", s.name, "key", row.path, "row", strings.Join(row.keys, "/"), "error", result.coordinationErr)
 				case result.storageErr != nil:
 					stats.Errors++
 					stats.SweepErrors++
