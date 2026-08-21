@@ -387,6 +387,18 @@ func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.
 	if collectionID == "" || h.CollectionRepo == nil {
 		return
 	}
+	unlockLocal := catalog.LockLibraryCollectionPosterMutation(collectionID)
+	unlockDatabase, err := h.CollectionRepo.AcquirePosterMutationLock(ctx, collectionID)
+	if err != nil {
+		unlockLocal()
+		slog.WarnContext(ctx, "failed to lock section-managed collection during section delete", "component", "api", "collection_id", collectionID, "error", err)
+		return
+	}
+	defer func() {
+		unlockDatabase()
+		unlockLocal()
+	}()
+
 	collection, err := h.CollectionRepo.GetByID(ctx, collectionID)
 	if err != nil {
 		if !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {

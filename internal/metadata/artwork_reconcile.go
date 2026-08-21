@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ArtworkObjectChecker is the S3 surface the reconciler needs: existence
@@ -31,6 +33,8 @@ const (
 	artworkReconcileHeadWorkers  = 16
 	artworkReconcileHeadTimeout  = 15 * time.Second
 	artworkReconcileErrorBudget  = 200
+	artworkCollectionPostersName = "collection posters"
+	artworkPosterURLColumn       = "poster_url"
 	// artworkReconcileBulkThreshold: when at least this fraction of sampled
 	// objects is missing, skip per-row verification for the large regenerable
 	// surfaces and reset every cached row.
@@ -170,6 +174,10 @@ type artworkSweepSurface struct {
 	// Used for small tables holding admin/user uploads, where a blind reset
 	// would discard the last pointer to an object that survived migration.
 	alwaysVerify bool
+	// coordinatePosterMutation requires the same local and PostgreSQL locks as
+	// deterministic collection-poster writers, followed by an under-lock HEAD
+	// recheck before clearing the pointer.
+	coordinatePosterMutation bool
 }
 
 func (s artworkSweepSurface) keyColumnNames() []string {
@@ -271,9 +279,9 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		// (user collections), or the default tile (library posters); admins
 		// re-upload anything they want back. alwaysVerify protects surviving
 		// uploads from blind bulk resets.
-		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
+		{name: artworkCollectionPostersName, table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: artworkPosterURLColumn, clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true, coordinatePosterMutation: true},
 		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
-		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: artworkPosterURLColumn, clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
 		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int32SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}
 }
@@ -283,15 +291,20 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 // (image cache queue, book enrichment, chapter thumbnail backfill, collection
 // collage generation) rebuild them in the currently configured storage.
 type ArtworkCacheReconciler struct {
-	pool *pgxpool.Pool
-	s3   ArtworkObjectChecker
+	pool           *pgxpool.Pool
+	s3             ArtworkObjectChecker
+	collectionRepo *catalog.LibraryCollectionRepository
 }
 
 func NewArtworkCacheReconciler(pool *pgxpool.Pool, s3 ArtworkObjectChecker) *ArtworkCacheReconciler {
 	if pool == nil || s3 == nil {
 		return nil
 	}
-	return &ArtworkCacheReconciler{pool: pool, s3: s3}
+	return &ArtworkCacheReconciler{
+		pool:           pool,
+		s3:             s3,
+		collectionRepo: catalog.NewLibraryCollectionRepository(pool),
+	}
 }
 
 // Run executes a full reconcile: probe, then either a bulk reset or a
@@ -761,6 +774,60 @@ type sweptRow struct {
 	remoteSource bool
 }
 
+type coordinatedPosterResetResult struct {
+	present    bool
+	reset      bool
+	storageErr error
+}
+
+func (r *ArtworkCacheReconciler) resetCollectionPosterIfStillMissing(
+	ctx context.Context,
+	s artworkSweepSurface,
+	row sweptRow,
+) (coordinatedPosterResetResult, error) {
+	if r.collectionRepo == nil || len(row.keys) != 1 {
+		return coordinatedPosterResetResult{}, fmt.Errorf("artwork reconcile: collection poster coordination is not configured")
+	}
+	collectionID := row.keys[0]
+	unlockLocal := catalog.LockLibraryCollectionPosterMutation(collectionID)
+	unlockDatabase, err := r.collectionRepo.AcquirePosterMutationLock(ctx, collectionID)
+	if err != nil {
+		unlockLocal()
+		return coordinatedPosterResetResult{}, fmt.Errorf("artwork reconcile: locking collection poster %s: %w", collectionID, err)
+	}
+	defer func() {
+		unlockDatabase()
+		unlockLocal()
+	}()
+
+	exists, err := r.objectExistsWithRetry(ctx, r.s3.Bucket(), row.path)
+	if err != nil {
+		if ctx.Err() != nil {
+			return coordinatedPosterResetResult{}, ctx.Err()
+		}
+		return coordinatedPosterResetResult{storageErr: err}, nil
+	}
+	if exists {
+		return coordinatedPosterResetResult{present: true}, nil
+	}
+
+	parsedKeys, err := s.parseKeys(row.keys)
+	if err != nil {
+		return coordinatedPosterResetResult{}, fmt.Errorf("artwork reconcile: invalid %s row key: %w", s.name, err)
+	}
+	args := append(parsedKeys, row.path)
+	set := s.clearSet
+	if row.remoteSource {
+		set = s.resetSet()
+	}
+	tag, err := r.pool.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE %s AND %s = $%d`,
+		s.table, set, keyEqualityPredicate(s.keyCols), s.pathCol, len(args)), args...)
+	if err != nil {
+		return coordinatedPosterResetResult{}, fmt.Errorf("artwork reconcile: resetting %s row: %w", s.name, err)
+	}
+	return coordinatedPosterResetResult{reset: tag.RowsAffected() > 0}, nil
+}
+
 func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, onProgress func(done int)) error {
 	return r.sweepSurfaceFrom(ctx, s, stats, nil, 0,
 		func(_ []string, done int, _ bool) error {
@@ -874,6 +941,26 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 				"surface", s.name, "key", batch[i].path, "error", v.err)
 		case v.missing:
 			row := batch[i]
+			if s.coordinatePosterMutation {
+				result, err := r.resetCollectionPosterIfStillMissing(ctx, s, row)
+				if err != nil {
+					return err
+				}
+				switch {
+				case result.storageErr != nil:
+					stats.Errors++
+					stats.SweepErrors++
+					slog.WarnContext(ctx, "artwork reconcile: collection poster recheck failed; leaving row untouched",
+						"surface", s.name, "key", row.path, "row", strings.Join(row.keys, "/"), "error", result.storageErr)
+				case result.present:
+					stats.Verified++
+				case result.reset && row.remoteSource:
+					stats.Requeued++
+				case result.reset:
+					stats.Cleared++
+				}
+				continue
+			}
 			args := make([]any, 0, len(row.keys)+1)
 			parsedKeys, err := s.parseKeys(row.keys)
 			if err != nil {
