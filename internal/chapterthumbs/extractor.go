@@ -36,6 +36,9 @@ const (
 	reasonDecodeInvalidData     = "decode_invalid_data"
 	reasonFFmpegProbeFailed     = "ffmpeg_probe_failed"
 	reasonToneMapUnsupported    = "tonemap_unsupported"
+	reasonHWKilled              = "hw_killed"
+	reasonHWTimeout             = "hw_timeout"
+	reasonCPUTimeout            = "cpu_timeout"
 	softwareToneMapProbeTimeout = 3 * time.Second
 	softwareToneMapFilterBT2390 = "zscale=t=linear:npl=100,format=gbrpf32le,tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
 	softwareToneMapFilterHable  = "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
@@ -323,12 +326,12 @@ func classifyExtractError(stage string, err error) string {
 		strings.Contains(lower, "invalid data found when processing input"),
 		strings.Contains(lower, "invalid as first byte of an ebml number"):
 		return reasonDecodeInvalidData
-	case stage == "hw" && strings.Contains(message, "signal: killed"):
-		return "hw_killed"
 	case stage == "hw" && isDeadlineError(err):
-		return "hw_timeout"
+		return reasonHWTimeout
 	case stage == "cpu" && isDeadlineError(err):
-		return "cpu_timeout"
+		return reasonCPUTimeout
+	case stage == "hw" && strings.Contains(message, "signal: killed"):
+		return reasonHWKilled
 	default:
 		return reasonChapterExtractFailed
 	}
@@ -445,6 +448,9 @@ func runFFmpegFrameExtract(ctx context.Context, ffmpegPath string, args []string
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("ffmpeg extract frame: %w (%s)", errors.Join(ctxErr, err), stderr.String())
+		}
 		return nil, fmt.Errorf("ffmpeg extract frame: %w (%s)", err, stderr.String())
 	}
 	if stdout.Len() == 0 {

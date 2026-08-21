@@ -26,10 +26,10 @@ const (
 	defaultBatchLimit          = 25
 	defaultPriorityBatchSize   = 3
 	defaultNormalBatchSize     = 8
-	hwExtractTimeoutSDR        = 8 * time.Second
-	hwExtractTimeoutHDR        = 20 * time.Second
-	cpuExtractTimeoutSDR       = 10 * time.Second
-	cpuExtractTimeoutHDR       = 25 * time.Second
+	hwExtractTimeoutSDR        = time.Minute
+	hwExtractTimeoutHDR        = 3 * time.Minute
+	cpuExtractTimeoutSDR       = time.Minute
+	cpuExtractTimeoutHDR       = 3 * time.Minute
 
 	chapterThumbnailHDRPolicySetting       = "playback.chapter_thumbnail_hdr_policy"
 	chapterThumbnailHDRPolicyDefault       = "best_effort"
@@ -1197,7 +1197,7 @@ func retryDurationForCount(failureCount int) time.Duration {
 
 func shouldApplyFileFailure(reason string) bool {
 	switch reason {
-	case reasonDecodeInvalidData, reasonFFmpegProbeFailed, reasonToneMapUnsupported:
+	case reasonDecodeInvalidData, reasonFFmpegProbeFailed, reasonToneMapUnsupported, reasonHWTimeout, reasonCPUTimeout:
 		return true
 	default:
 		return false

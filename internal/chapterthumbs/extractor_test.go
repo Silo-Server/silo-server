@@ -3,6 +3,7 @@ package chapterthumbs
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -563,6 +564,77 @@ func TestExtractFramePreservesHardwareAndCPUFailures(t *testing.T) {
 	}
 }
 
+func TestRunFFmpegFrameExtractPreservesDeadlineAfterProcessKill(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = runFFmpegFrameExtract(ctx, executable, []string{
+		"-test.run=TestFFmpegFrameExtractHelperProcess",
+		"--",
+		"chapterthumbs-block",
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runFFmpegFrameExtract() error = %v, want context deadline exceeded", err)
+	}
+	if !strings.Contains(err.Error(), "signal: killed") {
+		t.Fatalf("runFFmpegFrameExtract() error = %v, want preserved process failure", err)
+	}
+}
+
+func TestClassifyExtractErrorPrefersDeadlineOverKilledSignal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "context terminated hardware process",
+			err:  errors.Join(context.DeadlineExceeded, errors.New("signal: killed")),
+			want: "hw_timeout",
+		},
+		{
+			name: "externally killed hardware process",
+			err:  errors.New("signal: killed"),
+			want: "hw_killed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyExtractError("hw", tt.err); got != tt.want {
+				t.Fatalf("classifyExtractError() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractTimeoutForAttemptAllowsHighLatencyStorage(t *testing.T) {
+	tests := []struct {
+		name     string
+		hardware bool
+		hdr      bool
+		want     time.Duration
+	}{
+		{name: "hardware SDR", hardware: true, want: time.Minute},
+		{name: "CPU SDR", want: time.Minute},
+		{name: "hardware HDR", hardware: true, hdr: true, want: 3 * time.Minute},
+		{name: "CPU HDR", hdr: true, want: 3 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractTimeoutForAttempt(tt.hardware, tt.hdr); got != tt.want {
+				t.Fatalf("extractTimeoutForAttempt() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRemoteExtractTimeoutBudgetsOnlyAllowedAttempts(t *testing.T) {
 	sdrExtractBudget := extractTimeoutForAttempt(true, false) + extractTimeoutForAttempt(false, false)
 	if got := remoteExtractTimeout(false, false); got <= sdrExtractBudget {
@@ -607,5 +679,14 @@ func assertApproximateDeadline(t *testing.T, got time.Duration, want time.Durati
 	t.Helper()
 	if got < want-time.Second || got > want+time.Second {
 		t.Fatalf("deadline remaining = %s, want about %s", got, want)
+	}
+}
+
+func TestFFmpegFrameExtractHelperProcess(t *testing.T) {
+	if !slices.Contains(os.Args, "chapterthumbs-block") {
+		return
+	}
+	for {
+		runtime.Gosched()
 	}
 }

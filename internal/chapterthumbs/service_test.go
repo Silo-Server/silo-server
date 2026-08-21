@@ -519,6 +519,79 @@ func TestProcessRequestMarksDecodeInvalidDataAsFileFailure(t *testing.T) {
 	}
 }
 
+func TestProcessRequestStopsAfterTimeoutAndBacksOffFile(t *testing.T) {
+	tests := []struct {
+		name         string
+		reason       string
+		failureCount int
+		wantDelay    time.Duration
+	}{
+		{name: "first CPU timeout", reason: "cpu_timeout", wantDelay: 15 * time.Minute},
+		{name: "second CPU timeout", reason: "cpu_timeout", failureCount: 1, wantDelay: time.Hour},
+		{name: "third hardware timeout", reason: "hw_timeout", failureCount: 2, wantDelay: 6 * time.Hour},
+		{name: "later hardware timeout", reason: "hw_timeout", failureCount: 3, wantDelay: 24 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Unix(1_700_000_000, 0).UTC()
+			fileRepo := &testFileRepo{
+				file: &models.MediaFile{
+					ID:                           42,
+					MediaFolderID:                9,
+					FilePath:                     "/media/movie.mkv",
+					ChapterThumbnailFailureCount: tt.failureCount,
+					Chapters: []models.MediaChapter{
+						{Index: 0, StartSeconds: 0, EndSeconds: 10},
+						{Index: 1, StartSeconds: 10, EndSeconds: 20},
+					},
+				},
+			}
+			callCount := 0
+			service := &Service{
+				fileRepo:   fileRepo,
+				folderRepo: &testFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true, ChapterThumbnailsEnabled: true}},
+				clock: func() time.Time {
+					return now
+				},
+				extractFrameFunc: func(context.Context, *models.MediaFile, float64, string) ([]byte, string, error) {
+					callCount++
+					return nil, tt.reason, context.DeadlineExceeded
+				},
+			}
+
+			requeue, err := service.processRequest(context.Background(), ChapterThumbnailRequest{FileID: 42}, false)
+			if err != nil {
+				t.Fatalf("processRequest() error = %v", err)
+			}
+			if requeue {
+				t.Fatal("processRequest() requeue = true, want false")
+			}
+			if callCount != 1 {
+				t.Fatalf("extract calls = %d, want 1", callCount)
+			}
+			if fileRepo.file.ChapterThumbnailFailureCount != tt.failureCount+1 {
+				t.Fatalf("failure count = %d, want %d", fileRepo.file.ChapterThumbnailFailureCount, tt.failureCount+1)
+			}
+			if fileRepo.file.ChapterThumbnailRetryAfter == nil {
+				t.Fatal("file retry_after = nil, want cooldown")
+			}
+			if got, want := *fileRepo.file.ChapterThumbnailRetryAfter, now.Add(tt.wantDelay); !got.Equal(want) {
+				t.Fatalf("file retry_after = %v, want %v", got, want)
+			}
+			if !strings.HasPrefix(fileRepo.file.ChapterThumbnailLastError, tt.reason+":") {
+				t.Fatalf("file last error = %q, want %s prefix", fileRepo.file.ChapterThumbnailLastError, tt.reason)
+			}
+			if fileRepo.file.Chapters[0].ThumbnailRetryAfter == nil {
+				t.Fatal("timed-out chapter retry_after = nil, want cooldown")
+			}
+			if fileRepo.file.Chapters[1].ThumbnailRetryAfter != nil {
+				t.Fatal("later chapter was processed after file timeout")
+			}
+		})
+	}
+}
+
 func TestProcessRequestReportsToneMapCapabilityFailuresOnceWithNormalRetry(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -638,12 +711,8 @@ func TestExtractFrameCPUFallbackGetsFreshDeadline(t *testing.T) {
 	if callCount != 2 {
 		t.Fatalf("callCount = %d, want 2", callCount)
 	}
-	if hwRemaining < 7*time.Second || hwRemaining > 9*time.Second {
-		t.Fatalf("hw deadline = %s, want about 8s", hwRemaining)
-	}
-	if cpuRemaining < 9*time.Second || cpuRemaining > 11*time.Second {
-		t.Fatalf("cpu deadline = %s, want about 10s", cpuRemaining)
-	}
+	assertApproximateDeadline(t, hwRemaining, hwExtractTimeoutSDR)
+	assertApproximateDeadline(t, cpuRemaining, cpuExtractTimeoutSDR)
 }
 
 func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
