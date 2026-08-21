@@ -489,7 +489,8 @@ func appendStreamToken(rawURL, token string) string {
 // identity stream token so a direct-play/remux session survives a restart (the
 // client re-supplies its byte position). Transcode sessions are told which URL
 // to play by their v3 plan; the URL here is an informational placeholder that
-// the plan's delivery URL supersedes.
+// the plan's delivery URL supersedes. A remux with a versioned server recipe
+// uses a route older binaries do not mount, fencing rolling deployments.
 func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 	if s == nil {
 		return ""
@@ -498,13 +499,16 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", s.ID)
 	}
 	card := identityRecipeCard(s)
-	return appendStreamToken(fmt.Sprintf("/stream/%s", s.ID), h.signSessionToken(card))
+	path := fmt.Sprintf("/stream/%s", s.ID)
+	if s.PlayMethod == playback.PlayRemux && (s.RemuxFilter != "" || s.RemuxFilterVersion != "") {
+		path = playback.RemuxRecipeStreamPathV3 + s.ID
+	}
+	return appendStreamToken(path, h.signSessionToken(card))
 }
 
-// identityRecipeCard builds the identity-only recipe for a direct-play or remux
-// session: reconstruction needs only ownership plus the audio selection, since
-// the bytes are served by HTTP Range / a re-spawned remux pipe at the
-// client-supplied position.
+// identityRecipeCard builds the durable recipe for a direct-play or remux
+// session. Direct reconstruction needs only ownership; remux reconstruction
+// also preserves its selected audio handling and versioned byte-level recipes.
 func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	switch s.PlayMethod {
 	case playback.PlayRemux:
@@ -512,6 +516,8 @@ func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 		card.TargetCodecAudio = s.TargetAudioCodec
 		card.TargetAudioChannels = s.TargetAudioChannels
 		card.TargetAudioBitrateKbps = s.TargetAudioBitrateKbps
+		card.VideoBitstreamFilter = s.RemuxFilter
+		card.RemuxFilterVersion = s.RemuxFilterVersion
 		return card
 	default:
 		return playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)

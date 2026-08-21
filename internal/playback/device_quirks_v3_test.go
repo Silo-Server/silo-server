@@ -139,6 +139,115 @@ func TestPlanAttemptKeyV3DeviceQuirkIsStable(t *testing.T) {
 	}
 }
 
+func TestFirefoxMacOSHEVCResumeNormalizationScope(t *testing.T) {
+	macFirefox := "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0"
+	cases := []struct {
+		name       string
+		platform   string
+		userAgent  string
+		videoCodec string
+		want       bool
+	}{
+		{name: "macOS Firefox HEVC", platform: "web", userAgent: macFirefox, videoCodec: "hevc", want: true},
+		{name: "Windows Firefox", platform: "web", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0", videoCodec: "hevc"},
+		{name: "Linux Firefox", platform: "web", userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0", videoCodec: "hevc"},
+		{name: "macOS Safari", platform: "web", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.0 Safari/605.1.15", videoCodec: "hevc"},
+		{name: "macOS SeaMonkey", platform: "web", userAgent: macFirefox + " SeaMonkey/2.53", videoCodec: "hevc"},
+		{name: "macOS Firefox H264", platform: "web", userAgent: macFirefox, videoCodec: "h264"},
+		{name: "native client", platform: "macos", userAgent: macFirefox, videoCodec: "hevc"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			req := validStartRequestV3()
+			req.ClientPlaybackContext.Device = DeviceContextV3{Platform: test.platform, PlatformDetails: map[string]string{"user_agent": test.userAgent}}
+			got := requiresFirefoxMacOSHEVCResumeNormalizationV3(SourceDescriptorV3{VideoCodec: test.videoCodec}, req)
+			if got != test.want {
+				t.Fatalf("matched = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestPlanPlaybackV3FreezesFirefoxMacOSHEVCResumeTransformation(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].Profile = "Main"
+	file.VideoTracks[0].BitDepth = 8
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+
+	request := validStartRequestV3()
+	request.ClientPlaybackContext.FormFactor = "desktop"
+	request.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{
+		"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0",
+	}}
+	request.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	request.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	request.Capabilities.Containers = []string{"mp4"}
+	request.ClientPlaybackContext.Deliveries = map[string]DeliveryCapabilityV3{
+		DeliveryClassProgressiveV3: {
+			Enabled: true, SupportedOnDevice: true,
+			Containers: []string{"mp4"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"},
+		},
+	}
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{
+		Name: TransformationServerHEVCResumeLeadingPictureDropV3, RecipeVersion: TransformationServerHEVCResumeLeadingPictureDropVersionV3, Available: true,
+	}})
+
+	for _, test := range []struct {
+		name  string
+		start float64
+	}{{name: "initial start", start: 0}, {name: "resume", start: 1_234.5}} {
+		t.Run(test.name, func(t *testing.T) {
+			request.StartPosition = floatPointerV3(test.start)
+			result := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.Plan.Timeline.PlayerStartSeconds != test.start {
+				t.Fatalf("player start = %v, want %v", result.Plan.Timeline.PlayerStartSeconds, test.start)
+			}
+			if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationServerHEVCResumeLeadingPictureDropV3 ||
+				result.Plan.Transformations[0].Executor != ExecutorServerV3 || result.Plan.Transformations[0].RecipeVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 {
+				t.Fatalf("transformations = %#v", result.Plan.Transformations)
+			}
+			if len(result.Plan.AppliedQuirks) != 0 {
+				t.Fatalf("server recipe must not publish an unnegotiated client quirk: %#v", result.Plan.AppliedQuirks)
+			}
+		})
+	}
+
+	withoutCapability := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: NewTransformationRegistryV3(nil)})
+	if withoutCapability.Plan != nil && withoutCapability.Plan.Delivery == DeliveryRemuxProgressiveV3 {
+		t.Fatalf("progressive copy planned without the noise BSF: %#v", withoutCapability.Plan)
+	}
+	wrongVersion := NewTransformationRegistryV3([]TransformationSpecV3{{Name: TransformationServerHEVCResumeLeadingPictureDropV3, RecipeVersion: "0", Available: true}})
+	withStaleCapability := PlanPlaybackV3(PlannerInputV3{Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: wrongVersion})
+	if withStaleCapability.Plan != nil && withStaleCapability.Plan.Delivery == DeliveryRemuxProgressiveV3 {
+		t.Fatalf("progressive copy planned against a stale recipe: %#v", withStaleCapability.Plan)
+	}
+
+	hlsRequest := request
+	hlsRequest.ClientPlaybackContext.Deliveries = map[string]DeliveryCapabilityV3{
+		DeliveryClassProgressiveV3: {
+			Enabled: true, SupportedOnDevice: true,
+			Containers: []string{"mp4"}, VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"aac"},
+		},
+		DeliveryClassHLSV3: {Enabled: true, SupportedOnDevice: true},
+	}
+	hlsResult := PlanPlaybackV3(PlannerInputV3{Request: hlsRequest, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: NewTransformationRegistryV3(nil)})
+	if hlsResult.Plan == nil || hlsResult.Plan.Delivery != DeliveryRemuxHLSV3 {
+		t.Fatalf("HLS fallback = %s", ExplainPlannerResultV3(hlsResult))
+	}
+	for _, transformation := range hlsResult.Plan.Transformations {
+		if transformation.Name == TransformationServerHEVCResumeLeadingPictureDropV3 {
+			t.Fatalf("progressive-only resume transformation leaked into HLS: %#v", hlsResult.Plan.Transformations)
+		}
+	}
+	if len(hlsResult.Plan.AppliedQuirks) != 0 {
+		t.Fatalf("server recipe unexpectedly published a client quirk: %#v", hlsResult.Plan.AppliedQuirks)
+	}
+}
+
 func quirkRequestV3() StartRequestV3 {
 	req := validStartRequestV3()
 	req.ClientFeatures = append(req.ClientFeatures, FeatureDeviceQuirksV3)

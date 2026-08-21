@@ -107,6 +107,14 @@ const (
 	RemuxDVRejectP7V3     RemuxDVMode = "reject_profile_7"
 )
 
+const (
+	// HEVCResumeLeadingPictureBitstreamFilter drops only non-key HEVC packets
+	// whose presentation timestamp precedes the first packet in a seeked copy.
+	// The escaped comma is part of one FFmpeg argv token.
+	HEVCResumeLeadingPictureBitstreamFilter = `noise=drop=lt(pts\,startpts)*not(key)`
+	codecHEVCV3                             = "hevc"
+)
+
 // buildRemuxArgs constructs the ffmpeg argument list for a remux operation.
 // The args perform codec copy (-c copy) into the target container format,
 // using fragmented output for streaming (frag_keyframe+delay_moov+default_base_moof) and
@@ -123,6 +131,10 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 }
 
 func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) []string {
+	return buildRemuxArgsWithVideoBitstreamFilterV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, tagSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps, "")
+}
+
+func buildRemuxArgsWithVideoBitstreamFilterV3(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, tagSampleEntry, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int, videoBitstreamFilter string) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -172,8 +184,17 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 	}
 	args = append(args, "-sn", "-dn")
 
+	videoBitstreamFilters := make([]string, 0, 2)
+	if videoBitstreamFilter != "" && seekSeconds > 0 && !audioOnly {
+		videoBitstreamFilters = append(videoBitstreamFilters, videoBitstreamFilter)
+	}
 	if dvProfile == 7 {
-		args = append(args, "-bsf:v", "dovi_rpu=strip=1")
+		videoBitstreamFilters = append(videoBitstreamFilters, DV7ToHDR10BitstreamFilter)
+	}
+	if len(videoBitstreamFilters) > 0 {
+		args = append(args, "-bsf:v", strings.Join(videoBitstreamFilters, ","))
+	}
+	if dvProfile == 7 {
 		if tagSampleEntry {
 			// The explicit v3 strip recipe promised the client plain HDR10.
 			// Safari's media element only answers "probably" for hvc1 — the
@@ -244,16 +265,23 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 // v3 callers must pass the configured playback path so the strip capability
 // promised by the planner's probe holds for the binary that actually runs.
 func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
-	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, false, 0, 0)
+	return startRemuxWithOptions(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxServeOptions{DVMode: mode, FFmpegPath: ffmpegPath})
 }
 
-func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string, audioOnly bool, targetAudioChannels, targetAudioBitrateKbps int) (*RemuxSession, error) {
+func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, opts RemuxServeOptions) (*RemuxSession, error) {
+	if err := validateRemuxVideoBitstreamFilterV3(opts); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 
-	bin := ResolveFFmpegPath(ffmpegPath)
+	bin := ResolveFFmpegPath(opts.FFmpegPath)
+	if opts.VideoBitstreamFilter != "" && !supportsHEVCResumeLeadingPictureRecipeV3(ctx, bin) {
+		cancel()
+		return nil, fmt.Errorf("HEVC resume remux requires the expression-based noise bitstream filter")
+	}
 	effectiveProfile := dvProfile
 	tagSampleEntry := false
-	switch mode {
+	switch opts.DVMode {
 	case "", RemuxDVLegacyAutoV3:
 		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter(bin) &&
 			(dvProfile != 7 || sharedDVRPUProbe.CanStrip(ctx, bin, filePath)))
@@ -300,9 +328,9 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 		}
 	default:
 		cancel()
-		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
+		return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", opts.DVMode)
 	}
-	args := buildRemuxArgsWithAudioV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, targetAudioChannels, targetAudioBitrateKbps)
+	args := buildRemuxArgsWithVideoBitstreamFilterV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, opts.AudioOnly, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps, opts.VideoBitstreamFilter)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -359,6 +387,13 @@ type RemuxServeOptions struct {
 	// DVMode is the explicitly declared Dolby Vision recipe. The zero value
 	// decodes as the legacy auto behavior, matching old stream tokens.
 	DVMode RemuxDVMode
+	// VideoBitstreamFilter is a canonical, server-selected remux recipe. Its
+	// version is carried separately so stale signed tokens fail closed.
+	VideoBitstreamFilter string
+	VideoFilterVersion   string
+	// SourceVideoCodec validates that a remux-only HEVC recipe cannot be
+	// replayed against a different source codec.
+	SourceVideoCodec string
 	// FFmpegPath selects the binary to execute (empty = global discovery).
 	FFmpegPath string
 	// ContentType overrides the container-derived response type. Audio-only
@@ -370,6 +405,18 @@ type RemuxServeOptions struct {
 	// output. Zero values retain the historical stereo 192 kbps behavior.
 	TargetAudioChannels    int
 	TargetAudioBitrateKbps int
+}
+
+func validateRemuxVideoBitstreamFilterV3(opts RemuxServeOptions) error {
+	if opts.VideoBitstreamFilter == "" && opts.VideoFilterVersion == "" {
+		return nil
+	}
+	if opts.VideoBitstreamFilter != HEVCResumeLeadingPictureBitstreamFilter ||
+		opts.VideoFilterVersion != TransformationServerHEVCResumeLeadingPictureDropVersionV3 ||
+		normalizeCodecV3(opts.SourceVideoCodec) != codecHEVCV3 || opts.AudioOnly {
+		return fmt.Errorf("unsupported remux video bitstream filter recipe")
+	}
+	return nil
 }
 
 // RemuxContentType returns the override required for an audio-only fMP4.
@@ -398,7 +445,10 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 // ServeRemuxWithOptions is the full remux transport, taking its optional
 // serving concerns as a struct.
 func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, opts RemuxServeOptions) error {
-	mode, ffmpegPath := opts.DVMode, opts.FFmpegPath
+	if err := validateRemuxVideoBitstreamFilterV3(opts); err != nil {
+		http.Error(w, "stale remux recipe", http.StatusConflict)
+		return err
+	}
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
@@ -414,7 +464,7 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 		return err
 	}
 
-	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath, opts.AudioOnly, opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
+	session, err := startRemuxWithOptions(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, opts)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err

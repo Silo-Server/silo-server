@@ -124,6 +124,8 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/stream/direct/{token}", s.handleDirectPlay)
 		r.Head("/stream/remux/{token}", s.handleRemux)
 		r.Get("/stream/remux/{token}", s.handleRemux)
+		r.Head(playback.RemuxRecipeStreamPathV3+"{token}", s.handleRemux)
+		r.Get(playback.RemuxRecipeStreamPathV3+"{token}", s.handleRemux)
 		r.Head("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
 		r.Get("/stream/transcode/{token}/master.m3u8", s.handleTranscodeManifest)
 		r.Get("/stream/transcode/{token}/segment/{name}", s.handleTranscodeSegment)
@@ -367,6 +369,9 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// server's stream handler serves the same claims.
 	_ = playback.ServeRemuxWithOptions(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode:                 playback.RemuxDVMode(claims.RemuxDVMode),
+		VideoBitstreamFilter:   claims.VideoBitstreamFilter,
+		VideoFilterVersion:     claims.RemuxFilterVersion,
+		SourceVideoCodec:       claims.SourceVideoCodec,
 		FFmpegPath:             s.watcher.Config().Playback.FFmpegPath,
 		ContentType:            playback.RemuxContentType(claims.AudioOnly),
 		AudioOnly:              claims.AudioOnly,

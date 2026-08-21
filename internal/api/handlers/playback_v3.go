@@ -847,6 +847,10 @@ func planRequiresServerTransformationsV3(plan *playback.PlanV3) bool {
 }
 
 func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, timeline preparedTimelineV3) (preparedTransportV3, *transportErrorV3) {
+	remuxFilter, remuxFilterVersion, filterErr := remuxVideoBitstreamFilterForPlanV3(result.Plan)
+	if filterErr != nil {
+		return preparedTransportV3{}, &transportErrorV3{reason: "transformation_recipe_unavailable", message: "The selected remux recipe is unavailable.", retryable: true, cause: filterErr}
+	}
 	routeSession := *session
 	routeSession.PlayMethod = result.PlayMethod
 	routeSession.BasePlayMethod = result.PlayMethod
@@ -857,6 +861,8 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	routeSession.TargetAudioChannels = result.TargetAudioChannels
 	routeSession.TargetAudioBitrateKbps = result.TargetAudioBitrateKbps
 	routeSession.RemuxDVMode = remuxDVModeForPlanV3(result.Plan)
+	routeSession.RemuxFilter = remuxFilter
+	routeSession.RemuxFilterVersion = remuxFilterVersion
 
 	proxyNode, proxyErr := h.planIdentityProxyV3(r, session.ID, result)
 	if proxyErr != nil {
@@ -1034,9 +1040,9 @@ func identityStreamBitrateKbpsV3(result playback.PlannerResultV3) int {
 //
 // The proxy serves from the token alone, so the token has to carry everything
 // the API-local path would have read from the session and the file record: the
-// media path it opens, and the Dolby Vision profile its remux needs to strip a
-// dangling Profile 7 RPU. Omitting either would not fail loudly — the proxy
-// would serve a subtly different stream than the plan promised.
+// media path it opens, source codec, and every versioned remux recipe. Omitting
+// one would not fail loudly — the proxy could serve different bytes than the
+// plan promised. Versioned recipes also use a route old proxies do not mount.
 //
 // The bool reports whether the returned URL is actually a proxy URL, so the
 // caller can release the planner reservation when it is not.
@@ -1046,6 +1052,7 @@ func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.
 	}
 	card := identityRecipeCard(s)
 	card.InputPath = file.FilePath
+	card.SourceVideoCodec = playback.SourceDescriptorFromFileV3(file, s.AudioTrackIndex).VideoCodec
 	claims := card.ToClaims()
 	claims.DVProfile = file.PrimaryDVProfile()
 	claims.AudioOnly = file.IsAudioOnly()
@@ -1055,6 +1062,9 @@ func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.
 	}
 	base := strings.TrimRight(proxyNode.URL, "/")
 	if s.PlayMethod == playback.PlayRemux {
+		if s.RemuxFilter != "" || s.RemuxFilterVersion != "" {
+			return base + playback.RemuxRecipeStreamPathV3 + token, true
+		}
 		return base + "/stream/remux/" + token, true
 	}
 	return base + "/stream/direct/" + token, true
@@ -1386,7 +1396,8 @@ func sourceVideoTranscodeFactsV3(file *models.MediaFile, result playback.Planner
 }
 
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) playback.SessionStreamState {
-	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
+	remuxFilter, remuxFilterVersion, _ := remuxVideoBitstreamFilterForPlanV3(result.Plan)
+	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), RemuxFilter: remuxFilter, RemuxFilterVersion: remuxFilterVersion, TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
 	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
 		state.SegmentDuration = 2
 	}
@@ -3237,6 +3248,28 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 		}
 	}
 	return ""
+}
+
+func remuxVideoBitstreamFilterForPlanV3(plan *playback.PlanV3) (string, string, error) {
+	if plan == nil {
+		return "", "", nil
+	}
+	found := false
+	for _, transformation := range plan.Transformations {
+		if transformation.Name != playback.TransformationServerHEVCResumeLeadingPictureDropV3 {
+			continue
+		}
+		if found || transformation.Executor != playback.ExecutorServerV3 ||
+			transformation.RecipeVersion != playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3 ||
+			plan.Delivery != playback.DeliveryRemuxProgressiveV3 || !strings.EqualFold(plan.Source.VideoCodec, "hevc") {
+			return "", "", fmt.Errorf("unsupported HEVC resume transformation identity")
+		}
+		found = true
+	}
+	if !found {
+		return "", "", nil
+	}
+	return playback.HEVCResumeLeadingPictureBitstreamFilter, playback.TransformationServerHEVCResumeLeadingPictureDropVersionV3, nil
 }
 
 // lazyDVRPUStrippableV3 defers (and memoizes) the per-source RPU probe so the

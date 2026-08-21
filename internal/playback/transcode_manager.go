@@ -417,6 +417,8 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		AudioTrackIndex:        card.AudioTrackIndex,
 		TranscodeAudio:         card.TranscodeAudio,
 		RemuxDVMode:            card.RemuxDVMode,
+		RemuxFilter:            card.VideoBitstreamFilter,
+		RemuxFilterVersion:     card.RemuxFilterVersion,
 		TargetResolution:       card.TargetResolution,
 		TargetVideoCodec:       card.TargetCodecVideo,
 		TargetAudioCodec:       card.TargetCodecAudio,

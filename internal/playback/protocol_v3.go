@@ -129,12 +129,19 @@ const (
 // Server transformation names. A plan names the transformations its serving
 // executor must run; the registry keys availability by the same names.
 const (
-	TransformationAudioToAACV3     = "audio_to_aac"
-	TransformationVideoToH264V3    = "video_to_h264"
-	TransformationServerDV7HDR10V3 = "server_dv7_to_hdr10"
+	TransformationAudioToAACV3                         = "audio_to_aac"
+	TransformationVideoToH264V3                        = "video_to_h264"
+	TransformationServerDV7HDR10V3                     = "server_dv7_to_hdr10"
+	TransformationServerHEVCResumeLeadingPictureDropV3 = "server_hevc_resume_leading_picture_drop"
 
-	TransformationVideoToH264RecipeVersionV3 = "2"
+	TransformationVideoToH264RecipeVersionV3                  = "2"
+	TransformationServerHEVCResumeLeadingPictureDropVersionV3 = "1"
 )
+
+// RemuxRecipeStreamPathV3 fences remuxes with versioned server recipes from
+// binaries that predate those recipes. Old API and proxy routers do not mount
+// this path, so a rolling deployment fails closed instead of omitting a filter.
+const RemuxRecipeStreamPathV3 = "/stream/remux-v3/"
 
 // Transformation executors: who runs the transformation. A "server"
 // transformation is performed by the serving executor before the bytes leave
@@ -147,11 +154,12 @@ const (
 // Validated claims a server transformation asserts about its output: neutral
 // statements about the bytes, not client-framework decoder names.
 const (
-	ClaimAudioDecodeV3                = "audio_decode"
-	ClaimH264DecodeV3                 = "h264_decode"
-	ClaimDolbyVisionMetadataRemovedV3 = "dolby_vision_metadata_removed"
-	ClaimHDR10BaseLayerPreservedV3    = "hdr10_base_layer_preserved"
-	ClaimEnhancementLayerDiscardedV3  = "enhancement_layer_discarded"
+	ClaimAudioDecodeV3                  = "audio_decode"
+	ClaimH264DecodeV3                   = "h264_decode"
+	ClaimDolbyVisionMetadataRemovedV3   = "dolby_vision_metadata_removed"
+	ClaimHDR10BaseLayerPreservedV3      = "hdr10_base_layer_preserved"
+	ClaimEnhancementLayerDiscardedV3    = "enhancement_layer_discarded"
+	ClaimResumeLeadingPicturesRemovedV3 = "resume_leading_pictures_removed"
 )
 
 // DV7ToHDR10ClaimsV3 returns the claims the server DV7→HDR10 transformation
