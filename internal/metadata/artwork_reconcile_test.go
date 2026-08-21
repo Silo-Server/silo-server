@@ -118,12 +118,9 @@ func TestVerifyAndResetContinuesAfterCollectionPosterLockFailure(t *testing.T) {
 	const posterPath = "collection-images/collection-1/poster/original.webp"
 	const presentPath = "collection-images/collection-2/poster/original.webp"
 	lockErr := errors.New("simulated lock failure")
-	reconciler := &ArtworkCacheReconciler{
-		s3:             &fakeObjectChecker{missing: map[string]bool{posterPath: true}},
-		collectionRepo: failingCollectionPosterMutationLocker{
-			err: lockErr,
-		},
-	}
+	reconciler := &ArtworkCacheReconciler{}
+	reconciler.s3 = &fakeObjectChecker{missing: map[string]bool{posterPath: true}}
+	reconciler.collectionRepo = failingCollectionPosterMutationLocker{err: lockErr}
 	stats := ArtworkReconcileStats{}
 	err := reconciler.verifyAndReset(context.Background(), surface, []sweptRow{
 		{keys: []string{"collection-1"}, path: posterPath},
