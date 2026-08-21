@@ -335,13 +335,15 @@ func TestPluginProviderAssetRequests_ForwardProviderContext(t *testing.T) {
 		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
 	}
 
+	specials := 0
 	_, err = provider.GetImages(context.Background(), ImageRequest{
 		ProviderIDs: map[string]string{
 			"tmdb": "provider-1",
 			"imdb": "tt1234567",
 		},
-		ContentType: "movie",
-		Language:    "es",
+		ContentType:  "series",
+		Language:     "es",
+		SeasonNumber: &specials,
 	})
 	if err != nil {
 		t.Fatalf("GetImages() error = %v", err)
@@ -351,6 +353,9 @@ func TestPluginProviderAssetRequests_ForwardProviderContext(t *testing.T) {
 	}
 	if client.getImagesReq.GetLanguage() != "es" {
 		t.Fatalf("Language = %q, want es", client.getImagesReq.GetLanguage())
+	}
+	if client.getImagesReq.SeasonNumber == nil || client.getImagesReq.GetSeasonNumber() != 0 {
+		t.Fatalf("SeasonNumber = %v, want present Specials value 0", client.getImagesReq.SeasonNumber)
 	}
 	assertStructStringMap(t, client.getImagesReq.GetProviderIds(), map[string]string{
 		"tmdb": "provider-1",
@@ -408,13 +413,15 @@ func TestPluginProviderGetImages_MapsIncludesTextMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("structpb.NewStruct() error = %v", err)
 	}
+	specials := int32(0)
 	client := &fakePluginMetadataClient{
 		imagesResponse: &pluginv1.GetImagesResponse{Images: []*pluginv1.ImageRecord{
 			{
-				Url:      "https://artworks.thetvdb.com/example.jpg",
-				Kind:     "poster",
-				Language: "en",
-				Metadata: metadata,
+				Url:          "https://artworks.thetvdb.com/example.jpg",
+				Kind:         "poster",
+				Language:     "en",
+				Metadata:     metadata,
+				SeasonNumber: &specials,
 			},
 		}},
 	}
@@ -444,6 +451,9 @@ func TestPluginProviderGetImages_MapsIncludesTextMetadata(t *testing.T) {
 	}
 	if images[0].IncludesText == nil || *images[0].IncludesText {
 		t.Fatalf("IncludesText = %v, want explicit false", images[0].IncludesText)
+	}
+	if images[0].SeasonNumber == nil || *images[0].SeasonNumber != 0 {
+		t.Fatalf("SeasonNumber = %v, want present Specials value 0", images[0].SeasonNumber)
 	}
 }
 

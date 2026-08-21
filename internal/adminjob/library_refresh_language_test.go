@@ -10,13 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestQuickRefreshListsLanguageMismatchedItems covers the listing half of
-// issue #211: quick-mode library refresh must include items whose stamped
-// default_metadata_language differs from the library's configured metadata
-// language, even when the item is otherwise complete (overview, poster,
-// backdrop all present) — otherwise a library language change never revisits
-// already-complete items.
-func TestQuickRefreshListsLanguageMismatchedItems(t *testing.T) {
+// TestQuickRefreshListsLanguageOrArtworkIncompleteItems covers the listing
+// half of issue #211 and the artwork completeness contract: quick-mode library
+// refresh must revisit a mismatched metadata language, a missing logo, or an
+// existing TVDB clear-art logo, while leaving an otherwise complete item alone.
+func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -31,6 +29,8 @@ func TestQuickRefreshListsLanguageMismatchedItems(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	mismatchID := fmt.Sprintf("lang-mismatch-%d", suffix)
 	matchedID := fmt.Sprintf("lang-matched-%d", suffix)
+	missingLogoID := fmt.Sprintf("logo-missing-%d", suffix)
+	tvdbLogoID := fmt.Sprintf("logo-tvdb-%d", suffix)
 
 	var folderID int
 	if err := pool.QueryRow(ctx, `
@@ -41,24 +41,26 @@ func TestQuickRefreshListsLanguageMismatchedItems(t *testing.T) {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID, missingLogoID, tvdbLogoID})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
 
 	for _, row := range []struct {
-		id, lang string
+		id, lang, logo, logoSource string
 	}{
-		{mismatchID, "zh"},
-		{matchedID, "da"},
+		{mismatchID, "zh", "/l.png", "tmdb://logo/mismatch.png"},
+		{matchedID, "da", "/l.png", "tmdb://logo/matched.png"},
+		{missingLogoID, "da", "", ""},
+		{tvdbLogoID, "da", "/l.png", "tvdb://artwork/illustrated.png"},
 	} {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_items (
 				content_id, type, title, status, genres, tmdb_id,
-				default_metadata_language, overview, poster_path, backdrop_path,
+				default_metadata_language, overview, poster_path, backdrop_path, logo_path, logo_source_path,
 				last_refreshed, refresh_failures, episode_metadata_incomplete
 			) VALUES ($1, 'movie', 'Complete Item', 'matched', '{}'::text[], '42',
-				$2, 'An overview', '/p.jpg', '/b.jpg', NOW(), 0, FALSE)
-		`, row.id, row.lang); err != nil {
+				$2, 'An overview', '/p.jpg', '/b.jpg', $3, $4, NOW(), 0, FALSE)
+		`, row.id, row.lang, row.logo, row.logoSource); err != nil {
 			t.Fatalf("seed media item %s: %v", row.id, err)
 		}
 		if _, err := pool.Exec(ctx, `
@@ -75,13 +77,17 @@ func TestQuickRefreshListsLanguageMismatchedItems(t *testing.T) {
 		t.Fatalf("ListLibraryItems: %v", err)
 	}
 
-	var sawMismatch, sawMatched bool
+	var sawMismatch, sawMatched, sawMissingLogo, sawTVDBLogo bool
 	for _, item := range items {
 		switch item.ContentID {
 		case mismatchID:
 			sawMismatch = true
 		case matchedID:
 			sawMatched = true
+		case missingLogoID:
+			sawMissingLogo = true
+		case tvdbLogoID:
+			sawTVDBLogo = true
 		}
 	}
 	if !sawMismatch {
@@ -89,6 +95,12 @@ func TestQuickRefreshListsLanguageMismatchedItems(t *testing.T) {
 	}
 	if sawMatched {
 		t.Errorf("quick refresh must not include complete item whose stamped language matches the library language")
+	}
+	if !sawMissingLogo {
+		t.Errorf("quick refresh must include an otherwise complete item whose logo is missing")
+	}
+	if !sawTVDBLogo {
+		t.Errorf("quick refresh must include an item whose existing logo came from TVDB clear-art")
 	}
 }
 
@@ -131,10 +143,10 @@ func TestQuickRefreshIgnoresHistoricalSecondaryStaleIDs(t *testing.T) {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_items (
 				content_id, type, title, status, genres, tmdb_id,
-				default_metadata_language, overview, poster_path, backdrop_path,
+				default_metadata_language, overview, poster_path, backdrop_path, logo_path,
 				last_refreshed, refresh_failures, episode_metadata_incomplete
 			) VALUES ($1, 'movie', 'Complete Item', 'matched', '{}'::text[], $2,
-				'en', 'An overview', '/p.jpg', '/b.jpg', NOW(), 0, FALSE)
+				'en', 'An overview', '/p.jpg', '/b.jpg', '/l.png', NOW(), 0, FALSE)
 		`, row.contentID, row.tmdbID); err != nil {
 			t.Fatalf("seed media item %s: %v", row.contentID, err)
 		}
@@ -153,10 +165,10 @@ func TestQuickRefreshIgnoresHistoricalSecondaryStaleIDs(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (
 			content_id, type, title, status, genres, tvdb_id,
-			default_metadata_language, overview, poster_path, backdrop_path,
+			default_metadata_language, overview, poster_path, backdrop_path, logo_path,
 			last_refreshed, refresh_failures, episode_metadata_incomplete
 		) VALUES ($1, 'series', 'Complete TVDB Item', 'matched', '{}'::text[], $2,
-			'en', 'An overview', '/p.jpg', '/b.jpg', NOW(), 0, FALSE)
+			'en', 'An overview', '/p.jpg', '/b.jpg', '/l.png', NOW(), 0, FALSE)
 	`, rejectedSiblingID, suffix); err != nil {
 		t.Fatalf("seed TVDB-only media item: %v", err)
 	}
