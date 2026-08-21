@@ -31,6 +31,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	matchedID := fmt.Sprintf("lang-matched-%d", suffix)
 	missingLogoID := fmt.Sprintf("logo-missing-%d", suffix)
 	tvdbLogoID := fmt.Sprintf("logo-tvdb-%d", suffix)
+	legacyTVDBLogoPathID := fmt.Sprintf("logo-tvdb-path-%d", suffix)
 
 	var folderID int
 	if err := pool.QueryRow(ctx, `
@@ -41,7 +42,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		t.Fatalf("seed folder: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID, missingLogoID, tvdbLogoID})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{mismatchID, matchedID, missingLogoID, tvdbLogoID, legacyTVDBLogoPathID})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
 
@@ -52,6 +53,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		{matchedID, "da", "/l.png", "tmdb://logo/matched.png"},
 		{missingLogoID, "da", "", ""},
 		{tvdbLogoID, "da", "/l.png", "tvdb://artwork/illustrated.png"},
+		{legacyTVDBLogoPathID, "da", "tvdb/123/logo/clear-art.png", "tmdb://logo/legacy-path.png"},
 	} {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_items (
@@ -77,7 +79,7 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 		t.Fatalf("ListLibraryItems: %v", err)
 	}
 
-	var sawMismatch, sawMatched, sawMissingLogo, sawTVDBLogo bool
+	var sawMismatch, sawMatched, sawMissingLogo, sawTVDBLogo, sawLegacyTVDBLogoPath bool
 	for _, item := range items {
 		switch item.ContentID {
 		case mismatchID:
@@ -88,6 +90,8 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 			sawMissingLogo = true
 		case tvdbLogoID:
 			sawTVDBLogo = true
+		case legacyTVDBLogoPathID:
+			sawLegacyTVDBLogoPath = true
 		}
 	}
 	if !sawMismatch {
@@ -101,6 +105,9 @@ func TestQuickRefreshListsLanguageOrArtworkIncompleteItems(t *testing.T) {
 	}
 	if !sawTVDBLogo {
 		t.Errorf("quick refresh must include an item whose existing logo came from TVDB clear-art")
+	}
+	if !sawLegacyTVDBLogoPath {
+		t.Errorf("quick refresh must include an item whose legacy logo path identifies TVDB clear-art")
 	}
 }
 
