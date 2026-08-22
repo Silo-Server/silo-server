@@ -114,16 +114,14 @@ export default function CardOverlays({ data, prefs, variant = "poster" }: CardOv
       )}
       {(bottomLeft.length > 0 || bottomRight.length > 0) && (
         <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2">
-          {/* Wide cards keep the bottom edge clear for the progress bar. */}
+          {/* Wide cards keep the bottom edge clear for the progress bar. Poster
+              favorite/menu controls own both corners, so badges sit above them. */}
           <BadgeStack
             badges={bottomLeft}
             align="start"
             preset={preset}
-            extraClass={wide ? "mb-4" : ""}
+            extraClass={wide ? "mb-4" : "mb-10"}
           />
-          {/* The card menu button (MediaItemMenu) owns the bottom-right
-              corner — always visible on touch devices — so this stack sits
-              above it. */}
           <BadgeStack
             badges={bottomRight}
             align="end"

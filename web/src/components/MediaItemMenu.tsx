@@ -1,16 +1,41 @@
-import { useEffect, useMemo, useState } from "react";
-import { MoreVertical, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check,
+  FileText,
+  Heart,
+  History,
+  LoaderCircle,
+  MoreVertical,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  X,
+} from "lucide-react";
 import { useLocation } from "react-router";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import type { ItemDetail, MediaItemUserState } from "@/api/types";
-import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { useOptionalAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
+import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
+import MatchItemDialog from "@/components/MatchItemDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +46,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
+import {
+  canCurateMetadata as canCurateMetadataForUser,
+  isActingAdmin as isActingAdminForUser,
+} from "@/lib/permissions";
+import { mediaItemMenuTriggerClassName } from "@/components/mediaItemMenuTrigger";
 
 type MediaItemType = ItemDetail["type"];
 
@@ -35,16 +65,21 @@ type MediaItemMenuEntry =
         | "dismissFromHome"
         | "viewDetails"
         | "viewPlayHistory"
-        | "refreshMetadata";
+        | "refreshMetadata"
+        | "editMetadata"
+        | "matchItem";
       label: string;
     }
   | { kind: "separator" };
+
+type MediaItemMenuActionKey = Extract<MediaItemMenuEntry, { kind: "action" }>["key"];
 
 interface BuildMediaItemMenuModelOptions {
   mediaType: MediaItemType;
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
   isAdmin: boolean;
+  canCurateMetadata?: boolean;
   showCollectionActions?: boolean;
   dismissLabel?: string;
 }
@@ -66,6 +101,7 @@ export function buildMediaItemMenuModel({
   userState,
   hasPartialProgress = false,
   isAdmin,
+  canCurateMetadata = isAdmin,
   showCollectionActions = true,
   dismissLabel,
 }: BuildMediaItemMenuModelOptions): MediaItemMenuEntry[] {
@@ -111,22 +147,41 @@ export function buildMediaItemMenuModel({
     entries.push({ kind: "action", key: "viewDetails", label: "View Details" });
   }
 
-  if (isAdmin) {
+  if (isAdmin || canCurateMetadata) {
     if (entries.length > 0) {
       entries.push({ kind: "separator" });
     }
-    entries.push(
-      {
+
+    if (isAdmin) {
+      entries.push({
         kind: "action",
         key: "viewPlayHistory",
         label: "View Play History",
-      },
-      {
+      });
+    }
+
+    if (canCurateMetadata) {
+      entries.push({
         kind: "action",
         key: "refreshMetadata",
         label: "Refresh Metadata",
-      },
-    );
+      });
+
+      if (mediaType === "movie" || mediaType === "series") {
+        entries.push(
+          {
+            kind: "action",
+            key: "editMetadata",
+            label: "Edit Metadata",
+          },
+          {
+            kind: "action",
+            key: "matchItem",
+            label: "Match Item",
+          },
+        );
+      }
+    }
   }
 
   if (dismissLabel) {
@@ -148,6 +203,240 @@ function stopMenuEvent(event: Pick<Event, "preventDefault" | "stopPropagation">)
   event.stopPropagation();
 }
 
+function MediaItemMenuActionIcon({
+  actionKey,
+  userState,
+  isRefreshing,
+}: {
+  actionKey: MediaItemMenuActionKey;
+  userState?: MediaItemUserState;
+  isRefreshing: boolean;
+}) {
+  switch (actionKey) {
+    case "playFromBeginning":
+      return <RotateCcw aria-hidden="true" className="size-4" />;
+    case "toggleWatched":
+      return <Check aria-hidden="true" className="size-4" />;
+    case "toggleFavorite":
+      return (
+        <Heart
+          aria-hidden="true"
+          className={cn("size-4", userState?.is_favorite && "fill-current text-red-400")}
+        />
+      );
+    case "toggleWatchlist":
+      return userState?.in_watchlist ? (
+        <Check aria-hidden="true" className="size-4" />
+      ) : (
+        <Plus aria-hidden="true" className="size-4" />
+      );
+    case "dismissFromHome":
+      return <X aria-hidden="true" className="size-4" />;
+    case "viewDetails":
+      return <FileText aria-hidden="true" className="size-4" />;
+    case "viewPlayHistory":
+      return <History aria-hidden="true" className="size-4" />;
+    case "refreshMetadata":
+      return (
+        <RefreshCw aria-hidden="true" className={cn("size-4", isRefreshing && "animate-spin")} />
+      );
+    case "editMetadata":
+      return <Pencil aria-hidden="true" className="size-4" />;
+    case "matchItem":
+      return <Search aria-hidden="true" className="size-4" />;
+  }
+}
+
+export function PosterCardFavoriteButton({
+  isFavorite,
+  isPending,
+  onToggle,
+}: {
+  isFavorite: boolean;
+  isPending: boolean;
+  onToggle: () => void;
+}) {
+  const [isAnimating, setIsAnimating] = useState(false);
+  const pointerStartRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    maxMovement: number;
+  } | null>(null);
+  const label = isFavorite ? "Remove from favorites" : "Add to favorites";
+
+  const activateFavorite = useCallback(() => {
+    if (isPending) return;
+    if (!isFavorite) setIsAnimating(true);
+    onToggle();
+  }, [isFavorite, isPending, onToggle]);
+
+  useEffect(() => {
+    if (!isAnimating) return;
+    const timeout = window.setTimeout(() => setIsAnimating(false), 420);
+    return () => window.clearTimeout(timeout);
+  }, [isAnimating]);
+
+  return (
+    <div
+      className="absolute bottom-2.5 left-2.5 z-20"
+      onClick={stopMenuEvent}
+      onPointerDown={stopMenuEvent}
+    >
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={isFavorite}
+        title={label}
+        disabled={isPending}
+        className={cn(
+          mediaItemMenuTriggerClassName("poster"),
+          "relative cursor-pointer overflow-visible disabled:opacity-70",
+          isFavorite && "text-red-500 hover:text-red-400",
+        )}
+        onPointerDown={(event) => {
+          if (event.button !== 0) {
+            pointerStartRef.current = null;
+            return;
+          }
+          pointerStartRef.current = {
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            maxMovement: 0,
+          };
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const pointerStart = pointerStartRef.current;
+          if (!pointerStart || pointerStart.pointerId !== event.pointerId) return;
+
+          pointerStart.maxMovement = Math.max(
+            pointerStart.maxMovement,
+            Math.abs(event.clientX - pointerStart.clientX),
+            Math.abs(event.clientY - pointerStart.clientY),
+          );
+        }}
+        onPointerUp={(event) => {
+          const pointerStart = pointerStartRef.current;
+          pointerStartRef.current = null;
+          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          if (!pointerStart || pointerStart.pointerId !== event.pointerId) return;
+
+          const movement = Math.max(
+            pointerStart.maxMovement,
+            Math.abs(event.clientX - pointerStart.clientX),
+            Math.abs(event.clientY - pointerStart.clientY),
+          );
+          if (movement > 10) return;
+
+          event.preventDefault();
+          event.stopPropagation();
+          activateFavorite();
+        }}
+        onPointerCancel={(event) => {
+          pointerStartRef.current = null;
+          if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onLostPointerCapture={() => {
+          pointerStartRef.current = null;
+        }}
+        onClick={(event) => {
+          stopMenuEvent(event);
+          // Embla consumes the click following a carousel drag. Pointer taps are
+          // handled on pointerup above; detail=0 preserves keyboard/AT activation.
+          if (event.detail === 0) activateFavorite();
+        }}
+      >
+        {isAnimating && (
+          <span
+            aria-hidden="true"
+            data-testid="favorite-burst"
+            className="absolute top-1/2 left-1/2 size-7 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full bg-red-500/30 motion-reduce:hidden"
+          />
+        )}
+        <Heart
+          className={cn(
+            "relative size-4 transition-[transform,color,fill] duration-300 ease-out motion-reduce:transition-none",
+            isFavorite && "scale-110 fill-red-500 text-red-500",
+            isAnimating && "scale-125",
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
+type MetadataAction = "edit" | "match";
+
+export function MetadataActionDialogHost({
+  action,
+  contentId,
+  libraryId,
+  onClose,
+}: {
+  action: MetadataAction;
+  contentId: string;
+  libraryId?: number;
+  onClose: () => void;
+}) {
+  const {
+    data: item,
+    error,
+    isFetching,
+    isLoading,
+    refetch,
+  } = useCatalogItemDetail(contentId, libraryId);
+
+  if (item) {
+    return action === "edit" ? (
+      <EditMetadataDialog item={item} open onOpenChange={(open) => !open && onClose()} />
+    ) : (
+      <MatchItemDialog
+        key={item.content_id}
+        item={libraryId === undefined ? item : { ...item, library_id: libraryId }}
+        open
+        onOpenChange={(open) => !open && onClose()}
+      />
+    );
+  }
+
+  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
+  const loading = isLoading || isFetching;
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{actionLabel}</DialogTitle>
+          <DialogDescription>
+            {loading ? "Loading the latest item details…" : "The item details could not be loaded."}
+          </DialogDescription>
+        </DialogHeader>
+        {loading ? (
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
+            <LoaderCircle className="size-4 animate-spin" />
+            Loading…
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-muted-foreground text-sm">
+              {error instanceof Error ? error.message : "Please try again."}
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+              Try Again
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function MediaItemMenu({
   contentId,
   mediaType,
@@ -161,10 +450,18 @@ export default function MediaItemMenu({
   const navigate = useViewTransitionNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
-  const isAdmin = useIsActingAdmin();
+  const user = useOptionalAuth()?.user;
+  const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
+  const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
+  const isAdmin = profileIsResolved && isActingAdminForUser(user, currentProfile);
+  const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
   const [currentUserState, setCurrentUserState] = useState(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [filesDialogOpen, setFilesDialogOpen] = useState(false);
+  const [metadataAction, setMetadataAction] = useState<MetadataAction | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const lastMenuInteractionRef = useRef<"keyboard" | "pointer" | null>(null);
+  const pointerClosedMenuRef = useRef(false);
 
   useEffect(() => {
     setCurrentUserState(userState);
@@ -199,9 +496,13 @@ export default function MediaItemMenu({
     userState: currentUserState,
     hasPartialProgress,
     isAdmin,
+    canCurateMetadata,
     showCollectionActions,
     dismissLabel,
   });
+  const showPosterFavorite =
+    variant === "poster" &&
+    model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
 
   const isPending =
     watchedMutation.isPending ||
@@ -210,13 +511,24 @@ export default function MediaItemMenu({
     refreshMetadataMutation.isPending ||
     dismissHomeItemMutation.isPending;
 
-  const triggerClassName = cn(
-    "inline-flex items-center justify-center rounded-md border border-border/20 bg-background/60 text-foreground shadow-sm backdrop-blur-sm transition-[opacity,background-color] duration-150 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-    variant === "wide" ? "size-9" : "size-8",
-    "opacity-100 md:opacity-0 md:group-hover/card:opacity-100 md:group-focus-within/card:opacity-100",
-  );
+  const triggerClassName = mediaItemMenuTriggerClassName(variant);
 
-  async function handleAction(actionKey: Extract<MediaItemMenuEntry, { kind: "action" }>["key"]) {
+  async function handleFavoriteToggle() {
+    if (!currentUserState || favoriteMutation.isPending) return;
+    const wasFavorite = currentUserState.is_favorite;
+    setCurrentUserState((previous) =>
+      previous ? { ...previous, is_favorite: !wasFavorite } : previous,
+    );
+    try {
+      await favoriteMutation.mutateAsync(wasFavorite);
+    } catch {
+      setCurrentUserState((previous) =>
+        previous ? { ...previous, is_favorite: wasFavorite } : previous,
+      );
+    }
+  }
+
+  async function handleAction(actionKey: MediaItemMenuActionKey) {
     switch (actionKey) {
       case "playFromBeginning": {
         if (mediaType === "audiobook") {
@@ -238,9 +550,7 @@ export default function MediaItemMenu({
         return;
       }
       case "toggleFavorite": {
-        if (!currentUserState) return;
-        await favoriteMutation.mutateAsync(currentUserState.is_favorite);
-        setCurrentUserState((prev) => (prev ? { ...prev, is_favorite: !prev.is_favorite } : prev));
+        await handleFavoriteToggle();
         return;
       }
       case "toggleWatchlist": {
@@ -268,6 +578,14 @@ export default function MediaItemMenu({
         setRefreshDialogOpen(true);
         return;
       }
+      case "editMetadata": {
+        setMetadataAction("edit");
+        return;
+      }
+      case "matchItem": {
+        setMetadataAction("match");
+        return;
+      }
     }
   }
 
@@ -278,6 +596,15 @@ export default function MediaItemMenu({
 
   return (
     <>
+      {showPosterFavorite && currentUserState && (
+        <PosterCardFavoriteButton
+          isFavorite={currentUserState.is_favorite}
+          isPending={favoriteMutation.isPending}
+          onToggle={() => {
+            void handleFavoriteToggle();
+          }}
+        />
+      )}
       <div
         className={cn(
           "absolute z-20",
@@ -291,13 +618,55 @@ export default function MediaItemMenu({
             <MoreVertical className={variant === "wide" ? "size-5" : "size-4"} />
           </button>
         ) : (
-          <DropdownMenu modal={false}>
+          <DropdownMenu
+            modal={false}
+            onOpenChange={(open) => {
+              if (open) {
+                pointerClosedMenuRef.current = false;
+                lastMenuInteractionRef.current = null;
+                return;
+              }
+
+              pointerClosedMenuRef.current = lastMenuInteractionRef.current === "pointer";
+              lastMenuInteractionRef.current = null;
+            }}
+          >
             <DropdownMenuTrigger asChild>
-              <button type="button" aria-label="More actions" className={triggerClassName}>
+              <button
+                ref={menuTriggerRef}
+                type="button"
+                aria-label="More actions"
+                className={triggerClassName}
+                onPointerDown={() => {
+                  lastMenuInteractionRef.current = "pointer";
+                }}
+                onKeyDown={() => {
+                  lastMenuInteractionRef.current = "keyboard";
+                }}
+              >
                 <MoreVertical className={variant === "wide" ? "size-5" : "size-4"} />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent
+              align="end"
+              className="w-max min-w-0"
+              onPointerDownOutside={() => {
+                lastMenuInteractionRef.current = "pointer";
+              }}
+              onPointerDownCapture={() => {
+                lastMenuInteractionRef.current = "pointer";
+              }}
+              onKeyDownCapture={() => {
+                lastMenuInteractionRef.current = "keyboard";
+              }}
+              onCloseAutoFocus={(event) => {
+                if (pointerClosedMenuRef.current) {
+                  event.preventDefault();
+                  menuTriggerRef.current?.blur();
+                }
+                pointerClosedMenuRef.current = false;
+              }}
+            >
               {model.map((entry, index) => {
                 if (entry.kind === "separator") {
                   return <DropdownMenuSeparator key={`separator-${index}`} />;
@@ -311,9 +680,11 @@ export default function MediaItemMenu({
                       void handleAction(entry.key);
                     }}
                   >
-                    {entry.key === "refreshMetadata" && refreshMetadataMutation.isPending ? (
-                      <RefreshCw className="size-4 animate-spin" />
-                    ) : null}
+                    <MediaItemMenuActionIcon
+                      actionKey={entry.key}
+                      userState={currentUserState}
+                      isRefreshing={refreshMetadataMutation.isPending}
+                    />
                     {entry.label}
                   </DropdownMenuItem>
                 );
@@ -328,6 +699,14 @@ export default function MediaItemMenu({
         onConfirm={handleRefreshConfirm}
         isPending={refreshMetadataMutation.isPending}
       />
+      {metadataAction && (
+        <MetadataActionDialogHost
+          action={metadataAction}
+          contentId={contentId}
+          libraryId={libraryId}
+          onClose={() => setMetadataAction(null)}
+        />
+      )}
       {mediaType === "manga" && (
         <MangaFilesDialog
           contentId={contentId}

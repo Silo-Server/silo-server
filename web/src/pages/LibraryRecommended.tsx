@@ -19,6 +19,7 @@ import { collectCachedHomeSections } from "./homeSectionCache";
 import { isAudiobookLibraryType } from "./libraryPageSearchParams";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 
 interface LibraryRecommendedProps {
   libraryId: number;
@@ -42,6 +43,7 @@ export default function LibraryRecommended({
 }: LibraryRecommendedProps) {
   const queryClient = useQueryClient();
   const { data, isLoading } = useLibraryLayout(libraryId);
+  const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());
@@ -78,7 +80,7 @@ export default function LibraryRecommended({
         });
       });
     };
-  }, [libraryId, layout, layoutResetKey, queryClient]);
+  }, [libraryId, layout, layoutResetKey, queryClient, sectionRefreshSignal]);
 
   useEffect(() => {
     if (layout.length === 0) return;

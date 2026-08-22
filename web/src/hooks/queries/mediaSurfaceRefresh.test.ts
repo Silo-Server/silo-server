@@ -6,6 +6,7 @@ import {
   favoriteKeys,
   historyKeys,
   itemKeys,
+  libraryCollectionKeys,
   personKeys,
   progressKeys,
   recKeys,
@@ -19,7 +20,7 @@ import {
 } from "./mediaSurfaceRefresh";
 
 describe("invalidateMediaSurfaceQueries", () => {
-  it("marks item, section, progress, history, favorites, and watchlist queries stale", async () => {
+  it("marks media and collection surfaces stale", async () => {
     const queryClient = new QueryClient();
     const browseKey = itemKeys.browse({
       q: "",
@@ -53,6 +54,7 @@ describe("invalidateMediaSurfaceQueries", () => {
     queryClient.setQueryData(historyKeys.list(), { items: [] });
     queryClient.setQueryData(favoriteKeys.list(), { items: [] });
     queryClient.setQueryData(watchlistKeys.list(), { items: [] });
+    queryClient.setQueryData(libraryCollectionKeys.items(7, "favorites"), { items: [] });
 
     await invalidateMediaSurfaceQueries(queryClient);
 
@@ -79,6 +81,9 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(historyKeys.list())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(favoriteKeys.list())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(watchlistKeys.list())?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryState(libraryCollectionKeys.items(7, "favorites"))?.isInvalidated,
+    ).toBe(true);
   });
 
   it("marks the active catalog detail query stale for the mutated item", async () => {

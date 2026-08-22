@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
 import HeroBanner from "@/components/HeroBanner";
@@ -15,25 +15,16 @@ import { fetchHomeSectionItems, useHomeLayout } from "@/hooks/queries/sections";
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
+import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 
 const SECTION_STALE_TIME = 5 * 60 * 1000;
 const MAX_CONCURRENT_SECTION_REQUESTS = 5;
 const SKELETON_CARD_COUNT = 7;
 
-function useHomeRefreshSignal() {
-  return useQuery({
-    queryKey: sectionKeys.homeRefreshSignal(),
-    queryFn: () => 0,
-    initialData: 0,
-    staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
-  });
-}
-
 export default function Home() {
   const queryClient = useQueryClient();
   const { data, isLoading, isError, refetch } = useHomeLayout();
-  const { data: homeRefreshSignal = 0 } = useHomeRefreshSignal();
+  const { data: homeRefreshSignal = 0 } = useSectionRefreshSignal();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());

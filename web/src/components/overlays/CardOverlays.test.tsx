@@ -113,8 +113,12 @@ describe("CardOverlays", () => {
     expect(container.querySelectorAll("span.inline-flex").length).toBe(3);
   });
 
-  it("lifts bottom-right badges above the card menu button", () => {
+  it("lifts poster badges above the favorite and menu controls", () => {
     const prefs = prefsWithOnly("content_rating");
+    prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
+    const left = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
+    expect(left.querySelector("div.bottom-2 > div.items-start.mb-10")).toBeTruthy();
+
     prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-right" };
     const poster = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
     expect(poster.querySelector("div.bottom-2 > div.items-end.mb-10")).toBeTruthy();
