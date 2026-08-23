@@ -20,6 +20,8 @@ type fakeRequestService struct {
 	listNetworksFn func() ([]mediarequests.DiscoverBrandCard, error)
 	listGenresFn   func() ([]mediarequests.DiscoverBrandCard, error)
 	browseFn       func(kind, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	listMineFn     func() ([]*mediarequests.Request, error)
+	listAdminFn    func() ([]*mediarequests.Request, error)
 }
 
 func (f *fakeRequestService) ListStudios(context.Context, mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error) {
@@ -76,10 +78,16 @@ func (f *fakeRequestService) CreateRequest(context.Context, mediarequests.Viewer
 }
 
 func (f *fakeRequestService) ListMine(context.Context, mediarequests.Viewer, mediarequests.ListFilter) ([]*mediarequests.Request, error) {
+	if f.listMineFn != nil {
+		return f.listMineFn()
+	}
 	return nil, nil
 }
 
 func (f *fakeRequestService) ListAdmin(context.Context, mediarequests.Viewer, mediarequests.ListFilter) ([]*mediarequests.Request, error) {
+	if f.listAdminFn != nil {
+		return f.listAdminFn()
+	}
 	return nil, nil
 }
 
@@ -148,6 +156,17 @@ func authedRequest(method, target string) *http.Request {
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{
 		UserID:    1,
 		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+	})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
+	return req.WithContext(ctx)
+}
+
+func adminRequest(method, target string) *http.Request {
+	req := httptest.NewRequest(method, target, nil)
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{
+		UserID:    1,
+		Role:      "admin",
 		TokenType: auth.TokenTypeAccess,
 	})
 	ctx = apimw.SetProfileID(ctx, "profile-1")
@@ -245,5 +264,66 @@ func TestHandleBrowseGenreRequiresMediaType(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The store returns a nil slice when a user has no requests, which encodes as
+// `{"requests":null}`. Clients that decode `requests` as an array fail on null,
+// so both list endpoints must emit an empty array instead. These assert on the
+// raw body: null and [] both decode into a zero-length slice, so a len() check
+// would pass either way and pin nothing.
+func TestHandleListMineEncodesEmptyRequestsAsArray(t *testing.T) {
+	h := NewRequestsHandler(&fakeRequestService{
+		listMineFn: func() ([]*mediarequests.Request, error) { return nil, nil },
+	})
+
+	rec := httptest.NewRecorder()
+	h.HandleListMine(rec, authedRequest("GET", "/api/v1/requests/mine?limit=200&offset=0"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"requests":[]}` {
+		t.Errorf("body = %s, want {\"requests\":[]}", got)
+	}
+}
+
+func TestHandleAdminListEncodesEmptyRequestsAsArray(t *testing.T) {
+	h := NewRequestsHandler(&fakeRequestService{
+		listAdminFn: func() ([]*mediarequests.Request, error) { return nil, nil },
+	})
+
+	rec := httptest.NewRecorder()
+	h.HandleAdminList(rec, adminRequest("GET", "/api/v1/requests"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"requests":[]}` {
+		t.Errorf("body = %s, want {\"requests\":[]}", got)
+	}
+}
+
+func TestHandleListMinePreservesPopulatedRequests(t *testing.T) {
+	h := NewRequestsHandler(&fakeRequestService{
+		listMineFn: func() ([]*mediarequests.Request, error) {
+			return []*mediarequests.Request{{ID: "req-1"}}, nil
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	h.HandleListMine(rec, authedRequest("GET", "/api/v1/requests/mine"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body struct {
+		Requests []*mediarequests.Request `json:"requests"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.Requests) != 1 || body.Requests[0].ID != "req-1" {
+		t.Errorf("requests = %+v", body.Requests)
 	}
 }

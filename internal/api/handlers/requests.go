@@ -263,7 +263,7 @@ func (h *RequestsHandler) HandleListMine(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Requests []*mediarequests.Request `json:"requests"`
-	}{Requests: requests})
+	}{Requests: nonNilRequests(requests)})
 }
 
 func (h *RequestsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +291,7 @@ func (h *RequestsHandler) HandleAdminList(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Requests []*mediarequests.Request `json:"requests"`
-	}{Requests: requests})
+	}{Requests: nonNilRequests(requests)})
 }
 
 func (h *RequestsHandler) HandleApprove(w http.ResponseWriter, r *http.Request) {
@@ -627,6 +627,16 @@ func toIntegrationResponses(integrations []mediarequests.Integration) []requestI
 		out = append(out, requestIntegrationResponseFrom(integration))
 	}
 	return out
+}
+
+// nonNilRequests keeps an empty request list encoding as [] rather than null.
+// The store returns a nil slice when no rows match, and clients decoding
+// `requests` as an array fail on null instead of rendering an empty state.
+func nonNilRequests(requests []*mediarequests.Request) []*mediarequests.Request {
+	if requests == nil {
+		return []*mediarequests.Request{}
+	}
+	return requests
 }
 
 func writeRequestServiceError(w http.ResponseWriter, err error) {
