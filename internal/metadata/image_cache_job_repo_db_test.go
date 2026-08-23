@@ -163,3 +163,15 @@ func TestImageCacheFailedJobReadmission(t *testing.T) {
 		}
 	})
 }
+
+func TestImageCacheDiscoveryQueriesExplain(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := context.Background()
+
+	for surface := 0; surface < imageCacheDiscoverySurfaceCount; surface++ {
+		query, args := imageCacheDiscoveryQuery(imageCacheDiscoveryCursor{Surface: surface}, 1000)
+		if _, err := pool.Exec(ctx, "EXPLAIN "+query, args...); err != nil {
+			t.Fatalf("EXPLAIN discovery surface %d: %v", surface, err)
+		}
+	}
+}
