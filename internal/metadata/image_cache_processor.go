@@ -518,6 +518,8 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	}
 	var discoveryCursor imageCacheDiscoveryCursor
 	discoveredThisSweep := false
+	enqueuedThisSweep := false
+	confirmationSweep := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
@@ -579,6 +581,7 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 			total.EnqueuedExisting += page.Enqueued
 			reportImageCacheRunProgress(reportProgress, total)
 			if page.Enqueued > 0 {
+				enqueuedThisSweep = true
 				break
 			}
 			if !page.Complete {
@@ -587,11 +590,20 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 			if !discoveredThisSweep {
 				return total, nil
 			}
+			if confirmationSweep && !enqueuedThisSweep {
+				// A second complete sweep reported candidates but could not enqueue
+				// any of them. Repeating the same non-actionable catalog state cannot
+				// make progress; a later explicit backfill starts fresh from durable
+				// queue and catalog state.
+				return total, nil
+			}
 			// Queue rows and cached paths now reflect the completed sweep. Resetting
 			// catches concurrent changes that sorted behind the cursor. A retry or
 			// process restart also starts here and safely reuses those durable rows.
 			discoveryCursor = imageCacheDiscoveryCursor{}
 			discoveredThisSweep = false
+			enqueuedThisSweep = false
+			confirmationSweep = true
 		}
 	}
 }

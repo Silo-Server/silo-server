@@ -830,7 +830,11 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			in.ProviderID = imageCacheProviderIDFromSource(in.SourcePath, fallbackProvider)
 			in.ProviderContentID = imageCacheProviderContentID(in.ProviderID, tmdbID, tvdbID, imdbID, firstNonEmpty(in.SeriesID, in.TargetContentID))
 			in.ContentType = imageCacheContentType(in.ContentType)
-			inputs = append(inputs, in)
+			normalized, ok := normalizeImageCacheJobInput(in)
+			if !ok {
+				continue
+			}
+			inputs = append(inputs, normalized)
 			page.Discovered++
 		}
 	}

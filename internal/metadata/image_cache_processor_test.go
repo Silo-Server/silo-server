@@ -900,6 +900,33 @@ func TestImageCacheProcessorDiscoveryWrapsForConcurrentUpdates(t *testing.T) {
 	}
 }
 
+func TestImageCacheProcessorDiscoveryStopsAfterRepeatedNonEnqueueableCandidates(t *testing.T) {
+	unexpectedSweep := errors.New("unexpected third discovery sweep")
+	jobs := &loopingImageCacheJobs{
+		enqueuePages: []imageCacheDiscoveryPage{
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{Scanned: 1, Discovered: 1, Next: imageCacheDiscoveryCursor{Surface: imageCacheDiscoverySurfaceCount}, Complete: true},
+			{},
+		},
+		enqueueErrors:  []error{nil, nil, unexpectedSweep},
+		claimedResults: [][]*models.MetadataImageCacheJob{{}},
+	}
+	processor := NewImageCacheProcessor(jobs, &fakeImageCacher{}, &fakeImageResolver{}, nil, nil)
+
+	stats, err := processor.RunUntilIdle(context.Background(), "test-worker", 1000, 2, 0, nil)
+	if err != nil {
+		t.Fatalf("RunUntilIdle() error = %v", err)
+	}
+	if stats.EnqueuedExisting != 0 || jobs.enqueueCalls != 2 {
+		t.Fatalf("stats = %+v, discovery calls = %d; want no enqueues and one confirmation sweep", stats, jobs.enqueueCalls)
+	}
+	for call, cursor := range jobs.enqueueCursors {
+		if cursor != (imageCacheDiscoveryCursor{}) {
+			t.Fatalf("discovery call %d cursor = %+v, want reset cursor", call+1, cursor)
+		}
+	}
+}
+
 func TestImageCacheProcessorDiscoveryRetryStartsFromDurableState(t *testing.T) {
 	discoveryErr := errors.New("temporary discovery failure")
 	jobs := &loopingImageCacheJobs{
