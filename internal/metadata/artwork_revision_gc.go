@@ -171,6 +171,10 @@ func processArtworkRevisionGCBatch(
 		switch outcome {
 		case artworkRevisionGCReferenced:
 			stats.Referenced++
+		case artworkRevisionGCDeletionPendingHeal:
+			// Run accounts this deletion only after the shared final guard
+			// confirms that the durable tombstone can be removed.
+			continue
 		case artworkRevisionGCDeleted:
 			stats.Deleted++
 		case artworkRevisionGCDeletedAndHealed:
@@ -186,6 +190,7 @@ type artworkRevisionGCOutcome int
 const (
 	artworkRevisionGCSuperseded artworkRevisionGCOutcome = iota
 	artworkRevisionGCReferenced
+	artworkRevisionGCDeletionPendingHeal
 	artworkRevisionGCDeleted
 	artworkRevisionGCDeletedAndHealed
 )
@@ -364,7 +369,7 @@ func (g *ArtworkRevisionGarbageCollector) processCandidateToHeal(
 	if err := tx.Commit(ctx); err != nil {
 		return artworkRevisionGCSuperseded, nil, fmt.Errorf("artwork revision GC: commit deletion: %w", err)
 	}
-	return artworkRevisionGCSuperseded, &artworkRevisionGCPendingHeal{
+	return artworkRevisionGCDeletionPendingHeal, &artworkRevisionGCPendingHeal{
 		candidate:    candidate,
 		originalPath: originalPath,
 	}, nil
@@ -393,6 +398,8 @@ func (g *ArtworkRevisionGarbageCollector) processCandidate(
 // normal unreferenced paths immediately. Only survivors that raced back into
 // use need the legacy one-path surface healing. Each required surface update
 // stays in its own short transaction before one bounded confirmation sweep.
+// Run caps the interval between object deletion and this guard at the fixed
+// artworkRevisionGCBatchSize rather than accumulating an unbounded work list.
 func (g *ArtworkRevisionGarbageCollector) finishPendingHeals(
 	ctx context.Context,
 	pending []artworkRevisionGCPendingHeal,

@@ -89,7 +89,7 @@ func (tx *failingArtworkRevisionGCExecTx) Exec(
 }
 
 func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
-	candidates := []artworkRevisionGCCandidate{{id: 1}, {id: 2}, {id: 3}}
+	candidates := []artworkRevisionGCCandidate{{id: 1}, {id: 2}, {id: 3}, {id: 4}}
 	processed := make([]int64, 0, len(candidates))
 	retryErr := errors.New("schedule retry")
 
@@ -102,6 +102,8 @@ func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
 				return artworkRevisionGCSuperseded, errors.New("delete object")
 			case 2:
 				return artworkRevisionGCReferenced, nil
+			case 3:
+				return artworkRevisionGCDeletionPendingHeal, nil
 			default:
 				return artworkRevisionGCDeleted, nil
 			}
@@ -117,10 +119,10 @@ func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
 	if !errors.Is(err, retryErr) {
 		t.Fatalf("process batch error = %v, want %v", err, retryErr)
 	}
-	if !slices.Equal(processed, []int64{1, 2, 3}) {
+	if !slices.Equal(processed, []int64{1, 2, 3, 4}) {
 		t.Fatalf("processed candidates = %v, want all candidates", processed)
 	}
-	want := ArtworkRevisionGCStats{Claimed: 3, Deleted: 1, Referenced: 1, Retried: 1}
+	want := ArtworkRevisionGCStats{Claimed: 4, Deleted: 1, Referenced: 1, Retried: 1}
 	if stats != want {
 		t.Fatalf("stats = %+v, want %+v", stats, want)
 	}
