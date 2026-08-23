@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { sectionTypeLabel } from "@/lib/sectionTypes";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
-import type { RecipeCatalogResponse } from "@/lib/recipes";
+import type { GalleryPreset, RecipeCatalogResponse } from "@/lib/recipes";
 import { Eye, EyeOff, GripVertical, Pencil, Star, Trash2 } from "lucide-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -22,11 +22,70 @@ export interface EditableSectionViewModel {
   config?: Record<string, unknown>;
 }
 
-export function recipeLabel(catalog: RecipeCatalogResponse | undefined, type: string): string {
+function paramsEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== "object" || typeof b !== "object") return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * How specifically a preset matches a saved section config: the number of
+ * default_params the config reproduces, or -1 when any of them disagrees.
+ *
+ * A preset carrying no default_params scores 0 — it describes the recipe
+ * generically, so it matches anything but loses to any preset that matches on
+ * real parameters.
+ */
+function presetMatchScore(
+  preset: GalleryPreset,
+  config: Record<string, unknown> | undefined,
+): number {
+  const keys = Object.keys(preset.default_params ?? {});
+  if (keys.length === 0) return 0;
+  if (!config) return -1;
+  for (const key of keys) {
+    if (!paramsEqual(preset.default_params[key], config[key])) return -1;
+  }
+  return keys.length;
+}
+
+/**
+ * The preset a saved section was created from, identified by matching its
+ * default_params against the section's config.
+ *
+ * Presets within one recipe differ only by those params — trending_discover
+ * ships tmdb/day, tmdb/week and trakt/week — so the first preset is not a
+ * usable stand-in for the rest. Falls back to the first preset when nothing
+ * matches, which keeps sections saved before a preset existed labelled as they
+ * were.
+ */
+function matchingPreset(
+  presets: GalleryPreset[] | undefined,
+  config: Record<string, unknown> | undefined,
+): GalleryPreset | undefined {
+  let best: GalleryPreset | undefined;
+  let bestScore = -1;
+  for (const preset of presets ?? []) {
+    const score = presetMatchScore(preset, config);
+    if (score > bestScore) {
+      best = preset;
+      bestScore = score;
+    }
+  }
+  return bestScore >= 0 ? best : presets?.[0];
+}
+
+export function recipeLabel(
+  catalog: RecipeCatalogResponse | undefined,
+  type: string,
+  config?: Record<string, unknown>,
+): string {
   if (catalog) {
     for (const defs of Object.values(catalog.categories)) {
       const found = defs?.find((def) => def.type === type);
-      if (found?.presets[0]?.display_name) return found.presets[0].display_name;
+      const label = matchingPreset(found?.presets, config)?.display_name;
+      if (label) return label;
     }
   }
   return sectionTypeLabel(type);
@@ -71,7 +130,7 @@ export function SectionSummaryBadges({
 
   return (
     <div className="flex flex-wrap gap-1">
-      <Badge variant="secondary">{recipeLabel(catalog, section.sectionType)}</Badge>
+      <Badge variant="secondary">{recipeLabel(catalog, section.sectionType, section.config)}</Badge>
       {resumeLabel ? <Badge variant="outline">{resumeLabel}</Badge> : null}
       {queryDefinition.media_scope === "movie" ? <Badge variant="outline">Movies</Badge> : null}
       {queryDefinition.media_scope === "series" ? <Badge variant="outline">Series</Badge> : null}
@@ -118,7 +177,7 @@ export function SectionDragOverlay({
       <GripVertical className="text-muted-foreground h-4 w-4" />
       <span className="font-medium">{section.title}</span>
       <Badge variant="secondary" className="ml-2">
-        {recipeLabel(catalog, section.sectionType)}
+        {recipeLabel(catalog, section.sectionType, section.config)}
       </Badge>
     </div>
   );
