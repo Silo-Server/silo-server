@@ -231,7 +231,7 @@ func TestMountedCompatRouterDownloadIsATransfer(t *testing.T) {
 	}
 }
 
-func TestMountedCompatRouterBitrateTestIsACapExemptTransfer(t *testing.T) {
+func TestMountedCompatRouterBitrateTestIsACapExemptProbe(t *testing.T) {
 	registry := compatTelemetryRegistry(t)
 	fixture := newCompatTelemetryServer(t, registry)
 
@@ -247,9 +247,22 @@ func TestMountedCompatRouterBitrateTestIsACapExemptTransfer(t *testing.T) {
 	if snapshot.Transfers[0].Subject != streamtelemetry.UserSubject(91) {
 		t.Fatalf("bitrate probe subject = %+v", snapshot.Transfers[0].Subject)
 	}
-	// §4.2 "classify but exempt": transfer-observed, never cap-relevant.
+	// §4.2 "classify but exempt": observed, never cap-relevant.
 	if snapshot.Transfers[0].BytesAccepted != 1024*1024 {
 		t.Fatalf("bitrate probe bytes = %d", snapshot.Transfers[0].BytesAccepted)
+	}
+	// ...and classified apart from a real download, so a consumer totalling
+	// delivered bytes can drop it. Its MediaFileID names no file, which is the
+	// other half of why it must not be counted as media.
+	route := compatMediaRoute(http.MethodGet, "/Playback/BitrateTest")
+	if route.Class != streamtelemetry.ClassProbe {
+		t.Fatalf("bitrate probe class = %q, want %q", route.Class, streamtelemetry.ClassProbe)
+	}
+	if route.CapRelevant {
+		t.Fatal("bitrate probe must stay cap-exempt")
+	}
+	if snapshot.Transfers[0].MediaFileID != 0 {
+		t.Fatalf("bitrate probe media file = %d, want 0", snapshot.Transfers[0].MediaFileID)
 	}
 }
 

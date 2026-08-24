@@ -2,10 +2,13 @@ package streamtelemetry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"hash/maphash"
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -172,13 +175,8 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	if attachment.TokenIssuedAtSource == "" {
 		attachment.TokenIssuedAtSource = TokenIssuedAtSourceNone
 	}
-	if obs.route.Class == ClassTransfer {
-		// One record per subject/file/route, not one per HTTP request. Ranged
-		// byte routes issue many small overlapping GETs — an audiobook client
-		// alone can sustain tens per second — and a record per request would
-		// exhaust MaxTransfers within one retention window while requestCount,
-		// which exists to count exactly this, stayed pinned at 1.
-		key := transferKey(attachment, obs.route)
+	if obs.route.Class.foldsIntoTransfer() {
+		key := transferKey(attachment, obs.Capture)
 		r.transfersMu.Lock()
 		t := r.transfers[key]
 		if t == nil {
@@ -407,12 +405,40 @@ func maxPendingRealtimePerShard(maxSessions int64) int64 {
 	return maxSessions/shardCount + 1
 }
 
-// transferKey identifies one pour: a subject moving one media file over one
-// route. Deliberately excludes anything per-request so overlapping Range GETs
-// for the same file fold into a single record.
-func transferKey(a Attachment, route MediaRoute) string {
-	return string(a.Subject.Kind) + "\x00" + a.Subject.ID + "\x00" + a.ProfileID + "\x00" +
-		strconv.Itoa(a.MediaFileID) + "\x00" + routeID(route.Method, route.Pattern)
+// transferKey identifies one logical transfer: the same principal pulling the
+// same file over the same route from the same place. Deliberately excludes
+// anything per-request so overlapping Range GETs for the same file fold into a
+// single record — every ranged byte route is transfer-class, and a record per
+// request exhausts MaxTransfers within one retention window while requestCount,
+// which exists to count exactly this, stays pinned at 1.
+//
+// Viewer IP and device stay IN the identity. Folding every viewer of one file
+// into a single row and letting the newest capture win erases the fan-out signal
+// the re-stream detection depends on: two households pulling the same file would
+// read as one transfer whose viewer address flickered.
+//
+// The identity is HASHED rather than returned joined, because this value becomes
+// a Redis hash field NAME (store_redis.go). Key names are far more exposed than
+// values — they surface in SCAN, MONITOR, slowlog and RDB dumps — so a joined id
+// publishes a viewer's IP address and their client-supplied device id in the
+// clear, into the one place a redis operator sees without reading any record. It
+// also carries the NUL separators into every tool that walks the keyspace, which
+// is not a hypothetical: NUL-bearing field names silently truncate line-oriented
+// readers. Nothing is lost by hashing. TransferView carries Subject, ProfileID,
+// MediaFileID, Method, Pattern, ViewerIP and DeviceID as fields already, so the
+// id only has to be stable and collision-free, and no consumer parses it —
+// registry.go and store_redis.go sort by it, and the global merge never joins
+// transfers across publishers on it.
+//
+// SHA-256 and not maphash: maphash is seeded per process, so two publishers
+// observing the same logical transfer would emit different ids, which is exactly
+// the cross-publisher agreement the merge is entitled to assume.
+func transferKey(a Attachment, capture CaptureSet) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		string(a.Subject.Kind), a.Subject.ID, a.ProfileID, strconv.Itoa(a.MediaFileID),
+		capture.Method, capture.Pattern, capture.ViewerIP, capture.DeviceID,
+	}, "\x00")))
+	return hex.EncodeToString(sum[:16])
 }
 
 func (r *Registry) shard(id string) *sessionShard {

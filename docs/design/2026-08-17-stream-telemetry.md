@@ -423,9 +423,11 @@ authorization, then starts a transcode, and can still 404.
 | `jellycompat` | 24 | `viewer_egress` | compat play session |
 | `abs` | 22 | `viewer_egress` | ABS session id / abs user / feed owner |
 
-Classes are `playback`, `manifest` and `transfer`. Cap relevance is per route, not per
-family: streams, segments and manifests are cap-relevant; downloads, ebook reads, ABS
-files and the Jellyfin bandwidth probe are observed but cap-exempt.
+Classes are `playback`, `manifest`, `transfer` and `probe`. Cap relevance is per route,
+not per family: streams, segments and manifests are cap-relevant; downloads, ebook reads,
+ABS files and the Jellyfin bandwidth probe are observed but cap-exempt. `probe` is the
+bandwidth probe alone: recorded exactly like a transfer, but its bytes are filler against
+no media file, so a consumer totalling delivered bytes must exclude it.
 
 **Manifest routes are enrolled and load-bearing.** A killed session that reaches an
 unenrolled manifest route can reconstruct or start ffmpeg before the next segment is

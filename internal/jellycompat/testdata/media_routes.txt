@@ -33,7 +33,7 @@ GET /MediaSegments/{id}	non-media
 GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
-GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+GET /Playback/BitrateTest	media	probe	viewer_egress	false	true
 GET /QuickConnect/Enabled	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media
@@ -159,7 +159,7 @@ GET /MediaSegments/{id}	non-media
 GET /Movies/Recommendations	non-media
 GET /Movies/{id}/Similar	non-media
 GET /Persons	non-media
-GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+GET /Playback/BitrateTest	media	probe	viewer_egress	false	true
 GET /QuickConnect/Enabled	non-media
 GET /Search/Hints	non-media
 GET /Sessions	non-media

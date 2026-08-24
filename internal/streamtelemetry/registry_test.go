@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -614,6 +615,50 @@ func TestTransfersSeparateByFileAndSubject(t *testing.T) {
 	}
 }
 
+func TestTransfersSeparateViewersAndRemainGloballyBounded(t *testing.T) {
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	cfg.MaxTransfers = 2
+	route := testRoute(ClassTransfer)
+	route.Capture = func(r *http.Request) CaptureSet {
+		return CaptureSet{
+			Method: r.Method, Pattern: route.Pattern,
+			ViewerIP: r.Header.Get("X-Test-Viewer"), DeviceID: r.Header.Get("X-Test-Device"),
+		}
+	}
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(route)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Attach(r.Context(), testAttachment(""))
+		_, _ = w.Write([]byte("chunk"))
+	}))
+	serve := func(viewer, device string) {
+		request := httptest.NewRequest(http.MethodGet, "/media/x", nil)
+		request.Header.Set("X-Test-Viewer", viewer)
+		request.Header.Set("X-Test-Device", device)
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+	}
+
+	serve("192.0.2.1", "living-room")
+	serve("192.0.2.2", "phone")
+	serve("192.0.2.1", "living-room") // folds into the first viewer's transfer
+	serve("192.0.2.3", "tablet")      // exceeds the global transfer cap
+
+	snapshot := registry.Sweep()
+	if len(snapshot.Transfers) != 2 {
+		t.Fatalf("transfers = %+v, want two viewer-scoped records", snapshot.Transfers)
+	}
+	counts := make(map[string]int64, len(snapshot.Transfers))
+	for _, transfer := range snapshot.Transfers {
+		counts[transfer.ViewerIP+"\x00"+transfer.DeviceID] = transfer.RequestCount
+	}
+	if counts["192.0.2.1\x00living-room"] != 2 || counts["192.0.2.2\x00phone"] != 1 {
+		t.Fatalf("viewer transfer counts = %+v", counts)
+	}
+	if !snapshot.Truncated || snapshot.DroppedObservations != 1 {
+		t.Fatalf("cap state: truncated=%v dropped=%d", snapshot.Truncated, snapshot.DroppedObservations)
+	}
+}
+
 // HasIdentityConflict and IdentityConflicts must agree. A started-at authority
 // upgrade that confirms the recorded instant is not a conflict at all and must
 // not consume the per-session budget; one that moves it is, and sets the flag.
@@ -649,4 +694,61 @@ func TestStartedAtAuthorityUpgradeAndConflictAgree(t *testing.T) {
 			t.Fatalf("started at = %v, want %v", session.startedAt, moved)
 		}
 	})
+}
+
+// The transfer id becomes a Redis hash field name, so it must not leak the
+// identity it is derived from. A viewer's IP address and their client-supplied
+// device id belong in the record's fields, where reading them is a deliberate
+// act, not in a key name that SCAN, MONITOR, slowlog and an RDB dump all expose.
+// The id must also stay ASCII-safe: the pre-hash id joined its components with
+// NUL, which silently truncates every line-oriented reader of the keyspace.
+func TestTransferIDHidesViewerIdentity(t *testing.T) {
+	cfg := testConfig()
+	cfg.Retention = time.Hour
+	route := testRoute(ClassTransfer)
+	route.Capture = func(r *http.Request) CaptureSet {
+		return CaptureSet{Method: r.Method, Pattern: route.Pattern,
+			ViewerIP: "198.51.100.77", DeviceID: "kitchen-tv-8842"}
+	}
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	handler := registry.Observe(route)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Attach(r.Context(), testAttachment(""))
+		_, _ = w.Write([]byte("chunk"))
+	}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/media/x", nil))
+
+	snapshot := registry.Sweep()
+	if len(snapshot.Transfers) != 1 {
+		t.Fatalf("transfers = %d, want 1", len(snapshot.Transfers))
+	}
+	transfer := snapshot.Transfers[0]
+	for _, secret := range []string{"198.51.100.77", "kitchen-tv-8842", route.Pattern, "\x00"} {
+		if strings.Contains(transfer.ID, secret) {
+			t.Fatalf("transfer id %q leaks %q", transfer.ID, secret)
+		}
+	}
+	if transfer.ViewerIP != "198.51.100.77" || transfer.DeviceID != "kitchen-tv-8842" {
+		t.Fatalf("identity must survive as fields: ip=%q device=%q", transfer.ViewerIP, transfer.DeviceID)
+	}
+}
+
+// Hashing the id must not fold two viewers together, and must be stable across
+// processes — a runtime-seeded hash would give two publishers different ids for
+// the same logical transfer, which the merge is entitled to assume it can trust.
+func TestTransferKeyIsStableAndViewerDistinct(t *testing.T) {
+	attachment := testAttachment("")
+	base := CaptureSet{Method: http.MethodGet, Pattern: "/media/{id}", ViewerIP: "203.0.113.5", DeviceID: "den"}
+	other := base
+	other.ViewerIP = "203.0.113.6"
+
+	first, again, elsewhere := transferKey(attachment, base), transferKey(attachment, base), transferKey(attachment, other)
+	if first != again {
+		t.Fatalf("transfer key is not deterministic: %q then %q", first, again)
+	}
+	if first == elsewhere {
+		t.Fatalf("two viewers folded into one transfer key: %q", first)
+	}
+	if len(first) != 32 {
+		t.Fatalf("transfer key = %q, want 32 hex characters", first)
+	}
 }

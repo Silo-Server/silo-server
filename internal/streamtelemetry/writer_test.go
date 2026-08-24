@@ -185,3 +185,98 @@ func TestObserveSkipsUnobservedFamily(t *testing.T) {
 		t.Fatalf("observed family sessions = %+v", snapshot.Sessions)
 	}
 }
+
+// The cut flag has to be sampled BETWEEN slices, not once at entry. Write checks
+// it every ~32 KiB and the HTTP/2 writer has no ReaderFrom so it falls back to
+// Write; sampling once at entry left an HTTP/1.1 sendfile of the same session
+// pouring until the whole file drained. That made a kill switch behave
+// differently by protocol, which is why this test asserts both at once rather
+// than pinning h1 alone.
+func TestObservedWriterReadFromCutBehavesTheSameOverH1AndH2(t *testing.T) {
+	const slices = 8
+	total := slices * httpstream.ReadFromChunkDefault
+	cutAfter := 2 * httpstream.ReadFromChunkDefault
+	// One slice of overshoot is the floor on the zero-copy path: the kernel
+	// drives a sendfile already in flight to completion and never calls back
+	// into Go. The HTTP/2 fallback stops far sooner, and is held to the same
+	// bound rather than a tighter one so the assertion is genuinely shared.
+	limit := cutAfter + httpstream.ReadFromChunkDefault
+
+	for _, test := range []struct {
+		name  string
+		http2 bool
+	}{{name: "h1"}, {name: "h2", http2: true}} {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewRegistry(testConfig(), NewLocalStore(), nil)
+
+			var copied int64
+			var copyErr error
+			done := make(chan struct{})
+			handler := registry.Observe(testRoute(ClassPlayback))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(done)
+				Attach(r.Context(), testAttachment("session-cut"))
+				observation, _ := r.Context().Value(observationContextKey{}).(*Observation)
+				readerFrom, ok := w.(io.ReaderFrom)
+				if !ok {
+					t.Error("observedWriter does not implement io.ReaderFrom")
+					return
+				}
+				copied, copyErr = readerFrom.ReadFrom(&cuttingReader{
+					remaining: total, cutAt: cutAfter, observation: observation,
+				})
+			}))
+
+			server := httptest.NewUnstartedServer(handler)
+			server.EnableHTTP2 = test.http2
+			if test.http2 {
+				server.StartTLS()
+			} else {
+				server.Start()
+			}
+			defer server.Close()
+
+			response, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			if want := "HTTP/2.0"; test.http2 != (response.Proto == want) {
+				t.Fatalf("proto = %q, http2 = %v", response.Proto, test.http2)
+			}
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			<-done
+
+			if copyErr == nil {
+				t.Fatal("cut stream completed; the cut was only sampled at entry")
+			}
+			if copied > limit {
+				t.Fatalf("copied %d bytes after a cut at %d, want at most %d", copied, cutAfter, limit)
+			}
+		})
+	}
+}
+
+// cuttingReader trips the observation's cut flag once the stream has delivered
+// cutAt bytes, standing in for an operator ending a session mid-transfer.
+type cuttingReader struct {
+	remaining   int64
+	delivered   int64
+	cutAt       int64
+	observation *Observation
+}
+
+func (r *cuttingReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	n := int64(len(p))
+	if n > r.remaining {
+		n = r.remaining
+	}
+	r.remaining -= n
+	r.delivered += n
+	if r.delivered >= r.cutAt && r.observation != nil {
+		r.observation.cut.Store(true)
+	}
+	return int(n), nil
+}
