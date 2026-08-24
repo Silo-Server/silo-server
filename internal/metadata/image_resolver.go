@@ -329,12 +329,18 @@ func (r *PluginImageResolver) resolveS3Batch(
 	checker, _ := presigner.(s3ImageExistenceChecker)
 	now := time.Now()
 	expiresAt := now.Add(ttl)
+
+	// Walk the ladder for the whole batch before presigning any of it. Each walk
+	// can cost a HEAD or two against storage, and a browse page resolves a
+	// hundred images: done one after another that is seconds of latency in front
+	// of the JSON. Presigning itself is local signing work, so only this part is
+	// worth parallelizing.
+	ladderKeys := r.resolveLadderKeys(ctx, checker, presigner.Bucket(), entries)
+
 	for _, entry := range entries {
-		key := entry.originalPath
-		fellBack := false
-		if checker != nil {
-			key, fellBack = r.resolveLadderKey(ctx, checker, presigner.Bucket(), key)
-		}
+		resolvedKey := ladderKeys[entry.originalPath]
+		key := resolvedKey.key
+		fellBack := resolvedKey.fellBack
 		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), key, ttl)
 		if err != nil {
 			slog.ErrorContext(ctx, "s3 image resolution failed", "component", "metadata", "path", key, "error", err)

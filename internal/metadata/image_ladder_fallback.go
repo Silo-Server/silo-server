@@ -5,7 +5,10 @@ import (
 	"log/slog"
 	"path"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -78,6 +81,66 @@ func variantKey(key, variant string) string {
 	}
 	original := artworkkey.Original(dir, artworkkey.Revision(key), path.Ext(key))
 	return artworkkey.Variant(original, variant)
+}
+
+// ladderExistenceConcurrency bounds how many artwork existence checks run at
+// once for one batch. It keeps a large browse page off a serial chain of HEADs
+// without letting a single request open a hundred connections to storage.
+const ladderExistenceConcurrency = 12
+
+// ladderKey is the outcome of walking the ladder for one requested key.
+type ladderKey struct {
+	key      string
+	fellBack bool
+}
+
+// resolveLadderKeys walks the ladder for a whole batch with bounded concurrency,
+// returning the key to presign for each entry. Entries needing no check (every
+// rung but the newly-added one, which is the overwhelming majority) resolve to
+// themselves without touching storage.
+func (r *PluginImageResolver) resolveLadderKeys(
+	ctx context.Context,
+	checker s3ImageExistenceChecker,
+	bucket string,
+	entries []resolveEntry,
+) map[string]ladderKey {
+	resolved := make(map[string]ladderKey, len(entries))
+	for _, entry := range entries {
+		resolved[entry.originalPath] = ladderKey{key: entry.originalPath}
+	}
+	if checker == nil {
+		return resolved
+	}
+
+	// Only the entries that can actually miss are worth a goroutine.
+	pending := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if _, ok := needsExistenceCheck(entry.originalPath); ok {
+			pending = append(pending, entry.originalPath)
+		}
+	}
+	if len(pending) == 0 {
+		return resolved
+	}
+
+	var (
+		mu    sync.Mutex
+		group errgroup.Group
+	)
+	group.SetLimit(ladderExistenceConcurrency)
+	for _, path := range pending {
+		group.Go(func() error {
+			key, fellBack := r.resolveLadderKey(ctx, checker, bucket, path)
+			mu.Lock()
+			resolved[path] = ladderKey{key: key, fellBack: fellBack}
+			mu.Unlock()
+			return nil
+		})
+	}
+	// resolveLadderKey never returns an error — a failed check degrades to
+	// presigning what was asked for — so there is nothing to surface here.
+	_ = group.Wait()
+	return resolved
 }
 
 // resolveLadderKey returns the key to presign for a requested rung, walking down
