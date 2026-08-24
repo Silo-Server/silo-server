@@ -40,6 +40,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
@@ -2243,7 +2244,15 @@ func main() {
 			taskMgr.Register(tasks.NewRefreshMetadataTask(refreshWorker, metadataService))
 		}
 		if metadataImageCacheProcessor != nil {
-			taskMgr.Register(tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor))
+			cacheImagesTask := tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor)
+			// Artwork cached under an older variant ladder is missing the rungs
+			// a client can now ask for. Arm the one-shot regeneration pass; it
+			// records the version it finished and then costs nothing.
+			cacheImagesTask.SetLadderBackfill(
+				metadata.NewImageLadderBackfillStateRepository(pool),
+				artworkkey.LadderVersion,
+			)
+			taskMgr.Register(cacheImagesTask)
 			taskMgr.Register(tasks.NewBackfillMetadataImagesTask(metadataImageCacheProcessor))
 		}
 		if deps.S3Public != nil {

@@ -61,6 +61,13 @@ type ImageCacheJobClaimer interface {
 	DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
+// imageCacheLadderBackfiller is optional so lightweight stores that only serve
+// the normal queue do not have to implement the one-shot ladder sweep. A store
+// that does not implement it simply has no ladder backfill.
+type imageCacheLadderBackfiller interface {
+	EnqueueLadderBackfill(ctx context.Context, limit int, completedBefore time.Time) (int, error)
+}
+
 type targetImageCacheJobStore interface {
 	retryTargetNow(ctx context.Context, targetContentID string) error
 	claimDueForTarget(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error)
@@ -465,6 +472,94 @@ func (p *ImageCacheProcessor) DrainUntilIdle(ctx context.Context, workerID strin
 // cache processing must use DrainUntilIdle.
 func (p *ImageCacheProcessor) RunUntilIdle(ctx context.Context, workerID string, claimLimit int, concurrency int, maxRuntime time.Duration, reportProgress ImageCacheRunProgressReporter) (ImageCacheRunStats, error) {
 	return p.runUntilIdle(ctx, workerID, claimLimit, concurrency, maxRuntime, true, reportProgress)
+}
+
+// imageCacheLadderBackfillBatchSize bounds one enqueue step of the ladder
+// backfill. It is smaller than the discovery sweep because each of these jobs
+// re-downloads artwork that is already cached: the queue should stay short
+// enough that ordinary scan-driven work is not stuck behind a whole library.
+const imageCacheLadderBackfillBatchSize = 200
+
+// RunLadderBackfill regenerates already-cached artwork against the current
+// variant ladder, in bounded batches, draining each batch before enqueuing the
+// next. It reports whether the pass ran to completion; only a complete pass may
+// be recorded against artworkkey.LadderVersion.
+//
+// Interrupting it is safe and re-running it is cheap: the cacher skips uploading
+// variants whose objects already match, so a repeated pass costs the source
+// download and nothing else. An incomplete pass simply resumes on the next
+// scheduled run.
+func (p *ImageCacheProcessor) RunLadderBackfill(
+	ctx context.Context,
+	workerID string,
+	claimLimit int,
+	concurrency int,
+	maxRuntime time.Duration,
+	reportProgress ImageCacheRunProgressReporter,
+) (ImageCacheRunStats, bool, error) {
+	var total ImageCacheRunStats
+	if p == nil || p.jobs == nil || p.cacher == nil {
+		return total, false, nil
+	}
+	backfiller, ok := p.jobs.(imageCacheLadderBackfiller)
+	if !ok {
+		return total, false, nil
+	}
+	// Caching being off is not completion: recording the version would skip the
+	// backfill permanently for a deployment that turns caching back on.
+	if !p.enabled.Load() {
+		return total, false, nil
+	}
+
+	// Rows this pass has already finished stop being candidates. Captured once,
+	// before the first batch, so the boundary cannot drift forward as the pass
+	// runs and re-admit work it just did.
+	completedBefore := time.Now()
+
+	limited := maxRuntime > 0
+	deadline := time.Time{}
+	if limited {
+		deadline = completedBefore.Add(maxRuntime)
+	}
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, false, err
+		}
+		if !p.enabled.Load() {
+			return total, false, nil
+		}
+		remaining := time.Duration(0)
+		if limited {
+			remaining = time.Until(deadline)
+			if remaining <= 0 {
+				total.RuntimeLimited = true
+				return total, false, nil
+			}
+		}
+
+		enqueued, err := backfiller.EnqueueLadderBackfill(ctx, imageCacheLadderBackfillBatchSize, completedBefore)
+		if err != nil {
+			return total, false, err
+		}
+		total.EnqueuedExisting += enqueued
+		reportImageCacheRunProgress(reportProgress, total)
+		if enqueued == 0 {
+			return total, true, nil
+		}
+
+		stats, err := p.DrainUntilIdle(ctx, workerID, claimLimit, concurrency, remaining, reportProgress)
+		total.add(stats)
+		total.Batches += stats.Batches
+		reportImageCacheRunProgress(reportProgress, total)
+		if err != nil {
+			return total, false, err
+		}
+		if stats.RuntimeLimited {
+			total.RuntimeLimited = true
+			return total, false, nil
+		}
+	}
 }
 
 func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string, claimLimit int, concurrency int, maxRuntime time.Duration, discover bool, reportProgress ImageCacheRunProgressReporter) (ImageCacheRunStats, error) {
