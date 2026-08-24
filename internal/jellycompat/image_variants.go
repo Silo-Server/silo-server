@@ -45,6 +45,12 @@ func compatRequestImageSize(r *http.Request, imageType string) string {
 		return compatCardImageSize
 	case maxDim >= 1200:
 		return "original"
+	case maxDim >= 780:
+		// The ladder now carries a rung between the pre-existing default and
+		// the original (w780 posters and stills, w1280 logos), so a Jellyfin
+		// client asking for a large-but-not-full image gets one instead of
+		// being rounded down to the default.
+		return "large"
 	default:
 		return "medium"
 	}
