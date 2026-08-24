@@ -1306,6 +1306,13 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
 func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, size, nil)
+}
+
+// buildSectionsWithUserStates is buildSections reusing user states the caller
+// already loaded for these items (the Home hide-watched filter does); nil
+// loads them as buildSections does.
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
 	contentIDs := make([]string, 0)
@@ -1384,7 +1391,11 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 		playTargets = resolvedTargets
 	})
 
-	wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	if knownUserStates != nil {
+		userStates = knownUserStates
+	} else {
+		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	}
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
