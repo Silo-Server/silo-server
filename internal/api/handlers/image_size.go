@@ -30,11 +30,12 @@ func rejectInvalidImageSize(w http.ResponseWriter, r *http.Request) bool {
 // requestImageSize reads the artwork size the client asked for, treating an
 // unrecognized value as no preference.
 //
-// The authoritative parse — the one that answers 400 — happens once per request
-// in accessFilterOrError. These response builders re-read the same query
-// parameter rather than threading the size through a dozen signatures: it is
-// the same request, so it is the same answer, and the alternative is a size
-// argument on every helper that already takes *http.Request.
+// The authoritative parse — the one that answers 400 — happens once per request,
+// in accessFilterOrError or rejectInvalidImageSize. This is for the places that
+// turn a request into the per-request context everything else reads: the access
+// filter, and the single parse at the top of a section response. Response
+// builders take the resolved size as an argument rather than calling this, so
+// the value cannot diverge from the one that was validated.
 func requestImageSize(r *http.Request) imagesize.Size {
 	size, err := imagesize.FromRequest(r)
 	if err != nil {

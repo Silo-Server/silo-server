@@ -327,7 +327,7 @@ func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Requ
 
 	items := make([]itemListResponse, 0, len(result.Items))
 	for _, item := range result.Items {
-		items = append(items, h.itemsHandler.toItemListResponse(r, item))
+		items = append(items, h.itemsHandler.toItemListResponse(r, item, filter.ImageSize))
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{

@@ -271,7 +271,7 @@ func (h *CatalogResourceHandler) HandleGetSeasons(w http.ResponseWriter, r *http
 				if hasProgressMap {
 					userData = catalog.EpisodeRollupUserData(episodes, progressMap)
 				}
-				sr := h.items.seasonResponseFromEpisodes(r, s, episodes, userData)
+				sr := h.items.seasonResponseFromEpisodes(r, s, episodes, userData, filter.ImageSize)
 				resp = append(resp, sr)
 			}
 
@@ -366,6 +366,7 @@ func (h *CatalogResourceHandler) HandleGetSeason(w http.ResponseWriter, r *http.
 					season,
 					episodes,
 					h.items.getAggregateUserData(r, episodes),
+					filter.ImageSize,
 				),
 			})
 			return
@@ -462,6 +463,9 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 	if err != nil {
 		return nil, err
 	}
+	// The entrypoint has already rejected an unparseable size; this only carries
+	// the validated one down to the detail service and the season response.
+	filter.ImageSize = requestImageSize(r)
 
 	seriesDetail, err := h.items.detailSvc.GetItemDetail(r.Context(), seriesID, filter)
 	if err != nil {
@@ -492,6 +496,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(r *http.Request, seasonID
 		season,
 		episodes,
 		h.items.getAggregateUserData(r, episodes),
+		filter.ImageSize,
 	)
 	return &catalog.ItemDetail{
 		ContentID:         seasonID,

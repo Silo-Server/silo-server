@@ -714,7 +714,7 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 				item = localized
 			}
 		}
-		items = append(items, h.itemsH.toItemListResponseWithOverlay(r, item, nil, userStates[item.ContentID]))
+		items = append(items, h.itemsH.toItemListResponseWithOverlay(r, item, nil, userStates[item.ContentID], accessFilter.ImageSize))
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{
@@ -813,7 +813,7 @@ func (h *CatalogHandler) HandleLegacySearch(w http.ResponseWriter, r *http.Reque
 	userStates := h.itemsH.listItemUserStates(r, items)
 	resp := make([]itemListResponse, 0, len(items))
 	for _, item := range items {
-		resp = append(resp, h.itemsH.toItemListResponseWithOverlay(r, item, nil, userStates[item.ContentID]))
+		resp = append(resp, h.itemsH.toItemListResponseWithOverlay(r, item, nil, userStates[item.ContentID], accessFilter.ImageSize))
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{

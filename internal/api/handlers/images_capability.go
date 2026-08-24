@@ -3,8 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
@@ -67,17 +65,10 @@ func HandleImagesCapability(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// variantWidthPx converts the variant a size resolves to ("w780") into its
-// pixel width. A size that resolves to the original has no fixed width and
-// reports 0, which original_max_width_px covers instead.
+// variantWidthPx reports the pixel width a size resolves to for an image type.
+// A size that resolves to the original has no fixed width and reports 0, which
+// original_max_width_px covers instead.
 func variantWidthPx(imageType string, size imagesize.Size) int {
-	variant := imagesize.Variant(imageType, size)
-	if !strings.HasPrefix(variant, "w") {
-		return 0
-	}
-	width, err := strconv.Atoi(variant[1:])
-	if err != nil {
-		return 0
-	}
+	width, _ := imagesize.VariantWidthPx(imagesize.Variant(imageType, size))
 	return width
 }
