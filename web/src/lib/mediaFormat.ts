@@ -3,13 +3,16 @@
 // differences between surfaces (empty-string vs "—" fallback, GB vs GiB
 // labels) are expressed via parameters here instead of per-surface copies.
 
+import type { VideoRangeSource } from "@/lib/videoRange";
+import { videoRangeLabel } from "@/lib/videoRange";
+
 export const CODEC_LABELS: Record<string, string> = {
   aac: "AAC",
   ac3: "AC3",
   av1: "AV1",
   dts: "DTS",
   dtshd: "DTS-HD",
-  eac3: "EAC3",
+  eac3: "Dolby Digital+",
   flac: "FLAC",
   h264: "H.264",
   hevc: "HEVC",
@@ -38,6 +41,94 @@ export function mapAudioLabel(codec: string): string {
   if (lower.includes("aac")) return "AAC";
   if (lower.includes("flac")) return "FLAC";
   return codec.toUpperCase();
+}
+
+interface AudioFormatTrack {
+  codec?: string;
+  profile?: string;
+  layout?: string;
+  title?: string;
+  embedded_title?: string;
+  default?: boolean;
+}
+
+interface AudioFormatVersion {
+  codec_audio?: string;
+  effective_audio_track_index?: number;
+  audio_tracks?: readonly AudioFormatTrack[];
+}
+
+interface QualitySummaryVersion extends VideoRangeSource, AudioFormatVersion {
+  resolution?: string;
+  codec_video?: string;
+}
+
+export function formatDynamicRangeLabel(version: VideoRangeSource): string | null {
+  const label = videoRangeLabel(version);
+  if (label.startsWith("DV")) return "Dolby Vision";
+  return label || null;
+}
+
+export function formatAudioTrackLabel(track: AudioFormatTrack | undefined): string {
+  if (!track) return "";
+
+  const details = [track.codec, track.profile, track.layout, track.title, track.embedded_title]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  const hasAtmos = details.includes("atmos") || details.includes("joc");
+
+  if (hasAtmos) {
+    if (
+      details.includes("eac3") ||
+      details.includes("e-ac-3") ||
+      details.includes("ec-3") ||
+      details.includes("dolby digital plus") ||
+      details.includes("dd+")
+    ) {
+      return "DD+ Atmos";
+    }
+    if (details.includes("truehd")) return "TrueHD Atmos";
+    return "Atmos";
+  }
+
+  return track.codec?.trim() ? mapAudioLabel(track.codec) : "";
+}
+
+export function formatVersionAudioLabel(version: AudioFormatVersion): string {
+  const tracks = version.audio_tracks ?? [];
+  const effectiveIndex = version.effective_audio_track_index;
+  const effectiveTrack =
+    effectiveIndex != null && effectiveIndex >= 0 && effectiveIndex < tracks.length
+      ? tracks[effectiveIndex]
+      : undefined;
+  const track = effectiveTrack ?? tracks.find((candidate) => candidate.default) ?? tracks[0];
+
+  return formatAudioTrackLabel(track) || formatAudioTrackLabel({ codec: version.codec_audio });
+}
+
+function videoQualityParts(version: QualitySummaryVersion): Array<string | null> {
+  return [
+    prettyResolution(version.resolution),
+    formatCodecLabel(version.codec_video, ""),
+    formatDynamicRangeLabel(version),
+  ];
+}
+
+export function formatVideoQualitySummary(
+  version: QualitySummaryVersion,
+  separator = " · ",
+): string {
+  return videoQualityParts(version).filter(Boolean).join(separator);
+}
+
+export function formatVersionQualitySummary(
+  version: QualitySummaryVersion,
+  separator = " · ",
+): string {
+  return [...videoQualityParts(version), formatVersionAudioLabel(version)]
+    .filter(Boolean)
+    .join(separator);
 }
 
 interface FormatFileSizeOptions {

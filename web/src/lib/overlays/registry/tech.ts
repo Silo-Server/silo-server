@@ -18,8 +18,13 @@ function hdrIcon(value: string | undefined): OverlayIconId | null {
 
 function audioIcon(value: string | undefined): OverlayIconId | null {
   if (!value) return null;
-  if (value.toLowerCase() === "atmos") return "atmos";
+  if (value.toLowerCase().includes("atmos")) return "atmos";
   return "volume";
+}
+
+function compactAudioLabel(value: string | undefined): string | null {
+  if (!value) return null;
+  return value.toLowerCase().includes("atmos") ? "Atmos" : value;
 }
 
 function videoCodecIcon(value: string | undefined): OverlayIconId | null {
@@ -77,7 +82,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,
-    getValue: (d) => d.audio ?? null,
+    getValue: (d) => compactAudioLabel(d.audio),
     getIcon: (d) => audioIcon(d.audio),
   },
   {

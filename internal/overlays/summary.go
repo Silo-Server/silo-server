@@ -13,6 +13,12 @@ import (
 // Summary reuses the API-facing overlay summary shape.
 type Summary = models.OverlaySummary
 
+const (
+	audioLabelAtmos       = "Atmos"
+	audioLabelDDPlusAtmos = "DD+ Atmos"
+	audioLabelTrueHDAtmos = "TrueHD Atmos"
+)
+
 // BuildSummary derives a compact overlay summary from the best available file.
 func BuildSummary(files []*models.MediaFile) *Summary {
 	best := bestFile(files)
@@ -90,8 +96,7 @@ func rangeRank(file *models.MediaFile) int {
 // rows may carry only dv_profile or a DOVI* video_range_type.
 func hasDolbyVision(tracks []models.VideoTrack) bool {
 	for _, track := range tracks {
-		if track.DolbyVision != "" || track.DVProfile > 0 ||
-			strings.HasPrefix(track.VideoRangeType, "DOVI") {
+		if track.IsDolbyVision() {
 			return true
 		}
 	}
@@ -170,27 +175,64 @@ func hdrTypeFromTracks(tracks []models.VideoTrack) string {
 }
 
 func normalizeAudio(file *models.MediaFile) string {
-	defaultCandidates := make([]string, 0, 3)
-	candidates := make([]string, 0, len(file.AudioTracks)*3+1)
+	hasDefault := false
 	for _, track := range file.AudioTracks {
 		if track.Default {
-			defaultCandidates = append(defaultCandidates, track.Title, track.EmbeddedTitle, track.Codec)
+			hasDefault = true
+			if label := normalizeAudioTrack(track); label != "" {
+				return label
+			}
 		}
-		candidates = append(candidates, track.Title, track.EmbeddedTitle, track.Codec)
 	}
-	if len(defaultCandidates) > 0 {
-		defaultCandidates = append(defaultCandidates, file.CodecAudio)
-	}
-	if len(defaultCandidates) > 0 {
-		if label := normalizeAudioCandidates(defaultCandidates); label != "" {
+	if hasDefault {
+		if label := normalizeAudioTrack(models.AudioTrack{Codec: file.CodecAudio}); label != "" {
 			return label
 		}
 	}
-	if label := normalizeAudioCandidates(candidates); label != "" {
-		return label
+
+	for _, track := range file.AudioTracks {
+		if !track.Default {
+			if label := normalizeAudioTrack(track); label != "" {
+				return label
+			}
+		}
 	}
 
-	return normalizeAudioCandidates([]string{file.CodecAudio})
+	return normalizeAudioTrack(models.AudioTrack{Codec: file.CodecAudio})
+}
+
+func normalizeAudioTrack(track models.AudioTrack) string {
+	details := strings.ToLower(strings.Join([]string{
+		track.Codec,
+		track.Profile,
+		track.Layout,
+		track.Title,
+		track.EmbeddedTitle,
+	}, " "))
+	if strings.Contains(details, "atmos") || strings.Contains(details, "joc") {
+		codec := strings.ToLower(strings.TrimSpace(track.Codec))
+		switch {
+		case isEAC3(codec):
+			return audioLabelDDPlusAtmos
+		case strings.Contains(codec, "truehd"):
+			return audioLabelTrueHDAtmos
+		case strings.Contains(details, "truehd"):
+			return audioLabelTrueHDAtmos
+		case isEAC3(details), strings.Contains(details, "dolby digital plus"):
+			return audioLabelDDPlusAtmos
+		default:
+			return audioLabelAtmos
+		}
+	}
+
+	return normalizeAudioCandidates([]string{track.Title, track.EmbeddedTitle, track.Codec})
+}
+
+func isEAC3(value string) bool {
+	return strings.Contains(value, "eac3") ||
+		strings.Contains(value, "e-ac-3") ||
+		strings.Contains(value, "ec-3") ||
+		strings.Contains(value, "dd+")
 }
 
 func normalizeAudioCandidates(candidates []string) string {
@@ -200,7 +242,7 @@ func normalizeAudioCandidates(candidates []string) string {
 		case lower == "":
 			continue
 		case strings.Contains(lower, "atmos"):
-			return "Atmos"
+			return audioLabelAtmos
 		case strings.Contains(lower, "truehd"):
 			return "TrueHD"
 		case strings.Contains(lower, "dts-hd"), strings.Contains(lower, "dts:x"), strings.Contains(lower, "dtsx"):

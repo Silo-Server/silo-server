@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   compactHdrSuffix,
   dolbyVisionLabel,
+  formatAudioTrackLabel,
   formatBitrate,
   formatChannels,
   formatCodecLabel,
+  formatDynamicRangeLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  formatVideoQualitySummary,
+  formatVersionAudioLabel,
+  formatVersionQualitySummary,
   mapAudioLabel,
   prettyResolution,
 } from "./mediaFormat";
@@ -16,6 +21,7 @@ describe("formatCodecLabel", () => {
   it("maps known codecs to display labels", () => {
     expect(formatCodecLabel("h264")).toBe("H.264");
     expect(formatCodecLabel("hevc")).toBe("HEVC");
+    expect(formatCodecLabel("eac3")).toBe("Dolby Digital+");
     expect(formatCodecLabel("truehd")).toBe("TrueHD");
     expect(formatCodecLabel("opus")).toBe("Opus");
   });
@@ -52,6 +58,60 @@ describe("mapAudioLabel", () => {
     expect(mapAudioLabel("pcm_s24le")).toBe("PCM_S24LE");
     expect(mapAudioLabel("mp3")).toBe("MP3");
     expect(mapAudioLabel("opus")).toBe("OPUS");
+  });
+});
+
+describe("precise media labels", () => {
+  it("prefers Dolby Vision evidence over the generic HDR flag", () => {
+    expect(
+      formatDynamicRangeLabel({
+        hdr: true,
+        video_tracks: [{ dv_profile: 8, video_range_type: "DOVIWithHDR10" }],
+      }),
+    ).toBe("Dolby Vision");
+    expect(formatDynamicRangeLabel({ hdr: true, video_tracks: [] })).toBe("HDR");
+    expect(formatDynamicRangeLabel({ hdr: false, video_tracks: [] })).toBeNull();
+  });
+
+  it("distinguishes Dolby Digital Plus and TrueHD Atmos", () => {
+    expect(
+      formatAudioTrackLabel({
+        codec: "eac3",
+        profile: "Dolby Digital Plus + Dolby Atmos",
+      }),
+    ).toBe("DD+ Atmos");
+    expect(formatAudioTrackLabel({ codec: "truehd", profile: "Dolby TrueHD + Dolby Atmos" })).toBe(
+      "TrueHD Atmos",
+    );
+    expect(formatAudioTrackLabel({ codec: "opus", title: "English Atmos" })).toBe("Atmos");
+    expect(formatAudioTrackLabel({ codec: "eac3", profile: "Dolby Digital Plus" })).toBe("EAC3");
+  });
+
+  it("uses the effective or default audio track before the file fallback", () => {
+    expect(
+      formatVersionAudioLabel({
+        codec_audio: "aac",
+        effective_audio_track_index: 1,
+        audio_tracks: [
+          { codec: "truehd", profile: "Dolby TrueHD + Dolby Atmos", default: true },
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos" },
+        ],
+      }),
+    ).toBe("DD+ Atmos");
+  });
+
+  it("builds one consistent version summary", () => {
+    const version = {
+      resolution: "2160p",
+      codec_video: "hevc",
+      codec_audio: "eac3",
+      hdr: true,
+      video_tracks: [{ dv_profile: 8 }],
+      audio_tracks: [{ codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos", default: true }],
+    };
+
+    expect(formatVideoQualitySummary(version)).toBe("4K · HEVC · Dolby Vision");
+    expect(formatVersionQualitySummary(version)).toBe("4K · HEVC · Dolby Vision · DD+ Atmos");
   });
 });
 

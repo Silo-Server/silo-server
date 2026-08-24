@@ -137,7 +137,7 @@ describe("adminActivityPresentation", () => {
     expect(formatDeliveredContainerSummary(session)).toBe("MKV");
     expect(formatContainerDetail(session)).toBe("Original container");
     expect(formatDeliveredVideoSummary(session)).toBe("HEVC · 2160p");
-    expect(formatDeliveredAudioSummary(session)).toBe("EAC3 5.1");
+    expect(formatDeliveredAudioSummary(session)).toBe("Dolby Digital+ 5.1");
     expect(formatTranscodeModeSummary(session)).toBeNull();
   });
 

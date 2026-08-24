@@ -94,7 +94,9 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Video Info", "Player dimensions")).toBe("2560x1277");
     expect(rowValue(sections, "Video Info", "Video resolution")).toBe("3840x2160");
     expect(rowValue(sections, "Playback Stream Info", "Video codec")).toBe("HEVC (direct)");
-    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("EAC3 (direct)");
+    expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe(
+      "Dolby Digital+ (direct)",
+    );
     expect(rowValue(sections, "Current Source File", "Size")).toBe("7.1 GiB");
     expect(rowValue(sections, "Current Source File", "Bitrate")).toBe("22.5 Mbps");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("HEVC Main 10");
@@ -102,9 +104,7 @@ describe("playback info helpers", () => {
       "Dolby Vision Profile 8.1 (HDR10)",
     );
     expect(rowValue(sections, "Current Source File", "Color range")).toBe("Limited (tv)");
-    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe(
-      "EAC3 Dolby Digital Plus + Dolby Atmos",
-    );
+    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
     expect(rowValue(sections, "Current Source File", "Audio bitrate")).toBe("640 kbps");
     expect(rowValue(sections, "Current Source File", "Audio channels")).toBe("6");
     expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("48,000 Hz");
@@ -171,6 +171,56 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Playback Stream Info", "Audio codec")).toBe("AAC (transcoded)");
   });
 
+  it("uses derived Dolby Vision and profile-only Atmos metadata", () => {
+    const sections = buildPlaybackInfoSections({
+      streamUrl: "/api/v1/stream/test",
+      plan: fixturePlanV3(),
+      currentSourceVersion: makeVersion({
+        video_tracks: [
+          {
+            codec: "hevc",
+            dv_profile: 8,
+            video_range_type: "DOVIWithHDR10",
+          },
+        ],
+        audio_tracks: [
+          {
+            title: "E-AC-3",
+            codec: "eac3",
+            profile: "Dolby Digital Plus + Dolby Atmos",
+            channels: 6,
+            default: true,
+          },
+        ],
+      }),
+      runtimeStats: {},
+    });
+
+    expect(rowValue(sections, "Current Source File", "Video range type")).toBe(
+      "Dolby Vision Profile 8",
+    );
+    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
+  });
+
+  it("uses the plan-selected audio track in playback diagnostics", () => {
+    const sections = buildPlaybackInfoSections({
+      streamUrl: "/api/v1/stream/test",
+      plan: fixturePlanV3({
+        selected_tracks: { audio: { id: "file:7:audio:1", index: 1 } },
+      }),
+      currentSourceVersion: makeVersion({
+        effective_audio_track_index: 0,
+        audio_tracks: [
+          { codec: "truehd", profile: "Dolby TrueHD + Dolby Atmos", default: true },
+          { codec: "eac3", profile: "Dolby Digital Plus + Dolby Atmos" },
+        ],
+      }),
+      runtimeStats: {},
+    });
+
+    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
+  });
+
   it("shows explicit unavailable placeholders when metadata is missing", () => {
     const sections = buildPlaybackInfoSections({
       streamUrl: "/api/v1/stream/test",
@@ -228,9 +278,7 @@ describe("playback info helpers", () => {
       runtimeStats: {},
     });
 
-    // The default fixture is a Dolby Vision (Profile 8.1) file, so the range
-    // badge reads "DV" instead of the old generic boolean-derived "HDR".
-    expect(rowValue(sections, "Player", "Auto-switched from")).toBe("2160p HEVC DV");
+    expect(rowValue(sections, "Player", "Auto-switched from")).toBe("4K HEVC Dolby Vision");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("H.264 High");
   });
 

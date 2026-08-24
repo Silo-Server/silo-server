@@ -70,6 +70,7 @@ export interface PlayerVideoTrack {
   title?: string;
   codec?: string;
   dolby_vision?: string;
+  dv_profile?: number;
   profile?: string;
   level?: number;
   width?: number;
@@ -80,6 +81,7 @@ export interface PlayerVideoTrack {
   bitrate?: number;
   video_range?: string;
   color_range?: string;
+  video_range_type?: string;
   color_primaries?: string;
   color_space?: string;
   color_transfer?: string;
@@ -93,6 +95,7 @@ export interface PlayerAudioTrack {
   embedded_title?: string;
   language?: string;
   codec?: string;
+  profile?: string;
   layout?: string;
   channels?: number;
   bitrate?: number;

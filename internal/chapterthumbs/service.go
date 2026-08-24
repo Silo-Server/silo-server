@@ -1143,7 +1143,7 @@ func needsTonemap(file *models.MediaFile) bool {
 		return true
 	}
 	for _, track := range file.VideoTracks {
-		if strings.TrimSpace(track.DolbyVision) != "" {
+		if track.IsDolbyVision() {
 			return true
 		}
 	}

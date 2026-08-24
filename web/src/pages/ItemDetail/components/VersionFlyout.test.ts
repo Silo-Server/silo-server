@@ -29,7 +29,7 @@ describe("buildQualitySummary", () => {
       hdr: true,
       codec_audio: "truehd",
     });
-    expect(buildQualitySummary(version)).toBe("2160p · HEVC · HDR · TrueHD");
+    expect(buildQualitySummary(version)).toBe("4K · HEVC · HDR · TrueHD");
   });
 
   it("omits HDR segment when hdr is false", () => {
@@ -41,7 +41,7 @@ describe("buildQualitySummary", () => {
     });
     const result = buildQualitySummary(version);
     expect(result).not.toContain("HDR");
-    expect(result).toBe("1080p · H264 · AAC");
+    expect(result).toBe("1080p · H.264 · AAC");
   });
 
   it("omits empty segments", () => {
@@ -64,14 +64,33 @@ describe("buildQualitySummary", () => {
     expect(buildQualitySummary(version)).toBe("720p");
   });
 
-  it("maps audio codec label using mapAudioLabel", () => {
+  it("shows the Atmos codec family", () => {
     const version = makeVersion({
       resolution: "2160p",
       codec_video: "hevc",
       hdr: true,
       codec_audio: "TrueHD Atmos",
     });
-    expect(buildQualitySummary(version)).toBe("2160p · HEVC · HDR · Atmos");
+    expect(buildQualitySummary(version)).toBe("4K · HEVC · HDR · TrueHD Atmos");
+  });
+
+  it("prefers Dolby Vision and track-level Atmos evidence", () => {
+    const version = makeVersion({
+      resolution: "2160p",
+      codec_video: "hevc",
+      hdr: true,
+      codec_audio: "eac3",
+      video_tracks: [{ codec: "hevc", video_range_type: "DOVIWithHDR10" }],
+      audio_tracks: [
+        {
+          codec: "eac3",
+          profile: "Dolby Digital Plus + Dolby Atmos",
+          default: true,
+        },
+      ],
+    });
+
+    expect(buildQualitySummary(version)).toBe("4K · HEVC · Dolby Vision · DD+ Atmos");
   });
 
   it("falls back to container for ebook-style files without video quality", () => {

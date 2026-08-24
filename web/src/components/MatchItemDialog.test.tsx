@@ -246,6 +246,6 @@ describe("MatchItemDialog", () => {
     expect(markup).toContain("Local media");
     expect(markup).toContain("Inception (2010)/");
     expect(markup).toContain("Inception.4K.mkv");
-    expect(markup).toContain("2160p");
+    expect(markup).toContain("4K");
   });
 });

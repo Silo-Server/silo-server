@@ -404,6 +404,16 @@ type VideoTrack struct {
 	VideoCopyUnsafe bool `json:"-"`
 }
 
+// IsDolbyVision reports whether any stored probe field identifies the track
+// as Dolby Vision. Older scans may populate only one of these fields.
+func (t VideoTrack) IsDolbyVision() bool {
+	if t.DVProfile > 0 || strings.TrimSpace(t.DolbyVision) != "" {
+		return true
+	}
+	rangeEvidence := strings.ToLower(t.VideoRange + " " + t.VideoRangeType)
+	return strings.Contains(rangeEvidence, "dolbyvision") || strings.Contains(rangeEvidence, "dovi")
+}
+
 // AudioTrack represents a probed audio stream stored as JSONB.
 type AudioTrack struct {
 	Title         string `json:"title,omitempty"`

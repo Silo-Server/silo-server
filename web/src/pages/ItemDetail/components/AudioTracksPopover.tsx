@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getLanguageName } from "@/player/utils/languageNames";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { formatAudioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
 
@@ -118,7 +118,7 @@ export default function AudioTracksPopover({
             />
           )}
           {tracks.map((track, index) => {
-            const codec = track.codec ? mapAudioLabel(track.codec) : "";
+            const codec = formatAudioTrackLabel(track);
             const channels = formatChannels(track.channels);
             const language = getLanguageName(track.language ?? "");
             const fallbackTitle = audioTitle(track);

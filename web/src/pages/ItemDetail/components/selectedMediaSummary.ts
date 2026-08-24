@@ -1,5 +1,9 @@
 import type { FileVersion, PlaybackVariant } from "@/api/types";
-import { videoRangeLabel } from "@/lib/videoRange";
+import {
+  formatDynamicRangeLabel,
+  formatVersionAudioLabel,
+  prettyResolution,
+} from "@/lib/mediaFormat";
 import { pickBestAttributes } from "./versionRankingUtils";
 
 export interface SelectedMediaSummary {
@@ -31,8 +35,8 @@ export function resolveSelectedMediaSummary(
   return {
     durationMinutes:
       durationSeconds > 0 ? Math.round(durationSeconds / 60) : fallbackRuntimeMinutes,
-    resolution: quality?.resolution ?? "",
-    videoRangeLabel: selectedVersion ? videoRangeLabel(selectedVersion) : "",
-    audioLabel: quality?.audioLabel ?? "",
+    resolution: prettyResolution(quality?.resolution) ?? "",
+    videoRangeLabel: selectedVersion ? (formatDynamicRangeLabel(selectedVersion) ?? "") : "",
+    audioLabel: selectedVersion ? formatVersionAudioLabel(selectedVersion) : "",
   };
 }

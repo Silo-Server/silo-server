@@ -1,10 +1,12 @@
 import {
   dolbyVisionLabel,
+  formatAudioTrackLabel,
   formatBitrate,
   formatCodecLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  formatVideoQualitySummary,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
 import type { DeliveryV3, PlanV3 } from "./protocol-v3";
@@ -50,7 +52,9 @@ export function buildPlaybackInfoSections({
   runtimeStats,
 }: BuildPlaybackInfoSectionsInput): PlaybackInfoSection[] {
   const videoTrack = currentSourceVersion ? pickVideoTrack(currentSourceVersion) : undefined;
-  const audioTrack = currentSourceVersion ? pickAudioTrack(currentSourceVersion) : undefined;
+  const audioTrack = currentSourceVersion
+    ? pickAudioTrack(currentSourceVersion, plan.selected_tracks.audio?.index)
+    : undefined;
   const requestedSource =
     requestedVersion &&
     currentSourceVersion &&
@@ -206,12 +210,7 @@ function formatQualityBitrate(kbps?: number): string {
 }
 
 function formatRequestedSourceVersion(version: PlayerFileVersion): string {
-  const parts = [
-    version.resolution?.trim(),
-    formatCodecLabel(version.codec_video),
-    videoRangeLabel(version) || null,
-  ].filter(Boolean);
-  return parts.join(" ");
+  return formatVideoQualitySummary(version, " ");
 }
 
 /**
@@ -302,10 +301,20 @@ export function formatVideoRangeType(
   version?: PlayerFileVersion,
   track?: PlayerVideoTrack,
 ): string {
-  if (track?.dolby_vision) {
-    const dolbyVision = dolbyVisionLabel(track.dolby_vision);
-    return track.video_range ? `${dolbyVision} (${track.video_range})` : dolbyVision;
+  const trackRange = track ? videoRangeLabel({ video_tracks: [track] }) : "";
+  if (track && trackRange.startsWith("DV")) {
+    const dolbyVision = track.dolby_vision
+      ? dolbyVisionLabel(track.dolby_vision)
+      : track.dv_profile
+        ? `Dolby Vision Profile ${track.dv_profile}`
+        : "Dolby Vision";
+    const videoRange = track.video_range?.trim();
+    const normalizedRange = videoRange?.toLowerCase() ?? "";
+    const hasDistinctRange =
+      videoRange && !normalizedRange.includes("dolbyvision") && !normalizedRange.includes("dovi");
+    return hasDistinctRange ? `${dolbyVision} (${videoRange})` : dolbyVision;
   }
+  if (track?.video_range_type) return track.video_range_type;
   if (track?.video_range) {
     return track.video_range;
   }
@@ -332,11 +341,15 @@ export function formatOriginalAudioCodec(
   version?: PlayerFileVersion,
   track?: PlayerAudioTrack,
 ): string {
+  const trackFormat = formatAudioTrackLabel(track);
+  if (trackFormat.includes("Atmos")) {
+    return trackFormat;
+  }
   const title = track?.title || track?.embedded_title;
   if (title) {
     return title;
   }
-  return formatCodecLabel(track?.codec || version?.codec_audio);
+  return trackFormat || formatAudioTrackLabel({ codec: version?.codec_audio }) || "—";
 }
 
 export function formatAudioChannels(version?: PlayerFileVersion, track?: PlayerAudioTrack): string {
@@ -348,8 +361,17 @@ function pickVideoTrack(version: PlayerFileVersion): PlayerVideoTrack | undefine
   return version.video_tracks?.[0];
 }
 
-function pickAudioTrack(version: PlayerFileVersion): PlayerAudioTrack | undefined {
-  return version.audio_tracks?.find((track) => track.default) ?? version.audio_tracks?.[0];
+function pickAudioTrack(
+  version: PlayerFileVersion,
+  selectedIndex?: number,
+): PlayerAudioTrack | undefined {
+  const tracks = version.audio_tracks;
+  return (
+    tracks?.[selectedIndex ?? -1] ??
+    tracks?.[version.effective_audio_track_index ?? -1] ??
+    tracks?.find((track) => track.default) ??
+    tracks?.[0]
+  );
 }
 
 function displayValue(value?: string): string {

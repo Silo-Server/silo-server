@@ -6,6 +6,134 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+func TestNormalizeHDRUsesAllDolbyVisionEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want string
+	}{
+		{
+			name: "explicit label",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{DolbyVision: "Profile 5"}}},
+			want: "DV",
+		},
+		{
+			name: "profile number",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{DVProfile: 8}}},
+			want: "DV",
+		},
+		{
+			name: "derived range type",
+			file: &models.MediaFile{
+				VideoTracks: []models.VideoTrack{{VideoRangeType: "DOVIWithHDR10"}},
+			},
+			want: "DV HDR10",
+		},
+		{
+			name: "plain HDR range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}}},
+			want: "HDR10",
+		},
+		{
+			name: "HDR10+ range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10Plus"}}},
+			want: "HDR10+",
+		},
+		{
+			name: "HLG range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HLG"}}},
+			want: "HLG",
+		},
+		{
+			name: "file fallback",
+			file: &models.MediaFile{HDR: true},
+			want: "HDR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeHDR(tt.file); got != tt.want {
+				t.Fatalf("normalizeHDR() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want string
+	}{
+		{
+			name: "E-AC-3 title",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   audioLabelAtmos,
+				Codec:   "eac3",
+				Default: true,
+			}}},
+			want: audioLabelDDPlusAtmos,
+		},
+		{
+			name: "scanner profile",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "ATSC A/52B (AC-3, E-AC-3)",
+				Codec:   "eac3",
+				Profile: "Dolby Digital Plus + Dolby Atmos",
+				Default: true,
+			}}},
+			want: audioLabelDDPlusAtmos,
+		},
+		{
+			name: "TrueHD profile",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "TrueHD Atmos 7.1",
+				Codec:   "truehd",
+				Profile: "Dolby TrueHD + Dolby Atmos",
+				Default: true,
+			}}},
+			want: audioLabelTrueHDAtmos,
+		},
+		{
+			name: "unknown carrier",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   audioLabelAtmos,
+				Default: true,
+			}}},
+			want: audioLabelAtmos,
+		},
+		{
+			name: "default track wins",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{
+				{Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos"},
+				{Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Default: true},
+			}},
+			want: audioLabelDDPlusAtmos,
+		},
+		{
+			name: "non-Atmos E-AC-3 unchanged",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Codec:   "eac3",
+				Default: true,
+			}}},
+			want: "EAC3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildSummary([]*models.MediaFile{tt.file})
+			if got == nil {
+				t.Fatal("expected non-nil summary")
+			}
+			if got.Audio != tt.want {
+				t.Fatalf("Audio = %q, want %q", got.Audio, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeVideoCodec(t *testing.T) {
 	cases := []struct {
 		name string
@@ -383,7 +511,7 @@ func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 			AspectRatio: "16:9",
 		}},
 		AudioTracks: []models.AudioTrack{
-			{Language: "eng", Channels: 8, Default: true, Title: "Atmos"},
+			{Language: "eng", Channels: 8, Default: true, Title: audioLabelAtmos},
 			{Language: "spa", Channels: 6},
 		},
 		SubtitleTracks: []models.SubtitleTrack{{Language: "eng"}},
@@ -407,8 +535,8 @@ func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 	if got.AspectRatio != "16:9" {
 		t.Errorf("AspectRatio = %q, want %q", got.AspectRatio, "16:9")
 	}
-	if got.Audio != "Atmos" {
-		t.Errorf("Audio = %q, want %q", got.Audio, "Atmos")
+	if got.Audio != audioLabelAtmos {
+		t.Errorf("Audio = %q, want %q", got.Audio, audioLabelAtmos)
 	}
 	if !got.MultiAudio {
 		t.Error("MultiAudio = false, want true")
