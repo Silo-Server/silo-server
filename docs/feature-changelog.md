@@ -34,6 +34,17 @@ that can stream MKV keep direct play, and Firefox keeps its video and audio code
 
 ## 2026-08-24
 
+### Let clients choose the artwork size they receive
+Silo used to decide artwork width for you: card rows got narrow images, hero areas got wide ones. That guess is wrong often enough to matter — a TV renders a "card" at 600px, a phone renders a "hero" at 400 — and clients had no way to say so, so they either accepted a blurry image or wasted bandwidth on one far larger than the screen.
+
+Catalog browse, item and watch detail, seasons and episodes, and the home and library sections now accept `image_size=small|medium|large|original`. It applies to the whole response, so a screen never mixes resolutions, and it overrides every per-context default including the wider backdrop Continue Watching used. Sending nothing keeps today's behavior exactly, so no existing client changes; sending a value the server does not serve is a `400` rather than a silent fallback.
+
+Posters and stills gained a 780px width and logos a 1280px width to make `large` meaningful — the old ladder topped out at 500px for those, so "large" would have meant "the original" and nothing in between. Cast and crew headshots deliberately did not: they are only ever rendered small.
+
+Artwork cached before this change has no file at the new widths. A one-shot background pass regenerates it after the ordinary artwork queue drains, and until it reaches a given image the server serves the next narrower width it does have instead of a broken URL. Nothing to configure and no action required; the correct width appears on its own.
+
+Jellyfin clients benefit without changing anything: a request between 780 and 1199 pixels now maps to the new wider image rather than being rounded down. See [docs/images-api.md](images-api.md) for the width table and the `/api/v1/images/capability` endpoint clients should read it from.
+
 ### Restore loudness when Silo downmixes surround audio to stereo
 Surround sound mixed down by Silo could be about 6 dB quieter than the same
 file in other media apps. Server-owned stereo conversions now restore that
