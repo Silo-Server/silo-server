@@ -256,6 +256,7 @@ GET /api/v1/history-imports/sources	non-media
 GET /api/v1/home/layout	non-media
 GET /api/v1/home/sections	non-media
 GET /api/v1/home/sections/{id}/items	non-media
+GET /api/v1/images/capability	non-media
 GET /api/v1/invitations/{token}/	non-media
 POST /api/v1/invitations/{token}/accept	non-media
 GET /api/v1/items/trailers/capability	non-media
