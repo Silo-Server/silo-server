@@ -25,9 +25,19 @@ would hide it behind artwork that is merely the wrong resolution.
 Omitting the parameter keeps the per-context defaults exactly as they were, so no
 existing client is affected.
 
-The parameter is accepted on the catalog read surfaces: catalog browse and query,
-item and watch detail, seasons, season, and episodes, and the home and library
-section endpoints (including single-section items). Other surfaces ignore it.
+The parameter is accepted on:
+
+- catalog browse and query
+- item detail and watch detail
+- seasons, a single season, and episodes
+- home and library sections, including single-section items
+- the personal lists: `/favorites`, `/watchlist`, and `/history`
+
+Other surfaces ignore it.
+
+On the personal lists the per-slot defaults are asymmetric — a 500px poster
+beside a 300px backdrop — so an explicit size changes both, not just the one that
+looks wrong.
 
 ## Widths
 

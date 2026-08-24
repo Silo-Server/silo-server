@@ -132,6 +132,9 @@ const (
 
 // HandleListFavorites handles GET /favorites.
 func (h *PersonalDataHandler) HandleListFavorites(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
@@ -288,6 +291,9 @@ func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list w
 
 // HandleListWatchlist handles GET /watchlist.
 func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
@@ -453,6 +459,9 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 
 // HandleListHistory handles GET /history.
 func (h *PersonalDataHandler) HandleListHistory(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
@@ -587,6 +596,13 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 	// Index by content ID for order-preserving lookup.
 	byID := make(map[string]*itemListResponse, len(mediaItems))
 	filter := requestAccessFilter(r)
+	// Parsed once for the whole list; the calling handler has already rejected
+	// an unrecognized value. Unset keeps the per-slot defaults below, which are
+	// deliberately asymmetric (a featured poster beside a card backdrop); an
+	// explicit size applies to every image in the response instead.
+	size := requestImageSize(r)
+	posterHint := requestVariantHint("featured", size)
+	cardHint := requestVariantHint("card", size)
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
 		if err := h.itemRepo.EnsureAccessible(r.Context(), mi.ContentID, filter); err != nil {
@@ -622,8 +638,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(r, featuredPosterPath(mi.PosterPath), "featured")
-		resp.BackdropURL = h.presignURL(r, cardThumbnailPath(mi.BackdropPath), "card")
+		resp.PosterURL = h.presignURL(r, sizedPosterPath(mi.PosterPath, size), posterHint)
+		resp.BackdropURL = h.presignURL(r, sizedCardPath(mi.BackdropPath, "backdrop", size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 
@@ -664,14 +680,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(r, cardThumbnailPath(ep.StillPath), "card")
+						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, "still", size), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(r, cardThumbnailPath(parent.BackdropPath), "card")
+						resp.BackdropURL = h.presignURL(r, sizedCardPath(parent.BackdropPath, "backdrop", size), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(r, featuredPosterPath(parent.PosterPath), "featured")
+						resp.PosterURL = h.presignURL(r, sizedPosterPath(parent.PosterPath, size), posterHint)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
