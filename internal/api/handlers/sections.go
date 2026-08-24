@@ -588,6 +588,9 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 	withItems := h.fetcher.FetchAll(r.Context(), fetchSections, nil, libraryIDs, userID, profileID, accessFilter)
 	withItems = restoreHomeSectionDisplayLimits(withItems, resolved)
 	withItems, responseOptions = h.prepareHomeSectionsResponse(r, withItems, responseOptions)
+	if responseOptions.hideWatchedHomeItems {
+		withItems = dropEmptyWatchedHomeSections(withItems)
+	}
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
 	writeJSON(w, http.StatusOK, h.buildSectionsResponseWithOptions(r, withItems, responseOptions))
@@ -1260,12 +1263,6 @@ func (h *SectionHandler) homeSectionResponseOptions(r *http.Request) sectionResp
 	return options
 }
 
-func (h *SectionHandler) buildHomeSectionsResponse(r *http.Request, withItems []sections.SectionWithItems) homeSectionsResponse {
-	options := h.homeSectionResponseOptions(r)
-	withItems, options = h.prepareHomeSectionsResponse(r, withItems, options)
-	return h.buildSectionsResponseWithOptions(r, withItems, options)
-}
-
 func (h *SectionHandler) prepareHomeSectionsResponse(
 	r *http.Request,
 	withItems []sections.SectionWithItems,
@@ -1277,6 +1274,21 @@ func (h *SectionHandler) prepareHomeSectionsResponse(
 
 	options.userStates = h.listSectionItemUserStates(r, sectionMediaItems(withItems))
 	return filterWatchedHomeSectionItems(withItems, options.userStates), options
+}
+
+// dropEmptyWatchedHomeSections removes ordinary sections whose source contains
+// items but whose bounded candidate window was emptied by watched filtering.
+// The direct section endpoint still returns the empty section when requested.
+func dropEmptyWatchedHomeSections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
+	out := withItems[:0]
+	for _, section := range withItems {
+		if len(section.Items) == 0 && section.TotalCount > 0 &&
+			!section.Featured && !sections.PreserveWatchedItemsOnHome(section.SectionType) {
+			continue
+		}
+		out = append(out, section)
+	}
+	return out
 }
 
 func homeSectionsForFetch(

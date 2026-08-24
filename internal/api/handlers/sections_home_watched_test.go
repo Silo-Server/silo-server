@@ -158,6 +158,46 @@ func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
 	}
 }
 
+func TestDropEmptyWatchedHomeSections(t *testing.T) {
+	input := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "filtered", SectionType: sections.SectionRecentlyAdded},
+			TotalCount:      10,
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "naturally-empty", SectionType: sections.SectionRecentlyAdded},
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{
+				ID:          "featured",
+				SectionType: sections.SectionRecentlyAdded,
+				Featured:    true,
+			},
+			TotalCount: 10,
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "most-watched", SectionType: sections.SectionMostWatched},
+			TotalCount:      10,
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "non-empty", SectionType: sections.SectionRecentlyAdded},
+			Items:           []*models.MediaItem{{ContentID: "visible"}},
+			TotalCount:      10,
+		},
+	}
+
+	filtered := dropEmptyWatchedHomeSections(input)
+	wantIDs := []string{"naturally-empty", "featured", "most-watched", "non-empty"}
+	if len(filtered) != len(wantIDs) {
+		t.Fatalf("filtered sections = %d, want %d", len(filtered), len(wantIDs))
+	}
+	for i, want := range wantIDs {
+		if got := filtered[i].ID; got != want {
+			t.Errorf("filtered[%d].ID = %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestWatchedRefillRunsBeforeDiversity(t *testing.T) {
 	visible := &models.MediaItem{ContentID: "visible"}
 	overflow := &models.MediaItem{ContentID: "overflow"}
@@ -226,7 +266,9 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	reqCtx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1})
 	req = req.WithContext(apimw.SetProfileID(reqCtx, "profile-1"))
 
-	home := handler.buildHomeSectionsResponse(req, sectionItems)
+	options := handler.homeSectionResponseOptions(req)
+	prepared, options := handler.prepareHomeSectionsResponse(req, sectionItems, options)
+	home := handler.buildSectionsResponseWithOptions(req, prepared, options)
 	if got := home.Sections[0].Items; len(got) != 1 || got[0].ContentID != "unwatched" {
 		t.Fatalf("Home response items = %#v, want only unwatched", got)
 	}
