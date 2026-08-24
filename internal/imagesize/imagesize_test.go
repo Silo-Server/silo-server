@@ -119,7 +119,7 @@ func TestPluginVariant(t *testing.T) {
 	want := map[Size]string{
 		Small:    "card",
 		Medium:   "featured",
-		Large:    "featured",
+		Large:    "large",
 		Original: "original",
 		Unset:    "featured",
 	}

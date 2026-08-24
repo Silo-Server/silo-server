@@ -78,7 +78,12 @@ type ImageResolver interface {
 	// ResolveImageURL resolves a single image path. Plugin-prefixed paths (e.g.,
 	// "metadb://images/abc/original.jpg") are resolved via the owning plugin's RPC.
 	// HTTP(S) URLs pass through unchanged. Empty paths return "".
-	// The variant parameter is a semantic size hint: "card", "featured", "full", "original".
+	//
+	// The variant parameter is a semantic size hint. The vocabulary is "card",
+	// "featured", "large", "full", and "original", and it is an open string:
+	// per the plugin SDK contract a resolver that does not recognize a name
+	// falls back to a usable image rather than failing, so names may be added
+	// here without gating on a plugin capability.
 	ResolveImageURL(ctx context.Context, path string, variant string) string
 
 	// ResolveImageURLs resolves multiple image paths in a single call. Returns a
@@ -3899,7 +3904,7 @@ func firstNonEmpty(values ...string) string {
 //   - Bare path (legacy) → logs warning and returns "" (no longer resolvable)
 //
 // The variant parameter is a semantic size hint forwarded to plugin resolvers:
-// "card", "featured", "full", "original".
+// "card", "featured", "large", "full", "original".
 func (s *DetailService) PresignURL(ctx context.Context, path string, variant string) string {
 	return s.PresignURLWithExpiry(ctx, path, variant).URL
 }

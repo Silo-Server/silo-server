@@ -82,7 +82,7 @@ func TestSizeToVariant(t *testing.T) {
 		"":         "featured",
 		"small":    "card",
 		"medium":   "featured",
-		"large":    "featured",
+		"large":    "large",
 		"original": "original",
 		"nonsense": "featured",
 	}

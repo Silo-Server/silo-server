@@ -54,6 +54,12 @@ why it is not always the middle rung. `original` is the cached original, capped
 on ingest at 1920px on its longest edge — it is not the provider's untouched
 file.
 
+Artwork hosted by a metadata plugin rather than cached in the bucket has no
+fixed width. For those the size is forwarded to the plugin as a semantic variant
+hint — `card`, `featured`, `large`, or `original`, out of the SDK's open
+`card`/`featured`/`large`/`full`/`original` vocabulary — and the plugin picks the
+closest image it has, so the widths above are indicative rather than exact.
+
 Do not hardcode this table. Read it from the capability endpoint: the ladder is
 allowed to change, and the endpoint is generated from it.
 

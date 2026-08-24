@@ -95,7 +95,7 @@ func TestPersonalListsHonorImageSize(t *testing.T) {
 	}{
 		{"small", ":card:", "/poster/w300.", "/backdrop/w300."},
 		{"medium", ":featured:", "/poster/w500.", "/backdrop/w1920."},
-		{"large", ":featured:", "/poster/w780.", "/backdrop/w1920."},
+		{"large", ":large:", "/poster/w780.", "/backdrop/w1920."},
 		{"original", ":original:", "/poster/original.", "/backdrop/original."},
 	}
 

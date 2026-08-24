@@ -115,18 +115,24 @@ func mediumVariant(imageType string) string {
 }
 
 // PluginVariant maps a size to the semantic variant hint understood by plugin
-// image resolvers.
+// image resolvers. The vocabulary is "card", "featured", "large", "full", and
+// "original"; this function only produces the subset a client size maps onto.
 //
-// The plugin SDK has no "large" tier yet, so Large shares "featured" with
-// Medium; a plugin-hosted image therefore cannot currently honor the
-// distinction. Adding the tier is SDK work tracked as follow-up.
+// "large" is sent unconditionally. The SDK's variant field is an open string
+// and every first-party plugin falls back gracefully on a name it does not
+// recognize (tmdb and metadb to the original, tvdb to full art), so a plugin
+// built before this tier existed still returns a usable image rather than
+// failing — which is what lets the vocabulary grow additively instead of being
+// gated on a capability handshake.
 func PluginVariant(size Size) string {
 	switch size {
 	case Small:
 		return "card"
+	case Large:
+		return "large"
 	case Original:
 		return artworkkey.OriginalVariant
-	default: // Medium, Large, and Unset defensively.
+	default: // Medium and Unset defensively.
 		return "featured"
 	}
 }

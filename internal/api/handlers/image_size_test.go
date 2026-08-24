@@ -104,6 +104,11 @@ func TestRequestVariantHint(t *testing.T) {
 	if got := requestVariantHint("featured", imagesize.Small); got != "card" {
 		t.Errorf("small hint = %q, want card", got)
 	}
+	// Large is its own plugin tier, not a synonym for featured: a plugin that
+	// can serve a wider image should be told to.
+	if got := requestVariantHint("featured", imagesize.Large); got != "large" {
+		t.Errorf("large hint = %q, want large", got)
+	}
 }
 
 func TestRequestImageSizeIgnoresInvalidValue(t *testing.T) {
