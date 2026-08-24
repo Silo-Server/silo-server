@@ -35,12 +35,20 @@ type MetadataImageLadderBackfillRunner interface {
 }
 
 // MetadataImageLadderBackfillState records which ladder version this deployment
-// has finished backfilling. Satisfied by
+// has finished backfilling and when a pass last ran. Satisfied by
 // *metadata.ImageLadderBackfillStateRepository.
 type MetadataImageLadderBackfillState interface {
-	Get(ctx context.Context) (int, error)
+	Get(ctx context.Context) (metadata.ImageLadderBackfillState, error)
+	MarkAttempt(ctx context.Context) error
 	SetBackfilled(ctx context.Context, version int) error
 }
+
+// ladderBackfillScanInterval paces the sweep. It cannot simply run on every
+// scheduler tick: completion is measured against the artwork itself, so a
+// deployment holding an image that can never be regenerated — a provider that
+// 404s for good, a sidecar deleted off disk — never reaches "done", and its
+// remainder check would otherwise scan the catalog once a minute forever.
+const ladderBackfillScanInterval = 15 * time.Minute
 
 type MetadataImageBackfillRunner interface {
 	RunUntilIdle(ctx context.Context, workerID string, claimLimit int, concurrency int, maxRuntime time.Duration, reportProgress metadata.ImageCacheRunProgressReporter) (metadata.ImageCacheRunStats, error)
@@ -148,12 +156,21 @@ func (t *CacheMetadataImagesTask) pendingLadderBackfill(ctx context.Context, pro
 	if !ok || t.ladderState == nil || t.ladderTarget <= 0 {
 		return nil
 	}
-	done, err := t.ladderState.Get(ctx)
+	state, err := t.ladderState.Get(ctx)
 	if err != nil {
 		progress.Report(0, fmt.Sprintf("Artwork ladder backfill state unavailable: %v", err))
 		return nil
 	}
-	if done >= t.ladderTarget {
+	if state.BackfilledVersion >= t.ladderTarget {
+		return nil
+	}
+	if !state.LastAttemptAt.IsZero() && time.Since(state.LastAttemptAt) < ladderBackfillScanInterval {
+		return nil
+	}
+	// Written before the pass, not after, so a crash mid-sweep still paces the
+	// next one instead of letting every restart re-scan immediately.
+	if err := t.ladderState.MarkAttempt(ctx); err != nil {
+		progress.Report(0, fmt.Sprintf("Artwork ladder backfill could not be scheduled: %v", err))
 		return nil
 	}
 	return backfiller

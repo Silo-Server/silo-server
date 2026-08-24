@@ -26,13 +26,26 @@ func (f *ladderRunner) RunLadderBackfill(_ context.Context, workerID string, _ i
 }
 
 type fakeLadderState struct {
-	version  int
-	recorded []int
-	getErr   error
-	setErr   error
+	version     int
+	lastAttempt time.Time
+	attempts    int
+	recorded    []int
+	getErr      error
+	setErr      error
 }
 
-func (s *fakeLadderState) Get(context.Context) (int, error) { return s.version, s.getErr }
+func (s *fakeLadderState) Get(context.Context) (metadata.ImageLadderBackfillState, error) {
+	return metadata.ImageLadderBackfillState{
+		BackfilledVersion: s.version,
+		LastAttemptAt:     s.lastAttempt,
+	}, s.getErr
+}
+
+func (s *fakeLadderState) MarkAttempt(context.Context) error {
+	s.attempts++
+	s.lastAttempt = time.Now()
+	return nil
+}
 
 func (s *fakeLadderState) SetBackfilled(_ context.Context, version int) error {
 	if s.setErr != nil {
@@ -175,6 +188,48 @@ func TestDrainOwnsTheWholeBarWithoutALadderPass(t *testing.T) {
 	}
 	if last := progress.percents[len(progress.percents)-1]; last != 100 {
 		t.Fatalf("final percent = %v, want 100", last)
+	}
+}
+
+// Completion is measured against the artwork, so a deployment holding an image
+// that can never be regenerated never reaches "done". The sweep must therefore
+// be paced: a scheduler tick a minute after the last attempt does not re-scan.
+func TestLadderBackfillPacesRepeatedScans(t *testing.T) {
+	runner := &ladderRunner{complete: false}
+	state := &fakeLadderState{}
+
+	runLadderTask(t, runner, state, 2)
+	if runner.ladderCalls != 1 || state.attempts != 1 {
+		t.Fatalf("first run: ladder=%d attempts=%d, want 1/1", runner.ladderCalls, state.attempts)
+	}
+
+	// Immediately again: inside the interval, so it must not scan.
+	runLadderTask(t, runner, state, 2)
+	if runner.ladderCalls != 1 {
+		t.Fatalf("ladder runs = %d, want the second tick to be paced out", runner.ladderCalls)
+	}
+
+	// Once the interval has elapsed it resumes.
+	state.lastAttempt = time.Now().Add(-ladderBackfillScanInterval - time.Minute)
+	runLadderTask(t, runner, state, 2)
+	if runner.ladderCalls != 2 {
+		t.Fatalf("ladder runs = %d, want the sweep to resume after the interval", runner.ladderCalls)
+	}
+}
+
+// The attempt is recorded before the pass, so a crash mid-sweep still paces the
+// next one rather than letting every restart re-scan the catalog.
+func TestLadderBackfillRecordsAttemptBeforeRunning(t *testing.T) {
+	runner := &ladderRunner{ladderErr: errors.New("boom")}
+	state := &fakeLadderState{}
+
+	runLadderTask(t, runner, state, 2)
+
+	if state.attempts != 1 {
+		t.Fatalf("attempts = %d, want the attempt recorded even though the pass failed", state.attempts)
+	}
+	if len(state.recorded) != 0 {
+		t.Fatalf("recorded versions = %v, want none", state.recorded)
 	}
 }
 

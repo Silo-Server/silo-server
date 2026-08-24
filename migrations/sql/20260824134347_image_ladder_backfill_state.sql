@@ -6,6 +6,10 @@
 CREATE TABLE IF NOT EXISTS image_ladder_backfill_state (
     id                 smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     backfilled_version integer     NOT NULL DEFAULT 0,
+    -- When a pass last ran. A deployment holding artwork that cannot be
+    -- regenerated never reaches "done", so the sweep must not re-scan the whole
+    -- catalog on every scheduler tick; this paces it instead.
+    last_attempt_at    timestamptz,
     updated_at         timestamptz NOT NULL DEFAULT NOW()
 );
 

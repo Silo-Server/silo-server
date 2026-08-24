@@ -65,7 +65,11 @@ type ImageCacheJobClaimer interface {
 // the normal queue do not have to implement the one-shot ladder sweep. A store
 // that does not implement it simply has no ladder backfill.
 type imageCacheLadderBackfiller interface {
-	EnqueueLadderBackfill(ctx context.Context, limit int, completedBefore time.Time) (int, error)
+	EnqueueLadderBackfill(ctx context.Context, limit int) (int, error)
+	// HasLadderBackfillRemaining is the completion signal and is deliberately
+	// independent of the enqueue: it asks whether any artwork still lacks the
+	// new rung, not whether anything is enqueueable right now.
+	HasLadderBackfillRemaining(ctx context.Context) (bool, error)
 }
 
 type targetImageCacheJobStore interface {
@@ -485,6 +489,16 @@ const imageCacheLadderBackfillBatchSize = 200
 // next. It reports whether the pass ran to completion; only a complete pass may
 // be recorded against artworkkey.LadderVersion.
 //
+// "Complete" means no artwork is missing the new rung any more — a question
+// about storage, asked of the artwork revision manifest, not about this run's
+// job bookkeeping. That distinction is what makes the sweep safe on a cluster.
+// Running out of enqueueable work only means nothing is actionable here and now:
+// another node may hold the rest in flight, a node may have died mid-batch, a
+// node still on an older revision may have "succeeded" a job while writing only
+// the old rungs, and a job that exhausted its retries is parked out of view. In
+// every one of those cases the artwork still lacks the rung, so the sweep must
+// not call itself done — and next time round, those rows simply match again.
+//
 // Interrupting it is safe and re-running it is cheap: the cacher skips uploading
 // variants whose objects already match, so a repeated pass costs the source
 // download and nothing else. An incomplete pass simply resumes on the next
@@ -511,15 +525,10 @@ func (p *ImageCacheProcessor) RunLadderBackfill(
 		return total, false, nil
 	}
 
-	// Rows this pass has already finished stop being candidates. Captured once,
-	// before the first batch, so the boundary cannot drift forward as the pass
-	// runs and re-admit work it just did.
-	completedBefore := time.Now()
-
 	limited := maxRuntime > 0
 	deadline := time.Time{}
 	if limited {
-		deadline = completedBefore.Add(maxRuntime)
+		deadline = time.Now().Add(maxRuntime)
 	}
 
 	for {
@@ -538,14 +547,20 @@ func (p *ImageCacheProcessor) RunLadderBackfill(
 			}
 		}
 
-		enqueued, err := backfiller.EnqueueLadderBackfill(ctx, imageCacheLadderBackfillBatchSize, completedBefore)
+		enqueued, err := backfiller.EnqueueLadderBackfill(ctx, imageCacheLadderBackfillBatchSize)
 		if err != nil {
 			return total, false, err
 		}
 		total.EnqueuedExisting += enqueued
 		reportImageCacheRunProgress(reportProgress, total)
 		if enqueued == 0 {
-			return total, true, nil
+			// Nothing left to queue here. Whether that means "finished" is a
+			// question about the artwork, not about this run.
+			remainingWork, err := backfiller.HasLadderBackfillRemaining(ctx)
+			if err != nil {
+				return total, false, err
+			}
+			return total, !remainingWork, nil
 		}
 
 		stats, err := p.DrainUntilIdle(ctx, workerID, claimLimit, concurrency, remaining, reportProgress)

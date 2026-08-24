@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -1032,27 +1033,65 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	return r.enqueueBatch(ctx, inputs, true)
 }
 
-// EnqueueLadderBackfill re-enqueues artwork that IS already cached, so the
-// cacher regenerates it against the current variant ladder. It is the mirror
-// image of EnqueueExistingProviderArtwork: that sweep looks for artwork with no
-// cached destination, this one looks for artwork whose destination exists but
-// predates a rung.
+// ladderRecachableSchemesSQL lists the source schemes the ladder backfill
+// cannot re-download, for use as a NOT LIKE ALL guard. It deliberately differs
+// from nonProviderImageSchemesSQL by omitting file://: a local sidecar IS
+// re-cacheable (the processor's processLocalOne reads it back, confined to the
+// owning library's roots), so excluding sidecars would leave that artwork stuck
+// on the old ladder forever.
+const ladderRecachableSchemesSQL = `ARRAY['s3://%', 'local://%', 'upload://%', 'generated://%']`
+
+// ladderRungLiteral renders the SQL LIKE pattern matching an object key at the
+// rung this ladder version added for an image type. It is derived from the
+// ladder rather than spelled out, so it cannot drift from
+// artworkkey.VariantWidths.
 //
-// Only poster, still, and logo appear below — the types whose ladder changed at
-// artworkkey.LadderVersion 2. Re-downloading backdrops and headshots would cost
-// the same bandwidth to produce byte-identical objects. Revisit this list
-// together with artworkkey.VariantWidths and ladderRungsAddedAtVersion.
+// The pattern matches both key forms: revisioned ("…/w780.<revision>.webp") and
+// legacy ("…/w780.webp"). Both contain "/w780." — matching only one of them
+// would make the sweep never converge, so both are covered by test.
+func ladderRungLiteral(imageType string) string {
+	return "'%/" + imagesize.Variant(imageType, imagesize.Large) + ".%'"
+}
+
+// ladderMissingRungSQL is the artwork-state predicate behind the whole ladder
+// backfill: true when nothing proves the cached artwork at pathColumn already
+// carries the rung this ladder version added.
 //
-// completedBefore excludes rows this pass has already backfilled. Without it the
-// sweep would never terminate: enqueueBatch requeues succeeded jobs (that is the
-// point — every candidate already has one), so a completed row would immediately
-// look like a candidate again.
-func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int, completedBefore time.Time) (int, error) {
-	if r == nil || r.pool == nil || limit <= 0 {
-		return 0, nil
-	}
-	query := strings.ReplaceAll(`
-		WITH all_candidates AS (
+// The proof is the artwork revision manifest, which the cacher rewrites on every
+// re-cache (imagecache.trackRevision runs before upload, whether or not any
+// object actually needed uploading). A row whose manifest lists the new rung is
+// done; a row whose manifest predates it, or that has no manifest at all —
+// artwork cached before that table existed — still needs regenerating.
+//
+// Keying completion on artwork state rather than job bookkeeping is what makes
+// the sweep safe to run on a cluster: a node that dies mid-batch, a node still
+// running an older revision that regenerates only the old rungs, and a job that
+// exhausted its retries all leave the manifest unchanged, so the row simply
+// stays a candidate instead of being recorded as finished.
+func ladderMissingRungSQL(pathColumn, rungPattern string) string {
+	return fmt.Sprintf(`NOT EXISTS (
+					SELECT 1
+					FROM artwork_revision_gc_candidates m
+					WHERE m.original_path = %s
+					  AND EXISTS (
+						  SELECT 1 FROM unnest(m.object_keys) k WHERE k LIKE %s
+					  )
+				)`, pathColumn, rungPattern)
+}
+
+// ladderCandidateRowsSQL is the set of cached artwork still missing the rung its
+// image type gained at the current artworkkey.LadderVersion.
+//
+// Only poster, still, and logo appear: those are the types whose ladder changed.
+// Re-downloading backdrops and headshots would spend the same bandwidth to
+// produce byte-identical objects. Revisit this list together with
+// artworkkey.VariantWidths and ladderTypesWithAddedRung.
+func ladderCandidateRowsSQL() string {
+	return strings.NewReplacer(
+		"@recachableSchemes", ladderRecachableSchemesSQL,
+		"@wideRung", ladderRungLiteral(ImageCacheImagePoster),
+		"@logoRung", ladderRungLiteral(ImageCacheImageLogo),
+	).Replace(`
 			SELECT
 				'poster'::text AS image_type,
 				'item'::text AS target_type,
@@ -1068,9 +1107,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 				mi.imdb_id
 			FROM media_items mi
 			WHERE mi.poster_source_path LIKE '%://%'
-			  AND lower(mi.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(mi.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(mi.poster_path, '') <> ''
 			  AND mi.poster_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("mi.poster_path", "@wideRung") + `
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -1087,9 +1127,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 				mi.imdb_id
 			FROM media_items mi
 			WHERE mi.logo_source_path LIKE '%://%'
-			  AND lower(mi.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(mi.logo_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(mi.logo_path, '') <> ''
 			  AND mi.logo_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("mi.logo_path", "@logoRung") + `
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -1107,9 +1148,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			FROM media_item_localizations loc
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(loc.poster_path, '') <> ''
 			  AND loc.poster_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("loc.poster_path", "@wideRung") + `
 			UNION ALL
 			SELECT
 				'logo'::text,
@@ -1127,9 +1169,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			FROM media_item_localizations loc
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.logo_source_path LIKE '%://%'
-			  AND lower(loc.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(loc.logo_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(loc.logo_path, '') <> ''
 			  AND loc.logo_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("loc.logo_path", "@logoRung") + `
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -1147,9 +1190,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			FROM seasons s
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE s.poster_source_path LIKE '%://%'
-			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(s.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(s.poster_path, '') <> ''
 			  AND s.poster_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("s.poster_path", "@wideRung") + `
 			UNION ALL
 			SELECT
 				'poster'::text,
@@ -1168,9 +1212,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			JOIN seasons s ON s.content_id = loc.season_content_id
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(loc.poster_path, '') <> ''
 			  AND loc.poster_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("loc.poster_path", "@wideRung") + `
 			UNION ALL
 			SELECT
 				'still'::text,
@@ -1188,9 +1233,31 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			FROM episodes e
 			JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.still_source_path LIKE '%://%'
-			  AND lower(e.still_source_path) NOT LIKE ALL (@nonProviderSchemes)
+			  AND lower(e.still_source_path) NOT LIKE ALL (@recachableSchemes)
 			  AND coalesce(e.still_path, '') <> ''
 			  AND e.still_path NOT LIKE '%://%'
+			  AND ` + ladderMissingRungSQL("e.still_path", "@wideRung") + `
+`)
+}
+
+// EnqueueLadderBackfill queues a bounded batch of cached artwork that is still
+// missing the rung its image type gained at the current
+// artworkkey.LadderVersion, so the cacher regenerates it.
+//
+// It is the mirror image of EnqueueExistingProviderArtwork: that sweep looks for
+// artwork with no cached destination, this one looks for artwork whose
+// destination exists but predates a rung.
+//
+// The LEFT JOIN below is deduplication only — it keeps a row that already has a
+// queued or running job from being enqueued twice. It is deliberately NOT the
+// completion signal: a row held by another node's in-flight job is absent here
+// but is not done. HasLadderBackfillRemaining answers that question instead.
+func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, limit int) (int, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return 0, nil
+	}
+	query := `
+		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
 		),
 		candidates AS (
 			SELECT ac.*
@@ -1202,11 +1269,10 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 			 AND j.target_language = ac.target_language
 			WHERE j.id IS NULL
 			   OR j.source_path IS DISTINCT FROM ac.source_path
-			   OR (j.status = 'succeeded' AND (j.completed_at IS NULL OR j.completed_at < $2))
+			   OR j.status = 'succeeded'
 			   OR (
 				   j.status = 'failed'
 				   AND j.next_attempt_at <= NOW()
-				   AND (j.completed_at IS NULL OR j.completed_at < $2)
 			   )
 			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
 			LIMIT $1
@@ -1217,9 +1283,9 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	`
 
-	rows, err := r.pool.Query(ctx, query, limit, completedBefore)
+	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing artwork ladder backfill: %w", err)
 	}
@@ -1255,6 +1321,29 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 		return 0, fmt.Errorf("iterating artwork ladder backfill candidates: %w", err)
 	}
 	return r.enqueueBatch(ctx, inputs, true)
+}
+
+// HasLadderBackfillRemaining reports whether any cached artwork still lacks the
+// rung its image type gained at the current ladder version.
+//
+// This is the completion signal, and it counts rows regardless of any job that
+// may be queued, running, or parked against them: only artwork that actually
+// carries the new rung is done. It answers existence rather than a count so
+// Postgres can stop at the first match instead of scanning the whole catalog.
+func (r *ImageCacheJobRepository) HasLadderBackfillRemaining(ctx context.Context) (bool, error) {
+	if r == nil || r.pool == nil {
+		return false, nil
+	}
+	query := `
+		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
+		)
+		SELECT EXISTS (SELECT 1 FROM all_candidates)
+	`
+	var remaining bool
+	if err := r.pool.QueryRow(ctx, query).Scan(&remaining); err != nil {
+		return false, fmt.Errorf("checking artwork ladder backfill remainder: %w", err)
+	}
+	return remaining, nil
 }
 
 // imageCacheLocalProviderID is the synthetic provider slug for local sidecar
