@@ -12,7 +12,7 @@ Commands and paths in this document are relative to the repository root.
 Add `image_size` to a request. It applies to the whole response: every artwork
 URL in the body is resolved at that size, so a screen never mixes resolutions.
 
-```
+```http
 GET /api/v1/catalog?image_size=large
 GET /api/v1/catalog/items/{id}?image_size=small
 GET /api/v1/home/sections?image_size=medium
@@ -34,6 +34,14 @@ The parameter is accepted on:
 - the personal lists: `/favorites`, `/watchlist`, and `/history`
 
 Other surfaces ignore it.
+
+Within item detail this covers cast and crew headshots too: they follow the
+`profile` ladder, which has no wide rung, so `large` and `medium` land on the
+same 500px image.
+
+The `/people` endpoints do **not** take the parameter — their headshots are
+always the 500px variant. Browsing a person's filmography does honor it, because
+that is `/api/v1/catalog?source=person` rather than a person endpoint.
 
 On the personal lists the per-slot defaults are asymmetric — a 500px poster
 beside a 300px backdrop — so an explicit size changes both, not just the one that
@@ -65,7 +73,7 @@ allowed to change, and the endpoint is generated from it.
 
 ## Capability endpoint
 
-```
+```http
 GET /api/v1/images/capability
 ```
 

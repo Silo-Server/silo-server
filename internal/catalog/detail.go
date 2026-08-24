@@ -1455,7 +1455,7 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 	if err != nil {
 		return nil, fmt.Errorf("localizing episode series detail: %w", err)
 	}
-	castCredits, crewCredits := s.fetchCredits(ctx, seriesID)
+	castCredits, crewCredits := s.fetchCredits(ctx, seriesID, filter)
 	return &seriesDetailContext{
 		series:      series,
 		castCredits: castCredits,
@@ -1667,7 +1667,7 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 			haveCredits:        s.personRepo != nil,
 		}
 		if s.personRepo != nil {
-			pf.castCredits, pf.crewCredits = splitCastCrew(s.personCredits(ctx, creditsByID[id]))
+			pf.castCredits, pf.crewCredits = splitCastCrew(s.personCredits(ctx, creditsByID[id], filter))
 		}
 		if item.Type != "series" && haveFileBatch {
 			pf.haveFiles = true
@@ -1761,7 +1761,7 @@ func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, p
 }
 
 // fetchCredits returns cast and crew credits for the given content ID.
-func (s *DetailService) fetchCredits(ctx context.Context, contentID string) ([]CastCredit, []CrewCredit) {
+func (s *DetailService) fetchCredits(ctx context.Context, contentID string, filter AccessFilter) ([]CastCredit, []CrewCredit) {
 	if s.personRepo == nil {
 		return []CastCredit{}, []CrewCredit{}
 	}
@@ -1769,7 +1769,7 @@ func (s *DetailService) fetchCredits(ctx context.Context, contentID string) ([]C
 	if err != nil {
 		people = nil
 	}
-	credits := s.personCredits(ctx, people)
+	credits := s.personCredits(ctx, people, filter)
 	return splitCastCrew(credits)
 }
 
@@ -1814,7 +1814,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	if pf != nil && pf.haveCredits {
 		castCredits, crewCredits = pf.castCredits, pf.crewCredits
 	} else {
-		castCredits, crewCredits = s.fetchCredits(ctx, contentID)
+		castCredits, crewCredits = s.fetchCredits(ctx, contentID, filter)
 	}
 	detail := &ItemDetail{
 		ContentID:                  item.ContentID,
@@ -1991,7 +1991,7 @@ func applyWorkSummaryValue(detail *ItemDetail, summary *WorkSummary) {
 }
 
 // personCredits converts ItemPerson slice to PersonCredit slice with presigned URLs.
-func (s *DetailService) personCredits(ctx context.Context, people []models.ItemPerson) []PersonCredit {
+func (s *DetailService) personCredits(ctx context.Context, people []models.ItemPerson, filter AccessFilter) []PersonCredit {
 	credits := make([]PersonCredit, 0, len(people))
 	for _, p := range people {
 		pc := PersonCredit{
@@ -2006,7 +2006,14 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			PlexGUID:  p.PlexGUID,
 		}
 		if p.PhotoPath != "" && p.PhotoPath != "-" {
-			pc.PhotoURL = s.PresignURL(ctx, p.PhotoPath, "featured")
+			// Without an explicit size the stored key is presigned as-is, which
+			// is what this has always returned. An explicit size resolves the
+			// profile ladder instead, the same as every other image on the page.
+			if filter.ImageSize == imagesize.Unset {
+				pc.PhotoURL = s.PresignURL(ctx, p.PhotoPath, imagesize.PluginVariantFeatured)
+			} else {
+				pc.PhotoURL = s.PresignImageURL(ctx, p.PhotoPath, artworkkey.ImageProfile, string(filter.ImageSize))
+			}
 		}
 		if p.PhotoThumbhash != "" && p.PhotoThumbhash != "-" {
 			pc.PhotoThumbhash = p.PhotoThumbhash
@@ -2649,7 +2656,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 
 	episodeCount := len(episodes)
 	seasonNumber := season.SeasonNumber
-	castCredits, crewCredits := s.fetchCredits(ctx, season.SeriesID)
+	castCredits, crewCredits := s.fetchCredits(ctx, season.SeriesID, filter)
 	detail := &ItemDetail{
 		ContentID:                  season.ContentID,
 		Type:                       "season",

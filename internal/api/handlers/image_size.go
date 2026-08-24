@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
@@ -75,6 +76,16 @@ func sizedCardPath(path, imageType string, size imagesize.Size) string {
 	return sizedImagePath(path, imageType, size, cardThumbnailPath(path))
 }
 
+// sizedCardBackdropPath resolves an image sitting in a card's backdrop slot.
+//
+// That slot does not always hold a real backdrop: an episode row puts its still
+// there, and a still rides the still ladder, which has no w1920. Asking for the
+// backdrop ladder would name a key that was never generated, so the type is read
+// back off the key instead of assumed.
+func sizedCardBackdropPath(path string, size imagesize.Size) string {
+	return sizedCardPath(path, imageTypeForBackdropPath(path), size)
+}
+
 // sizedPosterPath is featuredPosterPath with the request's size applied.
 func sizedPosterPath(path string, size imagesize.Size) string {
 	return sizedImagePath(path, "poster", size, featuredPosterPath(path))
@@ -93,5 +104,5 @@ func imageTypeForBackdropPath(path string) string {
 	if imageType := catalog.ImageTypeFromCachedPath(path); imageType != "" {
 		return imageType
 	}
-	return "backdrop"
+	return artworkkey.ImageBackdrop
 }

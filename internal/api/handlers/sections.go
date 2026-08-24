@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -1417,7 +1418,7 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 				},
 				posterPath:   sizedPosterPath(item.PosterPath, size),
 				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
-				logoPath:     sizedImagePath(item.LogoPath, "logo", size, item.LogoPath),
+				logoPath:     sizedImagePath(item.LogoPath, artworkkey.ImageLogo, size, item.LogoPath),
 			}
 			pending = append(pending, images)
 			addPath(images.posterPath)

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -639,7 +640,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			UserState:         userStates[mi.ContentID],
 		}
 		resp.PosterURL = h.presignURL(r, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(r, sizedCardPath(mi.BackdropPath, "backdrop", size), cardHint)
+		resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 
@@ -680,10 +681,10 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, "still", size), cardHint)
+						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(r, sizedCardPath(parent.BackdropPath, "backdrop", size), cardHint)
+						resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {

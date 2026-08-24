@@ -131,6 +131,53 @@ func TestLadderBackfillSkippedWhenStateUnavailable(t *testing.T) {
 	}
 }
 
+// One execution runs two phases, and a progress bar that reaches 100 and then
+// restarts at 0 reads as a failed-and-retrying task. The reported percent must
+// only ever climb.
+func TestLadderBackfillProgressIsMonotone(t *testing.T) {
+	runner := &ladderRunner{complete: true}
+	runner.updates = []metadata.ImageCacheRunStats{
+		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 5},
+		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 10},
+	}
+	state := &fakeLadderState{}
+
+	progress := runLadderTask(t, runner, state, 2)
+
+	if len(progress.percents) < 2 {
+		t.Fatalf("percents = %v, want several reports", progress.percents)
+	}
+	for i, percent := range progress.percents {
+		if i > 0 && percent < progress.percents[i-1] {
+			t.Fatalf("progress went backwards at %d: %v", i, progress.percents)
+		}
+	}
+	if last := progress.percents[len(progress.percents)-1]; last != 100 {
+		t.Fatalf("final percent = %v, want 100", last)
+	}
+	// The drain must not consume the whole bar when a ladder pass follows it.
+	for i, message := range progress.messages {
+		if strings.Contains(message, "Regenerating cached artwork") && progress.percents[i] >= 100 {
+			t.Fatalf("ladder phase started at %v, want it below 100", progress.percents[i])
+		}
+	}
+}
+
+// With no ladder pass pending the drain still owns the whole bar and ends at 100.
+func TestDrainOwnsTheWholeBarWithoutALadderPass(t *testing.T) {
+	runner := &ladderRunner{complete: true}
+	state := &fakeLadderState{version: 2}
+
+	progress := runLadderTask(t, runner, state, 2)
+
+	if runner.ladderCalls != 0 {
+		t.Fatalf("ladder runs = %d, want none", runner.ladderCalls)
+	}
+	if last := progress.percents[len(progress.percents)-1]; last != 100 {
+		t.Fatalf("final percent = %v, want 100", last)
+	}
+}
+
 // Without SetLadderBackfill the task behaves exactly as before.
 func TestCacheTaskWithoutLadderBackfillOnlyDrains(t *testing.T) {
 	runner := &ladderRunner{complete: true}

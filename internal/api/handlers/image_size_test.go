@@ -91,6 +91,44 @@ func TestExplicitImageSizeLeavesNonCachedPathsAlone(t *testing.T) {
 	}
 }
 
+// An episode row puts its still in the card's backdrop slot. The still ladder
+// has no w1920, so resolving that slot against the backdrop ladder would name a
+// key the cache never generated — the URL would 404 rather than look wrong.
+func TestSizedCardBackdropPathFollowsTheStillLadder(t *testing.T) {
+	const still = "tvdb/series/73141/seasons/22/episodes/9/still/original.webp"
+	const backdrop = "tmdb/movies/550/backdrop/original.abc123.webp"
+
+	tests := []struct {
+		size         imagesize.Size
+		wantStill    string
+		wantBackdrop string
+	}{
+		{imagesize.Small, "still/w300.webp", "backdrop/w300.abc123.webp"},
+		{imagesize.Medium, "still/w500.webp", "backdrop/w1920.abc123.webp"},
+		{imagesize.Large, "still/w780.webp", "backdrop/w1920.abc123.webp"},
+		{imagesize.Original, "still/original.webp", "backdrop/original.abc123.webp"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.size), func(t *testing.T) {
+			if got := sizedCardBackdropPath(still, tt.size); !strings.HasSuffix(got, tt.wantStill) {
+				t.Errorf("still in backdrop slot = %q, want it to end in %q", got, tt.wantStill)
+			}
+			if got := sizedCardBackdropPath(backdrop, tt.size); !strings.HasSuffix(got, tt.wantBackdrop) {
+				t.Errorf("real backdrop = %q, want it to end in %q", got, tt.wantBackdrop)
+			}
+		})
+	}
+}
+
+// Absent parameter still means byte-identical output for both kinds of path.
+func TestSizedCardBackdropPathUnsetUnchanged(t *testing.T) {
+	for _, path := range imageSizePaths {
+		if got, want := sizedCardBackdropPath(path, imagesize.Unset), cardThumbnailPath(path); got != want {
+			t.Errorf("sizedCardBackdropPath(%q, Unset) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 func TestRequestVariantHint(t *testing.T) {
 	if got := requestVariantHint("card", imagesize.Unset); got != "card" {
 		t.Errorf("Unset hint = %q, want the caller's card default", got)

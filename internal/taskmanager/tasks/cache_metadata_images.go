@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -110,17 +111,69 @@ func (t *BackfillMetadataImagesTask) ShouldRun(context.Context) (bool, error) {
 	return false, nil
 }
 
+// drainPhaseCeiling is where the queue drain tops out when a ladder pass will
+// follow it in the same execution. The two phases own disjoint, ascending
+// stretches of the bar so it advances once from 0 to 100 rather than reaching
+// 100 and restarting.
+const drainPhaseCeiling = 50.0
+
 func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	if t.runner == nil {
 		progress.Report(100, "Metadata image cache is not configured")
 		return nil
 	}
-	if err := executeMetadataImages(ctx, progress, false, t.runner.DrainUntilIdle); err != nil {
+
+	// Resolved before the drain so the drain knows whether it owns the whole bar
+	// or only the first half of it.
+	backfiller := t.pendingLadderBackfill(ctx, progress)
+
+	drainProgress := progress
+	if backfiller != nil {
+		drainProgress = phaseProgress{inner: progress, start: 0, end: drainPhaseCeiling}
+	}
+	if err := executeMetadataImages(ctx, drainProgress, false, t.runner.DrainUntilIdle); err != nil {
 		return err
 	}
-	t.runLadderBackfill(ctx, progress)
+	if backfiller != nil {
+		t.runLadderBackfill(ctx, phaseProgress{inner: progress, start: drainPhaseCeiling, end: 100}, backfiller)
+	}
 	return nil
 }
+
+// pendingLadderBackfill reports the ladder pass this execution should run, or
+// nil when there is none: a runner without ladder support, no recorded state, or
+// the current ladder version already backfilled.
+func (t *CacheMetadataImagesTask) pendingLadderBackfill(ctx context.Context, progress taskmanager.ProgressReporter) MetadataImageLadderBackfillRunner {
+	backfiller, ok := t.runner.(MetadataImageLadderBackfillRunner)
+	if !ok || t.ladderState == nil || t.ladderTarget <= 0 {
+		return nil
+	}
+	done, err := t.ladderState.Get(ctx)
+	if err != nil {
+		progress.Report(0, fmt.Sprintf("Artwork ladder backfill state unavailable: %v", err))
+		return nil
+	}
+	if done >= t.ladderTarget {
+		return nil
+	}
+	return backfiller
+}
+
+// phaseProgress maps one phase's own 0-100 reporting onto a stretch of the
+// task's overall bar, so an execution that runs two phases advances the bar
+// monotonically instead of each phase restarting it at zero.
+type phaseProgress struct {
+	inner taskmanager.ProgressReporter
+	start float64
+	end   float64
+}
+
+func (p phaseProgress) Report(percent float64, message string) {
+	percent = min(max(percent, 0), 100)
+	p.inner.Report(p.start+(p.end-p.start)*percent/100, message)
+}
+
+func (p phaseProgress) SetResultData(data json.RawMessage) { p.inner.SetResultData(data) }
 
 // runLadderBackfill regenerates artwork cached under an older variant ladder,
 // once per ladder version, after the ordinary queue is drained. Draining first
@@ -130,20 +183,11 @@ func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmana
 // Failures are reported and swallowed: the drain above is this task's job, and
 // an incomplete pass simply resumes on the next run. Only a pass that reached
 // the end records the version.
-func (t *CacheMetadataImagesTask) runLadderBackfill(ctx context.Context, progress taskmanager.ProgressReporter) {
-	backfiller, ok := t.runner.(MetadataImageLadderBackfillRunner)
-	if !ok || t.ladderState == nil || t.ladderTarget <= 0 {
-		return
-	}
-	done, err := t.ladderState.Get(ctx)
-	if err != nil {
-		progress.Report(100, fmt.Sprintf("Artwork ladder backfill state unavailable: %v", err))
-		return
-	}
-	if done >= t.ladderTarget {
-		return
-	}
-
+func (t *CacheMetadataImagesTask) runLadderBackfill(
+	ctx context.Context,
+	progress taskmanager.ProgressReporter,
+	backfiller MetadataImageLadderBackfillRunner,
+) {
 	hostname, _ := os.Hostname()
 	if hostname == "" {
 		hostname = "silo"

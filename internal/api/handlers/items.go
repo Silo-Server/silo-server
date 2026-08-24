@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -995,8 +996,8 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *mode
 	}
 	resp := itemListResponseShell(item, overlaySummary, userState)
 	hint := requestVariantHint("card", size)
-	resp.PosterURL = h.presignURL(r, sizedCardPath(item.PosterPath, "poster", size), hint)
-	resp.BackdropURL = h.presignURL(r, sizedCardPath(item.BackdropPath, "backdrop", size), hint)
+	resp.PosterURL = h.presignURL(r, sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size), hint)
+	resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(item.BackdropPath, size), hint)
 	return resp
 }
 
@@ -1084,8 +1085,8 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 		}
 		images := pendingImages{
 			contentID:    item.ContentID,
-			posterPath:   sizedCardPath(item.PosterPath, "poster", size),
-			backdropPath: sizedCardPath(item.BackdropPath, "backdrop", size),
+			posterPath:   sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size),
+			backdropPath: sizedCardBackdropPath(item.BackdropPath, size),
 		}
 		pending = append(pending, images)
 		addPath(images.posterPath)
@@ -1232,7 +1233,7 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		resp.AirDate = ep.AirDate.Format("2006-01-02")
 	}
 
-	return resp, sizedCardPath(stillPath, "still", size)
+	return resp, sizedCardPath(stillPath, artworkkey.ImageStill, size)
 }
 
 // buildEpisodeResponses converts episodes to API responses using batched
