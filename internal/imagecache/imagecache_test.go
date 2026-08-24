@@ -304,11 +304,11 @@ func TestCache_Poster(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 3 variants: original, w500, w300
-	if len(keys) != 3 {
-		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 4 variants: original, w780, w500, w300
+	if len(keys) != 4 {
+		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w500", "w300"} {
+	for _, variant := range []string{"original", "w780", "w500", "w300"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
@@ -335,7 +335,7 @@ func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w500"], first.VariantPaths["w300"])
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"], first.VariantPaths["w300"])
 	s3.resetCalls()
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
@@ -347,10 +347,10 @@ func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
 	if got := s3.keys(); len(got) != 0 {
 		t.Fatalf("uploaded keys = %v, want none when variants already exist", got)
 	}
-	if result.UploadedVariants != 0 || result.ExistingVariants != 3 {
-		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 3", result.UploadedVariants, result.ExistingVariants)
+	if result.UploadedVariants != 0 || result.ExistingVariants != 4 {
+		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 4", result.UploadedVariants, result.ExistingVariants)
 	}
-	for _, key := range []string{result.VariantPaths["original"], result.VariantPaths["w500"], result.VariantPaths["w300"]} {
+	for _, key := range []string{result.VariantPaths["original"], result.VariantPaths["w780"], result.VariantPaths["w500"], result.VariantPaths["w300"]} {
 		if !hasKey(s3.checkedKeys(), key) {
 			t.Fatalf("ObjectExists was not checked for %q; checked %v", key, s3.checkedKeys())
 		}
@@ -374,8 +374,8 @@ func TestCacheDifferentContentCreatesDifferentImmutableRevision(t *testing.T) {
 	if first.Revision == second.Revision || first.OriginalPath == second.OriginalPath {
 		t.Fatalf("different content reused revision: first=%q second=%q", first.OriginalPath, second.OriginalPath)
 	}
-	if got := s3.keys(); len(got) != 6 {
-		t.Fatalf("uploaded keys = %v, want both immutable three-variant revisions", got)
+	if got := s3.keys(); len(got) != 8 {
+		t.Fatalf("uploaded keys = %v, want both immutable four-variant revisions", got)
 	}
 }
 
@@ -397,7 +397,7 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w500"])
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
 	s3.resetCalls()
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
@@ -406,8 +406,8 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	if got := s3.keys(); len(got) != 1 || got[0] != result.VariantPaths["w300"] {
 		t.Fatalf("uploaded keys = %v, want only missing w300 variant", got)
 	}
-	if result.UploadedVariants != 1 || result.ExistingVariants != 2 {
-		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 1 existing 2", result.UploadedVariants, result.ExistingVariants)
+	if result.UploadedVariants != 1 || result.ExistingVariants != 3 {
+		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 1 existing 3", result.UploadedVariants, result.ExistingVariants)
 	}
 }
 
@@ -475,20 +475,18 @@ func TestCache_Logo(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 2 variants: original, w500 — NO w300 or w1280
-	if len(keys) != 2 {
-		t.Errorf("expected 2 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 3 variants: original, w1280, w500 — NO w300
+	if len(keys) != 3 {
+		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w500"} {
+	for _, variant := range []string{"original", "w1280", "w500"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
 	}
-	for _, forbidden := range []string{"w300", "w1280"} {
-		if _, ok := result.VariantPaths[forbidden]; ok {
-			t.Errorf("logo should not have %s variant", forbidden)
-		}
+	if _, ok := result.VariantPaths["w300"]; ok {
+		t.Error("logo should not have w300 variant")
 	}
 }
 
@@ -516,7 +514,7 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	if result.Thumbhash == "" {
 		t.Fatal("Thumbhash is empty")
 	}
-	for _, variant := range []string{"original", "w500"} {
+	for _, variant := range []string{"original", "w1280", "w500"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())

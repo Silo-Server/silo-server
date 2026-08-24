@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
@@ -4025,7 +4026,15 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 
 // sizeToVariant maps the existing S3 size hints used by the frontend to
 // semantic variant names understood by plugins.
+//
+// An explicitly requested size is resolved by internal/imagesize, which owns
+// the client-facing size contract. Anything else — an absent or unparseable
+// hint — keeps the historical mapping below unchanged.
 func sizeToVariant(size string) string {
+	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
+		return imagesize.PluginVariant(parsed)
+	}
+
 	switch size {
 	case "small":
 		return "card"
@@ -4114,7 +4123,20 @@ func BackdropVariantPath(path, desiredVariant string) string {
 	return strings.Replace(path, "/original.", "/"+variant+".", 1)
 }
 
+// cachedImageVariantKey picks the cached artwork variant for an image type and
+// the size hint carried on the request.
+//
+// An explicitly requested size is resolved by internal/imagesize, which owns
+// the client-facing size contract and derives its rungs from
+// artworkkey.VariantWidths. Anything else — an absent hint, which is what most
+// call sites pass, or an unparseable one — falls through to the per-type
+// defaults below, which are retained verbatim as the record of what the server
+// returned before image_size existed.
 func cachedImageVariantKey(imageType, size string) string {
+	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
+		return imagesize.Variant(imageType, parsed)
+	}
+
 	if size == "original" {
 		return "original"
 	}

@@ -11,6 +11,14 @@ import (
 
 const OriginalVariant = "original"
 
+// LadderVersion identifies the current shape of the variant ladder returned by
+// VariantWidths. It MUST be bumped whenever VariantWidths changes so the
+// one-shot ladder backfill re-enqueues already-cached artwork and generates the
+// newly-added rungs. Existing deployments compare their recorded
+// backfilled_version against this value; leaving it stale means clients asking
+// for a new rung keep falling back to the next lower one forever.
+const LadderVersion = 2
+
 // Build returns an object key for a variant under basePath.
 func Build(basePath, variant, revision, ext string) string {
 	basePath = strings.TrimRight(strings.TrimSpace(basePath), "/")
@@ -76,17 +84,24 @@ func Revision(objectPath string) string {
 	return stem[firstDot+1:]
 }
 
-// VariantWidths returns the resize widths generated for an artwork type. This
-// is the single source of truth for the variant ladder: image generation,
-// object-key expansion, and garbage collection all derive from it.
+// VariantWidths returns the resize widths generated for an artwork type,
+// ordered widest first. This is the single source of truth for the variant
+// ladder: image generation, object-key expansion, garbage collection, and the
+// client-selectable image sizes in internal/imagesize all derive from it.
+//
+// Bump LadderVersion whenever this function changes.
 func VariantWidths(imageType string) []int {
 	switch strings.ToLower(strings.TrimSpace(imageType)) {
 	case "backdrop":
 		return []int{1920, 1280, 300}
 	case "logo":
-		return []int{500}
-	default: // poster, still, profile
+		return []int{1280, 500}
+	case "profile":
+		// Cast/crew headshots are only ever rendered at card size; they do not
+		// get the wide rung posters and stills carry.
 		return []int{500, 300}
+	default: // poster, still
+		return []int{780, 500, 300}
 	}
 }
 
