@@ -1,5 +1,10 @@
 # Feature Changelog
 
+## 2026-08-24
+
+### Let each profile hide watched items from Home
+Profiles can now remove watched items from ordinary Home sections without hiding them from library pages, search, collections, or other browsing surfaces. Featured sections and sections whose purpose depends on watch history — Most Watched, profile activity, and Forgotten Favorites — keep watched items. The preference is off by default and watched indicators remain available everywhere an item is shown.
+
 ## 2026-08-23
 
 ### Never wait on H.264 stream-copy analysis to start playing

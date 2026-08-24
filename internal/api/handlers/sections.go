@@ -586,7 +586,7 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 	withItems := h.fetcher.FetchAll(r.Context(), resolved, nil, libraryIDs, userID, profileID, accessFilter)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	writeJSON(w, http.StatusOK, h.buildSectionsResponse(r, withItems))
+	writeJSON(w, http.StatusOK, h.buildHomeSectionsResponse(r, withItems))
 }
 
 // HandleHomeSectionItems handles GET /home/sections/{id}/items
@@ -619,7 +619,7 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 			}
 		}
 
-		resp := h.buildSectionsResponse(r, []sections.SectionWithItems{withItems})
+		resp := h.buildHomeSectionsResponse(r, []sections.SectionWithItems{withItems})
 		if len(resp.Sections) == 0 {
 			resp.Sections = append(resp.Sections, resolvedSectionResponse{
 				ID:          withItems.ID,
@@ -1224,6 +1224,38 @@ type sectionItemImageURLs struct {
 }
 
 func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sections.SectionWithItems) homeSectionsResponse {
+	return h.buildSectionsResponseWithOptions(r, withItems, sectionResponseOptions{})
+}
+
+type sectionResponseOptions struct {
+	hideWatchedHomeItems bool
+}
+
+func (h *SectionHandler) buildHomeSectionsResponse(r *http.Request, withItems []sections.SectionWithItems) homeSectionsResponse {
+	options := sectionResponseOptions{}
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if h.StoreProvider != nil && userID > 0 && profileID != "" {
+		store, err := h.StoreProvider.ForUser(r.Context(), userID)
+		if err == nil {
+			options.hideWatchedHomeItems = sections.HideWatchedItemsFromHome(r.Context(), store, profileID)
+		}
+	}
+	return h.buildSectionsResponseWithOptions(r, withItems, options)
+}
+
+func (h *SectionHandler) buildSectionsResponseWithOptions(
+	r *http.Request,
+	withItems []sections.SectionWithItems,
+	options sectionResponseOptions,
+) homeSectionsResponse {
+	allItems := sectionMediaItems(withItems)
+	userStates := h.listSectionItemUserStates(r, allItems)
+	if options.hideWatchedHomeItems {
+		withItems = filterWatchedHomeSectionItems(withItems, userStates)
+		allItems = sectionMediaItems(withItems)
+	}
+
 	overlaySummaries := make(map[string]*models.OverlaySummary)
 	contentIDs := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -1251,11 +1283,6 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 	resp := homeSectionsResponse{
 		Sections: make([]resolvedSectionResponse, 0, len(withItems)),
 	}
-	allItems := make([]*models.MediaItem, 0)
-	for _, s := range withItems {
-		allItems = append(allItems, s.Items...)
-	}
-	userStates := h.listSectionItemUserStates(r, allItems)
 	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems)
 	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
 	mangaChapterMeta := h.listSectionMangaChapterItemMeta(r.Context(), allItems)
@@ -1300,6 +1327,38 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		})
 	}
 	return resp
+}
+
+func sectionMediaItems(withItems []sections.SectionWithItems) []*models.MediaItem {
+	items := make([]*models.MediaItem, 0)
+	for _, section := range withItems {
+		items = append(items, section.Items...)
+	}
+	return items
+}
+
+func filterWatchedHomeSectionItems(
+	withItems []sections.SectionWithItems,
+	userStates map[string]*itemUserStateResponse,
+) []sections.SectionWithItems {
+	filtered := make([]sections.SectionWithItems, len(withItems))
+	copy(filtered, withItems)
+	for i := range filtered {
+		section := &filtered[i]
+		if section.Featured || sections.PreserveWatchedItemsOnHome(section.SectionType) {
+			continue
+		}
+
+		items := make([]*models.MediaItem, 0, len(section.Items))
+		for _, item := range section.Items {
+			if item != nil && userStates[item.ContentID] != nil && userStates[item.ContentID].Played {
+				continue
+			}
+			items = append(items, item)
+		}
+		section.Items = items
+	}
+	return filtered
 }
 
 // listSectionMangaChapterItemMeta resolves series linkage for every manga
