@@ -1,0 +1,150 @@
+package metadata
+
+import (
+	"context"
+	"log/slog"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
+)
+
+const (
+	// existsCacheTTL is how long a confirmed-present object stays confirmed.
+	// Cached artwork is immutable per revision, so a hit cannot go stale except
+	// by deletion, which the reconciler already repairs.
+	existsCacheTTL = 24 * time.Hour
+	// missingExistsCacheTTL is how long a confirmed-absent object stays absent.
+	// It is short because absence is the transient state: the ladder backfill is
+	// generating the rung right now, and every viewer is being served a narrower
+	// image until it lands.
+	missingExistsCacheTTL = 15 * time.Minute
+)
+
+// s3ImageExistenceChecker is the existence half of the S3 surface. The presigner
+// is *s3client.Client in production, which implements it; a deployment whose
+// presigner does not simply skips the fallback and presigns what was asked for.
+type s3ImageExistenceChecker interface {
+	ObjectExists(ctx context.Context, bucket, key string) (bool, error)
+}
+
+// ladderRungsAddedAtVersion names the variant each image type gained in the
+// current artworkkey.LadderVersion. Artwork cached by an older version has no
+// object at these keys until the ladder backfill regenerates it, so these — and
+// only these — are worth an existence check before presigning. Every other rung
+// has been generated for as long as the artwork has existed.
+//
+// Update this together with artworkkey.VariantWidths and LadderVersion.
+var ladderRungsAddedAtVersion = map[string]string{
+	"poster": "w780",
+	"still":  "w780",
+	"logo":   "w1280",
+}
+
+// needsExistenceCheck reports whether a cached artwork key names a rung that
+// might not have been generated yet, along with the image type governing its
+// ladder.
+func needsExistenceCheck(key string) (imageType string, ok bool) {
+	imageType = catalog.ImageTypeFromCachedPath(key)
+	if imageType == "" {
+		return "", false
+	}
+	added, has := ladderRungsAddedAtVersion[imageType]
+	return imageType, has && added == keyVariant(key)
+}
+
+// keyVariant extracts the variant name from a cached artwork key, e.g.
+// "tmdb/movies/550/poster/w780.abc123.webp" -> "w780".
+func keyVariant(key string) string {
+	name := path.Base(strings.TrimSpace(key))
+	name = strings.TrimSuffix(name, path.Ext(name))
+	if dot := strings.IndexByte(name, '.'); dot >= 0 {
+		name = name[:dot]
+	}
+	return name
+}
+
+// variantKey rebuilds a cached artwork key at a different rung, preserving the
+// revision and extension.
+func variantKey(key, variant string) string {
+	dir := strings.TrimSuffix(artworkkey.Directory(key), "/")
+	if dir == "" {
+		return key
+	}
+	original := artworkkey.Original(dir, artworkkey.Revision(key), path.Ext(key))
+	return artworkkey.Variant(original, variant)
+}
+
+// resolveLadderKey returns the key to presign for a requested rung, walking down
+// the ladder when the requested one has not been generated yet. The second
+// return reports whether the answer is a fallback rather than what was asked
+// for, which the caller uses to shorten how long it caches the resolved URL.
+//
+// An existence check that errors is not treated as absence: storage being
+// briefly unreachable must not permanently downgrade everyone's artwork, so the
+// requested key is presigned optimistically and the result is not cached.
+func (r *PluginImageResolver) resolveLadderKey(ctx context.Context, checker s3ImageExistenceChecker, bucket, key string) (string, bool) {
+	imageType, ok := needsExistenceCheck(key)
+	if !ok {
+		return key, false
+	}
+
+	candidate := key
+	for {
+		exists, err := r.objectExists(ctx, checker, bucket, candidate)
+		if err != nil {
+			return key, false
+		}
+		if exists {
+			return candidate, candidate != key
+		}
+		next, hasNext := imagesize.NextLower(imageType, keyVariant(candidate))
+		if !hasNext {
+			// The original is the terminal fallback: it predates every rung, so
+			// checking it would spend a request to learn nothing actionable.
+			return variantKey(key, artworkkey.OriginalVariant), true
+		}
+		candidate = variantKey(key, next)
+	}
+}
+
+// objectExists answers from the existence cache when it can. Present and absent
+// are cached with different lifetimes; an error is not cached at all.
+func (r *PluginImageResolver) objectExists(ctx context.Context, checker s3ImageExistenceChecker, bucket, key string) (bool, error) {
+	cacheKey := bucket + "\x00" + key
+	if r.existsCache != nil {
+		if value, ok := r.existsCache.Get(cacheKey); ok {
+			return value, nil
+		}
+	}
+
+	exists, err := checker.ObjectExists(ctx, bucket, key)
+	if err != nil {
+		slog.DebugContext(ctx, "artwork existence check failed", "component", "metadata", "key", key, "error", err)
+		return false, err
+	}
+
+	if r.existsCache != nil {
+		ttl := missingExistsCacheTTL
+		if exists {
+			ttl = existsCacheTTL
+		}
+		r.existsCache.Set(cacheKey, exists, ttl)
+	}
+	return exists, nil
+}
+
+// fallbackURLExpiry shortens a presigned URL's advertised validity when it
+// points at a fallback rung, so the resolved-URL cache releases it about as soon
+// as the missing rung could have been backfilled. Without this a viewer could
+// keep receiving the narrow image for a full day after the real one landed.
+func fallbackURLExpiry(expiry time.Time, now time.Time) time.Time {
+	clamped := now.Add(missingExistsCacheTTL + resolvedURLCacheSafetyMargin)
+	if clamped.Before(expiry) {
+		return clamped
+	}
+	return expiry
+}
