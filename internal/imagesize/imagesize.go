@@ -103,20 +103,41 @@ func Variant(imageType string, size Size) string {
 	}
 }
 
-// mediumVariant is the pre-image_size default for an image type. Changing a
-// value here changes what clients that send no parameter receive.
+// Widths the pre-image_size server picked per image type. They are literals
+// rather than ladder positions on purpose: an absent parameter and an explicit
+// medium have to keep resolving to the same key even after the ladder grows.
+// Changing one changes what every client that sends no parameter receives.
+const (
+	mediumBackdropWidth = 1920
+	mediumDefaultWidth  = 500
+)
+
+// mediumVariant is the pre-image_size default for an image type.
 func mediumVariant(imageType string) string {
-	switch strings.ToLower(strings.TrimSpace(imageType)) {
-	case "backdrop":
-		return "w1920"
-	default: // poster, still, logo, profile, and anything unrecognized
-		return "w500"
+	// poster, still, logo, profile, and anything unrecognized share the default.
+	if strings.EqualFold(strings.TrimSpace(imageType), artworkkey.ImageBackdrop) {
+		return widthVariant(mediumBackdropWidth)
 	}
+	return widthVariant(mediumDefaultWidth)
 }
 
+// Semantic variant hints understood by plugin image resolvers. This vocabulary
+// is the plugin's, not the client's: it is deliberately separate from the sizes
+// above even where a word coincides, because a plugin picks the closest image it
+// happens to host rather than a pixel width.
+//
+// PluginVariantFull is part of the vocabulary but no client size maps onto it;
+// it is named here so the set is readable in one place.
+const (
+	PluginVariantCard     = "card"
+	PluginVariantFeatured = "featured"
+	PluginVariantLarge    = "large"
+	PluginVariantFull     = "full"
+	PluginVariantOriginal = artworkkey.OriginalVariant
+)
+
 // PluginVariant maps a size to the semantic variant hint understood by plugin
-// image resolvers. The vocabulary is "card", "featured", "large", "full", and
-// "original"; this function only produces the subset a client size maps onto.
+// image resolvers. It only produces the subset a client size maps onto.
 //
 // "large" is sent unconditionally. The SDK's variant field is an open string
 // and every first-party plugin falls back gracefully on a name it does not
@@ -127,13 +148,13 @@ func mediumVariant(imageType string) string {
 func PluginVariant(size Size) string {
 	switch size {
 	case Small:
-		return "card"
+		return PluginVariantCard
 	case Large:
-		return "large"
+		return PluginVariantLarge
 	case Original:
-		return artworkkey.OriginalVariant
+		return PluginVariantOriginal
 	default: // Medium and Unset defensively.
-		return "featured"
+		return PluginVariantFeatured
 	}
 }
 

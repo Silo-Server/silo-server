@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -11,7 +12,13 @@ import (
 // imageTypesWithWidths is every artwork type a client can receive a URL for.
 // Cast and crew headshots ("profile") are served through the same ladder, so
 // they are advertised too.
-var imageTypesWithWidths = []string{"poster", "backdrop", "still", "logo", "profile"}
+var imageTypesWithWidths = []string{
+	artworkkey.ImagePoster,
+	artworkkey.ImageBackdrop,
+	artworkkey.ImageStill,
+	artworkkey.ImageLogo,
+	artworkkey.ImageProfile,
+}
 
 // imageSizeWidths reports the pixel width behind each named size for one image
 // type. A size is absent from the map only if it resolves to the original,

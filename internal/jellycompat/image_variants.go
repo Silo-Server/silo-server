@@ -6,9 +6,21 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
-const compatCardImageSize = "small"
+// The Jellyfin surface expresses a requested size with the same vocabulary the
+// native API uses, because both end up in DetailService.PresignImageURL.
+const (
+	compatCardImageSize     = string(imagesize.Small)
+	compatMediumImageSize   = string(imagesize.Medium)
+	compatLargeImageSize    = string(imagesize.Large)
+	compatOriginalImageSize = string(imagesize.Original)
+)
+
+// compatBackdropImageType is Jellyfin's name for a backdrop, which is the one
+// image type this layer defaults to a hero size rather than a card size.
+const compatBackdropImageType = "Backdrop"
 
 func compatPresignImage(detailSvc *catalog.DetailService, ctx context.Context, path, imageType, size string) string {
 	return compatPresignImageWithExpiry(detailSvc, ctx, path, imageType, size).URL
@@ -23,8 +35,8 @@ func compatPresignImageWithExpiry(detailSvc *catalog.DetailService, ctx context.
 
 func compatRequestImageSize(r *http.Request, imageType string) string {
 	if r == nil {
-		if strings.EqualFold(imageType, "Backdrop") {
-			return "medium"
+		if strings.EqualFold(imageType, compatBackdropImageType) {
+			return compatMediumImageSize
 		}
 		return compatCardImageSize
 	}
@@ -37,21 +49,21 @@ func compatRequestImageSize(r *http.Request, imageType string) string {
 
 	switch {
 	case maxDim <= 0:
-		if strings.EqualFold(imageType, "Backdrop") {
-			return "medium"
+		if strings.EqualFold(imageType, compatBackdropImageType) {
+			return compatMediumImageSize
 		}
 		return compatCardImageSize
 	case maxDim <= 320:
 		return compatCardImageSize
 	case maxDim >= 1200:
-		return "original"
+		return compatOriginalImageSize
 	case maxDim >= 780:
 		// The ladder now carries a rung between the pre-existing default and
 		// the original (w780 posters and stills, w1280 logos), so a Jellyfin
 		// client asking for a large-but-not-full image gets one instead of
 		// being rounded down to the default.
-		return "large"
+		return compatLargeImageSize
 	default:
-		return "medium"
+		return compatMediumImageSize
 	}
 }

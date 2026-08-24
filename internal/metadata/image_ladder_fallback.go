@@ -31,17 +31,20 @@ type s3ImageExistenceChecker interface {
 	ObjectExists(ctx context.Context, bucket, key string) (bool, error)
 }
 
-// ladderRungsAddedAtVersion names the variant each image type gained in the
+// ladderTypesWithAddedRung lists the image types that gained a rung in the
 // current artworkkey.LadderVersion. Artwork cached by an older version has no
-// object at these keys until the ladder backfill regenerates it, so these — and
-// only these — are worth an existence check before presigning. Every other rung
-// has been generated for as long as the artwork has existed.
+// object at the new rung until the ladder backfill regenerates it, so these —
+// and only these — are worth an existence check before presigning. Every other
+// rung has been generated for as long as the artwork has existed.
 //
-// Update this together with artworkkey.VariantWidths and LadderVersion.
-var ladderRungsAddedAtVersion = map[string]string{
-	"poster": "w780",
-	"still":  "w780",
-	"logo":   "w1280",
+// The rung itself is not spelled out: at this version each of these types gained
+// its widest variant, so the check reads it back off the ladder and cannot drift
+// from artworkkey.VariantWidths. Revisit both this set and that assumption
+// whenever LadderVersion is bumped.
+var ladderTypesWithAddedRung = map[string]bool{
+	ImageCacheImagePoster: true,
+	ImageCacheImageStill:  true,
+	ImageCacheImageLogo:   true,
 }
 
 // needsExistenceCheck reports whether a cached artwork key names a rung that
@@ -49,11 +52,10 @@ var ladderRungsAddedAtVersion = map[string]string{
 // ladder.
 func needsExistenceCheck(key string) (imageType string, ok bool) {
 	imageType = catalog.ImageTypeFromCachedPath(key)
-	if imageType == "" {
+	if imageType == "" || !ladderTypesWithAddedRung[imageType] {
 		return "", false
 	}
-	added, has := ladderRungsAddedAtVersion[imageType]
-	return imageType, has && added == keyVariant(key)
+	return imageType, imagesize.Variant(imageType, imagesize.Large) == keyVariant(key)
 }
 
 // keyVariant extracts the variant name from a cached artwork key, e.g.
