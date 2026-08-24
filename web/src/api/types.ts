@@ -2577,6 +2577,91 @@ export interface AdminSession {
   routing_egress?: string;
   routing_egress_node_id?: number;
   routing_egress_node_name?: string;
+  /**
+   * Measured delivery for this session, from stream telemetry. Only ever
+   * populated by GET /admin/sessions/live; its absence there is meaningful and
+   * means telemetry has no record of bytes reaching a viewer.
+   */
+  telemetry?: AdminSessionTelemetry;
+}
+
+/**
+ * The per-session block from the merged telemetry view: what actually reached
+ * the viewer, how fast, from which addresses, and which side of the picture each
+ * fact came from.
+ *
+ * Absent on every row when the server has telemetry switched off.
+ */
+export interface AdminSessionTelemetry {
+  /**
+   * Read this first.
+   * - `reported` — a client claims to be watching. Nothing measured leaving.
+   * - `measured` — bytes went out. No session manager claims them.
+   * - `both` — an ordinary, corroborated viewer.
+   */
+  evidence: "reported" | "measured" | "both";
+  /**
+   * Reported as PLAYING with no measured bytes: a client posting progress for a
+   * stream nothing is sending. A session reported as PAUSED is never flagged,
+   * because a paused client legitimately stops pulling bytes.
+   */
+  no_delivery?: boolean;
+  /** Bytes delivered to the viewer at the outermost edge. */
+  viewer_bytes: number;
+  /** Internal proxy-to-node traffic. Never counts toward a concurrency cap. */
+  relay_bytes?: number;
+  /** The total is known to be short because a publisher dropped records. */
+  bytes_degraded?: boolean;
+  /**
+   * Measured between two consecutive view builds, so it is absent until a
+   * session has been seen twice. Absent means "not yet known" and must not be
+   * rendered as zero, which would read as a stalled stream.
+   */
+  delivery_rate_kbps?: number;
+  last_byte_at?: string;
+  open_observations: number;
+  request_count?: number;
+  /**
+   * Every address that pulled bytes for this session. More than one is not
+   * automatically abuse (carrier NAT and network handoff both produce it).
+   */
+  viewer_ips?: string[];
+  realtime_alive?: boolean;
+  /** Publishers disagreed about who is watching. An abuse signal, not noise. */
+  identity_conflict?: boolean;
+  /** Everyone who contributed. */
+  publishers?: string[];
+  /** Strictly who served bytes — what answers "from which node?". */
+  viewer_edge_publishers?: string[];
+}
+
+/**
+ * Envelope returned by GET /admin/sessions/live.
+ *
+ * The merged telemetry view is the source: every process publishes into it, so
+ * the list already holds every session anybody knows about. There is no
+ * "telemetry or legacy?" question to ask — only how complete the view is.
+ */
+export interface AdminLiveSessionsResponse {
+  /**
+   * False means the server has telemetry switched off, and `sessions` is the
+   * legacy projection with no telemetry block on any row.
+   */
+  telemetry_enabled: boolean;
+  /**
+   * False before the first view build. An empty list with this false means "not
+   * known yet", never "nothing is streaming".
+   */
+  view_available: boolean;
+  view_complete: boolean;
+  view_stale: boolean;
+  view_age_ms: number;
+  /** Why the view is incomplete, when it is. */
+  incomplete_reasons?: string[];
+  /** How many rows are reported-as-playing with no measured bytes. */
+  no_delivery_count: number;
+  no_delivery_shown: boolean;
+  sessions: AdminSession[];
 }
 
 export interface OperationalLogEntry {

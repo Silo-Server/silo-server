@@ -12,7 +12,7 @@ func TestConfigFromEnvValidation(t *testing.T) {
 		clearConfigEnv(t)
 		cfg := ConfigFromEnv("node")
 		if !cfg.Enabled || cfg.Distributed || cfg.DistributedExplicit || cfg.SweepInterval != time.Second || cfg.Retention != 5*time.Minute || cfg.MaxObservations != 50_000 ||
-			cfg.Freshness != 5*time.Second || cfg.MembershipTTL != time.Minute || cfg.KeyPrefix != "silo:stelem" || cfg.FullResyncEvery != 60 || cfg.MaxPublishers != 256 || cfg.MaxMergedSessions != 50_000 || cfg.MaxMergedTransfers != 50_000 {
+			cfg.Freshness != 5*time.Second || cfg.MembershipTTL != time.Minute || cfg.KeyPrefix != "silo:stelem" || cfg.FullResyncEvery != 60 || cfg.MaxPublishers != 512 || cfg.MaxMergedSessions != 50_000 || cfg.MaxMergedTransfers != 50_000 {
 			t.Fatalf("defaults = %+v", cfg)
 		}
 	})

@@ -63,8 +63,13 @@ type Config struct {
 	// ViewTTL bounds how stale a served merged view may be. It gates a rebuild
 	// that measured ~347 ms at the 50 000-session cap, so it is a cost control
 	// rather than a freshness preference.
-	ViewTTL            time.Duration
-	FullResyncEvery    int
+	ViewTTL         time.Duration
+	FullResyncEvery int
+	// MaxPublishers bounds the roster. Each API process contributes TWO entries -
+	// its measuring publisher and its reporting companion - so this is deliberately
+	// twice what a one-publisher-per-process fleet would need. Exceeding it drops
+	// publishers from the merge and hides their sessions, so it is sized to be
+	// reached only by a fleet far larger than the merged-session cap could serve.
 	MaxPublishers      int
 	MaxMergedSessions  int
 	MaxMergedTransfers int
@@ -93,7 +98,7 @@ func DefaultConfig(nodeID string) Config {
 		NodeID: nodeID, SweepInterval: time.Second, Retention: 5 * time.Minute,
 		Freshness: defaultFreshness, MembershipTTL: time.Minute, KeyPrefix: "silo:stelem",
 		ViewTTL:         DefaultViewTTL,
-		FullResyncEvery: 60, MaxPublishers: 256, MaxMergedSessions: 50_000, MaxMergedTransfers: 50_000,
+		FullResyncEvery: 60, MaxPublishers: 512, MaxMergedSessions: 50_000, MaxMergedTransfers: 50_000,
 		MaxSessions: 10_000, MaxTransfers: 10_000, MaxObservations: 50_000,
 		MaxObservationsPerSession: 64, MaxViewerIPsPerSession: 32,
 		MaxIdentityConflictsPerSession: 16, MaxDeviceIDsPerSession: 32,

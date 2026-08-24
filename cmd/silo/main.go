@@ -325,12 +325,15 @@ func registerClientIPConfigReload(watcher *nodeconfig.Watcher, resolver *clienti
 // cache.NewRedisClient builds a lazy client that never dials, and a Redis
 // restart mid-deploy must not strand a publisher local-only for the life of the
 // process.
-func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient *redis.Client) *streamtelemetry.Registry {
+func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient *redis.Client, hub *streamtelemetry.LocalHub) *streamtelemetry.Registry {
 	streamTelemetryConfig := streamtelemetry.ConfigFromEnv(nodeID)
 	if !streamTelemetryConfig.DistributedExplicit {
 		streamTelemetryConfig.Distributed = redisClient != nil
 	}
-	store := streamtelemetry.GlobalSnapshotStore(streamtelemetry.NewLocalStore())
+	// The hub, not a bare LocalStore: this process publishes twice (measuring and
+	// reporting) and a LocalStore holds exactly one snapshot, so two of them would
+	// leave the reported sessions somewhere nothing reads.
+	store := hub.Store(streamTelemetryConfig.PublisherID)
 	if streamTelemetryConfig.Enabled && streamTelemetryConfig.Distributed {
 		if redisClient != nil {
 			store = streamtelemetry.NewRedisStore(redisClient, streamTelemetryConfig, slog.Default())
@@ -348,6 +351,49 @@ func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient 
 			"families", strings.Join(streamTelemetryConfig.ObservedFamilies(), ","))
 	}
 	return streamtelemetry.NewRegistry(streamTelemetryConfig, store, slog.Default())
+}
+
+// newStreamTelemetryReportedPublisher builds this process's REPORTED publisher:
+// the sessions its playback session manager believes are live, published into the
+// same merge as every measured family.
+//
+// It is what makes the merged view complete. Measured families only see sessions
+// that moved bytes through an observed route, so without this a reader had to
+// reconcile the view against the legacy store — and reconciling two sets is what
+// produced the ghosts, the family-coverage gaps and the paused-session special
+// cases. Published here, "a client claims to be watching" is just a field.
+//
+// It gets its own store because RedisStore binds one publisher id for its
+// lifetime, and its publisher id is the registry's plus a suffix, so the merge
+// can tell a claim from a measurement without either side special-casing the
+// other. One per process: a process reports the sessions it owns, so nothing has
+// to be elected, and a session moving between processes is briefly reported by
+// both until the merge takes the newest.
+func newStreamTelemetryReportedPublisher(
+	ctx context.Context,
+	registry *streamtelemetry.Registry,
+	redisClient *redis.Client,
+	hub *streamtelemetry.LocalHub,
+	source streamtelemetry.ReportedSessionSource,
+) *streamtelemetry.ReportedPublisher {
+	if registry == nil || !registry.Enabled() || source == nil {
+		return nil
+	}
+	cfg := registry.Config()
+	reportedID := streamtelemetry.ReportedPublisherIDFor(cfg.PublisherID)
+	store := hub.Store(reportedID)
+	if cfg.Distributed {
+		if redisClient != nil {
+			// The suffixed publisher id has to reach NewRedisStore, which reads it
+			// from the config rather than from the first published snapshot.
+			reportedCfg := cfg
+			reportedCfg.PublisherID = reportedID
+			store = streamtelemetry.NewRedisStore(redisClient, reportedCfg, slog.Default())
+		} else {
+			slog.ErrorContext(ctx, "stream telemetry reported publisher has no redis; publishing to the local hub only")
+		}
+	}
+	return streamtelemetry.NewReportedPublisher(cfg, source, store, slog.Default())
 }
 
 // newStreamTelemetryViewCache builds the bounded-staleness cache the admin
@@ -898,6 +944,10 @@ func main() {
 	defer appCancel()
 	var streamTelemetryRegistry *streamtelemetry.Registry
 	var streamTelemetryViewCache *streamtelemetry.ViewCache
+	var streamTelemetryReported *streamtelemetry.ReportedPublisher
+	// One hub per process, shared by every publisher it runs. Without Redis this
+	// is what lets the measuring and reporting publishers see each other.
+	streamTelemetryHub := streamtelemetry.NewLocalHub()
 	restartReqCh := make(chan struct{}, 1)
 	var restartRequested atomic.Bool
 
@@ -933,7 +983,7 @@ func main() {
 			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
 		}
-		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, redisClient)
+		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, redisClient, streamTelemetryHub)
 		streamTelemetryRegistry.Start(appCtx)
 
 		// Resolved before the watcher starts: NODE_URL is this process's
@@ -1101,7 +1151,7 @@ func main() {
 	}
 
 	if mode == "" || mode == "integrated" || mode == "api" {
-		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
+		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient, streamTelemetryHub)
 		streamTelemetryRegistry.Start(appCtx)
 		streamTelemetryViewCache = newStreamTelemetryViewCache(streamTelemetryRegistry)
 	}
@@ -2052,6 +2102,17 @@ func main() {
 
 	// Step 6: Create playback session manager and wire into dependencies.
 	sessionMgr := playback.NewSessionManager(6, 2) // defaults from plan: max_streams=6, max_transcodes=2
+	// The reporting publisher can only start once the session manager it reports
+	// on exists, which is why it is not created beside the registry above.
+	if reported := newStreamTelemetryReportedPublisher(appCtx, streamTelemetryRegistry, apiRedisClient, streamTelemetryHub, sessionMgr); reported != nil {
+		streamTelemetryReported = reported
+		// Declared on the measuring publisher so the merge can tell an absent
+		// reporter from a process with nothing to report — the rolling-deploy case,
+		// where an un-upgraded process publishes no reported state at all.
+		streamTelemetryRegistry.DeclareReportingPublisher(reported.PublisherID())
+		streamTelemetryReported.Start(appCtx)
+		slog.InfoContext(appCtx, "stream telemetry reporting publisher started", "publisher", streamTelemetryReported.PublisherID())
+	}
 	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
@@ -3199,6 +3260,11 @@ func main() {
 	}
 	if stopErr := streamTelemetryRegistry.Stop(shutdownCtx); stopErr != nil {
 		slog.Error("stream telemetry shutdown error", "error", stopErr)
+	}
+	// Stopped before the session cleanup below, so the last thing published is
+	// what was actually playing rather than a set already being torn down.
+	if stopErr := streamTelemetryReported.Stop(shutdownCtx); stopErr != nil {
+		slog.Error("stream telemetry reporting publisher shutdown error", "error", stopErr)
 	}
 
 	// 2. Clean up stale sessions.

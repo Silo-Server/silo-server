@@ -63,6 +63,7 @@ type Registry struct {
 	lastWarnUnixNano        atomic.Int64
 	lastPublishWarnUnixNano atomic.Int64
 	sequence                atomic.Uint64
+	reportingPublisherID    atomic.Value
 	startOnce               sync.Once
 	stopOnce                sync.Once
 	stop                    chan struct{}
@@ -103,6 +104,16 @@ func (r *Registry) ViewTTL() time.Duration {
 		return 0
 	}
 	return r.cfg.ViewTTL
+}
+
+// Config returns the resolved configuration this registry was built with, so a
+// caller that already has the registry does not re-read and re-validate the
+// environment to learn one knob.
+func (r *Registry) Config() Config {
+	if r == nil {
+		return Config{}
+	}
+	return r.cfg
 }
 
 func (r *Registry) Store() SnapshotStore {
@@ -326,7 +337,34 @@ func (r *Registry) drop(reason string) {
 	r.warnRateLimited(reason, &r.lastWarnUnixNano)
 }
 
+// DeclareReportingPublisher records that this process also runs a reporting
+// publisher under the given id, so consumers of the merged view can tell an
+// absent reporter from a process that simply has nothing to report. A process
+// running older code declares nothing, which is exactly the signal wanted.
+func (r *Registry) DeclareReportingPublisher(publisherID string) {
+	if r == nil || publisherID == "" {
+		return
+	}
+	r.reportingPublisherID.Store(publisherID)
+}
+
+func (r *Registry) reportingCompanion() string {
+	if r == nil {
+		return ""
+	}
+	id, _ := r.reportingPublisherID.Load().(string)
+	return id
+}
+
 func (r *Registry) warnRateLimited(message string, stamp *atomic.Int64, attrs ...any) {
+	warnRateLimited(r.logger, stamp, message, attrs...)
+}
+
+// warnRateLimited emits at most one warning per minute per stamp, so a publisher
+// that keeps failing cannot fill the log. Shared by every telemetry component
+// that publishes on a ticker: they all fail the same way and should not each
+// carry their own copy of the throttle.
+func warnRateLimited(logger *slog.Logger, stamp *atomic.Int64, message string, attrs ...any) {
 	n := now().UnixNano()
 	for {
 		previous := stamp.Load()
@@ -336,7 +374,7 @@ func (r *Registry) warnRateLimited(message string, stamp *atomic.Int64, attrs ..
 		if stamp.CompareAndSwap(previous, n) {
 			attrs = append([]any{"component", "stream_telemetry"}, attrs...)
 			attrs = append([]any{"reason", message}, attrs...)
-			r.logger.Warn("stream telemetry warning", attrs...)
+			logger.Warn("stream telemetry warning", attrs...)
 			return
 		}
 	}
@@ -545,7 +583,8 @@ func (r *Registry) Snapshot() Snapshot { return r.SnapshotAt(now()) }
 // observations. Byte totals and LastByteAccepted reflect lastSweptBytes from the
 // most recent sweep; callers that need current totals must call Sweep.
 func (r *Registry) SnapshotAt(capturedAt time.Time) Snapshot {
-	view := Snapshot{PublisherID: r.cfg.PublisherID, NodeID: r.cfg.NodeID, PublisherEpoch: r.cfg.PublisherEpoch, Sequence: r.sequence.Load(), CapturedAt: capturedAt,
+	view := Snapshot{PublisherID: r.cfg.PublisherID, ReportingPublisherID: r.reportingCompanion(),
+		NodeID: r.cfg.NodeID, PublisherEpoch: r.cfg.PublisherEpoch, Sequence: r.sequence.Load(), CapturedAt: capturedAt,
 		Truncated: r.truncatedAt(capturedAt), DroppedObservations: r.droppedObservations.Load(),
 		DroppedBytes: r.droppedBytes.Load(), UnattributedObservations: r.unattributedObservations.Load(),
 		UnattributedBytes: r.unattributedBytes.Load()}

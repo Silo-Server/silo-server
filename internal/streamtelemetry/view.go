@@ -56,6 +56,23 @@ type SessionView struct {
 	HasIdentityConflict         bool
 	IdentityConflicts           []IdentityConflict
 	IdentityConflictsOverflowed bool
+
+	// Reported marks a session a playback session manager told us about, as
+	// opposed to one observed delivering bytes. It is the OTHER half of the
+	// picture: a session with Reported true and no bytes is a client claiming to
+	// watch something nothing is being sent for (#666), and a session with bytes
+	// and Reported false is delivery nobody has claimed.
+	//
+	// A reporting publisher contributes no bytes and no viewer IPs. Those belong
+	// exclusively to the outermost viewer edge (§2.5), and a session manager is
+	// not one — it knows what a client said, not what left the building.
+	Reported                bool
+	ReportedPaused          bool
+	ReportedPositionSeconds float64
+	// ReportedAt is when the reporting publisher captured this state. The merge
+	// takes the newest, so a session that moved between processes reads as its
+	// current owner reports it.
+	ReportedAt time.Time
 }
 
 type TransferView struct {
@@ -79,7 +96,14 @@ type TransferView struct {
 }
 
 type Snapshot struct {
-	PublisherID              string
+	PublisherID string
+	// ReportingPublisherID names this process's reporting companion, when it runs
+	// one. It is what lets BuildGlobalView tell "this process has no sessions to
+	// report" from "this process's reporter has not been seen yet" — during a
+	// rolling deploy an un-upgraded process publishes no reported state at all,
+	// and without this declaration the view would call itself complete while every
+	// paused and pre-delivery session it owns was missing.
+	ReportingPublisherID     string
 	NodeID                   string
 	PublisherEpoch           int64
 	Sequence                 uint64

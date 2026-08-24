@@ -52,7 +52,8 @@ func digest128(value []byte) [16]byte {
 func snapshotHashFields(snapshot Snapshot) (map[string][]byte, error) {
 	fields := make(map[string][]byte, len(snapshot.Sessions)+len(snapshot.Transfers)+1)
 	meta, err := encodeMeta(publisherMeta{
-		PublisherID: snapshot.PublisherID, NodeID: snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
+		PublisherID: snapshot.PublisherID, ReportingPublisherID: snapshot.ReportingPublisherID,
+		NodeID: snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
 		Sequence: snapshot.Sequence, CapturedAtUnixNano: timeToUnixNano(snapshot.CapturedAt), Truncated: snapshot.Truncated,
 		DroppedObservations: snapshot.DroppedObservations, DroppedBytes: snapshot.DroppedBytes,
 		UnattributedObservations: snapshot.UnattributedObservations, UnattributedBytes: snapshot.UnattributedBytes,
@@ -334,7 +335,8 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 		problem.Reason = publisherReasonIdentityMismatch
 		return Snapshot{}, problem, nil
 	}
-	snapshot := Snapshot{PublisherID: meta.PublisherID, NodeID: meta.NodeID, PublisherEpoch: meta.Epoch, Sequence: meta.Sequence,
+	snapshot := Snapshot{PublisherID: meta.PublisherID, ReportingPublisherID: meta.ReportingPublisherID,
+		NodeID: meta.NodeID, PublisherEpoch: meta.Epoch, Sequence: meta.Sequence,
 		CapturedAt: timeFromUnixNano(meta.CapturedAtUnixNano), Truncated: meta.Truncated, DroppedObservations: meta.DroppedObservations,
 		DroppedBytes: meta.DroppedBytes, UnattributedObservations: meta.UnattributedObservations, UnattributedBytes: meta.UnattributedBytes}
 	names := make([]string, 0, len(fields))

@@ -80,6 +80,33 @@ func TestBuildGlobalViewRelayDoesNotSupplyIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildGlobalViewRelayCannotClaimReportedIdentityFallback(t *testing.T) {
+	at := time.Now()
+	relay := Snapshot{PublisherID: "relay", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(9), ProfileID: "p", MediaFileID: 8,
+		Reported: true, ReportedPaused: true, ReportedPositionSeconds: 12, ReportedAt: at,
+		Routes: []RouteActivityView{{Role: RoleInternalRelay, BytesAccepted: 20}},
+	}}}
+	session := BuildGlobalView(globalSet(at, relay), at, globalTestParams()).Sessions[0]
+	if session.Reported || session.Subject != (Subject{}) || session.ProfileID != "" || session.MediaFileID != 0 {
+		t.Fatalf("relay supplied reported identity: %+v", session)
+	}
+}
+
+func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
+	at := time.Now()
+	reporter := Snapshot{PublisherID: "api#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(9), Reported: true, ReportedAt: at,
+		ViewerIPs: []string{"192.0.2.1"}, BytesAccepted: 99,
+		Routes: []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 99}},
+	}}}
+	session := BuildGlobalView(globalSet(at, reporter), at, globalTestParams()).Sessions[0]
+	if !session.Reported || session.ViewerBytesAccepted != 0 || len(session.ViewerIPs) != 0 ||
+		len(session.ViewerEdgePublishers) != 0 || len(session.Routes) != 0 {
+		t.Fatalf("reporter supplied measured provenance: %+v", session)
+	}
+}
+
 func TestBuildGlobalViewMergesRoutesWithEmptyMethod(t *testing.T) {
 	at := time.Now()
 	one := Snapshot{PublisherID: "p1", CapturedAt: at, Sessions: []SessionView{{SessionID: "s", Routes: []RouteActivityView{{Pattern: "/stream", Role: RoleViewerEgress, Open: 1, Requests: 2, BytesAccepted: 3}}}}}
@@ -220,6 +247,44 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 	}
 }
 
+func TestBuildGlobalViewDistinguishesEmptyReporterFromMissingReporter(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
+		ReportingPublisherID: "api#reported"}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at}
+
+	complete := BuildGlobalView(globalSet(at, measuring, reporting), at, globalTestParams())
+	if !complete.Complete || len(complete.MissingPublishers) != 0 {
+		t.Fatalf("empty reporter treated as missing: complete=%v reasons=%v missing=%+v",
+			complete.Complete, complete.IncompleteReasons, complete.MissingPublishers)
+	}
+
+	missing := BuildGlobalView(globalSet(at, measuring), at, globalTestParams())
+	if missing.Complete || !slices.Contains(missing.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("absent reporter not detected: complete=%v reasons=%v", missing.Complete, missing.IncompleteReasons)
+	}
+	if len(missing.MissingPublishers) != 1 || missing.MissingPublishers[0].PublisherID != "api#reported" {
+		t.Fatalf("missing publishers = %+v, want the declared reporter once", missing.MissingPublishers)
+	}
+}
+
+func TestBuildGlobalViewDoesNotDuplicateStaleDeclaredReporter(t *testing.T) {
+	at := time.Now()
+	params := globalTestParams()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
+		ReportingPublisherID: "api#reported"}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node",
+		CapturedAt: at.Add(-params.Freshness - time.Second)}
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, params)
+
+	if len(view.MissingPublishers) != 1 || view.MissingPublishers[0].PublisherID != "api#reported" {
+		t.Fatalf("missing publishers = %+v, want the stale declared reporter once", view.MissingPublishers)
+	}
+	if !slices.Contains(view.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("reasons = %v, want missing_reported_publisher", view.IncompleteReasons)
+	}
+}
+
 func TestBuildGlobalViewEpochAndClockSkew(t *testing.T) {
 	at := time.Now()
 	one := Snapshot{PublisherID: "a", PublisherEpoch: 1, Sequence: 1, CapturedAt: at.Add(time.Second)}
@@ -276,5 +341,90 @@ func TestBuildGlobalViewWholeViewPermutationInvariant(t *testing.T) {
 	rightJSON, _ := json.Marshal(right)
 	if string(leftJSON) != string(rightJSON) {
 		t.Fatalf("permutation changed view\nleft: %s\nright:%s", leftJSON, rightJSON)
+	}
+}
+
+// The session manager knows when playback began; the edge only knows when it
+// first saw bytes. StartedAtSourceSession outranks first_seen precisely to say
+// so, but a reporting publisher is never a viewer edge, so the merge has to let
+// it supply the instant or the authoritative rung never applies to a session
+// that is actually streaming.
+func TestBuildGlobalViewReportedStartedAtOutranksTheEdge(t *testing.T) {
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	trueStart := at.Add(-10 * time.Minute)
+	firstSeen := at.Add(-9 * time.Minute)
+
+	edge := Snapshot{PublisherID: "api-1", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s1", Subject: UserSubject(7),
+		StartedAt: firstSeen, StartedAtSource: StartedAtSourceFirstSeen, StartedAtDegraded: true,
+		BytesAccepted: 4096,
+		Routes: []RouteActivityView{{
+			Method: "GET", Pattern: "/x", Role: RoleViewerEgress, BytesAccepted: 4096,
+		}},
+	}}}
+	reporter := Snapshot{PublisherID: ReportedPublisherIDFor("api-1"), CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s1", Subject: UserSubject(7),
+		StartedAt: trueStart, StartedAtSource: StartedAtSourceSession,
+		Reported: true, ReportedAt: at,
+	}}}
+
+	view := BuildGlobalView(PublisherSet{
+		Members: []Member{
+			{PublisherID: "api-1", LastHeartbeat: at},
+			{PublisherID: ReportedPublisherIDFor("api-1"), LastHeartbeat: at},
+		},
+		Snapshots: []Snapshot{edge, reporter},
+	}, at, ViewParams{Freshness: 5 * time.Second, MaxMergedSessions: 100, MaxMergedTransfers: 100})
+
+	if len(view.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one merged session", view.Sessions)
+	}
+	session := view.Sessions[0]
+	if !session.StartedAt.Equal(trueStart) || session.StartedAtSource != StartedAtSourceSession {
+		t.Fatalf("started at = %v from %q, want %v from %q",
+			session.StartedAt.UTC(), session.StartedAtSource, trueStart, StartedAtSourceSession)
+	}
+	// StartedAtDegraded stays true, and that is main's settled convention rather
+	// than an oversight: the flag means "someone contributing to this row was
+	// guessing", which the edge's first_seen was. What this test pins is that the
+	// value SERVED is the authoritative one, not the guess.
+	if !session.StartedAtDegraded {
+		t.Fatal("a degraded contributor stopped being carried onto the row")
+	}
+	// The edge is still the only one that served bytes.
+	if len(session.ViewerEdgePublishers) != 1 || session.ViewerEdgePublishers[0].PublisherID != "api-1" {
+		t.Fatalf("viewer edge publishers = %+v, want only the measuring publisher", session.ViewerEdgePublishers)
+	}
+}
+
+// Two processes reporting one session — the shape a session that moved between
+// them takes — disagree about the start. The earlier instant is kept and the
+// row says it is degraded, rather than one process silently winning.
+func TestBuildGlobalViewTwoReportersDisagreeingOnStartIsDegraded(t *testing.T) {
+	at := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	earlier, later := at.Add(-10*time.Minute), at.Add(-8*time.Minute)
+
+	reporterOf := func(id string, startedAt time.Time) Snapshot {
+		return Snapshot{PublisherID: ReportedPublisherIDFor(id), CapturedAt: at, Sessions: []SessionView{{
+			SessionID: "s1", Subject: UserSubject(7),
+			StartedAt: startedAt, StartedAtSource: StartedAtSourceSession,
+			Reported: true, ReportedAt: at,
+		}}}
+	}
+
+	view := BuildGlobalView(PublisherSet{
+		Members: []Member{
+			{PublisherID: ReportedPublisherIDFor("api-1"), LastHeartbeat: at},
+			{PublisherID: ReportedPublisherIDFor("api-2"), LastHeartbeat: at},
+		},
+		Snapshots: []Snapshot{reporterOf("api-1", earlier), reporterOf("api-2", later)},
+	}, at, ViewParams{Freshness: 5 * time.Second, MaxMergedSessions: 100, MaxMergedTransfers: 100})
+
+	session := view.Sessions[0]
+	if !session.StartedAt.Equal(earlier) {
+		t.Fatalf("started at = %v, want the earlier %v", session.StartedAt.UTC(), earlier)
+	}
+	if !session.StartedAtDegraded {
+		t.Fatal("two reporters disagreeing about the start was not marked degraded")
 	}
 }

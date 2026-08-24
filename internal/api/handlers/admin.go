@@ -40,6 +40,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
+	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -163,6 +164,11 @@ type AdminHandler struct {
 	// means "not configured". See publicBucketConfigured for the full rule,
 	// which also accepts a bucket that is saved but not live yet.
 	PublicStorageConfigured func() bool
+	// StreamTelemetry and StreamTelemetryViewCache back GET /admin/sessions/live.
+	// Both nil is the normal shape on a process with telemetry disabled, and that
+	// endpoint degrades to the legacy projection rather than failing.
+	StreamTelemetry          *streamtelemetry.Registry
+	StreamTelemetryViewCache *streamtelemetry.ViewCache
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given
@@ -1072,6 +1078,21 @@ func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request
 		return nil, err
 	}
 	return loader.Load(ctx, r, PlaybackSessionsQuery{})
+}
+
+// loadPlaybackSessionsByID fetches display rows for exactly these sessions. An
+// empty id set means the caller wants nothing, not everything.
+func (h *AdminHandler) loadPlaybackSessionsByID(
+	ctx context.Context, r *http.Request, sessionIDs []string,
+) ([]playbackSessionRow, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
+	if err != nil {
+		return nil, err
+	}
+	return loader.Load(ctx, r, PlaybackSessionsQuery{SessionIDs: sessionIDs})
 }
 
 // HandleListPlaybackHistory handles GET /admin/playback-history.

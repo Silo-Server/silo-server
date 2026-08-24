@@ -58,6 +58,11 @@ type ViewCache struct {
 	status    ViewCacheStatus
 	refreshes int64
 	failures  int64
+	// rates carries per-session delivery rate across builds. The merged view is
+	// a level, not a rate, so the only place a rate can come from is the delta
+	// between two consecutive builds — and this is the one component that sees
+	// both.
+	rates map[string]rateSample
 }
 
 // NewViewCache returns a cache over registry's global view. A non-positive ttl
@@ -131,9 +136,11 @@ func (c *ViewCache) View(ctx context.Context) (GlobalMonitoringView, ViewCacheSt
 			c.status.LastError = err.Error()
 		} else {
 			c.refreshes++
+			refreshedAt := now()
 			c.view = view.clone()
+			c.updateRatesLocked(c.view, refreshedAt)
 			c.status.Available = true
-			c.status.RefreshedAt = now()
+			c.status.RefreshedAt = refreshedAt
 			c.status.Refreshes = c.refreshes
 			c.status.LastError = ""
 		}
@@ -143,6 +150,36 @@ func (c *ViewCache) View(ctx context.Context) (GlobalMonitoringView, ViewCacheSt
 		c.mu.Unlock()
 		return served, status
 	}
+}
+
+// Live returns the per-session byte facts behind the merged view.
+//
+// It no longer decides whether the caller may trust the list. That question
+// existed because telemetry only saw sessions that moved bytes through an
+// observed route family, so an absent session was ambiguous — "no bytes flowed"
+// or "nobody was looking" — and subtracting against it could erase live viewers.
+// Each API process now publishes its session manager as a reporting publisher,
+// so the view holds every session anyone knows about and an absent session simply
+// means absent. What is left is the ordinary freshness contract, returned
+// alongside so a caller can still tell a complete view from a degraded one.
+func (c *ViewCache) Live(ctx context.Context) (LiveSnapshot, GlobalMonitoringView, ViewCacheStatus) {
+	view, status := c.View(ctx)
+	snapshot := LiveSnapshot{Facts: map[string]LiveByteFacts{}}
+	if !status.Available {
+		return snapshot, view, status
+	}
+
+	snapshot.Facts = LiveByteFactsFromGlobalView(view)
+	c.mu.Lock()
+	for sessionID, facts := range snapshot.Facts {
+		if sample, ok := c.rates[sessionID]; ok && sample.known {
+			facts.DeliveryRateKbps = sample.kbps
+			facts.RateAvailable = true
+			snapshot.Facts[sessionID] = facts
+		}
+	}
+	c.mu.Unlock()
+	return snapshot, view, status
 }
 
 func (c *ViewCache) build(ctx context.Context) (GlobalMonitoringView, error) {

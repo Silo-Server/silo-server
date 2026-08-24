@@ -90,6 +90,16 @@ type wireSession struct {
 	HasIdentityConflict         bool                               `json:"hic"`
 	IdentityConflicts           []wireIdentityConflict             `json:"ics"`
 	IdentityConflictsOverflowed bool                               `json:"icso"`
+
+	// Reported-state block. These are additive: encoding/json ignores unknown
+	// fields on decode and leaves missing ones zero, so a publisher running older
+	// code stays decodable and simply contributes no reported state. That is why
+	// adding them needs no codecVersion bump, which would have made every older
+	// publisher's records undecodable through a rolling deploy.
+	Reported                bool    `json:"rep,omitempty"`
+	ReportedPaused          bool    `json:"reppa,omitempty"`
+	ReportedPositionSeconds float64 `json:"reppos,omitempty"`
+	ReportedAt              int64   `json:"repat,omitempty"`
 }
 
 type wireTransfer struct {
@@ -116,6 +126,7 @@ type wireTransfer struct {
 type publisherMeta struct {
 	V                        int    `json:"v"`
 	PublisherID              string `json:"pid"`
+	ReportingPublisherID     string `json:"rpid,omitempty"`
 	NodeID                   string `json:"nid"`
 	Epoch                    int64  `json:"ep"`
 	Sequence                 uint64 `json:"sq"`
@@ -167,7 +178,9 @@ func encodeSession(value SessionView) ([]byte, error) {
 		DeviceIDs: value.DeviceIDs, DeviceIDsOverflowed: value.DeviceIDsOverflowed, UserAgents: value.UserAgents, UserAgentsOverflowed: value.UserAgentsOverflowed,
 		TokenIssuedAtsOverflowed: value.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources:     value.TokenIssuedAtSources, Outcomes: value.Outcomes, HasIdentityConflict: value.HasIdentityConflict,
-		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed,
+		Reported: value.Reported, ReportedPaused: value.ReportedPaused,
+		ReportedPositionSeconds: value.ReportedPositionSeconds, ReportedAt: timeToUnixNano(value.ReportedAt)}
 	for _, route := range value.Routes {
 		w.Routes = append(w.Routes, wireRouteActivity{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeToUnixNano(route.LastByteAccepted), LastObservationEnd: timeToUnixNano(route.LastObservationEnd)})
 	}
@@ -202,7 +215,9 @@ func decodeSession(data []byte) (SessionView, error) {
 		ViewerIPs: w.ViewerIPs, ViewerIPsOverflowed: w.ViewerIPsOverflowed, DeviceIDs: w.DeviceIDs, DeviceIDsOverflowed: w.DeviceIDsOverflowed,
 		UserAgents: w.UserAgents, UserAgentsOverflowed: w.UserAgentsOverflowed, TokenIssuedAtsOverflowed: w.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources: w.TokenIssuedAtSources, Outcomes: w.Outcomes, HasIdentityConflict: w.HasIdentityConflict,
-		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed}
+		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed,
+		Reported: w.Reported, ReportedPaused: w.ReportedPaused,
+		ReportedPositionSeconds: w.ReportedPositionSeconds, ReportedAt: timeFromUnixNano(w.ReportedAt)}
 	for _, route := range w.Routes {
 		v.Routes = append(v.Routes, RouteActivityView{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeFromUnixNano(route.LastByteAccepted), LastObservationEnd: timeFromUnixNano(route.LastObservationEnd)})
 	}
