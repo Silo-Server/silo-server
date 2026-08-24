@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,6 +81,115 @@ func TestFilterWatchedHomeSectionItemsKeepsUnknownState(t *testing.T) {
 	filtered := filterWatchedHomeSectionItems(input, nil)
 	if len(filtered[0].Items) != 1 {
 		t.Fatal("item with unavailable user state was hidden")
+	}
+}
+
+func TestFilterWatchedHomeSectionItemsRefillsDisplayLimit(t *testing.T) {
+	items := make([]*models.MediaItem, 0, 23)
+	states := make(map[string]*itemUserStateResponse, 23)
+	for i := 0; i < 23; i++ {
+		id := fmt.Sprintf("item-%02d", i+1)
+		items = append(items, &models.MediaItem{ContentID: id})
+		states[id] = &itemUserStateResponse{Played: i < 3}
+	}
+	input := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{
+			ID:          "ordinary",
+			SectionType: sections.SectionRecentlyAdded,
+			ItemLimit:   20,
+		},
+		Items:      items,
+		TotalCount: 50,
+	}}
+
+	filtered := filterWatchedHomeSectionItems(input, states)
+	if got := len(filtered[0].Items); got != 20 {
+		t.Fatalf("filtered section has %d items, want configured limit 20", got)
+	}
+	if got := filtered[0].Items[19].ContentID; got != "item-23" {
+		t.Errorf("last displayed item = %q, want refill candidate item-23", got)
+	}
+	if got := filtered[0].TotalCount; got != 50 {
+		t.Errorf("TotalCount = %d, want source count 50", got)
+	}
+	if got := len(input[0].Items); got != 23 {
+		t.Errorf("input section mutated to %d items", got)
+	}
+}
+
+func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
+	resolved := []sections.ResolvedSection{
+		{ID: "ordinary", SectionType: sections.SectionRecentlyAdded, ItemLimit: 20},
+		{ID: "featured", SectionType: sections.SectionRecentlyAdded, Featured: true, ItemLimit: 20},
+		{ID: "most-watched", SectionType: sections.SectionMostWatched, ItemLimit: 20},
+		{ID: "large", SectionType: sections.SectionRecentlyAdded, ItemLimit: 250},
+	}
+
+	unchanged := homeSectionsForFetch(resolved, sectionResponseOptions{})
+	if unchanged[0].ItemLimit != 20 {
+		t.Fatalf("disabled preference changed limit to %d", unchanged[0].ItemLimit)
+	}
+
+	expanded := homeSectionsForFetch(resolved, sectionResponseOptions{hideWatchedHomeItems: true})
+	wantLimits := []int{100, 20, 20, 250}
+	for i, want := range wantLimits {
+		if got := expanded[i].ItemLimit; got != want {
+			t.Errorf("section %q fetch limit = %d, want %d", expanded[i].ID, got, want)
+		}
+	}
+	if got := resolved[0].ItemLimit; got != 20 {
+		t.Errorf("input limit mutated to %d", got)
+	}
+}
+
+func TestHomeWatchedCandidateLimitCapsExpandedWindow(t *testing.T) {
+	for _, test := range []struct {
+		display int
+		want    int
+	}{
+		{display: 0, want: 0},
+		{display: 20, want: 100},
+		{display: 50, want: 200},
+		{display: 250, want: 250},
+	} {
+		if got := homeWatchedCandidateLimit(test.display); got != test.want {
+			t.Errorf("homeWatchedCandidateLimit(%d) = %d, want %d", test.display, got, test.want)
+		}
+	}
+}
+
+func TestWatchedRefillRunsBeforeDiversity(t *testing.T) {
+	visible := &models.MediaItem{ContentID: "visible"}
+	overflow := &models.MediaItem{ContentID: "overflow"}
+	sectionsWithItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{
+				ID:          "ordinary",
+				SectionType: sections.SectionRecentlyAdded,
+				ItemLimit:   1,
+			},
+			Items: []*models.MediaItem{visible, overflow},
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{
+				ID:          "avoid-duplicates",
+				SectionType: sections.SectionHiddenGems,
+			},
+			Items: []*models.MediaItem{overflow},
+		},
+	}
+
+	filtered := filterWatchedHomeSectionItems(sectionsWithItems, map[string]*itemUserStateResponse{
+		"visible":  {Played: false},
+		"overflow": {Played: false},
+	})
+	diverse := applyDiversityFilter(filtered)
+
+	if got := diverse[0].Items; len(got) != 1 || got[0].ContentID != "visible" {
+		t.Fatalf("first section items = %#v, want visible refill", got)
+	}
+	if got := diverse[1].Items; len(got) != 1 || got[0].ContentID != "overflow" {
+		t.Fatalf("hidden overflow candidate affected downstream diversity: %#v", got)
 	}
 }
 

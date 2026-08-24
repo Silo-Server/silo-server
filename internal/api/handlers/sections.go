@@ -583,10 +583,14 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 
 	userID := apimw.GetUserID(r.Context())
 	resolved = h.maybeInjectNextUp(r.Context(), resolved, userID)
-	withItems := h.fetcher.FetchAll(r.Context(), resolved, nil, libraryIDs, userID, profileID, accessFilter)
+	responseOptions := h.homeSectionResponseOptions(r)
+	fetchSections := homeSectionsForFetch(resolved, responseOptions)
+	withItems := h.fetcher.FetchAll(r.Context(), fetchSections, nil, libraryIDs, userID, profileID, accessFilter)
+	withItems = restoreHomeSectionDisplayLimits(withItems, resolved)
+	withItems, responseOptions = h.prepareHomeSectionsResponse(r, withItems, responseOptions)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
-	writeJSON(w, http.StatusOK, h.buildHomeSectionsResponse(r, withItems))
+	writeJSON(w, http.StatusOK, h.buildSectionsResponseWithOptions(r, withItems, responseOptions))
 }
 
 // HandleHomeSectionItems handles GET /home/sections/{id}/items
@@ -604,13 +608,15 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 	}
 	userID := apimw.GetUserID(r.Context())
 	resolved = h.maybeInjectNextUp(r.Context(), resolved, userID)
+	responseOptions := h.homeSectionResponseOptions(r)
 
 	for _, s := range resolved {
 		if s.ID != sectionID {
 			continue
 		}
 
-		withItems, fetchErr := h.fetcher.FetchOne(r.Context(), s, nil, libraryIDs, userID, profileID, accessFilter)
+		fetchSection := homeSectionsForFetch([]sections.ResolvedSection{s}, responseOptions)[0]
+		withItems, fetchErr := h.fetcher.FetchOne(r.Context(), fetchSection, nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			slog.ErrorContext(r.Context(), "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
 			withItems = sections.SectionWithItems{
@@ -618,8 +624,10 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 				Items:           []*models.MediaItem{},
 			}
 		}
+		withItems.ItemLimit = s.ItemLimit
+		prepared, preparedOptions := h.prepareHomeSectionsResponse(r, []sections.SectionWithItems{withItems}, responseOptions)
 
-		resp := h.buildHomeSectionsResponse(r, []sections.SectionWithItems{withItems})
+		resp := h.buildSectionsResponseWithOptions(r, prepared, preparedOptions)
 		if len(resp.Sections) == 0 {
 			resp.Sections = append(resp.Sections, resolvedSectionResponse{
 				ID:          withItems.ID,
@@ -1229,9 +1237,17 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 
 type sectionResponseOptions struct {
 	hideWatchedHomeItems bool
+	userStates           map[string]*itemUserStateResponse
 }
 
-func (h *SectionHandler) buildHomeSectionsResponse(r *http.Request, withItems []sections.SectionWithItems) homeSectionsResponse {
+const (
+	homeWatchedCandidateMultiplier = 5
+	// Series and season watched state requires episode lookups, so keep the
+	// refill window bounded rather than scanning the whole section.
+	homeWatchedMaxExpandedCandidates = 200
+)
+
+func (h *SectionHandler) homeSectionResponseOptions(r *http.Request) sectionResponseOptions {
 	options := sectionResponseOptions{}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
@@ -1241,7 +1257,72 @@ func (h *SectionHandler) buildHomeSectionsResponse(r *http.Request, withItems []
 			options.hideWatchedHomeItems = sections.HideWatchedItemsFromHome(r.Context(), store, profileID)
 		}
 	}
+	return options
+}
+
+func (h *SectionHandler) buildHomeSectionsResponse(r *http.Request, withItems []sections.SectionWithItems) homeSectionsResponse {
+	options := h.homeSectionResponseOptions(r)
+	withItems, options = h.prepareHomeSectionsResponse(r, withItems, options)
 	return h.buildSectionsResponseWithOptions(r, withItems, options)
+}
+
+func (h *SectionHandler) prepareHomeSectionsResponse(
+	r *http.Request,
+	withItems []sections.SectionWithItems,
+	options sectionResponseOptions,
+) ([]sections.SectionWithItems, sectionResponseOptions) {
+	if !options.hideWatchedHomeItems {
+		return withItems, options
+	}
+
+	options.userStates = h.listSectionItemUserStates(r, sectionMediaItems(withItems))
+	return filterWatchedHomeSectionItems(withItems, options.userStates), options
+}
+
+func homeSectionsForFetch(
+	resolved []sections.ResolvedSection,
+	options sectionResponseOptions,
+) []sections.ResolvedSection {
+	if !options.hideWatchedHomeItems {
+		return resolved
+	}
+
+	fetchSections := make([]sections.ResolvedSection, len(resolved))
+	copy(fetchSections, resolved)
+	for i := range fetchSections {
+		section := &fetchSections[i]
+		if section.Featured || sections.PreserveWatchedItemsOnHome(section.SectionType) {
+			continue
+		}
+		section.ItemLimit = homeWatchedCandidateLimit(section.ItemLimit)
+	}
+	return fetchSections
+}
+
+func homeWatchedCandidateLimit(displayLimit int) int {
+	if displayLimit <= 0 || displayLimit >= homeWatchedMaxExpandedCandidates {
+		return displayLimit
+	}
+	if displayLimit > homeWatchedMaxExpandedCandidates/homeWatchedCandidateMultiplier {
+		return homeWatchedMaxExpandedCandidates
+	}
+	return displayLimit * homeWatchedCandidateMultiplier
+}
+
+func restoreHomeSectionDisplayLimits(
+	withItems []sections.SectionWithItems,
+	resolved []sections.ResolvedSection,
+) []sections.SectionWithItems {
+	displayLimits := make(map[string]int, len(resolved))
+	for _, section := range resolved {
+		displayLimits[section.ID] = section.ItemLimit
+	}
+	for i := range withItems {
+		if displayLimit, ok := displayLimits[withItems[i].ID]; ok {
+			withItems[i].ItemLimit = displayLimit
+		}
+	}
+	return withItems
 }
 
 func (h *SectionHandler) buildSectionsResponseWithOptions(
@@ -1250,10 +1331,9 @@ func (h *SectionHandler) buildSectionsResponseWithOptions(
 	options sectionResponseOptions,
 ) homeSectionsResponse {
 	allItems := sectionMediaItems(withItems)
-	userStates := h.listSectionItemUserStates(r, allItems)
-	if options.hideWatchedHomeItems {
-		withItems = filterWatchedHomeSectionItems(withItems, userStates)
-		allItems = sectionMediaItems(withItems)
+	userStates := options.userStates
+	if userStates == nil {
+		userStates = h.listSectionItemUserStates(r, allItems)
 	}
 
 	overlaySummaries := make(map[string]*models.OverlaySummary)
@@ -1355,6 +1435,9 @@ func filterWatchedHomeSectionItems(
 				continue
 			}
 			items = append(items, item)
+			if section.ItemLimit > 0 && len(items) == section.ItemLimit {
+				break
+			}
 		}
 		section.Items = items
 	}
