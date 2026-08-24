@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -539,6 +540,73 @@ func TestHandleUserImageHeadRequest(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
 		t.Fatalf("Content-Type = %q, want image/png", ct)
 	}
+}
+
+// TestHandlePersonImageClampsLargeRequestToProfileLadder verifies a large-ish
+// person-image request resolves a w500 headshot. Profiles ride the {500, 300}
+// ladder, so resolving them as posters would name a profile/w780 key that is
+// never generated, and the server-side ladder fallback skips profile.
+func TestHandlePersonImageClampsLargeRequestToProfileLadder(t *testing.T) {
+	codec := NewResourceIDCodec()
+	routeID := codec.EncodeIntID(EncodedIDPerson, 287)
+	photoPath := "tmdb/people/287/profile/original.abc123.webp"
+
+	resolver := &recordingImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+
+	h := &ImagesHandler{
+		codec:      codec,
+		images:     NewImageCache(time.Hour, time.Now),
+		personRepo: fakeImagePersonRepo{person: &models.Person{ID: 287, Name: "Brad Pitt", PhotoPath: photoPath}},
+		detailSvc:  detailSvc,
+		imageTags:  newImageTagSigner("image-secret"),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?MaxWidth=900", nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.handlePersonImage(rec, req, routeID, "Primary", 287)
+
+	if got := compatRequestImageSize(req, "Primary"); got != compatLargeImageSize {
+		t.Fatalf("compatRequestImageSize = %q, want %q", got, compatLargeImageSize)
+	}
+	want := "tmdb/people/287/profile/w500.abc123.webp"
+	if resolver.path != want {
+		t.Fatalf("resolved path = %q, want %q", resolver.path, want)
+	}
+	assertImageRedirect(t, rec, "https://cdn.example.test/"+want)
+}
+
+type recordingImageResolver struct {
+	path    string
+	variant string
+}
+
+func (r *recordingImageResolver) ResolveImageURL(_ context.Context, path string, variant string) string {
+	r.path = path
+	r.variant = variant
+	return "https://cdn.example.test/" + path
+}
+
+func (r *recordingImageResolver) ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string {
+	out := make(map[string]string, len(paths))
+	for _, path := range paths {
+		out[path] = r.ResolveImageURL(ctx, path, variant)
+	}
+	return out
+}
+
+type fakeImagePersonRepo struct {
+	person *models.Person
+}
+
+func (r fakeImagePersonRepo) Get(_ context.Context, id int64) (*models.Person, error) {
+	if r.person != nil && r.person.ID == id {
+		return r.person, nil
+	}
+	return nil, errors.New("person not found")
 }
 
 func assertImageRedirect(t *testing.T, rec *httptest.ResponseRecorder, wantLocation string) {
