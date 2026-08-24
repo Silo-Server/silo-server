@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -79,7 +80,7 @@ func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
 		},
 	}
 
-	urls := handler.itemListCardImageURLs(context.Background(), items)
+	urls := handler.itemListCardImageURLs(context.Background(), items, imagesize.Unset)
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single resolver calls = %d, want 0", resolver.singleCalls)

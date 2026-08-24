@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -35,6 +36,13 @@ type AccessFilter struct {
 	// DeviceID identifies the requesting client for device-scoped setting
 	// resolution. It does not participate in catalog access control.
 	DeviceID string
+	// ImageSize is the artwork size the client asked for on this request, and
+	// like DeviceID it does not participate in access control. It rides here
+	// because detail building fans out through a dozen helpers that already
+	// carry the filter, and every artwork URL in one response has to agree on a
+	// size. Unset means the caller expressed no preference, and the per-context
+	// defaults apply. See internal/imagesize.
+	ImageSize imagesize.Size
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so

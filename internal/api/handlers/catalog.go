@@ -201,7 +201,7 @@ func (h *CatalogHandler) catalogItemResponses(r *http.Request, resultItems []*mo
 	responseWG.Add(2)
 	go func() {
 		defer responseWG.Done()
-		imageURLs = h.itemsH.itemListCardImageURLs(r.Context(), localizedItems)
+		imageURLs = h.itemsH.itemListCardImageURLs(r.Context(), localizedItems, accessFilter.ImageSize)
 	}()
 	go func() {
 		defer responseWG.Done()

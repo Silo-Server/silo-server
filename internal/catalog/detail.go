@@ -1456,7 +1456,7 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 		castCredits: castCredits,
 		crewCredits: crewCredits,
 		versionPref: s.effectiveVersionDefaults(ctx, filter, seriesID),
-		backdropURL: s.PresignImageURL(ctx, series.BackdropPath, "backdrop", ""),
+		backdropURL: s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
 	}, nil
 }
 
@@ -1853,9 +1853,9 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 
 	// Resolve image URLs: full URLs (TVDB/TMDB) pass through; S3 cached base paths get
 	// variant-resolved and presigned.
-	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", "")
-	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", "")
-	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", "")
+	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
+	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
+	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
 
 	// File versions and subtitle aggregation only apply to movies.
 	// For series, each episode file shares the series content_id, so
@@ -2214,7 +2214,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 	}
 	// Presign every chapter poster in one batch rather than per chapter — a
 	// long-running series has hundreds of chapters.
-	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", "")
+	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", string(filter.ImageSize))
 	for i := range chapters {
 		chapters[i].PosterURL = resolved[chapters[i].PosterURL]
 	}
@@ -2246,8 +2246,8 @@ func firstNonEmptyString(values []string) string {
 	return ""
 }
 
-func (s *DetailService) presignAudiobookPosterURL(ctx context.Context, posterPath string) string {
-	return s.PresignImageURL(ctx, posterPath, "poster", "")
+func (s *DetailService) presignAudiobookPosterURL(ctx context.Context, posterPath string, filter AccessFilter) string {
+	return s.PresignImageURL(ctx, posterPath, "poster", string(filter.ImageSize))
 }
 
 func appendAudiobookItemAccessConditions(
@@ -2343,7 +2343,7 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath)
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
 		out = append(out, item)
 	}
 	return out
@@ -2410,7 +2410,7 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
 			return []AudiobookRelatedItem{}
 		}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath)
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
 		out = append(out, item)
 	}
 	return out
@@ -2484,7 +2484,7 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 				item.SeriesIndex = &n
 			}
 		}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, poster)
+		item.PosterURL = s.presignAudiobookPosterURL(ctx, poster, filter)
 		entries = append(entries, item)
 	}
 	if len(entries) < 2 {
@@ -2669,8 +2669,8 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		detail.AirDate = &airDate
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", "")
-	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", "")
+	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSize))
+	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
 	return detail, nil
 }
 
@@ -2719,7 +2719,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		detail.Title = fmt.Sprintf("Episode %d", episode.EpisodeNumber)
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", "")
+	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
 	detail.BackdropURL = seriesCtx.backdropURL
 
 	files, err := s.fileFetcher.GetByEpisodeID(ctx, episode.ContentID)
@@ -4100,6 +4100,14 @@ func imageTypeFromCachedPath(path string) string {
 	}
 	dir := path[:lastSlash]
 	return dir[strings.LastIndex(dir, "/")+1:]
+}
+
+// ImageTypeFromCachedPath returns the image type ("poster", "backdrop",
+// "logo", "still", "profile") encoded in a cached S3 image path, or "" when the
+// path is a full URL, plugin-prefixed, or has no directory segment. Callers
+// outside this package need it to pick the variant ladder that governs a path.
+func ImageTypeFromCachedPath(path string) string {
+	return imageTypeFromCachedPath(path)
 }
 
 // BackdropVariantPath rewrites a cached "/original." image path to the

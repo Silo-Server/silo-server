@@ -15,6 +15,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
@@ -575,6 +576,9 @@ func (h *SectionHandler) HandleLibraryLayout(w http.ResponseWriter, r *http.Requ
 
 // HandleHomeSections handles GET /home/sections
 func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(r)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -591,6 +595,9 @@ func (h *SectionHandler) HandleHomeSections(w http.ResponseWriter, r *http.Reque
 
 // HandleHomeSectionItems handles GET /home/sections/{id}/items
 func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	sectionID := chi.URLParam(r, "id")
 	if sectionID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Section ID is required")
@@ -645,6 +652,9 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 
 // HandleLibrarySections handles GET /library/{id}/sections
 func (h *SectionHandler) HandleLibrarySections(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	idStr := chi.URLParam(r, "id")
 	libraryID, err := strconv.Atoi(idStr)
 	if err != nil {
@@ -667,6 +677,9 @@ func (h *SectionHandler) HandleLibrarySections(w http.ResponseWriter, r *http.Re
 
 // HandleLibrarySectionItems handles GET /library/{id}/sections/{sectionId}/items
 func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *http.Request) {
+	if !rejectInvalidImageSize(w, r) {
+		return
+	}
 	idStr := chi.URLParam(r, "id")
 	libraryID, err := strconv.Atoi(idStr)
 	if err != nil {
@@ -1256,7 +1269,7 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		allItems = append(allItems, s.Items...)
 	}
 	userStates := h.listSectionItemUserStates(r, allItems)
-	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems)
+	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems, requestImageSize(r))
 	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
 	mangaChapterMeta := h.listSectionMangaChapterItemMeta(r.Context(), allItems)
 	for _, s := range withItems {
@@ -1365,7 +1378,7 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 	return meta
 }
 
-func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems) map[sectionItemImageKey]sectionItemImageURLs {
+func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
 	result := make(map[sectionItemImageKey]sectionItemImageURLs)
 	if h.DetailSvc == nil {
 		return result
@@ -1402,9 +1415,9 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 					sectionID: section.ID,
 					contentID: item.ContentID,
 				},
-				posterPath:   featuredPosterPath(item.PosterPath),
-				backdropPath: sectionBackdropPath(section.SectionType, item.BackdropPath),
-				logoPath:     item.LogoPath,
+				posterPath:   sizedPosterPath(item.PosterPath, size),
+				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
+				logoPath:     sizedImagePath(item.LogoPath, "logo", size, item.LogoPath),
 			}
 			pending = append(pending, images)
 			addPath(images.posterPath)
@@ -1413,7 +1426,7 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 		}
 	}
 
-	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, "featured")
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", size))
 	for _, images := range pending {
 		result[images.key] = sectionItemImageURLs{
 			posterURL:   resolved[images.posterPath].URL,
@@ -1475,6 +1488,14 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	resp.LogoURL = imageURLs.logoURL
 
 	return resp
+}
+
+// sizedSectionBackdropPath applies the request's image size to a section
+// backdrop. An explicit size wins over the per-section default, including the
+// Continue Watching / Next Up special case below: a client that asked for one
+// size gets that size in every row.
+func sizedSectionBackdropPath(sectionType sections.SectionType, path string, size imagesize.Size) string {
+	return sizedImagePath(path, imageTypeForBackdropPath(path), size, sectionBackdropPath(sectionType, path))
 }
 
 // sectionBackdropPath keeps featured-style backdrops for most sections, but
