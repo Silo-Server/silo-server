@@ -73,14 +73,19 @@ All paths are relative to `/api/v1`. Every endpoint requires an authenticated
 user. The mutation endpoints additionally require a profile, supplied as the
 `X-Profile-Id` header.
 
-Every non-2xx response body is the standard error envelope:
+Every non-2xx response body includes the standard error envelope:
 
 ```json
 {"error": "<machine_code>", "message": "<human sentence>"}
 ```
 
 The `error` code is the stable part; the `message` is for logs and is not
-contract.
+contract. An endpoint may add fields that help the client recover. In
+particular, a replan rejected after the server can prove `failed_plan_id` is no
+longer current includes `current_decision`, a complete playable
+`DecisionResponseV3` for the session's durably committed plan. A client can
+adopt that decision instead of stopping a session whose replacement completed
+while its response was in flight.
 
 ### 2.1 `GET /playback/capability`
 
@@ -101,13 +106,13 @@ the document is always the full one:
   "features": ["playback_plan_v3", "neutral_playback_v3_contract_v1", "layout_aware_passthrough", "playback_route_diagnostics",
                "device_quirks_v1", "seek_reanchor_v1", "output_change_v1", "direct_stream_resume_v1",
                "header_authenticated_media_v1", "authorized_media_origins_v1", "software_video_decode_v1",
-               "plan_invalidated_v1", "plan_source_duration_v1"],
+               "plan_invalidated_v1", "capability_warming_v1", "plan_source_duration_v1"],
   "deliveries": ["original_http", "server_remux_progressive", "server_remux_hls", "server_transcode_hls"],
   "transformations": [{"name": "audio_to_aac", "executor": "server", "recipe_version": "1", "validated_claims": ["audio_decode"]}]
 }
 ```
 
-The thirteen feature strings above are the full set this server version advertises:
+The fourteen feature strings above are the full set this server version advertises:
 
 | Feature | What it promises |
 | --- | --- |
@@ -123,6 +128,7 @@ The thirteen feature strings above are the full set this server version advertis
 | `authorized_media_origins_v1` | Meaningful only with the token above: the client also honors credential-free absolute media URLs on server-designated proxy origins, which restores distributed egress for a header-authenticated attempt (§4.1) |
 | `software_video_decode_v1` | Exact/platform-attested clients may qualify bounded `video_decode[]` entries with `hardware: false` for direct/original delivery; without the opt-in those evidence tiers remain hardware-only (§3) |
 | `plan_invalidated_v1` | The client can be told mid-session that the plan it is playing was withdrawn, over the realtime `plan_invalidated` command, and replans off it. A session that did not negotiate it is stopped instead (§6.1) |
+| `capability_warming_v1` | Decisions may return the retryable `capability_warming` terminal with `retry_after_ms`; clients may wait and retry the same requested file instead of treating the incomplete inventory as definitive (§7.3) |
 | `plan_source_duration_v1` | `source.duration_seconds` is populated when known, so its absence means *unknown* rather than *unsupported* (§5) |
 
 That last one is the reason feature detection is a list and not a version
@@ -193,7 +199,9 @@ the same replay/conflict rules and gives terminal route events an addressable
 authorization record.
 
 A client generates a fresh `playback_attempt_id` per user-initiated playback and
-reuses it only to retry a request whose response it did not receive.
+reuses it only to retry a request whose response it did not receive. After any
+response is received, including a retryable terminal, a follow-up start mints a
+new ID so the server does not replay the durable response.
 
 **Omission is a request, not a default.** Two start fields mean "you decide" when
 absent, and the server answers from stored user state rather than from a
@@ -234,7 +242,7 @@ body cap: 256 KiB. Body: `ReplanRequestV3`
 | `401` | `unauthorized` | No authenticated user, or no `X-Profile-Id` |
 | `403` | `forbidden` | The session belongs to another user or profile |
 | `404` | `playback_session_not_found` | No such session, or its session has ended |
-| `409` | `stale_playback_plan` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active |
+| `409` | `stale_playback_plan` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active. When the server rejects a superseded `failed_plan_id` or completed request against a known current plan, the body also carries its playable `current_decision`. |
 | `409` | `idempotency_key_reused` | This `replan_request_id` was used for a different replan |
 | `409` | `replan_in_progress` | A replan for this session holds the lease right now |
 | `503` | `replan_capacity_exhausted` | Server-wide concurrent replan limit (8) reached; retryable |
@@ -945,7 +953,10 @@ The plan will play, but something the user might notice was given up.
 ### 7.3 Terminal reasons
 
 Playback will not proceed. `terminal.retryable` says whether trying again could
-help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
+help. A retryable terminal may include `retry_after_ms`; each retry of a start
+must mint a fresh `playback_attempt_id`, because an attempt decision is
+idempotently replayed. Delivered inside a `201` (start) or `200` (replan), never
+a 4xx.
 
 *Planner:* `adaptation_exhausted`, `adaptation_unavailable`,
 `client_hls_unsupported`, `conversion_tool_unavailable`,
@@ -966,12 +977,19 @@ HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playba
 `subtitle_artifact_unavailable`, `capacity_unavailable`,
 `local_transcode_disabled`,
 `audio_transcoding_disabled`,
-`transcode_start_failed`, `transcode_node_unavailable`,
+`capability_warming`, `transcode_start_failed`, `transcode_node_unavailable`,
 `transcode_node_capability_unavailable`, `track_unavailable`,
 `invalid_seek_position`, `invalid_replan`, `seek_reanchor_route_changed`,
 `seek_reanchor_recipe_unavailable`,
 `seek_reanchor_intent_mismatch`, `seek_failure_recovery_intent_mismatch`,
 `policy_denied`.
+
+`capability_warming` means the bounded planning request ended before the shared
+tone-map inventory became definitive. It is retryable and never authorizes an
+alternate media-file selection; a client should keep the requested file pinned
+while retrying. Automatic retry requires the server-advertised
+`capability_warming_v1` feature; without it, a client treats the terminal as a
+normal adaptation refusal and surfaces the server message.
 
 ### 7.4 Route event names
 

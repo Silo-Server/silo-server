@@ -22,6 +22,10 @@ const (
 	FeatureOutputChangeV3        = "output_change_v1"
 	FeatureDirectStreamResumeV3  = "direct_stream_resume_v1"
 	FeaturePlanSourceDurationV3  = "plan_source_duration_v1"
+	// FeatureCapabilityWarmingV3 advertises retryable capability_warming
+	// terminals and their server-guided retry delay. Clients can detect this
+	// contract through the capability endpoint before starting playback.
+	FeatureCapabilityWarmingV3 = "capability_warming_v1"
 	// FeatureSoftwareVideoDecodeV3 lets a strict evidence-tier client opt into
 	// bounded hardware:false video_decode entries. Without the feature, exact
 	// and platform_attested retain their historical hardware-only direct-play
@@ -95,6 +99,7 @@ func ServerFeaturesV3() []string {
 		FeatureAuthorizedMediaOriginsV3,
 		FeatureSoftwareVideoDecodeV3,
 		FeaturePlanInvalidatedV3,
+		FeatureCapabilityWarmingV3,
 		// Advertised so a client can tell "this server does not populate
 		// source.duration_seconds" apart from "this server knows the runtime
 		// is genuinely unknown". Without the distinction both look like an
@@ -806,9 +811,10 @@ type PlanV3 struct {
 }
 
 type TerminalV3 struct {
-	Reason    string `json:"reason"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Reason           string `json:"reason"`
+	Message          string `json:"message"`
+	Retryable        bool   `json:"retryable"`
+	RetryAfterMillis int64  `json:"retry_after_ms,omitempty"`
 }
 
 type DecisionResponseV3 struct {

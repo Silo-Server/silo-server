@@ -1049,6 +1049,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.MarkerUpserter = deps.FileRepo
 		}
 		playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
+		playbackHandler.StartToneMapCapabilityWarmup(deps.AppContext)
 		// Optimistic remux: a play is never blocked on the H.264 copy-safety
 		// scan, so the scan runs behind the issued plan and the notifier moves
 		// any session that is already stream-copying an unsafe source off that

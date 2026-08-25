@@ -17,6 +17,7 @@ import (
 const (
 	probeCommandTimeout = 5 * time.Second
 	probeNegativeTTL    = 15 * time.Second
+	probePositiveTTL    = 5 * time.Minute
 	probeTimeoutSlack   = time.Second
 	probeEndpointSlack  = 20 * time.Second
 	probeRequestSlack   = 5 * time.Second
@@ -34,8 +35,9 @@ const decodeProbeFixtureBase64 = "AAAAAUABDAH//wIgAAADAJAAAAMAAAMAHpWUCQAAAAFCAQ
 // output. Tests inject it to model individual FFmpeg capabilities and failures.
 type CommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-// probeCacheEntry stores either a permanent positive capability result or a
-// short-lived negative result that is eligible for retry.
+// probeCacheEntry stores a bounded capability result. Positive inventories can
+// be partial (for example software succeeded while a hardware smoke test did
+// not), so they must be refreshed rather than pinned until process restart.
 type probeCacheEntry struct {
 	capabilities Capabilities
 	expiresAt    time.Time
@@ -58,11 +60,13 @@ func Probe(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevice stri
 func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevice string, run CommandRunner, now func() time.Time) (Capabilities, error) {
 	key := probeCacheKey(ffmpegPath, hardwareBackend, hardwareDevice)
 	probeCache.Lock()
-	if cached, ok := probeCache.entries[key]; ok && probeCacheEntryCurrent(cached, now()) {
+	cached, cachedOK := probeCache.entries[key]
+	if cachedOK && probeCacheEntryCurrent(cached, now()) {
 		result := append(Capabilities(nil), cached.capabilities...)
 		probeCache.Unlock()
 		return result, nil
 	}
+	stalePositive := cachedOK && len(cached.capabilities) > 0
 	probeCache.Unlock()
 
 	resultCh := probeCache.group.DoChan(key, func() (any, error) {
@@ -76,9 +80,22 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		defer cancel()
 		result, err := probeWithRunner(probeCtx, ffmpegPath, hardwareBackend, hardwareDevice, run)
 		if err != nil {
+			// Keep a known-good inventory available, but do not let steady
+			// playback traffic turn one slow executor into a continuous probe
+			// loop. A failed refresh gets the same short retry backoff as a
+			// completed empty inventory.
+			probeCache.Lock()
+			if stale, ok := probeCache.entries[key]; ok && len(stale.capabilities) > 0 {
+				stale.expiresAt = now().Add(probeNegativeTTL)
+				probeCache.entries[key] = stale
+			}
+			probeCache.Unlock()
 			return nil, err
 		}
-		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
+		entry := probeCacheEntry{
+			capabilities: append(Capabilities(nil), result...),
+			expiresAt:    now().Add(probePositiveTTL),
+		}
 		if len(result) == 0 {
 			entry.expiresAt = now().Add(probeNegativeTTL)
 		}
@@ -87,6 +104,13 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 		probeCache.Unlock()
 		return result, nil
 	})
+	if stalePositive {
+		// A previously validated executor remains safer than turning one periodic
+		// refresh into a new playback outage. The singleflight refresh above runs
+		// in the background and atomically replaces this inventory only after a
+		// complete probe succeeds.
+		return append(Capabilities(nil), cached.capabilities...), nil
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -149,10 +173,9 @@ func probeCacheKey(ffmpegPath, hardwareBackend, hardwareDevice string) string {
 	return strings.Join([]string{binaryIdentity, backend, device, strings.Join(driverIdentities, ",")}, "\x00")
 }
 
-// probeCacheEntryCurrent reports whether a positive result or unexpired
-// negative result may be reused.
+// probeCacheEntryCurrent reports whether a bounded discovery result may be reused.
 func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
-	return len(entry.capabilities) > 0 || now.Before(entry.expiresAt)
+	return now.Before(entry.expiresAt)
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke

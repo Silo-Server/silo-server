@@ -31,6 +31,19 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("describes exhausted capability warming retries", () => {
+    expect(
+      describePlanTerminal({
+        reason: "capability_warming",
+        message: "Tone-map capability discovery is still warming.",
+        retryable: true,
+      }),
+    ).toEqual({
+      title: "The transcoder is still starting",
+      message: "The server is still checking its video conversion capabilities. Please try again.",
+    });
+  });
+
   it("keeps the server's explanation of why a subtitle cannot be used", () => {
     expect(
       describePlanTerminal({

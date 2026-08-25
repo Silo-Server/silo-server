@@ -75,6 +75,12 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
         title: "Playback unavailable",
         message: "The server couldn't start converting this file. Please try again.",
       };
+    case "capability_warming":
+      return {
+        title: "The transcoder is still starting",
+        message:
+          "The server is still checking its video conversion capabilities. Please try again.",
+      };
     case "capacity_unavailable":
       return {
         title: "The server is busy",

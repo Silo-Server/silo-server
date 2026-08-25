@@ -836,18 +836,25 @@ func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 	info.ProbeRequestTimeoutMillis = tonemap.ProbeRequestTimeout(configuredHWAccel, hwDevice).Milliseconds()
 	capabilities, err := tonemap.Probe(resolveCtx, playback.ResolveFFmpegPath(ffmpegPath), hwAccel, hwDevice)
 	if err != nil {
-		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "capability probe unavailable", capabilityProbeErrorStatus(resolveCtx, err))
 		return
 	}
 	info.ToneMapCapabilities = capabilities
 	registry, err := playback.ProbeTransformationRegistryWithToneMapV3Result(resolveCtx, ffmpegPath, info.ToneMapCapabilities)
 	if err != nil {
-		http.Error(w, "capability probe unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "capability probe unavailable", capabilityProbeErrorStatus(resolveCtx, err))
 		return
 	}
 	info.Transformations = registry.Advertised()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
+}
+
+func capabilityProbeErrorStatus(ctx context.Context, err error) int {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		return http.StatusServiceUnavailable
+	}
+	return http.StatusInternalServerError
 }
 
 func toneMapCapabilityResolveTimeout(hardwareBackend, hardwareDevice string) time.Duration {

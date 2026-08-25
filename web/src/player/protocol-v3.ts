@@ -136,6 +136,7 @@ export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
  * this must actually implement the command.
  */
 export const FEATURE_PLAN_INVALIDATED_V3 = "plan_invalidated_v1";
+export const FEATURE_CAPABILITY_WARMING_V3 = "capability_warming_v1";
 
 /** The `original` rung label, which always preserves the source. */
 export const QUALITY_ORIGINAL_V3 = "original";
@@ -556,6 +557,7 @@ export interface TerminalV3 {
   reason: string;
   message: string;
   retryable: boolean;
+  retry_after_ms?: number;
 }
 
 export interface DecisionResponseV3 {

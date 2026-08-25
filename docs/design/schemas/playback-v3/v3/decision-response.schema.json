@@ -101,6 +101,11 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "retry_after_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional server hint for the delay before retrying this terminal decision."
         }
       },
       "additionalProperties": true

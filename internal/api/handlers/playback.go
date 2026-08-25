@@ -251,6 +251,11 @@ type PlaybackHandler struct {
 	v3Registry           *playback.TransformationRegistryV3
 	v3RegistryProbe      func(context.Context, string, tonemap.Capabilities) (*playback.TransformationRegistryV3, error)
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	v3HWAccelMu          sync.Mutex
+	v3HWAccelKey         string
+	v3HWAccelResolved    string
+	v3HWAccelExpiresAt   time.Time
+	v3HWAccelResolver    func(context.Context, string, string) string
 	v3NodeCapabilitiesMu sync.Mutex
 	v3NodeCapabilities   map[string]v3NodeCapabilityCache
 	v3EventOnce          sync.Once

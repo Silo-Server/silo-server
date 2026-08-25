@@ -45,6 +45,10 @@ const (
 	subtitleMIMEVTTV3            = "text/vtt"
 	subtitleUnavailableReasonV3  = "subtitle_artifact_unavailable"
 	transcodeStartFailedReasonV3 = "transcode_start_failed"
+	capabilityWarmingReasonV3    = "capability_warming"
+	capabilityWarmRetryAfterV3   = 250 * time.Millisecond
+	probePositiveTTLForHWAccelV3 = 5 * time.Minute
+	probeNegativeTTLForHWAccelV3 = 15 * time.Second
 	seekRestorationPlayerV3      = "player_position"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
@@ -65,7 +69,10 @@ const (
 	nodeRecipeWriteTimeoutV3 = 2 * time.Second
 )
 
-var errSubtitleStoreUnavailableV3 = errors.New("subtitle store unavailable")
+var (
+	errSubtitleStoreUnavailableV3 = errors.New("subtitle store unavailable")
+	errRemoteCapabilityWarmingV3  = errors.New("remote capability discovery is still warming")
+)
 
 type v3NodeCapabilityCache struct {
 	transformations     []playback.TransformationV3
@@ -73,6 +80,12 @@ type v3NodeCapabilityCache struct {
 	err                 error
 	expiresAt           time.Time
 	probeRequestTimeout time.Duration
+}
+
+type stalePlaybackPlanResponseV3 struct {
+	Error           string                      `json:"error"`
+	Message         string                      `json:"message"`
+	CurrentDecision playback.DecisionResponseV3 `json:"current_decision"`
 }
 
 type preparedTransportV3 struct {
@@ -228,7 +241,7 @@ func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playbac
 func (h *PlaybackHandler) localToneMapCapabilitiesV3(ctx context.Context) (tonemap.Capabilities, error) {
 	cfg := h.playbackConfig()
 	ffmpegPath := playback.ResolveFFmpegPath(cfg.FFmpegPath)
-	resolved := playback.ResolveHWAccelWithFFmpegContext(ctx, cfg.HWAccel, cfg.FFmpegPath)
+	resolved := h.resolveLocalHWAccelV3(ctx, cfg, ffmpegPath)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -239,6 +252,40 @@ func (h *PlaybackHandler) localToneMapCapabilitiesV3(ctx context.Context) (tonem
 	}
 	capabilities, err := probe(ctx, ffmpegPath, resolved, hwDevice)
 	return append(tonemap.Capabilities(nil), capabilities...), err
+}
+
+func (h *PlaybackHandler) resolveLocalHWAccelV3(ctx context.Context, cfg config.PlaybackConfig, ffmpegPath string) string {
+	key := strings.Join([]string{ffmpegPath, strings.TrimSpace(cfg.HWAccel), strings.TrimSpace(cfg.HWDevice)}, "\x00")
+	now := time.Now()
+	h.v3HWAccelMu.Lock()
+	if h.v3HWAccelKey == key && now.Before(h.v3HWAccelExpiresAt) {
+		resolved := h.v3HWAccelResolved
+		h.v3HWAccelMu.Unlock()
+		return resolved
+	}
+	h.v3HWAccelMu.Unlock()
+
+	resolver := playback.ResolveHWAccelWithFFmpegContext
+	if h.v3HWAccelResolver != nil {
+		resolver = h.v3HWAccelResolver
+	}
+	resolved := resolver(ctx, cfg.HWAccel, cfg.FFmpegPath)
+	if ctx.Err() != nil {
+		return resolved
+	}
+	ttl := probePositiveTTLForHWAccelV3
+	if strings.EqualFold(strings.TrimSpace(cfg.HWAccel), "auto") && resolved == playback.HWAccelNone {
+		// Auto-detection can return none after a transient driver/encoder probe
+		// failure. Match the detector's own short negative cache instead of
+		// promoting that result to a five-minute positive.
+		ttl = probeNegativeTTLForHWAccelV3
+	}
+	h.v3HWAccelMu.Lock()
+	h.v3HWAccelKey = key
+	h.v3HWAccelResolved = resolved
+	h.v3HWAccelExpiresAt = now.Add(ttl)
+	h.v3HWAccelMu.Unlock()
+	return resolved
 }
 
 func (h *PlaybackHandler) localToneMapCapabilitiesForTransportV3(ctx context.Context) (tonemap.Capabilities, error) {
@@ -267,6 +314,61 @@ func (h *PlaybackHandler) toneMapPlanningTimeoutV3(localFallbackAllowed bool) ti
 		return v3NodeCapabilityPlanTimeout
 	}
 	return remoteNodeProbeFallbackTimeout
+}
+
+// StartToneMapCapabilityWarmup begins a best-effort capability inventory after
+// runtime config, settings, and node planning have been wired. It deliberately
+// does not gate global readiness: a cold or unavailable transcoder is a
+// playback-subsystem state, not an API-server outage.
+func (h *PlaybackHandler) StartToneMapCapabilityWarmup(ctx context.Context) {
+	if h == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	go h.warmToneMapCapabilitiesV3(ctx)
+}
+
+func (h *PlaybackHandler) warmToneMapCapabilitiesV3(ctx context.Context) {
+	settings, err := h.plannerSettingsV3Result(ctx)
+	if err != nil {
+		slog.DebugContext(ctx, "tone-map capability warmup skipped while playback settings are unavailable", logComponentKey, "playback", "error", err)
+		return
+	}
+	if tonemap.NewPolicy(settings.HardwareToneMapEnabled, settings.SoftwareToneMapEnabled) == tonemap.PolicyNone {
+		return
+	}
+
+	localAllowed := h.NodePlanner == nil || nodepool.LocalTranscodeFallbackAllowed(ctx, h.SettingsRepo)
+	var nodeURLs []string
+	if enumerator, ok := h.NodePlanner.(transcodeNodeEnumeratorV3); ok {
+		nodeURLs = enumerator.TranscodeNodeURLs()
+	}
+
+	var wg sync.WaitGroup
+	if localAllowed {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, probeErr := h.localToneMapCapabilitiesForTransportV3(ctx); probeErr != nil && ctx.Err() == nil {
+				slog.DebugContext(ctx, "local tone-map capability warmup incomplete", logComponentKey, "playback", "error", probeErr)
+			}
+		}()
+	}
+	for _, nodeURL := range nodeURLs {
+		nodeURL := nodeURL
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			probeCtx, cancel := context.WithTimeout(ctx, h.remoteToneMapProbeTimeoutV3(nodeURL))
+			defer cancel()
+			if _, probeErr := h.remoteToneMapCapabilitiesV3(probeCtx, nodeURL, false); probeErr != nil && ctx.Err() == nil {
+				slog.DebugContext(ctx, "remote tone-map capability warmup incomplete", logComponentKey, "playback", "node", logredact.SanitizeURL(nodeURL), "error", probeErr)
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // remoteTransformationsV3 is the transport-time capability lookup for a
@@ -322,6 +424,13 @@ func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeUR
 		if current, currentOK := h.v3NodeCapabilities[nodeURL]; currentOK && current.err == nil && completedAt.Before(current.expiresAt) {
 			h.v3NodeCapabilitiesMu.Unlock()
 			return current, nil
+		}
+		// A planning deadline or an explicit warming response says nothing
+		// definitive about the node. Caching it for the ordinary failure TTL
+		// would make every bounded client retry replay the same stale error.
+		if toneMapCapabilityDiscoveryIncompleteV3(err) {
+			h.v3NodeCapabilitiesMu.Unlock()
+			return v3NodeCapabilityCache{}, err
 		}
 		h.v3NodeCapabilities[nodeURL] = v3NodeCapabilityCache{err: err, expiresAt: completedAt.Add(v3NodeCapabilityErrorTTL), probeRequestTimeout: entry.probeRequestTimeout}
 		h.v3NodeCapabilitiesMu.Unlock()
@@ -542,7 +651,9 @@ func (h *PlaybackHandler) hlsToneMapCapabilityInventoryV3(ctx context.Context) (
 	var probeErr error
 	if localAllowed {
 		if localResult.err != nil {
-			probeErr = errors.Join(probeErr, localResult.err)
+			if toneMapCapabilityDiscoveryIncompleteV3(localResult.err) {
+				probeErr = errors.Join(probeErr, localResult.err)
+			}
 		} else {
 			inventory.local = localResult.capabilities
 			inventory.union = append(inventory.union, localResult.capabilities...)
@@ -550,7 +661,13 @@ func (h *PlaybackHandler) hlsToneMapCapabilityInventoryV3(ctx context.Context) (
 	}
 	for _, remote := range results {
 		if remote.err != nil {
-			probeErr = errors.Join(probeErr, remote.err)
+			// A node that completed with an ordinary transport or protocol
+			// failure is definitively unavailable for this snapshot. Only a
+			// canceled/deadline-bounded lookup means discovery is still in
+			// progress and must defer an irreversible version fallback.
+			if toneMapCapabilityDiscoveryIncompleteV3(remote.err) {
+				probeErr = errors.Join(probeErr, remote.err)
+			}
 			continue
 		}
 		inventory.union = append(inventory.union, remote.capabilities...)
@@ -573,12 +690,10 @@ type hlsPlanningSnapshotV3 struct {
 	registry  *playback.TransformationRegistryV3
 	inventory hlsToneMapCapabilityInventoryV3
 	err       error
-	resolved  bool
 }
 
 func (snapshot *hlsPlanningSnapshotV3) resolve() {
 	snapshot.once.Do(func() {
-		snapshot.resolved = true
 		policy := tonemap.NewPolicy(snapshot.settings.HardwareToneMapEnabled, snapshot.settings.SoftwareToneMapEnabled)
 		if policy != tonemap.PolicyNone {
 			snapshot.inventory, snapshot.err = snapshot.handler.hlsToneMapCapabilityInventoryV3(snapshot.ctx)
@@ -598,39 +713,59 @@ func (snapshot *hlsPlanningSnapshotV3) toneMapCapabilities() tonemap.Capabilitie
 }
 
 func (snapshot *hlsPlanningSnapshotV3) capabilityError() error {
-	if !snapshot.resolved {
-		return nil
-	}
 	return snapshot.err
 }
 
-func retryIncompleteToneMapPlanningV3(result playback.PlannerResultV3, capabilityErr error) playback.PlannerResultV3 {
-	if capabilityErr == nil || result.Terminal == nil {
-		return result
+func toneMapCapabilityDiscoveryIncompleteV3(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errRemoteCapabilityWarmingV3)
+}
+
+func terminalDependsOnToneMapCapabilitiesV3(terminal *playback.TerminalV3) bool {
+	if terminal == nil {
+		return false
 	}
-	switch result.Terminal.Reason {
-	case playback.TerminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
-	default:
+	return terminal.Reason == playback.TerminalHDRTranscodeUnsupportedV3 ||
+		(terminal.Reason == terminalSubtitleConversionUnsupportedV3 && strings.Contains(terminal.Message, "this HDR source"))
+}
+
+func retryIncompleteToneMapPlanningV3(result playback.PlannerResultV3, capabilityErr error) playback.PlannerResultV3 {
+	if capabilityErr == nil || !terminalDependsOnToneMapCapabilitiesV3(result.Terminal) {
 		return result
 	}
 	result.Terminal = &playback.TerminalV3{
-		Reason:    transcodeStartFailedReasonV3,
-		Message:   "Tone-map capability discovery is temporarily unavailable.",
-		Retryable: true,
+		Reason:           capabilityWarmingReasonV3,
+		Message:          "Tone-map capability discovery is still warming.",
+		Retryable:        true,
+		RetryAfterMillis: capabilityWarmRetryAfterV3.Milliseconds(),
 	}
 	return result
+}
+
+// fallbackPlanningInputsCompleteV3 prevents a transiently incomplete settings
+// or executor snapshot from becoming an irreversible media-version choice.
+// A definitive terminal may still select a compatible alternate.
+func fallbackPlanningInputsCompleteV3(toneMapCapabilityErr, settingsErr error) bool {
+	return toneMapCapabilityErr == nil && settingsErr == nil
+}
+
+func terminalDecisionResponseV3(terminal *playback.TerminalV3) playback.DecisionResponseV3 {
+	if terminal == nil {
+		return playback.DecisionResponseV3{}
+	}
+	response := playback.NewTerminalResponseV3(terminal.Reason, terminal.Message, terminal.Retryable)
+	response.Terminal.RetryAfterMillis = terminal.RetryAfterMillis
+	return response
 }
 
 func retryIncompletePlaybackSettingsV3(result playback.PlannerResultV3, settingsErr error) playback.PlannerResultV3 {
 	if settingsErr == nil || result.Terminal == nil {
 		return result
 	}
-	terminal := result.Terminal
-	settingsDependent := terminal.Reason == playback.TerminalHDRTranscodeUnsupportedV3 ||
-		(terminal.Reason == terminalNoAlternateVersionV3 && terminal.Message == playback.TerminalMessage4KTranscodeDisabledV3) ||
-		(terminal.Reason == terminalSubtitleConversionUnsupportedV3 &&
-			(strings.Contains(terminal.Message, "this HDR source") || strings.Contains(terminal.Message, "4K transcoding is disabled")))
-	if !settingsDependent {
+	// A settings failure suppresses alternate-version planning above. Any
+	// terminal that would otherwise be eligible for that fallback is therefore
+	// provisional, even when its wording is about subtitles rather than HDR or
+	// the 4K policy directly.
+	if !terminalAllowsAlternateFileV3(result.Terminal) {
 		return result
 	}
 	result.Terminal = &playback.TerminalV3{
@@ -646,11 +781,8 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 	input.HLSRegistry = snapshot.hlsRegistry
 	input.HLSToneMapCapabilities = snapshot.toneMapCapabilities
 	result := playback.PlanPlaybackV3(input)
-	if result.Terminal != nil {
-		switch result.Terminal.Reason {
-		case playback.TerminalHDRTranscodeUnsupportedV3, terminalSubtitleConversionUnsupportedV3:
-			return result, snapshot.capabilityError()
-		}
+	if terminalDependsOnToneMapCapabilitiesV3(result.Terminal) {
+		return result, snapshot.capabilityError()
 	}
 	return result, nil
 }
@@ -970,7 +1102,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if terminalAllowsAlternateFileV3(result.Terminal) && shouldTryAlternateFileV3(req.QualityPreference) {
+	if fallbackPlanningInputsCompleteV3(toneMapCapabilityErr, settingsErr) && terminalAllowsAlternateFileV3(result.Terminal) && shouldTryAlternateFileV3(req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -1005,7 +1137,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 			"file_id", effectiveFile.ID,
 			"quality_preference", req.QualityPreference,
 		}, clientInfo.LogAttrs()...)...)
-		response, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable))
+		response, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, terminalDecisionResponseV3(result.Terminal))
 		if persistErr != nil {
 			writeStartAttemptPersistenceErrorV3(w, persistErr)
 			return
@@ -2817,6 +2949,25 @@ func downloadedSubtitleLabelV3(value subtitles.DownloadedSubtitle) string {
 	return value.ReleaseName + " (" + value.Provider + ")"
 }
 
+func writeStalePlaybackPlanV3(w http.ResponseWriter, record *playback.AttemptRecordV3) {
+	if record == nil || record.SessionID == "" || record.CurrentPlan.PlanID == "" {
+		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
+		return
+	}
+	plan := record.CurrentPlan
+	writeJSON(w, http.StatusConflict, stalePlaybackPlanResponseV3{
+		Error:   "stale_playback_plan",
+		Message: "The failed plan is no longer current",
+		CurrentDecision: playback.DecisionResponseV3{
+			ProtocolVersion: playback.ProtocolV3,
+			ServerFeatures:  playback.ServerFeaturesV3(),
+			Outcome:         playback.OutcomePlayableV3,
+			SessionID:       record.SessionID,
+			PlaybackPlan:    &plan,
+		},
+	})
+}
+
 // HandleReplanPlaybackV3 provides persistent idempotency and preserves the old
 // transport until a successor has entered its startup state and the new plan is
 // durably committed.
@@ -2938,7 +3089,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	if lease.State == playback.ReplanLeaseCompletedV3 {
 		if record.CurrentReplanRequestID != req.ReplanRequestID || !completedReplanResponseMatchesAttemptV3(lease.Response, record) {
-			writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
+			writeStalePlaybackPlanV3(w, record)
 			return
 		}
 		if _, err := h.sessionMgr.GetSession(sessionID); err != nil {
@@ -2962,7 +3113,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		}
 	}()
 	if record.CurrentPlanID != req.FailedPlanID {
-		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
+		writeStalePlaybackPlanV3(w, record)
 		return
 	}
 	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
@@ -3293,7 +3444,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	} else {
 		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
-	if outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
+	if fallbackPlanningInputsCompleteV3(toneMapCapabilityErr, plannerSettingsErr) && outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
 		// Returning to the requested edition is speculative during an output
 		// refresh. Any terminal from that probe must fall back to the edition
 		// already playing, not only HDR/alternate-selection terminals: its audio,
@@ -3307,7 +3458,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
-	if terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
+	if fallbackPlanningInputsCompleteV3(toneMapCapabilityErr, plannerSettingsErr) && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
@@ -3349,7 +3500,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		result = escalated
 	}
 	if result.Terminal != nil {
-		return playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable), *record, nil, nil
+		return terminalDecisionResponseV3(result.Terminal), *record, nil, nil
 	}
 	session, err := h.sessionMgr.GetSession(record.SessionID)
 	if err != nil {
@@ -4329,6 +4480,69 @@ func remapAudioSelectionV3(source, target *models.MediaFile, request *playback.S
 	return nil
 }
 
+func selectSubtitleRemapCandidateV3(baseMatches, exactMatches []int) (int, bool) {
+	if len(exactMatches) == 1 {
+		return exactMatches[0], false
+	}
+	if len(exactMatches) > 1 {
+		return -1, true
+	}
+	if len(baseMatches) == 1 {
+		return baseMatches[0], false
+	}
+	return -1, len(baseMatches) > 1
+}
+
+func sameEmbeddedSubtitleMetadataV3(left, right models.SubtitleTrack) bool {
+	return strings.EqualFold(strings.TrimSpace(left.Title), strings.TrimSpace(right.Title)) &&
+		strings.EqualFold(strings.TrimSpace(left.EmbeddedTitle), strings.TrimSpace(right.EmbeddedTitle)) &&
+		strings.EqualFold(strings.TrimSpace(left.Resolution), strings.TrimSpace(right.Resolution)) &&
+		left.Default == right.Default &&
+		left.HearingImpaired == right.HearingImpaired &&
+		left.External == right.External
+}
+
+func externalSubtitleStableSuffixV3(file *models.MediaFile, subtitle models.ExternalSubtitle) (string, bool) {
+	if file == nil {
+		return "", false
+	}
+	mediaName := filepath.Base(strings.TrimSpace(file.FilePath))
+	mediaStem := strings.TrimSuffix(mediaName, filepath.Ext(mediaName))
+	subtitleName := filepath.Base(strings.TrimSpace(subtitle.Title))
+	if subtitleName == "." || subtitleName == "" {
+		subtitleName = filepath.Base(strings.TrimSpace(subtitle.Path))
+	}
+	subtitleStem := strings.TrimSuffix(subtitleName, filepath.Ext(subtitleName))
+	if mediaStem == "" || len(subtitleStem) < len(mediaStem) || !strings.EqualFold(subtitleStem[:len(mediaStem)], mediaStem) {
+		return "", false
+	}
+	suffix := subtitleStem[len(mediaStem):]
+	if suffix != "" && !strings.HasPrefix(suffix, ".") {
+		return "", false
+	}
+	return strings.ToLower(strings.TrimPrefix(suffix, ".")), true
+}
+
+func sameExternalSubtitleMetadataV3(leftFile *models.MediaFile, left models.ExternalSubtitle, rightFile *models.MediaFile, right models.ExternalSubtitle) bool {
+	leftSuffix, leftHasSuffix := externalSubtitleStableSuffixV3(leftFile, left)
+	rightSuffix, rightHasSuffix := externalSubtitleStableSuffixV3(rightFile, right)
+	titleMatches := strings.EqualFold(strings.TrimSpace(left.Title), strings.TrimSpace(right.Title))
+	if leftHasSuffix && rightHasSuffix {
+		titleMatches = leftSuffix == rightSuffix
+	}
+	return titleMatches &&
+		strings.EqualFold(strings.TrimSpace(left.EmbeddedTitle), strings.TrimSpace(right.EmbeddedTitle)) &&
+		strings.EqualFold(strings.TrimSpace(left.Resolution), strings.TrimSpace(right.Resolution)) &&
+		left.Default == right.Default &&
+		left.HearingImpaired == right.HearingImpaired
+}
+
+func sameDownloadedSubtitleMetadataV3(left, right subtitles.DownloadedSubtitle) bool {
+	return strings.EqualFold(strings.TrimSpace(left.ReleaseName), strings.TrimSpace(right.ReleaseName)) &&
+		strings.EqualFold(strings.TrimSpace(left.Provider), strings.TrimSpace(right.Provider)) &&
+		left.HearingImpaired == right.HearingImpaired
+}
+
 func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, target *models.MediaFile, request *playback.StartRequestV3) error {
 	if request == nil || source == nil || target == nil || source.ID == target.ID {
 		return nil
@@ -4351,23 +4565,35 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		return errors.New("The selected subtitle track index is invalid.")
 	}
 	targetIndex := -1
+	ambiguous := false
 	switch {
 	case index < len(source.ExternalSubtitles):
 		wanted := source.ExternalSubtitles[index]
+		baseMatches := make([]int, 0)
+		exactMatches := make([]int, 0)
 		for candidateIndex, candidate := range target.ExternalSubtitles {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Format, wanted.Format) && candidate.Forced == wanted.Forced {
-				targetIndex = candidateIndex
-				break
+				baseMatches = append(baseMatches, candidateIndex)
+				if sameExternalSubtitleMetadataV3(target, candidate, source, wanted) {
+					exactMatches = append(exactMatches, candidateIndex)
+				}
 			}
 		}
+		targetIndex, ambiguous = selectSubtitleRemapCandidateV3(baseMatches, exactMatches)
 	case index < len(source.ExternalSubtitles)+len(source.SubtitleTracks):
 		wanted := source.SubtitleTracks[index-len(source.ExternalSubtitles)]
+		baseMatches := make([]int, 0)
+		exactMatches := make([]int, 0)
 		for candidateIndex, candidate := range target.SubtitleTracks {
 			if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(candidate.Codec, wanted.Codec) && candidate.Forced == wanted.Forced {
-				targetIndex = len(target.ExternalSubtitles) + candidateIndex
-				break
+				combinedIndex := len(target.ExternalSubtitles) + candidateIndex
+				baseMatches = append(baseMatches, combinedIndex)
+				if sameEmbeddedSubtitleMetadataV3(candidate, wanted) {
+					exactMatches = append(exactMatches, combinedIndex)
+				}
 			}
 		}
+		targetIndex, ambiguous = selectSubtitleRemapCandidateV3(baseMatches, exactMatches)
 	default:
 		if h.SubtitleRepo != nil {
 			sourceDownloaded, sourceErr := h.SubtitleRepo.ListDownloadedSubtitles(ctx, source.ID)
@@ -4375,14 +4601,23 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 			downloadedIndex := index - len(source.ExternalSubtitles) - len(source.SubtitleTracks)
 			if sourceErr == nil && targetErr == nil && downloadedIndex >= 0 && downloadedIndex < len(sourceDownloaded) {
 				wanted := sourceDownloaded[downloadedIndex]
+				baseMatches := make([]int, 0)
+				exactMatches := make([]int, 0)
 				for candidateIndex, candidate := range targetDownloaded {
-					if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(string(candidate.Format), string(wanted.Format)) && strings.EqualFold(candidate.ReleaseName, wanted.ReleaseName) {
-						targetIndex = len(target.ExternalSubtitles) + len(target.SubtitleTracks) + candidateIndex
-						break
+					if strings.EqualFold(candidate.Language, wanted.Language) && strings.EqualFold(string(candidate.Format), string(wanted.Format)) {
+						combinedIndex := len(target.ExternalSubtitles) + len(target.SubtitleTracks) + candidateIndex
+						baseMatches = append(baseMatches, combinedIndex)
+						if sameDownloadedSubtitleMetadataV3(candidate, wanted) {
+							exactMatches = append(exactMatches, combinedIndex)
+						}
 					}
 				}
+				targetIndex, ambiguous = selectSubtitleRemapCandidateV3(baseMatches, exactMatches)
 			}
 		}
+	}
+	if ambiguous {
+		return errors.New("selected subtitle track cannot be mapped unambiguously to the effective file version")
 	}
 	if targetIndex < 0 {
 		return errors.New("The selected subtitle track is unavailable in the effective file version.")

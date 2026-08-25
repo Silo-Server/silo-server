@@ -223,6 +223,36 @@ func TestLocalToneMapCapabilitiesV3UsesLivePlaybackHardware(t *testing.T) {
 	}
 }
 
+func TestLocalToneMapCapabilitiesV3MemoizesHardwareResolutionByConfig(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	cfg := config.PlaybackConfig{FFmpegPath: "/opt/ffmpeg-a", HWAccel: "auto", HWDevice: "/dev/dri/renderD128"}
+	handler.PlaybackConfig = func() config.PlaybackConfig { return cfg }
+	var resolveCalls atomic.Int32
+	handler.v3HWAccelResolver = func(context.Context, string, string) string {
+		resolveCalls.Add(1)
+		return tonemap.BackendQSV
+	}
+	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+		return nil, nil
+	}
+
+	for range 2 {
+		if _, err := handler.localToneMapCapabilitiesV3(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := resolveCalls.Load(); got != 1 {
+		t.Fatalf("hardware resolution calls = %d, want one for unchanged config", got)
+	}
+	cfg.HWDevice = "/dev/dri/renderD129"
+	if _, err := handler.localToneMapCapabilitiesV3(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveCalls.Load(); got != 2 {
+		t.Fatalf("hardware resolution calls after config change = %d, want two", got)
+	}
+}
+
 // TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers verifies that a
 // canceled request is not trapped behind another request's slow probe.
 func TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers(t *testing.T) {
@@ -268,6 +298,38 @@ func TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers(t *testing.T) {
 	}
 	close(release)
 	<-firstDone
+}
+
+func TestStartToneMapCapabilityWarmupUsesFullLocalProbePath(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+	}}
+	handler.PlaybackConfig = playbackTestConfig("", "none")
+	started := make(chan time.Time, 1)
+	handler.v3ToneMapProbe = func(ctx context.Context, _, _, _ string) (tonemap.Capabilities, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			started <- time.Time{}
+			return nil, nil
+		}
+		started <- deadline
+		return nil, nil
+	}
+
+	handler.StartToneMapCapabilityWarmup(context.Background())
+	select {
+	case deadline := <-started:
+		if deadline.IsZero() {
+			t.Fatal("warmup probe has no deadline")
+		}
+		if remaining := time.Until(deadline); remaining <= v3NodeCapabilityPlanTimeout {
+			t.Fatalf("warmup budget = %s, want full probe budget", remaining)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tone-map capability warmup did not start")
+	}
 }
 
 // TestHLSToneMapCapabilitiesV3FetchesNodesConcurrently verifies pooled node lookups overlap.
@@ -363,17 +425,40 @@ func TestHLSToneMapCapabilityInventoryV3StartsLocalAndRemoteConcurrently(t *test
 }
 
 func TestIncompleteToneMapPlanningBecomesRetryableStartFailure(t *testing.T) {
-	for _, reason := range []string{
-		playback.TerminalHDRTranscodeUnsupportedV3,
-		terminalSubtitleConversionUnsupportedV3,
+	for _, terminal := range []playback.TerminalV3{
+		{Reason: playback.TerminalHDRTranscodeUnsupportedV3},
+		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded."},
 	} {
-		result := playback.PlannerResultV3{Terminal: &playback.TerminalV3{Reason: reason}}
+		result := playback.PlannerResultV3{Terminal: &terminal}
 
 		result = retryIncompleteToneMapPlanningV3(result, context.DeadlineExceeded)
 
-		if result.Terminal == nil || result.Terminal.Reason != transcodeStartFailedReasonV3 || !result.Terminal.Retryable {
-			t.Fatalf("terminal for %q = %#v, want retryable %q", reason, result.Terminal, transcodeStartFailedReasonV3)
+		if result.Terminal == nil || result.Terminal.Reason != capabilityWarmingReasonV3 || !result.Terminal.Retryable || result.Terminal.RetryAfterMillis <= 0 {
+			t.Fatalf("terminal for %q = %#v, want retryable %q with delay", terminal.Reason, result.Terminal, capabilityWarmingReasonV3)
 		}
+	}
+}
+
+func TestIncompleteToneMapPlanningDoesNotRewriteUnrelatedSubtitlePolicy(t *testing.T) {
+	terminal := &playback.TerminalV3{
+		Reason:  terminalSubtitleConversionUnsupportedV3,
+		Message: "The selected subtitle must be burned into the video, but 4K transcoding is disabled.",
+	}
+	result := retryIncompleteToneMapPlanningV3(playback.PlannerResultV3{Terminal: terminal}, context.DeadlineExceeded)
+	if result.Terminal != terminal {
+		t.Fatalf("unrelated subtitle policy terminal = %#v, want original terminal", result.Terminal)
+	}
+}
+
+func TestFallbackPlanningInputsCompleteV3RequiresDefinitiveSnapshots(t *testing.T) {
+	if !fallbackPlanningInputsCompleteV3(nil, nil) {
+		t.Fatal("complete capability and settings snapshots rejected fallback planning")
+	}
+	if fallbackPlanningInputsCompleteV3(context.DeadlineExceeded, nil) {
+		t.Fatal("incomplete capability snapshot allowed fallback planning")
+	}
+	if fallbackPlanningInputsCompleteV3(nil, context.DeadlineExceeded) {
+		t.Fatal("incomplete settings snapshot allowed fallback planning")
 	}
 }
 
@@ -382,6 +467,7 @@ func TestIncompletePlaybackSettingsMakePolicyTerminalsRetryable(t *testing.T) {
 		{Reason: playback.TerminalHDRTranscodeUnsupportedV3, Message: "HDR unavailable"},
 		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded."},
 		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but 4K transcoding is disabled."},
+		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle format cannot be preserved on this version."},
 		{Reason: terminalNoAlternateVersionV3, Message: playback.TerminalMessage4KTranscodeDisabledV3},
 	}
 	for _, terminal := range tests {
@@ -515,12 +601,72 @@ func TestHLSToneMapCapabilitiesV3HonorsSharedDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	got := handler.hlsToneMapCapabilitiesV3(ctx)
+	inventory, err := handler.hlsToneMapCapabilityInventoryV3(ctx)
 	if elapsed := time.Since(started); elapsed >= time.Second {
 		t.Fatalf("capability aggregation took %s, want shared caller deadline", elapsed)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("capability inventory error = %v, want deadline exceeded", err)
+	}
+	got := inventory.union
 	if len(got) != 1 || !got.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
 		t.Fatalf("aggregated capabilities = %#v, want the successful node retained", got)
+	}
+}
+
+func TestHLSToneMapCapabilityInventoryV3TreatsCompletedNodeFailureAsDefinitive(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{config.PlaybackLocalTranscodeFallbackSettingKey: "false"}}
+
+	inventory, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
+	if err != nil {
+		t.Fatalf("completed node failure left capability inventory warming: %v", err)
+	}
+	if len(inventory.union) != 0 {
+		t.Fatalf("failed node contributed capabilities: %#v", inventory.union)
+	}
+}
+
+func TestHLSToneMapCapabilityInventoryV3RetriesNodeWarmingResponse(t *testing.T) {
+	var requests atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
+			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+		}}})
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{config.PlaybackLocalTranscodeFallbackSettingKey: "false"}}
+
+	first, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
+	if !errors.Is(err, errRemoteCapabilityWarmingV3) {
+		t.Fatalf("first inventory error = %v, want remote capability warming", err)
+	}
+	if len(first.union) != 0 {
+		t.Fatalf("warming node contributed capabilities: %#v", first.union)
+	}
+
+	second, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
+	if err != nil {
+		t.Fatalf("retry inventory error = %v", err)
+	}
+	if requests.Load() != 2 || !second.union.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
+		t.Fatalf("retry requests = %d capabilities = %#v, want a fresh successful probe", requests.Load(), second.union)
 	}
 }
 
@@ -547,10 +693,10 @@ func TestHLSToneMapCapabilityInventoryV3RedactsNodeURLSecrets(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 
 	_, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
-	if err == nil {
-		t.Fatal("capability inventory returned no error")
+	if err != nil {
+		t.Fatalf("completed node failure left capability inventory warming: %v", err)
 	}
-	diagnostics := logs.String() + "\n" + err.Error()
+	diagnostics := logs.String()
 	for _, secret := range []string{username, password, querySecret, fragmentSecret} {
 		if strings.Contains(diagnostics, secret) {
 			t.Fatalf("capability diagnostics contain %q: %q", secret, diagnostics)

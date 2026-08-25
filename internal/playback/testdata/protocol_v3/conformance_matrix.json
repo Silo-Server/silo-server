@@ -6547,6 +6547,7 @@
             "authorized_media_origins_v1",
             "software_video_decode_v1",
             "plan_invalidated_v1",
+            "capability_warming_v1",
             "plan_source_duration_v1"
           ],
           "outcome": "adaptation_unavailable",

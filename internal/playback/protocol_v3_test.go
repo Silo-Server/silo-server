@@ -37,6 +37,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeatureAuthorizedMediaOriginsV3:   {},
 		FeatureSoftwareVideoDecodeV3:      {},
 		FeaturePlanInvalidatedV3:          {},
+		FeatureCapabilityWarmingV3:        {},
 		FeaturePlanSourceDurationV3:       {},
 	}
 	if len(first) != len(expected) {

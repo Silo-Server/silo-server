@@ -95,6 +95,13 @@ func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret st
 		return playback.HWAccelInfo{}, err
 	}
 	if status != http.StatusOK {
+		// A cold node reports 503 while its live capability probe is still
+		// resolving. Preserve that as an incomplete snapshot so planning pins the
+		// requested version and lets the client retry instead of treating the node
+		// as definitively incapable.
+		if status == http.StatusServiceUnavailable {
+			return playback.HWAccelInfo{}, fmt.Errorf("%w: node returned %d", errRemoteCapabilityWarmingV3, status)
+		}
 		return playback.HWAccelInfo{}, fmt.Errorf("node returned %d", status)
 	}
 	info.Source = "transcode_node"

@@ -78,6 +78,7 @@ function playbackSession(
     qualityPreference: "original",
     shouldAutoPlay: true,
     loading: false,
+    loadingMessage: null,
     replacing: false,
     replanning: false,
     errorTitle: null,

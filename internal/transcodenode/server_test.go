@@ -379,6 +379,24 @@ func TestHandleHWCapabilitiesReturnsServiceUnavailableWhenDeadlineExpires(t *tes
 	}
 }
 
+func TestHandleHWCapabilitiesReturnsInternalServerErrorForCompletedProbeFailure(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "failed-inventory.sh")
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\nesac\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	server.watcher.Config().Playback.HWAccel = playback.HWAccelNone
+	recorder := httptest.NewRecorder()
+
+	server.handleHWCapabilities(recorder, httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body = %s", recorder.Code, http.StatusInternalServerError, recorder.Body.String())
+	}
+}
+
 func TestToneMapCapabilityResolveTimeoutCoversConfiguredProbeBudget(t *testing.T) {
 	got := toneMapCapabilityResolveTimeout(tonemap.BackendQSV, "/dev/dri/renderD128")
 	if want := tonemap.ProbeEndpointTimeout(tonemap.BackendQSV, "/dev/dri/renderD128"); got != want {

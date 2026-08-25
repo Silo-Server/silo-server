@@ -311,6 +311,182 @@ describe("routeEventPlanIdentityV3", () => {
   });
 });
 
+describe("usePlaybackSession capability warming", () => {
+  it("retries warming beyond the initial backoff sequence while keeping the requested file", async () => {
+    const startBodies: Array<{ file_id: number; playback_attempt_id: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startBodies.push(
+          JSON.parse(String(init?.body)) as { file_id: number; playback_attempt_id: string },
+        );
+        if (startBodies.length <= 7) {
+          return jsonResponse(
+            {
+              protocol_version: 3,
+              server_features: ["playback_plan_v3", "capability_warming_v1"],
+              outcome: "adaptation_unavailable",
+              terminal: {
+                reason: "capability_warming",
+                message: "Tone-map capability discovery is still warming.",
+                retryable: true,
+                retry_after_ms: 1,
+              },
+            },
+            { status: 201 },
+          );
+        }
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-warmed",
+            playback_plan: fixturePlanV3({
+              session_id: "session-warmed",
+              requested_media_file_id: 7,
+              effective_media_file_id: 7,
+            }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) {
+        return new Response(null, { status: 202 });
+      }
+      if (init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-warming", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-warmed"));
+    expect(startBodies).toHaveLength(8);
+    expect(startBodies.map((body) => body.file_id)).toEqual(Array(8).fill(7));
+    expect(new Set(startBodies.map((body) => body.playback_attempt_id)).size).toBe(8);
+    expect(result.current.error).toBeNull();
+
+    unmount();
+  });
+
+  it("does not retry a warming terminal without the advertised retry contract", async () => {
+    let startCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startCount += 1;
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "adaptation_unavailable",
+            terminal: {
+              reason: "capability_warming",
+              message: "Tone-map capability discovery is still warming.",
+              retryable: true,
+              retry_after_ms: 1,
+            },
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-warming-unadvertised", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.error).toContain("still checking"));
+    expect(startCount).toBe(1);
+    unmount();
+  });
+
+  it("refreshes a replacement start position while capability warming", async () => {
+    const startBodies: Array<{
+      file_id: number;
+      playback_attempt_id: string;
+      start_position?: number;
+    }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startBodies.push(
+          JSON.parse(String(init?.body)) as {
+            file_id: number;
+            playback_attempt_id: string;
+            start_position?: number;
+          },
+        );
+        if (startBodies.length === 2) {
+          return jsonResponse(
+            {
+              protocol_version: 3,
+              server_features: ["playback_plan_v3", "capability_warming_v1"],
+              outcome: "adaptation_unavailable",
+              terminal: {
+                reason: "capability_warming",
+                message: "Tone-map capability discovery is still warming.",
+                retryable: true,
+                retry_after_ms: 50,
+              },
+            },
+            { status: 201 },
+          );
+        }
+        const replacement = startBodies.length === 3;
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "capability_warming_v1"],
+            outcome: "playable",
+            session_id: replacement ? "session-replacement" : "session-initial",
+            playback_plan: fixturePlanV3({
+              session_id: replacement ? "session-replacement" : "session-initial",
+              requested_media_file_id: replacement ? 99 : 7,
+              effective_media_file_id: replacement ? 99 : 7,
+            }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-warming-replacement", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-initial"));
+
+    act(() => {
+      result.current.updatePlaybackState(10, true);
+      result.current.switchVersion(99, 10);
+    });
+    await waitFor(() => expect(startBodies).toHaveLength(2));
+    act(() => result.current.updatePlaybackState(17, true));
+    await waitFor(() => expect(result.current.sessionId).toBe("session-replacement"));
+
+    expect(startBodies[1]).toMatchObject({ file_id: 99, start_position: 10 });
+    expect(startBodies[2]).toMatchObject({ file_id: 99, start_position: 17 });
+    expect(startBodies[2]!.playback_attempt_id).not.toBe(startBodies[1]!.playback_attempt_id);
+    unmount();
+  });
+});
+
 describe("usePlaybackSession quality changes", () => {
   it("rolls back a rejected quality and keeps it out of later replans", async () => {
     const plan = fixturePlanV3();
@@ -1254,6 +1430,221 @@ describe("usePlaybackSession version switches", () => {
 });
 
 describe("usePlaybackSession replans", () => {
+  it("retries a warming replan with a fresh replan request id", async () => {
+    const replanBodies: Array<{ replan_request_id: string; position_seconds: number }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-warming-replan",
+            playback_plan: fixturePlanV3({ session_id: "session-warming-replan" }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-warming-replan/replan")) {
+        replanBodies.push(
+          JSON.parse(String(init?.body)) as {
+            replan_request_id: string;
+            position_seconds: number;
+          },
+        );
+        if (replanBodies.length === 1) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "capability_warming_v1"],
+            outcome: "adaptation_unavailable",
+            terminal: {
+              reason: "capability_warming",
+              message: "Tone-map capability discovery is still warming.",
+              retryable: true,
+              retry_after_ms: 50,
+            },
+          });
+        }
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-warming-replan",
+          playback_plan: fixturePlanV3({
+            session_id: "session-warming-replan",
+            plan_id: "plan:warmed-replan-0001",
+            plan_attempt_key: "v3:warmed-replan",
+          }),
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-warming-replan", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.changeQuality("720p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.updatePlaybackState(37, true));
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:warmed-replan-0001"));
+
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[1]!.replan_request_id).not.toBe(replanBodies[0]!.replan_request_id);
+    expect(replanBodies[0]!.position_seconds).toBe(30);
+    expect(replanBodies[1]!.position_seconds).toBe(37);
+    expect(result.current.error).toBeNull();
+    unmount();
+  });
+
+  it("aborts a warming user-intent replan when failure recovery is queued", async () => {
+    const replanBodies: Array<{ operation: string }> = [];
+    let warmingRetryAborted = false;
+    const decision = (plan: ReturnType<typeof fixturePlanV3>) => ({
+      protocol_version: 3,
+      server_features: ["playback_plan_v3", "capability_warming_v1"],
+      outcome: "playable",
+      session_id: plan.session_id,
+      playback_plan: plan,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(decision(fixturePlanV3()), { status: 201 });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as { operation: string });
+        if (replanBodies.length === 1) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "capability_warming_v1"],
+            outcome: "adaptation_unavailable",
+            terminal: {
+              reason: "capability_warming",
+              message: "Tone-map capability discovery is still warming.",
+              retryable: true,
+              retry_after_ms: 0,
+            },
+          });
+        }
+        if (replanBodies.length === 2) {
+          return new Promise<Response>((_resolve, reject) => {
+            const abort = () => {
+              warmingRetryAborted = true;
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            };
+            if (init?.signal?.aborted) abort();
+            else init?.signal?.addEventListener("abort", abort, { once: true });
+          });
+        }
+        return jsonResponse(
+          decision(
+            fixturePlanV3({
+              plan_id: "plan:failure-recovery",
+              plan_attempt_key: "v3:failure-recovery",
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-warming-recovery", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.changeQuality("720p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    act(() => result.current.recoverFromFailure({ classification: "decoder_failure" }, 31));
+
+    await waitFor(() => expect(replanBodies).toHaveLength(3), { timeout: 500 });
+    expect(warmingRetryAborted).toBe(true);
+    expect(replanBodies.map((body) => body.operation)).toEqual([
+      "quality_change",
+      "quality_change",
+      "failure_recovery",
+    ]);
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:failure-recovery"));
+    unmount();
+  });
+
+  it("replays a user intent after adopting a stale plan reconciliation", async () => {
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const decision = (plan: ReturnType<typeof fixturePlanV3>) => ({
+      protocol_version: 3,
+      server_features: ["playback_plan_v3"],
+      outcome: "playable",
+      session_id: "session-1",
+      playback_plan: plan,
+    });
+    const reconciledPlan = fixturePlanV3({
+      plan_id: "plan:reconciled0001",
+      plan_attempt_key: "v3:reconciled0001",
+    });
+    const requestedPlan = fixturePlanV3({
+      plan_id: "plan:requested000001",
+      plan_attempt_key: "v3:requested000001",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(decision(fixturePlanV3()), { status: 201 });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        if (replanBodies.length === 1) {
+          return jsonResponse(
+            {
+              error: "stale_playback_plan",
+              message: "The failed plan is no longer current",
+              current_decision: decision(reconciledPlan),
+            },
+            { status: 409 },
+          );
+        }
+        return jsonResponse(decision(requestedPlan));
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-reconcile-intent", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
+
+    act(() => result.current.changeQuality("720p", 30));
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:requested000001"));
+
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[0]).toMatchObject({
+      operation: "quality_change",
+      failed_plan_id: "plan:0123456789abcdef",
+      quality_preference: "720p",
+    });
+    expect(replanBodies[1]).toMatchObject({
+      operation: "quality_change",
+      failed_plan_id: "plan:reconciled0001",
+      quality_preference: "720p",
+    });
+    expect(result.current.qualityPreference).toBe("720p");
+    unmount();
+  });
+
   it("drops a queued predecessor failure after the in-flight replan adopts a new plan", async () => {
     const initialPlan = fixturePlanV3();
     let resolveFirstReplan: ((response: Response) => void) | undefined;
@@ -1722,6 +2113,296 @@ describe("usePlaybackSession server-invalidated plans", () => {
     });
     await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:3333333333333333"));
 
+    unmount();
+  });
+
+  it("interrupts a warming retry so an invalidation can meet its deadline", async () => {
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(playableDecision(fixturePlanV3()), { status: 201 });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        if (replanBodies.length === 1) {
+          return jsonResponse({
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "capability_warming_v1"],
+            outcome: "adaptation_unavailable",
+            terminal: {
+              reason: "capability_warming",
+              message: "Tone-map capability discovery is still warming.",
+              retryable: true,
+              retry_after_ms: 4_000,
+            },
+          });
+        }
+        return jsonResponse(
+          playableDecision(
+            fixturePlanV3({
+              plan_id: "plan:3333333333333333",
+              plan_attempt_key: "v3:3333333333333333",
+              delivery: "server_transcode_hls",
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
+
+    act(() => result.current.changeQuality("720p", 100));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    let invalidation: Promise<boolean> | undefined;
+    act(() => {
+      invalidation = result.current.invalidatePlan(
+        "plan:0123456789abcdef",
+        "video_copy_unsafe",
+        100,
+      );
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2), { timeout: 500 });
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await invalidation;
+    });
+
+    expect(outcome).toBe(true);
+    expect(replanBodies[1]).toMatchObject({
+      operation: "failure_recovery",
+      failed_plan_id: "plan:0123456789abcdef",
+      failure: { classification: "video_copy_unsafe" },
+    });
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:3333333333333333"));
+    unmount();
+  });
+
+  it("aborts an in-flight warming replacement retry before handling an invalidation", async () => {
+    let startCount = 0;
+    let replacementRetryAborted = false;
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startCount += 1;
+        if (startCount === 1) {
+          return jsonResponse(playableDecision(fixturePlanV3()), { status: 201 });
+        }
+        if (startCount === 2) {
+          return jsonResponse(
+            {
+              protocol_version: 3,
+              server_features: ["playback_plan_v3", "capability_warming_v1"],
+              outcome: "adaptation_unavailable",
+              terminal: {
+                reason: "capability_warming",
+                message: "Tone-map capability discovery is still warming.",
+                retryable: true,
+                retry_after_ms: 0,
+              },
+            },
+            { status: 201 },
+          );
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = () => {
+            replacementRetryAborted = true;
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener("abort", abort, { once: true });
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return jsonResponse(
+          playableDecision(
+            fixturePlanV3({
+              plan_id: "plan:replacement-invalidation",
+              plan_attempt_key: "v3:replacement-invalidation",
+              delivery: "server_transcode_hls",
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
+
+    act(() => result.current.switchVersion(99, 100));
+    await waitFor(() => expect(startCount).toBe(3));
+
+    let outcome: boolean | undefined;
+    act(() => {
+      void result.current
+        .invalidatePlan("plan:0123456789abcdef", "video_copy_unsafe", 100)
+        .then((value) => {
+          outcome = value;
+        });
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(1), { timeout: 500 });
+    await waitFor(() => expect(outcome).toBe(true));
+    expect(replacementRetryAborted).toBe(true);
+    expect(replanBodies[0]).toMatchObject({
+      operation: "failure_recovery",
+      failed_plan_id: "plan:0123456789abcdef",
+    });
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:replacement-invalidation"));
+    unmount();
+  });
+
+  it("aborts the first in-flight replacement request before handling an invalidation", async () => {
+    let startCount = 0;
+    let replacementStartAborted = false;
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startCount += 1;
+        if (startCount === 1) {
+          return jsonResponse(playableDecision(fixturePlanV3()), { status: 201 });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          const abort = () => {
+            replacementStartAborted = true;
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener("abort", abort, { once: true });
+        });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return jsonResponse(
+          playableDecision(
+            fixturePlanV3({
+              plan_id: "plan:first-replacement-invalidation",
+              plan_attempt_key: "v3:first-replacement-invalidation",
+              delivery: "server_transcode_hls",
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
+
+    act(() => result.current.switchVersion(99, 100));
+    await waitFor(() => expect(startCount).toBe(2));
+
+    let outcome: boolean | undefined;
+    act(() => {
+      void result.current
+        .invalidatePlan("plan:0123456789abcdef", "video_copy_unsafe", 100)
+        .then((value) => {
+          outcome = value;
+        });
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(1), { timeout: 500 });
+    await waitFor(() => expect(outcome).toBe(true));
+    expect(replacementStartAborted).toBe(true);
+    expect(replanBodies[0]).toMatchObject({
+      operation: "failure_recovery",
+      failed_plan_id: "plan:0123456789abcdef",
+    });
+    await waitFor(() =>
+      expect(result.current.plan?.plan_id).toBe("plan:first-replacement-invalidation"),
+    );
+    unmount();
+  });
+
+  it("aborts an in-flight replan when the server invalidates the current plan", async () => {
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(playableDecision(fixturePlanV3()), { status: 201 });
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        if (replanBodies.length === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          });
+        }
+        return jsonResponse(
+          {
+            error: "stale_playback_plan",
+            message: "The failed plan is no longer current",
+            current_decision: playableDecision(
+              fixturePlanV3({
+                plan_id: "plan:4444444444444444",
+                plan_attempt_key: "v3:4444444444444444",
+                delivery: "server_transcode_hls",
+              }),
+            ),
+          },
+          { status: 409 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
+
+    act(() => result.current.changeQuality("720p", 100));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    let outcome: boolean | undefined;
+    await act(async () => {
+      outcome = await result.current.invalidatePlan(
+        "plan:0123456789abcdef",
+        "video_copy_unsafe",
+        100,
+      );
+    });
+
+    expect(outcome).toBe(true);
+    expect(replanBodies).toHaveLength(2);
+    expect(replanBodies[1]).toMatchObject({
+      operation: "failure_recovery",
+      failed_plan_id: "plan:0123456789abcdef",
+      failure: { classification: "video_copy_unsafe" },
+    });
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:4444444444444444"));
     unmount();
   });
 

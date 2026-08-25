@@ -2,6 +2,17 @@
 
 ## 2026-08-24
 
+### Keep the selected media version while the transcoder warms up
+The first HDR playback after a server restart no longer treats a still-running
+tone-map capability check as proof that the selected 4K version cannot play.
+Silo warms the capability inventory in the background, keeps the requested file
+pinned while discovery is incomplete, and advertises the retry contract so the
+web player can wait through the bounded probe window with a visible preparing
+state. A lower-resolution version is considered only after a definitive result
+says the selected version has no route. Subtitle
+remapping between versions also uses the track's descriptive metadata and
+refuses ambiguous duplicate tracks instead of silently choosing the first one.
+
 ### Start audiobook playback once after browser capability detection
 The web audiobook player now waits for the browser's capability check to finish before requesting a playback session. It previously reacted to each intermediate capability result, creating and immediately replacing multiple sessions when one play request should have produced only one.
 
