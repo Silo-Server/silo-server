@@ -1,7 +1,10 @@
 import { type ReactNode } from "react";
 import { Languages } from "lucide-react";
+import type { ItemVideo } from "@/api/types";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
+import { youtubeHeroEmbedUrl } from "./heroTrailer";
+import { useHeroTrailerBackdrop } from "./useHeroTrailerBackdrop";
 
 interface DetailHeroProps {
   title: string;
@@ -9,6 +12,12 @@ interface DetailHeroProps {
   context?: ReactNode;
   backdropUrl?: string;
   backdropThumbhash?: string;
+  /**
+   * Optional YouTube trailer/teaser looped (muted) behind the still backdrop.
+   * The still image remains the fallback: reduced motion, narrow viewports,
+   * hidden tabs, and embed failure all keep Ken Burns.
+   */
+  heroTrailer?: ItemVideo | null;
   posterUrl?: string;
   posterThumbhash?: string;
   posterOrientation?: "portrait" | "landscape" | "square";
@@ -43,6 +52,7 @@ export default function DetailHero({
   context,
   backdropUrl,
   backdropThumbhash,
+  heroTrailer,
   posterUrl,
   posterThumbhash,
   posterOrientation = "portrait",
@@ -68,6 +78,7 @@ export default function DetailHero({
   const backdropPlaceholder = backdropThumbhash ? decodeThumbhash(backdropThumbhash) : "";
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
+  const playHeroTrailer = useHeroTrailerBackdrop() && Boolean(heroTrailer?.site_key);
 
   const posterSizeClass = (() => {
     switch (posterOrientation) {
@@ -99,7 +110,7 @@ export default function DetailHero({
   return (
     <section className="item-detail-hero border-border/10 relative isolate overflow-hidden border-b">
       {topNav}
-      {(backdropUrl || backdropPlaceholder) && (
+      {(backdropUrl || backdropPlaceholder || playHeroTrailer) && (
         <div
           className="absolute inset-0 h-full w-full"
           style={{
@@ -119,9 +130,24 @@ export default function DetailHero({
               src={backdropUrl}
               alt=""
               className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 will-change-transform ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
-              style={{ animation: "var(--animate-ken-burns-a)" }}
+              style={{ animation: playHeroTrailer ? undefined : "var(--animate-ken-burns-a)" }}
               onLoad={onBackdropLoad}
             />
+          )}
+          {playHeroTrailer && heroTrailer && (
+            <div
+              data-testid="detail-hero-trailer"
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+              aria-hidden="true"
+            >
+              <iframe
+                src={youtubeHeroEmbedUrl(heroTrailer.site_key)}
+                title=""
+                allow="autoplay; encrypted-media"
+                tabIndex={-1}
+                className="absolute top-1/2 left-1/2 aspect-video h-[56.25vw] min-h-full w-[177.78vh] min-w-full -translate-x-1/2 -translate-y-1/2 scale-[1.35] border-0"
+              />
+            </div>
           )}
         </div>
       )}

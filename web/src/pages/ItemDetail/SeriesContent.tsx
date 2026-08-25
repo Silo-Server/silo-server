@@ -20,6 +20,7 @@ import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
+import { pickHeroTrailer } from "./heroTrailer";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import SeasonCarousel from "./SeasonCarousel";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
@@ -134,6 +135,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
         studioLabel={firstNetwork}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}
+        heroTrailer={pickHeroTrailer(item.videos)}
         posterUrl={item.poster_url}
         posterThumbhash={item.poster_thumbhash}
         logoUrl={item.logo_url}

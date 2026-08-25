@@ -22,6 +22,7 @@ import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
+import { pickHeroTrailer } from "./heroTrailer";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MetadataBadges from "./components/MetadataBadges";
 import TrailersSection from "./components/TrailersSection";
@@ -231,6 +232,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
         studioLabel={firstStudio}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}
+        heroTrailer={pickHeroTrailer(item.videos)}
         posterUrl={item.poster_url}
         posterThumbhash={item.poster_thumbhash}
         logoUrl={item.logo_url}

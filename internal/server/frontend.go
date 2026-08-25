@@ -46,8 +46,9 @@ var Branding *branding.Service
 //     Plex auth (plex.tv), and HLS fetches against standalone worker origins.
 //   - font-src blob: data: plus fonts.gstatic.com for Google Fonts; reader
 //     book fonts load from blob: URLs.
-//   - frame-src youtube-nocookie.com: the item-detail trailer modal embeds
-//     remote trailers via YouTube's privacy-enhanced iframe host.
+//   - frame-src youtube-nocookie.com: the item-detail trailer modal and the
+//     muted movie/series hero backdrop embed remote trailers via YouTube's
+//     privacy-enhanced iframe host.
 const frontendContentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'wasm-unsafe-eval'; " +
 	"style-src 'self' 'unsafe-inline' blob: https://fonts.googleapis.com; " +
