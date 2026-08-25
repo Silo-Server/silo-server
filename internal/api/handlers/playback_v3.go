@@ -1832,11 +1832,14 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 	}
 	localFallbackAllowed := h.NodePlanner == nil || nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo)
 	if h.NodePlanner != nil {
-		// Local egress is the header-authenticated mode WITHOUT authorized
-		// origins: the API is then the only client-facing media origin, so a
-		// proxy must not be selected at all. With authorized origins the normal
-		// proxy+transcode pairing applies again.
-		plan := h.planNodeSessionV3(r.Context(), session, result, mode.headerAuth && !mode.proxyEgress)
+		// Check policy before reserving so we never create slots we discard.
+		policy := nodepool.ProxyPolicy(r.Context(), h.SettingsRepo)
+		restricted := policy == config.ProxyPolicyNever || policy == config.ProxyPolicyTranscodeOnly
+		var plan nodepool.Plan
+		if !(restricted && result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
+			localEgress := (mode.headerAuth && !mode.proxyEgress) || policy == config.ProxyPolicyNever
+			plan = h.planNodeSessionV3(r.Context(), session, result, localEgress)
+		}
 		if plan.TranscodeNode == nil && !localFallbackAllowed {
 			if fallback, attempted, fallbackErr := h.prepareSoftwareToneMapFallbackV3(r, session, file, result, timeline, mode); attempted {
 				return fallback, fallbackErr
@@ -2317,12 +2320,15 @@ func (h *PlaybackHandler) deleteNodeRecipeV3(ctx context.Context, transportID st
 // exception is a remux that must run ffmpeg: that is transcode work, so it
 // honors the same local-fallback gate as the HLS routes rather than quietly
 // spawning an encoder on an API-only node.
+// The playback.proxy_policy setting controls whether these deliveries are
+// eligible for proxy routing at all. Under "transcode_only" or "never",
+// direct play and remux streams always stay on the API server.
 func (h *PlaybackHandler) planIdentityProxyV3(r *http.Request, sessionID string, result playback.PlannerResultV3, mode mediaAuthModeV3) (*nodepool.Node, *transportErrorV3) {
-	// A legacy attempt addresses its proxy with a signed token, so an unset
-	// signing secret rules the whole pool out. An authorized-origin attempt
-	// addresses it by session id against a server-side grant and needs no
-	// signing secret of its own.
 	if h.NodePlanner == nil || (h.JWTSecret == "" && !mode.proxyEgress) {
+		return nil, h.refuseLocalIdentityWorkV3(r, result)
+	}
+	policy := nodepool.ProxyPolicy(r.Context(), h.SettingsRepo)
+	if policy == config.ProxyPolicyTranscodeOnly || policy == config.ProxyPolicyNever {
 		return nil, h.refuseLocalIdentityWorkV3(r, result)
 	}
 	// Reserve against the session id the rest of the transport uses, so a

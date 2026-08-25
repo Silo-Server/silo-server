@@ -31,6 +31,11 @@ const (
 const (
 	PlaybackLocalTranscodeFallbackSettingKey = "playback.local_transcode_fallback"
 	Allow4KTranscodeSettingKey               = "allow_4k_transcode"
+
+	PlaybackProxyPolicySettingKey = "playback.proxy_policy"
+	ProxyPolicyAlways            = "always"
+	ProxyPolicyTranscodeOnly     = "transcode_only"
+	ProxyPolicyNever             = "never"
 )
 
 // ArtworkStorageReconcileCheckpointKey is machine-managed task state. It is
@@ -87,6 +92,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.hw_accel":                        "auto",
 	"playback.transcode_enabled":               "true",
 	PlaybackLocalTranscodeFallbackSettingKey:   "true",
+	PlaybackProxyPolicySettingKey:              ProxyPolicyAlways,
 	"playback.chapter_thumbnail_workers":       "1",
 	"playback.chapter_thumbnail_execution":     "local",
 	"playback.chapter_thumbnail_node_capacity": "1",
@@ -441,6 +447,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "auto", "qsv", "vaapi", "nvenc", "videotoolbox", "none")
 	case "playback.chapter_thumbnail_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
+	case PlaybackProxyPolicySettingKey:
+		return normalizeAdminEnum(key, value, ProxyPolicyAlways, ProxyPolicyTranscodeOnly, ProxyPolicyNever)
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
 	case "metadata_ai.on_view":

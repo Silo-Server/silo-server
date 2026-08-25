@@ -38,6 +38,7 @@ const TRANSCODING_ADVANCED_KEYS = [
   "playback.local_transcode_fallback",
   "playback.transcode_hardware_tone_map_enabled",
   "playback.transcode_software_tone_map_enabled",
+  "playback.proxy_policy",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
   "playback.chapter_thumbnail_workers",
@@ -273,6 +274,18 @@ export default function PlaybackSettings() {
               value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
               onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
+            />
+            <SettingField
+              label="Proxy streaming policy"
+              type="select"
+              options={[
+                { value: "always", label: "Always (proxy serves all streams)" },
+                { value: "transcode_only", label: "Transcode only (server handles direct play and remux)" },
+                { value: "never", label: "Never (server serves all streams, nodes only transcode)" },
+              ]}
+              description="Controls when proxy nodes serve media streams to clients."
+              value={form.getValue("playback.proxy_policy") || "always"}
+              onChange={(v) => form.setValue("playback.proxy_policy", v)}
             />
             <SettingField
               label="Throttle transcoding"

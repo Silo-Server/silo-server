@@ -901,3 +901,18 @@ func LocalTranscodeFallbackAllowed(ctx context.Context, settings interface {
 	v, _ := settings.Get(ctx, config.PlaybackLocalTranscodeFallbackSettingKey)
 	return v != "false"
 }
+
+// ProxyPolicy returns the playback.proxy_policy setting value, defaulting to
+// "always" so existing deployments keep the historical behavior.
+func ProxyPolicy(ctx context.Context, settings interface {
+	Get(ctx context.Context, key string) (string, error)
+}) string {
+	if settings == nil {
+		return config.ProxyPolicyAlways
+	}
+	v, _ := settings.Get(ctx, config.PlaybackProxyPolicySettingKey)
+	if v == "" {
+		return config.ProxyPolicyAlways
+	}
+	return v
+}
