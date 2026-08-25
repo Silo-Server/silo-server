@@ -213,7 +213,9 @@ export default function MediaItemMenu({
   const triggerClassName = cn(
     "inline-flex items-center justify-center rounded-md border border-border/20 bg-background/60 text-foreground shadow-sm backdrop-blur-sm transition-[opacity,background-color] duration-150 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
     variant === "wide" ? "size-9" : "size-8",
-    "opacity-100 md:opacity-0 md:group-hover/card:opacity-100 md:group-focus-within/card:opacity-100",
+    // A desktop-width touchscreen can report `hover: none`; hiding by width alone
+    // leaves those users with no pointer interaction that can reveal the trigger.
+    "opacity-100 md:[@media(hover:hover)]:opacity-0 md:group-hover/card:opacity-100 md:group-focus-within/card:opacity-100",
   );
 
   async function handleAction(actionKey: Extract<MediaItemMenuEntry, { kind: "action" }>["key"]) {

@@ -2,6 +2,11 @@
 
 ## 2026-08-25
 
+### Keep card menus accessible on touchscreen computers
+Media-card action buttons now remain visible on desktop-width touchscreen and hybrid computers
+whose primary input cannot hover. Mouse and trackpad systems retain the existing reveal-on-hover
+behavior.
+
 ### Clear stale library troubleshooting entries after path changes
 Full library scans now reconcile troubleshooting entries across the whole library, so diagnostics for removed or replaced root paths disappear after the path-change scan completes. Subtree and single-file scans remain scoped and cannot clear diagnostics elsewhere in the library.
 
