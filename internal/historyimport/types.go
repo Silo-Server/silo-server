@@ -85,14 +85,15 @@ type ConnectSessionLoginResult struct {
 }
 
 type PlexServer struct {
-	Name             string `json:"name"`
-	ClientIdentifier string `json:"client_identifier"`
-	AccessToken      string `json:"access_token"`
-	RemoteURL        string `json:"remote_url"`
-	LocalURL         string `json:"local_url"`
-	Owned            bool   `json:"owned"`
-	HasRemoteURL     bool   `json:"has_remote_url"`
-	HasLocalURL      bool   `json:"has_local_url"`
+	Name             string   `json:"name"`
+	ClientIdentifier string   `json:"client_identifier"`
+	AccessToken      string   `json:"access_token"`
+	RemoteURL        string   `json:"remote_url"`
+	LocalURL         string   `json:"local_url"`
+	ConnectionURLs   []string `json:"connection_urls,omitempty"`
+	Owned            bool     `json:"owned"`
+	HasRemoteURL     bool     `json:"has_remote_url"`
+	HasLocalURL      bool     `json:"has_local_url"`
 }
 
 type PlexSession struct {
@@ -219,7 +220,10 @@ type CreateRunInput struct {
 	PlexSessionID    string `json:"plex_session_id,omitempty"`
 	PlexServerID     string `json:"plex_server_id,omitempty"`
 	PlexBaseURL      string `json:"plex_base_url,omitempty"`
-	PlexToken        string `json:"plex_token,omitempty"`
+	// PlexBaseURLs carries fallback addresses discovered for the same Plex
+	// server. PlexBaseURL remains the preferred address for older clients.
+	PlexBaseURLs []string `json:"plex_base_urls,omitempty"`
+	PlexToken    string   `json:"plex_token,omitempty"`
 	// PlexAccountToken is the plex.tv account token from a browser-side
 	// PIN/OAuth flow. PlexToken is a PMS access token in that flow and is
 	// rejected by account-level APIs (the watchlist), so clients that hold
@@ -270,8 +274,8 @@ type localProgressRow struct {
 }
 
 type plexAuth struct {
-	BaseURL string
-	Token   string
+	BaseURLs []string
+	Token    string
 	// AccountToken is the plex.tv account token (PIN/OAuth session token or
 	// the user-supplied token), used for account-level fetches such as the
 	// watchlist. May equal Token for manual-token imports.

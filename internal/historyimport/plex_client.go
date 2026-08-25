@@ -3,9 +3,12 @@ package historyimport
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -27,6 +30,43 @@ const (
 	plexWatchlistPageSize = 100
 )
 
+var (
+	errPrivatePlexDestination  = errors.New("plex destination resolves to a private or special-use network")
+	errInsecurePlexDestination = errors.New("profile Plex imports require HTTPS destinations")
+	errPlexDialTimeout         = errors.New("plex dial budget exhausted before any address was reachable")
+	plexDeniedNetworks         = []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("127.0.0.0/8"),
+		netip.MustParsePrefix("169.254.0.0/16"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("192.88.99.0/24"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("224.0.0.0/4"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+		netip.MustParsePrefix("::/128"),
+		netip.MustParsePrefix("::1/128"),
+		netip.MustParsePrefix("::/96"),
+		netip.MustParsePrefix("64:ff9b::/96"),
+		netip.MustParsePrefix("64:ff9b:1::/48"),
+		netip.MustParsePrefix("100::/64"),
+		netip.MustParsePrefix("2001::/32"),
+		netip.MustParsePrefix("2001:2::/48"),
+		netip.MustParsePrefix("2001:10::/28"),
+		netip.MustParsePrefix("2001:20::/28"),
+		netip.MustParsePrefix("2001:db8::/32"),
+		netip.MustParsePrefix("2002::/16"),
+		netip.MustParsePrefix("fc00::/7"),
+		netip.MustParsePrefix("fe80::/10"),
+	}
+)
+
 type PlexClient struct {
 	httpClient *http.Client
 	limiter    *upstreamRateLimiter
@@ -44,6 +84,180 @@ func NewPlexClient() *PlexClient {
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		limiter:    sharedHistoryImportUpstreamLimiter,
 	}
+}
+
+func (c *PlexClient) publicDestinationsOnly() *PlexClient {
+	clone := *c
+	timeout := 30 * time.Second
+	if c.httpClient != nil && c.httpClient.Timeout > 0 {
+		timeout = c.httpClient.Timeout
+	}
+	clone.httpClient = newPublicPlexHTTPClient(timeout)
+	return &clone
+}
+
+func newPublicPlexHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		Proxy:               nil,
+		DialContext:         publicPlexDialContext(dialer),
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        16,
+		IdleConnTimeout:     60 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	return &http.Client{
+		Timeout:       timeout,
+		Transport:     &publicPlexTransport{base: transport},
+		CheckRedirect: checkPublicPlexRedirect,
+	}
+}
+
+// checkPublicPlexRedirect bounds the redirect chain, keeps it on HTTPS, and
+// drops the Plex credential when the chain leaves the host it was minted for.
+//
+// net/http strips Authorization, Cookie, and WWW-Authenticate across a
+// cross-host redirect but knows nothing about X-Plex-Token, so a redirect from
+// a user-supplied Plex address to an attacker's host would otherwise hand that
+// host the user's token. Same-host redirects (including a port change) keep it.
+func checkPublicPlexRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("too many Plex redirects")
+	}
+	if req.URL.Scheme != "https" {
+		return errInsecurePlexDestination
+	}
+	if len(via) > 0 {
+		previous := via[len(via)-1].URL
+		if !strings.EqualFold(previous.Hostname(), req.URL.Hostname()) {
+			req.Header.Del("X-Plex-Token")
+		}
+	}
+	return nil
+}
+
+// plexDialTimeoutFloor keeps a long address list from partitioning the dial
+// budget into attempts too short to ever succeed. It matches the "sane minimum"
+// net/http applies in partialDeadline.
+const plexDialTimeoutFloor = 2 * time.Second
+
+// plexDialBudget is the deadline the whole address list shares: the caller's
+// context deadline or the dialer's own timeout, whichever lands first. A zero
+// return means neither imposes one.
+func plexDialBudget(ctx context.Context, dialer *net.Dialer, now time.Time) time.Time {
+	var deadline time.Time
+	if dialer != nil && dialer.Timeout > 0 {
+		deadline = now.Add(dialer.Timeout)
+	}
+	if ctxDeadline, ok := ctx.Deadline(); ok && (deadline.IsZero() || ctxDeadline.Before(deadline)) {
+		deadline = ctxDeadline
+	}
+	return deadline
+}
+
+// plexPartialDeadline splits the remaining budget across the addresses still
+// untried, mirroring net/http's partialDeadline: without it a couple of
+// black-holed A/AAAA records each consume the full dial timeout and exhaust the
+// enclosing HTTP budget before a reachable address is ever tried.
+func plexPartialDeadline(now, deadline time.Time, addressesRemaining int) (time.Time, error) {
+	if deadline.IsZero() {
+		return time.Time{}, nil
+	}
+	remaining := deadline.Sub(now)
+	if remaining <= 0 {
+		return time.Time{}, errPlexDialTimeout
+	}
+	if addressesRemaining < 1 {
+		addressesRemaining = 1
+	}
+	timeout := remaining / time.Duration(addressesRemaining)
+	if timeout < plexDialTimeoutFloor {
+		timeout = min(remaining, plexDialTimeoutFloor)
+	}
+	return now.Add(timeout), nil
+}
+
+type publicPlexTransport struct {
+	base *http.Transport
+}
+
+func (t *publicPlexTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		return nil, errInsecurePlexDestination
+	}
+	return t.base.RoundTrip(req)
+}
+
+func (t *publicPlexTransport) CloseIdleConnections() {
+	t.base.CloseIdleConnections()
+}
+
+func publicPlexDialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, err
+		}
+
+		var addresses []netip.Addr
+		if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+			addresses = []netip.Addr{literal}
+		} else {
+			addresses, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		candidates := make([]netip.Addr, 0, len(addresses))
+		for _, candidate := range addresses {
+			if publicPlexAddress(candidate) {
+				candidates = append(candidates, candidate)
+			}
+		}
+		if len(candidates) == 0 {
+			return nil, errPrivatePlexDestination
+		}
+
+		budget := plexDialBudget(ctx, dialer, time.Now())
+		var dialErrors []error
+		for i, candidate := range candidates {
+			attemptDeadline, err := plexPartialDeadline(time.Now(), budget, len(candidates)-i)
+			if err != nil {
+				dialErrors = append(dialErrors, err)
+				break
+			}
+			attemptCtx, cancel := ctx, context.CancelFunc(func() {})
+			if !attemptDeadline.IsZero() {
+				attemptCtx, cancel = context.WithDeadline(ctx, attemptDeadline)
+			}
+			conn, dialErr := dialer.DialContext(attemptCtx, network, net.JoinHostPort(candidate.String(), port))
+			cancel()
+			if dialErr == nil {
+				return conn, nil
+			}
+			dialErrors = append(dialErrors, dialErr)
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		return nil, errors.Join(dialErrors...)
+	}
+}
+
+func publicPlexAddress(address netip.Addr) bool {
+	if address.Is4In6() {
+		address = address.Unmap()
+	}
+	if !address.IsGlobalUnicast() {
+		return false
+	}
+	for _, denied := range plexDeniedNetworks {
+		if denied.Contains(address) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *PlexClient) CreatePin(ctx context.Context) (pinID int, pinCode string, err error) {
@@ -117,9 +331,11 @@ func (c *PlexClient) GetResources(ctx context.Context, token string) ([]PlexServ
 			Name:             entry.Name,
 			ClientIdentifier: entry.ClientIdentifier,
 			AccessToken:      entry.AccessToken,
+			ConnectionURLs:   make([]string, 0, len(entry.Connections)),
 			Owned:            entry.Owned,
 		}
 		for _, conn := range entry.Connections {
+			server.ConnectionURLs = append(server.ConnectionURLs, conn.URI)
 			if conn.Local {
 				server.LocalURL = conn.URI
 				server.HasLocalURL = true
@@ -149,22 +365,30 @@ func (c *PlexClient) GetCurrentUser(ctx context.Context, token string) (*PlexAcc
 	return &account, nil
 }
 
+type plexMediaContainerBody struct {
+	Size      int        `json:"size"`
+	TotalSize int        `json:"totalSize"`
+	Offset    int        `json:"offset"`
+	Metadata  []PlexItem `json:"Metadata"`
+	// Video mirrors Metadata: the discover API inconsistently keys some
+	// responses on "Video" instead of "Metadata" (movie items in
+	// particular), so both must be decoded.
+	Video     []PlexItem `json:"Video"`
+	Directory []struct {
+		Key   string `json:"key"`
+		Type  string `json:"type"`
+		Title string `json:"title"`
+	} `json:"Directory"`
+}
+
 type plexMediaContainer struct {
-	MediaContainer struct {
-		Size      int        `json:"size"`
-		TotalSize int        `json:"totalSize"`
-		Offset    int        `json:"offset"`
-		Metadata  []PlexItem `json:"Metadata"`
-		// Video mirrors Metadata: the discover API inconsistently keys some
-		// responses on "Video" instead of "Metadata" (movie items in
-		// particular), so both must be decoded.
-		Video     []PlexItem `json:"Video"`
-		Directory []struct {
-			Key   string `json:"key"`
-			Type  string `json:"type"`
-			Title string `json:"title"`
-		} `json:"Directory"`
-	} `json:"MediaContainer"`
+	MediaContainer plexMediaContainerBody `json:"MediaContainer"`
+}
+
+type plexLibrarySection struct {
+	Key   string
+	Type  string
+	Title string
 }
 
 // items returns the container's media entries regardless of whether the
@@ -225,19 +449,24 @@ func (g *PlexGuids) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("unsupported Plex Guid payload: %s", string(data))
 }
 
-func (c *PlexClient) FetchLibrarySections(ctx context.Context, baseURL, token string) ([]struct{ Key, Type, Title string }, error) {
+func (c *PlexClient) FetchLibrarySections(ctx context.Context, baseURL, token string) ([]plexLibrarySection, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/library/sections", nil)
 	if err != nil {
 		return nil, err
 	}
 	c.setPlexHeaders(req, token)
-	var container plexMediaContainer
+	var container struct {
+		MediaContainer *plexMediaContainerBody `json:"MediaContainer"`
+	}
 	if err := c.doJSON(req, &container); err != nil {
 		return nil, fmt.Errorf("fetching Plex library sections: %w", err)
 	}
-	var sections []struct{ Key, Type, Title string }
+	if container.MediaContainer == nil {
+		return nil, fmt.Errorf("fetching Plex library sections: response is missing MediaContainer")
+	}
+	var sections []plexLibrarySection
 	for _, dir := range container.MediaContainer.Directory {
-		sections = append(sections, struct{ Key, Type, Title string }{dir.Key, dir.Type, dir.Title})
+		sections = append(sections, plexLibrarySection{Key: dir.Key, Type: dir.Type, Title: dir.Title})
 	}
 	return sections, nil
 }
@@ -272,9 +501,10 @@ func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sect
 		if err := c.doJSON(req, &container); err != nil {
 			return nil, fmt.Errorf("fetching Plex section items (section %s, type %d, offset %d): %w", sectionKey, mediaType, offset, err)
 		}
-		allItems = append(allItems, container.MediaContainer.Metadata...)
-		offset += len(container.MediaContainer.Metadata)
-		if offset >= container.MediaContainer.TotalSize || len(container.MediaContainer.Metadata) == 0 {
+		pageItems := container.items()
+		allItems = append(allItems, pageItems...)
+		offset += len(pageItems)
+		if offset >= container.MediaContainer.TotalSize || len(pageItems) == 0 {
 			break
 		}
 	}

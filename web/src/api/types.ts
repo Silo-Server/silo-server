@@ -496,6 +496,7 @@ export interface CreateHistoryImportRunRequest {
   plex_session_id?: string;
   plex_server_id?: string;
   plex_base_url?: string;
+  plex_base_urls?: string[];
   plex_token?: string;
   plex_account_token?: string;
 }

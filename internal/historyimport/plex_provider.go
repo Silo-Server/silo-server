@@ -2,19 +2,30 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 )
 
 type PlexServerProvider struct {
 	client       *PlexClient
+	baseURLs     []string
 	baseURL      string
 	token        string
 	accountToken string
 }
 
-func NewPlexServerProvider(client *PlexClient, baseURL, token string) *PlexServerProvider {
-	return &PlexServerProvider{client: client, baseURL: baseURL, token: token}
+// NewPlexServerProvider takes the advertised connections in preference order,
+// already trimmed, deduped, and capped by plexBaseURLCandidates — resolvePlexAuth
+// owns that normalization because it also decides, from the resulting list,
+// whether the request names a usable server at all. The slice is copied so a
+// caller's later mutation cannot reorder a run's fallbacks mid-flight.
+func NewPlexServerProvider(client *PlexClient, baseURLs []string, token string) *PlexServerProvider {
+	return &PlexServerProvider{
+		client:   client,
+		baseURLs: append([]string(nil), baseURLs...),
+		token:    token,
+	}
 }
 
 // WithAccountToken enables account-level fetches (the watchlist). Empty
@@ -24,8 +35,16 @@ func (p *PlexServerProvider) WithAccountToken(token string) *PlexServerProvider 
 	return p
 }
 
+// WithPublicConnectionsOnly prevents profile OAuth imports from reaching LAN,
+// loopback, link-local, and other special-use destinations. Admin-configured
+// saved sources intentionally keep the unrestricted client.
+func (p *PlexServerProvider) WithPublicConnectionsOnly() *PlexServerProvider {
+	p.client = p.client.publicDestinationsOnly()
+	return p
+}
+
 func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	sections, err := p.client.FetchLibrarySections(ctx, p.baseURL, p.token)
+	sections, err := p.fetchLibrarySections(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -92,6 +111,49 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	}
 
 	return records, warnings, nil
+}
+
+type plexConnectionProbe struct {
+	index    int
+	baseURL  string
+	sections []plexLibrarySection
+	err      error
+}
+
+func (p *PlexServerProvider) fetchLibrarySections(ctx context.Context) ([]plexLibrarySection, error) {
+	if len(p.baseURLs) == 0 {
+		return nil, fmt.Errorf("selected Plex server has no usable address")
+	}
+
+	probeCtx, cancelProbes := context.WithCancel(ctx)
+	defer cancelProbes()
+	results := make(chan plexConnectionProbe, len(p.baseURLs))
+	for i, baseURL := range p.baseURLs {
+		go func() {
+			sections, err := p.client.FetchLibrarySections(probeCtx, baseURL, p.token)
+			results <- plexConnectionProbe{index: i, baseURL: baseURL, sections: sections, err: err}
+		}()
+	}
+
+	connectionErrors := make([]error, len(p.baseURLs))
+	for range p.baseURLs {
+		var result plexConnectionProbe
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result = <-results:
+		}
+		if result.err == nil {
+			p.baseURL = result.baseURL
+			cancelProbes()
+			return result.sections, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		connectionErrors[result.index] = fmt.Errorf("connection %d: %w", result.index+1, result.err)
+	}
+	return nil, fmt.Errorf("all advertised Plex connections failed: %w", errors.Join(connectionErrors...))
 }
 
 func (p *PlexServerProvider) fetchSeriesMetadata(ctx context.Context, items []PlexItem, warnings *[]string) map[string]*PlexItem {

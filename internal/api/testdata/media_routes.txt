@@ -246,6 +246,7 @@ PUT /api/v1/ebooks/{content_id}/progress	non-media
 GET /api/v1/ebooks/{content_id}/reader-config	non-media
 PUT /api/v1/ebooks/{content_id}/reader-config	non-media
 GET /api/v1/health	non-media
+GET /api/v1/history-imports/capability	non-media
 POST /api/v1/history-imports/emby-connect/login	non-media
 POST /api/v1/history-imports/plex/auth/check	non-media
 POST /api/v1/history-imports/plex/auth/pin	non-media

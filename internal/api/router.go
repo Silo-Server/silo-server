@@ -2502,6 +2502,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				if historyImportHandler != nil {
 					r.Route("/history-imports", func(r chi.Router) {
+						r.Get("/capability", historyImportHandler.HandleCapability)
 						r.Get("/sources", historyImportHandler.HandleListSources)
 						r.Post("/emby-connect/login", historyImportHandler.HandleLoginConnect)
 						r.Post("/plex/auth/pin", historyImportHandler.HandleCreatePlexPin)
