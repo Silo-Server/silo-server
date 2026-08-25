@@ -2,6 +2,8 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,16 +14,95 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // withCompatSession attaches a compat session carrying tok to req, so the
 // ActiveEncodings ownership guard (CompatToken == session.Token) is satisfied.
 func withCompatSession(req *http.Request, tok string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: tok}))
+}
+
+func writeMatchingToneMapFFprobe(t *testing.T, ffmpegPath string, track models.VideoTrack) {
+	t.Helper()
+	stream := map[string]any{
+		"index":               0,
+		"codec_name":          track.Codec,
+		"codec_type":          "video",
+		"profile":             track.Profile,
+		"level":               track.Level,
+		"width":               track.Width,
+		"height":              track.Height,
+		"avg_frame_rate":      track.FrameRate,
+		"pix_fmt":             track.PixelFormat,
+		"bits_per_raw_sample": track.BitDepth,
+		"color_range":         track.ColorRange,
+		"color_primaries":     track.ColorPrimaries,
+		"color_transfer":      track.ColorTransfer,
+		"color_space":         track.ColorSpace,
+	}
+	if track.DVConfigPresent {
+		sideData := map[string]any{
+			"side_data_type":   "DOVI configuration record",
+			"dv_profile":       track.DVProfile,
+			"dv_level":         track.DVLevel,
+			"bl_present_flag":  boolInt(track.DVBLPresent),
+			"rpu_present_flag": boolInt(track.DVRPUPresent),
+			"el_present_flag":  boolInt(track.DVELPresent),
+		}
+		if track.DVBLCompatIDPresent {
+			sideData["dv_bl_signal_compatibility_id"] = track.DVBLCompatID
+		}
+		stream["side_data_list"] = []any{sideData}
+	}
+	output, err := json.Marshal(map[string]any{"streams": []any{stream}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	probePath := mediaprobe.FFprobePathFromFFmpeg(ffmpegPath)
+	script := "#!/bin/sh\nprintf '%s' '" + strings.ReplaceAll(string(output), "'", "'\\''") + "'\n"
+	if err := os.WriteFile(probePath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func TestWriteCompatTranscodeErrorClassifiesLiveToneMapValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "stale metadata", err: tonemap.ErrSourceRevisionChanged, wantStatus: http.StatusUnsupportedMediaType, wantCode: "TranscodeUnsupported"},
+		{name: "preflight rejected", err: tonemap.ErrSourcePreflightRejected, wantStatus: http.StatusUnsupportedMediaType, wantCode: "TranscodeUnsupported"},
+		{name: "probe unavailable", err: playback.ErrToneMapSourceValidationUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "TranscodeUnavailable"},
+		{name: "executor probe unavailable", err: playback.ErrToneMapExecutorUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "TranscodeUnavailable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeCompatTranscodeError(recorder, fmt.Errorf("validate /secret/media/movie.mkv: %w", tt.err))
+			if recorder.Code != tt.wantStatus || !strings.Contains(recorder.Body.String(), `"Error":"`+tt.wantCode+`"`) {
+				t.Fatalf("response = %d %s, want %d/%s", recorder.Code, recorder.Body.String(), tt.wantStatus, tt.wantCode)
+			}
+			if strings.Contains(recorder.Body.String(), "/secret/media/movie.mkv") {
+				t.Fatalf("response leaked source path: %s", recorder.Body.String())
+			}
+		})
+	}
 }
 
 func TestAudioSelectionChanged(t *testing.T) {
@@ -55,6 +136,195 @@ func TestAudioSelectionChanged(t *testing.T) {
 				t.Errorf("audioSelectionChanged(%q, %d) = %v, want %v", tc.mediaSourceID, tc.incoming, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t *testing.T) {
+	dir := t.TempDir()
+	mediaPath := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(mediaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startedMarker := filepath.Join(dir, "ffmpeg-started")
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	ffmpegScript := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do\n" +
+		"  case \"$arg\" in\n" +
+		"    -filters) printf ' .S. zscale V->V\\n .S. tonemapx V->V\\n .S. sidedata V->V\\n'; exit 0;;\n" +
+		"    -encoders) printf 'libx264\\n'; exit 0;;\n" +
+		"  esac\n" +
+		"done\n" +
+		"eval \"last=\\\"\\${$#}\\\"\"\n" +
+		"if [ \"$last\" = '-' ]; then exit 0; fi\n" +
+		"touch " + startedMarker + "\n" +
+		"sleep 30\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	modifiedAt := info.ModTime()
+	probeUpdatedAt := time.Now().UTC()
+	file := &models.MediaFile{
+		ID: 42, FilePath: mediaPath, FileSize: info.Size(), FileModifiedAt: &modifiedAt, FileHash: "hash", ProbeUpdatedAt: &probeUpdatedAt, HDR: true,
+		VideoTracks: []models.VideoTrack{{
+			Codec: "hevc", Profile: "Main 10", Width: 1920, Height: 1080, BitDepth: 10, PixelFormat: "yuv420p10le",
+			VideoRange: "HDR10", ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
+		}},
+	}
+	writeMatchingToneMapFFprobe(t, ffmpegPath, file.VideoTracks[0])
+	version := testCompatVersion()
+	source := testCompatSource(NewResourceIDCodec(), version)
+	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", UpstreamPlayMethod: "transcode", MediaSources: []PlaybackMediaSource{source}})
+	handler := &PlaybackHandler{
+		playbackStore: playbackStore,
+		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID, PlayMethod: playback.PlayTranscode},
+		}},
+		fileResolver: testCompatFileResolver{file: file},
+		SettingsRepo: stubSettingsReader{values: map[string]string{config.PlaybackTranscodeSoftwareToneMapSettingKey: "true"}},
+		TranscodeDir: dir,
+		FFmpegPath:   ffmpegPath,
+		HWAccel:      playback.HWAccelNone,
+		tm:           playback.NewTranscodeManager(),
+	}
+
+	type ensureResult struct {
+		session *playback.TranscodeSession
+		err     error
+	}
+	firstResult := make(chan ensureResult, 1)
+	go func() {
+		session, ensureErr := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+		firstResult <- ensureResult{session: session, err: ensureErr}
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, statErr := os.Stat(startedMarker); statErr == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake FFmpeg did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	secondResult := make(chan ensureResult, 1)
+	go func() {
+		session, ensureErr := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+		secondResult <- ensureResult{session: session, err: ensureErr}
+	}()
+	var second ensureResult
+	select {
+	case second = <-secondResult:
+	case <-time.After(time.Second):
+		writeCompatStartupManifest(t, filepath.Join(dir, "upstream-1"))
+		first := <-firstResult
+		<-secondResult
+		if first.session != nil {
+			handler.tm.CloseTranscodeSession("upstream-1", "")
+		}
+		t.Fatal("concurrent manifest request blocked behind the lifecycle lock")
+	}
+	if second.err != nil || second.session == nil {
+		t.Fatalf("concurrent ensure result = session %p, error %v", second.session, second.err)
+	}
+
+	writeCompatStartupManifest(t, filepath.Join(dir, "upstream-1"))
+	first := <-firstResult
+	if first.err != nil || first.session == nil {
+		t.Fatalf("initial ensure result = session %p, error %v", first.session, first.err)
+	}
+	if first.session != second.session {
+		t.Fatalf("concurrent ensure returned a different transcode session: first=%p second=%p", first.session, second.session)
+	}
+	handler.tm.CloseTranscodeSession("upstream-1", "")
+}
+
+func writeCompatStartupManifest(t *testing.T, outputDir string) {
+	t.Helper()
+	for _, name := range []string{"seg_00000.m4s", "seg_00001.m4s", "seg_00002.m4s"} {
+		if err := os.WriteFile(filepath.Join(outputDir, name), []byte("segment"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n" +
+		"#EXTINF:2,\nseg_00000.m4s\n#EXTINF:2,\nseg_00001.m4s\n#EXTINF:2,\nseg_00002.m4s\n"
+	if err := os.WriteFile(filepath.Join(outputDir, "stream.m3u8"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testing.T) {
+	previousTimeout := compatManifestStartupTimeout
+	compatManifestStartupTimeout = time.Second
+	t.Cleanup(func() { compatManifestStartupTimeout = previousTimeout })
+
+	ffmpegPath := filepath.Join(t.TempDir(), "fallback-ffmpeg.sh")
+	script := "#!/bin/sh\n" +
+		"case \"$*\" in *tonemap_opencl*) sleep 30; exit 0;; esac\n" +
+		"out=\"\"\n" +
+		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
+		"mkdir -p \"$out\"\n" +
+		"for name in seg_00000.m4s seg_00001.m4s seg_00002.m4s; do printf segment > \"$out/$name\"; done\n" +
+		"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n#EXTINF:2,\\nseg_00000.m4s\\n#EXTINF:2,\\nseg_00001.m4s\\n#EXTINF:2,\\nseg_00002.m4s\\n' > \"$out/stream.m3u8\"\n" +
+		"sleep 30\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	file := &models.MediaFile{ID: 42, FilePath: filepath.Join(t.TempDir(), "movie.mkv"), HDR: true, VideoTracks: []models.VideoTrack{{
+		Codec: "hevc", Profile: "Main 10", BitDepth: 10, VideoRange: "HDR10",
+		ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
+	}}}
+	if err := os.WriteFile(file.FilePath, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(file.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modifiedAt := info.ModTime()
+	file.FileSize = info.Size()
+	file.FileModifiedAt = &modifiedAt
+	writeMatchingToneMapFFprobe(t, ffmpegPath, file.VideoTracks[0])
+	version := testCompatVersion()
+	version.FileID = file.ID
+	version.VideoTracks = file.VideoTracks
+	source := testCompatSource(NewResourceIDCodec(), version)
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
+	handler := &PlaybackHandler{
+		playbackStore: store,
+		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
+			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: file.ID, PlayMethod: playback.PlayTranscode},
+		}},
+		fileResolver: testCompatFileResolver{file: file},
+		SettingsRepo: stubSettingsReader{values: map[string]string{
+			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+		}},
+		TranscodeDir: t.TempDir(), FFmpegPath: ffmpegPath, HWAccel: tonemap.BackendQSV,
+		tm: playback.NewTranscodeManager(),
+		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+			return tonemap.Capabilities{
+				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+				{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+			}, nil
+		},
+	}
+
+	session, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+	if err != nil {
+		t.Fatalf("ensureTranscodeSession() error = %v, want software fallback ready", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	if opts := session.Opts(); opts.ToneMapMode != tonemap.ModeSoftware || opts.HWAccel != playback.HWAccelNone {
+		t.Fatalf("fallback opts = mode %q hw %q, want software/none", opts.ToneMapMode, opts.HWAccel)
 	}
 }
 
@@ -130,6 +400,26 @@ func TestBuildProxyRedirectURLRequestsSourceAlignedCompatManifest(t *testing.T) 
 	}
 	if !strings.HasSuffix(redirectURL, "/master.m3u8?"+playback.SourceTimelineQueryParam+"=1") {
 		t.Fatalf("redirect URL = %q, want source-timeline opt-in", redirectURL)
+	}
+}
+
+func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
+	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	source := PlaybackMediaSource{Version: catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10", ColorTransfer: "smpte2084"}}}}
+	redirectURL, err := h.buildProxyRedirectURL("play-1", "upstream-1", string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/hdr.mkv"}, source, nil, time.Time{}, "http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := strings.TrimSuffix(
+		strings.TrimPrefix(redirectURL, "http://proxy-1/stream/transcode/"),
+		"/master.m3u8?"+playback.SourceTimelineQueryParam+"=1",
+	)
+	claims, err := streamtoken.Verify(token, h.JWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.PlayMethod != streamtoken.PlayMethodToneMapTranscode {
+		t.Fatalf("tone-map proxy token method = %q", claims.PlayMethod)
 	}
 }
 

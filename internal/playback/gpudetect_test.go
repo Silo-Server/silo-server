@@ -1,10 +1,12 @@
 package playback
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,6 +25,7 @@ type fakeFFmpegProbe struct {
 	uploadCUDA bool
 	smokeOK    bool
 	hang       bool
+	delay      time.Duration
 }
 
 type fakeFFmpegBinary struct {
@@ -88,6 +91,64 @@ func TestExplicitNVENCBypassesFFmpegProbe(t *testing.T) {
 
 	if got := ResolveHWAccelWithFFmpeg("nvenc", "/does/not/exist/ffmpeg"); got != "nvenc" {
 		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want nvenc", got)
+	}
+}
+
+func TestResolveHWAccelWithFFmpegContextHonorsCallerDeadline(t *testing.T) {
+	env := setupHWAccelTest(t)
+	env.addRenderDevice(t, "renderD128", "0x10de")
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
+
+	// 60ms, not the caller deadline's natural handful of milliseconds: the
+	// budget has to cover the fake sysfs walk in listRenderDevices before the
+	// probe is reached, which is cold when this test runs after the rest of the
+	// package. Too tight and exec never starts the process, so nothing is
+	// logged. It stays far below the 200ms per-command timeout the assertion
+	// below distinguishes it from.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	started := time.Now()
+	got := ResolveHWAccelWithFFmpegContext(ctx, "auto", ffmpeg.path)
+	cancel()
+	if got != HWAccelNone {
+		t.Fatalf("ResolveHWAccelWithFFmpegContext() = %q, want none", got)
+	}
+	if elapsed := time.Since(started); elapsed >= 150*time.Millisecond {
+		t.Fatalf("caller deadline took %s, want less than per-command timeout", elapsed)
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("context error = %v, want deadline exceeded", ctx.Err())
+	}
+
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	_ = ResolveHWAccelWithFFmpegContext(retryCtx, "auto", ffmpeg.path)
+	retryCancel()
+	logData, err := os.ReadFile(ffmpeg.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Count(string(logData), "\n"); calls < 1 || calls > 4 {
+		t.Fatalf("canceled probe command count = %d, want one shared attempt of at most four commands", calls)
+	}
+}
+
+func TestNormalizeProbeRequestTimeout(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		millis   int64
+		fallback time.Duration
+		want     time.Duration
+	}{
+		{name: "missing uses caller fallback", fallback: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "negative uses caller fallback", millis: -1, fallback: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "too small", millis: time.Second.Milliseconds(), fallback: 2 * time.Minute, want: 5 * time.Second},
+		{name: "advertised", millis: (137 * time.Second).Milliseconds(), fallback: 2 * time.Minute, want: 137 * time.Second},
+		{name: "too large", millis: (10 * time.Minute).Milliseconds(), fallback: 2 * time.Minute, want: 5 * time.Minute},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := NormalizeProbeRequestTimeout(test.millis, test.fallback); got != test.want {
+				t.Fatalf("NormalizeProbeRequestTimeout() = %s, want %s", got, test.want)
+			}
+		})
 	}
 }
 
@@ -175,6 +236,122 @@ func TestFFmpegSupportsNVENCCachesByFFmpegPath(t *testing.T) {
 	}
 	if got := strings.Count(string(logData), "\n"); got != 4 {
 		t.Fatalf("probe command count = %d, want 4; log:\n%s", got, logData)
+	}
+}
+
+func TestFFmpegSupportsNVENCCoalescesConcurrentColdProbes(t *testing.T) {
+	env := setupHWAccelTest(t)
+	env.addRenderDevice(t, "renderD128", "0x10de")
+	probe := successfulNVENCProbe()
+	probe.delay = 30 * time.Millisecond
+	ffmpeg := writeFakeFFmpeg(t, probe)
+
+	start := make(chan struct{})
+	results := make(chan string, 8)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- ResolveHWAccelWithFFmpeg("auto", ffmpeg.path)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if result != "nvenc" {
+			t.Fatalf("concurrent resolution = %q, want nvenc", result)
+		}
+	}
+
+	logData, err := os.ReadFile(ffmpeg.logPath)
+	if err != nil {
+		t.Fatalf("read ffmpeg probe log: %v", err)
+	}
+	if got := strings.Count(string(logData), "\n"); got != 4 {
+		t.Fatalf("probe command count = %d, want one four-command shared probe; log:\n%s", got, logData)
+	}
+}
+
+func TestFFmpegSupportsNVENCInvalidatesWhenBinaryChangesInPlace(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, successfulNVENCProbe())
+	if ok, reason := ffmpegSupportsNVENC(ffmpeg.path); !ok {
+		t.Fatalf("initial NVENC probe failed: %s", reason)
+	}
+
+	replacement := "#!/bin/sh\necho 'replacement without NVENC support'\nexit 0\n"
+	if err := os.WriteFile(ffmpeg.path, []byte(replacement), 0o755); err != nil {
+		t.Fatalf("replace fake FFmpeg: %v", err)
+	}
+	changedAt := time.Now().Add(time.Second)
+	if err := os.Chtimes(ffmpeg.path, changedAt, changedAt); err != nil {
+		t.Fatalf("advance replacement timestamp: %v", err)
+	}
+	if ok, _ := ffmpegSupportsNVENC(ffmpeg.path); ok {
+		t.Fatal("replaced FFmpeg binary reused a stale positive NVENC result")
+	}
+}
+
+func TestNVENCProbeCacheKeyIncludesResolvedPATHIdentity(t *testing.T) {
+	firstDir := t.TempDir()
+	secondDir := t.TempDir()
+	stamp := time.Unix(100, 0)
+	for _, dir := range []string{firstDir, secondDir} {
+		path := filepath.Join(dir, "ffmpeg")
+		if err := os.WriteFile(path, []byte("same-binary-shape"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv("PATH", firstDir)
+	firstKey := nvencProbeCacheKey("ffmpeg")
+	t.Setenv("PATH", secondDir)
+	secondKey := nvencProbeCacheKey("ffmpeg")
+
+	if firstKey == secondKey {
+		t.Fatalf("PATH-resolved FFmpeg identities collided: %q", firstKey)
+	}
+}
+
+func TestFFmpegSupportsNVENCNegativeResultExpires(t *testing.T) {
+	setupHWAccelTest(t)
+	oldTTL := nvencProbeNegativeTTL
+	nvencProbeNegativeTTL = 20 * time.Millisecond
+	t.Cleanup(func() { nvencProbeNegativeTTL = oldTTL })
+
+	dir := t.TempDir()
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	markerPath := filepath.Join(dir, "nvenc-ready")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$*" in
+  *-hwaccels*) echo cuda; exit 0 ;;
+  *-encoders*) echo 'h264_nvenc hevc_nvenc'; exit 0 ;;
+  *-filters*) echo 'scale_cuda hwupload_cuda'; exit 0 ;;
+  *) test -e %q ;;
+esac
+`, markerPath)
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write marker-controlled FFmpeg: %v", err)
+	}
+
+	if ok, _ := ffmpegSupportsNVENC(ffmpegPath); ok {
+		t.Fatal("initial NVENC probe unexpectedly succeeded")
+	}
+	if err := os.WriteFile(markerPath, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("enable NVENC smoke probe: %v", err)
+	}
+	if ok, _ := ffmpegSupportsNVENC(ffmpegPath); ok {
+		t.Fatal("negative result was not retained during its short TTL")
+	}
+	time.Sleep(2 * nvencProbeNegativeTTL)
+	if ok, reason := ffmpegSupportsNVENC(ffmpegPath); !ok {
+		t.Fatalf("expired negative result was not retried: %s", reason)
 	}
 }
 
@@ -280,8 +457,11 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 
 	script := "#!/bin/sh\n"
 	script += fmt.Sprintf("printf '%%s\\n' \"$*\" >> %q\n", logPath)
+	if probe.delay > 0 {
+		script += fmt.Sprintf("sleep %.3f\n", probe.delay.Seconds())
+	}
 	if probe.hang {
-		script += "sleep 5\n"
+		script += "exec sleep 2147483647\n"
 	}
 	script += "case \"$*\" in\n"
 	script += "  *-hwaccels*)\n"
@@ -324,5 +504,5 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 func resetNVENCProbeCacheForTest() {
 	nvencProbeCache.Lock()
 	defer nvencProbeCache.Unlock()
-	nvencProbeCache.byPath = make(map[string]nvencProbeResult)
+	nvencProbeCache.byPath = make(map[string]nvencProbeCacheEntry)
 }

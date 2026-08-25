@@ -2,10 +2,39 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestProbeTransformationRegistryWithToneMapV3ResultPreservesDeadline(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	_, err := ProbeTransformationRegistryWithToneMapV3Result(ctx, "ffmpeg", nil)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("probe error = %v, want context deadline", err)
+	}
+}
+
+func TestProbeTransformationRegistryWithToneMapV3ResultRejectsFailedInventoryCommand(t *testing.T) {
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) echo dovi_rpu; exit 1 ;;\n-encoders) echo ' V....D libx264 H.264'; echo ' A....D aac AAC' ;;\nesac\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	registry, err := ProbeTransformationRegistryWithToneMapV3Result(context.Background(), ffmpeg, nil)
+	if err == nil {
+		t.Fatal("failed -bsfs command returned a cacheable registry")
+	}
+	if !registry.Available(TransformationAudioToAACV3) || !registry.Available(TransformationVideoToH264V3) {
+		t.Fatal("successful encoder inventory was not retained in the diagnostic registry")
+	}
+}
 
 func TestH264EncoderAvailabilityAcceptsAnyPipelineEncoder(t *testing.T) {
 	cases := []struct {

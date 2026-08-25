@@ -8,11 +8,14 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 type PlannerSettingsV3 struct {
-	TranscodeEnabled bool
-	Allow4KTranscode bool
+	TranscodeEnabled       bool
+	Allow4KTranscode       bool
+	HardwareToneMapEnabled bool
+	SoftwareToneMapEnabled bool
 }
 
 const (
@@ -45,6 +48,13 @@ type PlannerInputV3 struct {
 	// memoize; the transport layer re-validates whichever executor is
 	// actually selected.
 	HLSRegistry func() *TransformationRegistryV3
+	// ToneMapCapabilities and HLSToneMapCapabilities mirror Registry and
+	// HLSRegistry for executor variants of hdr_to_sdr_tonemap. The public plan
+	// names one stable transformation; these internal capabilities select a
+	// validated hardware or software implementation without exposing that
+	// deployment policy to clients.
+	ToneMapCapabilities    tonemap.Capabilities
+	HLSToneMapCapabilities func() tonemap.Capabilities
 	// DVRPUStrippable reports whether this particular source survives the
 	// Dolby Vision RPU strip. The registries answer whether the executor
 	// carries the transformation; this answers whether the file does, which
@@ -62,9 +72,18 @@ type PlannerInputV3 struct {
 // SourceExecutionMetadataV3 is the immutable source probe snapshot used to
 // reopen a frozen playback recipe without consuming later catalog drift.
 type SourceExecutionMetadataV3 struct {
-	VideoCodec          string
-	SoftwareVideoDecode bool
-	DurationSeconds     float64
+	VideoCodec                 string
+	VideoProfile               string
+	VideoBitDepth              int
+	SoftwareVideoDecode        bool
+	DurationSeconds            float64
+	ToneMapSourceKind          tonemap.SourceKind
+	ToneMapPreflightRequired   bool
+	ToneMapSourceRevision      tonemap.SourceRevision
+	ToneMapDVConfigPresent     bool
+	ToneMapDVBLCompatIDPresent bool
+	ToneMapDVBLPresent         bool
+	ToneMapDVRPUPresent        bool
 }
 
 // dvRPUStrippable resolves the per-source strip verdict, defaulting to true
@@ -110,9 +129,27 @@ type PlannerResultV3 struct {
 	// FrozenSourceMetadata is set only when a durable executable recipe is
 	// thawed for a seek reanchor. Transport construction must then use this
 	// captured source snapshot instead of a freshly probed media row.
-	FrozenSourceMetadata *SourceExecutionMetadataV3
+	FrozenSourceMetadata     *SourceExecutionMetadataV3
+	ToneMapPolicy            tonemap.Policy
+	ToneMapMode              tonemap.Mode
+	ToneMapSourceKind        tonemap.SourceKind
+	ToneMapRecipeVersion     string
+	ToneMapPreflightRequired bool
+	ToneMapSourceRevision    tonemap.SourceRevision
 }
 
+// hlsToneMapCapabilities resolves the lazy pooled inventory when present and
+// otherwise uses the eagerly supplied local capability set.
+func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
+	if input.HLSToneMapCapabilities != nil {
+		if capabilities := input.HLSToneMapCapabilities(); capabilities != nil {
+			return capabilities
+		}
+	}
+	return input.ToneMapCapabilities
+}
+
+// PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
 func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
@@ -196,15 +233,21 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 	// With the server strip gone, a client that cannot take the source range
-	// and cannot run its own DV transformation has no route left: this
-	// codebase has no tone-map recipe, so every remaining branch funnels into
-	// planVideoTranscodeV3's hdr_transcode_unsupported. Terminate here instead
-	// so the client is told the actual cause — a source whose Dolby Vision
-	// metadata cannot be removed — rather than a generic HDR message that
+	// (either natively or by managing it itself) and cannot run its own DV
+	// transformation is out of source-preserving routes. Terminate only when no
+	// enabled tone-map route remains either: a validated HDR-to-SDR executor can
+	// still decode the compatible base layer without preserving the Dolby Vision
+	// metadata. Without one, every remaining branch funnels into
+	// planVideoTranscodeV3's hdr_transcode_unsupported, so terminate here
+	// instead — the client is then told the actual cause, a source whose Dolby
+	// Vision metadata cannot be removed, rather than a generic HDR message that
 	// sends the user looking for a missing encoder.
 	if dvStripUnsupportedBySource && !originalRangeOK && !clientDV81Eligible && !clientHDR10Eligible {
-		return terminalPlannerResultV3(TerminalDVConversionUnsupportedV3,
-			"This source's Dolby Vision metadata cannot be removed cleanly, and this device cannot play the source as it is.", false)
+		_, _, _, _, toneMapEligible := toneMapRecipeV3(input, source)
+		if !toneMapEligible || !videoTranscodeExecutableV3(input, source) {
+			return terminalPlannerResultV3(TerminalDVConversionUnsupportedV3,
+				"This source's Dolby Vision metadata cannot be removed cleanly, and this device cannot play the source as it is.", false)
+		}
 	}
 
 	base := PlanV3{
@@ -500,12 +543,21 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 
 // availableQualitiesV3 publishes the server ladder rungs a client could
 // request for this source through a quality_change replan. The source rung is
-// always present; transcode rungs are listed only below the source's own
-// height and only when the cheap transcode gates pass. Registry availability
-// is deliberately not consulted: it can trigger lazy node-capability fetches,
-// which source-preserving starts must never pay for, and a rung whose
-// toolchain is missing degrades to a retryable terminal at replan time.
+// always present; transcode rungs are listed below the source resolution class,
+// and at the same class when they reduce bitrate, only when the cheap transcode
+// gates pass. Registry availability is deliberately not consulted: it can
+// trigger lazy node-capability fetches, which source-preserving starts must
+// never pay for, and a rung whose toolchain is missing degrades to a retryable
+// terminal at replan time.
 func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
+	return availableQualitiesForRouteV3(input, source)
+}
+
+// availableQualitiesForRouteV3 keeps source-preserving HDR planning lazy while
+// still advertising the choices the configured policy allows. Selecting a
+// lower HDR rung performs the executor capability lookup during the replan;
+// building the menu itself never probes local or pooled executors.
+func availableQualitiesForRouteV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
 	qualities := []AvailableQualityV3{{
 		Label:           QualityOriginalV3,
 		Height:          source.Height,
@@ -523,17 +575,19 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		return qualities
 	}
-	if hdrTranscodeUnavailableV3(source) {
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 &&
+		tonemap.NewPolicy(input.Settings.HardwareToneMapEnabled, input.Settings.SoftwareToneMapEnabled) == tonemap.PolicyNone {
 		return qualities
 	}
-	for _, height := range []int{2160, 1080, 720, 480} {
-		if height >= source.Height {
+	for _, rung := range ladderRungsV3 {
+		if !ladderRungPublishableV3(rung, source) {
 			continue
 		}
 		qualities = append(qualities, AvailableQualityV3{
-			Label:       resolutionLabelV3(height),
-			Height:      height,
-			BitrateKbps: ladderBitrateKbpsV3(height),
+			Label:       rung.Label,
+			DisplayName: rung.DisplayName,
+			Height:      rung.Height,
+			BitrateKbps: rung.BitrateKbps,
 		})
 	}
 	return qualities
@@ -732,11 +786,17 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3("transcoding_disabled", "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
-	if hdrTranscodeUnavailableV3(source) {
+	var hlsRegistry *TransformationRegistryV3
+	toneMapRecipe := resolvedToneMapRecipeV3{}
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
+		toneMapRecipe = resolveToneMapRecipeV3(input, source, nil)
+		hlsRegistry = toneMapRecipe.hlsRegistry
+	}
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 && !toneMapRecipe.ok {
 		if subtitleForcedAdaptation {
 			return terminalPlannerResultV3("subtitle_conversion_unsupported", "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded.", false)
 		}
-		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
+		return terminalPlannerResultV3(TerminalHDRTranscodeUnsupportedV3, "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
 	}
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		if subtitleForcedAdaptation {
@@ -744,8 +804,14 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3("no_alternate_version", TerminalMessage4KTranscodeDisabledV3, false)
 	}
-	if !input.hlsRegistry().Available(TransformationVideoToH264V3) || !input.hlsRegistry().Available(TransformationAudioToAACV3) {
+	if hlsRegistry == nil {
+		hlsRegistry = input.hlsRegistry()
+	}
+	if hlsRegistry == nil || !hlsRegistry.Available(TransformationVideoToH264V3) || !hlsRegistry.Available(TransformationAudioToAACV3) {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
+	}
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
+		base.AvailableQualities = availableQualitiesForRouteV3(input, source)
 	}
 	plan := base
 	plan.Delivery = DeliveryTranscodeHLSV3
@@ -765,6 +831,30 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		TransformationV3{Name: TransformationVideoToH264V3, Executor: ExecutorServerV3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, ValidatedClaims: []string{ClaimH264DecodeV3}},
 		TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: "1", ValidatedClaims: []string{ClaimAudioDecodeV3}},
 	)
+	toneMapPolicy := toneMapRecipe.policy
+	toneMapMode := toneMapRecipe.mode
+	toneMapResolution := toneMapRecipe.resolution
+	toneMapRevision := toneMapRecipe.revision
+	toneMapOK := toneMapRecipe.ok
+	toneMapSourceKind := toneMapResolution.Kind
+	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
+		plan.Transformations = append(plan.Transformations, TransformationV3{
+			Name: TransformationHDRToSDRToneMapV3, Executor: ExecutorServerV3,
+			RecipeVersion:   TransformationHDRToSDRToneMapRecipeVersionV3,
+			ValidatedClaims: []string{ClaimHDRMetadataRemovedV3, ClaimSDRBT709OutputV3},
+		})
+		plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
+			Code: DegradationWarningHDRToneMappedV3, Message: "HDR video is tone-mapped to SDR for this playback route.",
+		})
+	} else {
+		// A non-tone-mapped recipe has no execution policy. Keeping PolicyNone
+		// here would turn an ordinary SDR encode into a partial frozen recipe at
+		// the FFmpeg execution boundary.
+		toneMapPolicy = ""
+		toneMapSourceKind = ""
+		toneMapResolution = tonemap.SourceResolution{}
+		toneMapRevision = tonemap.SourceRevision{}
+	}
 	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Passthrough: false, AtmosPreserved: false, Reason: "server_audio_adaptation"}
 	applySubtitleDecisionV3(&plan, subtitle.Decision)
 	plan.Claims.Subtitles = subtitle.Claims
@@ -785,7 +875,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
 }
 
 // applySubtitleDecisionV3 changes the delivery-specific subtitle policy without
@@ -895,6 +985,9 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		result.Warnings = warnings
 		return result
 	}
+	if rung, ok := ladderRungForLabelV3(quality); ok {
+		return compoundRungQualityResultV3(rung, source, capKbps, warnings)
+	}
 	targetHeight := source.Height
 	reason := "quality_auto_source"
 	explicitRung := false
@@ -982,6 +1075,70 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	return result
 }
 
+// compoundRungQualityResultV3 resolves one explicit menu step. Its resolution
+// class never changes under a bandwidth cap; only the bitrate is clamped. For
+// cinema-aspect sources (for example 3840x1540 UHD), a same-class rung keeps
+// the probed dimensions instead of upscaling to the class's nominal height.
+func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, capKbps int, warnings []DegradationWarningV3) QualityResultV3 {
+	sourceClassHeight := sourceLadderHeightV3(source)
+	height := rung.Height
+	sameResolutionClass := sourceClassHeight == rung.Height
+	if source.Height > 0 && (sameResolutionClass || source.Height < height) {
+		height = source.Height
+	}
+	bitrate := rung.BitrateKbps
+	if source.BitrateKbps > 0 && source.BitrateKbps < bitrate {
+		bitrate = source.BitrateKbps
+	}
+	capApplied := capKbps > 0 && bitrate > capKbps
+	if capApplied {
+		bitrate = capKbps
+	}
+	reason := "quality_fixed_rung"
+	if capApplied {
+		reason = decisionReasonBandwidthCapV3
+		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
+	}
+	fitsRung := sourceClassHeight > 0 && sourceClassHeight <= rung.Height && source.BitrateKbps > 0 && source.BitrateKbps <= rung.BitrateKbps
+	if fitsRung && !capApplied {
+		return QualityResultV3{
+			Label:           strconv.Itoa(source.Height) + "p",
+			Width:           source.Width,
+			Height:          source.Height,
+			BitrateKbps:     source.BitrateKbps,
+			PreservesSource: true,
+			ExplicitRung:    true,
+			Reason:          reason,
+			Warnings:        warnings,
+		}
+	}
+	width := 0
+	if source.Width > 0 && source.Height > 0 {
+		width = source.Width * height / source.Height
+		width -= width % 2
+	}
+	if width == 0 {
+		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(height))
+	}
+	targetLabel := resolutionLabelV3(height)
+	if sameResolutionClass && source.Height > 0 && source.Height != rung.Height {
+		// The transcoder treats an unknown exact-height label as "do not scale",
+		// which preserves the source's cinema crop while still applying the
+		// selected bitrate and tone-map recipe.
+		targetLabel = strconv.Itoa(source.Height) + "p"
+	}
+	return QualityResultV3{
+		Label:             targetLabel,
+		Width:             width,
+		Height:            height,
+		BitrateKbps:       bitrate,
+		RequiresTranscode: true,
+		ExplicitRung:      true,
+		Reason:            reason,
+		Warnings:          warnings,
+	}
+}
+
 func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
 	return QualityResultV3{Label: resolutionLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
 }
@@ -1000,8 +1157,82 @@ func hlsNativeAudioCodecV3(codec string) bool {
 
 // hdrTranscodeUnavailableV3 mirrors planVideoTranscodeV3's terminal
 // condition: no validated HDR-preserving or tone-map transcode recipe exists.
-func hdrTranscodeUnavailableV3(source SourceDescriptorV3) bool {
-	return source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3
+func hdrTranscodeUnavailableV3(input PlannerInputV3, source SourceDescriptorV3) bool {
+	if source.DynamicRange == "" || source.DynamicRange == DynamicRangeSDRV3 {
+		return false
+	}
+	return !resolveToneMapRecipeV3(input, source, nil).ok
+}
+
+type resolvedToneMapRecipeV3 struct {
+	policy      tonemap.Policy
+	mode        tonemap.Mode
+	resolution  tonemap.SourceResolution
+	revision    tonemap.SourceRevision
+	hlsRegistry *TransformationRegistryV3
+	ok          bool
+}
+
+// toneMapRecipeV3 freezes the policy, preferred validated executor, safe source
+// resolution, and source revision required by an HDR video transcode plan.
+func toneMapRecipeV3(input PlannerInputV3, source SourceDescriptorV3) (tonemap.Policy, tonemap.Mode, tonemap.SourceResolution, tonemap.SourceRevision, bool) {
+	recipe := resolveToneMapRecipeV3(input, source, nil)
+	return recipe.policy, recipe.mode, recipe.resolution, recipe.revision, recipe.ok
+}
+
+func resolveToneMapRecipeV3(input PlannerInputV3, source SourceDescriptorV3, hlsRegistry *TransformationRegistryV3) resolvedToneMapRecipeV3 {
+	policy := tonemap.NewPolicy(input.Settings.HardwareToneMapEnabled, input.Settings.SoftwareToneMapEnabled)
+	file := input.EffectiveFile
+	if file == nil {
+		file = input.RequestedFile
+	}
+	resolution := toneMapSourceResolutionV3(file, source)
+	revision := tonemap.RevisionForFile(file)
+	recipe := resolvedToneMapRecipeV3{policy: policy, resolution: resolution, revision: revision}
+	if policy == tonemap.PolicyNone || resolution.Kind == "" {
+		return recipe
+	}
+	if hlsRegistry == nil {
+		hlsRegistry = input.hlsRegistry()
+	}
+	recipe.hlsRegistry = hlsRegistry
+	if hlsRegistry == nil || !hlsRegistry.Available(TransformationHDRToSDRToneMapV3) {
+		return recipe
+	}
+	recipe.mode = input.hlsToneMapCapabilities().PreferredMode(policy, resolution.Kind)
+	recipe.ok = recipe.mode != ""
+	return recipe
+}
+
+// toneMapSourceResolutionV3 combines protocol source facts with the scanner's
+// richer primary-track metadata before resolving a safe base signal.
+func toneMapSourceResolutionV3(file *models.MediaFile, source SourceDescriptorV3) tonemap.SourceResolution {
+	metadata := tonemap.SourceMetadata{
+		DynamicRange: source.DynamicRange,
+		DVProfile:    source.DVProfile,
+		DVBLCompatID: source.DVBLCompatID,
+	}
+	if file != nil && len(file.VideoTracks) > 0 {
+		track := file.VideoTracks[0]
+		metadata.DVConfigPresent = track.DVConfigPresent
+		metadata.DVBLCompatIDPresent = track.DVBLCompatIDPresent
+		metadata.DVBLPresent = track.DVBLPresent
+		metadata.DVRPUPresent = track.DVRPUPresent
+		metadata.ColorRange = track.ColorRange
+		metadata.ColorPrimaries = track.ColorPrimaries
+		metadata.ColorTransfer = track.ColorTransfer
+		metadata.ColorSpace = track.ColorSpace
+	}
+	return tonemap.ResolveSource(metadata)
+}
+
+// toneMapRecipeVersionV3 includes the transformation recipe version only when
+// tone mapping is part of the executable plan.
+func toneMapRecipeVersionV3(enabled bool) string {
+	if enabled {
+		return TransformationHDRToSDRToneMapRecipeVersionV3
+	}
+	return ""
 }
 
 // videoTranscodeExecutableV3 mirrors planVideoTranscodeV3's terminal
@@ -1014,7 +1245,7 @@ func videoTranscodeExecutableV3(input PlannerInputV3, source SourceDescriptorV3)
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		return false
 	}
-	if hdrTranscodeUnavailableV3(source) {
+	if hdrTranscodeUnavailableV3(input, source) {
 		return false
 	}
 	return input.hlsRegistry().Available(TransformationVideoToH264V3) && input.hlsRegistry().Available(TransformationAudioToAACV3)
@@ -1151,12 +1382,78 @@ func minPositiveV3(a, b int) int {
 	return b
 }
 
-// ladderBitrateKbpsV3 matches the established web ladder's standard shared
-// rungs; 2160p is the v3-only extension until the web menu exposes a 4K
-// transcode tier.
+// ladderBitrateKbpsV3 retains the established bitrate for each plain
+// resolution preference. Explicit menu steps use ladderRungsV3 below.
 func ladderBitrateKbpsV3(height int) int {
 	bitrates := map[int]int{480: 1_500, 720: 2_000, 1080: 6_000, 2160: 20_000}
 	return bitrates[resolutionHeightV3(resolutionLabelV3(height))]
+}
+
+type ladderRungV3 struct {
+	Label       string
+	DisplayName string
+	Height      int
+	BitrateKbps int
+}
+
+// ladderRungsV3 is the canonical menu ladder in descending resolution and
+// bitrate order. The medium values retain the existing plain-rung bitrates;
+// their compound labels make the bitrate constraint explicit at same height.
+var ladderRungsV3 = []ladderRungV3{
+	{Label: QualityRung2160pHighV3, DisplayName: "4K High", Height: 2160, BitrateKbps: 40_000},
+	{Label: QualityRung2160pMediumV3, DisplayName: "4K Medium", Height: 2160, BitrateKbps: 20_000},
+	{Label: QualityRung2160pLowV3, DisplayName: "4K Low", Height: 2160, BitrateKbps: 10_000},
+	{Label: QualityRung1080pHighV3, DisplayName: "1080p High", Height: 1080, BitrateKbps: 10_000},
+	{Label: QualityRung1080pMediumV3, DisplayName: "1080p Medium", Height: 1080, BitrateKbps: 6_000},
+	{Label: QualityRung1080pLowV3, DisplayName: "1080p Low", Height: 1080, BitrateKbps: 3_000},
+	{Label: QualityRung720pHighV3, DisplayName: "720p High", Height: 720, BitrateKbps: 4_000},
+	{Label: QualityRung720pMediumV3, DisplayName: "720p Medium", Height: 720, BitrateKbps: 2_000},
+	{Label: QualityRung720pLowV3, DisplayName: "720p Low", Height: 720, BitrateKbps: 1_500},
+	{Label: "480p", DisplayName: "480p", Height: 480, BitrateKbps: 1_500},
+}
+
+func ladderRungForLabelV3(label string) (ladderRungV3, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	for _, rung := range ladderRungsV3 {
+		if rung.Label == normalized {
+			return rung, true
+		}
+	}
+	return ladderRungV3{}, false
+}
+
+// sourceLadderHeightV3 classifies cinema-aspect encodes by width as well as
+// height. A 3840x1540 source is still a 4K source for menu purposes.
+func sourceLadderHeightV3(source SourceDescriptorV3) int {
+	switch {
+	case source.Width >= 3840 || source.Height >= 2160:
+		return 2160
+	case source.Width >= 1920 || source.Height >= 1080:
+		return 1080
+	case source.Width >= 1280 || source.Height >= 720:
+		return 720
+	case source.Width > 0 || source.Height > 0:
+		return 480
+	default:
+		return 0
+	}
+}
+
+// ladderRungPublishableV3 avoids upscaling and pointless same-resolution
+// re-encodes. Every lower resolution-class rung is useful; a same-class rung
+// appears only when its bitrate is a real reduction from the source.
+func ladderRungPublishableV3(rung ladderRungV3, source SourceDescriptorV3) bool {
+	sourceHeight := sourceLadderHeightV3(source)
+	if sourceHeight <= 0 {
+		return false
+	}
+	if rung.Height < sourceHeight {
+		return true
+	}
+	if rung.Height > sourceHeight || rung.Label == "480p" {
+		return false
+	}
+	return source.BitrateKbps > 0 && rung.BitrateKbps < source.BitrateKbps
 }
 
 func qualityDimensionsV3(height, sourceWidth, sourceHeight int) (int, int) {

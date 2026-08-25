@@ -34,6 +34,15 @@
       ]
     },
     {
+      "name": "hdr_to_sdr_tonemap",
+      "executor": "server",
+      "recipe_version": "1",
+      "validated_claims": [
+        "hdr_metadata_removed",
+        "sdr_bt709_output"
+      ]
+    },
+    {
       "name": "server_dv7_to_hdr10",
       "executor": "server",
       "recipe_version": "1",

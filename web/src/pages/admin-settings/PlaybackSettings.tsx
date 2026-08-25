@@ -20,6 +20,8 @@ const KEYS = [
   "playback.hw_device",
   "playback.transcode_enabled",
   "playback.local_transcode_fallback",
+  "playback.transcode_hardware_tone_map_enabled",
+  "playback.transcode_software_tone_map_enabled",
   "allow_4k_transcode",
   "enable_transcode_throttle",
   "transcode_throttle_seconds",
@@ -172,6 +174,20 @@ export default function PlaybackSettings() {
             hint="When no eligible transcode node is available, transcode on this server instead. Disable to keep all transcoding on dedicated nodes — playback that requires transcoding fails while no node is eligible."
             value={form.getValue("playback.local_transcode_fallback") || "true"}
             onChange={(v) => form.setValue("playback.local_transcode_fallback", v)}
+          />
+          <SettingField
+            label="Enable Hardware HDR Tone Mapping"
+            type="toggle"
+            hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
+            value={form.getValue("playback.transcode_hardware_tone_map_enabled") || "false"}
+            onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
+          />
+          <SettingField
+            label="Enable Software HDR Tone Mapping"
+            type="toggle"
+            hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
+            value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
+            onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
           />
           <SettingField
             label="Allow 4K Transcoding"

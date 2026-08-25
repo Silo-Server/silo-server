@@ -2120,7 +2120,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
-		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(req.Query.LibraryIDs, access.DisabledLibraryIDs),
+		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
 	}
 
@@ -2138,7 +2138,7 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 		// scopes like "video" expand here rather than leaking downstream.
 		Type:               strings.Join(MediaScopeItemTypes(req.Query.MediaScope), ","),
 		NamePrefix:         req.NamePrefix,
-		DisabledLibraryIDs: effectiveCatalogDisabledLibraryIDs(req.Query.LibraryIDs, access.DisabledLibraryIDs),
+		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaxContentRating:   access.MaxContentRating,
 	}
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
@@ -2244,13 +2244,6 @@ func effectiveCatalogLibraryIDs(requestIDs []int, access AccessFilter) ([]int, b
 		return nil, true
 	}
 	return ids, false
-}
-
-func effectiveCatalogDisabledLibraryIDs(requestIDs, disabled []int) []int {
-	if len(requestIDs) > 0 {
-		return nil
-	}
-	return append([]int(nil), disabled...)
 }
 
 func removeCatalogLibraryIDs(ids, remove []int) []int {

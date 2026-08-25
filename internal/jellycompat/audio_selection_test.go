@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
@@ -129,6 +130,20 @@ func (m *testCompatSessionManager) SetTranscodeNodeURL(sessionID, url string) er
 	if session, ok := m.sessions[sessionID]; ok {
 		session.TranscodeNodeURL = url
 	}
+	return nil
+}
+
+// SetTranscodeStreamDetails records the execution facts supplied by the compatibility handler.
+func (m *testCompatSessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error {
+	session, ok := m.sessions[sessionID]
+	if !ok {
+		return playback.ErrSessionNotFound
+	}
+	session.TargetVideoCodec = targetVideoCodec
+	session.TargetAudioCodec = targetAudioCodec
+	session.TranscodeAudio = transcodeAudio
+	session.TranscodeHWAccel = hwAccel
+	session.ToneMapMode = toneMapMode
 	return nil
 }
 
@@ -277,6 +292,7 @@ func TestHandlePlaybackReport_UpdatesSelectedAudioStreamAndUpstreamTrack(t *test
 	}
 }
 
+// TestEnsureTranscodeSession_UsesSelectedAudioTrack verifies compatibility playback keeps the requested audio stream.
 func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 	version := testCompatVersion()
 	codec := NewResourceIDCodec()
@@ -291,12 +307,17 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 		ID:           "play-1",
 		MediaSources: []PlaybackMediaSource{source},
 	})
+	sessionMgr := &testCompatSessionManager{sessions: map[string]*playback.Session{
+		"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayTranscode},
+	}}
 
 	handler := &PlaybackHandler{
 		playbackStore: playbackStore,
+		sessionMgr:    sessionMgr,
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
+		HWAccel:       playback.HWAccelNone,
 		tm:            playback.NewTranscodeManager(),
 	}
 
@@ -310,6 +331,49 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 
 	if got := transcodeSession.Opts().AudioTrackIndex; got != 1 {
 		t.Fatalf("AudioTrackIndex = %d, want 1", got)
+	}
+	upstream := sessionMgr.sessions["upstream-1"]
+	if upstream.TranscodeHWAccel != playback.HWAccelNone || upstream.ToneMapMode != "" {
+		t.Fatalf("reported execution facts = hw %q tone_map %q, want none and empty", upstream.TranscodeHWAccel, upstream.ToneMapMode)
+	}
+}
+
+// TestEnsureTranscodeSessionReportsReconstructedRecipeFacts verifies reconstructed sessions retain execution facts.
+func TestEnsureTranscodeSessionReportsReconstructedRecipeFacts(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(inputPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write media file: %v", err)
+	}
+	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID:        "upstream-1",
+		InputPath:        inputPath,
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		HWAccel:          playback.HWAccelNone,
+	})
+	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", Recipe: &card})
+	sessionMgr := &testCompatSessionManager{sessions: map[string]*playback.Session{
+		"upstream-1": {ID: "upstream-1", PlayMethod: playback.PlayTranscode},
+	}}
+	tm := playback.NewTranscodeManager()
+	transcodeDir := t.TempDir()
+	ffmpegPath := writeCompatTestFFmpeg(t)
+	tm.Config = func() playback.TranscodeRuntimeConfig {
+		return playback.TranscodeRuntimeConfig{TranscodeDir: transcodeDir, FFmpegPath: ffmpegPath, HWAccel: playback.HWAccelNone}
+	}
+	handler := &PlaybackHandler{playbackStore: playbackStore, sessionMgr: sessionMgr, tm: tm}
+
+	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", testCompatSource(NewResourceIDCodec(), testCompatVersion()))
+	if err != nil {
+		t.Fatalf("ensureTranscodeSession: %v", err)
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+
+	upstream := sessionMgr.sessions["upstream-1"]
+	if upstream.TargetVideoCodec != "h264" || upstream.TargetAudioCodec != "aac" || upstream.TranscodeHWAccel != playback.HWAccelNone || upstream.ToneMapMode != "" {
+		t.Fatalf("reconstructed execution facts not reported: %+v", upstream)
 	}
 }
 

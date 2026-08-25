@@ -4,11 +4,57 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestApplyCompatLibraryAccessUsesItemLevelDisabledExclusion(t *testing.T) {
+	access := catalog.AccessFilter{DisabledLibraryIDs: []int{9}}
+	var conditions []string
+	var args []any
+	argIdx := 2
+	if !applyCompatLibraryAccess(&access, nil, "mi.content_id", &conditions, &args, &argIdx) {
+		t.Fatal("disabled-only scope must remain queryable")
+	}
+
+	sql := strings.Join(conditions, " AND ")
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)") {
+		t.Fatalf("disabled-only scope must require positive membership, got %s", sql)
+	}
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
+		t.Fatalf("dual-membership items must be rejected with NOT EXISTS, got %s", sql)
+	}
+	if len(args) != 1 || argIdx != 3 {
+		t.Fatalf("args = %v, argIdx = %d; want one disabled-list arg and 3", args, argIdx)
+	}
+}
+
+func TestApplyCompatLibraryAccessNarrowsRequestedLibraryBeforeDeny(t *testing.T) {
+	libraryID := 7
+	access := catalog.AccessFilter{
+		AllowedLibraryIDs:  []int{7, 8},
+		DisabledLibraryIDs: []int{9},
+	}
+	var conditions []string
+	var args []any
+	argIdx := 1
+	if !applyCompatLibraryAccess(&access, &libraryID, "si.content_id", &conditions, &args, &argIdx) {
+		t.Fatal("requested allowed library must remain queryable")
+	}
+
+	if !reflect.DeepEqual(access.AllowedLibraryIDs, []int{7}) {
+		t.Fatalf("allowed libraries = %v, want requested library only", access.AllowedLibraryIDs)
+	}
+	sql := strings.Join(conditions, " AND ")
+	if !strings.Contains(sql, "mil.media_folder_id = ANY($1)") ||
+		!strings.Contains(sql, "NOT EXISTS") ||
+		!strings.Contains(sql, "mil.media_folder_id = ANY($2)") {
+		t.Fatalf("requested library and global deny must be independent predicates, got %s", sql)
+	}
+}
 
 type stubLibraryMembershipChecker struct {
 	membership map[string]bool

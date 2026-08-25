@@ -107,11 +107,14 @@ func videoCopyReconstructRefused(ctx context.Context, files FilePathResolver, ra
 // loadTranscodeServeSession, which is the only producer of the cards that reach
 // this function and runs before the session is registered — see the file
 // comment for why the earlier point is the correct one.
-func (h *PlaybackHandler) reconstructTransportForServe(ctx context.Context, sessionID string, requestedSegment int, card *playback.RecipeCard) *playback.TranscodeSession {
+// The returned error carries a tone-map execution failure so the serve handler
+// can render it as a 422 instead of a generic not-found; it is nil for every
+// other rebuild outcome, including a plain miss.
+func (h *PlaybackHandler) reconstructTransportForServe(ctx context.Context, sessionID string, requestedSegment int, card *playback.RecipeCard) (*playback.TranscodeSession, error) {
 	if card == nil {
-		return nil
+		return nil, nil
 	}
-	return h.tm.ReconstructTranscode(ctx, sessionID, requestedSegment, *card)
+	return h.tm.ReconstructTranscodeWithError(ctx, sessionID, requestedSegment, *card)
 }
 
 func logVideoCopyRevivalRefusal(ctx context.Context, file *models.MediaFile, sessionID string) {

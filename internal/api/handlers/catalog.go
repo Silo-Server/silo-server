@@ -622,30 +622,19 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 
 	disabledLibraryIDs := accessFilter.DisabledLibraryIDs
 	fromClause := "media_items mi"
-	if libraryIDs != nil || req.LibraryID > 0 || len(disabledLibraryIDs) > 0 {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
+	libraryConditions, libraryArgs, nextArgIdx, earlyEmpty := buildPostCatalogLibraryScope(
+		req.LibraryID,
+		libraryIDs,
+		disabledLibraryIDs,
+		argIdx,
+	)
+	if earlyEmpty {
+		writeJSON(w, http.StatusOK, browseResponse{Items: []itemListResponse{}, Total: 0})
+		return
 	}
-
-	if req.LibraryID > 0 {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = $%d", argIdx))
-		args = append(args, req.LibraryID)
-		argIdx++
-	}
-
-	if libraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			writeJSON(w, http.StatusOK, browseResponse{Items: []itemListResponse{}, Total: 0})
-			return
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, libraryIDs)
-		argIdx++
-	}
-	if len(disabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, disabledLibraryIDs)
-		argIdx++
-	}
+	conditions = append(conditions, libraryConditions...)
+	args = append(args, libraryArgs...)
+	argIdx = nextArgIdx
 	catalog.ApplySectionAccessFilter("mi", catalog.AccessFilter{MaxContentRating: accessFilter.MaxContentRating}, &conditions, &args, &argIdx)
 
 	whereClause := ""
@@ -733,6 +722,54 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 		HasMore: req.Offset+req.Limit < total,
 		Items:   items,
 	})
+}
+
+func buildPostCatalogLibraryScope(
+	libraryID int,
+	allowedLibraryIDs []int,
+	disabledLibraryIDs []int,
+	argIdx int,
+) (conditions []string, args []any, nextArgIdx int, earlyEmpty bool) {
+	nextArgIdx = argIdx
+	if allowedLibraryIDs != nil && len(allowedLibraryIDs) == 0 {
+		return nil, nil, nextArgIdx, true
+	}
+
+	positiveConditions := []string{"mil_scope_in.content_id = mi.content_id"}
+	hasPositiveScope := false
+	if libraryID > 0 {
+		positiveConditions = append(positiveConditions, fmt.Sprintf("mil_scope_in.media_folder_id = $%d", nextArgIdx))
+		args = append(args, libraryID)
+		nextArgIdx++
+		hasPositiveScope = true
+	}
+	if allowedLibraryIDs != nil {
+		positiveConditions = append(positiveConditions, fmt.Sprintf("mil_scope_in.media_folder_id = ANY($%d)", nextArgIdx))
+		args = append(args, allowedLibraryIDs)
+		nextArgIdx++
+		hasPositiveScope = true
+	}
+	if hasPositiveScope {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE %s)",
+			strings.Join(positiveConditions, " AND "),
+		))
+	} else if len(disabledLibraryIDs) > 0 {
+		conditions = append(conditions,
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
+		)
+	}
+
+	if len(disabledLibraryIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
+			nextArgIdx,
+		))
+		args = append(args, disabledLibraryIDs)
+		nextArgIdx++
+	}
+
+	return conditions, args, nextArgIdx, false
 }
 
 func (h *CatalogHandler) HandleLegacySearch(w http.ResponseWriter, r *http.Request) {

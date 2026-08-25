@@ -38,6 +38,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TargetAudioChannels:  s.TargetAudioChannels,
 		TargetBitrateKbps:    s.TargetBitrateKbps,
 		TranscodeHWAccel:     s.TranscodeHWAccel,
+		ToneMapMode:          string(s.ToneMapMode),
 		StartedAt:            s.StartedAt,
 		UpdatedAt:            s.UpdatedAt,
 		PositionSeconds:      s.Position,

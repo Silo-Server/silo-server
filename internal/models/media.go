@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -362,32 +363,40 @@ func NormalizeVideoBitDepth(explicit int, pixelFormat, profile string) int {
 
 // VideoTrack represents a probed video stream stored as JSONB.
 type VideoTrack struct {
-	Title              string `json:"title,omitempty"`
-	Codec              string `json:"codec,omitempty"`
-	DolbyVision        string `json:"dolby_vision,omitempty"`
-	DVProfile          int    `json:"dv_profile,omitempty"`
-	DVLevel            int    `json:"dv_level,omitempty"`
-	DVBLCompatID       int    `json:"dv_bl_compat_id,omitempty"`
-	DVELPresent        bool   `json:"dv_el_present,omitempty"`
-	DVEnhancementLayer string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown
-	HDR10Plus          bool   `json:"hdr10_plus,omitempty"`
-	Profile            string `json:"profile,omitempty"`
-	Level              int    `json:"level,omitempty"`
-	Width              int    `json:"width,omitempty"`
-	Height             int    `json:"height,omitempty"`
-	AspectRatio        string `json:"aspect_ratio,omitempty"`
-	Interlaced         bool   `json:"interlaced"`
-	FrameRate          string `json:"frame_rate,omitempty"`
-	Bitrate            int    `json:"bitrate,omitempty"`
-	VideoRange         string `json:"video_range,omitempty"`
-	VideoRangeType     string `json:"video_range_type,omitempty"`
-	ColorRange         string `json:"color_range,omitempty"`
-	ColorPrimaries     string `json:"color_primaries,omitempty"`
-	ColorSpace         string `json:"color_space,omitempty"`
-	ColorTransfer      string `json:"color_transfer,omitempty"`
-	BitDepth           int    `json:"bit_depth,omitempty"`
-	PixelFormat        string `json:"pixel_format,omitempty"`
-	ReferenceFrames    int    `json:"reference_frames,omitempty"`
+	Title               string `json:"title,omitempty"`
+	Codec               string `json:"codec,omitempty"`
+	DolbyVision         string `json:"dolby_vision,omitempty"`
+	DVProfile           int    `json:"dv_profile,omitempty"`
+	DVLevel             int    `json:"dv_level,omitempty"`
+	DVBLCompatID        int    `json:"dv_bl_compat_id,omitempty"`
+	DVConfigPresent     bool   `json:"dv_config_present"`
+	DVBLCompatIDPresent bool   `json:"dv_bl_compat_id_present"`
+	// DVProvenanceCurrent records whether stored JSON explicitly carried both
+	// provenance booleans. Nil denotes an in-memory track that has not crossed
+	// the storage boundary; false identifies legacy rows written by old nodes.
+	DVProvenanceCurrent *bool  `json:"-"`
+	DVBLPresent         bool   `json:"dv_bl_present,omitempty"`
+	DVRPUPresent        bool   `json:"dv_rpu_present,omitempty"`
+	DVELPresent         bool   `json:"dv_el_present,omitempty"`
+	DVEnhancementLayer  string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown
+	HDR10Plus           bool   `json:"hdr10_plus,omitempty"`
+	Profile             string `json:"profile,omitempty"`
+	Level               int    `json:"level,omitempty"`
+	Width               int    `json:"width,omitempty"`
+	Height              int    `json:"height,omitempty"`
+	AspectRatio         string `json:"aspect_ratio,omitempty"`
+	Interlaced          bool   `json:"interlaced"`
+	FrameRate           string `json:"frame_rate,omitempty"`
+	Bitrate             int    `json:"bitrate,omitempty"`
+	VideoRange          string `json:"video_range,omitempty"`
+	VideoRangeType      string `json:"video_range_type,omitempty"`
+	ColorRange          string `json:"color_range,omitempty"`
+	ColorPrimaries      string `json:"color_primaries,omitempty"`
+	ColorSpace          string `json:"color_space,omitempty"`
+	ColorTransfer       string `json:"color_transfer,omitempty"`
+	BitDepth            int    `json:"bit_depth,omitempty"`
+	PixelFormat         string `json:"pixel_format,omitempty"`
+	ReferenceFrames     int    `json:"reference_frames,omitempty"`
 	// MultiplePPS records whether an H.264 stream redefines the same
 	// pic_parameter_set_id in-band with more than one distinct content. Such
 	// streams cannot be safely stream-copied into an avc1/fMP4 HLS segment:
@@ -402,6 +411,25 @@ type VideoTrack struct {
 	// safety scan cannot establish that video stream-copy is safe. It is
 	// runtime-only so transient scan failures are retried on a later request.
 	VideoCopyUnsafe bool `json:"-"`
+}
+
+// UnmarshalJSON preserves raw-key presence so rolling older scanners cannot
+// make a legacy Dolby Vision probe look current merely by retaining a non-NULL
+// probe timestamp.
+func (v *VideoTrack) UnmarshalJSON(data []byte) error {
+	type videoTrackAlias VideoTrack
+	var decoded videoTrackAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	current := raw["dv_config_present"] != nil && raw["dv_bl_compat_id_present"] != nil
+	*v = VideoTrack(decoded)
+	v.DVProvenanceCurrent = &current
+	return nil
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.

@@ -58,3 +58,22 @@ func TestBuildRecentlyAddedQueryKeepsGenericPathForMultiLibraryConfig(t *testing
 		t.Fatalf("multi-library generic path should not use the single-library first_seen_at sort:\n%s", query)
 	}
 }
+
+func TestBuildRecentlyAddedSingleLibraryQueryRejectsAnyDisabledMembership(t *testing.T) {
+	t.Parallel()
+
+	query, _ := buildRecentlyAddedQuery(ResolvedSection{
+		ItemLimit: 12,
+		Config:    json.RawMessage(`{"generated_source":"home_library_recent","filter_library_id":1,"filter_type":"movie"}`),
+	}, nil, nil, catalog.AccessFilter{DisabledLibraryIDs: []int{9}})
+
+	if !strings.Contains(query, "mil.media_folder_id = $1") {
+		t.Fatalf("single-library fast path must keep its direct indexed membership, got:\n%s", query)
+	}
+	if !strings.Contains(query, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out") {
+		t.Fatalf("single-library fast path must reject any disabled membership, got:\n%s", query)
+	}
+	if strings.Contains(query, "mil.media_folder_id NOT IN") {
+		t.Fatalf("row-local deny leaks dual-membership items, got:\n%s", query)
+	}
+}

@@ -1,11 +1,35 @@
 package catalog
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestRecentlyAddedLibraryBrowseFiltersPreserveDisabledLibraries(t *testing.T) {
+	base := BrowseFilters{
+		LibraryIDs:         []int{1, 2},
+		DisabledLibraryIDs: []int{9},
+		Offset:             25,
+		Limit:              50,
+	}
+
+	got := recentlyAddedLibraryBrowseFilters(base, 7, 20)
+	if got.LibraryID != 7 {
+		t.Fatalf("LibraryID = %d, want 7", got.LibraryID)
+	}
+	if got.LibraryIDs != nil {
+		t.Fatalf("LibraryIDs = %v, want nil for the single-library fast path", got.LibraryIDs)
+	}
+	if !slices.Equal(got.DisabledLibraryIDs, []int{9}) {
+		t.Fatalf("DisabledLibraryIDs = %v, want [9]", got.DisabledLibraryIDs)
+	}
+	if got.Offset != 0 || got.Limit != 20 {
+		t.Fatalf("Offset/Limit = %d/%d, want 0/20", got.Offset, got.Limit)
+	}
+}
 
 func tsPtr(t time.Time) *time.Time { return &t }
 

@@ -14,7 +14,7 @@ const LibraryCollectionVisibilityVisible = "visible"
 type AccessFilter struct {
 	AllowedLibraryIDs     []int
 	AllowedContentIDs     []string
-	DisabledLibraryIDs    []int // user-disabled libraries (only set when AllowedLibraryIDs is nil)
+	DisabledLibraryIDs    []int // libraries whose membership globally hides an item
 	PresentationLibraryID *int
 	PresentationLanguage  string
 	// ProfilePreferredLanguage is the viewer profile's preferred metadata
@@ -140,6 +140,13 @@ func appendLibraryAccessConditions(keyColumn string, filter AccessFilter, condit
 		*argIdx = *argIdx + 1
 	}
 	*conditions = append(*conditions, libraryAccessConditions(keyColumn, allowedIdx, disabledIdx)...)
+}
+
+// ApplyLibraryAccessFilter appends the canonical item-level library allow/deny
+// predicates for keyColumn. It is exported for query builders outside the
+// catalog package that must enforce the same dual-membership invariant.
+func ApplyLibraryAccessFilter(keyColumn string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	appendLibraryAccessConditions(keyColumn, filter, conditions, args, argIdx)
 }
 
 // ApplySectionAccessFilter applies non-library access constraints to section queries.

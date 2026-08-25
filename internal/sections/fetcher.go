@@ -2423,13 +2423,12 @@ func buildRecentlyAddedSingleLibraryQuery(s ResolvedSection, cfgFilters SectionC
 	}
 
 	if len(filter.DisabledLibraryIDs) > 0 {
-		placeholders := make([]string, len(filter.DisabledLibraryIDs))
-		for i, id := range filter.DisabledLibraryIDs {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, id)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id NOT IN (%s)", strings.Join(placeholders, ", ")))
+		conditions = append(conditions, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
+			argIdx,
+		))
+		args = append(args, append([]int(nil), filter.DisabledLibraryIDs...))
+		argIdx++
 	}
 
 	applyConfigTypeFilter("mi", cfgFilters.FilterType, &conditions, &args, &argIdx)
@@ -2677,30 +2676,9 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	}
 	conditions = append(conditions, fmt.Sprintf("e.content_id IN (%s)", strings.Join(placeholders, ", ")))
 
-	effectiveLibraryIDs := effectiveFetchLibraryIDs(libraryIDs, filter)
-
 	fromClause := "episodes e JOIN media_items si ON e.series_id = si.content_id LEFT JOIN seasons s ON s.content_id = e.season_id"
-	if libraryID != nil || effectiveLibraryIDs != nil {
-		fromClause += " JOIN media_item_libraries mil ON si.content_id = mil.content_id"
-	}
-
-	if libraryID != nil {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = $%d", argIdx))
-		args = append(args, *libraryID)
-		argIdx++
-	}
-
-	if effectiveLibraryIDs != nil {
-		if len(effectiveLibraryIDs) == 0 {
-			return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
-		}
-		placeholders = make([]string, len(effectiveLibraryIDs))
-		for i, id := range effectiveLibraryIDs {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, id)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id IN (%s)", strings.Join(placeholders, ", ")))
+	if !applyEpisodeTargetLibraryAccess(filter, libraryID, libraryIDs, &conditions, &args, &argIdx) {
+		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
 	}
 
 	catalog.ApplySectionAccessFilter("si", filter, &conditions, &args, &argIdx)
@@ -2794,6 +2772,22 @@ func effectiveFetchLibraryIDs(libraryIDs []int, filter catalog.AccessFilter) []i
 		return filter.AllowedLibraryIDs
 	}
 	return nil
+}
+
+func applyEpisodeTargetLibraryAccess(
+	filter catalog.AccessFilter,
+	libraryID *int,
+	libraryIDs []int,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	scoped := collectionRailQueryAccess(filter, libraryID, libraryIDs)
+	if scoped.AllowedLibraryIDs != nil && len(scoped.AllowedLibraryIDs) == 0 {
+		return false
+	}
+	catalog.ApplyLibraryAccessFilter("si.content_id", scoped, conditions, args, argIdx)
+	return true
 }
 
 // collectionRailQueryAccess expresses the section's explicit library scope as

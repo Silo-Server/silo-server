@@ -5,11 +5,15 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
+
+const remoteNodeInventoryProbeTimeout = 5 * time.Second
 
 // SystemHandler serves read-only system inspection endpoints.
 type SystemHandler struct {
@@ -84,7 +88,7 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 		entry := NodeHWAccel{NodeURL: node.URL, NodeName: node.Name}
 		if errs[i] != nil {
 			slog.WarnContext(r.Context(), "hw-accel: node probe failed", "component", "api",
-				"node", node.URL, "error", errs[i])
+				"node", logredact.SanitizeURL(node.URL), "error", errs[i])
 			entry.Error = errs[i].Error()
 		} else {
 			entry.Resolved = infos[i].Resolved
@@ -116,5 +120,9 @@ func (h *SystemHandler) HandleBuildInfo(w http.ResponseWriter, _ *http.Request) 
 }
 
 func (h *SystemHandler) fetchRemoteHWAccel(ctx context.Context, node *nodepool.Node) (playback.HWAccelInfo, error) {
-	return fetchRemoteTranscodeCapabilities(ctx, node.URL, h.jwtSecret)
+	// Inventory is an interactive admin request, so a stalled healthy node must
+	// fail quickly and surface through the node entry's existing Error field.
+	requestCtx, cancel := context.WithTimeout(ctx, remoteNodeInventoryProbeTimeout)
+	defer cancel()
+	return fetchRemoteTranscodeCapabilities(requestCtx, node.URL, h.jwtSecret)
 }

@@ -1035,6 +1035,20 @@ func identityColumnDefaults(mf models.MediaFile) (groupKeyVersion int, identityC
 // track/chapter JSONB payloads along for millions of rows. Returns
 // ErrFileNotFound when the row no longer exists.
 func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile) (int, error) {
+	return r.updateIdentity(ctx, mf, nil)
+}
+
+// UpdateIdentityAndExternalSubtitles applies sidecar and identity changes
+// without replacing probe-derived columns after a failed repair attempt.
+func (r *FileRepository) UpdateIdentityAndExternalSubtitles(ctx context.Context, mf models.MediaFile) (int, error) {
+	externalSubtitlesJSON, err := serializeJSONB(mf.ExternalSubtitles)
+	if err != nil {
+		return 0, fmt.Errorf("marshaling external_subtitles: %w", err)
+	}
+	return r.updateIdentity(ctx, mf, externalSubtitlesJSON)
+}
+
+func (r *FileRepository) updateIdentity(ctx context.Context, mf models.MediaFile, externalSubtitlesJSON []byte) (int, error) {
 	groupKeyVersion, identityConfidence, identityJSON := identityColumnDefaults(mf)
 
 	query := `UPDATE media_files SET
@@ -1060,6 +1074,7 @@ func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile
 		presentation_part_total = $21,
 		multi_episode_start = $22,
 		multi_episode_end = $23,
+		external_subtitles = COALESCE($24, external_subtitles),
 		match_suppressed_at = NULL,
 		updated_at = NOW()
 	WHERE file_path = $1
@@ -1090,6 +1105,7 @@ func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile
 		nilIfZero(mf.PresentationPartTotal),
 		nilIfZero(mf.MultiEpisodeStart),
 		nilIfZero(mf.MultiEpisodeEnd),
+		externalSubtitlesJSON,
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

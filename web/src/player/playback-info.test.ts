@@ -4,9 +4,10 @@ import {
   formatProtocol,
   formatStreamType,
   qualityOptionsFromPlanV3,
+  resolveActiveQualityOptionId,
 } from "./playback-info";
 import { fixturePlanV3 } from "./protocol-v3.fixtures";
-import type { PlayerFileVersion } from "./types";
+import type { PlayerFileVersion, QualityOption } from "./types";
 
 function makeVersion(overrides: Partial<PlayerFileVersion> = {}): PlayerFileVersion {
   return {
@@ -259,13 +260,24 @@ describe("qualityOptionsFromPlanV3", () => {
       fixturePlanV3({
         available_qualities: [
           { label: "original", height: 2160, bitrate_kbps: 22500, preserves_source: true },
-          { label: "1080p", height: 1080, bitrate_kbps: 6000, preserves_source: false },
+          {
+            label: "1080p-medium",
+            display_name: "1080p Medium",
+            height: 1080,
+            bitrate_kbps: 6000,
+            preserves_source: false,
+          },
           { label: "480p", height: 480, bitrate_kbps: 1500, preserves_source: false },
         ],
       }),
     );
 
-    expect(options.map((option) => option.id)).toEqual(["auto", "original", "1080p", "480p"]);
+    expect(options.map((option) => option.id)).toEqual([
+      "auto",
+      "original",
+      "1080p-medium",
+      "480p",
+    ]);
     expect(options[1]).toMatchObject({
       id: "original",
       label: "Original",
@@ -275,11 +287,46 @@ describe("qualityOptionsFromPlanV3", () => {
       isOriginal: true,
     });
     expect(options[2]).toMatchObject({
-      id: "1080p",
-      label: "1080p",
+      id: "1080p-medium",
+      label: "1080p Medium",
       sublabel: "6 Mbps",
       isOriginal: false,
     });
+  });
+
+  it("maps stored resolution preferences onto their equivalent visible rung", () => {
+    const options = qualityOptionsFromPlanV3(
+      fixturePlanV3({
+        available_qualities: [
+          { label: "original", height: 2160, bitrate_kbps: 22_500, preserves_source: true },
+          {
+            label: "1080p-medium",
+            display_name: "1080p Medium",
+            height: 1080,
+            bitrate_kbps: 6000,
+            preserves_source: false,
+          },
+        ],
+      }),
+    );
+
+    expect(resolveActiveQualityOptionId(options, "1080p")).toBe("1080p-medium");
+    expect(resolveActiveQualityOptionId(options, "FHD")).toBe("1080p-medium");
+  });
+
+  it("marks Original when a resolution cap already preserves the source", () => {
+    const options: QualityOption[] = [
+      {
+        id: "original",
+        label: "Original",
+        sublabel: "8 Mbps",
+        resolution: "720p",
+        bitrateKbps: 8000,
+        isOriginal: true,
+      },
+    ];
+
+    expect(resolveActiveQualityOptionId(options, "1080p")).toBe("original");
   });
 
   it("offers no auto entry when the plan publishes a single rung", () => {

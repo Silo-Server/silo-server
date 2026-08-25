@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,14 +23,25 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
+)
+
+// Tests override this to exercise indeterminate remote-start failures without
+// waiting through the production cold-probe budget.
+var compatRemoteTranscodeStartTimeout time.Duration
+
+const (
+	compatRemoteNodeProbeFallbackTimeout = 2 * time.Minute
+	compatToneMapNegotiationTimeout      = 5 * time.Second
 )
 
 type playbackInfoRequest struct {
@@ -102,11 +114,35 @@ type sessionStarterContext interface {
 	StartSessionWithContext(ctx context.Context, userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 }
 
+// compatCapabilitySessionPlanner restricts session placement with a lock-safe
+// node predicate when Jellyfin-compatible playback needs tone mapping.
+type compatCapabilitySessionPlanner interface {
+	PlanSessionWith(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int, eligible func(*nodepool.Node) bool) nodepool.Plan
+}
+
+// compatTranscodeNodeEnumerator lists the enabled transcode pool for capability
+// discovery before a Jellyfin-compatible session is placed.
+type compatTranscodeNodeEnumerator interface {
+	TranscodeNodeURLs() []string
+}
+
+type compatSessionReservationReleaser interface {
+	ReleaseSession(sessionID string)
+}
+
+// compatTranscodeNodeHealth reports whether a pooled transcode node is
+// currently healthy and enabled. Remote-start adoption is gated on it so a
+// recipe another API server published is only adopted while its node still
+// serves; *nodepool.Planner implements it.
+type compatTranscodeNodeHealth interface {
+	TranscodeNodeHealthy(nodeURL string) bool
+}
+
 // transcodeStreamDetailsSetter is implemented by the native SessionManager.
 // Optional (like sessionStarterContext) so lightweight test fakes don't have
 // to; without it the session keeps transport-level defaults only.
 type transcodeStreamDetailsSetter interface {
-	SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool) error
+	SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool, hwAccel string, toneMapMode tonemap.Mode) error
 }
 
 // recordTranscodeStreamDetails mirrors the encode decisions of a started
@@ -121,7 +157,7 @@ func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upst
 		return
 	}
 	transcodeAudio := playback.TranscodesAudio(opts.TargetCodecAudio)
-	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio); err != nil {
+	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio, opts.HWAccel, opts.ToneMapMode); err != nil {
 		slog.WarnContext(ctx, "record transcode stream details failed", "component", "jellycompat",
 			"error", err, "playback_session_id", upstreamSessionID)
 		return
@@ -205,7 +241,11 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore recipeNodePutter
+	RecipeNodeStore    recipeNodePutter
+	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
+	// compatLocalTranscodeReady is a test seam invoked after manifest readiness
+	// and before lifecycle-locked publication. Production leaves it nil.
+	compatLocalTranscodeReady func(*playback.TranscodeSession)
 }
 
 // recipeNodePutter persists and removes a remote transcode's reconstruction
@@ -239,6 +279,405 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 }
 
 var errTranscode4KDisallowed = errors.New("4k video transcode disallowed by server settings")
+var errHDRTranscodeUnsupported = errors.New("HDR video transcode requires an enabled validated tone-map executor")
+var errToneMapCapabilityUnavailable = errors.New("tone-map capability discovery is temporarily unavailable")
+var errRemoteSoftwareToneMapStartFailed = errors.New("remote software tone-map start failed")
+var errRemoteStartAdoptedLocal = errors.New("remote start superseded by local transcode")
+var errRemoteStartAdoptedRemote = errors.New("remote start adopted an already-published remote transcode")
+
+type remoteStartAdoptedRemoteError struct {
+	nodeURL string
+}
+
+func (e *remoteStartAdoptedRemoteError) Error() string { return errRemoteStartAdoptedRemote.Error() }
+func (e *remoteStartAdoptedRemoteError) Unwrap() error { return errRemoteStartAdoptedRemote }
+
+// compatToneMapRecipe freezes the safe source classification and executor facts
+// that Jellyfin clients cannot round-trip in their protocol.
+type compatToneMapRecipe struct {
+	policy              tonemap.Policy
+	mode                tonemap.Mode
+	sourceKind          tonemap.SourceKind
+	filter              string
+	recipeVersion       string
+	hwAccel             string
+	preflightRequired   bool
+	sourceRevision      tonemap.SourceRevision
+	dvConfigPresent     bool
+	dvBLCompatIDPresent bool
+	dvBLPresent         bool
+	dvRPUPresent        bool
+}
+
+// downgradeToSoftwareToneMap replaces a failed hardware selection with a
+// validated software executor only when the frozen policy permits the change.
+func downgradeToSoftwareToneMap(
+	policy tonemap.Policy,
+	mode *tonemap.Mode,
+	filter, hwAccel *string,
+	kind tonemap.SourceKind,
+	capabilities tonemap.Capabilities,
+) bool {
+	if mode == nil || filter == nil || hwAccel == nil || *mode != tonemap.ModeHardware ||
+		!policy.Allows(tonemap.ModeSoftware) || !capabilities.Supports(tonemap.ModeSoftware, kind) {
+		return false
+	}
+	*mode = tonemap.ModeSoftware
+	*filter = capabilities.FilterFor(tonemap.ModeSoftware, kind)
+	*hwAccel = playback.HWAccelNone
+	return true
+}
+
+// requireCompatToneMapMode narrows an already validated recipe without
+// widening policy. Software failover must stay software even when the next
+// executor also advertises hardware, or it can repeat the failure class that
+// triggered the replan.
+func requireCompatToneMapMode(recipe *compatToneMapRecipe, capabilities tonemap.Capabilities, required tonemap.Mode) error {
+	if required == "" {
+		return nil
+	}
+	if recipe == nil || recipe.mode == "" {
+		return errHDRTranscodeUnsupported
+	}
+	if recipe.mode == required {
+		return nil
+	}
+	if required == tonemap.ModeSoftware && downgradeToSoftwareToneMap(
+		recipe.policy, &recipe.mode, &recipe.filter, &recipe.hwAccel,
+		recipe.sourceKind, capabilities,
+	) {
+		return nil
+	}
+	return errHDRTranscodeUnsupported
+}
+
+// apply copies a non-empty compatibility recipe into transcode options without
+// disturbing ordinary SDR or source-preserving requests.
+func (r compatToneMapRecipe) apply(opts *playback.TranscodeOpts) {
+	if opts == nil || r.mode == "" {
+		return
+	}
+	opts.ToneMapPolicy = r.policy
+	opts.ToneMapMode = r.mode
+	opts.ToneMapSourceKind = r.sourceKind
+	opts.ToneMapFilter = r.filter
+	opts.ToneMapRecipeVersion = r.recipeVersion
+	opts.ToneMapPreflightRequired = r.preflightRequired
+	opts.ToneMapSourceRevision = r.sourceRevision
+	opts.ToneMapDVConfigPresent = r.dvConfigPresent
+	opts.ToneMapDVBLCompatIDPresent = r.dvBLCompatIDPresent
+	opts.ToneMapDVBLPresent = r.dvBLPresent
+	opts.ToneMapDVRPUPresent = r.dvRPUPresent
+	opts.HWAccel = r.hwAccel
+}
+
+// toneMapPolicy reads the independent hardware and software settings used by
+// Jellyfin-compatible transcode negotiation.
+func (h *PlaybackHandler) toneMapPolicy(ctx context.Context) tonemap.Policy {
+	policy, _ := h.toneMapPolicyResult(ctx)
+	return policy
+}
+
+func (h *PlaybackHandler) toneMapPolicyResult(ctx context.Context) (tonemap.Policy, error) {
+	if h.SettingsRepo == nil {
+		return tonemap.PolicyNone, nil
+	}
+	hardware, err := h.SettingsRepo.Get(ctx, config.PlaybackTranscodeHardwareToneMapSettingKey)
+	if err != nil {
+		return tonemap.PolicyNone, fmt.Errorf("load hardware tone-map setting: %w", err)
+	}
+	software, err := h.SettingsRepo.Get(ctx, config.PlaybackTranscodeSoftwareToneMapSettingKey)
+	if err != nil {
+		return tonemap.PolicyNone, fmt.Errorf("load software tone-map setting: %w", err)
+	}
+	return tonemap.NewPolicy(strings.EqualFold(hardware, "true"), strings.EqualFold(software, "true")), nil
+}
+
+// resolveCompatToneMapRecipe classifies an HDR source and freezes the preferred
+// enabled executor from the supplied validated capability inventory.
+func (h *PlaybackHandler) resolveCompatToneMapRecipe(ctx context.Context, file *models.MediaFile, capabilities tonemap.Capabilities) (compatToneMapRecipe, error) {
+	policy, err := h.toneMapPolicyResult(ctx)
+	if err != nil {
+		return compatToneMapRecipe{}, fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, err)
+	}
+	return resolveCompatToneMapRecipeWithPolicy(file, capabilities, policy)
+}
+
+func resolveCompatToneMapRecipeWithPolicy(file *models.MediaFile, capabilities tonemap.Capabilities, policy tonemap.Policy) (compatToneMapRecipe, error) {
+	metadata := tonemap.MetadataForFile(file)
+	if metadata.DynamicRange == "" || metadata.DynamicRange == playback.DynamicRangeSDRV3 {
+		return compatToneMapRecipe{}, nil
+	}
+	resolution := tonemap.ResolveSource(metadata)
+	kind := resolution.Kind
+	mode := capabilities.PreferredMode(policy, kind)
+	if kind == "" || mode == "" {
+		return compatToneMapRecipe{}, errHDRTranscodeUnsupported
+	}
+	hwAccel := playback.HWAccelNone
+	if mode == tonemap.ModeHardware {
+		hwAccel = capabilities.BackendFor(mode, kind)
+	}
+	return compatToneMapRecipe{
+		policy: policy, mode: mode, sourceKind: kind,
+		filter:            capabilities.FilterFor(mode, kind),
+		recipeVersion:     playback.TransformationHDRToSDRToneMapRecipeVersionV3,
+		hwAccel:           hwAccel,
+		preflightRequired: resolution.PreflightRequired,
+		sourceRevision:    tonemap.RevisionForFile(file),
+		dvConfigPresent:   metadata.DVConfigPresent, dvBLCompatIDPresent: metadata.DVBLCompatIDPresent,
+		dvBLPresent: metadata.DVBLPresent, dvRPUPresent: metadata.DVRPUPresent,
+	}, nil
+}
+
+// localToneMapCapabilities probes the API host's live FFmpeg backend and device.
+func (h *PlaybackHandler) localToneMapCapabilities(ctx context.Context) (tonemap.Capabilities, error) {
+	backend := playback.ResolveHWAccelWithFFmpegContext(ctx, h.HWAccel, h.FFmpegPath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	hwDevice := ""
+	if h.cfg != nil {
+		hwDevice = h.cfg.Playback.HWDevice
+	}
+	probe := tonemap.Probe
+	if h.compatToneMapProbe != nil {
+		probe = h.compatToneMapProbe
+	}
+	return probe(ctx, playback.ResolveFFmpegPath(h.FFmpegPath), backend, hwDevice)
+}
+
+// remoteToneMapCapabilities retrieves one transcode node's authenticated,
+// smoke-tested executor inventory under a bounded request deadline.
+func (h *PlaybackHandler) remoteToneMapCapabilities(ctx context.Context, nodeURL string) (tonemap.Capabilities, error) {
+	info, err := h.remoteToneMapCapabilityInfo(ctx, nodeURL)
+	return info.ToneMapCapabilities, err
+}
+
+func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, nodeURL string) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, http.DefaultClient, nodeURL, h.JWTSecret)
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	if status != http.StatusOK {
+		return playback.HWAccelInfo{}, fmt.Errorf("transcode node returned %d", status)
+	}
+	return info, nil
+}
+
+func (h *PlaybackHandler) toneMapCapabilityTimeout() time.Duration {
+	return compatRemoteNodeProbeFallbackTimeout
+}
+
+func (h *PlaybackHandler) remoteTranscodeStartTimeout(request transcodenode.TranscodeStartRequest, nodeProbeTimeoutMillis int64) time.Duration {
+	if compatRemoteTranscodeStartTimeout > 0 {
+		return compatRemoteTranscodeStartTimeout
+	}
+	if request.ToneMapMode == "" {
+		return 20 * time.Second
+	}
+	timeout := playback.NormalizeProbeRequestTimeout(nodeProbeTimeoutMillis, h.toneMapCapabilityTimeout()) + playback.ManifestStartupTimeout
+	if request.ToneMapPreflightRequired {
+		timeout += tonemap.SourcePreflightTimeout(request.TotalDuration)
+	}
+	if request.RequireReady {
+		timeout += transcodenode.TranscodeStartReadinessTimeout
+	}
+	return timeout
+}
+
+// availableCompatToneMapCapabilities returns the union visible to media-source
+// negotiation, including local execution only when fallback is allowed.
+func (h *PlaybackHandler) availableCompatToneMapCapabilities(ctx context.Context, timeout time.Duration) (tonemap.Capabilities, error) {
+	capabilities, _, err := h.compatToneMapCapabilityInventory(ctx, timeout)
+	return capabilities, err
+}
+
+// compatToneMapCapabilityInventory returns both a planning union and per-node
+// records so heterogeneous pools can be placed without losing executor identity.
+func (h *PlaybackHandler) compatToneMapCapabilityInventory(ctx context.Context, timeout time.Duration) (tonemap.Capabilities, map[string]tonemap.Capabilities, error) {
+	capabilities := make(tonemap.Capabilities, 0, 4)
+	byNode := make(map[string]tonemap.Capabilities)
+	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	type capabilityResult struct {
+		capabilities tonemap.Capabilities
+		err          error
+	}
+	localAllowed := h.NodePlanner == nil || nodepool.LocalTranscodeFallbackAllowed(ctx, h.SettingsRepo)
+	var localResult capabilityResult
+	var localWG sync.WaitGroup
+	if localAllowed {
+		localWG.Add(1)
+		go func() {
+			defer localWG.Done()
+			localResult.capabilities, localResult.err = h.localToneMapCapabilities(fetchCtx)
+		}()
+	}
+
+	var remoteResults []capabilityResult
+	var nodeURLs []string
+	if enumerator, ok := h.NodePlanner.(compatTranscodeNodeEnumerator); ok {
+		nodeURLs = enumerator.TranscodeNodeURLs()
+		remoteResults = make([]capabilityResult, len(nodeURLs))
+		var wg sync.WaitGroup
+		for i, nodeURL := range nodeURLs {
+			wg.Add(1)
+			go func(i int, nodeURL string) {
+				defer wg.Done()
+				remoteResults[i].capabilities, remoteResults[i].err = h.remoteToneMapCapabilities(fetchCtx, nodeURL)
+			}(i, nodeURL)
+		}
+		wg.Wait()
+	}
+	localWG.Wait()
+
+	var probeErr error
+	for i, result := range remoteResults {
+		if result.err != nil {
+			probeErr = errors.Join(probeErr, result.err)
+			continue
+		}
+		byNode[strings.TrimRight(nodeURLs[i], "/")] = result.capabilities
+		capabilities = append(capabilities, result.capabilities...)
+	}
+	if localAllowed {
+		if localResult.err != nil {
+			probeErr = errors.Join(probeErr, localResult.err)
+		} else {
+			capabilities = append(capabilities, localResult.capabilities...)
+		}
+	}
+	return capabilities, byNode, probeErr
+}
+
+// applyCompatToneMapAvailability suppresses unsafe HDR video transcodes from a
+// media source when no enabled validated executor can run them.
+func (h *PlaybackHandler) applyCompatToneMapAvailability(ctx context.Context, source PlaybackMediaSource, capabilities tonemap.Capabilities) PlaybackMediaSource {
+	return applyCompatToneMapAvailabilityWithPolicy(source, capabilities, h.toneMapPolicy(ctx))
+}
+
+func applyCompatToneMapAvailabilityWithPolicy(source PlaybackMediaSource, capabilities tonemap.Capabilities, policy tonemap.Policy) PlaybackMediaSource {
+	if !source.SupportsTranscoding || source.TranscodeAudio {
+		return source
+	}
+	file := &models.MediaFile{
+		ID:          source.Version.FileID,
+		HDR:         source.Version.HDR,
+		VideoTracks: source.Version.VideoTracks,
+	}
+	metadata := tonemap.MetadataForFile(file)
+	if metadata.DynamicRange == "" || metadata.DynamicRange == playback.DynamicRangeSDRV3 {
+		return source
+	}
+	if _, err := resolveCompatToneMapRecipeWithPolicy(file, capabilities, policy); err != nil {
+		source.SupportsTranscoding = false
+	}
+	return source
+}
+
+// compatVersionRequiresToneMap reports whether transcoding the catalog version's
+// video would require an HDR-to-SDR executor.
+func compatVersionRequiresToneMap(version catalog.FileVersion) bool {
+	metadata := tonemap.MetadataForFile(&models.MediaFile{HDR: version.HDR, VideoTracks: version.VideoTracks})
+	return metadata.DynamicRange != "" && metadata.DynamicRange != playback.DynamicRangeSDRV3
+}
+
+// planCompatTranscodeSession restricts an HDR video transcode to nodes that
+// support the preferred policy mode and resolved source kind.
+func (h *PlaybackHandler) planCompatTranscodeSession(ctx context.Context, session *playback.Session, file *models.MediaFile, bitrateKbps int, videoTranscode bool) (nodepool.Plan, error) {
+	if h.NodePlanner == nil || session == nil {
+		return nodepool.Plan{}, nil
+	}
+	metadata := tonemap.MetadataForFile(file)
+	if !videoTranscode || metadata.DynamicRange == "" || metadata.DynamicRange == playback.DynamicRangeSDRV3 {
+		return h.NodePlanner.PlanSession(session.ID, session.TranscodeNodeURL, true, bitrateKbps), nil
+	}
+	policy, err := h.toneMapPolicyResult(ctx)
+	if err != nil {
+		return nodepool.Plan{}, fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, err)
+	}
+	kind := tonemap.ResolveSource(metadata).Kind
+	if kind == "" || policy == tonemap.PolicyNone {
+		return nodepool.Plan{}, errHDRTranscodeUnsupported
+	}
+	selector, selectable := h.NodePlanner.(compatCapabilitySessionPlanner)
+	_, enumerable := h.NodePlanner.(compatTranscodeNodeEnumerator)
+	if !selectable || !enumerable {
+		return h.NodePlanner.PlanSession(session.ID, session.TranscodeNodeURL, true, bitrateKbps), nil
+	}
+	available, nodeCapabilities, capabilityErr := h.compatToneMapCapabilityInventory(ctx, h.toneMapCapabilityTimeout())
+	preferredMode := available.PreferredMode(policy, kind)
+	if preferredMode == "" {
+		if capabilityErr != nil {
+			return nodepool.Plan{}, fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, capabilityErr)
+		}
+		return nodepool.Plan{}, errHDRTranscodeUnsupported
+	}
+	modes := []tonemap.Mode{preferredMode}
+	if preferredMode == tonemap.ModeHardware && policy.Allows(tonemap.ModeSoftware) && available.Supports(tonemap.ModeSoftware, kind) {
+		modes = append(modes, tonemap.ModeSoftware)
+	}
+	for _, mode := range modes {
+		plan := selector.PlanSessionWith(session.ID, session.TranscodeNodeURL, true, bitrateKbps, func(node *nodepool.Node) bool {
+			return node != nil && nodeCapabilities[strings.TrimRight(node.URL, "/")].Supports(mode, kind)
+		})
+		if plan.TranscodeNode != nil {
+			return plan, nil
+		}
+	}
+	return nodepool.Plan{}, nil
+}
+
+// planCompatSoftwareToneMapSession replans a failed hardware-then-software
+// start onto a different node with a validated software executor. Failed node
+// URLs are excluded so retries make forward progress instead of following
+// session affinity back to an executor that already rejected the recipe.
+func (h *PlaybackHandler) planCompatSoftwareToneMapSession(
+	ctx context.Context,
+	session *playback.Session,
+	file *models.MediaFile,
+	bitrateKbps int,
+	excluded map[string]struct{},
+) (nodepool.Plan, error) {
+	if h.NodePlanner == nil || session == nil {
+		return nodepool.Plan{}, nil
+	}
+	policy, err := h.toneMapPolicyResult(ctx)
+	if err != nil {
+		return nodepool.Plan{}, fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, err)
+	}
+	kind := tonemap.ResolveSource(tonemap.MetadataForFile(file)).Kind
+	if kind == "" || !policy.Allows(tonemap.ModeSoftware) {
+		return nodepool.Plan{}, errHDRTranscodeUnsupported
+	}
+	selector, selectable := h.NodePlanner.(compatCapabilitySessionPlanner)
+	_, enumerable := h.NodePlanner.(compatTranscodeNodeEnumerator)
+	if !selectable || !enumerable {
+		return nodepool.Plan{}, nil
+	}
+	available, nodeCapabilities, capabilityErr := h.compatToneMapCapabilityInventory(ctx, h.toneMapCapabilityTimeout())
+	if !available.Supports(tonemap.ModeSoftware, kind) && capabilityErr != nil {
+		return nodepool.Plan{}, fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, capabilityErr)
+	}
+	return selector.PlanSessionWith(session.ID, session.TranscodeNodeURL, true, bitrateKbps, func(node *nodepool.Node) bool {
+		if node == nil {
+			return false
+		}
+		nodeURL := strings.TrimRight(node.URL, "/")
+		if _, failed := excluded[nodeURL]; failed {
+			return false
+		}
+		return nodeCapabilities[nodeURL].Supports(tonemap.ModeSoftware, kind)
+	}), nil
+}
+
+func (h *PlaybackHandler) releaseCompatSessionReservation(sessionID string) {
+	if releaser, ok := h.NodePlanner.(compatSessionReservationReleaser); ok {
+		releaser.ReleaseSession(sessionID)
+	}
+}
 
 // allow4KVideoTranscode reads the allow_4k_transcode server setting,
 // defaulting to deny like the native playback handler.
@@ -246,7 +685,7 @@ func (h *PlaybackHandler) allow4KVideoTranscode(ctx context.Context) bool {
 	if h.SettingsRepo == nil {
 		return false
 	}
-	v, _ := h.SettingsRepo.Get(ctx, "allow_4k_transcode")
+	v, _ := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
 	return v == "true"
 }
 
@@ -376,6 +815,12 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		TranscodeNode:   transcodeNodeURL,
 		DVProfile:       file.PrimaryDVProfile(),
 	}
+	if method == string(playback.PlayTranscode) && !source.TranscodeAudio && compatVersionRequiresToneMap(source.Version) {
+		// Older binaries do not understand the frozen tone-map claims. Give them
+		// a method they reject rather than let a proxy serve HDR bytes the plan
+		// promised as tone-mapped SDR.
+		claims.PlayMethod = streamtoken.PlayMethodToneMapTranscode
+	}
 	if compatSession != nil {
 		claims.UserID = compatSession.StreamAppUserID
 		claims.ProfileID = compatSession.ProfileID
@@ -426,6 +871,7 @@ func clampSeekSeconds(seekSeconds float64, sources []PlaybackMediaSource) float6
 	return seekSeconds
 }
 
+// startRemoteTranscode submits a frozen compatibility recipe to a selected node.
 func (h *PlaybackHandler) startRemoteTranscode(
 	ctx context.Context,
 	playSessionID string,
@@ -435,6 +881,46 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	initialSeekSeconds float64,
 	transcodeNodeURL string,
 ) error {
+	return h.startRemoteTranscodeWithToneMapMode(
+		ctx, playSessionID, upstreamSessionID, source, file,
+		initialSeekSeconds, transcodeNodeURL, "",
+	)
+}
+
+func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
+	ctx context.Context,
+	playSessionID string,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	file *models.MediaFile,
+	initialSeekSeconds float64,
+	transcodeNodeURL string,
+	requiredToneMapMode tonemap.Mode,
+) error {
+	// Remote contenders for one upstream session single-flight across route
+	// binding, node start, and durable publication. This uses a dedicated key,
+	// so a local software fallback can still proceed and win through the normal
+	// session lifecycle fence while a node request is slow.
+	if h.tm != nil {
+		remoteStartUnlock := h.tm.LockSessionLifecycle("compat-remote-start\x00" + upstreamSessionID)
+		defer remoteStartUnlock()
+		if h.tm.GetTranscodeSession(upstreamSessionID) != nil {
+			return errRemoteStartAdoptedLocal
+		}
+	}
+	if h.playbackStore != nil {
+		if current, ok := h.playbackStore.Get(playSessionID); ok && current.TranscodeStarted && current.Recipe != nil && current.Recipe.TranscodeNodeURL != "" {
+			if upstream, sessionErr := h.sessionMgr.GetSession(upstreamSessionID); sessionErr == nil && upstream != nil &&
+				strings.TrimRight(upstream.TranscodeNodeURL, "/") == strings.TrimRight(current.Recipe.TranscodeNodeURL, "/") {
+				return &remoteStartAdoptedRemoteError{nodeURL: current.Recipe.TranscodeNodeURL}
+			}
+		}
+	}
+	if h.sessionMgr != nil {
+		if err := h.sessionMgr.SetTranscodeNodeURL(upstreamSessionID, transcodeNodeURL); err != nil {
+			return fmt.Errorf("bind transcode node: %w", err)
+		}
+	}
 	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
 		return errTranscode4KDisallowed
 	}
@@ -450,6 +936,58 @@ func (h *PlaybackHandler) startRemoteTranscode(
 		startSegmentNumber = int(initialSeekSeconds / float64(segmentDuration))
 	}
 	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
+	toneMapRecipe := compatToneMapRecipe{}
+	var toneMapCapabilities tonemap.Capabilities
+	nodeProbeTimeoutMillis := int64(0)
+	if !source.TranscodeAudio {
+		metadata := tonemap.MetadataForFile(file)
+		var requiredPolicy tonemap.Policy
+		if requiredToneMapMode != "" {
+			var policyErr error
+			requiredPolicy, policyErr = h.toneMapPolicyResult(ctx)
+			if policyErr != nil {
+				return fmt.Errorf("%w: %w", errToneMapCapabilityUnavailable, policyErr)
+			}
+			if !requiredPolicy.Allows(requiredToneMapMode) {
+				return errHDRTranscodeUnsupported
+			}
+		}
+		if metadata.DynamicRange != "" && metadata.DynamicRange != playback.DynamicRangeSDRV3 {
+			var capabilityErr error
+			capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
+			var info playback.HWAccelInfo
+			info, capabilityErr = h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
+			toneMapCapabilities = info.ToneMapCapabilities
+			nodeProbeTimeoutMillis = info.ProbeRequestTimeoutMillis
+			cancelCapabilityFetch()
+			if capabilityErr != nil {
+				err := fmt.Errorf("load transcode node tone-map capabilities: %w", capabilityErr)
+				if requiredToneMapMode == tonemap.ModeSoftware && ctx.Err() == nil {
+					return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, err)
+				}
+				return err
+			}
+		}
+		var toneMapErr error
+		if requiredToneMapMode != "" {
+			toneMapRecipe, toneMapErr = resolveCompatToneMapRecipeWithPolicy(file, toneMapCapabilities, requiredPolicy)
+		} else {
+			toneMapRecipe, toneMapErr = h.resolveCompatToneMapRecipe(ctx, file, toneMapCapabilities)
+		}
+		if toneMapErr != nil {
+			kind := tonemap.ResolveSource(metadata).Kind
+			if requiredToneMapMode == tonemap.ModeSoftware && kind != "" && !toneMapCapabilities.Supports(tonemap.ModeSoftware, kind) {
+				return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, toneMapErr)
+			}
+			return toneMapErr
+		}
+		if toneMapErr = requireCompatToneMapMode(&toneMapRecipe, toneMapCapabilities, requiredToneMapMode); toneMapErr != nil {
+			if requiredToneMapMode == tonemap.ModeSoftware && !toneMapCapabilities.Supports(tonemap.ModeSoftware, toneMapRecipe.sourceKind) {
+				return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, toneMapErr)
+			}
+			return toneMapErr
+		}
+	}
 
 	reqBody := transcodenode.TranscodeStartRequest{
 		SessionID:           upstreamSessionID,
@@ -465,35 +1003,181 @@ func (h *PlaybackHandler) startRemoteTranscode(
 		HWAccel:             h.HWAccel,
 		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
 		TotalDuration:       float64(source.Version.Duration),
+		RequireReady:        toneMapRecipe.mode != "",
+	}
+	if toneMapRecipe.mode != "" {
+		reqBody.ToneMapPolicy = toneMapRecipe.policy
+		reqBody.ToneMapMode = toneMapRecipe.mode
+		reqBody.ToneMapSourceKind = toneMapRecipe.sourceKind
+		reqBody.ToneMapRecipeVersion = toneMapRecipe.recipeVersion
+		reqBody.ToneMapPreflightRequired = toneMapRecipe.preflightRequired
+		reqBody.ToneMapSourceRevision = toneMapRecipe.sourceRevision
+		reqBody.ToneMapDVConfigPresent = toneMapRecipe.dvConfigPresent
+		reqBody.ToneMapDVBLCompatIDPresent = toneMapRecipe.dvBLCompatIDPresent
+		reqBody.ToneMapDVBLPresent = toneMapRecipe.dvBLPresent
+		reqBody.ToneMapDVRPUPresent = toneMapRecipe.dvRPUPresent
+		reqBody.HWAccel = toneMapRecipe.hwAccel
 	}
 	if source.TranscodeAudio {
 		reqBody.TargetCodecVideo = "copy"
+		reqBody.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("marshal transcode request: %w", err)
+	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
+		body, err := json.Marshal(request)
+		if err != nil {
+			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("marshal transcode request: %w", err)
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, h.remoteTranscodeStartTimeout(request, nodeProbeTimeoutMillis))
+		defer cancel()
+		httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, transcodeNodeURL+"/transcode/start", strings.NewReader(string(body)))
+		if err != nil {
+			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("build transcode request: %w", logredact.SanitizeURLError(err))
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			return transcodenode.TranscodeStartResponse{}, 0, true, fmt.Errorf("remote transcode start failed: %w", logredact.SanitizeURLError(err))
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusAccepted {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			if request.ToneMapMode != "" {
+				if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
+					resp.StatusCode,
+					resp.Header.Get(transcodenode.ToneMapExecutionErrorHeader),
+				); validationErr != nil {
+					return transcodenode.TranscodeStartResponse{}, resp.StatusCode, false, validationErr
+				}
+			}
+			return transcodenode.TranscodeStartResponse{}, resp.StatusCode, false, nil
+		}
+		// Older nodes returned an empty 202 response. Accept that response for
+		// ordinary transcodes, while decoding current-node execution facts when
+		// present. Tone-mapped recipes still require a confirmed mode below.
+		var result transcodenode.TranscodeStartResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			if errors.Is(err, io.EOF) && request.ToneMapMode == "" {
+				return transcodenode.TranscodeStartResponse{}, resp.StatusCode, false, nil
+			}
+			return transcodenode.TranscodeStartResponse{}, resp.StatusCode, true, err
+		}
+		return result, resp.StatusCode, false, nil
 	}
-	// Bound the dispatch like the native path does (playback.go) — without
-	// this, an unreachable transcode node hangs the compat manifest request
-	// until the OS gives up on the connection.
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, transcodeNodeURL+"/transcode/start", strings.NewReader(string(body)))
-	if err != nil {
-		return fmt.Errorf("build transcode request: %w", err)
+	nodeResponse, status, cleanupRequired, err := dispatch(reqBody)
+	initialValidationErr := error(nil)
+	if isCompatToneMapExecutionError(err) {
+		initialValidationErr = err
+		err = nil
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	if err == nil && status == http.StatusAccepted && reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
+		err = errors.New("remote transcode node did not confirm tone-map mode")
+		cleanupRequired = true
+	}
+	initialStatus := status
+	initialErr := err
+	validationErr := initialValidationErr
+	retryWithSoftware := false
+	if err != nil {
+		if cleanupRequired {
+			h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		}
+		if cleanupRequired && ctx.Err() == nil {
+			retryWithSoftware = downgradeToSoftwareToneMap(
+				toneMapRecipe.policy, &toneMapRecipe.mode, &toneMapRecipe.filter, &toneMapRecipe.hwAccel,
+				toneMapRecipe.sourceKind, toneMapCapabilities,
+			)
+		}
+		if !retryWithSoftware {
+			return err
+		}
+	} else if status == http.StatusUnprocessableEntity || status == http.StatusNotImplemented || errors.Is(initialValidationErr, playback.ErrToneMapExecutorUnavailable) {
+		retryWithSoftware = downgradeToSoftwareToneMap(
+			toneMapRecipe.policy, &toneMapRecipe.mode, &toneMapRecipe.filter, &toneMapRecipe.hwAccel,
+			toneMapRecipe.sourceKind, toneMapCapabilities,
+		)
+	}
+	if retryWithSoftware {
+		reqBody.ToneMapMode = toneMapRecipe.mode
+		reqBody.HWAccel = toneMapRecipe.hwAccel
+		nodeResponse, status, cleanupRequired, err = dispatch(reqBody)
+		validationErr = nil
+		if isCompatToneMapExecutionError(err) {
+			validationErr = err
+			err = nil
+		}
+		if err != nil {
+			if cleanupRequired {
+				h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+			}
+			if initialErr != nil {
+				return fmt.Errorf("%w: remote hardware tone-map start failed: %w; software retry failed: %w", errRemoteSoftwareToneMapStartFailed, initialErr, err)
+			}
+			return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, err)
+		}
+	}
+	if status != http.StatusAccepted {
+		var startErr error
+		if retryWithSoftware {
+			if initialErr != nil {
+				startErr = fmt.Errorf("remote hardware tone-map start failed: %w; software tone-map retry status %d", initialErr, status)
+			} else {
+				startErr = fmt.Errorf("remote transcode start rejected: initial status %d; software tone-map retry status %d", initialStatus, status)
+			}
+		} else {
+			startErr = fmt.Errorf("remote transcode start rejected: status %d", status)
+		}
+		if retryWithSoftware && initialValidationErr != nil && validationErr != nil {
+			validationErr = errors.Join(initialValidationErr, validationErr)
+		}
+		if validationErr != nil {
+			startErr = errors.Join(validationErr, startErr)
+		}
+		if reqBody.ToneMapMode == tonemap.ModeSoftware || validationErr != nil {
+			return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, startErr)
+		}
+		return startErr
+	}
+	if reqBody.ToneMapMode != "" && nodeResponse.ToneMapMode != reqBody.ToneMapMode {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		err := errors.New("remote transcode node did not confirm tone-map mode")
+		if reqBody.ToneMapMode == tonemap.ModeSoftware {
+			return fmt.Errorf("%w: %w", errRemoteSoftwareToneMapStartFailed, err)
+		}
+		return err
+	}
 
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("remote transcode start failed: %w", err)
+	// A remote HTTP start may finish after another request has installed a
+	// local fallback for the same upstream generation. Serialize publication
+	// with local replacement and adopt that winner without overwriting its
+	// execution facts or durable recipe.
+	publishUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+	remoteStillOwnsRoute := true
+	localWinner := h.tm.GetTranscodeSession(upstreamSessionID) != nil
+	if h.playbackStore != nil {
+		if currentPlay, ok := h.playbackStore.Get(playSessionID); !ok || currentPlay.UpstreamSessionID != upstreamSessionID {
+			remoteStillOwnsRoute = false
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("remote transcode start rejected: status %d", resp.StatusCode)
+	if h.sessionMgr != nil {
+		if currentUpstream, currentErr := h.sessionMgr.GetSession(upstreamSessionID); currentErr != nil || currentUpstream == nil ||
+			strings.TrimRight(currentUpstream.TranscodeNodeURL, "/") != strings.TrimRight(transcodeNodeURL, "/") {
+			remoteStillOwnsRoute = false
+		}
 	}
+	if localWinner {
+		remoteStillOwnsRoute = false
+	}
+	if !remoteStillOwnsRoute {
+		publishUnlock()
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		if localWinner {
+			return errRemoteStartAdoptedLocal
+		}
+		return errors.New("remote transcode route ownership changed before publication")
+	}
+	defer publishUnlock()
 
 	// Mirror the byte-affecting opts sent to the node into a RecipeCard and persist
 	// it for restart resilience. The node-hop token is identity-only by design (see
@@ -510,22 +1194,26 @@ func (h *PlaybackHandler) startRemoteTranscode(
 		StartSegmentNumber:  reqBody.StartSegmentNumber,
 		TargetCodecVideo:    reqBody.TargetCodecVideo,
 		TargetCodecAudio:    reqBody.TargetCodecAudio,
+		VideoSampleEntry:    reqBody.VideoSampleEntry,
 		SegmentDuration:     reqBody.SegmentDuration,
-		HWAccel:             reqBody.HWAccel,
 		AudioTrackIndex:     reqBody.AudioTrackIndex,
 		TotalDuration:       reqBody.TotalDuration,
 	}
+	toneMapRecipe.apply(&opts)
+	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
+	opts.ToneMapMode = nodeResponse.ToneMapMode
 	if source.TranscodeAudio {
 		opts.TargetCodecVideo = "copy"
 	}
 
 	// Same mirror as the local path: the node runs the encode, but the
 	// upstream session here is what session sync and admin views read.
-	h.recordTranscodeStreamDetails(ctx, upstreamSessionID, opts)
+	reportedOpts := opts
+	h.recordTranscodeStreamDetails(ctx, upstreamSessionID, reportedOpts)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
 		// Roll back the already-started node ffmpeg so it isn't leaked.
-		h.tm.CloseTranscodeSession(upstreamSessionID, transcodeNodeURL)
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return err
 	}
 
@@ -537,17 +1225,17 @@ func (h *PlaybackHandler) startRemoteTranscode(
 // local (ensureLocalTranscode) and remote (startRemoteTranscode) transcode paths
 // so both stores stay in lock-step.
 //
-// The recipe is recorded in the compat store in the same Update that marks the
-// transcode started — a failed write leaves neither set — and then best-effort
-// handed to the node recipe store (Redis) for dedicated transcode nodes. The node
+// For dedicated nodes, the recipe is first committed to the node recipe store
+// (Redis), then recorded in the compat store in the same Update that marks the
+// transcode started. The node
 // URL is taken from the upstream session (bound before start on the remote path),
 // so it is "" for integrated transcodes and the node-store write is skipped.
 // A Jellyfin client carries no native token of its own and the node-hop token is
 // deliberately identity-only (see internal/noderecipe), so the persisted recipe is
 // the only way a node or central restart can rebuild ffmpeg.
 //
-// Returns an error only when the compat-store Update fails; the caller owns
-// rolling back its (local or remote) transcode in that case. A missing upstream
+// The caller owns rolling back its transcode when either durable write fails.
+// A missing upstream
 // session (a start/build race, or no session manager in tests) is logged and the
 // live transcode is left serving — only restart resilience is forfeited.
 func (h *PlaybackHandler) persistTranscodeRecipe(
@@ -581,25 +1269,59 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			"playback_session_id", upstreamSessionID)
 	}
 
-	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+	var previousRecipe *playback.RecipeCard
+	if previous, ok := h.playbackStore.Get(playSessionID); ok && previous != nil && previous.Recipe != nil {
+		copy := *previous.Recipe
+		previousRecipe = &copy
+	}
+	nodeRecipeCommitted := recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil
+	if nodeRecipeCommitted {
+		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("persist node transcode recipe: %w", err)
+		}
+	}
+	remoteToLocal := recipe != nil && recipe.TranscodeNodeURL == "" && previousRecipe != nil && previousRecipe.TranscodeNodeURL != ""
+	oldNodeRecipeRemoved := false
+	if remoteToLocal {
+		h.tm.StopRemoteTranscode(upstreamSessionID, previousRecipe.TranscodeNodeURL)
+		if h.RecipeNodeStore != nil {
+			deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			err := h.RecipeNodeStore.Delete(deleteCtx, upstreamSessionID)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("delete replaced node transcode recipe: %w", err)
+			}
+			oldNodeRecipeRemoved = true
+		}
+	}
+
+	if updateErr := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
 		current.TranscodeStarted = true
 		current.Recipe = recipe
 		return nil
-	}); err != nil {
-		return fmt.Errorf("update playback session: %w", err)
-	}
-
-	// Hand the recipe to the control-plane store (Redis) so a dedicated transcode
-	// node that restarts can rebuild ffmpeg from it. Bounded and best effort: a
-	// stalled write must not hang the manifest request, and a failed write only
-	// forfeits node-restart resilience for this session, never the start.
-	if recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil {
-		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		if err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe); err != nil {
-			slog.WarnContext(ctx, "persist node transcode recipe failed", "component", "jellycompat", "error", err,
-				"playback_session_id", upstreamSessionID, "node", recipe.TranscodeNodeURL)
+	}); updateErr != nil {
+		var restoreErr error
+		if nodeRecipeCommitted || oldNodeRecipeRemoved {
+			restoreCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if previousRecipe != nil && previousRecipe.TranscodeNodeURL != "" {
+				if err := h.RecipeNodeStore.Put(restoreCtx, upstreamSessionID, *previousRecipe); err != nil {
+					restoreErr = fmt.Errorf("restore prior node transcode recipe: %w", err)
+				}
+			} else {
+				if err := h.RecipeNodeStore.Delete(restoreCtx, upstreamSessionID); err != nil {
+					restoreErr = fmt.Errorf("remove uncommitted node transcode recipe: %w", err)
+				}
+			}
 		}
+		updateErr = fmt.Errorf("update playback session: %w", updateErr)
+		if restoreErr != nil {
+			return errors.Join(updateErr, restoreErr)
+		}
+		return updateErr
 	}
 	return nil
 }
@@ -676,6 +1398,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	sourceDTOs := make([]mediaSourceDTO, 0, len(detail.Versions))
 
 	allow4KTranscode := h.allow4KVideoTranscode(r.Context())
+	toneMapPolicy := tonemap.PolicyNone
+	toneMapPolicyLoaded := false
+	var toneMapCapabilities tonemap.Capabilities
+	var toneMapCapabilityErr error
+	toneMapCapabilitiesLoaded := false
 	if req.MediaSourceID != "" {
 		matched := false
 		for _, version := range detail.Versions {
@@ -698,6 +1425,36 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode)
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
+		}
+		if source.SupportsTranscoding && !source.TranscodeAudio && compatVersionRequiresToneMap(version) {
+			if !toneMapPolicyLoaded {
+				var policyErr error
+				toneMapPolicy, policyErr = h.toneMapPolicyResult(r.Context())
+				if policyErr != nil {
+					if !source.SupportsDirectPlay && !source.SupportsDirectStream {
+						writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map policy is temporarily unavailable")
+						return
+					}
+					toneMapPolicy = tonemap.PolicyNone
+				}
+				toneMapPolicyLoaded = true
+			}
+			if !toneMapCapabilitiesLoaded {
+				if toneMapPolicy != tonemap.PolicyNone {
+					toneMapCapabilities, toneMapCapabilityErr = h.availableCompatToneMapCapabilities(r.Context(), compatToneMapNegotiationTimeout)
+				}
+				toneMapCapabilitiesLoaded = true
+			}
+			if toneMapCapabilityErr != nil {
+				metadata := tonemap.MetadataForFile(&models.MediaFile{HDR: version.HDR, VideoTracks: version.VideoTracks})
+				resolution := tonemap.ResolveSource(metadata)
+				if resolution.Kind != "" && toneMapCapabilities.PreferredMode(toneMapPolicy, resolution.Kind) == "" &&
+					!source.SupportsDirectPlay && !source.SupportsDirectStream {
+					writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map capability discovery is temporarily unavailable")
+					return
+				}
+			}
+			source = applyCompatToneMapAvailabilityWithPolicy(source, toneMapCapabilities, toneMapPolicy)
 		}
 
 		// Resolve the client's subtitle selection against both the
@@ -955,6 +1712,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 		if bitrate == 0 && version.Bitrate > 0 {
 			bitrate = version.Bitrate * 1000
 		}
+		anamorphic, anamorphicKnown := compatIsAnamorphic(track)
 		streams = append(streams, mediaStreamDTO{
 			Index:                  index,
 			Type:                   "Video",
@@ -970,7 +1728,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			SupportsExternalStream: false,
 			IsInterlaced:           track.Interlaced,
 			IsAVC:                  strings.EqualFold(track.Codec, "h264"),
-			IsAnamorphic:           false,
+			IsAnamorphic:           anamorphicKnown && anamorphic,
 			NalLengthSize:          "4",
 			BitDepth:               track.BitDepth,
 			RefFrames:              track.ReferenceFrames,

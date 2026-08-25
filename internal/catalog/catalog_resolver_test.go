@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,36 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestCatalogScopedLibraryRequestPreservesGlobalDisabledLibraries(t *testing.T) {
+	req := CatalogRequest{Query: QueryDefinition{LibraryIDs: []int{7}}}
+	viewerAccess := AccessFilter{DisabledLibraryIDs: []int{9}}
+
+	searchAccess, _, earlyEmpty := catalogSearchAccess(req, viewerAccess)
+	if earlyEmpty {
+		t.Fatal("catalogSearchAccess returned early empty for an enabled requested library")
+	}
+	if !slices.Equal(searchAccess.AllowedLibraryIDs, []int{7}) {
+		t.Fatalf("search allowed libraries = %v, want [7]", searchAccess.AllowedLibraryIDs)
+	}
+	if !slices.Equal(searchAccess.DisabledLibraryIDs, []int{9}) {
+		t.Fatalf("search disabled libraries = %v, want [9]", searchAccess.DisabledLibraryIDs)
+	}
+
+	browseFilters, earlyEmpty, err := catalogBrowseFilters(req, viewerAccess)
+	if err != nil {
+		t.Fatalf("catalogBrowseFilters: %v", err)
+	}
+	if earlyEmpty {
+		t.Fatal("catalogBrowseFilters returned early empty for an enabled requested library")
+	}
+	if browseFilters.LibraryID != 7 {
+		t.Fatalf("browse library = %d, want 7", browseFilters.LibraryID)
+	}
+	if !slices.Equal(browseFilters.DisabledLibraryIDs, []int{9}) {
+		t.Fatalf("browse disabled libraries = %v, want [9]", browseFilters.DisabledLibraryIDs)
+	}
+}
 
 func TestValidateCatalogQueryRequest_AllowsLastAirDateSort(t *testing.T) {
 	req := CatalogRequest{

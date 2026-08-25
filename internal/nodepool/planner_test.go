@@ -39,6 +39,25 @@ func transcodeNode(id int, url string, group *string, activeJobs int) *Node {
 	return &Node{ID: id, Name: url, Type: NodeTypeTranscode, URL: url, Enabled: true, Healthy: true, Group: group, ActiveJobs: activeJobs}
 }
 
+func TestTranscodeNodeHealthyNormalizesTrailingSlash(t *testing.T) {
+	f := newFixture(nil, []*Node{
+		{URL: "http://tc-node:8080/", Enabled: true, Healthy: true},
+	})
+
+	if !f.planner.TranscodeNodeHealthy("http://tc-node:8080") {
+		t.Fatal("stored trailing-slash URL did not match a lookup without the slash")
+	}
+	if !f.planner.TranscodeNodeHealthy("http://tc-node:8080/") {
+		t.Fatal("stored trailing-slash URL did not match a lookup with the slash")
+	}
+	if f.planner.TranscodeNodeHealthy("http://other-node:8080") {
+		t.Fatal("unknown node URL reported healthy")
+	}
+	if f.planner.TranscodeNodeHealthy("") {
+		t.Fatal("empty node URL reported healthy")
+	}
+}
+
 func TestPlanTranscodePairsProxyFromSameGroup(t *testing.T) {
 	f := newFixture(
 		[]*Node{
@@ -422,6 +441,29 @@ func TestReservationsExpire(t *testing.T) {
 	f.now = f.now.Add(maxReservationAge + time.Second)
 	if f.planner.PlanSession("s3", "", true, 0).TranscodeNode == nil {
 		t.Fatal("session should be admitted after reservation expiry")
+	}
+}
+
+func TestTranscodeWorkAvailableIgnoresExpiredReservations(t *testing.T) {
+	capped := transcodeNode(2, "http://tc-1", nil, 0)
+	capped.MaxJobs = intPtr(1)
+	f := newFixture(
+		[]*Node{proxyNode(1, "http://proxy-1", nil)},
+		[]*Node{capped},
+	)
+
+	if f.planner.PlanSession("s1", "", true, 0).TranscodeNode == nil {
+		t.Fatal("first session should be admitted")
+	}
+	if f.planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("fresh reservation should consume the only transcode slot")
+	}
+
+	// Availability checks are intentionally read-only, but expired reservations
+	// must not consume capacity while waiting for a later placement to prune them.
+	f.now = f.now.Add(maxReservationAge + time.Second)
+	if !f.planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("expired reservation should not consume transcode capacity")
 	}
 }
 

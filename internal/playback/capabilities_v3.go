@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // SourceDurationSecondsV3 reports a media file's runtime, or nil when it is
@@ -286,24 +287,9 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 	return false, false, claim
 }
 
+// normalizeDynamicRangeV3 returns the protocol dynamic-range label for a track.
 func normalizeDynamicRangeV3(track models.VideoTrack) string {
-	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
-		return DynamicRangeDolbyVisionV3
-	}
-	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
-		return DynamicRangeHDR10PlusV3
-	}
-	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))
-	if strings.Contains(joined, "hlg") || strings.Contains(joined, "arib-std-b67") {
-		return DynamicRangeHLGV3
-	}
-	if strings.Contains(joined, "hdr") || strings.Contains(joined, "smpte2084") || strings.Contains(joined, "pq") {
-		return DynamicRangeHDR10V3
-	}
-	if joined == "  " || strings.TrimSpace(joined) == "" {
-		return ""
-	}
-	return DynamicRangeSDRV3
+	return tonemap.DynamicRangeForVideoTrack(track)
 }
 
 func parseFrameRateV3(value string) float64 {

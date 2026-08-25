@@ -640,7 +640,7 @@ func (r *Repository) ReconcileLinkedDownloads(ctx context.Context) (ready []*Dow
 		     file_size = COALESCE((SELECT a.file_size FROM download_artifacts a WHERE a.id = downloads.artifact_id), file_size),
 		     updated_at = now()
 		 WHERE status = 'preparing' AND artifact_id IS NOT NULL
-		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status = 'ready')
+		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status IN ('ready', 'tone_map_ready'))
 		 RETURNING `+downloadColumns,
 	)
 	if err != nil {

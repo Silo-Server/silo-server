@@ -52,6 +52,17 @@ type episodeCatalogUserStatePlan struct {
 // render. episodeCatalogSeriesParentGuard re-expresses that same constraint at
 // the entry-scan level so both queries stay aligned with hydration.
 func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
+	if len(access.DisabledLibraryIDs) > 0 {
+		*whereParts = append(*whereParts,
+			"EXISTS (SELECT 1 FROM episode_libraries el_scope_any WHERE el_scope_any.episode_id = ece.episode_id)",
+		)
+		*whereParts = append(*whereParts, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM episode_libraries el_scope_out WHERE el_scope_out.episode_id = ece.episode_id AND el_scope_out.media_folder_id = ANY($%d))",
+			*argIdx,
+		))
+		*args = append(*args, access.DisabledLibraryIDs)
+		*argIdx++
+	}
 	access.ExcludedMediaTypes = nil // access is a value param; caller unaffected
 	ApplySectionAccessFilter("ece", access, whereParts, args, argIdx)
 	*whereParts = append(*whereParts, episodeCatalogSeriesParentGuard)

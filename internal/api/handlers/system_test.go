@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -198,5 +201,49 @@ func TestHandleHWAccelAllNodeProbesFailFallsBackLocal(t *testing.T) {
 	}
 	if len(got.Nodes) != 1 || got.Nodes[0].Error == "" {
 		t.Fatalf("nodes = %+v, want the failing node listed with its error", got.Nodes)
+	}
+}
+
+func TestHandleHWAccelProbeLogRedactsNodeURLSecrets(t *testing.T) {
+	const (
+		username       = "probe-operator"
+		password       = "node-password"
+		querySecret    = "query-secret"
+		fragmentSecret = "fragment-secret"
+	)
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{Resolved: "qsv"})
+	}))
+	defer healthy.Close()
+	failed := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	failed.Close()
+	failedNodeURL := strings.Replace(failed.URL, "http://", "http://"+username+":"+password+"@", 1) +
+		"?access_token=" + querySecret + "#" + fragmentSecret
+
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{
+		{ID: 1, Name: "healthy-node", URL: healthy.URL, Enabled: true, Healthy: true},
+		{ID: 2, Name: "failed-node", URL: failedNodeURL, Enabled: true, Healthy: true},
+	})
+	handler := &SystemHandler{transcodePool: pool, jwtSecret: "jwt-secret"}
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	recorder := httptest.NewRecorder()
+	handler.HandleHWAccel(recorder, httptest.NewRequest(http.MethodGet, "/admin/system/hw-accel", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	diagnostics := logs.String()
+	for _, secret := range []string{username, password, querySecret, fragmentSecret} {
+		if strings.Contains(diagnostics, secret) {
+			t.Fatalf("capability probe log contains %q: %q", secret, diagnostics)
+		}
+	}
+	if !strings.Contains(diagnostics, failed.URL) {
+		t.Fatalf("capability probe log lost sanitized node origin: %q", diagnostics)
 	}
 }

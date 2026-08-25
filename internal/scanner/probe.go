@@ -13,8 +13,13 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
+// not describe a playable primary video stream.
+var ErrPrimaryVideoNotFound = mediaprobe.ErrPrimaryVideoNotFound
 
 // ffprobeOutput represents the top-level JSON output from ffprobe.
 type ffprobeOutput struct {
@@ -23,30 +28,7 @@ type ffprobeOutput struct {
 	Chapters []ffprobeChapter `json:"chapters"`
 }
 
-// ffprobeScalarString accepts ffprobe fields that may be emitted as either
-// JSON strings or numbers depending on codec/container details.
-type ffprobeScalarString string
-
-func (s *ffprobeScalarString) UnmarshalJSON(data []byte) error {
-	if string(data) == "null" {
-		*s = ""
-		return nil
-	}
-
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		*s = ffprobeScalarString(str)
-		return nil
-	}
-
-	var num json.Number
-	if err := json.Unmarshal(data, &num); err == nil {
-		*s = ffprobeScalarString(num.String())
-		return nil
-	}
-
-	return fmt.Errorf("unsupported ffprobe scalar %s", string(data))
-}
+type ffprobeScalarString = mediaprobe.ScalarString
 
 // ffprobeFormat represents the "format" section of ffprobe JSON output.
 type ffprobeFormat struct {
@@ -60,37 +42,7 @@ type ffprobeFormat struct {
 	Tags           map[string]string `json:"tags"`
 }
 
-// ffprobeStream represents a single stream entry in ffprobe JSON output.
-type ffprobeStream struct {
-	Index              int                 `json:"index"`
-	CodecName          string              `json:"codec_name"`
-	CodecLongName      string              `json:"codec_long_name"`
-	CodecType          string              `json:"codec_type"`
-	Profile            string              `json:"profile"`
-	Level              int                 `json:"level"`
-	Width              int                 `json:"width"`
-	Height             int                 `json:"height"`
-	DisplayAspectRatio string              `json:"display_aspect_ratio"`
-	FieldOrder         string              `json:"field_order"`
-	AvgFrameRate       string              `json:"avg_frame_rate"`
-	StartTime          string              `json:"start_time"`
-	Duration           string              `json:"duration"`
-	BitRate            string              `json:"bit_rate"`
-	ColorRange         string              `json:"color_range"`
-	ColorTransfer      string              `json:"color_transfer"`
-	ColorPrimaries     string              `json:"color_primaries"`
-	ColorSpace         string              `json:"color_space"`
-	PixFmt             string              `json:"pix_fmt"`
-	Refs               int                 `json:"refs"`
-	BitsPerRawSample   ffprobeScalarString `json:"bits_per_raw_sample"`
-	BitsPerSample      ffprobeScalarString `json:"bits_per_sample"`
-	Channels           int                 `json:"channels"`
-	ChannelLayout      string              `json:"channel_layout"`
-	SampleRate         string              `json:"sample_rate"`
-	Disposition        ffprobeDisp         `json:"disposition"`
-	Tags               map[string]string   `json:"tags"`
-	SideDataList       []ffprobeSideData   `json:"side_data_list"`
-}
+type ffprobeStream = mediaprobe.Stream
 
 type ffprobeChapter struct {
 	ID        int                 `json:"id"`
@@ -102,21 +54,8 @@ type ffprobeChapter struct {
 	Tags      map[string]string   `json:"tags"`
 }
 
-type ffprobeSideData struct {
-	SideDataType string `json:"side_data_type"`
-	DVProfile    int    `json:"dv_profile"`
-	DVLevel      int    `json:"dv_level"`
-	DVBlPresent  int    `json:"dv_bl_present"`
-	DVElPresent  int    `json:"dv_el_present"`
-	DVBLCompatID int    `json:"dv_bl_signal_compatibility_id"`
-}
-
-// ffprobeDisp represents the disposition flags on a stream.
-type ffprobeDisp struct {
-	Default     int `json:"default"`
-	Forced      int `json:"forced"`
-	AttachedPic int `json:"attached_pic"`
-}
+type ffprobeSideData = mediaprobe.SideData
+type ffprobeDisp = mediaprobe.Disposition
 
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
@@ -156,15 +95,16 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	return probe, nil
 }
 
+// ProbePrimaryVideoTrack runs a bounded metadata-only FFprobe and returns the
+// first playable video stream using the scanner's authoritative normalization.
+// It does not scan packets or persist any result.
+func ProbePrimaryVideoTrack(ctx context.Context, ffprobePath, filePath string) (models.VideoTrack, error) {
+	return mediaprobe.ProbePrimaryVideoTrack(ctx, ffprobePath, filePath)
+}
+
 // FFprobePathFromFFmpeg derives the sibling ffprobe binary path from a configured ffmpeg path.
 func FFprobePathFromFFmpeg(ffmpegPath string) string {
-	if i := strings.LastIndex(ffmpegPath, "ffmpeg"); i >= 0 {
-		ffprobePath := ffmpegPath[:i] + "ffprobe" + ffmpegPath[i+len("ffmpeg"):]
-		if ffprobePath != "" && ffprobePath != ffmpegPath {
-			return ffprobePath
-		}
-	}
-	return "ffprobe"
+	return mediaprobe.FFprobePathFromFFmpeg(ffmpegPath)
 }
 
 // convertProbeData transforms raw ffprobe JSON output into ProbeData.
@@ -195,46 +135,47 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			// picture is ordered ahead of the real stream, the flat
 			// codec_video/resolution/hdr columns describe the poster instead of
 			// the movie.
-			if !isMainVideoStream(s) {
+			if !mediaprobe.IsPrimaryVideoStream(s) {
 				continue
 			}
-			dvProfile := dolbyVisionProfileNumber(s.SideDataList)
-			// ffprobe omits unspecified optional fields by default; "unknown" is
-			// FFmpeg's canonical name for AVCOL_RANGE_UNSPECIFIED.
-			colorRange := firstNonEmpty(s.ColorRange, "unknown")
+			normalized := mediaprobe.NormalizeVideoTrack(s)
 			track := VideoTrackInfo{
-				Title:              firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
-				Codec:              s.CodecName,
-				DolbyVision:        dolbyVisionProfile(s.SideDataList),
-				DVProfile:          dvProfile,
-				DVLevel:            dolbyVisionLevel(s.SideDataList),
-				DVBLCompatID:       dolbyVisionBLCompatID(s.SideDataList),
-				DVELPresent:        dolbyVisionELPresent(s.SideDataList),
-				DVEnhancementLayer: dolbyVisionEnhancementLayer(dolbyVisionELPresent(s.SideDataList)),
-				HDR10Plus:          hasHDR10Plus(s.SideDataList),
-				Profile:            s.Profile,
-				Level:              s.Level,
-				Width:              s.Width,
-				Height:             s.Height,
-				AspectRatio:        s.DisplayAspectRatio,
-				Interlaced:         isInterlaced(s.FieldOrder),
-				FrameRate:          normalizeFrameRate(s.AvgFrameRate),
-				Bitrate:            parseNumeric(s.BitRate) / 1000,
-				VideoRange:         videoRangeLabel(s),
-				VideoRangeType:     videoRangeType(s),
-				ColorRange:         colorRange,
-				ColorPrimaries:     s.ColorPrimaries,
-				ColorSpace:         s.ColorSpace,
-				ColorTransfer:      s.ColorTransfer,
-				BitDepth:           models.NormalizeVideoBitDepth(parseBitDepth(s), s.PixFmt, s.Profile),
-				PixelFormat:        s.PixFmt,
-				ReferenceFrames:    s.Refs,
+				Title:               normalized.Title,
+				Codec:               normalized.Codec,
+				DolbyVision:         normalized.DolbyVision,
+				DVProfile:           normalized.DVProfile,
+				DVLevel:             normalized.DVLevel,
+				DVBLCompatID:        normalized.DVBLCompatID,
+				DVConfigPresent:     normalized.DVConfigPresent,
+				DVBLCompatIDPresent: normalized.DVBLCompatIDPresent,
+				DVBLPresent:         normalized.DVBLPresent,
+				DVRPUPresent:        normalized.DVRPUPresent,
+				DVELPresent:         normalized.DVELPresent,
+				DVEnhancementLayer:  normalized.DVEnhancementLayer,
+				HDR10Plus:           normalized.HDR10Plus,
+				Profile:             normalized.Profile,
+				Level:               normalized.Level,
+				Width:               normalized.Width,
+				Height:              normalized.Height,
+				AspectRatio:         normalized.AspectRatio,
+				Interlaced:          normalized.Interlaced,
+				FrameRate:           normalized.FrameRate,
+				Bitrate:             normalized.Bitrate,
+				VideoRange:          normalized.VideoRange,
+				VideoRangeType:      normalized.VideoRangeType,
+				ColorRange:          normalized.ColorRange,
+				ColorPrimaries:      normalized.ColorPrimaries,
+				ColorSpace:          normalized.ColorSpace,
+				ColorTransfer:       normalized.ColorTransfer,
+				BitDepth:            normalized.BitDepth,
+				PixelFormat:         normalized.PixelFormat,
+				ReferenceFrames:     normalized.ReferenceFrames,
 			}
 			pd.VideoTracks = append(pd.VideoTracks, track)
 			if pd.CodecVideo == "" {
 				pd.CodecVideo = s.CodecName
 				pd.Resolution = mapResolution(s.Width, s.Height)
-				pd.HDR = isHDR(s.ColorTransfer) || dvProfile > 0 || track.HDR10Plus
+				pd.HDR = isHDR(s.ColorTransfer) || normalized.DVProfile > 0 || track.HDR10Plus
 			}
 		case "audio":
 			track := AudioTrackInfo{
@@ -350,7 +291,7 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	}
 
 	for _, stream := range raw.Streams {
-		if !isMainVideoStream(stream) {
+		if !mediaprobe.IsPrimaryVideoStream(stream) {
 			continue
 		}
 		streamDuration := parseFloat(stream.Duration)
@@ -383,7 +324,7 @@ func corroboratedLongVideoDuration(raw *ffprobeOutput, formatDuration float64) (
 	}
 
 	for _, stream := range raw.Streams {
-		if !isMainVideoStream(stream) {
+		if !mediaprobe.IsPrimaryVideoStream(stream) {
 			continue
 		}
 		streamDuration := parseFloat(stream.Duration)
@@ -501,21 +442,13 @@ func truncatedDuration(duration float64) int {
 	return max(1, int(duration))
 }
 
-// isMainVideoStream reports whether the stream is a real video stream.
-// Embedded cover art (attached_pic) is reported by ffprobe as a video stream
-// but must not drive duration decisions: it would route audiobooks and music
-// through the video duration gauntlet and packet-scan a single still image.
-func isMainVideoStream(stream ffprobeStream) bool {
-	return stream.CodecType == "video" && stream.Disposition.AttachedPic == 0
-}
-
 func hasVideoStream(streams []ffprobeStream) bool {
-	return slices.ContainsFunc(streams, isMainVideoStream)
+	return slices.ContainsFunc(streams, mediaprobe.IsPrimaryVideoStream)
 }
 
 func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 	for _, stream := range streams {
-		if isMainVideoStream(stream) {
+		if mediaprobe.IsPrimaryVideoStream(stream) {
 			return stream.AvgFrameRate, true
 		}
 	}
@@ -746,150 +679,6 @@ func parseBitDepth(s ffprobeStream) int {
 	return parseNumeric(string(s.BitsPerSample))
 }
 
-func normalizeFrameRate(raw string) string {
-	if raw == "" || raw == "0/0" {
-		return ""
-	}
-	if !strings.Contains(raw, "/") {
-		return raw
-	}
-	fps := parseFrameRate(raw)
-	if fps == 0 {
-		return raw
-	}
-	return strconv.FormatFloat(fps, 'f', 3, 64)
-}
-
-func isInterlaced(fieldOrder string) bool {
-	switch strings.ToLower(fieldOrder) {
-	case "tt", "bb", "tb", "bt":
-		return true
-	default:
-		return false
-	}
-}
-
-func videoRangeLabel(s ffprobeStream) string {
-	if dv := dolbyVisionProfile(s.SideDataList); dv != "" {
-		return "DolbyVision"
-	}
-	if isHDR(s.ColorTransfer) {
-		return "HDR"
-	}
-	return ""
-}
-
-func dolbyVisionProfile(sideData []ffprobeSideData) string {
-	if profile := dolbyVisionProfileNumber(sideData); profile > 0 {
-		return fmt.Sprintf("Profile %d", profile)
-	}
-	return ""
-}
-
-func dolbyVisionProfileNumber(sideData []ffprobeSideData) int {
-	for _, data := range sideData {
-		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVProfile > 0 {
-			return data.DVProfile
-		}
-	}
-	return 0
-}
-
-func dolbyVisionLevel(sideData []ffprobeSideData) int {
-	for _, data := range sideData {
-		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVLevel > 0 {
-			return data.DVLevel
-		}
-	}
-	return 0
-}
-
-func dolbyVisionBLCompatID(sideData []ffprobeSideData) int {
-	for _, data := range sideData {
-		if strings.EqualFold(data.SideDataType, "DOVI configuration record") && data.DVBLCompatID > 0 {
-			return data.DVBLCompatID
-		}
-	}
-	return 0
-}
-
-func dolbyVisionELPresent(sideData []ffprobeSideData) bool {
-	for _, data := range sideData {
-		if strings.EqualFold(data.SideDataType, "DOVI configuration record") {
-			return data.DVElPresent > 0
-		}
-	}
-	return false
-}
-
-// dolbyVisionEnhancementLayer remains conservative until a libdovi-backed
-// analyzer has inspected the RPU mapping. ffprobe can prove that an enhancement
-// layer exists, but it cannot distinguish MEL from FEL.
-func dolbyVisionEnhancementLayer(present bool) string {
-	if !present {
-		return "none"
-	}
-	return "unknown"
-}
-
-func hasHDR10Plus(sideData []ffprobeSideData) bool {
-	for _, data := range sideData {
-		typ := strings.ToLower(data.SideDataType)
-		if strings.Contains(typ, "hdr10+") || strings.Contains(typ, "smpte2094-40") {
-			return true
-		}
-	}
-	return false
-}
-
-func videoRangeType(s ffprobeStream) string {
-	profile := dolbyVisionProfileNumber(s.SideDataList)
-	hdr10Plus := hasHDR10Plus(s.SideDataList)
-	if profile > 0 {
-		switch profile {
-		case 5:
-			return "DOVI"
-		case 7:
-			if hdr10Plus {
-				return "DOVIWithELHDR10Plus"
-			}
-			return "DOVIWithEL"
-		case 8:
-			if hdr10Plus {
-				return "DOVIWithHDR10Plus"
-			}
-			switch dolbyVisionBLCompatID(s.SideDataList) {
-			case 1:
-				return "DOVIWithHDR10"
-			case 2:
-				return "DOVIWithSDR"
-			case 4:
-				return "DOVIWithHLG"
-			default:
-				if isHLG(s.ColorTransfer) {
-					return "DOVIWithHLG"
-				}
-				if isHDR(s.ColorTransfer) {
-					return "DOVIWithHDR10"
-				}
-				return "DOVIWithSDR"
-			}
-		default:
-			return "DOVI"
-		}
-	}
-	if hdr10Plus {
-		return "HDR10Plus"
-	}
-	if isHLG(s.ColorTransfer) {
-		return "HLG"
-	}
-	if isHDR(s.ColorTransfer) {
-		return "HDR10"
-	}
-	return "SDR"
-}
-
 func subtitleResolutionLabel(s ffprobeStream) string {
 	if s.Width <= 0 || s.Height <= 0 {
 		return ""
@@ -940,10 +729,6 @@ func mapResolution(width, height int) string {
 func isHDR(colorTransfer string) bool {
 	ct := strings.ToLower(colorTransfer)
 	return strings.Contains(ct, "smpte2084") || strings.Contains(ct, "arib-std-b67")
-}
-
-func isHLG(colorTransfer string) bool {
-	return strings.Contains(strings.ToLower(colorTransfer), "arib-std-b67")
 }
 
 // normalizeFormatTags lowercases tag keys so callers can look up

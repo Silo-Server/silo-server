@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -71,9 +72,28 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 		if videoTracksMissingColorRange(file.VideoTracks) {
 			return true
 		}
+		if videoTracksHaveLegacyDVProvenance(file.VideoTracks) {
+			return true
+		}
 	}
 	if file.Chapters == nil {
 		return true
+	}
+	return false
+}
+
+// videoTracksHaveLegacyDVProvenance reports whether a Dolby Vision track was
+// written by a probe generation that predates the DV provenance columns. Those
+// rows decode to explicit false, which is indistinguishable from a genuine
+// "the source really has no DV configuration record" — and the tone-map
+// preflight needs the distinction, so the row is reprobed once.
+func videoTracksHaveLegacyDVProvenance(tracks []models.VideoTrack) bool {
+	for _, track := range tracks {
+		isDV := track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") ||
+			strings.Contains(strings.ToLower(track.DolbyVision), "dolby")
+		if isDV && track.DVProvenanceCurrent != nil && !*track.DVProvenanceCurrent {
+			return true
+		}
 	}
 	return false
 }
@@ -98,13 +118,30 @@ type copySafetyWriter interface {
 	UpdateMultiplePPS(ctx context.Context, fileID int, multiplePPS bool, scanSize int64, scanMtime *time.Time) error
 }
 
+// playbackProbeFileRepository is the slice of *FileRepository the ensurer
+// needs: re-read the row inside the repair flight, and persist the reprobe.
+// The indirection keeps the coalescing tests off a live database.
+type playbackProbeFileRepository interface {
+	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
+	Upsert(ctx context.Context, file models.MediaFile) (*models.MediaFile, error)
+}
+
 // PlaybackProbeEnsurer repairs missing playback-critical probe metadata on
 // demand by running a local ffprobe and persisting the result.
 type PlaybackProbeEnsurer struct {
-	fileRepo    *FileRepository
+	fileRepo    playbackProbeFileRepository
 	ffprobePath string
 	ffmpegPath  string
 	timeout     time.Duration
+	// probeFile is the ffprobe entry point; nil means the package's ProbeFile.
+	// Tests substitute it to drive the coalescing behavior deterministically.
+	probeFile func(context.Context, string, string) (*ProbeData, error)
+	// probeRepair collapses concurrent repairs of the same source revision so a
+	// burst of playback/detail requests spawns one ffprobe, not one each.
+	probeRepair singleflight.Group
+	// probeSlots bounds how many distinct repairs may run ffprobe at once, so a
+	// library-wide browse cannot fork an unbounded number of processes.
+	probeSlots chan struct{}
 	// copySafetyRepo persists multi-PPS verdicts. Normally the same
 	// *FileRepository as fileRepo; tests substitute a double.
 	copySafetyRepo copySafetyWriter
@@ -142,12 +179,16 @@ func (r copySafetyResult) matches(file *models.MediaFile) bool {
 
 func NewPlaybackProbeEnsurer(fileRepo *FileRepository, ffprobePath, ffmpegPath string, timeout time.Duration) *PlaybackProbeEnsurer {
 	e := &PlaybackProbeEnsurer{
-		fileRepo:    fileRepo,
 		ffprobePath: ffprobePath,
 		ffmpegPath:  ffmpegPath,
 		timeout:     timeout,
+		probeSlots:  make(chan struct{}, 4),
 	}
+	// Assign through a typed nil check so a nil *FileRepository keeps the
+	// interfaces nil: the e.fileRepo == nil guard is the constructor's
+	// contract, and a typed-nil interface would panic inside GetByID.
 	if fileRepo != nil {
+		e.fileRepo = fileRepo
 		e.copySafetyRepo = fileRepo
 	}
 	return e
@@ -285,22 +326,7 @@ func (e *PlaybackProbeEnsurer) ensureProbeRepair(ctx context.Context, file *mode
 
 	current := file
 	if NeedsCriticalProbeRepair(file) && strings.TrimSpace(e.ffprobePath) != "" {
-		timeout := e.timeout
-		if timeout <= 0 {
-			timeout = 5 * time.Second
-		}
-		if reprobeMayScanPackets(file) && timeout < time.Minute {
-			timeout = time.Minute
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, timeout)
-		probe, err := ProbeFile(probeCtx, e.ffprobePath, file.FilePath)
-		cancel()
-		if err != nil || probe == nil {
-			return file, err
-		}
-		updated := *file
-		applyProbeData(&updated, probe, "local")
-		repaired, err := e.fileRepo.Upsert(ctx, updated)
+		repaired, err := e.ensureCriticalProbe(ctx, file)
 		if err != nil {
 			return file, err
 		}
@@ -308,6 +334,79 @@ func (e *PlaybackProbeEnsurer) ensureProbeRepair(ctx context.Context, file *mode
 	}
 
 	return current, nil
+}
+
+// ensureCriticalProbe reprobes one source revision at a time, shared across
+// every caller looking at the same bytes.
+//
+// The flight key is the tone-map source revision fingerprint rather than the
+// file ID: a rewrite in place keeps the row ID and changes the bitstream, and a
+// caller holding the replacement must not consume the old generation's probe.
+// The work runs on a context detached from any single caller, so the leader
+// walking away (a client that closed its connection) cannot poison the probe
+// for the callers still waiting on it; each caller still honors its own
+// cancellation while waiting. Inside the flight the row is re-read first, so a
+// caller holding a stale snapshot of an already-repaired file spawns no ffprobe
+// at all.
+func (e *PlaybackProbeEnsurer) ensureCriticalProbe(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error) {
+	sharedCtx := context.WithoutCancel(ctx)
+	revisionKey := tonemap.RevisionForFile(file).Fingerprint()
+	resultCh := e.probeRepair.DoChan(revisionKey, func() (any, error) {
+		lookupTimeout := e.timeout
+		if lookupTimeout <= 0 {
+			lookupTimeout = 5 * time.Second
+		}
+		lookupCtx, cancelLookup := context.WithTimeout(sharedCtx, lookupTimeout)
+		current, err := e.fileRepo.GetByID(lookupCtx, file.ID)
+		cancelLookup()
+		if err != nil {
+			return nil, err
+		}
+		if current == nil || !NeedsCriticalProbeRepair(current) {
+			return current, nil
+		}
+		timeout := e.timeout
+		if timeout <= 0 {
+			timeout = 5 * time.Second
+		}
+		if reprobeMayScanPackets(current) && timeout < time.Minute {
+			timeout = time.Minute
+		}
+		probeCtx, cancel := context.WithTimeout(sharedCtx, timeout)
+		defer cancel()
+		if e.probeSlots != nil {
+			select {
+			case e.probeSlots <- struct{}{}:
+				defer func() { <-e.probeSlots }()
+			case <-probeCtx.Done():
+				return nil, probeCtx.Err()
+			}
+		}
+		probeFile := e.probeFile
+		if probeFile == nil {
+			probeFile = ProbeFile
+		}
+		probe, err := probeFile(probeCtx, e.ffprobePath, current.FilePath)
+		if err != nil || probe == nil {
+			return nil, err
+		}
+		updated := *current
+		applyProbeData(&updated, probe, "local")
+		return e.fileRepo.Upsert(probeCtx, updated)
+	})
+	select {
+	case <-ctx.Done():
+		return file, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return file, result.Err
+		}
+		repaired, _ := result.Val.(*models.MediaFile)
+		if repaired == nil {
+			return file, nil
+		}
+		return repaired, nil
+	}
 }
 
 // ensureCopySafety resolves the multi-PPS copy-safety flag for H.264 files at

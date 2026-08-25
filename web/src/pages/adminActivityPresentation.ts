@@ -225,6 +225,30 @@ export function formatTranscodeModeSummary(session: AdminSession): string | null
   }
 }
 
+/** Labels for a confirmed HDR-to-SDR executor in compact and detailed views. */
+export interface ToneMapSummary {
+  badge: "HW Tone map" | "SW Tone map";
+  detail: "Hardware" | "Software";
+  mode: "hardware" | "software";
+}
+
+/** Format a confirmed HDR-to-SDR executor without guessing from legacy data. */
+export function formatToneMapSummary(session: AdminSession): ToneMapSummary | null {
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  if (videoDecision !== "transcode") {
+    return null;
+  }
+
+  switch (session.tone_map_mode?.trim().toLowerCase()) {
+    case "hardware":
+      return { badge: "HW Tone map", detail: "Hardware", mode: "hardware" };
+    case "software":
+      return { badge: "SW Tone map", detail: "Software", mode: "software" };
+    default:
+      return null;
+  }
+}
+
 export function formatSessionBitrate(kbps?: number | null): string | null {
   if (!kbps || kbps <= 0) {
     return null;

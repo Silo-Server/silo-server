@@ -50,6 +50,7 @@ type scanStateFile struct {
 	HasNonImageVideoTracks bool
 	HasAudioTracks         bool
 	HasChapters            bool
+	DVProvenanceCurrent    *bool
 	ExternalSubtitlePaths  []string
 }
 
@@ -69,6 +70,12 @@ const scanStateColumns = `id, content_id, extra_id,
 	), FALSE) AS has_non_image_video_tracks,
 	COALESCE(jsonb_typeof(audio_tracks) = 'array' AND jsonb_array_length(audio_tracks) > 0, FALSE) AS has_audio_tracks,
 	chapters IS NOT NULL AS has_chapters,
+	NOT EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements(CASE WHEN jsonb_typeof(video_tracks) = 'array' THEN video_tracks ELSE '[]'::jsonb END) AS dv_track(track)
+		WHERE (track ? 'dv_profile' OR lower(COALESCE(track->>'video_range_type', '')) LIKE '%dovi%' OR lower(COALESCE(track->>'dolby_vision', '')) LIKE '%dolby%')
+		  AND (NOT (track ? 'dv_config_present') OR NOT (track ? 'dv_bl_compat_id_present'))
+	) AS dv_provenance_current,
 	COALESCE((
 		SELECT jsonb_agg(path)
 		FROM (
@@ -95,6 +102,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var presentationPartIndex, multiEpisodeStart, multiEpisodeEnd *int
 	var probeSource *string
 	var externalSubtitlePathsJSON []byte
+	var dvProvenanceCurrent bool
 
 	if err := row.Scan(
 		&state.ID,
@@ -134,6 +142,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		&state.HasNonImageVideoTracks,
 		&state.HasAudioTracks,
 		&state.HasChapters,
+		&dvProvenanceCurrent,
 		&externalSubtitlePathsJSON,
 	); err != nil {
 		return nil, fmt.Errorf("scanning scan state row: %w", err)
@@ -173,6 +182,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.IdentityJSON = append([]byte(nil), identityJSON...)
 	}
 	state.FileModifiedAt = fileModifiedAt
+	state.DVProvenanceCurrent = &dvProvenanceCurrent
 	if fileHash != nil {
 		state.FileHash = *fileHash
 	}

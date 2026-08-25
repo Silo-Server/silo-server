@@ -5,6 +5,32 @@
 ### Let each profile hide watched items from Home
 Profiles can now remove watched items from ordinary Home sections without hiding them from library pages, search, collections, or other browsing surfaces. Featured sections and sections whose purpose depends on watch history — Most Watched, profile activity, and Forgotten Favorites — keep watched items. The preference is off by default and watched indicators remain available everywhere an item is shown.
 
+### Start audiobook playback once after browser capability detection
+The web audiobook player now waits for the browser's capability check to finish before requesting a playback session. It previously reacted to each intermediate capability result, creating and immediately replacing multiple sessions when one play request should have produced only one.
+
+### Play HDR video on SDR-only devices
+An HDR source used to be a dead end for a device that cannot display HDR: Silo had no recipe that could convert one, so the plan refused rather than washing the picture out. Silo can now tone-map HDR to SDR, on streaming and on prepared downloads alike, so those devices get a watchable picture with the colors mapped rather than clipped.
+
+It is off until an administrator turns it on. Playback settings gain two independent switches — hardware tone mapping and software tone mapping — both default off, because the result is a re-encode and the quality is a judgement call that belongs to whoever runs the server. Turning on only one pins every tone-map to that path; turning on both prefers hardware and falls back to software when no hardware executor has capacity, so a busy GPU no longer refuses a stream an idle CPU could serve.
+
+Dolby Vision Profile 7 sources benefit too. Where the source declares a standards-compatible base layer, Silo now plays that base layer instead of refusing the file. Sources whose metadata cannot prove a usable base layer — Profile 5, and anything with incomplete signaling — are still refused rather than guessed at, and are re-examined automatically the next time the file is scanned.
+
+Admin activity shows which path a session actually used, so a stream that fell back from hardware to software reads as software rather than as whatever was planned. Direct play and direct stream of HDR are unchanged, and a device that manages HDR itself is never pushed onto a tone-map route. When tone mapping and 4K transcoding are enabled, the quality menu still offers lower resolutions during source-preserving HDR playback; choosing one validates the executor then starts the tone-mapped transcode. Quality choices now include explicit High, Medium, and Low bitrate steps at 4K, 1080p, and 720p, while omitting same-resolution steps that would not actually reduce the source bitrate.
+
+### Fix Jellyfin-compatible playback negotiation for optional codec-profile conditions
+Jellyfin clients send codec profiles whose conditions are frequently optional, and Silo previously
+failed every condition it did not model — including the `IsAnamorphic` check that jellyfin-web's
+webOS profile sends — so compatible H.264 and HEVC files were pushed into a needless transcode.
+Condition evaluation now matches Jellyfin's semantics and answers from real scanner data.
+- Honors `IsRequired` on profile conditions: an optional condition Silo cannot evaluate no longer
+  blocks direct play, while a required one still does. An omitted `IsRequired` key now decodes as
+  required, matching Jellyfin's own deserialization default.
+- Evaluates interlacing, frame rate, video and audio bitrate, audio sample rate, and audio profile
+  from the scanned track data instead of leaving those conditions unanswered.
+- Derives `IsAnamorphic` by comparing the track's display aspect ratio against its storage aspect
+  ratio, and reports the same derived value on the media stream returned to clients.
+- Restores direct play for compatible webOS H.264 and HEVC media that previously transcoded.
+
 ## 2026-08-23
 
 ### Never wait on H.264 stream-copy analysis to start playing

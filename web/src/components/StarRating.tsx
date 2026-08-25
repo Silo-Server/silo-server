@@ -68,11 +68,17 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
             aria-label={`${star} star${star !== 1 ? "s" : ""}`}
             aria-checked={value === star}
             tabIndex={star === tabbableStar ? 0 : -1}
-            className={`cursor-pointer border-none bg-transparent p-0.5 leading-none transition-all duration-150 hover:scale-110 ${filled ? "text-yellow-400" : "text-muted-foreground/50"}`}
+            className={`transform-gpu cursor-pointer border-none bg-transparent p-0.5 leading-none transition-[color,scale] duration-100 ease-out motion-safe:hover:scale-110 motion-reduce:transition-none ${filled ? "text-yellow-400" : "text-muted-foreground/50"}`}
             onMouseEnter={() => handleMouseEnter(star)}
             onClick={() => handleClick(star)}
           >
-            <Star size={size} fill={filled ? "currentColor" : "none"} strokeWidth={1.5} />
+            <Star
+              size={size}
+              fill="currentColor"
+              fillOpacity={filled ? 1 : 0}
+              strokeWidth={1.5}
+              className="transition-[fill-opacity] duration-100 ease-out motion-reduce:transition-none"
+            />
           </button>
         );
       })}

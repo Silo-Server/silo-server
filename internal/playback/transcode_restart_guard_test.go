@@ -2,9 +2,12 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // TestSegmentRecoveryDecisionWaitsWhileRestarting covers half of issue #243's
@@ -15,7 +18,7 @@ import (
 func TestSegmentRecoveryDecisionWaitsWhileRestarting(t *testing.T) {
 	session := &TranscodeSession{
 		outputDir:  t.TempDir(),
-		restarting: true,
+		restarting: &restartFlight{done: make(chan struct{})},
 		opts: TranscodeOpts{
 			TargetCodecVideo:   "h264",
 			SegmentDuration:    2,
@@ -115,38 +118,44 @@ func TestRestartCopySeekOriginIsReplacedOrCleared(t *testing.T) {
 	}
 }
 
-// TestRestartIsSingleFlight covers the other half: Restart must be
-// single-flight per session. A second caller arriving while a restart is in
-// progress must return immediately without killing the process the first
-// restart just started.
-func TestRestartIsSingleFlight(t *testing.T) {
+// TestRestartWaiterReceivesInFlightOutcome covers the single-flight outcome:
+// a caller arriving while a restart is in progress must not perform its own
+// restart, and it must receive the in-flight restart's result instead of
+// assuming success. The first caller here fails validation; the waiter must
+// surface that failure rather than returning nil.
+func TestRestartWaiterReceivesInFlightOutcome(t *testing.T) {
 	session := &TranscodeSession{
 		outputDir:  t.TempDir(),
-		restarting: true,
+		restarting: &restartFlight{done: make(chan struct{})},
 		opts: TranscodeOpts{
 			TargetCodecVideo:   "h264",
 			SegmentDuration:    2,
 			StartSegmentNumber: 0,
-			// Nonexistent binary: if the guard is missing and Restart
-			// proceeds, exec fails and the call returns an error, failing
-			// the assertions below.
+			// Nonexistent binary: if the waiter were to start its own restart
+			// instead of joining the flight, exec fails and the call returns an
+			// error, failing the assertions below.
 			FFmpegPath: "/nonexistent/ffmpeg-single-flight-test",
 		},
 	}
+	flight := session.restarting
+
+	// The in-flight leader completes its restart with a validation failure.
+	go func() {
+		session.mu.Lock()
+		flight.err = tonemap.ErrSourceRevisionChanged
+		session.mu.Unlock()
+		close(flight.done)
+	}()
 
 	err := session.Restart(context.Background(), 20, 10)
-	if err != nil {
-		t.Fatalf("Restart during in-flight restart = %v, want nil (single-flight no-op)", err)
+	if !errors.Is(err, tonemap.ErrSourceRevisionChanged) {
+		t.Fatalf("Restart during in-flight restart = %v, want the in-flight validation outcome", err)
 	}
 
 	session.mu.Lock()
 	restartCount := session.restartCount
-	stillRestarting := session.restarting
 	session.mu.Unlock()
 	if restartCount != 0 {
-		t.Errorf("restartCount = %d, want 0 (second caller must not perform a restart)", restartCount)
-	}
-	if !stillRestarting {
-		t.Error("restarting flag cleared by no-op caller; must be left for the in-flight restart to clear")
+		t.Errorf("restartCount = %d, want 0 (waiter must not perform a restart)", restartCount)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 type FrameExtractOptions struct {
@@ -37,7 +38,7 @@ const (
 	reasonFFmpegProbeFailed     = "ffmpeg_probe_failed"
 	reasonToneMapUnsupported    = "tonemap_unsupported"
 	softwareToneMapProbeTimeout = 3 * time.Second
-	softwareToneMapFilterBT2390 = "zscale=t=linear:npl=100,format=gbrpf32le,tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
+	softwareToneMapFilterBT2390 = "tonemapx=tonemap=bt2390,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
 	softwareToneMapFilterHable  = "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable,zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p"
 )
 
@@ -123,6 +124,7 @@ func softwareToneMapProbeResultValue(result softwareToneMapProbeResult) (string,
 	return "", result.failureReason, errors.New(result.detail)
 }
 
+// probeSoftwareToneMapFilter selects a usable FFmpeg software tone-map filter.
 func probeSoftwareToneMapFilter(
 	ffmpegPath string,
 	probeFn func(ffmpegPath string) ([]byte, error),
@@ -140,17 +142,18 @@ func probeSoftwareToneMapFilter(
 			detail:        "FFmpeg filter probe failed: " + playback.FormatFFmpegProbeFailure(err, output),
 		}
 	}
-	if !ffmpegFilterOutputHasToken(output, "zscale") {
+	filter, hasZScale := tonemap.SelectSoftwareFilter(output)
+	if !hasZScale {
 		return softwareToneMapProbeResult{
 			failureReason: reasonToneMapUnsupported,
 			detail:        "configured FFmpeg lacks the required zscale filter",
 			cacheable:     true,
 		}
 	}
-	if ffmpegFilterOutputHasToken(output, "tonemapx") {
+	if filter == tonemap.SoftwareFilterBT2390 {
 		return softwareToneMapProbeResult{filter: softwareToneMapFilterBT2390, cacheable: true}
 	}
-	if ffmpegFilterOutputHasToken(output, "tonemap") {
+	if filter == tonemap.SoftwareFilterHable {
 		return softwareToneMapProbeResult{filter: softwareToneMapFilterHable, cacheable: true}
 	}
 	return softwareToneMapProbeResult{
@@ -424,19 +427,6 @@ func runFFmpegFilterProbe(ffmpegPath string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), softwareToneMapProbeTimeout)
 	defer cancel()
 	return exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-filters").CombinedOutput()
-}
-
-func ffmpegFilterOutputHasToken(output []byte, token string) bool {
-	for _, line := range strings.Split(string(output), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 || !strings.Contains(fields[2], "->") {
-			continue
-		}
-		if strings.EqualFold(fields[1], token) {
-			return true
-		}
-	}
-	return false
 }
 
 func runFFmpegFrameExtract(ctx context.Context, ffmpegPath string, args []string) ([]byte, error) {

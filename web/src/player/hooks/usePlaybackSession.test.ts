@@ -122,6 +122,12 @@ describe("buildStartRequestV3", () => {
     });
   });
 
+  it("includes the resolved subtitle track in the initial request", () => {
+    expect(buildStartRequestV3({ ...startBase, subtitleTrackIndex: 0 })).toMatchObject({
+      subtitle_track_index: 0,
+    });
+  });
+
   it("omits the bandwidth estimate when the browser reports none", () => {
     expect(buildStartRequestV3({ ...startBase, bandwidthEstimateKbps: null })).not.toHaveProperty(
       "bandwidth_estimate_kbps",
@@ -397,6 +403,63 @@ describe("usePlaybackSession output capability changes", () => {
       for (const listener of listeners) listener();
     };
   }
+
+  it("waits for the initial HDR10 probe before starting playback", async () => {
+    outputProbe(false);
+    let resolveProbe!: (value: MediaCapabilitiesDecodingInfo) => void;
+    const probeResult = new Promise<MediaCapabilitiesDecodingInfo>((resolve) => {
+      resolveProbe = resolve;
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "test-browser",
+      mediaCapabilities: { decodingInfo: vi.fn(() => probeResult) },
+    });
+
+    const startBodies: Array<{
+      client_playback_context: { output: { hdr_details: { hdr10: boolean } } };
+    }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startBodies.push(JSON.parse(String(init?.body)) as (typeof startBodies)[number]);
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3", "output_change_v1"],
+            outcome: "playable",
+            session_id: "session-hdr",
+            playback_plan: fixturePlanV3({ session_id: "session-hdr" }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "1080p"),
+      { wrapper },
+    );
+    await act(async () => Promise.resolve());
+    expect(startBodies).toHaveLength(0);
+
+    await act(async () => {
+      resolveProbe({
+        supported: true,
+        smooth: true,
+        powerEfficient: true,
+        keySystemAccess: null,
+      });
+      await probeResult;
+    });
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+    expect(startBodies).toHaveLength(1);
+    expect(startBodies[0]?.client_playback_context.output.hdr_details.hdr10).toBe(true);
+    unmount();
+  });
 
   it("retries a terminal start when the window moves onto an HDR output", async () => {
     const setHDR = outputProbe(false);

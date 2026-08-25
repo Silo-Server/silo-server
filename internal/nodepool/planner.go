@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // Plan is the result of a node selection for one playback session.
@@ -121,6 +123,18 @@ func (p *Planner) TranscodeNode(nodeID int) (*Node, bool) {
 		}
 	}
 	return nil, false
+}
+
+// TranscodeNodeHealthy reports whether the pooled transcode node serving a URL
+// is currently healthy and enabled. Remote-start adoption gates its redirect
+// on this: a recipe another API server published is only trustworthy while
+// its node still serves.
+func (p *Planner) TranscodeNodeHealthy(nodeURL string) bool {
+	if p == nil || p.transcodes == nil || nodeURL == "" {
+		return false
+	}
+	node := p.transcodes.FindByURL(normalizeNodeURL(nodeURL))
+	return node != nil && node.Healthy && node.Enabled
 }
 
 // PlanDownload picks a healthy proxy for an unbounded file transfer. A
@@ -350,6 +364,13 @@ func (p *Planner) ReleaseSessionProxy(sessionID string) {
 // a playback session it does not require a proxy partner: the completed file
 // is written to the configured shared artifact store and served later.
 func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
+	return p.ReserveTranscodeWorkWith(workID, nil)
+}
+
+// ReserveTranscodeWorkWith is ReserveTranscodeWork with an optional
+// capability predicate. The predicate runs under the planner lock and must not
+// perform I/O.
+func (p *Planner) ReserveTranscodeWorkWith(workID string, eligible func(*Node) bool) (*Node, func()) {
 	if p == nil || p.transcodes == nil || workID == "" {
 		return nil, func() {}
 	}
@@ -361,6 +382,9 @@ func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
 	var best *Node
 	for _, node := range p.transcodes.Nodes() {
 		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+			continue
+		}
+		if eligible != nil && !eligible(node) {
 			continue
 		}
 		if best == nil || p.effectiveJobs(node, now) < p.effectiveJobs(best, now) {
@@ -379,6 +403,26 @@ func (p *Planner) ReserveTranscodeWork(workID string) (*Node, func()) {
 	return best, func() {
 		once.Do(func() { p.ReleaseSession(reservationID) })
 	}
+}
+
+// TranscodeWorkAvailableWith reports whether a healthy, under-cap transcode
+// node satisfies eligible without creating a provisional reservation.
+func (p *Planner) TranscodeWorkAvailableWith(eligible func(*Node) bool) bool {
+	if p == nil || p.transcodes == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	for _, node := range p.transcodes.Nodes() {
+		if node == nil || !node.Enabled || !node.Healthy || !p.underCap(node, now) {
+			continue
+		}
+		if eligible == nil || eligible(node) {
+			return true
+		}
+	}
+	return false
 }
 
 // groupHealth reports, for every group label present in either pool, whether
@@ -566,6 +610,9 @@ func (p *Planner) effectiveEgressKbps(n *Node, now time.Time) int {
 func (p *Planner) effectiveJobs(n *Node, now time.Time) int {
 	jobs := n.ActiveJobs
 	for _, res := range p.reserved {
+		if now.Sub(res.createdAt) > maxReservationAge {
+			continue
+		}
 		if res.transcodeURL != n.URL && res.proxyURL != n.URL {
 			continue
 		}
@@ -595,6 +642,6 @@ func LocalTranscodeFallbackAllowed(ctx context.Context, settings interface {
 	if settings == nil {
 		return true
 	}
-	v, _ := settings.Get(ctx, "playback.local_transcode_fallback")
+	v, _ := settings.Get(ctx, config.PlaybackLocalTranscodeFallbackSettingKey)
 	return v != "false"
 }

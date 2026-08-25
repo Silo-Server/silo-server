@@ -31,6 +31,7 @@ type SessionInfo struct {
 	CodecAudio        string `json:"codec_audio,omitempty"`
 	Resolution        string `json:"resolution,omitempty"`
 	HWAccel           string `json:"hw_accel,omitempty"`
+	ToneMapMode       string `json:"tone_map_mode,omitempty"`
 	StartedAt         string `json:"started_at"`
 	StartedAtUnixNano int64  `json:"started_at_unix_nano,omitempty"`
 	StartedAtSource   string `json:"started_at_source,omitempty"`

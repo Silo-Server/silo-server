@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -20,6 +24,7 @@ var (
 	sysClassDRMDir             = "/sys/class/drm"
 	currentGOOS                = runtime.GOOS
 	nvencProbeCommandTimeout   = 3 * time.Second
+	nvencProbeNegativeTTL      = 15 * time.Second
 )
 
 type nvencProbeResult struct {
@@ -27,22 +32,52 @@ type nvencProbeResult struct {
 	reason    string
 }
 
+type nvencProbeCacheEntry struct {
+	result    nvencProbeResult
+	expiresAt time.Time
+}
+
 var nvencProbeCache = struct {
 	sync.Mutex
-	byPath map[string]nvencProbeResult
+	byPath map[string]nvencProbeCacheEntry
+	group  singleflight.Group
 }{
-	byPath: make(map[string]nvencProbeResult),
+	byPath: make(map[string]nvencProbeCacheEntry),
 }
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
-	Resolved            string             `json:"resolved"`
-	RenderDevices       []string           `json:"render_devices"`
-	RenderDeviceDetails []RenderDeviceInfo `json:"render_device_details"`
-	IntelDetected       bool               `json:"intel_detected"`
-	Source              string             `json:"source"`
-	NodeURL             string             `json:"node_url,omitempty"`
-	Transformations     []TransformationV3 `json:"transformations,omitempty"`
+	Resolved            string               `json:"resolved"`
+	RenderDevices       []string             `json:"render_devices"`
+	RenderDeviceDetails []RenderDeviceInfo   `json:"render_device_details"`
+	IntelDetected       bool                 `json:"intel_detected"`
+	Source              string               `json:"source"`
+	NodeURL             string               `json:"node_url,omitempty"`
+	Transformations     []TransformationV3   `json:"transformations,omitempty"`
+	ToneMapCapabilities tonemap.Capabilities `json:"tone_map_capabilities,omitempty"`
+	// ProbeRequestTimeoutMillis is the caller-side budget for this node's
+	// effective tone-map probe matrix, including endpoint and transport slack.
+	ProbeRequestTimeoutMillis int64 `json:"probe_request_timeout_ms,omitempty"`
+}
+
+const (
+	probeRequestMinTimeout = 5 * time.Second
+	probeRequestMaxTimeout = 5 * time.Minute
+)
+
+// NormalizeProbeRequestTimeout bounds a node-advertised probe budget while
+// preserving the caller's established fallback for a missing advertisement.
+func NormalizeProbeRequestTimeout(millis int64, fallback time.Duration) time.Duration {
+	if millis <= 0 {
+		return fallback
+	}
+	if millis < probeRequestMinTimeout.Milliseconds() {
+		return probeRequestMinTimeout
+	}
+	if millis > probeRequestMaxTimeout.Milliseconds() {
+		return probeRequestMaxTimeout
+	}
+	return time.Duration(millis) * time.Millisecond
 }
 
 // DetectHWAccel probes this host's GPU hardware and returns structured info.
@@ -52,6 +87,11 @@ func DetectHWAccel() HWAccelInfo {
 
 // DetectHWAccelWithFFmpeg probes this host's GPU hardware and configured FFmpeg.
 func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
+	return DetectHWAccelWithFFmpegContext(context.Background(), ffmpegPath)
+}
+
+// DetectHWAccelWithFFmpegContext probes this host without outliving ctx.
+func DetectHWAccelWithFFmpegContext(ctx context.Context, ffmpegPath string) HWAccelInfo {
 	devices := listRenderDevices(defaultDRIDir)
 	intel := false
 	for _, d := range devices {
@@ -61,7 +101,7 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 		}
 	}
 	return HWAccelInfo{
-		Resolved:            ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
+		Resolved:            ResolveHWAccelWithFFmpegContext(ctx, "auto", ffmpegPath),
 		RenderDevices:       devices,
 		RenderDeviceDetails: renderDeviceDetails(devices),
 		IntelDetected:       intel,
@@ -96,6 +136,12 @@ func ResolveHWAccel(hwAccel string) string {
 // Preference order: nvenc > qsv > vaapi > none.
 // Non-"auto" values are returned unchanged.
 func ResolveHWAccelWithFFmpeg(hwAccel string, ffmpegPath string) string {
+	return ResolveHWAccelWithFFmpegContext(context.Background(), hwAccel, ffmpegPath)
+}
+
+// ResolveHWAccelWithFFmpegContext resolves auto hardware without allowing any
+// FFmpeg capability probe to outlive ctx.
+func ResolveHWAccelWithFFmpegContext(ctx context.Context, hwAccel string, ffmpegPath string) string {
 	if hwAccel != "auto" {
 		return hwAccel
 	}
@@ -125,7 +171,7 @@ func ResolveHWAccelWithFFmpeg(hwAccel string, ffmpegPath string) string {
 	}
 
 	if nvidiaDevice != "" || hasNVIDIADevice() {
-		if ok, reason := ffmpegSupportsNVENC(ffmpegPath); ok {
+		if ok, reason := ffmpegSupportsNVENCContext(ctx, ffmpegPath); ok {
 			if nvidiaDevice != "" {
 				slog.Info("hw_accel=auto: NVIDIA GPU detected, using NVENC", "device", nvidiaDevice)
 			} else {
@@ -153,19 +199,79 @@ func ResolveHWAccelWithFFmpeg(hwAccel string, ffmpegPath string) string {
 }
 
 func ffmpegSupportsNVENC(ffmpegPath string) (bool, string) {
+	return ffmpegSupportsNVENCContext(context.Background(), ffmpegPath)
+}
+
+func ffmpegSupportsNVENCContext(ctx context.Context, ffmpegPath string) (bool, string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	ffmpegPath = normalizeFFmpegPath(ffmpegPath)
+	cacheKey := nvencProbeCacheKey(ffmpegPath)
+	commandTimeout := nvencProbeCommandTimeout
+	negativeTTL := nvencProbeNegativeTTL
 	nvencProbeCache.Lock()
-	if result, ok := nvencProbeCache.byPath[ffmpegPath]; ok {
+	if entry, ok := nvencProbeCache.byPath[cacheKey]; ok && nvencProbeCacheEntryCurrent(entry, time.Now()) {
 		nvencProbeCache.Unlock()
-		return result.available, result.reason
+		return entry.result.available, entry.result.reason
 	}
 	nvencProbeCache.Unlock()
 
-	result := probeFFmpegNVENC(ffmpegPath)
-	nvencProbeCache.Lock()
-	nvencProbeCache.byPath[ffmpegPath] = result
-	nvencProbeCache.Unlock()
-	return result.available, result.reason
+	resultCh := nvencProbeCache.group.DoChan(cacheKey, func() (any, error) {
+		nvencProbeCache.Lock()
+		cached, ok := nvencProbeCache.byPath[cacheKey]
+		nvencProbeCache.Unlock()
+		if ok && nvencProbeCacheEntryCurrent(cached, time.Now()) {
+			return cached.result, nil
+		}
+		probeCtx, cancel := context.WithTimeout(context.Background(), 4*commandTimeout+time.Second)
+		defer cancel()
+		result := probeFFmpegNVENCContext(probeCtx, ffmpegPath, commandTimeout)
+		entry := nvencProbeCacheEntry{result: result}
+		if !result.available {
+			entry.expiresAt = time.Now().Add(negativeTTL)
+		}
+		nvencProbeCache.Lock()
+		nvencProbeCache.byPath[cacheKey] = entry
+		nvencProbeCache.Unlock()
+		return result, nil
+	})
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err().Error()
+	case shared := <-resultCh:
+		if shared.Err != nil {
+			return false, shared.Err.Error()
+		}
+		result, ok := shared.Val.(nvencProbeResult)
+		if !ok {
+			return false, "invalid shared NVENC probe result"
+		}
+		return result.available, result.reason
+	}
+}
+
+func nvencProbeCacheEntryCurrent(entry nvencProbeCacheEntry, now time.Time) bool {
+	return entry.result.available || now.Before(entry.expiresAt)
+}
+
+// nvencProbeCacheKey invalidates cached capability results when an FFmpeg
+// executable is replaced at the same configured path.
+func nvencProbeCacheKey(ffmpegPath string) string {
+	identityPath := ffmpegPath
+	if !strings.ContainsRune(identityPath, os.PathSeparator) {
+		if resolved, err := exec.LookPath(identityPath); err == nil {
+			identityPath = resolved
+		}
+	}
+	if absolute, err := filepath.Abs(identityPath); err == nil {
+		identityPath = absolute
+	}
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		return ffmpegPath
+	}
+	return fmt.Sprintf("%s\x00%d\x00%d", identityPath, info.Size(), info.ModTime().UnixNano())
 }
 
 func normalizeFFmpegPath(ffmpegPath string) string {
@@ -179,14 +285,14 @@ func normalizeFFmpegPath(ffmpegPath string) string {
 	return ffmpegPath
 }
 
-func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
-	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
+func probeFFmpegNVENCContext(ctx context.Context, ffmpegPath string, commandTimeout time.Duration) nvencProbeResult {
+	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
 		return nvencProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "cuda") {
 		return nvencProbeResult{reason: "cuda hwaccel unavailable"}
 	}
 
-	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-encoders"); err != nil {
+	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders"); err != nil {
 		return nvencProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "h264_nvenc") {
 		return nvencProbeResult{reason: "h264_nvenc encoder unavailable"}
@@ -194,7 +300,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 		return nvencProbeResult{reason: "hevc_nvenc encoder unavailable"}
 	}
 
-	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-filters"); err != nil {
+	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-filters"); err != nil {
 		return nvencProbeResult{reason: "filters probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "scale_cuda") {
 		return nvencProbeResult{reason: "scale_cuda filter unavailable"}
@@ -202,7 +308,7 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 		return nvencProbeResult{reason: "hwupload_cuda filter unavailable"}
 	}
 
-	if output, err := runFFmpegProbe(ffmpegPath,
+	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath,
 		"-hide_banner",
 		"-loglevel", "error",
 		"-f", "lavfi",
@@ -219,8 +325,11 @@ func probeFFmpegNVENC(ffmpegPath string) nvencProbeResult {
 	return nvencProbeResult{available: true}
 }
 
-func runFFmpegProbe(ffmpegPath string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), nvencProbeCommandTimeout)
+func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath string, args ...string) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 }

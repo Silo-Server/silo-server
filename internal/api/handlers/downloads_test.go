@@ -591,6 +591,7 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 		{"transcode disabled", downloads.ErrTranscodeDisabled, http.StatusForbidden},
 		{"invalid quality", downloads.ErrInvalidQuality, http.StatusBadRequest},
 		{"quality unavailable", downloads.ErrQualityUnavailable, http.StatusNotImplemented},
+		{"capability unavailable", downloads.ErrCapabilityUnavailable, http.StatusServiceUnavailable},
 		{"bulk quality unavailable", downloads.ErrBulkQualityUnavailable, http.StatusNotImplemented},
 		{"format unavailable", downloads.ErrFormatUnavailable, http.StatusNotImplemented},
 		{"profile required", downloads.ErrProfileRequired, http.StatusBadRequest},
@@ -608,6 +609,24 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleCreateDownloadCapacityUnavailableIsRetryable(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloadService{createErr: fmt.Errorf("tone-map placement: %w", downloads.ErrCapacityUnavailable)})
+	body, _ := json.Marshal(downloadRequest{ContentID: "c1"})
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	var response errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Error != "capacity_unavailable" {
+		t.Fatalf("error = %q, want capacity_unavailable (body: %s)", response.Error, rec.Body.String())
 	}
 }
 
@@ -723,14 +742,16 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 	svc := &proxyDownloadService{
 		fakeDownloadService: &fakeDownloadService{},
 		managedTarget: &downloads.FileTarget{
-			DownloadID:       "dl-remote",
-			ArtifactID:       "artifact-row",
-			Path:             "/prepared/Movie Final.mp4",
-			MediaFileID:      42,
-			OriginNodeURL:    "http://transcode-b.internal:8096",
-			OriginNodeGroup:  "host-b",
-			OriginArtifactID: "artifact-remote",
-			ProxyEligible:    true,
+			DownloadID:                   "dl-remote",
+			ArtifactID:                   "artifact-row",
+			Path:                         "/prepared/Movie Final.mp4",
+			MediaFileID:                  42,
+			OriginNodeURL:                "http://transcode-b.internal:8096",
+			OriginNodeGroup:              "host-b",
+			OriginArtifactID:             "artifact-remote",
+			ExpectedArtifactSize:         123,
+			ExpectedExecutionFingerprint: "recipe-fingerprint",
+			ProxyEligible:                true,
 		},
 	}
 	groupA, groupB := "host-a", "host-b"
@@ -757,7 +778,9 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 		t.Fatal(err)
 	}
 	if claims.MediaPath != "" || claims.DownloadFilename != "Movie Final.mp4" || claims.TranscodeNode != "http://transcode-b.internal:8096" ||
-		claims.DownloadArtifactID != "artifact-remote" || claims.DownloadArtifactRowID != "artifact-row" {
+		claims.PlayMethod != streamtoken.PlayMethodToneMapDownload ||
+		claims.DownloadArtifactID != "artifact-remote" || claims.DownloadArtifactRowID != "artifact-row" ||
+		claims.DownloadArtifactSize != 123 || claims.DownloadExecutionFingerprint != "recipe-fingerprint" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }
@@ -780,6 +803,31 @@ func TestManagedFileFallsBackWhenRemoteLocatorHasNoOriginURL(t *testing.T) {
 	h.HandleDownloadFileViaProxy(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "served" {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestManagedToneMapFileFallsBackWhenLegacyProxyRejectsToken(t *testing.T) {
+	legacyProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer legacyProxy.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		managedTarget: &downloads.FileTarget{
+			DownloadID: "dl-attested", ArtifactID: "artifact-row", Path: "/prepared/movie.mp4", MediaFileID: 42,
+			OriginNodeURL: "http://transcode.internal", OriginArtifactID: "artifact-remote",
+			ExpectedArtifactSize: 123, ExpectedExecutionFingerprint: "fingerprint", ProxyEligible: true,
+		},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: legacyProxy.URL, Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl-attested/file-proxy", nil, 7, "pA", "devA"), "dl-attested")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFileViaProxy(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "served" {
+		t.Fatalf("fallback response = %d %q, want central serve", rec.Code, rec.Body.String())
 	}
 }
 

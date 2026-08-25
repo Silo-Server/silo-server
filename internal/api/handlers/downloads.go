@@ -618,17 +618,27 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 			downloadFilename = filepath.Base(target.Path)
 		}
 	}
+	playMethod := streamtoken.PlayMethodDownload
+	if target.ExpectedExecutionFingerprint != "" {
+		if target.ExpectedArtifactSize <= 0 {
+			releaseReservation()
+			return false, nil
+		}
+		playMethod = streamtoken.PlayMethodToneMapDownload
+	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:             sessionID,
-		MediaPath:             mediaPath,
-		PlayMethod:            streamtoken.PlayMethodDownload,
-		TranscodeNode:         target.OriginNodeURL,
-		DownloadArtifactID:    target.OriginArtifactID,
-		DownloadArtifactRowID: target.ArtifactID,
-		DownloadFilename:      downloadFilename,
-		UserID:                userID,
-		ProfileID:             profileID,
-		MediaFileID:           target.MediaFileID,
+		SessionID:                    sessionID,
+		MediaPath:                    mediaPath,
+		PlayMethod:                   playMethod,
+		TranscodeNode:                target.OriginNodeURL,
+		DownloadArtifactID:           target.OriginArtifactID,
+		DownloadArtifactRowID:        target.ArtifactID,
+		DownloadArtifactSize:         target.ExpectedArtifactSize,
+		DownloadExecutionFingerprint: target.ExpectedExecutionFingerprint,
+		DownloadFilename:             downloadFilename,
+		UserID:                       userID,
+		ProfileID:                    profileID,
+		MediaFileID:                  target.MediaFileID,
 	}, secret, proxyDownloadTokenTTL)
 	if err != nil {
 		releaseReservation()
@@ -841,6 +851,10 @@ func (h *DownloadHandler) writeDownloadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 	case errors.Is(err, downloads.ErrBulkQualityUnavailable):
 		writeError(w, http.StatusNotImplemented, "bulk_quality_unavailable", "Bitrate quality is not available for bulk downloads yet")
+	case errors.Is(err, downloads.ErrCapacityUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "capacity_unavailable", "Download preparation capacity is currently unavailable")
+	case errors.Is(err, downloads.ErrCapabilityUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "Download preparation capabilities are temporarily unavailable")
 	case errors.Is(err, downloads.ErrQualityUnavailable):
 		writeError(w, http.StatusNotImplemented, "quality_unavailable", "This download quality is not available")
 	case errors.Is(err, downloads.ErrFormatUnavailable):

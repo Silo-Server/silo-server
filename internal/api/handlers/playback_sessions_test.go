@@ -70,8 +70,8 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode capabilities: %v", err)
 	}
-	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.ClientBuild || !resp.ClientChannel ||
-		!resp.TargetAudioChannels {
+	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.TranscodeHWAccel || !resp.ToneMapMode ||
+		!resp.ClientBuild || !resp.ClientChannel || !resp.TargetAudioChannels {
 		t.Fatalf("capabilities must advertise every additive field: %+v", resp)
 	}
 	want := []string{"direct", "remux", "transcode", "audio"}
@@ -82,6 +82,9 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 		if resp.EffectivePlayMethodValues[i] != v {
 			t.Fatalf("bucket vocabulary = %v, want %v", resp.EffectivePlayMethodValues, want)
 		}
+	}
+	if got, wantToneMap := resp.ToneMapModeValues, []string{"hardware", "software"}; len(got) != len(wantToneMap) || got[0] != wantToneMap[0] || got[1] != wantToneMap[1] {
+		t.Fatalf("tone-map vocabulary = %v, want %v", got, wantToneMap)
 	}
 }
 

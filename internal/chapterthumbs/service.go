@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 const (
@@ -1135,19 +1136,9 @@ func isChapterEligible(chapter models.MediaChapter, now time.Time) bool {
 	return true
 }
 
+// needsTonemap reports whether thumbnail extraction must convert HDR to SDR.
 func needsTonemap(file *models.MediaFile) bool {
-	if file == nil {
-		return false
-	}
-	if file.HDR {
-		return true
-	}
-	for _, track := range file.VideoTracks {
-		if strings.TrimSpace(track.DolbyVision) != "" {
-			return true
-		}
-	}
-	return false
+	return tonemap.NeedsToneMap(file)
 }
 
 func applyChapterSuccess(chapter *models.MediaChapter, thumbnailPath string, thumbnailThumbhash string) {

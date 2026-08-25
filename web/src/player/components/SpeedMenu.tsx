@@ -65,7 +65,7 @@ export function SpeedMenu({ rates, value, onChange }: SpeedMenuProps) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full mb-2 flex min-w-[100px] flex-col overflow-hidden rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute right-0 bottom-full z-30 mb-2 flex min-w-[100px] flex-col overflow-hidden rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onKeyDown={handleMenuKeyDown}
         >
           {rates.map((r, idx) => (

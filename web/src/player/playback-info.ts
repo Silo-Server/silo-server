@@ -170,7 +170,7 @@ export function buildPlaybackInfoSections({
 export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
   const rungs = plan.available_qualities.map((quality) => ({
     id: quality.label,
-    label: qualityRungLabel(quality.label),
+    label: quality.display_name || qualityRungLabel(quality.label),
     sublabel: formatQualityBitrate(quality.bitrate_kbps),
     resolution: quality.height ? `${quality.height}p` : "",
     bitrateKbps: quality.bitrate_kbps ?? 0,
@@ -187,6 +187,64 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
     { id: "auto", label: "Auto", sublabel: "", resolution: "", bitrateKbps: 0, isOriginal: false },
     ...rungs,
   ];
+}
+
+/**
+ * Resolves a stored resolution-only preference onto the explicit bitrate rung
+ * that implements the same policy in the current plan. Plain 2160p/1080p/720p
+ * preferences use the ladder's Medium bitrate; when that resolution cap is at
+ * or above the source, the source-preserving Original rung is the active one.
+ */
+export function resolveActiveQualityOptionId(
+  options: QualityOption[],
+  preference: string,
+): string | null {
+  const normalized = preference.trim().toLowerCase();
+  const exact = options.find((option) => option.id.toLowerCase() === normalized);
+  if (exact) return exact.id;
+
+  const aliasHeight = qualityPreferenceHeight(normalized);
+  if (aliasHeight === null) {
+    const originalAlias = ["source", "max"].includes(normalized);
+    return originalAlias ? (options.find((option) => option.isOriginal)?.id ?? null) : null;
+  }
+
+  const medium = options.find((option) => option.id === `${aliasHeight}p-medium`);
+  if (medium) return medium.id;
+
+  const original = options.find((option) => option.isOriginal);
+  if (original && resolutionHeight(original.resolution) <= aliasHeight) {
+    return original.id;
+  }
+  return null;
+}
+
+function qualityPreferenceHeight(preference: string): number | null {
+  switch (preference) {
+    case "2160p":
+    case "4k":
+    case "uhd":
+      return 2160;
+    case "1080p":
+    case "fhd":
+      return 1080;
+    case "720p":
+    case "hd":
+      return 720;
+    case "480p":
+    case "sd":
+      return 480;
+    default:
+      return null;
+  }
+}
+
+function resolutionHeight(resolution: string): number {
+  const match = resolution
+    .trim()
+    .toLowerCase()
+    .match(/^(\d+)p$/);
+  return match ? Number.parseInt(match[1] ?? "0", 10) : 0;
 }
 
 function qualityRungLabel(label: string): string {

@@ -133,10 +133,13 @@ unknown, and both look like an absent field.
 `deliveries` reports the four *server-side* delivery values, not the three
 delivery classes a client negotiates in. §4 gives the folding.
 
-`transformations` advertises only what the *installed* FFmpeg was probed for at
-startup — a server without a `dovi_rpu` bitstream filter does not list
-`server_dv7_to_hdr10`. A client must not assume a transformation exists because
-this document names it.
+`transformations` advertises only what an eligible executor has validated. Most
+entries come from the installed FFmpeg probe; pooled transcode nodes contribute
+their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
+administrator-enabled hardware or software policy and a successful device-level
+smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind. A
+client must not assume a
+transformation exists because this document names it.
 
 `enabled` survives from the rollout period and is now constant `true`; the
 negative shape was deliberately removed before v1 lock because v3 is the only
@@ -434,11 +437,14 @@ sample entry because the explicit v3 HDR10 strip remux labels its output `hvc1`
 requires a definitive media-element answer for exactly `dvh1.05.06` or
 `dvh1.08.06`, because the preserve remux tags its output `dvh1`. An answer only
 for the other spelling (`hev1`/`dvhe`) is evidence for a file Silo never sends
-and earns no claim. Both claims are scoped to `progressive`: they
-are cleared from `original_http` and `hls` because those delivery paths were not
-tested by the same probe. An HDR10 claim can carry `hdr10_max_width`, `hdr10_max_height`,
-`hdr10_max_frame_rate`, and `hdr10_max_bitrate_kbps`; these ceilings keep a
-successful format probe from admitting an untested stream class.
+and earns no claim. When native HLS is available, these media-element `dvh1` and
+`hvc1` claims are scoped to `hls`, and `progressive` does not inherit them. When
+native HLS is unavailable, they remain scoped to `progressive`; the hls.js MSE
+path does not inherit evidence from a different playback engine.
+`original_http` never receives normalized-remux evidence. An HDR10 claim can
+carry `hdr10_max_width`, `hdr10_max_height`, `hdr10_max_frame_rate`, and
+`hdr10_max_bitrate_kbps`; these ceilings keep a successful format probe from
+admitting an untested stream class.
 
 ---
 
@@ -643,6 +649,10 @@ position, `can_seek_anywhere` is true when the runtime is known, and
 
 **Copy remux over HLS** is served from FFmpeg's live, still-growing playlist,
 which starts at the preceding keyframe selected by FFmpeg's input seek.
+For HEVC HDR copy packaging, the frozen plan also controls the sample entry: a
+preserved Dolby Vision Profile 5 or 8 plan emits `dvh1` with FFmpeg's unofficial
+strictness relaxation so the DOVI configuration record is retained, while a
+validated Dolby Vision-to-HDR10 plan emits `hvc1`.
 `stream_origin` and `timeline_offset` both equal that resolved source position,
 while `player_start` is the requested position minus the resolved origin so the
 client advances past copied pre-roll. `seek_window_start_seconds` is the resolved
@@ -924,6 +934,7 @@ The plan will play, but something the user might notice was given up.
 | `dolby_vision_removed` | DV metadata stripped |
 | `dolby_vision_strip_unsupported_by_source` | DV could not be stripped |
 | `dolby_vision_enhancement_layer_discarded` | FEL/MEL dropped, base layer kept |
+| `hdr_tone_mapped` | HDR video converted to limited-range BT.709 SDR |
 | `audio_converted` | Audio re-encoded rather than copied |
 | `subtitle_burn_in` | Subtitles rendered into the video |
 | `quality_reduction_unavailable` | Requested rung could not be produced |
@@ -1084,17 +1095,40 @@ selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
 The source rung is always present, labelled `original`, with
-`preserves_source: true`. Transcode rungs are added only below the source's own
-height, and only when HLS is available to the client, transcoding is enabled,
-4K transcoding is permitted for a 4K source, and the source is not HDR. Ladder
-bitrates:
+`preserves_source: true`. Transcode rungs are added below the source resolution
+class, plus at the same class when they reduce bitrate, and only when HLS is
+available to the client, transcoding is enabled, and 4K transcoding is permitted
+for a 4K source. HDR plans additionally require
+at least one enabled tone-map policy. A source-preserving HDR plan advertises
+those lower rungs without probing an executor; selecting one performs the lazy
+capability validation during the quality-change replan. The published ladder
+uses compound labels so each menu selection pins both a resolution class and a
+bitrate:
 
-| Rung | kbps |
-| --- | --- |
-| 2160p | 20000 |
-| 1080p | 6000 |
-| 720p | 2000 |
-| 480p | 1500 |
+| label | display_name | height | kbps |
+| --- | --- | --- | --- |
+| `2160p-high` | 4K High | 2160 | 40000 |
+| `2160p-medium` | 4K Medium | 2160 | 20000 |
+| `2160p-low` | 4K Low | 2160 | 10000 |
+| `1080p-high` | 1080p High | 1080 | 10000 |
+| `1080p-medium` | 1080p Medium | 1080 | 6000 |
+| `1080p-low` | 1080p Low | 1080 | 3000 |
+| `720p-high` | 720p High | 720 | 4000 |
+| `720p-medium` | 720p Medium | 720 | 2000 |
+| `720p-low` | 720p Low | 720 | 1500 |
+| `480p` | 480p | 480 | 1500 |
+
+A rung below the source resolution class is always useful. At the source's own
+class, a rung is published only when it undercuts the source bitrate; a 25.2
+Mbps 4K file therefore offers 4K Medium and 4K Low but not a pointless 40 Mbps
+4K High encode. Resolution classification also considers width, so cinema-crop
+UHD sources such as 3840x1540 retain their native dimensions on a 4K bitrate
+step instead of being upscaled to 2160 lines.
+
+Compound rungs are strict resolution/bitrate selections. A bandwidth cap can
+clamp their bitrate but does not silently demote their resolution. Plain labels
+remain accepted for stored/default preferences and retain their existing
+height-only behavior.
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
@@ -1104,10 +1138,11 @@ to a retryable terminal at replan time instead.
 Audio-only sources publish a single `original` rung — quality rungs are a video
 concept.
 
-`quality_preference` accepts `auto`, `original` (aliases `source`, `max`), and
-`2160p` / `1080p` / `720p` / `480p` with the obvious aliases (`4k`, `uhd`, `fhd`,
-`hd`, `sd`). An unrecognized value normalizes to `auto` and the response carries
-the `quality_preference_normalized` warning rather than an error.
+`quality_preference` accepts `auto`, `original` (aliases `source`, `max`), the
+plain `2160p` / `1080p` / `720p` / `480p` values with their obvious aliases
+(`4k`, `uhd`, `fhd`, `hd`, `sd`), and the compound labels in the table above.
+An unrecognized value normalizes to `auto` and the response carries the
+`quality_preference_normalized` warning rather than an error.
 
 ---
 
@@ -1119,26 +1154,41 @@ A transformation is a named, versioned media operation with claims attached.
 | --- | --- | --- | --- | --- |
 | `audio_to_aac` | `server` | `1` | — | `audio_decode` |
 | `video_to_h264` | `server` | `2` | `sdr` output | `h264_decode` |
+| `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `1` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
-They are advertised only if the installed FFmpeg actually has the required
-capability, probed once at startup:
+They are advertised only if an eligible executor actually has the required
+capability. The ordinary FFmpeg feature probe is cached; the more expensive
+tone-map smoke probe is lazy and cached by binary, backend, and device:
 
 | Transformation | Probe |
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
+| `hdr_to_sdr_tonemap` | A bounded decode → BT.709 H.264 encode succeeds for the advertised PQ, BT.2100 HLG, legacy HLG, BT.709 SDR-base, and/or BT.2020 SDR-base source kinds on the real software, VAAPI/QSV, or NVENC executor |
 
-`GET /playback/capability` reports the *local* probe only. A deployment with
-pooled transcode nodes may still plan an HLS route using a transformation those
-nodes advertise but the local FFmpeg lacks, so the capability list is a floor,
-not a ceiling — one more reason a client must not precompute routes from it.
+`GET /playback/capability` reports the union of currently eligible local and
+pooled executors. The generic tone-map transformation does not reveal hardware
+selection policy; the server freezes a validated executor into each accepted
+recipe. Heterogeneous pools are filtered again at transport startup, and a stale
+or older node advertisement is rejected instead of silently changing modes.
+Dolby Vision compatibility IDs `1` through `6` resolve to their declared
+standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
+legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR. ID `0`,
+Profile 5, and a declared absent base layer remain unsupported. Missing,
+reserved, legacy, or contradictory signaling
+is only a candidate classification: the selected executor must successfully
+decode and normalize samples near the beginning, midpoint, and end before the
+first manifest is published. Positive and negative verdicts are cached against
+the source revision, FFmpeg build, recipe, backend/device, and driver, so any
+relevant change forces validation again.
 
 An unavailable transformation is not silently skipped at plan time: it produces
 its own terminal reason (`dv_conversion_unsupported`,
-`audio_conversion_unsupported`, `video_conversion_unsupported`) so the client
-learns which conversion was missing rather than seeing a generic refusal.
+`audio_conversion_unsupported`, `video_conversion_unsupported`,
+`hdr_transcode_unsupported`) so the client learns which conversion was missing
+rather than seeing a generic refusal.
 
 A client may advertise its *own* transformations in a delivery's
 `transformations[]` with `executor: "client"` — Dolby Vision profile 7 → 8.1
@@ -1156,6 +1206,71 @@ audio bridging, or display adaptation. Those operations do not give the server
 a distinct selectable output recipe. Use a delivery claim for an executor
 property; reserve transformations for named outcomes the server deliberately
 selects and can describe in the plan.
+
+### 11.1 Tone-map execution integrity
+
+`hdr_to_sdr_tonemap` is the only transformation whose output is not derivable
+from the plan alone: the same recipe run against a different executor, or
+against bytes the catalog no longer describes, produces silently wrong pixels
+rather than an error. These rules exist to make that impossible, and they bind
+every executor — local FFmpeg, pooled transcode node, and prepared-download
+worker alike.
+
+**A frozen recipe carries every source fact its FFmpeg graph depends on.**
+Source video profile and bit depth ride the frozen recipe alongside codec,
+decode mode, duration, tone-map source kind, source revision, and Dolby Vision
+provenance. A seek, restart, or reconstruct rebuilds from the frozen snapshot,
+never from a later catalog row — a 10-bit hardware SDR-base recipe that dropped
+its profile would degrade to an 8-bit assumption on reconstruct and change the
+output. For the same reason a sidecar-only replan may reuse existing
+audio/video bytes only when profile and bit depth are equal too; otherwise it
+gets a new transport rather than old bytes under a new recipe.
+
+**Every tone-map execution re-verifies the source immediately before it runs.**
+Size, mtime, and content hashes are change signals, not proof that the executor
+about to run sees the metadata the plan froze. So each attempt runs a bounded
+FFprobe on the executor, normalized through the same `mediaprobe` path the
+scanner persists with, and requires an exact match against the frozen
+signature. A mismatch is permanent (the recipe is stale); an unavailable,
+malformed, cancelled, or timed-out probe is transient and retryable. The two
+must stay distinguishable across the local, jellycompat, and transcode-node
+boundaries, and a frozen tone-map recipe is never replaced by a fresh plan
+merely because its reconstruction failed. Verification runs for starts,
+restarts, reconstructs, and prepared downloads — never for direct play, direct
+stream, or an ordinary non-tone-mapped transcode.
+
+**A tone-mapped reconstruction token is rejected by readers that predate it.**
+Stream tokens for a tone-map transcode carry the `transcode_tonemap_v1`
+play-method discriminator instead of `transcode`. Current readers map it back
+to an ordinary transcode; an older binary in a rolling deployment rejects it
+rather than reconstructing the HDR recipe without its tone-map stage.
+
+**A remote prepared artifact is accepted only against its attestation.** A node
+that advertised tone-map support can be replaced by an older binary before its
+queued job runs, and an older decoder ignores the frozen recipe fields — so
+artifact ID and size cannot prove the HDR source was tone-mapped. After a
+successful encode the node publishes a receipt beside the artifact recording
+the confirmed mode, output size, and a canonical fingerprint over every
+transported byte-affecting field (the artifact ID is excluded: it is the
+idempotency handle, not an encoding input). Publication is crash-ordered — the
+output and its directory are synced before the receipt — so the receipt is the
+commit record for bytes already on disk. Central accepts an artifact only when
+every attested value matches its frozen request, and the expected size and
+fingerprint travel through direct file targets and signed proxy claims too, so
+a missing or mismatched receipt fails closed at delivery instead of serving
+unverified bytes.
+
+**Ambiguous Dolby Vision provenance fails closed.** Resolving a DV source for
+tone mapping requires authoritative evidence that the configuration record was
+present, that the base-layer compatibility ID was present and nonzero, and that
+a base layer exists. Profile 5 and incomplete provenance are refused rather than
+guessed at. Because a row written before the provenance columns existed decodes
+to explicit `false` — indistinguishable from a source that genuinely has none —
+the scanner records whether those keys were literally present, and a row that
+predates them is reprobed once rather than trusted. A failed repair probe
+preserves the previous technical metadata and leaves the probe timestamp empty
+for a later bounded retry, so a legacy writer in a rolling upgrade can never
+make an incomplete row look current.
 
 ---
 

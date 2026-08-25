@@ -73,6 +73,7 @@ export function WatchPage({
   qualityPreference,
   maxBitrateKbps,
   explicitAudioTrackIndex,
+  initialSubtitleTrackIndexByFileId,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
   subtitleMode,
@@ -128,6 +129,7 @@ export function WatchPage({
     maxBitrateKbps,
     resumeHints,
     explicitAudioTrackIndex,
+    initialSubtitleTrackIndexByFileId,
   );
 
   const audioTracks = useMemo(

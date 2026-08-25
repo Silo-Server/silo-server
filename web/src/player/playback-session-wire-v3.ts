@@ -72,6 +72,7 @@ export interface StartRequestInput {
   /** Omitted means the server owns durable item progress. */
   progressPersistence?: ProgressPersistenceV3;
   explicitAudioTrackIndex?: number | null;
+  subtitleTrackIndex?: number | null;
   metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
@@ -108,6 +109,9 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     ...(input.progressPersistence ? { progress_persistence: input.progressPersistence } : {}),
     ...(input.explicitAudioTrackIndex != null && input.explicitAudioTrackIndex >= 0
       ? { audio_track_index: input.explicitAudioTrackIndex }
+      : {}),
+    ...(input.subtitleTrackIndex != null && input.subtitleTrackIndex >= 0
+      ? { subtitle_track_index: input.subtitleTrackIndex }
       : {}),
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }

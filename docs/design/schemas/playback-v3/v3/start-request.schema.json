@@ -35,7 +35,7 @@
     },
     "quality_preference": {
       "type": "string",
-      "description": "Free-form and deliberately unbounded: the server normalizes an unrecognized value to \"auto\" and returns a quality_preference_normalized degradation warning rather than rejecting the request. The values that survive normalization unchanged are auto, original, 2160p, 1080p, 720p and 480p."
+      "description": "Free-form and deliberately unbounded: the server normalizes an unrecognized value to \"auto\" and returns a quality_preference_normalized degradation warning rather than rejecting the request. Values that survive include auto, original, the plain resolution preferences, and compound menu rungs such as 2160p-medium and 1080p-low."
     },
     "subtitle_fidelity_preference": {
       "type": "string",

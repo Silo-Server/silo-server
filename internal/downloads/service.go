@@ -80,14 +80,16 @@ type Capability struct {
 // from the request-scoped resolver methods below; a path alone is never an
 // authorization grant.
 type FileTarget struct {
-	Path             string
-	DownloadID       string
-	MediaFileID      int
-	ArtifactID       string
-	OriginNodeID     int
-	OriginNodeURL    string
-	OriginNodeGroup  string
-	OriginArtifactID string
+	Path                         string
+	DownloadID                   string
+	MediaFileID                  int
+	ArtifactID                   string
+	OriginNodeID                 int
+	OriginNodeURL                string
+	OriginNodeGroup              string
+	OriginArtifactID             string
+	ExpectedArtifactSize         int64
+	ExpectedExecutionFingerprint string
 	// ProxyEligible is true when a proxy can read the path directly or relay the
 	// opaque artifact from its owning transcode node.
 	ProxyEligible bool
@@ -428,17 +430,38 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		return s.reuseOrReplaceManaged(ctx, existing, replacement)
 	}
 
+	resolvedTarget := decision.PrepareTarget
+	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
+	if toneMapPreResolved {
+		// A quick, non-authoritative quota check avoids expensive capability work
+		// for requests that are already over quota. The check is repeated under the
+		// advisory lock below to retain the concurrency guarantee.
+		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+			return nil, err
+		}
+		var err error
+		resolvedTarget, err = s.artifacts.resolveToneMapTarget(ctx, file, resolvedTarget)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// New row: the quota lock serializes check + insert across concurrent
-	// creates so they cannot all observe free quota before any row exists. The
-	// limiter must still pass BEFORE artifacts.Ensure — a rejected request must
-	// not leave an encode job behind (the worker would run it even though the
-	// caller saw 429) — so the lock spans Ensure too.
+	// creates so they cannot all observe free quota before any row exists.
+	// Capability discovery is complete, but the lock still spans artifact row
+	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
 		if err := s.limiter.Check(ctx, userID, 1); err != nil {
 			return err
 		}
-		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		var artifact *Artifact
+		var err error
+		if toneMapPreResolved {
+			artifact, err = s.artifacts.ensureResolved(ctx, file, decision.DeliveryFormat, resolvedTarget)
+		} else {
+			artifact, err = s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, resolvedTarget)
+		}
 		if err != nil {
 			return err
 		}
@@ -502,7 +525,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 // artifactRowStatus maps an ensured artifact to the download row status and
 // recorded size: ready artifacts serve immediately, anything else is preparing.
 func artifactRowStatus(artifact *Artifact, file *models.MediaFile) (string, int64) {
-	if artifact.Status == ArtifactReady {
+	if artifactReady(artifact) {
 		return StatusReady, artifact.FileSize
 	}
 	return StatusPreparing, file.FileSize
@@ -1112,16 +1135,22 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		if !catalog.FileAllowedByAccess(&served, filter) {
 			return nil, catalog.ErrItemNotFound
 		}
+		expectedFingerprint := ""
+		if artifact.ToneMapMode != "" {
+			expectedFingerprint = artifact.ParamsHash
+		}
 		return &FileTarget{
-			Path:             artifact.OutputPath,
-			DownloadID:       dl.ID,
-			MediaFileID:      file.ID,
-			ArtifactID:       artifact.ID,
-			OriginNodeID:     artifact.OriginNodeID,
-			OriginNodeURL:    artifact.OriginNodeURL,
-			OriginNodeGroup:  artifact.OriginNodeGroup,
-			OriginArtifactID: artifact.OriginArtifactID,
-			ProxyEligible:    preparedProxyEligible,
+			Path:                         artifact.OutputPath,
+			DownloadID:                   dl.ID,
+			MediaFileID:                  file.ID,
+			ArtifactID:                   artifact.ID,
+			OriginNodeID:                 artifact.OriginNodeID,
+			OriginNodeURL:                artifact.OriginNodeURL,
+			OriginNodeGroup:              artifact.OriginNodeGroup,
+			OriginArtifactID:             artifact.OriginArtifactID,
+			ExpectedArtifactSize:         artifact.FileSize,
+			ExpectedExecutionFingerprint: expectedFingerprint,
+			ProxyEligible:                preparedProxyEligible,
 		}, nil
 	}
 	if file.MissingSince != nil {
@@ -1209,6 +1238,16 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	}
 	if !downloadprepare.RelayStatusAllowed(resp.StatusCode) {
 		return fmt.Errorf("remote artifact node returned %d", resp.StatusCode)
+	}
+	if target.ExpectedExecutionFingerprint != "" {
+		attestation, attestationErr := downloadprepare.ResultFromHeaders(resp.Header)
+		if attestationErr != nil || attestation.ExecutionFingerprint != target.ExpectedExecutionFingerprint || attestation.FileSize != target.ExpectedArtifactSize {
+			artifact := &Artifact{ID: target.ArtifactID, OriginNodeID: target.OriginNodeID, OriginNodeURL: target.OriginNodeURL, OriginNodeGroup: target.OriginNodeGroup, OriginArtifactID: target.OriginArtifactID}
+			if _, err := s.artifacts.requeueRemoteArtifactExactNow(ctx, artifact, "remote output attestation mismatch"); err != nil {
+				return err
+			}
+			return fmt.Errorf("remote artifact attestation mismatch: %w", ErrDownloadNotActive)
+		}
 	}
 	// Preserve an origin-provided disposition, but supply the same sanitized
 	// attachment filename as local delivery when the node omits one.

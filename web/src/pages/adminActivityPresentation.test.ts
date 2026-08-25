@@ -12,6 +12,7 @@ import {
   formatDeliveredVideoSummary,
   formatPlaybackDecisionSummary,
   formatSourceContainerSummary,
+  formatToneMapSummary,
   formatTranscodeModeSummary,
   formatVideoDetail,
   formatVideoSummary,
@@ -52,6 +53,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
     target_bitrate_kbps: overrides.target_bitrate_kbps ?? 8000,
     transcode_hw_accel: overrides.transcode_hw_accel,
+    tone_map_mode: overrides.tone_map_mode,
     source_container: overrides.source_container ?? "mkv",
     source_bitrate_kbps: overrides.source_bitrate_kbps ?? 9000,
     source_video_codec: overrides.source_video_codec ?? "h264",
@@ -143,6 +145,12 @@ describe("adminActivityPresentation", () => {
 
   it("labels hardware and software transcode modes", () => {
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "qsv" }))).toBe("HW QSV");
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "vaapi" }))).toBe(
+      "HW VAAPI",
+    );
+    expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "nvenc" }))).toBe(
+      "HW NVENC",
+    );
     expect(formatTranscodeModeSummary(makeSession({ transcode_hw_accel: "none" }))).toBe("SW");
     expect(
       formatTranscodeModeSummary(
@@ -183,6 +191,31 @@ describe("adminActivityPresentation", () => {
 
     // The source summary still describes the source in full.
     expect(formatAudioSummary(unknownTarget)).toBe("TrueHD 7.1");
+  });
+
+  it("reports only confirmed tone-map executors", () => {
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "hardware" }))).toEqual({
+      badge: "HW Tone map",
+      detail: "Hardware",
+      mode: "hardware",
+    });
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "software" }))).toEqual({
+      badge: "SW Tone map",
+      detail: "Software",
+      mode: "software",
+    });
+    expect(formatToneMapSummary(makeSession())).toBeNull();
+    expect(formatToneMapSummary(makeSession({ tone_map_mode: "future-mode" }))).toBeNull();
+    expect(
+      formatToneMapSummary(
+        makeSession({
+          play_method: "remux",
+          video_decision: "remux",
+          audio_decision: "transcode",
+          tone_map_mode: "hardware",
+        }),
+      ),
+    ).toBeNull();
   });
 
   it("buckets activity sessions by the backend's per-stream decisions", () => {
@@ -333,16 +366,19 @@ describe("adminActivityPresentation", () => {
     expect(formatVideoDetail(session)).toBe("Video stream copied");
   });
 
-  it("prefers the server's exact client label in the full label", () => {
+  it("keeps exact client build/channel and tone-map mode in expanded activity details", () => {
     const session = makeSession({
       client_name: "Silo Android TV",
       client_version: "1.0.0",
       client_build: "5",
+      client_channel: "beta",
       client_label: "Silo Android TV 1.0.0",
-      client_label_full: "Silo Android TV 1.0.0 (build 5)",
+      client_label_full: "Silo Android TV 1.0.0 (build 5, beta)",
+      tone_map_mode: "hardware",
     });
 
-    expect(getSessionClientLabelFull(session)).toBe("Silo Android TV 1.0.0 (build 5)");
+    expect(getSessionClientLabelFull(session)).toBe("Silo Android TV 1.0.0 (build 5, beta)");
+    expect(formatToneMapSummary(session)?.detail).toBe("Hardware");
     // The compact row label keeps its unchanged width.
     expect(getSessionClientLabel(session)).toBe("Silo Android TV 1.0.0");
   });

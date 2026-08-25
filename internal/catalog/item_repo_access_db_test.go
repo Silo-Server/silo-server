@@ -35,7 +35,7 @@ func TestDualLibraryItemDeniedByDisabledLibraryDB(t *testing.T) {
 		t.Fatalf("seed disabled folder: %v", err)
 	}
 	batchEquivExec(t, pool, `
-		INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', 'Dual Library Item')`, item)
+		INSERT INTO media_items (content_id, type, title, genres) VALUES ($1, 'movie', 'Dual Library Item', ARRAY['Dual Library Leak'])`, item)
 	batchEquivExec(t, pool, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($1, $3)`,
 		item, enabledLib, disabledLib)
@@ -46,6 +46,7 @@ func TestDualLibraryItemDeniedByDisabledLibraryDB(t *testing.T) {
 
 	itemRepo := NewItemRepository(pool)
 	libraryRepo := NewLibraryItemRepository(pool)
+	browseRepo := NewBrowseRepository(pool)
 
 	scopes := []struct {
 		name   string
@@ -53,6 +54,42 @@ func TestDualLibraryItemDeniedByDisabledLibraryDB(t *testing.T) {
 	}{
 		{"disabled list", AccessFilter{DisabledLibraryIDs: []int{disabledLib}}},
 		{"allowlist excluding disabled", AccessFilter{AllowedLibraryIDs: []int{enabledLib}, DisabledLibraryIDs: []int{disabledLib}}},
+	}
+
+	browseResult, err := browseRepo.Browse(ctx, BrowseFilters{
+		ContentIDs:         []string{item},
+		DisabledLibraryIDs: []int{disabledLib},
+		Limit:              20,
+	})
+	if err != nil {
+		t.Fatalf("Browse dual-library scope: %v", err)
+	}
+	if len(browseResult.Items) != 0 || browseResult.Total != 0 {
+		t.Fatalf("Browse returned disabled dual-library item: %+v", browseResult)
+	}
+
+	genres, err := browseRepo.ListGenres(ctx, BrowseFilters{
+		ContentIDs:         []string{item},
+		DisabledLibraryIDs: []int{disabledLib},
+	})
+	if err != nil {
+		t.Fatalf("ListGenres dual-library scope: %v", err)
+	}
+	if len(genres) != 0 {
+		t.Fatalf("ListGenres exposed disabled dual-library metadata: %v", genres)
+	}
+
+	recent, err := browseRepo.BrowseRecentlyAddedAcrossLibraries(ctx, BrowseFilters{
+		ContentIDs:         []string{item},
+		DisabledLibraryIDs: []int{disabledLib},
+		Sort:               "recently_added",
+		Limit:              20,
+	}, []int{enabledLib})
+	if err != nil {
+		t.Fatalf("BrowseRecentlyAddedAcrossLibraries dual-library scope: %v", err)
+	}
+	if len(recent.Items) != 0 {
+		t.Fatalf("recently-added fanout returned disabled dual-library item: %+v", recent.Items)
 	}
 	for _, scope := range scopes {
 		t.Run(scope.name, func(t *testing.T) {
@@ -91,5 +128,16 @@ func TestDualLibraryItemDeniedByDisabledLibraryDB(t *testing.T) {
 	// accessible through the membership EXISTS.
 	if err := itemRepo.EnsureAccessible(ctx, item, AccessFilter{DisabledLibraryIDs: []int{disabledLib + 100000}}); err != nil {
 		t.Fatalf("EnsureAccessible with unrelated disabled library = %v, want nil", err)
+	}
+	controlBrowse, err := browseRepo.Browse(ctx, BrowseFilters{
+		ContentIDs:         []string{item},
+		DisabledLibraryIDs: []int{disabledLib + 100000},
+		Limit:              20,
+	})
+	if err != nil {
+		t.Fatalf("Browse with unrelated disabled library: %v", err)
+	}
+	if len(controlBrowse.Items) != 1 || controlBrowse.Total != 1 {
+		t.Fatalf("Browse with unrelated disabled library = %+v, want one visible item", controlBrowse)
 	}
 }

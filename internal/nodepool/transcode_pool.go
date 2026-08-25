@@ -1,6 +1,7 @@
 package nodepool
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,10 +18,17 @@ func NewTranscodePool() *TranscodePool {
 	return &TranscodePool{}
 }
 
-// SetNodes replaces the node list.
+// SetNodes replaces the node list. Node URLs are normalized (trailing slashes
+// trimmed) at the storage boundary so every consumer compares them
+// consistently, including TranscodeNodeHealthy and remote-start adoption.
 func (p *TranscodePool) SetNodes(nodes []*Node) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	for _, n := range nodes {
+		if n != nil {
+			n.URL = normalizeNodeURL(n.URL)
+		}
+	}
 	p.nodes = nodes
 }
 
@@ -53,6 +61,13 @@ func (p *TranscodePool) FindByURL(url string) *Node {
 		}
 	}
 	return nil
+}
+
+// normalizeNodeURL trims trailing slashes so a node URL stored with a
+// trailing slash (e.g. an admin-entered base URL) compares equal to a lookup
+// without one. Applied where URLs enter the pool and where lookups are made.
+func normalizeNodeURL(url string) string {
+	return strings.TrimRight(url, "/")
 }
 
 // Nodes returns a copy of the current node list.

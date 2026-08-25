@@ -236,6 +236,7 @@ export function probeWebCapabilities(): WebCapabilityProbe {
       };
     }),
   };
+  const hlsSupport = detectHLSSupport();
 
   return {
     containers,
@@ -245,7 +246,8 @@ export function probeWebCapabilities(): WebCapabilityProbe {
     maxResolution,
     hdr,
     hdrDetails,
-    hls: detectHLSSupport(),
+    hls: hlsSupport.supported,
+    nativeHLS: hlsSupport.native,
   };
 }
 
@@ -254,39 +256,52 @@ export function probeWebCapabilities(): WebCapabilityProbe {
  * Moving a window between SDR and HDR displays can change the media-query
  * result without remounting the player, so refresh when either query changes.
  */
-export function useCodecDetection(): WebCapabilityProbe {
-  const [capabilities, setCapabilities] = useState(probeWebCapabilities);
+export interface SettledWebCapabilityProbe extends WebCapabilityProbe {
+  /** Whether asynchronous format probes have joined the synchronous evidence. */
+  settled: boolean;
+}
+
+export function useCodecDetection(): SettledWebCapabilityProbe {
+  const [capabilities, setCapabilities] = useState<SettledWebCapabilityProbe>(() => ({
+    ...probeWebCapabilities(),
+    settled: false,
+  }));
 
   useEffect(() => {
-    if (typeof matchMedia === "undefined") return;
     let disposed = false;
     let probeGeneration = 0;
-    const queries = [
-      matchMedia("(dynamic-range: high)"),
-      matchMedia("(video-dynamic-range: high)"),
-    ];
+    const queries =
+      typeof matchMedia === "undefined"
+        ? []
+        : [matchMedia("(dynamic-range: high)"), matchMedia("(video-dynamic-range: high)")];
     const refresh = () => {
       const generation = ++probeGeneration;
       const next = probeWebCapabilities();
-      setCapabilities(next);
+      setCapabilities({ ...next, settled: false });
 
       void probeHDR10PlaybackSupport().then((hdr10) => {
-        if (disposed || generation !== probeGeneration || !hdr10) return;
+        if (disposed || generation !== probeGeneration) return;
         setCapabilities((current) => ({
           ...current,
+          settled: true,
           // The exact HDR10 query proves the HEVC Main10 base codec for the
           // progressive MP4 route even when the separate generic HEVC probe was
           // rejected. Keep that evidence scoped away from original and HLS.
-          progressiveCodecsVideo: current.progressiveCodecsVideo.includes("hevc")
-            ? current.progressiveCodecsVideo
-            : [...current.progressiveCodecsVideo, "hevc"],
+          progressiveCodecsVideo:
+            !hdr10 || current.progressiveCodecsVideo.includes("hevc")
+              ? current.progressiveCodecsVideo
+              : [...current.progressiveCodecsVideo, "hevc"],
           hdrDetails: {
             ...current.hdrDetails,
-            hdr10: true,
-            hdr10_max_width: 3840,
-            hdr10_max_height: 2160,
-            hdr10_max_frame_rate: 24,
-            hdr10_max_bitrate_kbps: 80_000,
+            ...(hdr10
+              ? {
+                  hdr10: true,
+                  hdr10_max_width: 3840,
+                  hdr10_max_height: 2160,
+                  hdr10_max_frame_rate: 24,
+                  hdr10_max_bitrate_kbps: 80_000,
+                }
+              : {}),
           },
         }));
       });

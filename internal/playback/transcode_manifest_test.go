@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 func TestBuildPlaybackManifest_CopyVideoUsesRealManifest(t *testing.T) {
@@ -628,7 +630,7 @@ func TestRestartSeekTarget_CopyModeReportsUnresolvedWhenManifestNotReady(t *test
 func TestWaitForSegment_RestartingSessionReturnsNotFoundInsteadOfTranscodeFailed(t *testing.T) {
 	session := &TranscodeSession{
 		outputDir:  t.TempDir(),
-		restarting: true,
+		restarting: &restartFlight{done: make(chan struct{})},
 		waitErr:    errors.New("signal: killed"),
 	}
 
@@ -963,6 +965,153 @@ func TestCleanStaleSegments(t *testing.T) {
 				t.Errorf("expected %s to be removed, but it still exists", name)
 			}
 		}
+	}
+}
+
+func TestCleanStaleOutputForRestart_CopyToToneMapEncodeRemovesStaleOutput(t *testing.T) {
+	tempDir := t.TempDir()
+
+	files := map[string]bool{
+		"init.mp4":      true,  // codec config is source-derived — survives
+		"stream.m3u8":   false, // describes the copy stream — removed
+		"seg_00005.m4s": true,  // before the restart point — survives
+		"seg_00006.m4s": true,  // before the restart point — survives
+		"seg_00007.m4s": false, // copy bitstream at/after restart — removed
+		"seg_00120.m4s": false, // copy bitstream far ahead — removed
+	}
+	for name := range files {
+		if err := os.WriteFile(filepath.Join(tempDir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	previous := TranscodeOpts{TargetCodecVideo: "copy", SegmentDuration: 2}
+	next := TranscodeOpts{
+		TargetCodecVideo: "h264",
+		SegmentDuration:  2,
+		HWAccel:          "qsv",
+		ToneMapMode:      tonemap.ModeHardware,
+		ToneMapFilter:    "tonemap_opencl",
+	}
+
+	session := &TranscodeSession{outputDir: tempDir, opts: previous}
+
+	if !session.cleanStaleOutputForRestart(previous, next, 7) {
+		t.Fatal("cleanStaleOutputForRestart = false, want true for a copy -> tone-map restart")
+	}
+
+	for name, shouldExist := range files {
+		_, err := os.Stat(filepath.Join(tempDir, name))
+		if exists := err == nil; exists != shouldExist {
+			if shouldExist {
+				t.Errorf("expected %s to survive cleanup, but it was removed", name)
+			} else {
+				t.Errorf("expected %s to be removed, but it still exists", name)
+			}
+		}
+	}
+}
+
+func TestCleanStaleOutputForRestart_ToneMapModeChangeRemovesStaleOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	writeManifestRange(t, tempDir, 7, 9, ".ts")
+	if err := os.WriteFile(filepath.Join(tempDir, "seg_00008.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write segment: %v", err)
+	}
+
+	previous := TranscodeOpts{TargetCodecVideo: "h264", HWAccel: "qsv", ToneMapMode: tonemap.ModeHardware, ToneMapFilter: "tonemap_opencl"}
+	next := TranscodeOpts{TargetCodecVideo: "h264", HWAccel: HWAccelNone, ToneMapMode: tonemap.ModeSoftware, ToneMapFilter: "tonemap"}
+
+	session := &TranscodeSession{outputDir: tempDir, opts: previous}
+
+	if !session.cleanStaleOutputForRestart(previous, next, 7) {
+		t.Fatal("cleanStaleOutputForRestart = false, want true for a tone-map mode change")
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "stream.m3u8")); err == nil {
+		t.Error("expected the previous generation's manifest to be removed")
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "seg_00008.ts")); err == nil {
+		t.Error("expected the previous generation's segment to be removed")
+	}
+}
+
+func TestCleanStaleOutputForRestart_SameEncodedRecipeKeepsSegments(t *testing.T) {
+	tempDir := t.TempDir()
+	writeManifestRange(t, tempDir, 7, 9, ".ts")
+	if err := os.WriteFile(filepath.Join(tempDir, "seg_00008.ts"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write segment: %v", err)
+	}
+
+	opts := TranscodeOpts{TargetCodecVideo: "h264", HWAccel: "qsv", ToneMapMode: tonemap.ModeHardware, ToneMapFilter: "tonemap_opencl"}
+	session := &TranscodeSession{outputDir: tempDir, opts: opts}
+
+	// A backward seek within one generation keeps its segments reusable.
+	if session.cleanStaleOutputForRestart(opts, opts, 7) {
+		t.Fatal("cleanStaleOutputForRestart = true, want false for an unchanged encoded recipe")
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "stream.m3u8")); err != nil {
+		t.Errorf("expected the manifest to survive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "seg_00008.ts")); err != nil {
+		t.Errorf("expected seg_00008.ts to survive: %v", err)
+	}
+}
+
+func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Now()
+	staleTime := now.Add(-time.Minute)
+
+	// A previous copy generation raced hundreds of segments ahead and left its
+	// manifest behind; the current process has produced nothing yet.
+	writeManifestRange(t, tempDir, 225, 293, ".ts")
+	if err := os.Chtimes(filepath.Join(tempDir, "stream.m3u8"), staleTime, staleTime); err != nil {
+		t.Fatalf("chtimes manifest: %v", err)
+	}
+	for i := 225; i <= 293; i++ {
+		writeSegmentFile(t, tempDir, segmentFilename(i, TranscodeOpts{TargetCodecVideo: "h264"}), []byte("x"), staleTime)
+	}
+
+	session := &TranscodeSession{
+		outputDir:            tempDir,
+		running:              true,
+		lastRequestedSegment: 225,
+		generationStartedAt:  now,
+		opts: TranscodeOpts{
+			TargetCodecVideo:   "h264",
+			SegmentDuration:    2,
+			StartSegmentNumber: 225,
+		},
+	}
+	writer := &recordingWriteCloser{}
+	throttler := NewTranscodeThrottler(session, writer, 60, 2)
+
+	throttler.CheckOnce()
+	if throttler.paused {
+		t.Fatal("throttler paused on output produced before the current generation started")
+	}
+	if writer.writes != "" {
+		t.Fatalf("writes = %q, want no command", writer.writes)
+	}
+
+	// A throttler that already paused on stale output must let ffmpeg go again.
+	throttler.paused = true
+	throttler.CheckOnce()
+	if throttler.paused {
+		t.Fatal("throttler stayed paused on stale output")
+	}
+	if writer.writes != "u" {
+		t.Fatalf("writes = %q, want u", writer.writes)
+	}
+
+	// Once this generation writes its own manifest, throttling works normally.
+	writeManifestRange(t, tempDir, 225, 293, ".ts")
+	throttler.CheckOnce()
+	if !throttler.paused {
+		t.Fatal("expected throttler to pause on this generation's own produced head")
+	}
+	if writer.writes != "up" {
+		t.Fatalf("writes = %q, want up", writer.writes)
 	}
 }
 

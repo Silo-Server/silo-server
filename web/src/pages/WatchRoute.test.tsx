@@ -335,4 +335,59 @@ describe("buildWatchPageProps", () => {
       },
     });
   });
+
+  it("passes the selected PGS ordinal into the initial playback request", () => {
+    const props = buildWatchPageProps({
+      request: createWatchRouteRequest({
+        contentId: "movie-1",
+        fileId: 42,
+        prePlaySubtitleMode: "explicit",
+        prePlaySubtitleSelection: {
+          source: "embedded",
+          language: "en",
+          codec: "hdmv_pgs_subtitle",
+          label: "English PGS",
+          track_index: 4,
+        },
+      }),
+      item: makeWatchDetail({
+        versions: [
+          {
+            file_id: 42,
+            resolution: "2160p",
+            codec_video: "hevc",
+            codec_audio: "truehd",
+            hdr: true,
+            container: "mkv",
+            file_size: 1,
+            duration: 120,
+            bitrate: 25_000,
+            effective_audio_track_index: 0,
+            effective_audio_language: "en",
+            subtitle_tracks: [
+              {
+                index: 4,
+                language: "en",
+                codec: "hdmv_pgs_subtitle",
+                title: "English PGS",
+              },
+            ],
+          },
+        ],
+        subtitles: [
+          {
+            source: "embedded",
+            language: "en",
+            codec: "hdmv_pgs_subtitle",
+            forced: false,
+            title: "English PGS",
+          },
+        ],
+      }),
+      currentProfile: profile,
+    });
+
+    // Playback ordinals are dense; the container stream index 4 is ordinal 0.
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
+  });
 });

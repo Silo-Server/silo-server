@@ -3,11 +3,13 @@ package playback
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool {
@@ -113,6 +115,39 @@ func TestStartRequestV3UnknownQualityFallsBackToAuto(t *testing.T) {
 	if req.QualityPreference != "auto" || len(warnings) != 1 || warnings[0].Code != "quality_preference_normalized" {
 		t.Fatalf("quality=%q warnings=%#v", req.QualityPreference, warnings)
 	}
+
+	for _, quality := range []string{QualityRung2160pMediumV3, QualityRung1080pLowV3, QualityRung720pHighV3, "1080P-MEDIUM"} {
+		req := validStartRequestV3()
+		req.QualityPreference = quality
+		warnings, err := req.NormalizeAndValidate()
+		if err != nil {
+			t.Fatalf("NormalizeAndValidate(%q): %v", quality, err)
+		}
+		if req.QualityPreference != strings.ToLower(quality) || len(warnings) != 0 {
+			t.Fatalf("quality %q normalized to %q warnings=%#v", quality, req.QualityPreference, warnings)
+		}
+	}
+}
+
+func TestResolveQualityPolicyV3CompoundRung(t *testing.T) {
+	request := validStartRequestV3()
+	request.QualityPreference = QualityRung2160pMediumV3
+	source := SourceDescriptorV3{Width: 3840, Height: 1540, BitrateKbps: 25_200}
+
+	result := ResolveQualityPolicyV3(request, source)
+	if result.Width != 3840 || result.Height != 1540 || result.Label != "1540p" || result.BitrateKbps != 20_000 || !result.RequiresTranscode || !result.ExplicitRung {
+		t.Fatalf("cropped UHD + 4K Medium = %#v", result)
+	}
+
+	capKbps := 8_000
+	request.BandwidthCapKbps = &capKbps
+	result = ResolveQualityPolicyV3(request, source)
+	if result.Height != 1540 || result.BitrateKbps != capKbps || result.Reason != decisionReasonBandwidthCapV3 {
+		t.Fatalf("capped 4K Medium = %#v", result)
+	}
+	if !hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {
+		t.Fatalf("capped 4K Medium has no cap warning: %#v", result.Warnings)
+	}
 }
 
 func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
@@ -204,6 +239,72 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	request.Operation = "future_operation"
 	if err := request.Validate(); err == nil {
 		t.Fatal("unknown replan operation was accepted")
+	}
+}
+
+func TestReplanRequestV3ValidationRetainsClientBuildChannelNormalization(t *testing.T) {
+	start := validStartRequestV3()
+	request := ReplanRequestV3{
+		ProtocolVersion:       ProtocolV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "replan-client-metadata-0001",
+		FailedPlanID:          "plan:client-metadata-0001",
+		PlanAttemptID:         "plan-attempt-client-metadata-0001",
+		PlanAttemptKey:        "v3:0000000000000001",
+		AttemptCount:          1,
+		QualityPreference:     start.QualityPreference,
+		Failure:               FailureV3{Classification: "parser_failure"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	request.ClientPlaybackContext.AppBuild = strings.Repeat("build", 20) + "\x00ignored"
+	request.ClientPlaybackContext.AppChannel = strings.Repeat("channel", 10) + "\x00ignored"
+
+	if err := request.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got, want := request.ClientPlaybackContext.AppBuild, strings.Repeat("build", 12)+"buil"; got != want {
+		t.Fatalf("normalized app_build = %q, want %q", got, want)
+	}
+	if got, want := request.ClientPlaybackContext.AppChannel, strings.Repeat("channel", 4)+"chan"; got != want {
+		t.Fatalf("normalized app_channel = %q, want %q", got, want)
+	}
+}
+
+func TestStartRequestV3NormalizesUnicodeAppVersionAndStripsControls(t *testing.T) {
+	request := validStartRequestV3()
+	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
+
+	if _, err := request.NormalizeAndValidate(); err != nil {
+		t.Fatalf("NormalizeAndValidate() error = %v", err)
+	}
+	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
+		t.Fatalf("normalized app_version = %q, want %q", got, want)
+	}
+}
+
+func TestReplanRequestV3NormalizesUnicodeAppVersionAndStripsControls(t *testing.T) {
+	start := validStartRequestV3()
+	request := ReplanRequestV3{
+		ProtocolVersion:       ProtocolV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "replan-client-version-0001",
+		FailedPlanID:          "plan:client-version-0001",
+		PlanAttemptID:         "plan-attempt-client-version-0001",
+		PlanAttemptKey:        "v3:0000000000000001",
+		AttemptCount:          1,
+		QualityPreference:     start.QualityPreference,
+		Failure:               FailureV3{Classification: "parser_failure"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
+
+	if err := request.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
+		t.Fatalf("normalized app_version = %q, want %q", got, want)
 	}
 }
 
@@ -744,6 +845,56 @@ func TestPlanPlaybackV3DirectPlaysLegacyDolbyVisionProfile8(t *testing.T) {
 	}
 	if result.Plan.RequestedMediaFileID != file.ID || result.Plan.EffectiveMediaFileID != file.ID {
 		t.Fatalf("source ids = requested %d effective %d", result.Plan.RequestedMediaFileID, result.Plan.EffectiveMediaFileID)
+	}
+}
+
+func TestPlanPlaybackV3SafariNativeHLSAvoidsProgressiveDVRemux(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.CodecAudio = "eac3"
+	file.AudioTracks[0] = models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1"}
+	file.VideoTracks[0].PixelFormat = "yuv420p10le"
+	file.VideoTracks[0].DVProfile = 8
+	file.VideoTracks[0].DVLevel = 6
+	file.VideoTracks[0].DVBLCompatID = 1
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+
+	req := validStartRequestV3()
+	req.Capabilities.Containers = []string{"mp4"}
+	req.Capabilities.CodecsAudio = []string{"eac3"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{
+		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
+		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+	}}
+	hdr := &HDRCapabilitiesV3{
+		DolbyVisionProfiles: []int{8},
+		DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{
+			Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1},
+		}},
+	}
+	req.Capabilities.HDRDetails = hdr
+	req.ClientPlaybackContext.Output.HDRDetails = hdr
+
+	progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+	progressive.Containers = []string{"mp4"}
+	progressive.VideoCodecs = []string{"hevc"}
+	progressive.AudioDecodeCodecs = []string{"eac3"}
+	progressive.HDRDetails = &HDRCapabilitiesV3{}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+
+	hls := progressive
+	hls.Containers = []string{"hls"}
+	hls.HDRDetails = hdr
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 ||
+		result.TargetVideoCodec != "copy" || result.PlayMethod != PlayRemux ||
+		!result.Plan.Claims.Video.DolbyVision {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 }
 
@@ -1298,6 +1449,165 @@ func TestPlanPlaybackV3NeverClaimsUnimplementedHDRTranscode(t *testing.T) {
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}})
 	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// TestPlanPlaybackV3ToneMapSettingsSelectValidatedExecutor verifies planning honors validated executor policy.
+func TestPlanPlaybackV3ToneMapSettingsSelectValidatedExecutor(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].ColorPrimaries = "bt2020"
+	file.VideoTracks[0].ColorTransfer = "smpte2084"
+	file.VideoTracks[0].ColorSpace = "bt2020nc"
+	req := validStartRequestV3()
+	req.QualityPreference = QualityRung2160pMediumV3
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	capabilities := tonemap.Capabilities{
+		{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemapx", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ, tonemap.SourceHLG}},
+		{Mode: tonemap.ModeHardware, Backend: "qsv", Filter: "tonemap_opencl", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+	}
+	tests := []struct {
+		name     string
+		hardware bool
+		software bool
+		wantMode tonemap.Mode
+	}{
+		{name: "disabled"},
+		{name: "hardware only", hardware: true, wantMode: tonemap.ModeHardware},
+		{name: "software only", software: true, wantMode: tonemap.ModeSoftware},
+		{name: "hardware preferred", hardware: true, software: true, wantMode: tonemap.ModeHardware},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, HardwareToneMapEnabled: tt.hardware, SoftwareToneMapEnabled: tt.software},
+				Registry: registry, ToneMapCapabilities: capabilities,
+			})
+			if tt.wantMode == "" {
+				if result.Terminal == nil || result.Terminal.Reason != TerminalHDRTranscodeUnsupportedV3 {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+				return
+			}
+			if result.Plan == nil || result.ToneMapMode != tt.wantMode || result.ToneMapSourceKind != tonemap.SourcePQ {
+				t.Fatalf("result = %#v", result)
+			}
+			if result.TargetResolution != "2160p" || result.TargetBitrateKbps != 20_000 || result.Plan.EffectiveRecipe.Height == nil || *result.Plan.EffectiveRecipe.Height != 2160 {
+				t.Fatalf("4K Medium target = resolution %q bitrate %d recipe %#v", result.TargetResolution, result.TargetBitrateKbps, result.Plan.EffectiveRecipe)
+			}
+			if result.Plan.EffectiveRecipe.DynamicRange != DynamicRangeSDRV3 || !hasDegradationWarningV3(result.Plan.DegradationWarnings, DegradationWarningHDRToneMappedV3) {
+				t.Fatalf("plan = %#v", result.Plan)
+			}
+			found := false
+			for _, transformation := range result.Plan.Transformations {
+				if transformation.Name == TransformationHDRToSDRToneMapV3 && transformation.RecipeVersion == TransformationHDRToSDRToneMapRecipeVersionV3 {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("transformations = %#v", result.Plan.Transformations)
+			}
+		})
+	}
+}
+
+func TestPlanPlaybackV3ResolvesToneMapRecipeOnce(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].ColorPrimaries = "bt2020"
+	file.VideoTracks[0].ColorTransfer = "smpte2084"
+	file.VideoTracks[0].ColorSpace = "bt2020nc"
+	req := validStartRequestV3()
+	req.QualityPreference = "1080p"
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	capabilities := tonemap.Capabilities{{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}}
+	registryCalls := 0
+	capabilityCalls := 0
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, SoftwareToneMapEnabled: true},
+		Registry: registry,
+		HLSRegistry: func() *TransformationRegistryV3 {
+			registryCalls++
+			return registry
+		},
+		HLSToneMapCapabilities: func() tonemap.Capabilities {
+			capabilityCalls++
+			return capabilities
+		},
+	})
+
+	if result.Plan == nil || result.ToneMapMode != tonemap.ModeSoftware {
+		t.Fatalf("result = %s, want software tone-map transcode", ExplainPlannerResultV3(result))
+	}
+	if registryCalls != 1 || capabilityCalls != 1 {
+		t.Fatalf("tone-map resolution calls = registry %d capabilities %d, want one each", registryCalls, capabilityCalls)
+	}
+}
+
+// TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks verifies unsafe or uncertain sources are handled explicitly.
+func TestPlanPlaybackV3RejectsDolbyOnlyAndFreezesAmbiguousFallbacks(t *testing.T) {
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	capabilities := tonemap.Capabilities{{Mode: tonemap.ModeSoftware, Backend: "software", Filter: "tonemapx", SourceKinds: tonemap.AllSourceKinds()}}
+	tests := []struct {
+		name          string
+		mutate        func(*models.VideoTrack)
+		wantTerminal  bool
+		wantKind      tonemap.SourceKind
+		wantPreflight bool
+	}{
+		{name: "profile 5", mutate: func(track *models.VideoTrack) { track.DVProfile = 5 }, wantTerminal: true},
+		{name: "explicit id 0", mutate: func(track *models.VideoTrack) { track.DVBLCompatID = 0 }, wantTerminal: true},
+		{name: "absent base", mutate: func(track *models.VideoTrack) { track.DVBLPresent = false }, wantTerminal: true},
+		{name: "id 2 SDR base", mutate: func(track *models.VideoTrack) {
+			track.DVProfile, track.DVBLCompatID = 8, 2
+			track.ColorPrimaries, track.ColorTransfer, track.ColorSpace = "bt709", "bt709", "bt709"
+		}, wantKind: tonemap.SourceSDRBT709},
+		{name: "legacy missing id presence", mutate: func(track *models.VideoTrack) {
+			track.DVConfigPresent, track.DVBLCompatIDPresent = false, false
+		}, wantTerminal: true},
+		{name: "contradictory transfer", mutate: func(track *models.VideoTrack) {
+			track.ColorTransfer = "arib-std-b67"
+		}, wantKind: tonemap.SourcePQ, wantPreflight: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			track := &file.VideoTracks[0]
+			track.DVProfile, track.DVBLCompatID = 7, 6
+			track.DVConfigPresent, track.DVBLCompatIDPresent, track.DVBLPresent, track.DVRPUPresent = true, true, true, true
+			track.VideoRangeType = "DOVIWithHDR10"
+			track.ColorRange, track.ColorPrimaries, track.ColorTransfer, track.ColorSpace = "tv", "bt2020", "smpte2084", "bt2020nc"
+			tt.mutate(track)
+			req := validStartRequestV3()
+			req.QualityPreference = "1080p"
+			result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, SoftwareToneMapEnabled: true}, Registry: registry, ToneMapCapabilities: capabilities})
+			if tt.wantTerminal {
+				if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+				return
+			}
+			if result.Plan == nil || result.ToneMapSourceKind != tt.wantKind || result.ToneMapPreflightRequired != tt.wantPreflight {
+				t.Fatalf("result = %#v", result)
+			}
+		})
 	}
 }
 
@@ -2335,6 +2645,55 @@ func TestPlanPlaybackV3AbandonsStripForAnUnstrippableSource(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3ToneMapEscapeRequiresExecutableTranscode(t *testing.T) {
+	file := unstrippableProfile7FixtureV3()
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: true},
+		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: true},
+		{Name: TransformationAudioToAACV3, RecipeVersion: "1", Available: true},
+		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: true},
+	})
+	capabilities := tonemap.Capabilities{{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
+		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}}
+
+	for _, test := range []struct {
+		name              string
+		transcodeEnabled  bool
+		removeHLSDelivery bool
+		wantPlan          bool
+	}{
+		{name: "transcoding disabled"},
+		{name: "HLS delivery unavailable", transcodeEnabled: true, removeHLSDelivery: true},
+		{name: "usable transcode route", transcodeEnabled: true, wantPlan: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := hdr10OnlyProfile7RequestV3()
+			if test.removeHLSDelivery {
+				delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
+			}
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{
+					TranscodeEnabled: test.transcodeEnabled, Allow4KTranscode: true, SoftwareToneMapEnabled: true,
+				},
+				Registry: registry, ToneMapCapabilities: capabilities,
+				DVRPUStrippable: func() bool { return false },
+			})
+			if test.wantPlan {
+				if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 {
+					t.Fatalf("result = %s, want executable tone-map transcode", ExplainPlannerResultV3(result))
+				}
+				return
+			}
+			if result.Terminal == nil || result.Terminal.Reason != TerminalDVConversionUnsupportedV3 {
+				t.Fatalf("terminal = %#v, want Dolby Vision conversion cause", result.Terminal)
+			}
+		})
+	}
+}
+
 // The strip is a server capability, not the only one: a client that can do the
 // conversion itself must still get its route, with the reason the server route
 // was dropped attached.
@@ -2369,6 +2728,10 @@ func unstrippableProfile7FixtureV3() *models.MediaFile {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7
 	file.VideoTracks[0].DVBLCompatID = 6
+	file.VideoTracks[0].DVConfigPresent = true
+	file.VideoTracks[0].DVBLCompatIDPresent = true
+	file.VideoTracks[0].DVBLPresent = true
+	file.VideoTracks[0].DVRPUPresent = true
 	file.VideoTracks[0].DVELPresent = false
 	file.VideoTracks[0].DVEnhancementLayer = ""
 	file.VideoTracks[0].VideoRange = "DolbyVision"
@@ -2407,9 +2770,9 @@ func TestPlanPlaybackV3DoesNotProbeWhenNoStripIsOnTheTable(t *testing.T) {
 	}
 }
 
-// availableQualities must publish the transcode ladder below the source height
-// plus the source-preserving "original" entry, and shrink to "original" alone
-// when the transcode route cannot execute.
+// availableQualities must publish useful same-class bitrate steps and every
+// lower resolution step alongside the source-preserving "original" entry, and
+// shrink to "original" alone when the transcode route cannot execute.
 func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
@@ -2426,14 +2789,21 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	for _, quality := range result.Plan.AvailableQualities {
 		labels = append(labels, quality.Label)
 	}
-	if len(labels) != 4 || labels[0] != "original" || labels[1] != "1080p" || labels[2] != "720p" || labels[3] != "480p" {
-		t.Fatalf("labels = %v", labels)
+	want := []string{
+		"original",
+		QualityRung2160pHighV3, QualityRung2160pMediumV3, QualityRung2160pLowV3,
+		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
+		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
+		"480p",
+	}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("labels = %v, want %v", labels, want)
 	}
 	if !result.Plan.AvailableQualities[0].PreservesSource || result.Plan.AvailableQualities[0].Height != 2160 {
 		t.Fatalf("original entry = %#v", result.Plan.AvailableQualities[0])
 	}
-	if result.Plan.AvailableQualities[2].BitrateKbps != 2_000 {
-		t.Fatalf("720p bitrate = %#v", result.Plan.AvailableQualities[2])
+	if got := result.Plan.AvailableQualities[2]; got.BitrateKbps != 20_000 || got.DisplayName != "4K Medium" {
+		t.Fatalf("4K Medium = %#v", got)
 	}
 
 	// Without an HLS delivery the ladder cannot execute: menu shrinks to
@@ -2455,6 +2825,63 @@ func TestAvailableQualitiesV3UnknownSourceHeightPublishesNoFixedRungs(t *testing
 	}, SourceDescriptorV3{VideoCodec: "h264", BitrateKbps: 8_000})
 	if len(qualities) != 1 || qualities[0].Label != QualityOriginalV3 || !qualities[0].PreservesSource {
 		t.Fatalf("unknown-height qualities = %#v, want original only", qualities)
+	}
+}
+
+// TestAvailableQualitiesV3KeepsDirectHDRPlanningCapabilityLazy verifies direct
+// HDR playback advertises configured lower-quality choices without probing an
+// executor until the user selects one.
+func TestAvailableQualitiesV3KeepsDirectHDRPlanningCapabilityLazy(t *testing.T) {
+	capabilityCalls := 0
+	input := PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true, SoftwareToneMapEnabled: true},
+		HLSRegistry: func() *TransformationRegistryV3 {
+			capabilityCalls++
+			return testTransformationRegistryV3()
+		},
+		HLSToneMapCapabilities: func() tonemap.Capabilities {
+			capabilityCalls++
+			return nil
+		},
+	}
+	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 80_000, DynamicRange: DynamicRangeHDR10V3}
+	if got := availableQualitiesV3(input, source); len(got) != 11 || got[0].Label != QualityOriginalV3 || got[1].Label != QualityRung2160pHighV3 {
+		t.Fatalf("direct HDR qualities = %#v, want original plus compound ladder", got)
+	}
+	if capabilityCalls != 0 {
+		t.Fatalf("direct HDR quality planning performed %d lazy capability lookups", capabilityCalls)
+	}
+
+	input.Settings.SoftwareToneMapEnabled = false
+	if got := availableQualitiesV3(input, source); len(got) != 1 || got[0].Label != QualityOriginalV3 {
+		t.Fatalf("disabled HDR tone-map qualities = %#v, want original only", got)
+	}
+	if capabilityCalls != 0 {
+		t.Fatalf("disabled HDR quality planning performed %d lazy capability lookups", capabilityCalls)
+	}
+}
+
+func TestAvailableQualitiesV3Cropped4KPublishesOnlyUsefulSameClassRungs(t *testing.T) {
+	input := PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+	}
+	source := SourceDescriptorV3{Width: 3840, Height: 1540, BitrateKbps: 25_200}
+	qualities := availableQualitiesV3(input, source)
+	labels := make([]string, 0, len(qualities))
+	for _, quality := range qualities {
+		labels = append(labels, quality.Label)
+	}
+	want := []string{
+		QualityOriginalV3,
+		QualityRung2160pMediumV3, QualityRung2160pLowV3,
+		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
+		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
+		"480p",
+	}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("cropped 4K labels = %v, want %v", labels, want)
 	}
 }
 

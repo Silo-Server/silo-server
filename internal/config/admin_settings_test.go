@@ -186,6 +186,19 @@ func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
 	}
 }
 
+// TestTranscodeToneMapPoliciesDefaultDisabled verifies tone mapping remains opt-in.
+func TestTranscodeToneMapPoliciesDefaultDisabled(t *testing.T) {
+	effective := EffectiveAdminSettings(nil)
+	for _, key := range []string{
+		PlaybackTranscodeHardwareToneMapSettingKey,
+		PlaybackTranscodeSoftwareToneMapSettingKey,
+	} {
+		if got := effective[key]; got != "false" {
+			t.Fatalf("%s default = %q, want false", key, got)
+		}
+	}
+}
+
 func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	if cfg.S3.Public.URLAuth == "" {
 		cfg.S3.Public.URLAuth = "presigned"
@@ -209,6 +222,7 @@ func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	)
 }
 
+// TestNormalizeAdminSettingRejectsInvalidValues verifies invalid admin settings are rejected.
 func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		key   string
@@ -217,6 +231,8 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
 		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
+		{key: PlaybackTranscodeHardwareToneMapSettingKey, value: "maybe"},
+		{key: PlaybackTranscodeSoftwareToneMapSettingKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
 		{key: "recommendations.embeddings_cron", value: "not a cron"},
 		{key: "notifications.server_channels.batch_seconds", value: "119"},
