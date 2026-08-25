@@ -2,6 +2,9 @@
 
 ## 2026-08-24
 
+### Let each profile hide watched items from Home
+Profiles can now remove watched items from ordinary Home sections without hiding them from library pages, search, collections, or other browsing surfaces. Featured sections and sections whose purpose depends on watch history — Most Watched, profile activity, and Forgotten Favorites — keep watched items. The preference is off by default and watched indicators remain available everywhere an item is shown.
+
 ### Start audiobook playback once after browser capability detection
 The web audiobook player now waits for the browser's capability check to finish before requesting a playback session. It previously reacted to each intermediate capability result, creating and immediately replacing multiple sessions when one play request should have produced only one.
 
