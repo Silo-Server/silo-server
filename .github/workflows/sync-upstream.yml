@@ -1,0 +1,41 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: feature/proxy-policy-setting
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase on upstream main
+        run: |
+          git remote add upstream https://github.com/Silo-Server/silo-server.git
+          git fetch upstream main
+          BEFORE=$(git rev-parse HEAD)
+          git rebase upstream/main || {
+            echo "::warning::Rebase conflict — manual resolution needed"
+            git rebase --abort
+            exit 0
+          }
+          AFTER=$(git rev-parse HEAD)
+          if [ "$BEFORE" = "$AFTER" ]; then
+            echo "Already up to date"
+          else
+            git push origin feature/proxy-policy-setting --force-with-lease
+          fi
