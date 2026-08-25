@@ -57,8 +57,26 @@ type ImageCacheJobClaimer interface {
 	MarkFailed(ctx context.Context, id int64, attemptCount int, lockedBy string, errText string) error
 	RequeueClaimed(ctx context.Context, ids []int64, workerID string) error
 	CurrentTargetSourcePath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error)
-	EnqueueExistingProviderArtwork(ctx context.Context, limit int) (int, error)
+	EnqueueExistingProviderArtwork(ctx context.Context, cursor imageCacheDiscoveryCursor, limit int) (imageCacheDiscoveryPage, error)
 	DeleteSucceededBefore(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
+// imageCacheDiscoveryCursor is deliberately scoped to one explicit backfill
+// run. Queue rows and cached target paths are the durable resume markers; a
+// persisted catalog cursor would add state that can drift away from them.
+type imageCacheDiscoveryCursor struct {
+	Surface    int
+	Key        string
+	Subkey     string
+	NumericKey int64
+}
+
+type imageCacheDiscoveryPage struct {
+	Enqueued   int
+	Scanned    int
+	Discovered int
+	Next       imageCacheDiscoveryCursor
+	Complete   bool
 }
 
 type targetImageCacheJobStore interface {
@@ -498,6 +516,10 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 	if limited {
 		deadline = time.Now().Add(maxRuntime)
 	}
+	var discoveryCursor imageCacheDiscoveryCursor
+	discoveredThisSweep := false
+	enqueuedThisSweep := false
+	confirmationSweep := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return total, err
@@ -536,14 +558,52 @@ func (p *ImageCacheProcessor) runUntilIdle(ctx context.Context, workerID string,
 		if !discover {
 			return total, nil
 		}
-		enqueued, err := p.jobs.EnqueueExistingProviderArtwork(ctx, imageCacheDiscoveryBatchSize)
-		if err != nil {
-			return total, err
-		}
-		total.EnqueuedExisting += enqueued
-		reportImageCacheRunProgress(reportProgress, total)
-		if enqueued == 0 {
-			return total, nil
+		// Keep walking source-keyed discovery pages until one queues work. When a
+		// sweep reaches the end after seeing candidates, wrap once and confirm
+		// that no work appeared behind the in-memory cursor during the sweep.
+		for {
+			if err := ctx.Err(); err != nil {
+				return total, err
+			}
+			if !p.enabled.Load() {
+				return total, ErrImageCachingDisabled
+			}
+			if limited && !time.Now().Before(deadline) {
+				total.RuntimeLimited = true
+				return total, nil
+			}
+			page, err := p.jobs.EnqueueExistingProviderArtwork(ctx, discoveryCursor, imageCacheDiscoveryBatchSize)
+			if err != nil {
+				return total, err
+			}
+			discoveryCursor = page.Next
+			discoveredThisSweep = discoveredThisSweep || page.Discovered > 0
+			total.EnqueuedExisting += page.Enqueued
+			reportImageCacheRunProgress(reportProgress, total)
+			if page.Enqueued > 0 {
+				enqueuedThisSweep = true
+				break
+			}
+			if !page.Complete {
+				continue
+			}
+			if !discoveredThisSweep {
+				return total, nil
+			}
+			if confirmationSweep && !enqueuedThisSweep {
+				// A second complete sweep reported candidates but could not enqueue
+				// any of them. Repeating the same non-actionable catalog state cannot
+				// make progress; a later explicit backfill starts fresh from durable
+				// queue and catalog state.
+				return total, nil
+			}
+			// Queue rows and cached paths now reflect the completed sweep. Resetting
+			// catches concurrent changes that sorted behind the cursor. A retry or
+			// process restart also starts here and safely reuses those durable rows.
+			discoveryCursor = imageCacheDiscoveryCursor{}
+			discoveredThisSweep = false
+			enqueuedThisSweep = false
+			confirmationSweep = true
 		}
 	}
 }

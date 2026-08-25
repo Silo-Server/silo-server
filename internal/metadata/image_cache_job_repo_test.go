@@ -96,6 +96,7 @@ func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
 		"",
 		"tmdb/series/1396/poster/original.webp",
 		"s3://media/tmdb/series/1396/poster/original.webp",
+		"  s3://media/tmdb/series/1396/poster/original.webp  ",
 		"local://poster.jpg",
 		"generated://collections/1/poster.jpg",
 	} {
@@ -133,6 +134,82 @@ func TestNormalizeImageCacheJobInputKeepsLanguageAndDefaultsAttribution(t *testi
 	}
 	if got.ContentType != "series" {
 		t.Fatalf("ContentType = %q, want series", got.ContentType)
+	}
+}
+
+func TestImageCacheDiscoverySurfacesUseBoundedNativeKeyPages(t *testing.T) {
+	providerColumns := [...]string{
+		"mi.poster_source_path",
+		"mi.backdrop_source_path",
+		"mi.logo_source_path",
+		"loc.poster_source_path",
+		"loc.backdrop_source_path",
+		"loc.logo_source_path",
+		"s.poster_source_path",
+		"loc.poster_source_path",
+		"e.still_source_path",
+		"p.photo_source_path",
+	}
+	uncachedColumns := [...]string{
+		"mi.poster_path",
+		"mi.backdrop_path",
+		"mi.logo_path",
+		"loc.poster_path",
+		"loc.backdrop_path",
+		"loc.logo_path",
+		"s.poster_path",
+		"loc.poster_path",
+		"e.still_path",
+		"p.photo_path",
+	}
+	for surface := 0; surface < imageCacheDiscoverySurfaceCount; surface++ {
+		cursor := imageCacheDiscoveryCursor{Surface: surface, Key: "content-10", Subkey: "fr", NumericKey: 10}
+		query, args := imageCacheDiscoveryQuery(cursor, 1000)
+		if !strings.Contains(query, "LIMIT $1") {
+			t.Fatalf("surface %d query is not page-bounded", surface)
+		}
+		if strings.Contains(strings.ToUpper(query), "UNION") {
+			t.Fatalf("surface %d query rebuilds a cross-surface union", surface)
+		}
+		if strings.Contains(query, "%!") || !strings.Contains(query, "LIKE '%://%'") {
+			t.Fatalf("surface %d query has a malformed provider-source predicate", surface)
+		}
+		providerPredicate := "AND " + providerColumns[surface] + " LIKE '%://%'"
+		if !strings.Contains(query, providerPredicate) {
+			t.Fatalf("surface %d query missing exact provider predicate %q:\n%s", surface, providerPredicate, query)
+		}
+		if strings.Contains(query, providerColumns[surface]+" "+providerColumns[surface]) {
+			t.Fatalf("surface %d query duplicates provider column %q:\n%s", surface, providerColumns[surface], query)
+		}
+		uncachedPredicate := "AND (" + uncachedColumns[surface] + " LIKE '%://%' OR coalesce(" + uncachedColumns[surface] + ", '') = '')"
+		if !strings.Contains(query, uncachedPredicate) {
+			t.Fatalf("surface %d query missing exact uncached-target predicate %q:\n%s", surface, uncachedPredicate, query)
+		}
+		if strings.Contains(query, "@nonProviderSchemes") || !strings.Contains(query, nonProviderImageSchemesSQL) {
+			t.Fatalf("surface %d query did not expand the non-provider scheme filter:\n%s", surface, query)
+		}
+		if !strings.Contains(query, "LEFT JOIN LATERAL") ||
+			!strings.Contains(query, "FROM metadata_image_cache_jobs j") ||
+			!strings.Contains(query, `j.target_content_id = c.target_content_id COLLATE "default"`) ||
+			!strings.Contains(query, "j.source_path IS DISTINCT FROM c.source_path") {
+			t.Fatalf("surface %d query is missing the indexed eligibility lookup:\n%s", surface, query)
+		}
+		wantArgs := 2
+		if (surface >= 3 && surface <= 5) || surface == 7 {
+			wantArgs = 3
+		}
+		if len(args) != wantArgs || args[0] != 1000 {
+			t.Fatalf("surface %d args = %#v, want page limit and native cursor", surface, args)
+		}
+	}
+
+	localizedQuery, localizedArgs := imageCacheDiscoveryQuery(imageCacheDiscoveryCursor{Surface: 3}, 1000)
+	if !strings.Contains(localizedQuery, "loc.language > $3") || len(localizedArgs) != 3 {
+		t.Fatalf("localized discovery does not use its composite primary key: args=%#v", localizedArgs)
+	}
+	personQuery, personArgs := imageCacheDiscoveryQuery(imageCacheDiscoveryCursor{Surface: 9, NumericKey: 41}, 1000)
+	if !strings.Contains(personQuery, "p.id > $2") || len(personArgs) != 2 || personArgs[1] != int64(41) {
+		t.Fatalf("person discovery does not preserve its numeric cursor: args=%#v", personArgs)
 	}
 }
 
