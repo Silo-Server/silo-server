@@ -17,8 +17,14 @@ type AssetKind string
 const (
 	// KindWordmark is the wide logo shown in the expanded sidebar.
 	KindWordmark AssetKind = "wordmark"
+	// KindWordmarkLight is the wide logo shown in the expanded sidebar for light
+	// themes.
+	KindWordmarkLight AssetKind = "wordmark_light"
 	// KindMark is the square icon shown in the collapsed sidebar and PWA install.
 	KindMark AssetKind = "mark"
+	// KindMarkLight is the square icon shown in the collapsed sidebar for light
+	// themes.
+	KindMarkLight AssetKind = "mark_light"
 	// KindFavicon is the browser tab icon. Served as-is (no WebP re-encode) so
 	// Safari and mobile browsers keep working.
 	KindFavicon AssetKind = "favicon"

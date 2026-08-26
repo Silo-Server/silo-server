@@ -154,6 +154,16 @@ export default function BrandingSettings() {
               preview="wide"
             />
             <BrandingAssetField
+              label="Logo (wordmark, light themes)"
+              description="Optional. Shown on light themes; falls back to the main logo."
+              kind="wordmark_light"
+              currentUrl={branding.wordmarkLightUrl}
+              accept={IMAGE_ACCEPT}
+              enabled={assetStorageAvailable}
+              preview="wide"
+              previewBg="light"
+            />
+            <BrandingAssetField
               label="Logo (icon)"
               description="Square mark shown in the collapsed sidebar and installed app."
               kind="mark"
@@ -161,6 +171,16 @@ export default function BrandingSettings() {
               accept={IMAGE_ACCEPT}
               enabled={assetStorageAvailable}
               preview="square"
+            />
+            <BrandingAssetField
+              label="Logo (icon, light themes)"
+              description="Optional. Shown on light themes; falls back to the main icon."
+              kind="mark_light"
+              currentUrl={branding.markLightUrl}
+              accept={IMAGE_ACCEPT}
+              enabled={assetStorageAvailable}
+              preview="square"
+              previewBg="light"
             />
             <BrandingAssetField
               label="Favicon"

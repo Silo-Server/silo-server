@@ -64,6 +64,24 @@ func TestRenderIndexHTMLInjectsThemeColorOnlyWhenAccentSet(t *testing.T) {
 	}
 }
 
+func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
+	snap := newSnapshot("Acme")
+	baseline := snap.RenderKey()
+	snap.assets[KindWordmarkLight] = "wordmark-light.webp"
+	if got := snap.RenderKey(); got == baseline {
+		t.Fatal("RenderKey did not change when wordmark_light ref changed")
+	}
+}
+
+func TestRenderKeyIncludesMarkLight(t *testing.T) {
+	snap := newSnapshot("Acme")
+	baseline := snap.RenderKey()
+	snap.assets[KindMarkLight] = "mark-light.webp"
+	if got := snap.RenderKey(); got == baseline {
+		t.Fatal("RenderKey did not change when mark_light ref changed")
+	}
+}
+
 // TestRenderIndexHTMLAgainstRealShell guards against web/index.html drifting
 // away from the literals RenderIndexHTML depends on.
 func TestRenderIndexHTMLAgainstRealShell(t *testing.T) {

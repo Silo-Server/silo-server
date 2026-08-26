@@ -32,7 +32,9 @@ type brandingResponse struct {
 	AccentColor      string `json:"accent_color,omitempty"`
 	DefaultTheme     string `json:"default_theme,omitempty"`
 	WordmarkURL      string `json:"wordmark_url,omitempty"`
+	WordmarkLightURL string `json:"wordmark_light_url,omitempty"`
 	MarkURL          string `json:"mark_url,omitempty"`
+	MarkLightURL     string `json:"mark_light_url,omitempty"`
 	FaviconURL       string `json:"favicon_url,omitempty"`
 	LoginBgURL       string `json:"login_bg_url,omitempty"`
 	StorageAvailable bool   `json:"storage_available"`
@@ -49,7 +51,9 @@ func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Reque
 		AccentColor:      snap.AccentColor,
 		DefaultTheme:     snap.DefaultTheme,
 		WordmarkURL:      snap.AssetURL(branding.KindWordmark),
+		WordmarkLightURL: snap.AssetURL(branding.KindWordmarkLight),
 		MarkURL:          snap.AssetURL(branding.KindMark),
+		MarkLightURL:     snap.AssetURL(branding.KindMarkLight),
 		FaviconURL:       snap.AssetURL(branding.KindFavicon),
 		LoginBgURL:       snap.AssetURL(branding.KindLoginBg),
 		StorageAvailable: h.svc.HasStorage(),

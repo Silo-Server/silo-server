@@ -19,6 +19,12 @@ import type { TextScale, TextWeight } from "@/hooks/themePreferences";
 
 interface ThemeContextValue {
   theme: ThemeId;
+  /**
+   * The theme actually painted right now: the preview theme while the picker
+   * is previewing one, otherwise the committed theme. Always matches the
+   * html[data-theme] attribute.
+   */
+  activeTheme: ThemeId;
   setTheme: (theme: ThemeId) => void;
   previewTheme: (theme: ThemeId) => void;
   resetPreviewTheme: () => void;
@@ -236,9 +242,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     cacheOwner,
   ]);
 
+  // The single source of truth for what is on screen: both the DOM attribute
+  // and the context value derive from it, so consumers reading appearance stay
+  // in lockstep with the painted theme, preview included.
+  const activeTheme = previewThemeState ?? theme;
+
   useEffect(() => {
-    applyThemeToDOM(previewThemeState ?? theme);
-  }, [previewThemeState, theme]);
+    applyThemeToDOM(activeTheme);
+  }, [activeTheme]);
 
   useEffect(() => {
     applyTextScaleToDOM(textScale);
@@ -305,6 +316,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     <ThemeContext
       value={{
         theme,
+        activeTheme,
         setTheme,
         previewTheme,
         resetPreviewTheme,
@@ -325,4 +337,13 @@ export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
   return ctx;
+}
+
+/**
+ * Like useTheme(), but yields null outside ThemeProvider instead of throwing.
+ * For components that render both inside and outside the app shell (login
+ * chrome, brand marks) and can fall back to a sensible default.
+ */
+export function useOptionalTheme(): ThemeContextValue | null {
+  return useContext(ThemeContext);
 }

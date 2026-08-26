@@ -143,10 +143,14 @@ vi.mock("@/hooks/useServerBranding", () => ({
 vi.mock("@/hooks/useTheme", () => ({
   useTheme: () => ({
     theme: "dark",
+    activeTheme: "dark",
     setTheme: vi.fn(),
     previewTheme: vi.fn(),
     resetPreviewTheme: vi.fn(),
   }),
+  // SiloBrand reads the appearance through the optional hook; null keeps it on
+  // the dark built-in assets, matching the sidebar's own surface.
+  useOptionalTheme: () => null,
 }));
 
 vi.mock("@/components/ThemeSwitcher", () => ({
