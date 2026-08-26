@@ -21,7 +21,7 @@
   <a href="#quick-start">Quick start</a>
   · <a href="docs/wiki/index.md">Documentation</a>
   · <a href="docs/release-versioning.md">Builds &amp; releases</a>
-  · <a href="http://discord.gg/siloserver">Discord</a>
+  · <a href="https://discord.gg/siloserver">Discord</a>
   · <a href="#supporting-silo">Support Silo</a>
   · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
@@ -116,7 +116,7 @@ defines each tag and the SemVer contract.
 
 ## Community and contributions
 
-Questions and discussion: [Discord](http://discord.gg/siloserver).
+Questions and discussion: [Discord](https://discord.gg/siloserver).
 Bugs, install problems, and performance issues: the
 [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose),
 which ask for reproduction steps and raw logs.
