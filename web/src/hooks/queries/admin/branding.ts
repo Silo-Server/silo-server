@@ -5,7 +5,12 @@ import { api } from "@/api/client";
 import { adminKeys, themeKeys } from "../keys";
 
 export type BrandingAssetKind =
-  "wordmark" | "mark" | "wordmark_light" | "mark_light" | "favicon" | "login_bg";
+  | "wordmark"
+  | "mark"
+  | "wordmark_light"
+  | "mark_light"
+  | "favicon"
+  | "login_bg";
 
 interface BrandingAssetUploadResponse {
   kind: string;
