@@ -688,7 +688,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		} else if filters.LibraryID > 0 {
 			parentAccess.AllowedLibraryIDs = []int{filters.LibraryID}
 		}
-		appendEpisodeParentLibraryAccess(libraryContentExpr, parentAccess, &conditions, &args, &argIdx)
+		appendEpisodeParentLibraryAccessByEpisodeID(libraryContentExpr, parentAccess, &conditions, &args, &argIdx)
 	}
 
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filters.MaxContentRating}, &conditions, &args, &argIdx)

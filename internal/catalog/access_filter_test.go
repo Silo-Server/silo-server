@@ -7,15 +7,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestAppendEpisodeParentLibraryAccessRejectsDisabledSeriesMembership(t *testing.T) {
+func TestAppendEpisodeParentLibraryAccessByEpisodeIDRejectsDisabledSeriesMembership(t *testing.T) {
 	var conditions []string
 	var args []any
 	argIdx := 2
-	appendEpisodeParentLibraryAccess("e.content_id", AccessFilter{DisabledLibraryIDs: []int{9}}, &conditions, &args, &argIdx)
+	appendEpisodeParentLibraryAccessByEpisodeID("e.content_id", AccessFilter{DisabledLibraryIDs: []int{9}}, &conditions, &args, &argIdx)
 
 	sql := strings.Join(conditions, " AND ")
-	assertEpisodeParentDisabledAccess(t, sql, "e.content_id")
-	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = "+episodeParentSeriesIDExpr("e.content_id")+")") {
+	seriesExpr := episodeParentSeriesIDExpr("e.content_id")
+	assertEpisodeParentDisabledAccess(t, sql, seriesExpr)
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = "+seriesExpr+")") {
 		t.Fatalf("disabled-only episode listing must require positive series membership, got:\n%s", sql)
 	}
 	if len(args) != 1 || argIdx != 3 {
@@ -23,9 +24,21 @@ func TestAppendEpisodeParentLibraryAccessRejectsDisabledSeriesMembership(t *test
 	}
 }
 
-func assertEpisodeParentDisabledAccess(t *testing.T, sql, episodeIDExpr string) {
+func TestAppendEpisodeParentLibraryAccessUsesProjectedSeriesID(t *testing.T) {
+	var conditions []string
+	var args []any
+	argIdx := 1
+	appendEpisodeParentLibraryAccess("ece.series_id", AccessFilter{DisabledLibraryIDs: []int{9}}, &conditions, &args, &argIdx)
+
+	sql := strings.Join(conditions, " AND ")
+	assertEpisodeParentDisabledAccess(t, sql, "ece.series_id")
+	if strings.Contains(sql, "SELECT e_parent.series_id") {
+		t.Fatalf("projected series ID must not trigger an episode lookup, got:\n%s", sql)
+	}
+}
+
+func assertEpisodeParentDisabledAccess(t *testing.T, sql, seriesExpr string) {
 	t.Helper()
-	seriesExpr := episodeParentSeriesIDExpr(episodeIDExpr)
 	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = "+seriesExpr+" AND mil.media_folder_id = ANY(") {
 		t.Fatalf("episode listing must reject disabled parent-series membership, got:\n%s", sql)
 	}

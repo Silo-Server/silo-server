@@ -513,7 +513,7 @@ func buildLibraryScopeJoin(
 			parentAccess.AllowedLibraryIDs = allowedLibraryIDs
 		}
 		var parentClauses []string
-		appendEpisodeParentLibraryAccess(itemContentExpr, parentAccess, &parentClauses, &args, &argIdx)
+		appendEpisodeParentLibraryAccessByEpisodeID(itemContentExpr, parentAccess, &parentClauses, &args, &argIdx)
 		clauses = append(clauses, parentClauses...)
 	}
 

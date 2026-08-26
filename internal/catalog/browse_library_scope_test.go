@@ -80,7 +80,7 @@ func TestFilterWhereClauseDisabledLibrariesUseScopeMembershipTable(t *testing.T)
 	}
 
 	assertDisabledLibraryItemScope(t, whereClause, "episode_libraries", "episode_id", "mi.content_id")
-	assertEpisodeParentDisabledAccess(t, whereClause, "mi.content_id")
+	assertEpisodeParentDisabledAccess(t, whereClause, episodeParentSeriesIDExpr("mi.content_id"))
 	if strings.Contains(fromClause, "JOIN episode_libraries") {
 		t.Fatalf("disabled-only episode facet query must not fan out through a membership JOIN; got FROM %s %s", fromClause, whereClause)
 	}
