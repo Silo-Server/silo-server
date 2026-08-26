@@ -463,6 +463,7 @@ type sectionItemResponse struct {
 	RatingRTCritic    *int                   `json:"rating_rt_critic,omitempty"`
 	RatingRTAudience  *int                   `json:"rating_rt_audience,omitempty"`
 	OriginalLanguage  string                 `json:"original_language,omitempty"`
+	Tagline           string                 `json:"tagline,omitempty"`
 	Overview          string                 `json:"overview,omitempty"`
 	PositionSeconds   *float64               `json:"position_seconds,omitempty"`
 	DurationSeconds   *float64               `json:"duration_seconds,omitempty"`
@@ -1457,6 +1458,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		RatingRTCritic:    item.RatingRTCritic,
 		RatingRTAudience:  item.RatingRTAudience,
 		OriginalLanguage:  item.OriginalLanguage,
+		Tagline:           item.Tagline,
 		Overview:          item.Overview,
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,

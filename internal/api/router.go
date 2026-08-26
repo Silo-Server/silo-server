@@ -549,6 +549,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build browse/search/items handlers if DB is available.
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
+	var textlessPosterHandler *handlers.TextlessPosterHandler
 	var catalogHandler *handlers.CatalogHandler
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
@@ -1238,6 +1239,15 @@ func NewRouter(deps Dependencies) chi.Router {
 			detailSvc,
 		)
 		adminImageHandler.EventsHub = deps.EventsHub
+	}
+	if imageSvc, ok := deps.MetadataService.(handlers.TextlessPosterImageService); ok && itemsHandler != nil && itemRepo != nil && deps.DB != nil && deps.PluginImageResolver != nil {
+		textlessPosterHandler = handlers.NewTextlessPosterHandler(
+			itemsHandler,
+			itemRepo,
+			&handlers.PoolFolderLookup{Pool: deps.DB},
+			imageSvc,
+			deps.PluginImageResolver,
+		)
 	}
 
 	var adminIntroHandler *handlers.AdminIntroHandler
@@ -2099,7 +2109,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Artwork size selection. Static: the answer depends only on
 				// the server's variant ladder, not on the caller.
-				r.Get("/images/capability", handlers.HandleImagesCapability)
+				r.Get("/images/capability", handlers.NewImagesCapabilityHandler(textlessPosterHandler != nil))
 
 				// User notifications: profile-scoped inbox, preferences, and
 				// the websocket handshake ticket.
@@ -2225,6 +2235,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					if catalogResourceHandler != nil {
 						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
+						if textlessPosterHandler != nil {
+							r.Get("/catalog/items/{id}/images/textless-poster", textlessPosterHandler.HandleGet)
+						}
 						r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
 						r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
 						r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
