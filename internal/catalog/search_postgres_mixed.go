@@ -397,4 +397,7 @@ func appendEpisodeLibrarySearchAccess(
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx++
 	}
+	// File membership is not enough: a series linked to a disabled library is
+	// hidden at detail/play, so search must hide those episodes too.
+	appendEpisodeParentLibraryAccess(episodeIDExpr, filter, conditions, args, argIdx)
 }

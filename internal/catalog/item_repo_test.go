@@ -785,6 +785,7 @@ func TestItemRepo_Search_EpisodeAccessUsesIndependentMembershipPredicates(t *tes
 	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM episode_libraries disabled_el") {
 		t.Fatalf("episode search missing independent disabled-library NOT EXISTS:\n%s", sql)
 	}
+	assertEpisodeParentDisabledAccess(t, sql, "e.content_id")
 }
 
 // TestItemRepo_ListUnmatchedByFolderAndPathPrefix_ExcludesMangaChapters pins

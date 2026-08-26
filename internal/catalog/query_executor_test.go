@@ -92,8 +92,8 @@ func TestBuildLibraryScopeJoin_EpisodeScopeUsesEpisodeLibraryMembership(t *testi
 	if !ok {
 		t.Fatal("expected join to be enabled")
 	}
-	if len(args) != 1 {
-		t.Fatalf("args = %v, want single slice arg", args)
+	if len(args) != 2 {
+		t.Fatalf("args = %v, want episode and series allowed-library args", args)
 	}
 	if got, ok := args[0].([]int); !ok || len(got) != 1 || got[0] != 4 {
 		t.Fatalf("args[0] = %v, want []int{4}", args[0])
@@ -103,6 +103,9 @@ func TestBuildLibraryScopeJoin_EpisodeScopeUsesEpisodeLibraryMembership(t *testi
 	}
 	if !strings.Contains(whereSQL, ".episode_id = mi.content_id") {
 		t.Fatalf("expected episode library scope to match episode_id to mi.content_id, got %q", whereSQL)
+	}
+	if !strings.Contains(whereSQL, episodeParentSeriesIDExpr("mi.content_id")) {
+		t.Fatalf("episode library scope must also require parent-series membership, got %q", whereSQL)
 	}
 }
 
@@ -144,8 +147,8 @@ func TestEpisodeCatalogBaseRelationForLibraries_UsesEpisodeLibraries(t *testing.
 	if !handled {
 		t.Fatal("expected episode library scope to be handled in the base relation")
 	}
-	if len(args) != 2 {
-		t.Fatalf("args = %v, want 2 slice args", args)
+	if len(args) != 4 {
+		t.Fatalf("args = %v, want 4 slice args (episode allow/deny and series allow/deny)", args)
 	}
 	if got, ok := args[0].([]int); !ok || len(got) != 2 || got[0] != 2 || got[1] != 7 {
 		t.Fatalf("args[0] = %v, want []int{2, 7}", args[0])
@@ -161,6 +164,15 @@ func TestEpisodeCatalogBaseRelationForLibraries_UsesEpisodeLibraries(t *testing.
 	}
 	if !strings.Contains(relation, "NOT EXISTS (") || !strings.Contains(relation, "el_scope_out.media_folder_id = ANY($4)") {
 		t.Fatalf("expected independent disabled-library NOT EXISTS filter, got %q", relation)
+	}
+	if !strings.Contains(relation, "mil.content_id = e.series_id") {
+		t.Fatalf("episode catalog must also gate on parent-series membership, got %q", relation)
+	}
+	if !strings.Contains(relation, "mil.media_folder_id = ANY($5)") {
+		t.Fatalf("expected series allowed-library placeholder, got %q", relation)
+	}
+	if !strings.Contains(relation, "mil.media_folder_id = ANY($6)") {
+		t.Fatalf("expected series disabled-library placeholder, got %q", relation)
 	}
 	if strings.Contains(relation, "NOT (el.media_folder_id = ANY(") {
 		t.Fatalf("row-local disabled-library predicate leaks dual-membership episodes, got %q", relation)
@@ -181,8 +193,11 @@ func TestEpisodeCatalogBaseRelationForLibraries_DisabledOnlyRequiresMembership(t
 	if !strings.Contains(relation, "NOT EXISTS (") || !strings.Contains(relation, "el_scope_out.media_folder_id = ANY($1)") {
 		t.Fatalf("disabled-only episode scope must reject any disabled membership, got %q", relation)
 	}
-	if len(args) != 1 {
-		t.Fatalf("args = %v, want one disabled-library argument", args)
+	if !strings.Contains(relation, "mil.content_id = e.series_id") {
+		t.Fatalf("disabled-only episode scope must also reject disabled parent-series membership, got %q", relation)
+	}
+	if len(args) != 2 {
+		t.Fatalf("args = %v, want episode and series disabled-library arguments", args)
 	}
 }
 
@@ -233,7 +248,7 @@ func TestEpisodeCatalogSingleLibraryAddedAtUsesDirectMembershipJoin(t *testing.T
 	if !strings.Contains(sql, "JOIN episode_libraries sort_added") {
 		t.Fatalf("expected direct episode_libraries join for single-library added_at sort, got %s", sql)
 	}
-	if !strings.Contains(sql, "sort_added.media_folder_id = $2") {
+	if !strings.Contains(sql, "sort_added.media_folder_id = $3") {
 		t.Fatalf("expected direct added_at join to bind the single library, got %s", sql)
 	}
 	if strings.Contains(sql, "GROUP BY el.episode_id") {

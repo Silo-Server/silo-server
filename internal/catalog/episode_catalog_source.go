@@ -151,6 +151,12 @@ func episodeCatalogBaseRelationForLibraries(
 		argIdx++
 	}
 
+	parentAccess := AccessFilter{DisabledLibraryIDs: disabledLibraryIDs}
+	if len(allowedLibraryIDs) > 0 {
+		parentAccess.AllowedLibraryIDs = allowedLibraryIDs
+	}
+	appendLibraryAccessConditions("e.series_id", parentAccess, &libraryPredicates, &args, &argIdx)
+
 	relation := fmt.Sprintf(
 		episodeCatalogSelectBody,
 		strings.Join(libraryPredicates, "\n\tAND "),

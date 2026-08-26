@@ -26,8 +26,9 @@ func TestApplyEpisodeCatalogAccessFilterRejectsAnyDisabledMembership(t *testing.
 	if !strings.Contains(where, "el_scope_out.media_folder_id = ANY($2)") {
 		t.Fatalf("disabled libraries must bind at $2, got %s", where)
 	}
-	if len(args) != 1 || argIdx != 3 {
-		t.Fatalf("args = %v, argIdx = %d; want one disabled-list arg and 3", args, argIdx)
+	assertEpisodeParentDisabledAccess(t, where, "ece.episode_id")
+	if len(args) != 2 || argIdx != 4 {
+		t.Fatalf("args = %v, argIdx = %d; want episode and series disabled-list args and 4", args, argIdx)
 	}
 }
 
