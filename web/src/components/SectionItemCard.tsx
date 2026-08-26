@@ -38,6 +38,7 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
   const cardRef = useRef<HTMLDivElement>(null);
+  const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
   return (
     <div ref={cardRef} className="media-card media-card-longpress group/card">
@@ -102,14 +103,12 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
           userState={item.user_state}
           variant="poster"
           longPressRef={cardRef}
-          itemTitle={item.title}
+          itemTitle={displayTitle}
         />
       </div>
       {showCaption ? (
         <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-          <div className="truncate text-[14px] font-semibold tracking-tight">
-            {episodeLabels ? episodeLabels.seriesTitle : item.title}
-          </div>
+          <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
           {showMetadata && upcomingEvent ? (
             <>
               {subtitle && (
