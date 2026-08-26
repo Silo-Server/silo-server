@@ -93,7 +93,7 @@ func handleImagesCapability(w http.ResponseWriter, textlessPosterEnabled bool) {
 	if textlessPosterEnabled {
 		response.TextlessPoster = &textlessPosterCapability{
 			Endpoint:       "/api/v1/catalog/items/{id}/images/textless-poster",
-			SupportedTypes: []string{"movie", "series"},
+			SupportedTypes: []string{textlessPosterMovieType, textlessPosterSeriesType},
 		}
 	}
 

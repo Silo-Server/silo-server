@@ -19,6 +19,8 @@ import (
 )
 
 const (
+	textlessPosterMovieType        = "movie"
+	textlessPosterSeriesType       = "series"
 	textlessPosterCacheSize        = 512
 	textlessPosterCacheTTL         = 6 * time.Hour
 	textlessPosterNegativeCacheTTL = 15 * time.Minute
@@ -176,7 +178,7 @@ func (h *TextlessPosterHandler) HandleGet(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item")
 		return
 	}
-	if item.Type != "movie" && item.Type != "series" {
+	if item.Type != textlessPosterMovieType && item.Type != textlessPosterSeriesType {
 		writeError(w, http.StatusBadRequest, "unsupported_type", "Textless posters are available for movies and series")
 		return
 	}
