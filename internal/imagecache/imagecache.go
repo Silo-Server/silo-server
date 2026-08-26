@@ -38,8 +38,10 @@ type objectMatcher interface {
 	ObjectMatches(ctx context.Context, bucket, key string, data []byte) (bool, error)
 }
 
-// ArtworkRevisionTracker persists the exact object manifest for an immutable
-// revision before any object is uploaded.
+// ArtworkRevisionTracker persists the object manifest for an immutable
+// revision. The cacher first records an empty, image-type-backed manifest so
+// partial uploads remain collectible, then replaces it with the exact keys
+// only after every upload succeeds.
 type ArtworkRevisionTracker interface {
 	TrackArtworkRevision(ctx context.Context, originalPath, imageType string, objectKeys []string) error
 }
@@ -238,12 +240,16 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 	bucket := c.s3.Bucket()
 	revision := variantRevision(result)
 	variantPaths := buildVariantPaths(basePath, revision, result)
-	if err := c.trackRevision(ctx, req.ImageType, variantPaths); err != nil {
+	originalPath := variantPaths[artworkkey.OriginalVariant]
+	if err := c.trackRevision(ctx, req.ImageType, originalPath, nil); err != nil {
 		return nil, err
 	}
 
 	uploadStats, err := c.uploadVariants(ctx, bucket, result, variantPaths)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.trackRevision(ctx, req.ImageType, originalPath, variantPaths); err != nil {
 		return nil, err
 	}
 	return &CacheResult{
@@ -361,11 +367,10 @@ func buildVariantPaths(basePath, revision string, result *imageutil.VariantResul
 	return paths
 }
 
-func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType, variantPaths map[string]string) error {
+func (c *Cacher) trackRevision(ctx context.Context, imageType metadata.ImageType, originalPath string, variantPaths map[string]string) error {
 	if c == nil || c.revisionTracker == nil {
 		return nil
 	}
-	originalPath := variantPaths[artworkkey.OriginalVariant]
 	keys := make([]string, 0, len(variantPaths))
 	for _, key := range variantPaths {
 		keys = append(keys, key)

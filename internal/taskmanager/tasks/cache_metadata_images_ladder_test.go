@@ -26,12 +26,13 @@ func (f *ladderRunner) RunLadderBackfill(_ context.Context, workerID string, _ i
 }
 
 type fakeLadderState struct {
-	version     int
-	lastAttempt time.Time
-	attempts    int
-	recorded    []int
-	getErr      error
-	setErr      error
+	version       int
+	lastAttempt   time.Time
+	attempts      int
+	recorded      []int
+	getErr        error
+	setErr        error
+	rejectConfirm bool
 }
 
 func (s *fakeLadderState) Get(context.Context) (metadata.ImageLadderBackfillState, error) {
@@ -47,13 +48,17 @@ func (s *fakeLadderState) MarkAttempt(context.Context) error {
 	return nil
 }
 
-func (s *fakeLadderState) SetBackfilled(_ context.Context, version int) error {
+func (s *fakeLadderState) ConfirmBackfilled(_ context.Context, version int) (bool, error) {
 	if s.setErr != nil {
-		return s.setErr
+		return false, s.setErr
+	}
+	if s.rejectConfirm {
+		s.lastAttempt = time.Time{}
+		return false, nil
 	}
 	s.recorded = append(s.recorded, version)
 	s.version = version
-	return nil
+	return true, nil
 }
 
 func runLadderTask(t *testing.T, runner *ladderRunner, state *fakeLadderState, target int) *recordingProgress {
@@ -116,6 +121,23 @@ func TestLadderBackfillNotRecordedWhenIncomplete(t *testing.T) {
 
 	if len(state.recorded) != 0 {
 		t.Fatalf("recorded versions = %v, want none for an unfinished pass", state.recorded)
+	}
+}
+
+func TestLadderBackfillFinalConfirmationCanReopenThePass(t *testing.T) {
+	runner := &ladderRunner{complete: true}
+	state := &fakeLadderState{rejectConfirm: true}
+
+	progress := runLadderTask(t, runner, state, 2)
+
+	if len(state.recorded) != 0 {
+		t.Fatalf("recorded versions = %v, want none after rejected confirmation", state.recorded)
+	}
+	if !state.lastAttempt.IsZero() {
+		t.Fatalf("last attempt = %v, want final confirmation to make the next run eligible", state.lastAttempt)
+	}
+	if !strings.Contains(strings.Join(progress.messages, "\n"), "resume on the next run") {
+		t.Fatalf("progress messages = %v, want reopened pass reported", progress.messages)
 	}
 }
 

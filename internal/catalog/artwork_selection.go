@@ -50,19 +50,22 @@ func NewArtworkRevisionTracker(pool *pgxpool.Pool) *ArtworkRevisionTracker {
 	return &ArtworkRevisionTracker{pool: pool, gracePeriod: defaultArtworkGCGracePeriod}
 }
 
-// TrackArtworkRevision records the exact object manifest for a revision before
-// its upload starts. Image caching calls this before uploading, so it
-// serializes with a collector that may already be deleting an older,
-// currently-unreferenced copy. Revisions parked as referenced stay dormant: a
-// re-cache of live artwork is not garbage, and displacement triggers re-arm
-// the row if the reference later moves away.
+// TrackArtworkRevision records an immutable revision's object manifest. Image
+// caching first supplies an empty manifest before uploading, so it serializes
+// with a collector that may already be deleting an older, unreferenced copy;
+// the image type lets GC expand that pending manifest if an upload only partly
+// succeeds. The cacher replaces it with exact keys only after every upload
+// succeeds. Revisions parked as referenced stay dormant: a re-cache of live
+// artwork is not garbage, and displacement triggers re-arm the row if the
+// reference later moves away.
 func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, originalPath, imageType string, objectKeys []string) error {
 	if t == nil || t.pool == nil {
 		return fmt.Errorf("catalog: artwork revision tracking is not configured")
 	}
 	originalPath = strings.TrimSpace(originalPath)
+	imageType = strings.ToLower(strings.TrimSpace(imageType))
 	keys := compactArtworkObjectKeys(objectKeys)
-	if originalPath == "" || strings.Contains(originalPath, "://") || len(keys) == 0 {
+	if originalPath == "" || strings.Contains(originalPath, "://") || (len(keys) == 0 && imageType == "") {
 		return nil
 	}
 	notBefore := time.Now().Add(t.gracePeriod)
@@ -91,7 +94,7 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
 			locked_at = NULL,
 			locked_by = '',
 			last_error = '',
-			updated_at = NOW()`, originalPath, strings.ToLower(strings.TrimSpace(imageType)), keys, notBefore)
+			updated_at = NOW()`, originalPath, imageType, keys, notBefore)
 	if err != nil {
 		return fmt.Errorf("catalog: track artwork revision: %w", err)
 	}

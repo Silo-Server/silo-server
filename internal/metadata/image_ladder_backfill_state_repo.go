@@ -77,14 +77,55 @@ func (r *ImageLadderBackfillStateRepository) MarkAttempt(ctx context.Context) er
 	return nil
 }
 
-// SetBackfilled records that the ladder at this version has been proven fully
-// backfilled. It only ever moves the version forward, so a stale worker that
-// finishes an older pass late cannot un-record a newer one.
-func (r *ImageLadderBackfillStateRepository) SetBackfilled(ctx context.Context, version int) error {
+// ConfirmBackfilled authoritatively checks the artwork state and records the
+// version in one transaction. The singleton row lock coordinates with the
+// database trigger installed for rolling upgrades: a late old worker either
+// publishes first and is visible to this check, or publishes afterward and
+// reopens the version itself.
+func (r *ImageLadderBackfillStateRepository) ConfirmBackfilled(ctx context.Context, version int) (bool, error) {
 	if r == nil || r.pool == nil {
-		return nil
+		return false, nil
 	}
-	_, err := r.pool.Exec(ctx, `
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, fmt.Errorf("starting image ladder backfill confirmation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var recordedVersion int
+	if err := tx.QueryRow(ctx, `
+		SELECT backfilled_version
+		FROM image_ladder_backfill_state
+		WHERE id = 1
+		FOR UPDATE
+	`).Scan(&recordedVersion); err != nil {
+		return false, fmt.Errorf("locking image ladder backfill state: %w", err)
+	}
+
+	var remaining bool
+	if err := tx.QueryRow(ctx, `
+		WITH all_candidates AS (`+ladderCandidateRowsSQL()+`
+		)
+		SELECT EXISTS (SELECT 1 FROM all_candidates)
+	`).Scan(&remaining); err != nil {
+		return false, fmt.Errorf("confirming image ladder backfill remainder: %w", err)
+	}
+	if remaining {
+		if _, err := tx.Exec(ctx, `
+			UPDATE image_ladder_backfill_state
+			SET last_attempt_at = NULL,
+			    updated_at = NOW()
+			WHERE id = 1
+		`); err != nil {
+			return false, fmt.Errorf("reopening image ladder backfill attempt: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("committing image ladder backfill reopen: %w", err)
+		}
+		return false, nil
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO image_ladder_backfill_state (id, backfilled_version, updated_at)
 		VALUES (1, $1, NOW())
 		ON CONFLICT (id) DO UPDATE
@@ -92,7 +133,10 @@ func (r *ImageLadderBackfillStateRepository) SetBackfilled(ctx context.Context, 
 		    updated_at = NOW()
 	`, version)
 	if err != nil {
-		return fmt.Errorf("recording image ladder backfill state: %w", err)
+		return false, fmt.Errorf("recording image ladder backfill state: %w", err)
 	}
-	return nil
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("committing image ladder backfill state: %w", err)
+	}
+	return true, nil
 }

@@ -172,7 +172,7 @@ func (m *mockS3) resetCalls() {
 	m.existsCalls = nil
 }
 
-func TestCacheBytesTracksExactRevisionBeforeUpload(t *testing.T) {
+func TestCacheBytesTracksPendingThenExactRevision(t *testing.T) {
 	s3 := &mockS3{bucket: "artwork"}
 	tracker := &recordingRevisionTracker{}
 	cacher := newWithHTTPClient(s3, nil)
@@ -189,8 +189,8 @@ func TestCacheBytesTracksExactRevisionBeforeUpload(t *testing.T) {
 	}
 
 	calls := tracker.recorded()
-	if len(calls) != 1 {
-		t.Fatalf("tracker calls = %d, want 1", len(calls))
+	if len(calls) != 2 {
+		t.Fatalf("tracker calls = %d, want pending and complete manifests", len(calls))
 	}
 	if calls[0].originalPath != result.OriginalPath {
 		t.Fatalf("tracked original = %q, want %q", calls[0].originalPath, result.OriginalPath)
@@ -198,13 +198,40 @@ func TestCacheBytesTracksExactRevisionBeforeUpload(t *testing.T) {
 	if calls[0].imageType != "poster" {
 		t.Fatalf("tracked image type = %q, want poster", calls[0].imageType)
 	}
+	if len(calls[0].objectKeys) != 0 {
+		t.Fatalf("pending keys = %v, want none before uploads complete", calls[0].objectKeys)
+	}
 	wantKeys := make([]string, 0, len(result.VariantPaths))
 	for _, key := range result.VariantPaths {
 		wantKeys = append(wantKeys, key)
 	}
 	sort.Strings(wantKeys)
-	if !slices.Equal(calls[0].objectKeys, wantKeys) {
-		t.Fatalf("tracked keys = %v, want %v", calls[0].objectKeys, wantKeys)
+	if !slices.Equal(calls[1].objectKeys, wantKeys) {
+		t.Fatalf("completed keys = %v, want %v", calls[1].objectKeys, wantKeys)
+	}
+}
+
+func TestCacheBytesUploadFailureLeavesManifestPending(t *testing.T) {
+	s3 := &mockS3{bucket: "artwork", putErr: errors.New("storage unavailable")}
+	tracker := &recordingRevisionTracker{}
+	cacher := newWithHTTPClient(s3, nil)
+	cacher.SetArtworkRevisionTracker(tracker)
+
+	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "335984",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err == nil || !strings.Contains(err.Error(), "storage unavailable") {
+		t.Fatalf("CacheBytes error = %v, want upload failure", err)
+	}
+	calls := tracker.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("tracker calls = %d, want only the pending manifest", len(calls))
+	}
+	if len(calls[0].objectKeys) != 0 {
+		t.Fatalf("tracked keys = %v, want no completion proof after upload failure", calls[0].objectKeys)
 	}
 }
 

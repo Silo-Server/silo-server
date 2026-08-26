@@ -40,7 +40,7 @@ type MetadataImageLadderBackfillRunner interface {
 type MetadataImageLadderBackfillState interface {
 	Get(ctx context.Context) (metadata.ImageLadderBackfillState, error)
 	MarkAttempt(ctx context.Context) error
-	SetBackfilled(ctx context.Context, version int) error
+	ConfirmBackfilled(ctx context.Context, version int) (bool, error)
 }
 
 // ladderBackfillScanInterval paces the sweep. It cannot simply run on every
@@ -230,8 +230,13 @@ func (t *CacheMetadataImagesTask) runLadderBackfill(
 		progress.Report(100, fmt.Sprintf("Artwork ladder backfill in progress: %d regenerated so far", stats.Succeeded))
 		return
 	}
-	if err := t.ladderState.SetBackfilled(ctx, t.ladderTarget); err != nil {
+	confirmed, err := t.ladderState.ConfirmBackfilled(ctx, t.ladderTarget)
+	if err != nil {
 		progress.Report(100, fmt.Sprintf("Artwork ladder backfill finished but could not be recorded: %v", err))
+		return
+	}
+	if !confirmed {
+		progress.Report(100, "Artwork ladder backfill found new work during final confirmation; it will resume on the next run")
 		return
 	}
 	progress.Report(100, fmt.Sprintf("Artwork ladder backfill complete: %d images regenerated", stats.Succeeded))
