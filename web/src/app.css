@@ -1260,40 +1260,47 @@
     transform: translateY(-4px);
   }
 
-  /* Keep card actions visible by default for touch, keyboard-only, and older
-     browsers. When any connected precise pointer can hover, hide them until
-     the card itself is hovered. This deliberately uses a direct :hover
+  /* Card actions stay hidden at rest so touch devices get clean artwork; a
+     long press opens the action sheet instead. Keyboard focus and an open
+     menu reveal them on every device so keyboard and assistive-tech users
+     always have a visible, hittable target. */
+  .media-card-action-trigger,
+  .media-card-play-trigger {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .media-card-action-trigger[data-state="open"],
+  .media-card-action-trigger:focus-visible,
+  .media-card-play-trigger:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  /* Hover reveal is for precise pointers only, so a tap-emulated :hover on a
+     phone cannot uncover the controls. This deliberately uses a direct :hover
      selector: Tailwind's group-hover variant is limited to the primary
      pointer's (hover: hover) result, which can exclude Windows hybrid devices
      even while an attached mouse is actively hovering the card. */
-  .media-card-action-trigger,
-  .media-card-play-trigger {
-    opacity: 1;
-  }
-  .media-card-play-trigger {
-    pointer-events: auto;
-  }
   @media (any-hover: hover) and (any-pointer: fine) {
     .group\/media:hover .media-card-hover-dim {
       background-color: rgb(0 0 0 / 0.3);
     }
-    .media-card-action-trigger,
-    .media-card-play-trigger {
-      opacity: 0;
-    }
-    .media-card-play-trigger {
-      pointer-events: none;
-    }
     .group\/card:hover .media-card-action-trigger,
-    .media-card-action-trigger[data-state="open"],
-    .media-card-action-trigger:focus-visible,
-    .group\/media:hover .media-card-play-trigger,
-    .media-card-play-trigger:focus-visible {
+    .group\/media:hover .media-card-play-trigger {
       opacity: 1;
-    }
-    .group\/media:hover .media-card-play-trigger,
-    .media-card-play-trigger:focus-visible {
       pointer-events: auto;
+    }
+  }
+
+  /* A long press on a card opens the action sheet, so the browser's own image
+     and link callout has to stay out of the way. Text selection is only
+     disabled for coarse primary pointers: a mouse user can still select a
+     card's caption. */
+  .media-card-longpress {
+    -webkit-touch-callout: none;
+  }
+  @media (pointer: coarse) {
+    .media-card-longpress {
+      user-select: none;
     }
   }
 

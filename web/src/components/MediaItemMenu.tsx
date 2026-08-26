@@ -1,4 +1,12 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Check,
   Eye,
@@ -42,6 +50,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useLongPress } from "@/hooks/useLongPress";
 import { cn } from "@/lib/utils";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -102,6 +118,10 @@ interface MediaItemMenuProps {
   showWatchedShortcut?: boolean;
   /** Uses smaller poster controls on narrow catalog cards. */
   narrowPosterActions?: boolean;
+  /** Card root whose long press opens the touch action sheet. */
+  longPressRef?: RefObject<HTMLElement | null>;
+  /** Heading for the touch action sheet. */
+  itemTitle?: string;
 }
 
 export function buildMediaItemMenuModel({
@@ -255,6 +275,90 @@ function MediaItemMenuActionIcon({
     case "matchItem":
       return <MediaActionIcon action="matchItem" />;
   }
+}
+
+function MediaItemActionSheetRow({
+  disabled,
+  onSelect,
+  children,
+}: {
+  disabled?: boolean;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      className="hover:bg-accent/60 active:bg-accent flex min-h-11 w-full items-center gap-3 px-5 py-3 text-left text-sm font-medium transition-colors disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Touch equivalent of the three-dot dropdown: the same action model presented
+ * as a bottom sheet, opened by long-pressing the card.
+ */
+function MediaItemActionSheet({
+  open,
+  onOpenChange,
+  title,
+  entries,
+  userState,
+  isPending,
+  isRefreshing,
+  onSelectAction,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title?: string;
+  entries: MediaItemMenuEntry[];
+  userState?: MediaItemUserState;
+  isPending: boolean;
+  isRefreshing: boolean;
+  onSelectAction: (actionKey: MediaItemMenuActionKey) => void;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
+        className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
+      >
+        <SheetHeader className="px-5 pt-4 pb-2">
+          <SheetTitle className="truncate text-left text-base">{title ?? "Actions"}</SheetTitle>
+          <SheetDescription className="sr-only">Choose an action for this item.</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col pb-3">
+          {entries.map((entry, index) =>
+            entry.kind === "separator" ? (
+              <div
+                key={`separator-${index}`}
+                aria-hidden="true"
+                className="bg-border/60 my-1.5 h-px"
+              />
+            ) : (
+              <MediaItemActionSheetRow
+                key={entry.key}
+                disabled={isPending}
+                onSelect={() => onSelectAction(entry.key)}
+              >
+                <MediaItemMenuActionIcon
+                  actionKey={entry.key}
+                  userState={userState}
+                  isRefreshing={isRefreshing}
+                />
+                {entry.label}
+              </MediaItemActionSheetRow>
+            ),
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
 }
 
 function CardQuickActionButton({
@@ -562,6 +666,8 @@ export default function MediaItemMenu({
   hasPartialProgress = false,
   showWatchedShortcut = false,
   narrowPosterActions = false,
+  longPressRef,
+  itemTitle,
 }: MediaItemMenuProps) {
   const navigate = useViewTransitionNavigate();
   const location = useLocation();
@@ -577,6 +683,7 @@ export default function MediaItemMenu({
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [filesDialogOpen, setFilesDialogOpen] = useState(false);
   const [metadataAction, setMetadataAction] = useState<MetadataAction | null>(null);
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const lastMenuInteractionRef = useRef<"keyboard" | "pointer" | null>(null);
   const pointerClosedMenuRef = useRef(false);
@@ -626,6 +733,10 @@ export default function MediaItemMenu({
     canCurateMetadata,
     showCollectionActions,
     dismissLabel,
+  });
+  useLongPress(longPressRef, {
+    onLongPress: () => setActionSheetOpen(true),
+    enabled: model.length > 0,
   });
   const showPosterFavorite =
     variant === "poster" &&
@@ -884,6 +995,19 @@ export default function MediaItemMenu({
           </DropdownMenu>
         )}
       </div>
+      <MediaItemActionSheet
+        open={actionSheetOpen}
+        onOpenChange={setActionSheetOpen}
+        title={itemTitle}
+        entries={model}
+        userState={currentUserState}
+        isPending={isPending}
+        isRefreshing={refreshMetadataMutation.isPending}
+        onSelectAction={(actionKey) => {
+          setActionSheetOpen(false);
+          void handleAction(actionKey);
+        }}
+      />
       <RefreshMetadataDialog
         open={refreshDialogOpen}
         onOpenChange={setRefreshDialogOpen}

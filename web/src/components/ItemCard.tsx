@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -196,9 +197,10 @@ export default function ItemCard({
   const { cardPresentation } = useUICustomization();
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
+  const cardRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="media-card group/card">
+    <div ref={cardRef} className="media-card media-card-longpress group/card">
       <div className="relative">
         <ViewTransitionLink
           to={itemHref}
@@ -307,6 +309,8 @@ export default function ItemCard({
           userState={item.user_state}
           variant="poster"
           narrowPosterActions={narrowPosterActions}
+          longPressRef={cardRef}
+          itemTitle={displayTitle}
         />
       </div>
       {showCaption ? (

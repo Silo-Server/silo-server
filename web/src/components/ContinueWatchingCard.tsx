@@ -1,6 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import type { ProgressEntry } from "@/api/types";
@@ -36,6 +36,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const { cardPresentation } = useUICustomization();
+  const cardRef = useRef<HTMLDivElement>(null);
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
@@ -222,7 +223,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const imageSrc = imagePrimary || imageFallback;
 
   return (
-    <div className={`group/card ${containerWidth}`}>
+    <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
       <div className="group/media relative">
         <ViewTransitionLink to={detailHref} className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
@@ -297,6 +298,8 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           showFavoriteShortcut={false}
           dismissAction={dismissAction}
           hasPartialProgress={hasPartialProgress}
+          longPressRef={cardRef}
+          itemTitle={heading}
         />
       </div>
 
