@@ -211,6 +211,7 @@ func (t *CacheMetadataImagesTask) runLadderBackfill(
 	}
 	workerID := fmt.Sprintf("%s:ladder:%s", hostname, uuid.NewString())
 	progress.Report(0, "Regenerating cached artwork for the current image size ladder")
+	reportedPercent := 0.0
 
 	stats, complete, err := backfiller.RunLadderBackfill(
 		ctx,
@@ -219,7 +220,12 @@ func (t *CacheMetadataImagesTask) runLadderBackfill(
 		cacheMetadataImagesWorkers,
 		cacheMetadataImagesMaxRuntime,
 		func(update metadata.ImageCacheRunStats) {
-			progress.Report(cacheMetadataImagesPercent(update), formatCacheMetadataImagesProgress(update))
+			percent := cacheMetadataImagesPercent(update)
+			if percent < reportedPercent {
+				percent = reportedPercent
+			}
+			reportedPercent = percent
+			progress.Report(percent, formatCacheMetadataImagesProgress(update))
 		},
 	)
 	if err != nil {

@@ -102,12 +102,16 @@ func TestImageLadderBackfillLateOldArtworkReopensCompletedVersion(t *testing.T) 
 	fixture := seedLadderFenceFixture(t, pool)
 	ctx := context.Background()
 
-	confirmed, err := NewImageLadderBackfillStateRepository(pool).ConfirmBackfilled(ctx, 2)
-	if err != nil {
-		t.Fatalf("ConfirmBackfilled: %v", err)
-	}
-	if !confirmed {
-		t.Fatal("wide-rung fixture did not confirm ladder v2")
+	// This test exercises the trigger after completion, so establish that state
+	// directly. ConfirmBackfilled intentionally scans the whole catalog; using it
+	// here would make an unrelated fixture in a shared integration database able
+	// to block this test before it reaches the behavior under test.
+	if _, err := pool.Exec(ctx, `
+		UPDATE image_ladder_backfill_state
+		SET backfilled_version = 2, updated_at = NOW()
+		WHERE id = 1
+	`); err != nil {
+		t.Fatalf("establish completed ladder state: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE media_items SET poster_path = $1 WHERE content_id = $2`, fixture.oldPath, fixture.contentID); err != nil {
 		t.Fatalf("publish late old-ladder artwork: %v", err)

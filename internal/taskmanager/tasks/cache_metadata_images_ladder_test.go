@@ -13,15 +13,19 @@ import (
 // ladderRunner adds the optional one-shot ladder pass to the drain fake.
 type ladderRunner struct {
 	fakeMetadataImageCacheRunner
-	ladderCalls int
-	ladderStats metadata.ImageCacheRunStats
-	complete    bool
-	ladderErr   error
+	ladderCalls   int
+	ladderStats   metadata.ImageCacheRunStats
+	ladderUpdates []metadata.ImageCacheRunStats
+	complete      bool
+	ladderErr     error
 }
 
-func (f *ladderRunner) RunLadderBackfill(_ context.Context, workerID string, _ int, _ int, _ time.Duration, _ metadata.ImageCacheRunProgressReporter) (metadata.ImageCacheRunStats, bool, error) {
+func (f *ladderRunner) RunLadderBackfill(_ context.Context, workerID string, _ int, _ int, _ time.Duration, report metadata.ImageCacheRunProgressReporter) (metadata.ImageCacheRunStats, bool, error) {
 	f.ladderCalls++
 	f.workerIDs = append(f.workerIDs, workerID)
+	for _, update := range f.ladderUpdates {
+		report(update)
+	}
 	return f.ladderStats, f.complete, f.ladderErr
 }
 
@@ -176,6 +180,11 @@ func TestLadderBackfillProgressIsMonotone(t *testing.T) {
 		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 10},
 	}
 	state := &fakeLadderState{}
+	runner.ladderUpdates = []metadata.ImageCacheRunStats{
+		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 2}, Succeeded: 2},
+		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 3},
+		{Backlog: metadata.ImageCacheBacklog{Known: true, Queued: 10}, Succeeded: 10},
+	}
 
 	progress := runLadderTask(t, runner, state, 2)
 
