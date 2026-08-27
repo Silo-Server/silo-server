@@ -312,10 +312,60 @@ function handleJobSideEffects(
   }
 }
 
+const LIVE_SESSIONS_INVALIDATE_INTERVAL_MS = 10_000;
+
+interface LiveSessionsInvalidationState {
+  lastRunAt: number | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+const liveSessionsInvalidations = new WeakMap<QueryClient, LiveSessionsInvalidationState>();
+
+function scheduleLiveSessionsInvalidation(queryClient: QueryClient, isAllowed: () => boolean) {
+  let state = liveSessionsInvalidations.get(queryClient);
+  if (!state) {
+    state = { lastRunAt: null, timer: null };
+    liveSessionsInvalidations.set(queryClient, state);
+  }
+
+  const run = () => {
+    void queryClient.invalidateQueries({
+      queryKey: adminKeys.liveSessionsRoot(),
+      refetchType: isAllowed() ? "active" : "none",
+    });
+  };
+  const now = Date.now();
+  const elapsed = state.lastRunAt === null ? null : now - state.lastRunAt;
+
+  if (elapsed === null || elapsed >= LIVE_SESSIONS_INVALIDATE_INTERVAL_MS) {
+    if (state.timer !== null) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    state.lastRunAt = now;
+    run();
+    return;
+  }
+  if (state.timer !== null) return;
+
+  // A wall-clock rollback can delay one trailing refetch, but clamping the
+  // remaining delay keeps that bounded to this window.
+  const delay = Math.min(
+    LIVE_SESSIONS_INVALIDATE_INTERVAL_MS,
+    LIVE_SESSIONS_INVALIDATE_INTERVAL_MS - elapsed,
+  );
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    state.lastRunAt = Date.now();
+    run();
+  }, delay);
+}
+
 function hydrateSessions(
   queryClient: QueryClient,
   sessions: AdminSession[],
   allowDashboardUpdates: boolean,
+  isDashboardUpdateAllowed: () => boolean,
 ) {
   if (!allowDashboardUpdates) {
     invalidateDashboardQueries(queryClient, false);
@@ -328,7 +378,10 @@ function hydrateSessions(
   // carries the legacy row only, with no measured byte flow to filter or
   // decorate it, so writing it here would quietly replace a telemetry-backed
   // list with a legacy one while the envelope still claimed "measured".
-  void queryClient.invalidateQueries({ queryKey: adminKeys.liveSessionsRoot() });
+  // The reconciler publishes on a 15s tick whose change gate includes playback
+  // position. Throttle this enriched merged-view query so ordinary playback
+  // does not trigger its multi-join lookup on essentially every tick.
+  scheduleLiveSessionsInvalidation(queryClient, isDashboardUpdateAllowed);
   void queryClient.invalidateQueries({ queryKey: adminKeys.stats() });
 }
 
@@ -633,6 +686,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           queryClient,
           (message.data as AdminSession[]) ?? [],
           allowDashboardRealtimeUpdatesRef.current,
+          () => allowDashboardRealtimeUpdatesRef.current,
         );
         break;
       case "tasks":
@@ -729,6 +783,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             queryClient,
             (message.data as AdminSession[]) ?? [],
             allowDashboardRealtimeUpdatesRef.current,
+            () => allowDashboardRealtimeUpdatesRef.current,
           );
         }
         break;

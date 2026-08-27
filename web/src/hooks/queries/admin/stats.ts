@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { AdminStats, AdminSession, AdminLiveSessionsResponse } from "@/api/types";
+import type { AdminStats, AdminLiveSessionsResponse } from "@/api/types";
 import { adminKeys } from "../keys";
 
 const ADMIN_STALE_TIME = 30_000;
@@ -17,22 +17,13 @@ export function useAdminStats() {
   });
 }
 
-export function useAdminSessions() {
-  return useQuery({
-    queryKey: adminKeys.sessions(),
-    queryFn: () => api<AdminSession[]>("/admin/sessions").then((d) => d ?? []),
-    staleTime: ADMIN_STALE_TIME,
-  });
-}
-
 /**
  * The live session list, from the merged stream-telemetry view.
  *
- * Where {@link useAdminSessions} answers "who told us they are watching?", this
- * answers "who is actually receiving video?". Every process publishes into that
- * one view — the five measuring route families, and each API process's session
- * manager as a reporting publisher — so the list already holds every session
- * anybody knows about, with each row carrying the evidence behind it:
+ * Every process publishes into one view — the five measuring route families,
+ * and each API process's session manager as a reporting publisher — so the list
+ * holds every session anybody knows about, with each row carrying the evidence
+ * behind it:
  *
  * - `reported` — a client claims to be watching; nothing measured leaving.
  * - `measured` — bytes went out; no session manager claims them.

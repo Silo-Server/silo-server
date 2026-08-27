@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -62,6 +62,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
+import { describeLiveSessionsSource } from "@/lib/sessionTelemetry";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -75,7 +76,9 @@ function routeSortValue(session: AdminSession): string {
 }
 
 export default function AdminActivity() {
-  const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
+  const { data: liveSessions, isLoading, refetch: refresh } = useAdminLiveSessions(true);
+  const sessions = liveSessions?.sessions ?? [];
+  const sessionsSource = describeLiveSessionsSource(liveSessions);
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
   const error = undefined;
@@ -274,6 +277,11 @@ export default function AdminActivity() {
               Realtime Updates
             </div>
             <div className="text-[12px]">{formatConnectionState(connectionState)}</div>
+            {sessionsSource.label ? (
+              <span className="text-muted-foreground text-[11px]" title={sessionsSource.detail}>
+                {sessionsSource.label}
+              </span>
+            ) : null}
             {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
           </div>
         </div>

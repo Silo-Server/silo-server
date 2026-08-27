@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
-import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminLiveSessions } from "@/hooks/queries/admin/stats";
 import { useTasks } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
@@ -34,7 +34,8 @@ interface ServerActivityProps {
 // Channel subscriptions are owned by the parent layout
 // (AdminLayoutEventChannels / AdminEventChannels), not here.
 function useServerActivityData() {
-  const { data: sessions = [] } = useAdminSessions();
+  const { data: liveSessions } = useAdminLiveSessions(true);
+  const sessions = liveSessions?.sessions ?? [];
   const { data: tasks = [] } = useTasks();
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();

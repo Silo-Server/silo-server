@@ -28,7 +28,7 @@ const mockUseBuildInfo = vi.fn<() => MockBuildInfoResult>(() => ({
   isPending: false,
   isError: false,
 }));
-const mockUseAdminSessions = vi.fn(() => ({ data: [] }));
+const mockUseAdminLiveSessions = vi.fn(() => ({ data: { sessions: [] } }));
 const mockUseAdminPluginInstallations = vi.fn(() => ({ data: [] }));
 const mockUsePolicyCapability = vi.fn(() => ({
   data: {
@@ -48,7 +48,7 @@ vi.mock("@/hooks/queries/admin/system", () => ({
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
-  useAdminSessions: () => mockUseAdminSessions(),
+  useAdminLiveSessions: (includeHidden: boolean) => mockUseAdminLiveSessions(includeHidden),
 }));
 
 vi.mock("@/hooks/queries/admin/plugins", () => ({
@@ -93,6 +93,12 @@ describe("AdminSidebar", () => {
 
     expect(settingsLinks).toEqual(['href="/admin/settings"']);
     expect(markup).not.toContain("/admin/settings?tab=");
+  });
+
+  it("counts sessions from the live endpoint including idle rows", () => {
+    renderSidebar();
+
+    expect(mockUseAdminLiveSessions).toHaveBeenCalledWith(true);
   });
 
   it("renders as an embedded rail inside the mobile drawer", () => {

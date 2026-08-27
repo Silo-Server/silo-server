@@ -73,6 +73,35 @@ class FakeWebSocket {
   }
 }
 
+function renderProvider(queryClient: QueryClient) {
+  // Live-session invalidation is gated on the admin dashboard route
+  // (isDashboardRoute), and the suite's beforeEach parks the router on "/".
+  mockState.pathname = "/admin";
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RealtimeEventsProvider>
+        <div />
+      </RealtimeEventsProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function emitSessionsReplaced(socket: FakeWebSocket) {
+  socket.emitMessage({
+    type: "event",
+    channel: "sessions",
+    event: "sessions.replaced",
+    data: [],
+  });
+}
+
+function liveInvalidationCalls(spy: ReturnType<typeof vi.spyOn>) {
+  return spy.mock.calls.filter(
+    ([filters]) =>
+      JSON.stringify(filters?.queryKey) === JSON.stringify(adminKeys.liveSessionsRoot()),
+  );
+}
+
 describe("buildEventsUrl", () => {
   it("includes auth token and websocket scheme", () => {
     expect(
@@ -334,5 +363,115 @@ describe("RealtimeEventsProvider", () => {
       user_data: { played: true },
       user_state: { played: true, is_favorite: true },
     });
+  });
+
+  it("bounds a burst to one leading and one trailing live-session invalidation", () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(queryClient);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => {
+      for (let index = 0; index < 20; index += 1) emitSessionsReplaced(socket);
+    });
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
+
+    act(() => vi.advanceTimersByTime(5_001));
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
+  });
+
+  it("invalidates synchronously on the first live-session event", () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(queryClient);
+
+    act(() => emitSessionsReplaced(FakeWebSocket.instances[0]));
+
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(1);
+  });
+
+  it("runs another leading invalidation at the exact throttle boundary", () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(queryClient);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => emitSessionsReplaced(socket));
+    act(() => vi.advanceTimersByTime(10_000));
+    act(() => emitSessionsReplaced(socket));
+
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
+  });
+
+  it("bounds a fresh burst after a trailing invalidation", () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(queryClient);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => {
+      emitSessionsReplaced(socket);
+      emitSessionsReplaced(socket);
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
+
+    act(() => {
+      for (let index = 0; index < 10; index += 1) emitSessionsReplaced(socket);
+      vi.advanceTimersByTime(9_999);
+    });
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(3);
+  });
+
+  it("tracks invalidation windows independently for each query client", () => {
+    const firstClient = new QueryClient();
+    const secondClient = new QueryClient();
+    const firstInvalidate = vi.spyOn(firstClient, "invalidateQueries").mockResolvedValue();
+    const secondInvalidate = vi.spyOn(secondClient, "invalidateQueries").mockResolvedValue();
+    renderProvider(firstClient);
+    renderProvider(secondClient);
+
+    act(() => {
+      emitSessionsReplaced(FakeWebSocket.instances[0]);
+      emitSessionsReplaced(FakeWebSocket.instances[1]);
+    });
+
+    expect(liveInvalidationCalls(firstInvalidate)).toHaveLength(1);
+    expect(liveInvalidationCalls(secondInvalidate)).toHaveLength(1);
+  });
+
+  it("marks a trailing invalidation stale without refetching after the page becomes inactive", () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    const view = renderProvider(queryClient);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => {
+      emitSessionsReplaced(socket);
+      emitSessionsReplaced(socket);
+    });
+    act(() => {
+      mockState.pageActivity = {
+        ...mockState.pageActivity,
+        canPollDashboard: false,
+      };
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <RealtimeEventsProvider>
+            <div />
+          </RealtimeEventsProvider>
+        </QueryClientProvider>,
+      );
+    });
+    act(() => vi.advanceTimersByTime(10_000));
+
+    expect(liveInvalidationCalls(invalidate)).toHaveLength(2);
+    expect(liveInvalidationCalls(invalidate)[1]?.[0]).toMatchObject({ refetchType: "none" });
   });
 });

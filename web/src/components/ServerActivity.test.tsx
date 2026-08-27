@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TaskInfo } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
+  useAdminLiveSessions: vi.fn(() => ({ data: { sessions: [] } })),
   tasks: [
     {
       key: "cache_metadata_images",
@@ -19,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
-  useAdminSessions: () => ({ data: [] }),
+  useAdminLiveSessions: (includeHidden: boolean) => mocks.useAdminLiveSessions(includeHidden),
 }));
 vi.mock("@/hooks/queries/admin/tasks", () => ({
   useTasks: () => ({ data: mocks.tasks }),
@@ -49,5 +50,6 @@ describe("ServerActivity task progress", () => {
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("Processed 1,000 images across 1 batch")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(true);
   });
 });

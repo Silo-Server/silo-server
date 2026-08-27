@@ -76,6 +76,50 @@ describe("describeSessionDelivery", () => {
     expect(delivery?.noDelivery).toBe(false);
   });
 
+  it("flags measured delivery with a complete view after the grace window", () => {
+    const now = Date.parse("2026-08-27T12:00:00Z");
+    const session = {
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      started_at: "2026-08-27T11:59:00Z",
+    };
+
+    expect(describeSessionDelivery(session, { viewComplete: true, now })?.unclaimed).toBe(true);
+  });
+
+  it("suppresses unclaimed framing when the merged view is incomplete", () => {
+    const now = Date.parse("2026-08-27T12:00:00Z");
+    const session = {
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      started_at: "2026-08-27T11:59:00Z",
+    };
+    const delivery = describeSessionDelivery(session, { viewComplete: false, now });
+
+    expect(delivery?.unclaimed).toBe(false);
+    expect(session.telemetry?.evidence).toBe("measured");
+    expect(delivery?.noDelivery).toBe(false);
+  });
+
+  it.each([
+    ["five seconds ago", "2026-08-27T11:59:55Z", false],
+    ["sixty seconds ago", "2026-08-27T11:59:00Z", true],
+    ["exactly thirty seconds ago", "2026-08-27T11:59:30Z", true],
+    ["a missing start", undefined, true],
+    ["an unparseable start", "not-a-date", true],
+    ["a future start", "2026-08-27T12:00:05Z", false],
+  ])("handles %s when classifying unclaimed delivery", (_label, startedAt, expected) => {
+    const session = {
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      started_at: startedAt,
+    };
+
+    expect(
+      describeSessionDelivery(session, {
+        viewComplete: true,
+        now: Date.parse("2026-08-27T12:00:00Z"),
+      })?.unclaimed,
+    ).toBe(expected);
+  });
+
   it("surfaces the degraded, multi-IP and identity-conflict signals", () => {
     const delivery = describeSessionDelivery(
       sessionWith({
