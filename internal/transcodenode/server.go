@@ -1431,7 +1431,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 				if err != nil {
 					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
 						"session", sessionID, "playback_session_id", sessionID)
-					return nil
+					return nil, err
 				}
 			}
 		}
