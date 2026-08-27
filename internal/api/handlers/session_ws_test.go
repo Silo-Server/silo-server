@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -90,6 +92,54 @@ func TestHandleSessionWebSocket_RequiresHelloBeforeRealtimeReady(t *testing.T) {
 
 	waitForPlaybackRealtimeState(t, sessionMgr, session.ID, false)
 	waitForTelemetryRealtimeState(t, handler.StreamTelemetry, session.ID, false)
+}
+
+func TestSendCurrentMarkerSnapshotLoadsPersistedSharedMarkers(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	session, err := sessionMgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	introStart, introEnd := 4.0, 58.0
+	creditsStart, creditsEnd := 3500.0, 3600.0
+	resolver := mapPlaybackFileResolver{files: map[int]*models.MediaFile{
+		100: {
+			ID:           100,
+			IntroStart:   &introStart,
+			IntroEnd:     &introEnd,
+			CreditsStart: &creditsStart,
+			CreditsEnd:   &creditsEnd,
+		},
+	}}
+	handler := NewPlaybackHandler(sessionMgr, resolver)
+	handler.RealtimeHub = playback.NewRealtimeHub()
+	handler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(sessionMgr, handler.RealtimeHub)
+	conn := &adminPlaybackControlTestConn{}
+	registration := handler.RealtimeHub.Register(session.ID, conn)
+	if registration == nil {
+		t.Fatal("expected realtime registration")
+	}
+	defer handler.RealtimeHub.Unregister(registration)
+
+	handler.sendCurrentMarkerSnapshot(session.ID)
+
+	if len(conn.messages) != 1 {
+		t.Fatalf("snapshot messages = %d, want 1", len(conn.messages))
+	}
+	event, ok := conn.messages[0].(playback.EventEnvelope)
+	if !ok {
+		t.Fatalf("message type = %T, want playback.EventEnvelope", conn.messages[0])
+	}
+	var payload playback.MarkersUpdatedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload): %v", err)
+	}
+	if payload.Intro == nil || payload.Intro.Start != introStart || payload.Intro.End != introEnd {
+		t.Fatalf("intro snapshot = %#v, want persisted intro", payload.Intro)
+	}
+	if payload.Credits == nil || payload.Credits.Start != creditsStart || payload.Credits.End != creditsEnd {
+		t.Fatalf("credits snapshot = %#v, want persisted credits", payload.Credits)
+	}
 }
 
 func waitForTelemetryRealtimeState(t *testing.T, registry *streamtelemetry.Registry, sessionID string, want bool) {

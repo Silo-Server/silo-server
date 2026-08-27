@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 type fakePlaybackMarkerProvider struct{}
@@ -19,6 +20,34 @@ func (fakePlaybackMarkerProvider) ID() string { return "fake-online" }
 
 func (fakePlaybackMarkerProvider) FetchMarkers(context.Context, markers.Request) (markers.Result, error) {
 	return markers.Result{}, nil
+}
+
+type recordingPlaybackMarkerProvider struct {
+	calls chan markers.Request
+}
+
+func (p recordingPlaybackMarkerProvider) ID() string { return "recording-online" }
+
+func (p recordingPlaybackMarkerProvider) FetchMarkers(_ context.Context, req markers.Request) (markers.Result, error) {
+	p.calls <- req
+	return markers.Result{}, nil
+}
+
+type fakePlaybackExternalIDResolver struct{}
+
+func (fakePlaybackExternalIDResolver) ResolveForFile(context.Context, *models.MediaFile) (markers.ExternalIDs, error) {
+	return markers.ExternalIDs{
+		Kind:          markers.ItemKindEpisode,
+		TmdbID:        "123",
+		SeasonNumber:  1,
+		EpisodeNumber: 2,
+	}, nil
+}
+
+type fakePlaybackMarkerUpserter struct{}
+
+func (fakePlaybackMarkerUpserter) UpsertMarkers(context.Context, int, scanner.MarkerUpdate) (bool, error) {
+	return false, nil
 }
 
 type fakePlaybackIntroAnalyzer struct {
@@ -306,6 +335,41 @@ func TestMaybeQueueLazyPlaybackMarkersOnlineModeWithProviderDoesNotRunLocalAnaly
 	}
 }
 
+func TestMaybeQueueLazyPlaybackMarkersOnlineRetriesPartialSkipMarkers(t *testing.T) {
+	start := 10.0
+	end := 60.0
+	file := lazyMarkerTestFile()
+	file.IntroStart = &start
+	file.IntroEnd = &end
+
+	calls := make(chan markers.Request, 1)
+	registry := markers.NewRegistry(slog.Default())
+	if err := registry.Register(recordingPlaybackMarkerProvider{calls: calls}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: file})
+	handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
+		markers.SettingLazyPlayback: "true",
+		markers.SettingMode:         "online",
+	}}
+	handler.IntroRepository = fakePlaybackIntroEligibility{eligible: true}
+	handler.MarkerRegistry = registry
+	handler.MarkerResolver = fakePlaybackExternalIDResolver{}
+	handler.MarkerUpserter = fakePlaybackMarkerUpserter{}
+	handler.MarkerLazyContext = context.Background()
+
+	handler.maybeQueueLazyPlaybackMarkers(context.Background(), &playback.Session{ID: "session-1"}, file)
+
+	select {
+	case req := <-calls:
+		if req.ExternalIDs[markers.ExternalIDKeyTMDB] != "123" {
+			t.Fatalf("TMDB id = %q, want 123", req.ExternalIDs[markers.ExternalIDKeyTMDB])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("partial markers did not trigger online lookup")
+	}
+}
+
 func TestMaybeQueueLazyPlaybackMarkersAnalyzerSuccessWithoutMarkerDoesNotEmitUpdate(t *testing.T) {
 	analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
 	file := lazyMarkerTestFile()
@@ -349,5 +413,46 @@ func lazyMarkerTestFile() *models.MediaFile {
 		EpisodeID:     "episode-1",
 		MediaFolderID: 7,
 		Duration:      1800,
+	}
+}
+
+func TestHasCompletePlaybackSkipMarkers(t *testing.T) {
+	start := 10.0
+	introEnd := 60.0
+	creditsStart := 1700.0
+	creditsEnd := 1800.0
+
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want bool
+	}{
+		{name: "nil file", file: nil, want: false},
+		{
+			name: "intro only remains eligible",
+			file: &models.MediaFile{IntroStart: &start, IntroEnd: &introEnd},
+			want: false,
+		},
+		{
+			name: "credits only remains eligible",
+			file: &models.MediaFile{CreditsStart: &creditsStart, CreditsEnd: &creditsEnd},
+			want: false,
+		},
+		{
+			name: "both skip markers stop lookup",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasCompletePlaybackSkipMarkers(tt.file); got != tt.want {
+				t.Fatalf("hasCompletePlaybackSkipMarkers() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

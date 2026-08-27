@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -137,6 +138,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			h.syncSessionsNow(context.Background(), "realtime_hello")
 		}
 		h.touchSessionActivity(sessionID)
+		go h.sendCurrentMarkerSnapshot(sessionID)
 		return nil
 	case playback.RealtimeMessageTypeAck:
 		var ack playback.AckEnvelope
@@ -210,5 +212,35 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		return nil
 	default:
 		return playback.ErrInvalidRealtimePayload
+	}
+}
+
+type playbackMarkerSnapshotNotifier interface {
+	SendSessionSnapshotFromLoader(
+		ctx context.Context,
+		sessionID string,
+		fileID int,
+		loader playback.MarkerSnapshotFileLoader,
+	) error
+}
+
+func (h *PlaybackHandler) sendCurrentMarkerSnapshot(sessionID string) {
+	if h == nil || h.fileResolver == nil || h.MarkerUpdateNotifier == nil {
+		return
+	}
+	notifier, ok := h.MarkerUpdateNotifier.(playbackMarkerSnapshotNotifier)
+	if !ok {
+		return
+	}
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err != nil || session == nil || session.MediaFileID <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := notifier.SendSessionSnapshotFromLoader(ctx, sessionID, session.MediaFileID, h.fileResolver); err != nil {
+		slog.DebugContext(ctx, "playback marker snapshot unavailable", "component", "api",
+			"session", sessionID, "playback_session_id", sessionID,
+			"file_id", session.MediaFileID, "error", err)
 	}
 }

@@ -8,6 +8,18 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+type blockingMarkerSnapshotLoader struct {
+	file    *models.MediaFile
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (l blockingMarkerSnapshotLoader) GetByID(context.Context, int) (*models.MediaFile, error) {
+	close(l.entered)
+	<-l.release
+	return l.file, nil
+}
+
 func TestMarkerUpdateNotifierTargetsMatchingSessions(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
 	matchA, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
@@ -109,5 +121,102 @@ func TestMarkerUpdateNotifierSendsAllClearedMarkers(t *testing.T) {
 	}
 	if payload.Intro != nil || payload.Credits != nil || payload.Recap != nil || payload.Preview != nil {
 		t.Fatalf("payload markers = %#v, want all nil", payload)
+	}
+}
+
+func TestMarkerUpdateNotifierSendsSnapshotToOnlyRequestedSession(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	sessionA, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	sessionB, _ := sessions.StartSession(2, "profile-b", 100, PlayDirect, false)
+
+	hub := NewRealtimeHub()
+	connA := &dispatchTestConn{}
+	connB := &dispatchTestConn{}
+	regA := hub.Register(sessionA.ID, connA)
+	regB := hub.Register(sessionB.ID, connB)
+	defer hub.Unregister(regA)
+	defer hub.Unregister(regB)
+
+	introStart := 3.0
+	introEnd := 64.0
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+	notifier.SendSessionSnapshot(context.Background(), sessionA.ID, &models.MediaFile{
+		ID:         100,
+		IntroStart: &introStart,
+		IntroEnd:   &introEnd,
+	})
+
+	if len(connA.messages) != 1 {
+		t.Fatalf("requested session messages = %d, want 1", len(connA.messages))
+	}
+	if len(connB.messages) != 0 {
+		t.Fatalf("other session messages = %d, want 0", len(connB.messages))
+	}
+}
+
+func TestMarkerUpdateNotifierOrdersPersistedSnapshotBeforeConcurrentUpdate(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	_ = sessions.SetRealtimeConnection(session.ID, true)
+	hub := NewRealtimeHub()
+	conn := &dispatchTestConn{}
+	registration := hub.Register(session.ID, conn)
+	defer hub.Unregister(registration)
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+
+	oldIntroStart, oldIntroEnd := 1.0, 50.0
+	newIntroStart, newIntroEnd := 2.0, 60.0
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	snapshotDone := make(chan struct{})
+	go func() {
+		defer close(snapshotDone)
+		_ = notifier.SendSessionSnapshotFromLoader(context.Background(), session.ID, 100, blockingMarkerSnapshotLoader{
+			file: &models.MediaFile{
+				ID:         100,
+				IntroStart: &oldIntroStart,
+				IntroEnd:   &oldIntroEnd,
+			},
+			entered: entered,
+			release: release,
+		})
+	}()
+	<-entered
+
+	updateDone := make(chan struct{})
+	go func() {
+		defer close(updateDone)
+		notifier.MarkersUpdated(context.Background(), &models.MediaFile{
+			ID:         100,
+			IntroStart: &newIntroStart,
+			IntroEnd:   &newIntroEnd,
+		})
+	}()
+	close(release)
+	<-snapshotDone
+	<-updateDone
+
+	if len(conn.messages) != 2 {
+		t.Fatalf("messages = %d, want snapshot then update", len(conn.messages))
+	}
+	markerStart := func(message any) float64 {
+		event, ok := message.(EventEnvelope)
+		if !ok {
+			t.Fatalf("message type = %T, want EventEnvelope", message)
+		}
+		var payload MarkersUpdatedPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("json.Unmarshal(payload): %v", err)
+		}
+		if payload.Intro == nil {
+			t.Fatal("intro payload is nil")
+		}
+		return payload.Intro.Start
+	}
+	if got := markerStart(conn.messages[0]); got != oldIntroStart {
+		t.Fatalf("first marker start = %v, want old snapshot %v", got, oldIntroStart)
+	}
+	if got := markerStart(conn.messages[1]); got != newIntroStart {
+		t.Fatalf("second marker start = %v, want new update %v", got, newIntroStart)
 	}
 }

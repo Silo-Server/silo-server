@@ -467,7 +467,7 @@ func (r *Registry) logProviderError(providerID string, req Request, err error) {
 		"provider", providerID,
 		"kind", req.Kind,
 		"external_ids", sanitizeExternalIDs(req.ExternalIDs),
-		"error", err,
+		"error", err.Error(),
 	)
 }
 

@@ -84,7 +84,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	hasOnline := h.hasOnlineMarkerProviders()
 	shouldRunLocal := markers.ShouldRunLocal(mode)
 	shouldRunOnline := (mode == markers.ModeOnline || mode == markers.ModeBoth) && hasOnline
-	if shouldRunOnline && hasOnlineSourcedMarkers(file) {
+	if shouldRunOnline && hasCompletePlaybackSkipMarkers(file) {
 		shouldRunOnline = false
 	}
 
@@ -179,7 +179,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 				"file_id", file.ID,
 				"episode_id", file.EpisodeID,
 				"mode", mode,
-				"error", err)
+				"error", err.Error())
 		}
 		if wrote {
 			if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
@@ -320,31 +320,18 @@ func (h *PlaybackHandler) notifyPlaybackMarkers(
 		"mode", mode)
 }
 
-// hasOnlineSourcedMarkers reports whether the file already has at least one
-// marker written by a non-local source. We short-circuit lazy online fetch
-// in that case to avoid refetching every playback start — TheIntroDB often
-// returns only intro+credits and never recap/preview for a given episode, so
-// requiring all four kinds before skipping would loop forever on partial data.
-// Markers from the scanner/s3 path remain refetchable since online sources
-// outrank them.
-func hasOnlineSourcedMarkers(file *models.MediaFile) bool {
+// hasCompletePlaybackSkipMarkers reports whether the two playback skip
+// segments supplied by online marker providers are already populated. A
+// partial online result must remain eligible: TheIntroDB can gain a missing
+// intro or credits marker after the first playback, and the next fresh
+// playback session is the inexpensive opportunity to fill it for every user.
+// Provider-side caching prevents repeated external requests for a recent miss.
+func hasCompletePlaybackSkipMarkers(file *models.MediaFile) bool {
 	if file == nil {
 		return false
 	}
-	isOnlineSource := func(source *string) bool {
-		if source == nil {
-			return false
-		}
-		switch *source {
-		case models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceManual:
-			return true
-		}
-		return false
-	}
-	return isOnlineSource(file.IntroMarkersSource) ||
-		isOnlineSource(file.CreditsMarkersSource) ||
-		isOnlineSource(file.RecapMarkersSource) ||
-		isOnlineSource(file.PreviewMarkersSource)
+	return file.IntroStart != nil && file.IntroEnd != nil &&
+		file.CreditsStart != nil && file.CreditsEnd != nil
 }
 
 // hasAnyMarker reports whether the file has at least one populated marker
