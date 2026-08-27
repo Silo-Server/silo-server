@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -366,7 +367,7 @@ func TestQueuedMarkerSnapshotStopsWhenContextIsCanceled(t *testing.T) {
 	<-observed
 	cancel()
 
-	if err := <-done; err != context.Canceled {
+	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("SendSessionSnapshotFromLoader error = %v, want context.Canceled", err)
 	}
 	select {
