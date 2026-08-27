@@ -3427,8 +3427,18 @@ func sameLegacyOutputRouteReplanV3(record *playback.AttemptRecordV3, next playba
 	if next.Metered != current.Metered ||
 		!reflect.DeepEqual(next.BandwidthEstimateKbps, current.BandwidthEstimateKbps) ||
 		!reflect.DeepEqual(next.BandwidthCapKbps, current.BandwidthCapKbps) ||
-		!sameSelectedTracksV3(next.SelectedTracks, record.CurrentPlan.SelectedTracks) ||
 		!reflect.DeepEqual(next.ClientFeatures, current.ClientFeatures) {
+		return false
+	}
+	// Legacy failure replans may omit unchanged track identities. Only an
+	// explicitly supplied identity can prove that this callback carries a
+	// material track change; track-change operations use their own path.
+	if next.SelectedTracks.Audio != nil &&
+		!sameTrackIdentityV3(next.SelectedTracks.Audio, record.CurrentPlan.SelectedTracks.Audio) {
+		return false
+	}
+	if next.SelectedTracks.Subtitle != nil &&
+		!sameTrackIdentityV3(next.SelectedTracks.Subtitle, record.CurrentPlan.SelectedTracks.Subtitle) {
 		return false
 	}
 	currentCapabilities := current.Capabilities

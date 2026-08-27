@@ -1116,8 +1116,7 @@ func TestHandleReplanPlaybackV3RejectsUnchangedOutputRoute(t *testing.T) {
 		Failure: playback.FailureV3{
 			Classification: "output_route_changed",
 		},
-		SelectedTracks: started.PlaybackPlan.SelectedTracks,
-		Capabilities:   startRequest.Capabilities,
+		Capabilities: startRequest.Capabilities,
 		ClientPlaybackContext: playback.ClientPlaybackContextV3{
 			ProtocolVersion: startRequest.ClientPlaybackContext.ProtocolVersion,
 			FormFactor:      startRequest.ClientPlaybackContext.FormFactor,
@@ -1158,7 +1157,9 @@ func TestSameLegacyOutputRouteReplanV3RequiresEveryOtherInputToMatch(t *testing.
 	record := &playback.AttemptRecordV3{
 		NormalizedRequest: start,
 		CurrentPlan: playback.PlanV3{
-			SelectedTracks: playback.SelectedTracksV3{},
+			SelectedTracks: playback.SelectedTracksV3{
+				Audio: &playback.TrackIdentityV3{ID: "audio-1"},
+			},
 		},
 	}
 	next := playback.ReplanRequestV3{
@@ -1171,8 +1172,13 @@ func TestSameLegacyOutputRouteReplanV3RequiresEveryOtherInputToMatch(t *testing.
 	next.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}, SpatializerEnabled: true}
 	next.ClientPlaybackContext.Output.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}, SpatializerEnabled: true}
 	if !sameLegacyOutputRouteReplanV3(record, next) {
-		t.Fatal("route generation and Spatializer state should be ignored")
+		t.Fatal("route generation, Spatializer state, and omitted tracks should be ignored")
 	}
+	next.SelectedTracks.Audio = &playback.TrackIdentityV3{ID: "audio-2"}
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("explicit audio track change should not be suppressed")
+	}
+	next.SelectedTracks = playback.SelectedTracksV3{}
 	next.Capabilities.AudioEvidence = playback.EvidenceDeclaredV3
 	if sameLegacyOutputRouteReplanV3(record, next) {
 		t.Fatal("capability evidence change should not be suppressed")
