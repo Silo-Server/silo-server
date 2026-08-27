@@ -98,6 +98,36 @@ export function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
   );
 }
 
+/** Invalidates only the queries scoped to a single item: both item-detail key
+ * shapes, the watch detail, and the favorite/watchlist membership checks. */
+export function invalidateItemScopedQueries(
+  queryClient: QueryClient,
+  itemId: string,
+): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["catalog", "items", itemId, "detail"] }),
+    queryClient.invalidateQueries({ queryKey: ["items", "detail", itemId] }),
+    queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", itemId] }),
+    queryClient.invalidateQueries({ queryKey: favoriteKeys.check(itemId) }),
+    queryClient.invalidateQueries({ queryKey: watchlistKeys.check(itemId) }),
+  ]).then(() => undefined);
+}
+
+/** Invalidates the series-level surfaces that render per-episode watch state
+ * (season/episode lists and the series' own item queries), so a progress
+ * change on one episode refreshes an open series page without a broad
+ * media-surface pass. */
+export function invalidateSeriesScopedQueries(
+  queryClient: QueryClient,
+  seriesId: string,
+): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["catalog", "series", seriesId] }),
+    queryClient.invalidateQueries({ queryKey: ["catalog", "items", seriesId] }),
+    invalidateItemScopedQueries(queryClient, seriesId),
+  ]).then(() => undefined);
+}
+
 export async function invalidateMediaSurfaceQueries(
   queryClient: QueryClient,
   options: InvalidateMediaSurfaceOptions = {},
@@ -132,13 +162,7 @@ export async function invalidateMediaSurfaceQueries(
   ];
 
   if (options.itemId) {
-    invalidations.push(
-      queryClient.invalidateQueries({ queryKey: ["catalog", "items", options.itemId, "detail"] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "detail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", options.itemId] }),
-      queryClient.invalidateQueries({ queryKey: favoriteKeys.check(options.itemId) }),
-      queryClient.invalidateQueries({ queryKey: watchlistKeys.check(options.itemId) }),
-    );
+    invalidations.push(invalidateItemScopedQueries(queryClient, options.itemId));
   }
 
   for (const key of options.watchedKeys ?? []) {

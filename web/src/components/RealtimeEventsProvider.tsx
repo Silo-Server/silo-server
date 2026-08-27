@@ -33,9 +33,18 @@ import { invalidateCatalogState } from "@/components/realtimeCatalogInvalidation
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { usePageActivity } from "@/hooks/usePageActivity";
-import { adminKeys, historyImportKeys, libraryKeys } from "@/hooks/queries/keys";
 import {
+  adminKeys,
+  historyImportKeys,
+  historyKeys,
+  libraryKeys,
+  progressKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
+import {
+  invalidateItemScopedQueries,
   invalidateMediaSurfaceQueries,
+  invalidateSeriesScopedQueries,
   updateCatalogItemDetail,
 } from "@/hooks/queries/mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
@@ -64,7 +73,35 @@ const CATALOG_ITEM_CHANGED_EVENTS = new Set([
   "library.item_added",
   "metadata.updated",
 ]);
-const SCOPED_CATALOG_LIBRARY_EVENTS = new Set(["catalog.library.changed", "library.changed"]);
+// Broad catalog invalidations refetch every active media surface. Metadata
+// enrichment and scans publish per-item events in bursts, so realtime-driven
+// broad passes are throttled to one leading + one trailing run per window;
+// only per-item invalidations fire immediately (#796).
+const CATALOG_BROAD_INVALIDATE_THROTTLE_MS = 15_000;
+
+interface BroadCatalogInvalidateOptions {
+  libraryId?: number;
+  allowDashboardRefetch: boolean;
+  includeLibraryLists: boolean;
+}
+
+function mergeBroadCatalogOptions(
+  current: BroadCatalogInvalidateOptions | null,
+  next: BroadCatalogInvalidateOptions,
+): BroadCatalogInvalidateOptions {
+  if (!current) {
+    return next;
+  }
+  return {
+    // Differing libraries collapse to undefined (all libraries): tracking a
+    // set of ids across the throttle window isn't worth the complexity for
+    // one coalesced refresh.
+    libraryId: current.libraryId === next.libraryId ? current.libraryId : undefined,
+    allowDashboardRefetch: current.allowDashboardRefetch || next.allowDashboardRefetch,
+    includeLibraryLists: current.includeLibraryLists || next.includeLibraryLists,
+  };
+}
+
 const DASHBOARD_QUERY_KEYS = [
   adminKeys.stats(),
   adminKeys.sessions(),
@@ -281,6 +318,7 @@ function handleJobSideEffects(
   job: AdminJob,
   eventName: string,
   allowDashboardRefetch: boolean,
+  runBroadCatalogInvalidation: (options: { allowDashboardRefetch: boolean }) => void,
 ) {
   if (job.job_type === "delete_library") {
     void queryClient.invalidateQueries({
@@ -290,12 +328,14 @@ function handleJobSideEffects(
     void queryClient.invalidateQueries({ queryKey: libraryKeys.all });
   }
 
-  if (eventName === "job.completed" && job.job_type === "catalog_import") {
-    invalidateCatalogState(queryClient, { allowDashboardRefetch });
-  }
-
-  if (eventName === "job.completed" && job.job_type === "delete_library") {
-    invalidateCatalogState(queryClient, { allowDashboardRefetch });
+  if (
+    eventName === "job.completed" &&
+    (job.job_type === "catalog_import" || job.job_type === "delete_library")
+  ) {
+    // Job-terminal passes run immediately (one-shot events, not bursts) but
+    // reset the broad-catalog throttle so a pending trailing pass from the
+    // same import's event burst doesn't repeat the full sweep moments later.
+    runBroadCatalogInvalidation({ allowDashboardRefetch });
   }
 }
 
@@ -403,6 +443,7 @@ function handleUserStateEvent(
   payload: UserStatePayload,
   activeProfileID: string | null | undefined,
   allowDashboardRefetch: boolean,
+  scheduleBroadCatalogRefresh: (options: BroadCatalogInvalidateOptions) => void,
 ) {
   if (payload.profile_id && activeProfileID && payload.profile_id !== activeProfileID) {
     return;
@@ -419,12 +460,41 @@ function handleUserStateEvent(
     }));
   }
 
-  void invalidateMediaSurfaceQueries(
-    queryClient,
-    payload.content_id ? { itemId: payload.content_id } : {},
-  ).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
+  if (payload.change === "progress") {
+    // Progress events arrive continuously while any device is playing; a
+    // broad media-surface invalidation here refetches the open player's
+    // metadata queries and competes with segment downloads (#796). Touch only
+    // the progress-driven surfaces, the item, and its series immediately —
+    // the remaining watch-state surfaces (browse grids, catalog lists,
+    // watched-filtered collections) catch up through the trailing-only broad
+    // throttle instead of going permanently stale: threshold-based completion
+    // emits only change:"progress", never "watched".
+    const invalidations: Array<Promise<void>> = [
+      queryClient.invalidateQueries({ queryKey: progressKeys.all }),
+      queryClient.invalidateQueries({ queryKey: historyKeys.all }),
+      queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
+    ];
+    if (payload.content_id) {
+      invalidations.push(invalidateItemScopedQueries(queryClient, payload.content_id));
+    }
+    if (payload.series_id) {
+      invalidations.push(invalidateSeriesScopedQueries(queryClient, payload.series_id));
+    }
+    void Promise.all(invalidations).then(() => {
+      bumpHomeRefreshSignal(queryClient);
+    });
+    scheduleBroadCatalogRefresh({
+      allowDashboardRefetch,
+      includeLibraryLists: false,
+    });
+  } else {
+    void invalidateMediaSurfaceQueries(
+      queryClient,
+      payload.content_id ? { itemId: payload.content_id } : {},
+    ).then(() => {
+      bumpHomeRefreshSignal(queryClient);
+    });
+  }
   void queryClient.invalidateQueries({
     queryKey: adminKeys.stats(),
     refetchType: allowDashboardRefetch ? "active" : "none",
@@ -455,6 +525,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const canApplyRealtimeUpdatesRef = useRef(pageActivity.canApplyRealtimeUpdates);
   const allowDashboardRealtimeUpdatesRef = useRef(allowDashboardRealtimeUpdates);
   const shouldCatchUpOnFocusRef = useRef(!pageActivity.canApplyRealtimeUpdates);
+  const broadCatalogThrottleRef = useRef<{
+    lastRunAt: number;
+    timerId: number | undefined;
+    pending: BroadCatalogInvalidateOptions | null;
+  }>({ lastRunAt: 0, timerId: undefined, pending: null });
 
   activeProfileIDRef.current = profile?.id;
   canApplyRealtimeUpdatesRef.current = pageActivity.canApplyRealtimeUpdates;
@@ -536,6 +611,75 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     },
     [sendSubscribe],
   );
+
+  // Leading edge fires immediately; events arriving during the window merge
+  // into a single trailing pass with the coalesced options. `trailingOnly`
+  // (progress-driven catch-up) never spends the leading edge: the broad pass
+  // always lands a full window after the event, so continuous playback costs
+  // at most one broad refresh per window and none immediately.
+  function scheduleBroadCatalogInvalidation(
+    options: BroadCatalogInvalidateOptions,
+    { trailingOnly = false }: { trailingOnly?: boolean } = {},
+  ) {
+    const throttle = broadCatalogThrottleRef.current;
+    const now = Date.now();
+    const remainder = Math.max(
+      0,
+      CATALOG_BROAD_INVALIDATE_THROTTLE_MS - (now - throttle.lastRunAt),
+    );
+    if (!trailingOnly && throttle.timerId === undefined && remainder === 0) {
+      throttle.lastRunAt = now;
+      invalidateCatalogState(queryClient, options);
+      return;
+    }
+    throttle.pending = mergeBroadCatalogOptions(throttle.pending, options);
+    if (throttle.timerId === undefined) {
+      throttle.timerId = window.setTimeout(
+        () => {
+          throttle.timerId = undefined;
+          const pending = throttle.pending;
+          throttle.pending = null;
+          if (!canApplyRealtimeUpdatesRef.current) {
+            // A hidden/frozen tab drops the pass the same way onmessage drops
+            // events; the catch-up-on-focus refetch covers it on return.
+            // lastRunAt stays untouched so the next event after refocus gets
+            // an immediate leading pass.
+            return;
+          }
+          throttle.lastRunAt = Date.now();
+          if (pending) {
+            invalidateCatalogState(queryClient, pending);
+          }
+        },
+        remainder > 0 ? remainder : CATALOG_BROAD_INVALIDATE_THROTTLE_MS,
+      );
+    }
+  }
+
+  // Immediate broad pass for one-shot triggers (job completion). Resets the
+  // throttle window and swallows any pending trailing pass — this full
+  // unscoped sweep is a superset of every coalesced option set.
+  function runBroadCatalogInvalidationNow(options: { allowDashboardRefetch: boolean }) {
+    const throttle = broadCatalogThrottleRef.current;
+    if (throttle.timerId !== undefined) {
+      window.clearTimeout(throttle.timerId);
+      throttle.timerId = undefined;
+    }
+    throttle.pending = null;
+    throttle.lastRunAt = Date.now();
+    invalidateCatalogState(queryClient, options);
+  }
+
+  useEffect(() => {
+    const throttle = broadCatalogThrottleRef.current;
+    return () => {
+      if (throttle.timerId !== undefined) {
+        window.clearTimeout(throttle.timerId);
+        throttle.timerId = undefined;
+        throttle.pending = null;
+      }
+    };
+  }, []);
 
   function dispatchChannelMessage(
     channel: EventChannel,
@@ -641,24 +785,26 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         {
           const eventLibraryID = catalogEventLibraryID(message.data);
           if (CATALOG_ITEM_CHANGED_EVENTS.has(message.event)) {
-            invalidateCatalogState(queryClient, {
-              itemId:
-                typeof message.data === "object" && message.data && "content_id" in message.data
-                  ? (message.data as { content_id?: string }).content_id
-                  : undefined,
+            const contentID =
+              typeof message.data === "object" && message.data && "content_id" in message.data
+                ? (message.data as { content_id?: string }).content_id
+                : undefined;
+            // Refresh the changed item right away; the broad surface refresh
+            // (lists, sections, home) rides the throttle so per-item bursts
+            // don't starve an open player of bandwidth.
+            if (contentID) {
+              void invalidateItemScopedQueries(queryClient, contentID);
+            }
+            scheduleBroadCatalogInvalidation({
               libraryId: eventLibraryID,
               allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
               includeLibraryLists: false,
             });
-          } else if (SCOPED_CATALOG_LIBRARY_EVENTS.has(message.event) && eventLibraryID) {
-            invalidateCatalogState(queryClient, {
-              libraryId: eventLibraryID,
-              allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
-            });
           } else {
-            invalidateCatalogState(queryClient, {
+            scheduleBroadCatalogInvalidation({
               libraryId: eventLibraryID,
               allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+              includeLibraryLists: true,
             });
           }
         }
@@ -670,6 +816,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           message.data as AdminJob,
           message.event,
           allowDashboardRealtimeUpdatesRef.current,
+          runBroadCatalogInvalidationNow,
         );
         settleWaiterRef.current(message.data as AdminJob);
         break;
@@ -707,6 +854,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           message.data as UserStatePayload,
           activeProfileIDRef.current,
           allowDashboardRealtimeUpdatesRef.current,
+          (options) => scheduleBroadCatalogInvalidation(options, { trailingOnly: true }),
         );
         break;
       case "notifications":
