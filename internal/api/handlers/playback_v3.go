@@ -2664,7 +2664,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			// become an immediate client-visible transport error.
 			retryOpts := opts
 			retryOpts.AvoidHWDevice = startupFailure.failedDevice
-			retryOpts.HWAccel = playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath)
+			retryOpts.HWAccel = playback.StartupRetryHWAccel(opts)
 			slog.WarnContext(r.Context(), "local transcode crashed during startup; retrying once",
 				logComponentKey, playbackLogValueV3,
 				"playback_session_id", session.ID,

@@ -425,15 +425,17 @@ func videoToolboxProbeCacheKey(execPath string) string {
 
 // StartupRetryHWAccel returns the acceleration for the single retry after a
 // transcode dies before producing its first segment. VideoToolbox has no
-// alternate render device to move to, so its retry runs in software — e.g. an
-// encoder session the hardware cannot create at the requested dimensions
-// falls back to the working CPU encoder. Every other accel keeps its
-// configured value; the retry moves render devices via AvoidHWDevice instead.
-func StartupRetryHWAccel(configuredHWAccel, ffmpegPath string) string {
-	if ResolveHWAccelWithFFmpeg(configuredHWAccel, ffmpegPath) == transcodeHWVideoToolbox {
+// alternate render device to move to, so an ordinary encode retries on the
+// CPU. A frozen hardware tone-map recipe cannot take that acceleration-only
+// shortcut because its mode and filter would no longer describe the executor;
+// the owner must replan it as a complete software recipe instead. Every other
+// accel keeps its configured value and moves render devices via AvoidHWDevice.
+func StartupRetryHWAccel(opts TranscodeOpts) string {
+	if opts.ToneMapMode != tonemap.ModeHardware &&
+		ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath) == transcodeHWVideoToolbox {
 		return transcodeHWNone
 	}
-	return configuredHWAccel
+	return opts.HWAccel
 }
 
 // probeExecFFmpegPath returns the binary a capability probe must execute for

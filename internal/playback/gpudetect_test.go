@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 type hwAccelTestEnv struct {
@@ -706,13 +708,18 @@ func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing
 
 func TestStartupRetryHWAccel(t *testing.T) {
 	// Explicit values bypass ffmpeg probing, keeping this host-independent.
-	if got := StartupRetryHWAccel("videotoolbox", "/does/not/exist"); got != "none" {
+	if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist"}); got != "none" {
 		t.Fatalf("videotoolbox retry accel = %q, want none (no alternate device to move to)", got)
 	}
 	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
-		if got := StartupRetryHWAccel(accel, "/does/not/exist"); got != accel {
+		if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: accel, FFmpegPath: "/does/not/exist"}); got != accel {
 			t.Fatalf("%s retry accel = %q, want unchanged", accel, got)
 		}
+	}
+	if got := StartupRetryHWAccel(TranscodeOpts{
+		HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist", ToneMapMode: tonemap.ModeHardware,
+	}); got != "videotoolbox" {
+		t.Fatalf("hardware tone-map retry accel = %q, want unchanged frozen executor", got)
 	}
 }
 

@@ -33,6 +33,7 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 			args := buildFFmpegArgs(TranscodeOpts{
 				InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 				FFmpegPath:       videoToolboxTestFFmpegFor(t, tt.hwAccel),
+				SourceVideoCodec: "hevc",
 				TargetResolution: "1080p", HWAccel: tt.hwAccel, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
 				ToneMapMode: tt.mode, ToneMapSourceKind: tt.sourceKind, ToneMapFilter: tt.filter,
 				ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -56,6 +57,31 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 				t.Fatalf("hardware graph requested a software pixel format conversion: %s", joined)
 			}
 		})
+	}
+}
+
+func TestBuildFFmpegArgs_VideoToolboxToneMapUnprobedCodecUsesSoftwareDecodeUpload(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath: "/media/hdr-av1.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		FFmpegPath: videoToolboxTestFFmpeg(t), SourceVideoCodec: "av1", SourceVideoBitDepth: 10,
+		TargetResolution: "1080p", HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
+		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+	})
+	joined := strings.Join(args, " ")
+	for _, forbidden := range []string{"-hwaccel videotoolbox", "-hwaccel_output_format videotoolbox_vld"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("unprobed source codec must not use VideoToolbox decoding, found %q: %s", forbidden, joined)
+		}
+	}
+	for _, required := range []string{
+		"-init_hw_device videotoolbox=vt", "-filter_hw_device vt",
+		"setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,format=p010le,hwupload",
+		"scale_vt=w=-2:h=1080", "-c:v h264_videotoolbox",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("software-decode VideoToolbox tone map missing %q: %s", required, joined)
+		}
 	}
 }
 

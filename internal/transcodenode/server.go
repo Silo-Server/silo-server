@@ -1122,7 +1122,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			// alternate render device to move to), so a hardware encoder
 			// session this Mac cannot create does not fail clustered
 			// playback while CPU encoding was available.
-			retryAccel := playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath)
+			retryAccel := playback.StartupRetryHWAccel(opts)
 			if wasRunning || retryAccel == opts.HWAccel {
 				unlock()
 				slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
@@ -1415,7 +1415,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// media as permanently missing. Mirror handleStart's software retry for
 	// the accel StartupRetryHWAccel would change; other accels keep the
 	// existing register-immediately behavior.
-	if retryAccel := playback.StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
+	if retryAccel := playback.StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
 		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",

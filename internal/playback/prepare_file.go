@@ -125,7 +125,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 		// once in software. A frozen hardware tone-map recipe cannot take this
 		// shortcut: changing only HWAccel would drop its conversion graph while
 		// still tagging the unconverted output as SDR.
-		if retryAccel := StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
+		if retryAccel := StartupRetryHWAccel(opts); retryAccel != opts.HWAccel {
 			slog.WarnContext(ctx, "prepared encode failed; retrying with software encoding",
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
 			retryOpts := opts

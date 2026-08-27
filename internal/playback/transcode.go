@@ -463,6 +463,19 @@ func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
 	return opts
 }
 
+// resolveVideoToolboxToneMapDecode keeps hardware decoding only for the HEVC
+// source path exercised by the VideoToolbox tone-map capability probe. Other
+// codecs may still use scale_vt and the hardware encoder after CPU decoding,
+// but must upload their frames explicitly rather than requesting unsupported
+// VideoToolbox decoder surfaces.
+func resolveVideoToolboxToneMapDecode(opts TranscodeOpts) TranscodeOpts {
+	if opts.ToneMapMode == tonemap.ModeHardware && opts.HWAccel == transcodeHWVideoToolbox &&
+		normalizeCodecV3(opts.SourceVideoCodec) != "hevc" {
+		opts.SoftwareVideoDecode = true
+	}
+	return opts
+}
+
 // normalizeTranscodeOpts resolves source-specific decode safety and the
 // configured hardware execution mode in one place. Every FFmpeg entry point
 // must pass through this helper so streaming and prepared-file recipes cannot
@@ -480,6 +493,7 @@ func normalizeTranscodeOptsContext(ctx context.Context, opts TranscodeOpts) Tran
 		return opts
 	}
 	opts.HWAccel = resolveEffectiveTranscodeHWAccelContext(ctx, opts)
+	opts = resolveVideoToolboxToneMapDecode(opts)
 	return opts
 }
 
