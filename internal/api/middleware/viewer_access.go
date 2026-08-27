@@ -80,3 +80,20 @@ func (m *ViewerAccessMiddleware) RequireViewerAccess(next http.Handler) http.Han
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// RequireTransportViewerAccess applies the ordinary profile gate after
+// transport authentication while allowing a verified stream capability to use
+// the profile identity signed into that capability. Mount it after transport
+// rate limiting so rejected range and segment requests do not reach the viewer
+// resolver first.
+func (m *ViewerAccessMiddleware) RequireTransportViewerAccess(next http.Handler) http.Handler {
+	validated := m.RequireViewerAccess(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r.Context())
+		if claims != nil && claims.TokenType == auth.TokenTypeStream {
+			next.ServeHTTP(w, r)
+			return
+		}
+		validated.ServeHTTP(w, r)
+	})
+}

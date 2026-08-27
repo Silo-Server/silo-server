@@ -986,7 +986,7 @@ func TestMediaAuthModeForStartV3AppliesOnlyToAffectedAppleClient(t *testing.T) {
 }
 
 func TestMediaAuthModeForReplanV3PreservesSessionCapability(t *testing.T) {
-	req := playback.StartRequestV3{ClientFeatures: []string{playback.FeatureHeaderAuthenticatedMediaV3}}
+	req := playback.StartRequestV3{ClientFeatures: []string{playback.FeatureDeviceQuirksV3}}
 	currentPlan := playback.PlanV3{Stream: playback.StreamV3{Headers: map[string]string{streamtoken.Header: "session-capability"}}}
 
 	mode := mediaAuthModeForReplanV3(req, currentPlan)
@@ -1004,12 +1004,22 @@ func TestHandleReplanPlaybackV3CannotDowngradeHeaderAuthenticatedAttempt(t *test
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
 	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
+	start.ClientFeatures = append(
+		start.ClientFeatures,
+		playback.FeatureHeaderAuthenticatedMediaV3,
+		playback.FeatureDeviceQuirksV3,
+	)
+	start.ClientPlaybackContext.Device.Platform = "ios"
+	start.ClientPlaybackContext.AppBuild = "31"
+	start.ClientPlaybackContext.FormFactor = "mobile"
 	startRR := httptest.NewRecorder()
 	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	var started playback.DecisionResponseV3
 	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
 		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+	if started.PlaybackPlan.Stream.Headers[streamtoken.Header] == "" {
+		t.Fatal("start plan did not negotiate the session capability")
 	}
 
 	nextContext := start.ClientPlaybackContext
@@ -1035,6 +1045,9 @@ func TestHandleReplanPlaybackV3CannotDowngradeHeaderAuthenticatedAttempt(t *test
 	parsed, err := url.Parse(replanned.PlaybackPlan.Stream.URL)
 	if err != nil || parsed.IsAbs() || parsed.Query().Get(streamTokenParam) != "" {
 		t.Fatalf("replan URL = %q, want tokenless API-local route (parse error %v)", replanned.PlaybackPlan.Stream.URL, err)
+	}
+	if replanned.PlaybackPlan.Stream.Headers[streamtoken.Header] == "" {
+		t.Fatal("replan dropped the session capability header")
 	}
 	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
 	if err != nil {

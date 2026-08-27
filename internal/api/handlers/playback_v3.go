@@ -220,6 +220,7 @@ func mediaAuthModeForStartV3(req playback.StartRequestV3, resolvedClientBuild st
 func mediaAuthModeForReplanV3(req playback.StartRequestV3, currentPlan playback.PlanV3) mediaAuthModeV3 {
 	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
 	if currentPlan.Stream.Headers[streamtoken.Header] != "" {
+		mode.headerAuth = true
 		mode.proxyEgress = false
 		mode.sessionHeaderCapability = true
 	}

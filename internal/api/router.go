@@ -2077,6 +2077,9 @@ func NewRouter(deps Dependencies) chi.Router {
 				if deps.RateLimitMW != nil {
 					r.Use(deps.RateLimitMW.Handler)
 				}
+				if viewerAccessMiddleware != nil {
+					r.Use(viewerAccessMiddleware.RequireTransportViewerAccess)
+				}
 				if playbackHandler != nil {
 					r.Get("/playback/transcode/{session_id}/master.m3u8", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/playback/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest))
 					r.Get("/playback/transcode/{session_id}/segment/{name}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/playback/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment))

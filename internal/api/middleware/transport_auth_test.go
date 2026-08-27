@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
@@ -28,6 +29,20 @@ func (v *transportAuthTokenValidator) ValidateToken(string) (*auth.Claims, error
 
 type transportAuthSessionValidator struct {
 	valid bool
+}
+
+type transportAuthViewerResolver struct {
+	calls int
+	err   error
+	order *[]string
+}
+
+func (r *transportAuthViewerResolver) Resolve(context.Context, access.ResolveInput) (access.Scope, error) {
+	r.calls++
+	if r.order != nil {
+		*r.order = append(*r.order, "viewer")
+	}
+	return access.Scope{}, r.err
 }
 
 func (v transportAuthSessionValidator) IsValid(context.Context, string) (bool, error) {
@@ -116,6 +131,77 @@ func TestRequireTransportAuthAcceptsVersionedPlaybackRecipes(t *testing.T) {
 				t.Fatalf("access validator calls = %d, want capability hot path", validator.calls)
 			}
 		})
+	}
+}
+
+func TestRequireTransportAuthAppliesViewerAccessOnlyToRegularAuthFallback(t *testing.T) {
+	const secret = "transport-auth-test-secret"
+	validator := &transportAuthTokenValidator{claims: &auth.Claims{
+		UserID:    7,
+		ProfileID: "profile-1",
+		SessionID: "login-session-1",
+		TokenType: auth.TokenTypeAccess,
+	}}
+	middleware := NewAuthMiddleware(validator, transportAuthSessionValidator{valid: true}, nil, nil)
+	resolver := &transportAuthViewerResolver{err: access.ErrProfileUnverified}
+	viewer := NewViewerAccessMiddleware(resolver)
+	nextCalls := 0
+
+	router := chi.NewRouter()
+	router.With(middleware.RequireTransportAuth(secret), viewer.RequireTransportViewerAccess).Get("/stream/{session_id}", func(w http.ResponseWriter, _ *http.Request) {
+		nextCalls++
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	regularReq := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+	regularReq.Header.Set("Authorization", "Bearer access-token")
+	regularReq.Header.Set("X-Profile-Id", "profile-1")
+	regularRec := httptest.NewRecorder()
+	router.ServeHTTP(regularRec, regularReq)
+	if regularRec.Code != http.StatusForbidden || resolver.calls != 1 || nextCalls != 0 {
+		t.Fatalf("regular fallback status=%d viewer_calls=%d next_calls=%d", regularRec.Code, resolver.calls, nextCalls)
+	}
+
+	capabilityReq := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+	capabilityReq.Header.Set(streamtoken.Header, signTransportAuthToken(t, secret, "playback-1", 7, 42, "direct", time.Hour))
+	capabilityRec := httptest.NewRecorder()
+	router.ServeHTTP(capabilityRec, capabilityReq)
+	if capabilityRec.Code != http.StatusNoContent || resolver.calls != 1 || nextCalls != 1 {
+		t.Fatalf("capability status=%d viewer_calls=%d next_calls=%d", capabilityRec.Code, resolver.calls, nextCalls)
+	}
+}
+
+func TestTransportViewerAccessRunsAfterRateLimiting(t *testing.T) {
+	validator := &transportAuthTokenValidator{claims: &auth.Claims{
+		UserID:    7,
+		ProfileID: "profile-1",
+		SessionID: "login-session-1",
+		TokenType: auth.TokenTypeAccess,
+	}}
+	middleware := NewAuthMiddleware(validator, transportAuthSessionValidator{valid: true}, nil, nil)
+	order := []string{}
+	resolver := &transportAuthViewerResolver{order: &order}
+	viewer := NewViewerAccessMiddleware(resolver)
+	rateLimit := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "rate")
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	router := chi.NewRouter()
+	router.With(middleware.RequireTransportAuth("transport-auth-test-secret"), rateLimit, viewer.RequireTransportViewerAccess).Get("/stream/{session_id}", func(w http.ResponseWriter, _ *http.Request) {
+		order = append(order, "handler")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+	req.Header.Set("Authorization", "Bearer access-token")
+	req.Header.Set("X-Profile-Id", "profile-1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent || len(order) != 3 || order[0] != "rate" || order[1] != "viewer" || order[2] != "handler" {
+		t.Fatalf("status=%d middleware_order=%v", rec.Code, order)
 	}
 }
 
