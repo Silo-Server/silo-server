@@ -28,10 +28,12 @@ func (l *markerFileLock) lock() {
 	<-l.token
 }
 
-func (l *markerFileLock) lockContext(ctx context.Context) bool {
+func (l *markerFileLock) lockContext(ctx context.Context, registrationDone <-chan struct{}) bool {
 	l.once.Do(l.initialize)
 	select {
 	case <-ctx.Done():
+		return false
+	case <-registrationDone:
 		return false
 	case <-l.token:
 		return true
@@ -118,8 +120,11 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 		return nil
 	}
 	lock := n.fileLock(fileID)
-	if !lock.lockContext(ctx) {
-		return ctx.Err()
+	if !lock.lockContext(ctx, registration.Done()) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
 	}
 	defer lock.unlock()
 	if err := ctx.Err(); err != nil {

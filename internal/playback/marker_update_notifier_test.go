@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -303,6 +304,7 @@ func TestQueuedStaleMarkerSnapshotDoesNotLoadFile(t *testing.T) {
 
 	lock := notifier.fileLock(100)
 	lock.lock()
+	defer lock.unlock()
 	observed := make(chan struct{})
 	loaderCalled := make(chan struct{})
 	done := make(chan error, 1)
@@ -316,18 +318,19 @@ func TestQueuedStaleMarkerSnapshotDoesNotLoadFile(t *testing.T) {
 	}()
 	<-observed
 
-	if !hub.Unregister(oldRegistration) {
-		t.Fatal("old connection did not unregister")
-	}
 	newRegistration := hub.Register(session.ID, &dispatchTestConn{})
 	if newRegistration == nil {
 		t.Fatal("replacement registration is nil")
 	}
 	defer hub.Unregister(newRegistration)
-	lock.unlock()
 
-	if err := <-done; err != nil {
-		t.Fatalf("SendSessionSnapshotFromLoader: %v", err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SendSessionSnapshotFromLoader: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stale queued snapshot did not stop after replacement")
 	}
 	select {
 	case <-loaderCalled:

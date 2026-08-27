@@ -17,10 +17,11 @@ type RealtimeConnection interface {
 }
 
 type sessionLane struct {
-	conn       RealtimeConnection
-	mu         sync.Mutex
-	closed     bool
-	generation uint64
+	conn             RealtimeConnection
+	mu               sync.Mutex
+	closed           bool
+	generation       uint64
+	registrationDone chan struct{}
 }
 
 // RealtimeRegistration is an opaque ownership token for a realtime connection.
@@ -28,6 +29,7 @@ type RealtimeRegistration struct {
 	sessionID  string
 	lane       *sessionLane
 	generation uint64
+	done       <-chan struct{}
 }
 
 // SessionID returns the playback session owned by this registration.
@@ -36,6 +38,14 @@ func (r *RealtimeRegistration) SessionID() string {
 		return ""
 	}
 	return r.sessionID
+}
+
+// Done closes when this registration stops owning the active connection.
+func (r *RealtimeRegistration) Done() <-chan struct{} {
+	if r == nil {
+		return nil
+	}
+	return r.done
 }
 
 // RealtimeHub stores one active realtime connection per playback session.
@@ -63,13 +73,14 @@ func (h *RealtimeHub) Register(sessionID string, conn RealtimeConnection) *Realt
 	h.mu.Lock()
 	lane := h.connections[sessionID]
 	if lane == nil {
-		lane = &sessionLane{conn: conn, generation: 1}
+		done := make(chan struct{})
+		lane = &sessionLane{conn: conn, generation: 1, registrationDone: done}
 		h.connections[sessionID] = lane
 		h.mu.Unlock()
 		if h.onInitialRegister != nil {
 			h.onInitialRegister()
 		}
-		return &RealtimeRegistration{sessionID: sessionID, lane: lane, generation: 1}
+		return &RealtimeRegistration{sessionID: sessionID, lane: lane, generation: 1, done: done}
 	}
 	h.mu.Unlock()
 
@@ -81,13 +92,19 @@ func (h *RealtimeHub) Register(sessionID string, conn RealtimeConnection) *Realt
 		lane.mu.Unlock()
 		return nil
 	}
+	if lane.registrationDone != nil {
+		close(lane.registrationDone)
+	}
+	done := make(chan struct{})
 	lane.conn = conn
 	lane.closed = false
 	lane.generation++
+	lane.registrationDone = done
 	reg := &RealtimeRegistration{
 		sessionID:  sessionID,
 		lane:       lane,
 		generation: lane.generation,
+		done:       done,
 	}
 	lane.mu.Unlock()
 
@@ -112,6 +129,10 @@ func (h *RealtimeHub) Unregister(reg *RealtimeRegistration) bool {
 	if lane.generation != reg.generation || lane.closed {
 		lane.mu.Unlock()
 		return false
+	}
+	if lane.registrationDone != nil {
+		close(lane.registrationDone)
+		lane.registrationDone = nil
 	}
 	lane.closed = true
 	lane.conn = nil
