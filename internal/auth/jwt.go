@@ -37,6 +37,9 @@ const (
 	TokenTypeRefresh      = "refresh"
 	TokenTypeAPIKey       = "api_key"
 	TokenTypePluginAccess = "plugin_access"
+	// TokenTypeStream is synthesized only by the route-scoped playback transport
+	// middleware after it verifies a signed session capability.
+	TokenTypeStream = "stream"
 )
 
 const PluginAccessCookieName = "silo_plugin_access"
