@@ -73,6 +73,61 @@ func TestAFTKRTEAC3HLSCorrectionTranscodesAudioOnly(t *testing.T) {
 	}
 }
 
+func TestAndroidMobileBluetoothEAC3FallbackCopiesVideoAndAdaptsAudio(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/eac3.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3",
+		Resolution: "1080p", Bitrate: 5918, AudioChannels: 6,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 5918, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)"}},
+	}
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDeviceQuirksV3)
+	req.ClientPlaybackContext.FormFactor = "mobile"
+	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "android", Manufacturer: "Samsung", Model: "SM-S938B"}
+	req.ClientPlaybackContext.Output = OutputContextV3{
+		SinkType: "bluetooth",
+		AudioPassthrough: &AudioPassthroughV3{
+			MaxChannels:       10,
+			PassthroughCodecs: []string{},
+		},
+		OutputContextID: "3",
+	}
+	req.Capabilities.Containers = []string{"mkv"}
+	req.Capabilities.CodecsAudio = []string{"aac", "eac3"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{40}, BitDepths: []int{8}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 120_000, Hardware: true}}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = DeliveryCapabilityV3{}
+
+	input := PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()}
+	direct := PlanPlaybackV3(input)
+	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("direct = %s", ExplainPlannerResultV3(direct))
+	}
+	input.AttemptedKeys = []string{direct.Plan.PlanAttemptKey}
+	fallback := PlanPlaybackV3(input)
+	if fallback.Plan == nil || fallback.Plan.Delivery != DeliveryRemuxHLSV3 || fallback.PlayMethod != PlayRemux || fallback.TargetVideoCodec != "copy" || !fallback.TranscodeAudio || fallback.TargetAudioCodec != "aac" {
+		t.Fatalf("fallback = %s", ExplainPlannerResultV3(fallback))
+	}
+	if fallback.Plan.EffectiveRecipe.VideoCodec != "h264" || fallback.Plan.EffectiveRecipe.AudioCodec != "aac" {
+		t.Fatalf("fallback recipe = %#v", fallback.Plan.EffectiveRecipe)
+	}
+	if len(fallback.Plan.Transformations) != 1 || fallback.Plan.Transformations[0].Name != TransformationAudioToAACV3 {
+		t.Fatalf("fallback transformations = %#v", fallback.Plan.Transformations)
+	}
+	if len(fallback.Plan.AppliedQuirks) != 1 || fallback.Plan.AppliedQuirks[0].ID != QuirkAndroidMobileEAC3BluetoothV3 {
+		t.Fatalf("fallback quirks = %#v", fallback.Plan.AppliedQuirks)
+	}
+
+	req.ClientPlaybackContext.Output.SinkType = "Speaker"
+	if quirk, ok := hlsEAC3AudioCorrectionV3(SourceDescriptorFromFileV3(file, 0), req); ok || quirk != nil {
+		t.Fatalf("speaker route received Bluetooth correction: %#v", quirk)
+	}
+	req.ClientPlaybackContext.Output.SinkType = "bluetooth"
+	req.ClientPlaybackContext.FormFactor = "tv"
+	if quirk, ok := hlsEAC3AudioCorrectionV3(SourceDescriptorFromFileV3(file, 0), req); ok || quirk != nil {
+		t.Fatalf("Android TV route received mobile correction: %#v", quirk)
+	}
+}
+
 func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 8

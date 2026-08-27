@@ -3,9 +3,10 @@ package playback
 import "strings"
 
 const (
-	QuirkFireTVAFTKRTHigh10V3  = "android.fire_tv.aftkrt.h264_high10_l52_v1"
-	QuirkFireTVAFTKRTEAC3HLSV3 = "android.fire_tv.aftkrt.eac3_7_1_hls_audio_adapt_v1"
-	QuirkFireTVDV8HDR10PlusV3  = "android.fire_tv.dv8_hdr10plus_sei_v1"
+	QuirkFireTVAFTKRTHigh10V3         = "android.fire_tv.aftkrt.h264_high10_l52_v1"
+	QuirkFireTVAFTKRTEAC3HLSV3        = "android.fire_tv.aftkrt.eac3_7_1_hls_audio_adapt_v1"
+	QuirkAndroidMobileEAC3BluetoothV3 = "android.mobile.eac3_bluetooth_hls_audio_adapt_v1"
+	QuirkFireTVDV8HDR10PlusV3         = "android.fire_tv.dv8_hdr10plus_sei_v1"
 )
 
 func high10DecodeOverrideV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
@@ -35,8 +36,19 @@ func high10DecodeOverrideV3(source SourceDescriptorV3, request StartRequestV3) (
 }
 
 func hlsEAC3AudioCorrectionV3(source SourceDescriptorV3, request StartRequestV3) (*AppliedQuirkV3, bool) {
-	if !deviceQuirkProtocolAvailableV3(request) || !isAmazonModelV3(request, "AFTKRT") ||
-		!strings.EqualFold(source.AudioCodec, "eac3") || source.AudioChannels != 8 {
+	if !deviceQuirkProtocolAvailableV3(request) || !strings.EqualFold(source.AudioCodec, "eac3") {
+		return nil, false
+	}
+	if isAndroidMobileBluetoothOutputV3(request) && source.AudioChannels >= 6 {
+		quirk := AppliedQuirkV3{
+			ID:               QuirkAndroidMobileEAC3BluetoothV3,
+			RegistryRevision: DeviceQuirkRegistryRevisionV3,
+			Action:           "audio_only_transcode",
+			Reason:           "Android mobile cannot reliably decode multichannel E-AC-3 on the observed Bluetooth output route; preserve video and adapt audio to AAC.",
+		}
+		return &quirk, true
+	}
+	if !isAmazonModelV3(request, "AFTKRT") || source.AudioChannels != 8 {
 		return nil, false
 	}
 	quirk := AppliedQuirkV3{
@@ -46,6 +58,16 @@ func hlsEAC3AudioCorrectionV3(source SourceDescriptorV3, request StartRequestV3)
 		Reason:           "AFTKRT cannot reliably consume eight-channel E-AC-3 from an HLS MPEG-TS route.",
 	}
 	return &quirk, true
+}
+
+func isAndroidMobileBluetoothOutputV3(request StartRequestV3) bool {
+	device := request.ClientPlaybackContext.Device
+	output := request.ClientPlaybackContext.Output
+	return strings.EqualFold(device.Platform, "android") &&
+		strings.EqualFold(request.ClientPlaybackContext.FormFactor, "mobile") &&
+		strings.EqualFold(output.SinkType, "bluetooth") &&
+		output.AudioPassthrough != nil &&
+		len(output.AudioPassthrough.PassthroughCodecs) == 0
 }
 
 func dv8HDR10PlusRuntimeCorrectionV3(source SourceDescriptorV3, request StartRequestV3, deliveryClass string) (*AppliedQuirkV3, bool) {
