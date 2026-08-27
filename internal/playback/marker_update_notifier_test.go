@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -12,6 +13,26 @@ type blockingMarkerSnapshotLoader struct {
 	file    *models.MediaFile
 	entered chan struct{}
 	release chan struct{}
+}
+
+type observedDoneContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *observedDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+type observedMarkerSnapshotLoader struct {
+	called chan struct{}
+}
+
+func (l observedMarkerSnapshotLoader) GetByID(context.Context, int) (*models.MediaFile, error) {
+	close(l.called)
+	return &models.MediaFile{ID: 100}, nil
 }
 
 func (l blockingMarkerSnapshotLoader) GetByID(context.Context, int) (*models.MediaFile, error) {
@@ -270,5 +291,84 @@ func TestMarkerSnapshotFromReplacedConnectionDoesNotReachReplacement(t *testing.
 	}
 	if len(newConn.messages) != 0 {
 		t.Fatalf("replacement connection messages = %d, want 0", len(newConn.messages))
+	}
+}
+
+func TestQueuedStaleMarkerSnapshotDoesNotLoadFile(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	hub := NewRealtimeHub()
+	oldRegistration := hub.Register(session.ID, &dispatchTestConn{})
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+
+	lock := notifier.fileLock(100)
+	lock.lock()
+	observed := make(chan struct{})
+	loaderCalled := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- notifier.SendSessionSnapshotFromLoader(
+			&observedDoneContext{Context: context.Background(), observed: observed},
+			oldRegistration,
+			100,
+			observedMarkerSnapshotLoader{called: loaderCalled},
+		)
+	}()
+	<-observed
+
+	if !hub.Unregister(oldRegistration) {
+		t.Fatal("old connection did not unregister")
+	}
+	newRegistration := hub.Register(session.ID, &dispatchTestConn{})
+	if newRegistration == nil {
+		t.Fatal("replacement registration is nil")
+	}
+	defer hub.Unregister(newRegistration)
+	lock.unlock()
+
+	if err := <-done; err != nil {
+		t.Fatalf("SendSessionSnapshotFromLoader: %v", err)
+	}
+	select {
+	case <-loaderCalled:
+		t.Fatal("stale queued snapshot called the loader")
+	default:
+	}
+}
+
+func TestQueuedMarkerSnapshotStopsWhenContextIsCanceled(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	hub := NewRealtimeHub()
+	registration := hub.Register(session.ID, &dispatchTestConn{})
+	defer hub.Unregister(registration)
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+
+	lock := notifier.fileLock(100)
+	lock.lock()
+	defer lock.unlock()
+	observed := make(chan struct{})
+	loaderCalled := make(chan struct{})
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := &observedDoneContext{Context: baseCtx, observed: observed}
+	done := make(chan error, 1)
+	go func() {
+		done <- notifier.SendSessionSnapshotFromLoader(
+			ctx,
+			registration,
+			100,
+			observedMarkerSnapshotLoader{called: loaderCalled},
+		)
+	}()
+	<-observed
+	cancel()
+
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("SendSessionSnapshotFromLoader error = %v, want context.Canceled", err)
+	}
+	select {
+	case <-loaderCalled:
+		t.Fatal("canceled queued snapshot called the loader")
+	default:
 	}
 }

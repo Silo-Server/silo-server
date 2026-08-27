@@ -13,6 +13,35 @@ type markerUpdateSessionLookup interface {
 	GetSessionsByMediaFileID(fileID int) []*Session
 }
 
+type markerFileLock struct {
+	once  sync.Once
+	token chan struct{}
+}
+
+func (l *markerFileLock) initialize() {
+	l.token = make(chan struct{}, 1)
+	l.token <- struct{}{}
+}
+
+func (l *markerFileLock) lock() {
+	l.once.Do(l.initialize)
+	<-l.token
+}
+
+func (l *markerFileLock) lockContext(ctx context.Context) bool {
+	l.once.Do(l.initialize)
+	select {
+	case <-ctx.Done():
+		return false
+	case <-l.token:
+		return true
+	}
+}
+
+func (l *markerFileLock) unlock() {
+	l.token <- struct{}{}
+}
+
 // MarkerUpdateNotifier publishes live marker updates to active playback sessions.
 type MarkerUpdateNotifier struct {
 	sessions markerUpdateSessionLookup
@@ -21,7 +50,7 @@ type MarkerUpdateNotifier struct {
 	// with provider-update delivery. This prevents an older partial snapshot
 	// from landing after a newer markers_updated event without growing a lock
 	// map for every file in a large library.
-	fileLocks [64]sync.Mutex
+	fileLocks [64]markerFileLock
 }
 
 // MarkerSnapshotFileLoader loads the persisted media-file marker row used for
@@ -45,8 +74,8 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(ctx context.Context, file *models.
 		return
 	}
 	lock := n.fileLock(file.ID)
-	lock.Lock()
-	defer lock.Unlock()
+	lock.lock()
+	defer lock.unlock()
 
 	for _, session := range n.sessions.GetSessionsByMediaFileID(file.ID) {
 		if session == nil || session.ID == "" || !session.HasRealtimeConnection {
@@ -64,8 +93,8 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshot(ctx context.Context, sessionI
 		return
 	}
 	lock := n.fileLock(file.ID)
-	lock.Lock()
-	defer lock.Unlock()
+	lock.lock()
+	defer lock.unlock()
 	n.sendSessionSnapshotLocked(ctx, sessionID, file)
 }
 
@@ -82,9 +111,23 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 	if n == nil || n.hub == nil || registration == nil || registration.SessionID() == "" || fileID <= 0 || loader == nil {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !n.hub.HasRegistration(registration) {
+		return nil
+	}
 	lock := n.fileLock(fileID)
-	lock.Lock()
-	defer lock.Unlock()
+	if !lock.lockContext(ctx) {
+		return ctx.Err()
+	}
+	defer lock.unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !n.hub.HasRegistration(registration) {
+		return nil
+	}
 	file, err := loader.GetByID(ctx, fileID)
 	if err != nil || file == nil {
 		return err
@@ -93,7 +136,7 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 	return nil
 }
 
-func (n *MarkerUpdateNotifier) fileLock(fileID int) *sync.Mutex {
+func (n *MarkerUpdateNotifier) fileLock(fileID int) *markerFileLock {
 	return &n.fileLocks[uint(fileID)%uint(len(n.fileLocks))]
 }
 

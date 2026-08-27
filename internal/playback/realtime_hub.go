@@ -155,17 +155,11 @@ func (h *RealtimeHub) Send(sessionID string, message any) error {
 // used for connection-specific work that must not spill into a replacement
 // websocket after a reconnect.
 func (h *RealtimeHub) SendRegistered(reg *RealtimeRegistration, message any) error {
-	if h == nil || reg == nil || reg.sessionID == "" || reg.lane == nil {
+	if !h.HasRegistration(reg) {
 		return ErrRealtimeConnectionNotFound
 	}
 
-	h.mu.RLock()
-	lane, ok := h.connections[reg.sessionID]
-	h.mu.RUnlock()
-	if !ok || lane == nil || lane != reg.lane {
-		return ErrRealtimeConnectionNotFound
-	}
-
+	lane := reg.lane
 	lane.mu.Lock()
 	if lane.closed || lane.conn == nil || lane.generation != reg.generation {
 		lane.mu.Unlock()
@@ -174,4 +168,23 @@ func (h *RealtimeHub) SendRegistered(reg *RealtimeRegistration, message any) err
 	err := lane.conn.WriteJSON(message)
 	lane.mu.Unlock()
 	return err
+}
+
+// HasRegistration reports whether reg still owns the active connection.
+func (h *RealtimeHub) HasRegistration(reg *RealtimeRegistration) bool {
+	if h == nil || reg == nil || reg.sessionID == "" || reg.lane == nil {
+		return false
+	}
+
+	h.mu.RLock()
+	lane, ok := h.connections[reg.sessionID]
+	h.mu.RUnlock()
+	if !ok || lane == nil || lane != reg.lane {
+		return false
+	}
+
+	lane.mu.Lock()
+	active := !lane.closed && lane.conn != nil && lane.generation == reg.generation
+	lane.mu.Unlock()
+	return active
 }
