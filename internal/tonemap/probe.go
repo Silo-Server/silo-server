@@ -402,7 +402,7 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 // HDR and already-SDR Dolby Vision base layers.
 func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth int) string {
 	if backend == BackendVideoToolbox {
-		return VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(sourceVideoBitDepth) + "," + HDRMetadataRemovalFilter()
+		return SourceParameters(kind) + "," + VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(sourceVideoBitDepth) + "," + HDRMetadataRemovalFilter()
 	}
 	if backend == BackendNVENC {
 		if IsSDRSource(kind) {

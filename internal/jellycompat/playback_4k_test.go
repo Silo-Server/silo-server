@@ -69,6 +69,33 @@ func TestIs4KResolution(t *testing.T) {
 	}
 }
 
+func TestCompatVideoToolboxToneMapBitrateKbps(t *testing.T) {
+	videoToolbox := compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendVideoToolbox}
+	tests := []struct {
+		name    string
+		version catalog.FileVersion
+		recipe  compatToneMapRecipe
+		want    int
+	}{
+		{name: "4K track", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 2160}}}, recipe: videoToolbox, want: 20_000},
+		{name: "4K label", version: catalog.FileVersion{Resolution: "4K"}, recipe: videoToolbox, want: 20_000},
+		{name: "1080p", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 1080}}}, recipe: videoToolbox, want: 6_000},
+		{name: "720p", version: catalog.FileVersion{Resolution: "720p"}, recipe: videoToolbox, want: 2_000},
+		{name: "SD", version: catalog.FileVersion{VideoTracks: []models.VideoTrack{{Height: 576}}}, recipe: videoToolbox, want: 1_500},
+		{name: "source bitrate fallback", version: catalog.FileVersion{Bitrate: 9_000}, recipe: videoToolbox, want: 9_000},
+		{name: "unknown source", recipe: videoToolbox},
+		{name: "software mode", version: catalog.FileVersion{Resolution: "2160p"}, recipe: compatToneMapRecipe{mode: tonemap.ModeSoftware, hwAccel: tonemap.BackendSoftware}},
+		{name: "other hardware", version: catalog.FileVersion{Resolution: "2160p"}, recipe: compatToneMapRecipe{mode: tonemap.ModeHardware, hwAccel: tonemap.BackendQSV}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := compatVideoToolboxToneMapBitrateKbps(test.version, test.recipe); got != test.want {
+				t.Fatalf("compatVideoToolboxToneMapBitrateKbps() = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 	version4K := catalog.FileVersion{
 		FileID:     1,

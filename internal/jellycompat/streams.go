@@ -2135,6 +2135,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			return nil, toneMapErr
 		}
 		toneMapRecipe.apply(&opts)
+		if bitrateKbps := compatVideoToolboxToneMapBitrateKbps(source.Version, toneMapRecipe); bitrateKbps > 0 {
+			opts.TargetBitrateKbps = bitrateKbps
+		}
 	}
 	opts.SegmentDuration = h.compatSegmentDuration()
 

@@ -36,6 +36,7 @@ func TestVideoToolboxSmokeUsesHardwareFramesAndEightBitOutput(t *testing.T) {
 	for _, token := range []string{
 		"-hwaccel videotoolbox",
 		"-hwaccel_output_format videotoolbox_vld",
+		SourceParameters(SourcePQ),
 		"scale_vt=w=iw:h=ih:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709",
 		"hwdownload,format=p010le,format=nv12",
 		"sidedata=mode=delete:type=DOVI_RPU_BUFFER",
@@ -44,6 +45,17 @@ func TestVideoToolboxSmokeUsesHardwareFramesAndEightBitOutput(t *testing.T) {
 		if !strings.Contains(joined, token) {
 			t.Fatalf("VideoToolbox smoke args missing %q: %s", token, joined)
 		}
+	}
+}
+
+func TestVideoToolboxSmokeDeclaresEverySourceSignal(t *testing.T) {
+	for _, kind := range AllSourceKinds() {
+		t.Run(string(kind), func(t *testing.T) {
+			filter := hardwareSmokeFilter(BackendVideoToolbox, kind, decodeProbeFixtureBitDepth)
+			if !strings.HasPrefix(filter, SourceParameters(kind)+",") {
+				t.Fatalf("hardwareSmokeFilter() = %q, want source declaration %q first", filter, SourceParameters(kind))
+			}
+		})
 	}
 }
 

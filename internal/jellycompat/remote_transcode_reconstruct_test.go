@@ -811,6 +811,69 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 	}
 }
 
+func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) {
+	var requests []transcodenode.TranscodeStartRequest
+	capabilities := tonemap.Capabilities{
+		{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVideoToolbox, Filter: tonemap.HardwareFilterVideoToolbox, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+		{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterHable, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+	}
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{ToneMapCapabilities: capabilities})
+		case "/transcode/start":
+			var request transcodenode.TranscodeStartRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode start request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			requests = append(requests, request)
+			if request.ToneMapMode == tonemap.ModeHardware {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(node.Close)
+
+	recipeStore := &stubRecipeNodeStore{}
+	handler, _, playbackStore := newRemoteTranscodeHandler(t, node.URL, recipeStore)
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		config.Allow4KTranscodeSettingKey:                 "true",
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+	}}
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+	source := testRemoteTranscodeSource()
+	source.Version.Resolution = "2160p"
+	source.Version.VideoTracks[0].Height = 2160
+	file := &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", HDR: true, VideoTracks: []models.VideoTrack{{Codec: "hevc", VideoRangeType: "HDR10", ColorTransfer: "smpte2084", ColorPrimaries: "bt2020", ColorSpace: "bt2020nc", BitDepth: 10}}}
+
+	if err := handler.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
+		t.Fatalf("startRemoteTranscode: %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("start requests = %d, want hardware attempt plus software fallback", len(requests))
+	}
+	if got := requests[0].TargetBitrateKbps; got != 20_000 {
+		t.Fatalf("hardware target bitrate = %d, want 20000", got)
+	}
+	if requests[0].TargetResolution != "" {
+		t.Fatalf("hardware target resolution = %q, want source dimensions preserved", requests[0].TargetResolution)
+	}
+	if got := requests[1].TargetBitrateKbps; got != 0 {
+		t.Fatalf("software fallback target bitrate = %d, want unconstrained CRF", got)
+	}
+	card, ok := recipeStore.Get("upstream-1")
+	if !ok || card.TargetBitrateKbps != 0 || card.ToneMapMode != tonemap.ModeSoftware {
+		t.Fatalf("persisted fallback recipe = found %t bitrate %d mode %q", ok, card.TargetBitrateKbps, card.ToneMapMode)
+	}
+}
+
 func TestStartRemoteToneMapTimeoutFallsBackToSoftwareAfterCleanup(t *testing.T) {
 	previousTimeout := compatRemoteTranscodeStartTimeout
 	compatRemoteTranscodeStartTimeout = 200 * time.Millisecond
