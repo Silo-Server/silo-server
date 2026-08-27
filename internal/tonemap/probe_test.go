@@ -133,6 +133,52 @@ func TestProbeEmptyCapabilitiesExpire(t *testing.T) {
 	}
 }
 
+func TestProbePartialHardwareCapabilitiesExpire(t *testing.T) {
+	resetProbeCache(t)
+	now := time.Unix(100, 0)
+	hardwareReady := false
+	calls := 0
+	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		calls++
+		if len(args) > 0 && args[len(args)-1] == "-filters" {
+			return []byte(" .S. zscale V->V\n .S. tonemap V->V\n .S. scale_vt V->V\n .S. hwdownload V->V\n .S. sidedata V->V\n"), nil
+		}
+		if len(args) > 0 && args[len(args)-1] == "-encoders" {
+			return []byte("libx264 h264_videotoolbox"), nil
+		}
+		if strings.Contains(strings.Join(args, " "), "-hwaccel videotoolbox") && !hardwareReady {
+			return nil, errors.New("VideoToolbox session temporarily unavailable")
+		}
+		return nil, nil
+	}
+
+	got, err := probeCached(t.Context(), "/ffmpeg-partial", BackendVideoToolbox, "", runner, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("partial probe error = %v", err)
+	}
+	if len(got) != 1 || !got.Supports(ModeSoftware, SourcePQ) || got.Supports(ModeHardware, SourcePQ) {
+		t.Fatalf("partial probe = %#v, want software only", got)
+	}
+	firstCalls := calls
+	hardwareReady = true
+	got, err = probeCached(t.Context(), "/ffmpeg-partial", BackendVideoToolbox, "", runner, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("cached partial probe error = %v", err)
+	}
+	if calls != firstCalls || got.Supports(ModeHardware, SourcePQ) {
+		t.Fatalf("partial probe was not cached until expiry: calls = %d, capabilities = %#v", calls, got)
+	}
+
+	now = now.Add(probeNegativeTTL + time.Second)
+	got, err = probeCached(t.Context(), "/ffmpeg-partial", BackendVideoToolbox, "", runner, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("retried partial probe error = %v", err)
+	}
+	if calls == firstCalls || !got.Supports(ModeHardware, SourcePQ) {
+		t.Fatalf("expired partial probe was not retried: calls = %d, capabilities = %#v", calls, got)
+	}
+}
+
 func TestProbeCommandDeadlineIsTransientAndNotCached(t *testing.T) {
 	resetProbeCache(t)
 	calls := 0

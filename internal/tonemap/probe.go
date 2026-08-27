@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,8 +35,8 @@ const decodeProbeFixtureBase64 = "AAAAAUABDAH//wIgAAADAJAAAAMAAAMAHpWUCQAAAAFCAQ
 // output. Tests inject it to model individual FFmpeg capabilities and failures.
 type CommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-// probeCacheEntry stores either a permanent positive capability result or a
-// short-lived negative result that is eligible for retry.
+// probeCacheEntry stores either a permanent complete capability result or a
+// short-lived incomplete result that is eligible for retry.
 type probeCacheEntry struct {
 	capabilities Capabilities
 	expiresAt    time.Time
@@ -79,7 +80,7 @@ func probeCached(ctx context.Context, ffmpegPath, hardwareBackend, hardwareDevic
 			return nil, err
 		}
 		entry := probeCacheEntry{capabilities: append(Capabilities(nil), result...)}
-		if len(result) == 0 {
+		if !probeCapabilitiesComplete(result, hardwareBackend) {
 			entry.expiresAt = now().Add(probeNegativeTTL)
 		}
 		probeCache.Lock()
@@ -149,10 +150,29 @@ func probeCacheKey(ffmpegPath, hardwareBackend, hardwareDevice string) string {
 	return strings.Join([]string{binaryIdentity, backend, device, strings.Join(driverIdentities, ",")}, "\x00")
 }
 
-// probeCacheEntryCurrent reports whether a positive result or unexpired
-// negative result may be reused.
+// probeCacheEntryCurrent reports whether a complete result or unexpired
+// incomplete result may be reused.
 func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
-	return len(entry.capabilities) > 0 || now.Before(entry.expiresAt)
+	return entry.expiresAt.IsZero() || now.Before(entry.expiresAt)
+}
+
+// probeCapabilitiesComplete reports whether discovery found a reusable result
+// for every executor class it was asked to inspect. A software capability does
+// not make a missing configured hardware executor permanent: temporary device
+// contention must be retried after the negative-cache interval.
+func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend string) bool {
+	if len(capabilities) == 0 {
+		return false
+	}
+	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
+	switch backend {
+	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
+		return slices.ContainsFunc(capabilities, func(capability Capability) bool {
+			return capability.Mode == ModeHardware && capability.Backend == backend
+		})
+	default:
+		return true
+	}
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
