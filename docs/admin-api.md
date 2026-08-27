@@ -740,7 +740,7 @@ Each entry in `sources`:
 
 | Field       | Type     | Meaning                                      |
 | ----------- | -------- | -------------------------------------------- |
-| `source`    | string   | `playback_sessions_sync` or `node_sessions`. |
+| `source`    | string   | `playback_sessions_sync` or `node_sessions_redis`. |
 | `available` | bool     | The projection could be read.                |
 | `error`     | string   | Why it could not.                            |
 | `notes`     | string[] | Caveats that apply to this comparison.       |
@@ -748,15 +748,40 @@ Each entry in `sources`:
 
 `report`:
 
-| Field                                               | Type     | Meaning                                                                                                                          |
-| --------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `telemetry_count`, `legacy_count`, `in_both`        | int      | Session counts on each side and their intersection.                                                                              |
-| `agrees`                                            | bool     | Same session set, and no field both sides express disagrees. Read `fields_absent` before treating this as clearance to cut over. |
-| `telemetry_only`, `legacy_only`                     | string[] | Session ids present on one side only, capped.                                                                                    |
-| `telemetry_only_truncated`, `legacy_only_truncated` | int      | How many ids the cap dropped.                                                                                                    |
-| `mismatches`                                        | object[] | Per-session field disagreements, capped.                                                                                         |
-| `mismatches_truncated`                              | int      | How many the cap dropped.                                                                                                        |
-| `fields_absent`                                     | object   | Per field, sessions both sides know where one side carries no value. A gap in a projection, not a disagreement.                  |
+| Field                                               | Type     | Meaning                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `telemetry_count`, `legacy_count`, `in_both`        | int      | Session counts on each side and their intersection.                                                                                                                                                                                                                                                        |
+| `telemetry_measured`, `telemetry_reported_only`     | int      | Telemetry sessions backed by measuring publishers, and sessions known only from playback session managers. Their sum is `telemetry_count`.                                                                                                                                                                 |
+| `in_both_measured`, `in_both_reported_only`         | int      | Shared sessions split by telemetry evidence. Their sum is `in_both`.                                                                                                                                                                                                                                       |
+| `in_both_reported_only_sessions`                    | string[] | Shared session ids known to telemetry only through a playback session manager, sorted and capped.                                                                                                                                                                                                          |
+| `in_both_reported_only_truncated`                   | int      | How many reported-only shared ids the cap dropped.                                                                                                                                                                                                                                                         |
+| `agrees`                                            | bool     | Same session set, no field both sides express disagrees, at least one shared session is backed by measurement when the set is non-empty, the telemetry view is complete and fresh, and the legacy read is neither truncated nor lossy. Read `fields_absent` before treating this as clearance to cut over. |
+| `agreement_self_derived`                            | bool     | The non-empty intersection contains only reported-only sessions, so it is not independent corroboration.                                                                                                                                                                                                   |
+| `view_complete`, `view_stale`                       | bool     | Completeness and freshness of the telemetry view used for this comparison.                                                                                                                                                                                                                                 |
+| `legacy_truncated`, `legacy_lossy`                  | bool     | The legacy reader hit its record limit, or skipped records it could not decode. Either condition withholds agreement.                                                                                                                                                                                      |
+| `agrees_withheld`                                   | string[] | Why otherwise identical projections were not called agreement: `agreement_self_derived`, `view_incomplete`, `view_stale`, `legacy_truncated`, or `legacy_lossy`. Omitted when no reason applies.                                                                                                           |
+| `telemetry_only`, `legacy_only`                     | string[] | Session ids present on one side only, capped.                                                                                                                                                                                                                                                              |
+| `telemetry_only_truncated`, `legacy_only_truncated` | int      | How many ids the cap dropped.                                                                                                                                                                                                                                                                              |
+| `mismatches`                                        | object[] | Per-session field disagreements, capped.                                                                                                                                                                                                                                                                   |
+| `mismatches_truncated`                              | int      | How many the cap dropped.                                                                                                                                                                                                                                                                                  |
+| `fields_absent`                                     | object   | Per field, sessions both sides know where one side carries no value. A gap in a projection, not a disagreement.                                                                                                                                                                                            |
+
+Telemetry's reported-only sessions and `playback_sessions_sync` rows both come
+from the playback session manager. Their intersection is therefore one source
+agreeing with itself, not independent corroboration, and cannot make `agrees`
+true on its own. `node_sessions_redis` records are written by proxy and
+transcode nodes (`internal/nodesessions/tracker.go`) and do not share that
+source; withholding reported-only agreement there is conservative rather than
+an accusation against the node projection. The rule is deliberately uniform.
+
+`agrees: true` is not a claim that the intersection is free of self-derived
+rows. Only an intersection that is *entirely* reported-only withholds it —
+requiring every shared session to be measured would flap through the first
+seconds of every play, before a client has asked for a byte. So a fleet with one
+measured shared session and fifty #666 ghosts still reports `agrees: true` with
+`in_both_reported_only` at 50. Read `in_both_reported_only` and
+`in_both_reported_only_sessions` beside `agrees` before treating agreement as
+clearance to retire the legacy writers.
 
 A single report samples three independently updated stores, so one-sided
 differences are normal and are not on their own evidence of a defect. Repeated

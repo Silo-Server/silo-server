@@ -17,9 +17,17 @@ func liveSession(id string, mutate ...func(*LiveSession)) LiveSession {
 	return session
 }
 
+func healthy(sessions ...LiveSession) TelemetrySide {
+	return TelemetrySide{Sessions: sessions, ViewComplete: true}
+}
+
+func legacySide(sessions ...LiveSession) LegacySide {
+	return LegacySide{Sessions: sessions}
+}
+
 func TestCompareLiveSessionsAgreesOnIdenticalSets(t *testing.T) {
 	sessions := []LiveSession{liveSession("a"), liveSession("b")}
-	report := CompareLiveSessions("legacy", sessions, sessions, 0)
+	report := CompareLiveSessions("legacy", healthy(sessions...), legacySide(sessions...), 0)
 	if !report.Agrees {
 		t.Fatalf("identical sets disagreed: %+v", report)
 	}
@@ -34,7 +42,7 @@ func TestCompareLiveSessionsAgreesOnIdenticalSets(t *testing.T) {
 func TestCompareLiveSessionsReportsOnlySides(t *testing.T) {
 	telemetry := []LiveSession{liveSession("a"), liveSession("only-telemetry")}
 	legacy := []LiveSession{liveSession("a"), liveSession("only-legacy")}
-	report := CompareLiveSessions("legacy", telemetry, legacy, 0)
+	report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0)
 	if report.Agrees {
 		t.Fatal("differing sets agreed")
 	}
@@ -53,7 +61,7 @@ func TestCompareLiveSessionsFieldRules(t *testing.T) {
 	t.Run("subject disagreement is a mismatch", func(t *testing.T) {
 		telemetry := []LiveSession{liveSession("a")}
 		legacy := []LiveSession{liveSession("a", func(s *LiveSession) { s.Subject = UserSubject(9) })}
-		report := CompareLiveSessions("legacy", telemetry, legacy, 0)
+		report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0)
 		if len(report.Mismatches) != 1 || report.Mismatches[0].Field != "subject" {
 			t.Fatalf("mismatches = %+v", report.Mismatches)
 		}
@@ -72,7 +80,7 @@ func TestCompareLiveSessionsFieldRules(t *testing.T) {
 			s.MediaFileID = 0
 			s.Node = ""
 		})}
-		report := CompareLiveSessions("legacy", telemetry, legacy, 0)
+		report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0)
 		if len(report.Mismatches) != 0 {
 			t.Fatalf("absence produced mismatches: %+v", report.Mismatches)
 		}
@@ -97,7 +105,7 @@ func TestCompareLiveSessionsFieldRules(t *testing.T) {
 		legacy := []LiveSession{liveSession("a", func(s *LiveSession) {
 			s.StartedAt = s.StartedAt.Add(900 * time.Millisecond)
 		})}
-		if report := CompareLiveSessions("legacy", telemetry, legacy, 0); !report.Agrees {
+		if report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0); !report.Agrees {
 			t.Fatalf("900ms of start skew was reported as a mismatch: %+v", report.Mismatches)
 		}
 	})
@@ -107,7 +115,7 @@ func TestCompareLiveSessionsFieldRules(t *testing.T) {
 		legacy := []LiveSession{liveSession("a", func(s *LiveSession) {
 			s.StartedAt = s.StartedAt.Add(-5 * time.Second)
 		})}
-		report := CompareLiveSessions("legacy", telemetry, legacy, 0)
+		report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0)
 		if len(report.Mismatches) != 1 || report.Mismatches[0].Field != "started_at" {
 			t.Fatalf("mismatches = %+v", report.Mismatches)
 		}
@@ -130,7 +138,7 @@ func TestCompareLiveSessionsCapsEveryList(t *testing.T) {
 		legacy = append(legacy, liveSession(id, func(s *LiveSession) { s.Subject = UserSubject(99) }))
 	}
 
-	report := CompareLiveSessions("legacy", telemetry, legacy, 3)
+	report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 3)
 	if len(report.TelemetryOnly) != 3 || report.TelemetryMore != 7 {
 		t.Fatalf("telemetry only = %d (+%d)", len(report.TelemetryOnly), report.TelemetryMore)
 	}
@@ -142,12 +150,172 @@ func TestCompareLiveSessionsCapsEveryList(t *testing.T) {
 	}
 }
 
+func TestCompareLiveSessionsEvidenceGatesAgreement(t *testing.T) {
+	t.Run("reported-only on both sides is not corroboration", func(t *testing.T) {
+		telemetry := liveSession("ghost", func(session *LiveSession) { session.ReportedOnly = true })
+		report := CompareLiveSessions("legacy", healthy(telemetry), legacySide(liveSession("ghost")), 0)
+		if report.InBoth != 1 || report.InBothReportedOnly != 1 || report.InBothMeasured != 0 {
+			t.Fatalf("evidence counts = %+v", report)
+		}
+		if !report.AgreementSelfDerived || report.Agrees {
+			t.Fatalf("self-derived agreement was accepted: %+v", report)
+		}
+		if len(report.AgreesWithheld) != 1 || report.AgreesWithheld[0] != "agreement_self_derived" {
+			t.Fatalf("withheld reasons = %+v", report.AgreesWithheld)
+		}
+		if len(report.Mismatches) != 0 {
+			t.Fatalf("evidence veto manufactured mismatches: %+v", report.Mismatches)
+		}
+	})
+
+	t.Run("measured session on both sides is corroboration", func(t *testing.T) {
+		session := liveSession("measured")
+		report := CompareLiveSessions("legacy", healthy(session), legacySide(session), 0)
+		if report.InBothMeasured != 1 || report.InBothReportedOnly != 0 || report.AgreementSelfDerived || !report.Agrees {
+			t.Fatalf("measured agreement = %+v", report)
+		}
+	})
+
+	t.Run("reported-only fleet stays false", func(t *testing.T) {
+		telemetry := make([]LiveSession, 0, 3)
+		legacy := make([]LiveSession, 0, 3)
+		for _, id := range []string{"a", "b", "c"} {
+			telemetry = append(telemetry, liveSession(id, func(session *LiveSession) { session.ReportedOnly = true }))
+			legacy = append(legacy, liveSession(id))
+		}
+		report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 0)
+		if report.Agrees || !report.AgreementSelfDerived || report.InBothReportedOnly != 3 {
+			t.Fatalf("reported-only fleet = %+v", report)
+		}
+	})
+
+	t.Run("mixed fleet still agrees", func(t *testing.T) {
+		measured := liveSession("measured")
+		reported := liveSession("reported", func(session *LiveSession) { session.ReportedOnly = true })
+		report := CompareLiveSessions(
+			"legacy", healthy(measured, reported), legacySide(measured, liveSession("reported")), 0,
+		)
+		if !report.Agrees || report.AgreementSelfDerived || report.InBothMeasured != 1 || report.InBothReportedOnly != 1 {
+			t.Fatalf("mixed agreement = %+v", report)
+		}
+		if len(report.InBothReportedOnlySessions) != 1 || report.InBothReportedOnlySessions[0] != "reported" {
+			t.Fatalf("reported-only sessions = %+v", report.InBothReportedOnlySessions)
+		}
+	})
+}
+
+func TestCompareLiveSessionsReadHealthWithholdsAgreement(t *testing.T) {
+	session := liveSession("shared")
+	tests := []struct {
+		name      string
+		telemetry TelemetrySide
+		legacy    LegacySide
+		reason    string
+	}{
+		{name: "incomplete view", telemetry: TelemetrySide{Sessions: []LiveSession{session}}, legacy: legacySide(session), reason: "view_incomplete"},
+		{name: "stale view", telemetry: TelemetrySide{Sessions: []LiveSession{session}, ViewComplete: true, ViewStale: true}, legacy: legacySide(session), reason: "view_stale"},
+		{name: "truncated legacy read", telemetry: healthy(session), legacy: LegacySide{Sessions: []LiveSession{session}, Truncated: true}, reason: "legacy_truncated"},
+		{name: "lossy legacy read", telemetry: healthy(session), legacy: LegacySide{Sessions: []LiveSession{session}, Lossy: true}, reason: "legacy_lossy"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report := CompareLiveSessions("legacy", test.telemetry, test.legacy, 0)
+			if report.Agrees {
+				t.Fatalf("unhealthy read agreed: %+v", report)
+			}
+			if len(report.AgreesWithheld) != 1 || report.AgreesWithheld[0] != test.reason {
+				t.Fatalf("withheld reasons = %+v, want %q", report.AgreesWithheld, test.reason)
+			}
+		})
+	}
+}
+
+func TestCompareLiveSessionsSortsAndCapsReportedOnlySessions(t *testing.T) {
+	telemetry := make([]LiveSession, 0, 5)
+	legacy := make([]LiveSession, 0, 5)
+	for _, id := range []string{"e", "d", "c", "b", "a"} {
+		telemetry = append(telemetry, liveSession(id, func(session *LiveSession) { session.ReportedOnly = true }))
+		legacy = append(legacy, liveSession(id))
+	}
+	report := CompareLiveSessions("legacy", healthy(telemetry...), legacySide(legacy...), 3)
+	if got := report.InBothReportedOnlySessions; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Fatalf("reported-only sessions = %+v", got)
+	}
+	if report.InBothReportedOnlyTruncated != 2 {
+		t.Fatalf("reported-only truncated = %d", report.InBothReportedOnlyTruncated)
+	}
+}
+
+func TestLiveSessionsFromGlobalViewClassifiesEvidence(t *testing.T) {
+	reportedPublisher := PublisherRef{PublisherID: "api-1" + ReportedPublisherSuffix}
+	measuringPublisher := PublisherRef{PublisherID: "proxy-1"}
+	tests := []struct {
+		name         string
+		session      GlobalSessionView
+		reportedOnly bool
+	}{
+		{
+			name: "reporting publisher only", reportedOnly: true,
+			session: GlobalSessionView{Publishers: []PublisherRef{reportedPublisher}, ReportingPublishers: []PublisherRef{reportedPublisher}},
+		},
+		{
+			name:    "reporting and measuring publishers",
+			session: GlobalSessionView{Publishers: []PublisherRef{reportedPublisher, measuringPublisher}, ReportingPublishers: []PublisherRef{reportedPublisher}},
+		},
+		{
+			name: "malformed reporting publisher absent from reporting list", reportedOnly: true,
+			session: GlobalSessionView{Publishers: []PublisherRef{reportedPublisher}},
+		},
+		{
+			name: "measurement tombstone retains evidence",
+			session: GlobalSessionView{
+				MeasurementPruned: true, Reported: true, Publishers: []PublisherRef{reportedPublisher},
+				ReportingPublishers: []PublisherRef{reportedPublisher}, ViewerBytesAccepted: 4096,
+				Routes: []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 4096}},
+			},
+		},
+		{
+			name:    "measuring publisher only",
+			session: GlobalSessionView{Publishers: []PublisherRef{measuringPublisher}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.session.SessionID = "session"
+			got := LiveSessionsFromGlobalView(GlobalMonitoringView{Sessions: []GlobalSessionView{test.session}})
+			if len(got) != 1 || got[0].ReportedOnly != test.reportedOnly {
+				t.Fatalf("projection = %+v, want reported_only=%t", got, test.reportedOnly)
+			}
+		})
+	}
+}
+
+func TestReportedGhostIsAttributedInsteadOfSilentlyAgreed(t *testing.T) {
+	publisher := PublisherRef{PublisherID: "api-1" + ReportedPublisherSuffix}
+	view := GlobalMonitoringView{Sessions: []GlobalSessionView{{
+		SessionID: "ghost-666", Reported: true,
+		Publishers: []PublisherRef{publisher}, ReportingPublishers: []PublisherRef{publisher},
+	}}}
+	telemetry := TelemetrySide{Sessions: LiveSessionsFromGlobalView(view), ViewComplete: true}
+	report := CompareLiveSessions("legacy", telemetry, legacySide(LiveSession{SessionID: "ghost-666"}), 0)
+	if report.InBothReportedOnly != 1 || report.Agrees {
+		t.Fatalf("ghost agreement = %+v", report)
+	}
+	if len(report.InBothReportedOnlySessions) != 1 || report.InBothReportedOnlySessions[0] != "ghost-666" {
+		t.Fatalf("reported-only sessions = %+v", report.InBothReportedOnlySessions)
+	}
+}
+
 func TestLiveSessionsFromGlobalView(t *testing.T) {
 	view := GlobalMonitoringView{Sessions: []GlobalSessionView{
 		{
 			SessionID: "b", Subject: UserSubject(7), ProfileID: "profile-1", MediaFileID: 42,
 			StartedAt:   time.Unix(1_700_000_000, 0),
 			PlayMethods: []string{"direct"},
+			Publishers: []PublisherRef{
+				{PublisherID: "p1", NodeID: ""},
+				{PublisherID: "p2", NodeID: "node-b"},
+			},
 			ViewerEdgePublishers: []PublisherRef{
 				{PublisherID: "p1", NodeID: ""},
 				{PublisherID: "p2", NodeID: "node-b"},
@@ -178,5 +346,8 @@ func TestLiveSessionsFromGlobalView(t *testing.T) {
 	}
 	if sessions[0].Node != "" {
 		t.Fatalf("a relay-only session claimed node %q", sessions[0].Node)
+	}
+	if sessions[0].ReportedOnly || sessions[1].ReportedOnly {
+		t.Fatalf("measuring publishers were classified as reported-only: %+v", sessions)
 	}
 }

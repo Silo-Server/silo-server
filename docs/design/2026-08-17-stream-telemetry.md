@@ -673,6 +673,13 @@ field only one side can express would manufacture mismatches and bury the real o
 - **`agrees` covers set membership and real contradiction, not absence.** Folding
   absences in would make the flag permanently false — legacy rows carry no value for
   several of these fields — and therefore useless. Read `fields_absent` too.
+- **Telemetry is split by evidence, and unhealthy reads cannot agree.** Agreement that
+  consists only of two projections of the playback session manager is self-derived, not
+  corroboration. `agrees` also refuses a verdict over an incomplete or stale telemetry
+  view or a truncated or lossy legacy read. Only a wholly reported-only intersection
+  withholds it — demanding measurement for every shared session would flap through the
+  first seconds of each play — so `in_both_reported_only` is read beside `agrees`, never
+  inferred from it.
 - **Start times compare with one second of tolerance.** Two independent writers cannot
   be expected to agree to the nanosecond, and nothing downstream needs them to: victim
   ordering only has to be a total order.
@@ -721,12 +728,15 @@ than it is: `abs` (no audiobook traffic exists on the host), `proxy` and `transc
 one publisher. Those rest on the per-family manifest tests and the two-publisher
 real-Redis integration test, not on production evidence.
 
-**What it found.** The parity projection surfaced a defect in the legacy view it is
-compared against: `playback_sessions_sync` treats a progress POST as liveness, so
-sessions that stopped fetching bytes persist indefinitely and their transcodes are never
-reaped. Telemetry is byte-path driven and correctly excluded them; they appeared
-one-sided in 179 of 185 consecutive samples. Filed as #666 — the finding belongs to the
-legacy store, not to this branch.
+**What it found (historical observation).** Before the reporting publisher existed,
+telemetry was byte-path only. The parity projection then surfaced a defect in the legacy
+view: `playback_sessions_sync` treats a progress POST as liveness, so sessions that
+stopped fetching bytes persist indefinitely and their transcodes are never reaped. Those
+ghosts appeared only on the legacy side in 179 of 185 consecutive samples. With the
+reporting publisher, the same ghosts appear on both sides; they are now counted as
+`in_both_reported_only`, listed by session id, and withhold `agrees` instead of reading as
+corroboration. Filed as #666 — the finding belongs to the legacy store, not to this
+branch.
 
 
 ### Legacy retirement — its own project, gated on parity evidence

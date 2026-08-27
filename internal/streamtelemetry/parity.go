@@ -3,6 +3,7 @@ package streamtelemetry
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -35,6 +36,29 @@ type LiveSession struct {
 	PlayMethod  string
 	Node        string
 	StartedAt   time.Time
+	// ReportedOnly marks a session no measuring publisher contributed anything
+	// for: every publisher that carried it is a reporting publisher, i.e. a
+	// playback session manager (§ ReportedPublisherSuffix), and no route, byte or
+	// observation backs it.
+	//
+	// It matters because the legacy playback_sessions_sync projection is written
+	// by internal/worker/reconciler.go from that same session manager. A
+	// reported-only session present on both sides is one source agreeing with
+	// itself, not two projections corroborating each other, and
+	// CompareLiveSessions refuses to count it as corroboration.
+	//
+	// The publisher-id suffix is authoritative rather than ReportingPublishers:
+	// normalizeProvenance uses that suffix to strip measurement from reporting
+	// publishers even when a malformed or mixed-version contribution did not set
+	// Reported. Routes and bytes take precedence so MeasurementPruned tombstones
+	// remain measured evidence. There is deliberately no session.Reported
+	// requirement: an empty publisher set also withholds agreement, which is the
+	// conservative direction.
+	//
+	// Only the telemetry side sets it. A legacy projection has no evidence axis
+	// and leaves it false; CompareLiveSessions reads it from the telemetry side
+	// only.
+	ReportedOnly bool
 }
 
 // LiveSessionsFromGlobalView projects the merged view onto the comparable core,
@@ -61,10 +85,41 @@ func LiveSessionsFromGlobalView(view GlobalMonitoringView) []LiveSession {
 				break
 			}
 		}
+		measured := len(session.Routes) > 0 ||
+			session.ViewerBytesAccepted > 0 || session.RelayBytesAccepted > 0
+		if !measured {
+			for _, publisher := range session.Publishers {
+				if !strings.HasSuffix(publisher.PublisherID, ReportedPublisherSuffix) {
+					measured = true
+					break
+				}
+			}
+		}
+		live.ReportedOnly = !measured
 		sessions = append(sessions, live)
 	}
 	sort.Slice(sessions, func(i, j int) bool { return sessions[i].SessionID < sessions[j].SessionID })
 	return sessions
+}
+
+// TelemetrySide is the telemetry projection plus the health of the view it
+// came from. A parity verdict computed from an incomplete or stale view is
+// worth what a ghost classification computed from one is worth — see
+// decorateLiveSessions in internal/api/handlers/admin_live_sessions.go, which
+// suppresses on exactly this.
+type TelemetrySide struct {
+	Sessions     []LiveSession
+	ViewComplete bool
+	ViewStale    bool
+}
+
+// LegacySide is one legacy projection plus what its reader could not deliver.
+// A truncated or partially undecodable read is missing sessions by
+// construction, so an apparent match over it is not evidence of parity.
+type LegacySide struct {
+	Sessions  []LiveSession
+	Truncated bool
+	Lossy     bool // records the reader could not decode and skipped
 }
 
 // ParityMismatch is one field two projections disagree about for a session they
@@ -80,24 +135,35 @@ type ParityMismatch struct {
 // projection. Every list is capped, with an explicit count of what the cap
 // dropped: silent truncation would read as "covered everything".
 type ParityReport struct {
-	Source         string `json:"source"`
-	TelemetryCount int    `json:"telemetry_count"`
-	LegacyCount    int    `json:"legacy_count"`
-	InBoth         int    `json:"in_both"`
+	Source                      string   `json:"source"`
+	TelemetryCount              int      `json:"telemetry_count"`
+	TelemetryMeasured           int      `json:"telemetry_measured"`
+	TelemetryReportedOnly       int      `json:"telemetry_reported_only"`
+	LegacyCount                 int      `json:"legacy_count"`
+	InBoth                      int      `json:"in_both"`
+	InBothMeasured              int      `json:"in_both_measured"`
+	InBothReportedOnly          int      `json:"in_both_reported_only"`
+	InBothReportedOnlySessions  []string `json:"in_both_reported_only_sessions"`
+	InBothReportedOnlyTruncated int      `json:"in_both_reported_only_truncated"`
 	// Agrees means the two projections describe the same set of sessions and
-	// disagree on no field they both express. It deliberately does NOT account
-	// for FieldsAbsent: a field only one side carries is a different question
-	// from a field they contradict each other about, and folding the two
-	// together would make this flag permanently false — legacy rows carry no
-	// value for several of these — and therefore useless. Read FieldsAbsent as
-	// well before treating agreement as clearance to cut over.
-	Agrees         bool             `json:"agrees"`
-	TelemetryOnly  []string         `json:"telemetry_only"`
-	TelemetryMore  int              `json:"telemetry_only_truncated"`
-	LegacyOnly     []string         `json:"legacy_only"`
-	LegacyMore     int              `json:"legacy_only_truncated"`
-	Mismatches     []ParityMismatch `json:"mismatches"`
-	MismatchesMore int              `json:"mismatches_truncated"`
+	// disagree on no field they both express, have at least one shared measured
+	// session when non-empty, and came from healthy reads. It deliberately does
+	// NOT account for FieldsAbsent: folding fields only one side carries into the
+	// verdict would make this flag permanently false and therefore useless. Read
+	// FieldsAbsent as well before treating agreement as clearance to cut over.
+	Agrees               bool             `json:"agrees"`
+	AgreementSelfDerived bool             `json:"agreement_self_derived"`
+	ViewComplete         bool             `json:"view_complete"`
+	ViewStale            bool             `json:"view_stale"`
+	LegacyTruncated      bool             `json:"legacy_truncated"`
+	LegacyLossy          bool             `json:"legacy_lossy"`
+	AgreesWithheld       []string         `json:"agrees_withheld,omitempty"`
+	TelemetryOnly        []string         `json:"telemetry_only"`
+	TelemetryMore        int              `json:"telemetry_only_truncated"`
+	LegacyOnly           []string         `json:"legacy_only"`
+	LegacyMore           int              `json:"legacy_only_truncated"`
+	Mismatches           []ParityMismatch `json:"mismatches"`
+	MismatchesMore       int              `json:"mismatches_truncated"`
 	// FieldsAbsent counts, per field, sessions both projections know where one
 	// side carries no value at all. That is a gap in a projection, not a
 	// disagreement between them, and counting it as a mismatch would bury the
@@ -109,38 +175,55 @@ type ParityReport struct {
 // session id. It is a pure function — no clock, no store, no logger — so every
 // rule below is unit-testable in CI on a machine with neither Postgres nor
 // Redis, which is the same reason BuildGlobalView is pure.
-func CompareLiveSessions(source string, telemetry, legacy []LiveSession, limit int) ParityReport {
+// TelemetryMeasured plus TelemetryReportedOnly equals TelemetryCount, and
+// InBothMeasured plus InBothReportedOnly equals InBoth.
+func CompareLiveSessions(source string, telemetry TelemetrySide, legacy LegacySide, limit int) ParityReport {
 	if limit <= 0 {
 		limit = DefaultParityLimit
 	}
 	report := ParityReport{
-		Source: source, TelemetryCount: len(telemetry), LegacyCount: len(legacy),
-		TelemetryOnly: []string{}, LegacyOnly: []string{}, Mismatches: []ParityMismatch{},
+		Source: source, TelemetryCount: len(telemetry.Sessions), LegacyCount: len(legacy.Sessions),
+		ViewComplete: telemetry.ViewComplete, ViewStale: telemetry.ViewStale,
+		LegacyTruncated: legacy.Truncated, LegacyLossy: legacy.Lossy,
+		InBothReportedOnlySessions: []string{}, TelemetryOnly: []string{},
+		LegacyOnly: []string{}, Mismatches: []ParityMismatch{},
 		FieldsAbsent: map[string]int{},
 	}
 
-	legacyByID := make(map[string]LiveSession, len(legacy))
-	for _, session := range legacy {
+	legacyByID := make(map[string]LiveSession, len(legacy.Sessions))
+	for _, session := range legacy.Sessions {
 		legacyByID[session.SessionID] = session
 	}
-	telemetryByID := make(map[string]LiveSession, len(telemetry))
-	for _, session := range telemetry {
+	telemetryByID := make(map[string]LiveSession, len(telemetry.Sessions))
+	for _, session := range telemetry.Sessions {
 		telemetryByID[session.SessionID] = session
+		if session.ReportedOnly {
+			report.TelemetryReportedOnly++
+		} else {
+			report.TelemetryMeasured++
+		}
 	}
 
 	telemetryOnly := make([]string, 0)
+	inBothReportedOnly := make([]string, 0)
 	mismatches := make([]ParityMismatch, 0)
-	for _, session := range telemetry {
+	for _, session := range telemetry.Sessions {
 		counterpart, ok := legacyByID[session.SessionID]
 		if !ok {
 			telemetryOnly = append(telemetryOnly, session.SessionID)
 			continue
 		}
 		report.InBoth++
+		if session.ReportedOnly {
+			report.InBothReportedOnly++
+			inBothReportedOnly = append(inBothReportedOnly, session.SessionID)
+		} else {
+			report.InBothMeasured++
+		}
 		mismatches = append(mismatches, compareSession(session, counterpart, report.FieldsAbsent)...)
 	}
 	legacyOnly := make([]string, 0)
-	for _, session := range legacy {
+	for _, session := range legacy.Sessions {
 		if _, ok := telemetryByID[session.SessionID]; !ok {
 			legacyOnly = append(legacyOnly, session.SessionID)
 		}
@@ -148,6 +231,7 @@ func CompareLiveSessions(source string, telemetry, legacy []LiveSession, limit i
 
 	sort.Strings(telemetryOnly)
 	sort.Strings(legacyOnly)
+	sort.Strings(inBothReportedOnly)
 	sort.Slice(mismatches, func(i, j int) bool {
 		if mismatches[i].SessionID == mismatches[j].SessionID {
 			return mismatches[i].Field < mismatches[j].Field
@@ -155,9 +239,35 @@ func CompareLiveSessions(source string, telemetry, legacy []LiveSession, limit i
 		return mismatches[i].SessionID < mismatches[j].SessionID
 	})
 
-	report.Agrees = len(telemetryOnly) == 0 && len(legacyOnly) == 0 && len(mismatches) == 0
+	setAgreement := len(telemetryOnly) == 0 && len(legacyOnly) == 0 && len(mismatches) == 0
+	// Requiring every shared session to be measured would flap during the first
+	// seconds of each play, before any byte is requested. Instead, only a fleet
+	// whose entire non-empty intersection is reported-only is self-derived; mixed
+	// fleets retain useful agreement while keeping the reported-only ids visible.
+	report.AgreementSelfDerived = report.InBoth > 0 && report.InBothMeasured == 0
+	report.Agrees = setAgreement && !report.AgreementSelfDerived &&
+		report.ViewComplete && !report.ViewStale &&
+		!report.LegacyTruncated && !report.LegacyLossy
+	if setAgreement && !report.Agrees {
+		if report.AgreementSelfDerived {
+			report.AgreesWithheld = append(report.AgreesWithheld, "agreement_self_derived")
+		}
+		if !report.ViewComplete {
+			report.AgreesWithheld = append(report.AgreesWithheld, "view_incomplete")
+		}
+		if report.ViewStale {
+			report.AgreesWithheld = append(report.AgreesWithheld, "view_stale")
+		}
+		if report.LegacyTruncated {
+			report.AgreesWithheld = append(report.AgreesWithheld, "legacy_truncated")
+		}
+		if report.LegacyLossy {
+			report.AgreesWithheld = append(report.AgreesWithheld, "legacy_lossy")
+		}
+	}
 	report.TelemetryOnly, report.TelemetryMore = capStrings(telemetryOnly, limit)
 	report.LegacyOnly, report.LegacyMore = capStrings(legacyOnly, limit)
+	report.InBothReportedOnlySessions, report.InBothReportedOnlyTruncated = capStrings(inBothReportedOnly, limit)
 	if len(mismatches) > limit {
 		report.MismatchesMore = len(mismatches) - limit
 		mismatches = mismatches[:limit]
