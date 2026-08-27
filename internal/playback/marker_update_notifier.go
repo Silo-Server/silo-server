@@ -75,11 +75,11 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshot(ctx context.Context, sessionI
 // wholly after this snapshot, never as a newer event followed by stale data.
 func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 	ctx context.Context,
-	sessionID string,
+	registration *RealtimeRegistration,
 	fileID int,
 	loader MarkerSnapshotFileLoader,
 ) error {
-	if n == nil || n.hub == nil || sessionID == "" || fileID <= 0 || loader == nil {
+	if n == nil || n.hub == nil || registration == nil || registration.SessionID() == "" || fileID <= 0 || loader == nil {
 		return nil
 	}
 	lock := n.fileLock(fileID)
@@ -89,7 +89,7 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 	if err != nil || file == nil {
 		return err
 	}
-	n.sendSessionSnapshotLocked(ctx, sessionID, file)
+	n.sendSessionSnapshotToRegistrationLocked(ctx, registration, file)
 	return nil
 }
 
@@ -98,6 +98,28 @@ func (n *MarkerUpdateNotifier) fileLock(fileID int) *sync.Mutex {
 }
 
 func (n *MarkerUpdateNotifier) sendSessionSnapshotLocked(ctx context.Context, sessionID string, file *models.MediaFile) {
+	n.sendSessionSnapshotWithLocked(ctx, sessionID, file, func(event any) error {
+		return n.hub.Send(sessionID, event)
+	})
+}
+
+func (n *MarkerUpdateNotifier) sendSessionSnapshotToRegistrationLocked(
+	ctx context.Context,
+	registration *RealtimeRegistration,
+	file *models.MediaFile,
+) {
+	sessionID := registration.SessionID()
+	n.sendSessionSnapshotWithLocked(ctx, sessionID, file, func(event any) error {
+		return n.hub.SendRegistered(registration, event)
+	})
+}
+
+func (n *MarkerUpdateNotifier) sendSessionSnapshotWithLocked(
+	ctx context.Context,
+	sessionID string,
+	file *models.MediaFile,
+	send func(any) error,
+) {
 	rangePayload := func(start, end *float64) *TimeRangePayload {
 		if start == nil || end == nil {
 			return nil
@@ -121,7 +143,7 @@ func (n *MarkerUpdateNotifier) sendSessionSnapshotLocked(ctx context.Context, se
 		)
 		return
 	}
-	if err := n.hub.Send(sessionID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
+	if err := send(event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
 		slog.WarnContext(ctx,
 			"failed to deliver markers updated realtime event", "component", "playback",
 			"session_id", sessionID,

@@ -92,17 +92,16 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 		return
 	}
 
+	configureWebSocket(conn)
+	ctx, cancelRead := context.WithCancel(r.Context())
 	defer func() {
-		if h.setRealtimeConnectionState(sessionID, false) {
+		cancelRead()
+		if h.RealtimeHub.Unregister(registration) && h.setRealtimeConnectionState(sessionID, false) {
 			h.syncSessionsNow(context.Background(), "realtime_disconnect")
 		}
-		h.RealtimeHub.Unregister(registration)
 		_ = conn.Close()
 	}()
 
-	configureWebSocket(conn)
-	ctx, cancelRead := context.WithCancel(r.Context())
-	defer cancelRead()
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
 	helloReceived := false
 
@@ -117,7 +116,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 			continue
 		}
 		if sendMarkerSnapshot {
-			go h.sendCurrentMarkerSnapshot(sessionID)
+			go h.sendCurrentMarkerSnapshot(ctx, registration, sessionID)
 		}
 	}
 }
@@ -227,13 +226,17 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 type playbackMarkerSnapshotNotifier interface {
 	SendSessionSnapshotFromLoader(
 		ctx context.Context,
-		sessionID string,
+		registration *playback.RealtimeRegistration,
 		fileID int,
 		loader playback.MarkerSnapshotFileLoader,
 	) error
 }
 
-func (h *PlaybackHandler) sendCurrentMarkerSnapshot(sessionID string) {
+func (h *PlaybackHandler) sendCurrentMarkerSnapshot(
+	connectionCtx context.Context,
+	registration *playback.RealtimeRegistration,
+	sessionID string,
+) {
 	if h == nil || h.fileResolver == nil || h.MarkerUpdateNotifier == nil {
 		return
 	}
@@ -245,9 +248,9 @@ func (h *PlaybackHandler) sendCurrentMarkerSnapshot(sessionID string) {
 	if err != nil || session == nil || session.MediaFileID <= 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(connectionCtx, 3*time.Second)
 	defer cancel()
-	if err := notifier.SendSessionSnapshotFromLoader(ctx, sessionID, session.MediaFileID, h.fileResolver); err != nil {
+	if err := notifier.SendSessionSnapshotFromLoader(ctx, registration, session.MediaFileID, h.fileResolver); err != nil {
 		slog.DebugContext(ctx, "playback marker snapshot unavailable", "component", "api",
 			"session", sessionID, "playback_session_id", sessionID,
 			"file_id", session.MediaFileID, "error", err)

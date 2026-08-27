@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -121,7 +122,7 @@ func TestSendCurrentMarkerSnapshotLoadsPersistedSharedMarkers(t *testing.T) {
 	}
 	defer handler.RealtimeHub.Unregister(registration)
 
-	handler.sendCurrentMarkerSnapshot(session.ID)
+	handler.sendCurrentMarkerSnapshot(context.Background(), registration, session.ID)
 
 	if len(conn.messages) != 1 {
 		t.Fatalf("snapshot messages = %d, want 1", len(conn.messages))

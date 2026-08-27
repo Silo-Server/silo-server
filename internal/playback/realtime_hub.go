@@ -30,6 +30,14 @@ type RealtimeRegistration struct {
 	generation uint64
 }
 
+// SessionID returns the playback session owned by this registration.
+func (r *RealtimeRegistration) SessionID() string {
+	if r == nil {
+		return ""
+	}
+	return r.sessionID
+}
+
 // RealtimeHub stores one active realtime connection per playback session.
 type RealtimeHub struct {
 	mu                   sync.RWMutex
@@ -135,6 +143,31 @@ func (h *RealtimeHub) Send(sessionID string, message any) error {
 
 	lane.mu.Lock()
 	if lane.closed || lane.conn == nil {
+		lane.mu.Unlock()
+		return ErrRealtimeConnectionNotFound
+	}
+	err := lane.conn.WriteJSON(message)
+	lane.mu.Unlock()
+	return err
+}
+
+// SendRegistered writes only when reg still owns the active connection. It is
+// used for connection-specific work that must not spill into a replacement
+// websocket after a reconnect.
+func (h *RealtimeHub) SendRegistered(reg *RealtimeRegistration, message any) error {
+	if h == nil || reg == nil || reg.sessionID == "" || reg.lane == nil {
+		return ErrRealtimeConnectionNotFound
+	}
+
+	h.mu.RLock()
+	lane, ok := h.connections[reg.sessionID]
+	h.mu.RUnlock()
+	if !ok || lane == nil || lane != reg.lane {
+		return ErrRealtimeConnectionNotFound
+	}
+
+	lane.mu.Lock()
+	if lane.closed || lane.conn == nil || lane.generation != reg.generation {
 		lane.mu.Unlock()
 		return ErrRealtimeConnectionNotFound
 	}

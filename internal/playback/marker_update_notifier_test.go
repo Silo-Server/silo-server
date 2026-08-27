@@ -171,7 +171,7 @@ func TestMarkerUpdateNotifierOrdersPersistedSnapshotBeforeConcurrentUpdate(t *te
 	snapshotDone := make(chan struct{})
 	go func() {
 		defer close(snapshotDone)
-		_ = notifier.SendSessionSnapshotFromLoader(context.Background(), session.ID, 100, blockingMarkerSnapshotLoader{
+		_ = notifier.SendSessionSnapshotFromLoader(context.Background(), registration, 100, blockingMarkerSnapshotLoader{
 			file: &models.MediaFile{
 				ID:         100,
 				IntroStart: &oldIntroStart,
@@ -218,5 +218,54 @@ func TestMarkerUpdateNotifierOrdersPersistedSnapshotBeforeConcurrentUpdate(t *te
 	}
 	if got := markerStart(conn.messages[1]); got != newIntroStart {
 		t.Fatalf("second marker start = %v, want new update %v", got, newIntroStart)
+	}
+}
+
+func TestMarkerSnapshotFromReplacedConnectionDoesNotReachReplacement(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	hub := NewRealtimeHub()
+	oldConn := &dispatchTestConn{}
+	oldRegistration := hub.Register(session.ID, oldConn)
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+
+	introStart, introEnd := 1.0, 50.0
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	snapshotDone := make(chan error, 1)
+	go func() {
+		snapshotDone <- notifier.SendSessionSnapshotFromLoader(
+			context.Background(),
+			oldRegistration,
+			100,
+			blockingMarkerSnapshotLoader{
+				file: &models.MediaFile{
+					ID:         100,
+					IntroStart: &introStart,
+					IntroEnd:   &introEnd,
+				},
+				entered: entered,
+				release: release,
+			},
+		)
+	}()
+	<-entered
+
+	newConn := &dispatchTestConn{}
+	newRegistration := hub.Register(session.ID, newConn)
+	if newRegistration == nil {
+		t.Fatal("replacement registration is nil")
+	}
+	defer hub.Unregister(newRegistration)
+	close(release)
+	if err := <-snapshotDone; err != nil {
+		t.Fatalf("SendSessionSnapshotFromLoader: %v", err)
+	}
+
+	if len(oldConn.messages) != 0 {
+		t.Fatalf("old connection messages = %d, want 0", len(oldConn.messages))
+	}
+	if len(newConn.messages) != 0 {
+		t.Fatalf("replacement connection messages = %d, want 0", len(newConn.messages))
 	}
 }
