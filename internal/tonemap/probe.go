@@ -161,18 +161,28 @@ func probeCacheEntryCurrent(entry probeCacheEntry, now time.Time) bool {
 // not make a missing configured hardware executor permanent: temporary device
 // contention must be retried after the negative-cache interval.
 func probeCapabilitiesComplete(capabilities Capabilities, hardwareBackend string) bool {
-	if len(capabilities) == 0 {
+	if !capabilityCoversAllSourceKinds(capabilities, ModeSoftware, BackendSoftware) {
 		return false
 	}
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
 	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
-		return slices.ContainsFunc(capabilities, func(capability Capability) bool {
-			return capability.Mode == ModeHardware && capability.Backend == backend
-		})
+		return capabilityCoversAllSourceKinds(capabilities, ModeHardware, backend)
 	default:
 		return true
 	}
+}
+
+func capabilityCoversAllSourceKinds(capabilities Capabilities, mode Mode, backend string) bool {
+	index := slices.IndexFunc(capabilities, func(capability Capability) bool {
+		return capability.Mode == mode && capability.Backend == backend
+	})
+	if index < 0 {
+		return false
+	}
+	return !slices.ContainsFunc(AllSourceKinds(), func(kind SourceKind) bool {
+		return !slices.Contains(capabilities[index].SourceKinds, kind)
+	})
 }
 
 // ProbeTotalTimeout budgets one bounded deadline for every listing and smoke
