@@ -136,9 +136,9 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		}
 		if h.setRealtimeConnectionState(sessionID, true) {
 			h.syncSessionsNow(context.Background(), "realtime_hello")
+			go h.sendCurrentMarkerSnapshot(sessionID)
 		}
 		h.touchSessionActivity(sessionID)
-		go h.sendCurrentMarkerSnapshot(sessionID)
 		return nil
 	case playback.RealtimeMessageTypeAck:
 		var ack playback.AckEnvelope
