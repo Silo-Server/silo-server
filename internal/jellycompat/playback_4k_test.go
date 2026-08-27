@@ -96,6 +96,36 @@ func TestCompatVideoToolboxToneMapBitrateKbps(t *testing.T) {
 	}
 }
 
+func TestDowngradeCompatLocalToneMapClearsOnlyAutomaticVideoToolboxBitrate(t *testing.T) {
+	capabilities := tonemap.Capabilities{{
+		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
+		Filter: tonemap.SoftwareFilterHable, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
+	}}
+	newOpts := func() playback.TranscodeOpts {
+		return playback.TranscodeOpts{
+			ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tonemap.ModeHardware,
+			ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+			HWAccel: tonemap.BackendVideoToolbox, TargetBitrateKbps: 20_000,
+		}
+	}
+
+	automatic := newOpts()
+	if !downgradeCompatLocalToneMap(&automatic, capabilities, 20_000) {
+		t.Fatal("automatic VideoToolbox recipe did not downgrade")
+	}
+	if automatic.TargetBitrateKbps != 0 || automatic.ToneMapMode != tonemap.ModeSoftware || automatic.HWAccel != playback.HWAccelNone {
+		t.Fatalf("automatic fallback = bitrate %d mode %q hw %q", automatic.TargetBitrateKbps, automatic.ToneMapMode, automatic.HWAccel)
+	}
+
+	explicit := newOpts()
+	if !downgradeCompatLocalToneMap(&explicit, capabilities, 0) {
+		t.Fatal("explicitly constrained recipe did not downgrade")
+	}
+	if explicit.TargetBitrateKbps != 20_000 {
+		t.Fatalf("explicit fallback bitrate = %d, want 20000", explicit.TargetBitrateKbps)
+	}
+}
+
 func TestBuildPlaybackSource4KVideoTranscodeGate(t *testing.T) {
 	version4K := catalog.FileVersion{
 		FileID:     1,

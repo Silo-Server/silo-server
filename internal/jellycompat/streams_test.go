@@ -332,7 +332,7 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 
 	ffmpegPath := filepath.Join(t.TempDir(), "fallback-ffmpeg.sh")
 	script := "#!/bin/sh\n" +
-		"case \"$*\" in *tonemap_opencl*) sleep 30; exit 0;; esac\n" +
+		"case \"$*\" in *-hwaccels*) printf 'videotoolbox\\n'; exit 0;; *-encoders*) printf ' V..... h264_videotoolbox VideoToolbox H.264 encoder\\n'; exit 0;; *' -f lavfi '*) exit 0;; *scale_vt*) sleep 30; exit 0;; esac\n" +
 		"out=\"\"\n" +
 		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) out=\"$(dirname \"$arg\")\";; esac; done\n" +
 		"mkdir -p \"$out\"\n" +
@@ -374,23 +374,23 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
 			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
 		}},
-		TranscodeDir: t.TempDir(), FFmpegPath: ffmpegPath, HWAccel: tonemap.BackendQSV,
+		TranscodeDir: t.TempDir(), FFmpegPath: ffmpegPath, HWAccel: tonemap.BackendVideoToolbox,
 		tm: playback.NewTranscodeManager(),
 		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 			return tonemap.Capabilities{
-				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendQSV, Filter: tonemap.HardwareFilterOpenCL, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
+				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVideoToolbox, Filter: tonemap.HardwareFilterVideoToolbox, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
 				{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
 			}, nil
 		},
 	}
 
-	session, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
+	session, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
 	if err != nil {
 		t.Fatalf("ensureTranscodeSession() error = %v, want software fallback ready", err)
 	}
 	t.Cleanup(func() { _ = session.Close() })
-	if opts := session.Opts(); opts.ToneMapMode != tonemap.ModeSoftware || opts.HWAccel != playback.HWAccelNone {
-		t.Fatalf("fallback opts = mode %q hw %q, want software/none", opts.ToneMapMode, opts.HWAccel)
+	if opts := session.Opts(); opts.ToneMapMode != tonemap.ModeSoftware || opts.HWAccel != playback.HWAccelNone || opts.TargetBitrateKbps != 0 {
+		t.Fatalf("fallback opts = mode %q hw %q bitrate %d, want software/none/unconstrained", opts.ToneMapMode, opts.HWAccel, opts.TargetBitrateKbps)
 	}
 }
 

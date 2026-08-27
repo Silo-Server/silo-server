@@ -2118,6 +2118,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		opts.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
 	}
 	var toneMapCapabilities tonemap.Capabilities
+	autoVideoToolboxBitrate := 0
 	if !source.TranscodeAudio {
 		metadata := tonemap.MetadataForFile(file)
 		if metadata.DynamicRange != "" && metadata.DynamicRange != playback.DynamicRangeSDRV3 {
@@ -2135,8 +2136,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			return nil, toneMapErr
 		}
 		toneMapRecipe.apply(&opts)
-		if bitrateKbps := compatVideoToolboxToneMapBitrateKbps(source.Version, toneMapRecipe); bitrateKbps > 0 {
-			opts.TargetBitrateKbps = bitrateKbps
+		autoVideoToolboxBitrate = compatVideoToolboxToneMapBitrateKbps(source.Version, toneMapRecipe)
+		if autoVideoToolboxBitrate > 0 {
+			opts.TargetBitrateKbps = autoVideoToolboxBitrate
 		}
 	}
 	opts.SegmentDuration = h.compatSegmentDuration()
@@ -2163,10 +2165,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 	manifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 	transcodeSession, err := playback.StartTranscode(ctx, opts)
-	if err != nil && downgradeToSoftwareToneMap(
-		opts.ToneMapPolicy, &opts.ToneMapMode, &opts.ToneMapFilter, &opts.HWAccel,
-		opts.ToneMapSourceKind, toneMapCapabilities,
-	) {
+	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
 		if err == nil {
 			manifestDeadline = time.Now().Add(compatManifestStartupTimeout)
@@ -2181,10 +2180,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 
 	if opts.ToneMapMode != "" {
 		if _, readyErr := transcodeSession.WaitForManifest(time.Until(manifestDeadline)); readyErr != nil {
-			fallbackEligible := downgradeToSoftwareToneMap(
-				opts.ToneMapPolicy, &opts.ToneMapMode, &opts.ToneMapFilter, &opts.HWAccel,
-				opts.ToneMapSourceKind, toneMapCapabilities,
-			)
+			fallbackEligible := downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate)
 			replaceUnlock := h.tm.LockSessionLifecycle(upstreamSessionID)
 			if live := h.tm.GetTranscodeSession(upstreamSessionID); live != transcodeSession {
 				replaceUnlock()
@@ -2262,6 +2258,23 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+// downgradeCompatLocalToneMap removes the bitrate synthesized solely for a
+// VideoToolbox hardware attempt when the local session falls back to software.
+// Explicit client constraints are represented by a zero automatic bitrate and
+// remain intact.
+func downgradeCompatLocalToneMap(opts *playback.TranscodeOpts, capabilities tonemap.Capabilities, autoVideoToolboxBitrate int) bool {
+	if opts == nil || !downgradeToSoftwareToneMap(
+		opts.ToneMapPolicy, &opts.ToneMapMode, &opts.ToneMapFilter, &opts.HWAccel,
+		opts.ToneMapSourceKind, capabilities,
+	) {
+		return false
+	}
+	if autoVideoToolboxBitrate > 0 && opts.TargetBitrateKbps == autoVideoToolboxBitrate {
+		opts.TargetBitrateKbps = 0
+	}
+	return true
 }
 
 func compatLiveTranscodeMatchesAudioSource(transcodeSession *playback.TranscodeSession, source PlaybackMediaSource) bool {
