@@ -458,15 +458,22 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 				device = "0"
 			}
 			args = append(args, "-init_hw_device", "cuda=cu:"+device, "-filter_hw_device", "cu", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+		case BackendVideoToolbox:
+			if request.SoftwareVideoDecode {
+				args = append(args, "-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt")
+			} else {
+				args = append(args, "-hwaccel", BackendVideoToolbox, "-hwaccel_output_format", "videotoolbox_vld")
+			}
 		}
 	}
 	args = append(args, "-ss", strconv.FormatFloat(position, 'f', 3, 64), "-i", request.InputPath, "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1")
 	filter := sourceConversionPreflightFilter(request)
 	args = append(args, "-vf", filter, "-c:v", sourcePreflightEncoder(request), "-color_range", "tv", "-color_primaries", colorBT709, "-color_trc", colorBT709)
-	// Hardware filters already stamp the BT.709 matrix on their output. Asking
-	// FFmpeg to apply -colorspace at the mux boundary can insert an unsupported
-	// software conversion between hardware frames and the hardware encoder.
-	if request.Mode == ModeSoftware {
+	// VAAPI/QSV/CUDA filters stamp the BT.709 matrix on hardware frames; an
+	// explicit mux-boundary colorspace can insert an unsupported conversion.
+	// VideoToolbox has downloaded an NV12 frame and needs the explicit matrix
+	// because its encoder otherwise preserves the source BT.2020 matrix.
+	if request.Mode == ModeSoftware || request.Backend == BackendVideoToolbox {
 		args = append(args, "-colorspace", colorBT709)
 	}
 	if outputPath == "" {
@@ -480,6 +487,13 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 func sourceConversionPreflightFilter(request SourcePreflightRequest) string {
 	if request.Mode == ModeSoftware {
 		return SoftwareFilter(request.Kind, request.Filter)
+	}
+	if request.Backend == BackendVideoToolbox {
+		filter := ""
+		if request.SoftwareVideoDecode {
+			filter = VideoToolboxUploadFilter(request.Kind, request.SourceBitDepth) + ","
+		}
+		return filter + VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(request.SourceBitDepth) + "," + HDRMetadataRemovalFilter()
 	}
 	if request.Backend == BackendNVENC {
 		if IsSDRSource(request.Kind) {

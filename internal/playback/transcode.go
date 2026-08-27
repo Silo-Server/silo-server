@@ -145,6 +145,8 @@ const (
 	transcodeHWNVENC         = "nvenc"
 	transcodeHWVideoToolbox  = "videotoolbox"
 	transcodeHWNone          = "none"
+	transcodeResolution328p  = "328p"
+	transcodeResolution420p  = "420p"
 	transcodeResolution480p  = "480p"
 	transcodeResolution720p  = "720p"
 	transcodeResolution1080p = "1080p"
@@ -514,8 +516,12 @@ func validateToneMapOpts(opts TranscodeOpts) error {
 			if opts.ToneMapFilter != tonemap.HardwareFilterCUDA {
 				return fmt.Errorf("unsupported nvenc tone-map filter %q", opts.ToneMapFilter)
 			}
+		case transcodeHWVideoToolbox:
+			if opts.ToneMapFilter != tonemap.HardwareFilterVideoToolbox {
+				return fmt.Errorf("unsupported videotoolbox tone-map filter %q", opts.ToneMapFilter)
+			}
 		default:
-			return fmt.Errorf("hardware tone mapping requires qsv, vaapi, or nvenc")
+			return fmt.Errorf("hardware tone mapping requires qsv, vaapi, nvenc, or videotoolbox")
 		}
 	default:
 		return fmt.Errorf("unsupported tone-map mode %q", opts.ToneMapMode)
@@ -924,14 +930,19 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 			args = append(args, "-hwaccel_device", hwDevice)
 		}
 	case transcodeHWVideoToolbox:
-		// No -hwaccel_output_format: decoded frames land in system memory,
-		// so the software filter graph (scale, subtitle burn-in, tone paths)
-		// applies unchanged and the *_videotoolbox encoders upload
-		// internally. HW decode + HW encode carries nearly all of the win.
+		// Hardware tone mapping keeps decoded frames as IOSurfaces for
+		// scale_vt/VTPixelTransferSession. Other VideoToolbox transcodes land
+		// frames in system memory so ordinary scale and subtitle filters apply
+		// unchanged and the encoder uploads internally.
 		// H.264 Hi10P decodes in software (VideoToolbox cannot), same as the
 		// QSV/VAAPI paths; the encoder still runs in hardware.
-		if !opts.SoftwareVideoDecode {
+		if opts.ToneMapMode == tonemap.ModeHardware && opts.SoftwareVideoDecode {
+			args = append(args, "-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt")
+		} else if !opts.SoftwareVideoDecode {
 			args = append(args, "-hwaccel", "videotoolbox")
+			if opts.ToneMapMode == tonemap.ModeHardware {
+				args = append(args, "-hwaccel_output_format", "videotoolbox_vld")
+			}
 		}
 	}
 	return args
@@ -1024,9 +1035,14 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		}
 	case opts.HWAccel == transcodeHWVideoToolbox && codec == transcodeCodecH264:
 		// 8-bit output for browser MSE compatibility (mirrors the libx264
-		// path); VideoToolbox has no 10-bit H.264 encode.
-		args = append(args, "-c:v", "h264_videotoolbox",
-			"-pix_fmt", "yuv420p", "-profile:v", "high")
+		// path); VideoToolbox has no 10-bit H.264 encode. Hardware tone
+		// mapping already emits NV12. Re-requesting yuv420p at the encoder
+		// boundary makes FFmpeg 9.0.1 crash on 2160p scale_vt output.
+		args = append(args, "-c:v", "h264_videotoolbox")
+		if opts.ToneMapMode != tonemap.ModeHardware {
+			args = append(args, "-pix_fmt", "yuv420p")
+		}
+		args = append(args, "-profile:v", "high")
 		args = appendVideoToolboxRateControl(args, opts)
 	case opts.HWAccel == transcodeHWVideoToolbox && codec == "hevc":
 		// pix_fmt is left to the input: 10-bit sources encode as p010
@@ -1055,12 +1071,11 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 			"-color_primaries", "bt709",
 			"-color_trc", "bt709",
 		)
-		// FFmpeg treats -colorspace as a requested pixel conversion for
-		// hardware frames. VAAPI then inserts an impossible auto_scale between
-		// tonemap_vaapi and h264_vaapi. Hardware filters already stamp m=bt709
-		// and the encoder propagates it into the bitstream; libx264 accepts the
-		// explicit mux-boundary option without a format transition.
-		if opts.ToneMapMode == tonemap.ModeSoftware {
+		// FFmpeg treats -colorspace as a requested pixel conversion for VAAPI,
+		// QSV, and CUDA frames. VideoToolbox has already downloaded an NV12
+		// software frame here and needs the explicit matrix because its encoder
+		// otherwise preserves the source BT.2020 matrix in the H.264 stream.
+		if opts.ToneMapMode == tonemap.ModeSoftware || opts.HWAccel == transcodeHWVideoToolbox {
 			args = append(args, "-colorspace", "bt709")
 		}
 	}
@@ -1167,6 +1182,8 @@ func toneMapScaleFilter(opts TranscodeOpts) string {
 				return filter + ",format=nv12,hwupload_cuda"
 			}
 			return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + "," + nvencScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter()
+		case transcodeHWVideoToolbox:
+			return videoToolboxToneMapCPUFilter(opts) + "," + tonemap.HDRMetadataRemovalFilter()
 		}
 	}
 	return ""
@@ -1199,6 +1216,8 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 			return nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "," + cpuTail + ",format=nv12,hwupload_cuda"
 		}
 		return tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter() + ",hwdownload,format=nv12," + cpuTail + ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter()
+	case transcodeHWVideoToolbox:
+		return videoToolboxToneMapCPUFilter(opts) + "," + subFilter + "," + tonemap.HDRMetadataRemovalFilter()
 	default:
 		return ""
 	}
@@ -1239,6 +1258,9 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 			graph += "," + scale
 		}
 		graph += ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+	case transcodeHWVideoToolbox:
+		graph = "[0:v:0]" + videoToolboxToneMapCPUFilter(opts) + "[vmain];[vmain]" +
+			subInput + "overlay=eof_action=pass," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 	}
 	if graph == "" {
 		return args
@@ -1263,6 +1285,38 @@ func softwareToneMapUploadFilter(opts TranscodeOpts) string {
 // SDR Dolby Vision base layer to the CPU for unsupported CUDA color conversion.
 func nvencSDRFallbackDownload(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.NVENCSoftwareFallbackPixelFormat(opts.SourceVideoBitDepth)
+}
+
+// videoToolboxToneMapCPUFilter converts on an IOSurface, integrates scaling,
+// then returns an 8-bit software frame for VideoToolbox H.264 encoding or CPU
+// subtitle composition. Software-decoded sources are uploaded with explicit
+// source color attachments first.
+func videoToolboxToneMapCPUFilter(opts TranscodeOpts) string {
+	width, height := videoToolboxScaleDimensions(opts.TargetResolution)
+	filter := ""
+	if opts.SoftwareVideoDecode {
+		filter = tonemap.VideoToolboxUploadFilter(opts.ToneMapSourceKind, opts.SourceVideoBitDepth) + ","
+	}
+	return filter + tonemap.VideoToolboxFilter(width, height) + "," + tonemap.VideoToolboxDownloadFilter(opts.SourceVideoBitDepth)
+}
+
+func videoToolboxScaleDimensions(resolution string) (string, string) {
+	switch resolution {
+	case transcodeResolution2160p:
+		return "-2", "2160"
+	case transcodeResolution1080p:
+		return "-2", "1080"
+	case transcodeResolution720p:
+		return "-2", "720"
+	case transcodeResolution480p:
+		return "-2", "480"
+	case transcodeResolution420p:
+		return "-2", "420"
+	case transcodeResolution328p:
+		return "-2", "328"
+	default:
+		return "iw", "ih"
+	}
 }
 
 // TranscodesAudio reports whether a transcode with the given target audio
@@ -1506,9 +1560,9 @@ func resolutionToScale(res string) string {
 		return "scale=-2:720"
 	case "480p":
 		return "scale=-2:480"
-	case "420p":
+	case transcodeResolution420p:
 		return "scale=-2:420"
-	case "328p":
+	case transcodeResolution328p:
 		return "scale=-2:328"
 	default:
 		return ""
@@ -1534,9 +1588,9 @@ func qsvScaleFilterWithMapMode(res, mapMode string) string {
 		return "scale_vaapi=w=-2:h=720:format=nv12," + hwmap + ",format=qsv"
 	case "480p":
 		return "scale_vaapi=w=-2:h=480:format=nv12," + hwmap + ",format=qsv"
-	case "420p":
+	case transcodeResolution420p:
 		return "scale_vaapi=w=-2:h=420:format=nv12," + hwmap + ",format=qsv"
-	case "328p":
+	case transcodeResolution328p:
 		return "scale_vaapi=w=-2:h=328:format=nv12," + hwmap + ",format=qsv"
 	default:
 		return "scale_vaapi=format=nv12," + hwmap + ",format=qsv"
@@ -1575,9 +1629,9 @@ func vaapiScaleFilter(res string) string {
 		return "scale_vaapi=w=-2:h=720:format=nv12"
 	case "480p":
 		return "scale_vaapi=w=-2:h=480:format=nv12"
-	case "420p":
+	case transcodeResolution420p:
 		return "scale_vaapi=w=-2:h=420:format=nv12"
-	case "328p":
+	case transcodeResolution328p:
 		return "scale_vaapi=w=-2:h=328:format=nv12"
 	default:
 		return "scale_vaapi=format=nv12"
@@ -1602,9 +1656,9 @@ func nvencScaleFilter(res string) string {
 		return "scale_cuda=w=-2:h=720:format=nv12"
 	case "480p":
 		return "scale_cuda=w=-2:h=480:format=nv12"
-	case "420p":
+	case transcodeResolution420p:
 		return "scale_cuda=w=-2:h=420:format=nv12"
-	case "328p":
+	case transcodeResolution328p:
 		return "scale_cuda=w=-2:h=328:format=nv12"
 	default:
 		return "scale_cuda=format=nv12"

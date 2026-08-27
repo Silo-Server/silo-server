@@ -25,6 +25,7 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 		{name: "QSV", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: "tonemap_opencl", sourceKind: tonemap.SourcePQ, want: []string{"-init_hw_device opencl=ocl@va", "tonemap_opencl", "hwmap=derive_device=qsv:mode=read+write", "h264_qsv"}},
 		{name: "VAAPI", mode: tonemap.ModeHardware, hwAccel: "vaapi", filter: "tonemap_vaapi", sourceKind: tonemap.SourceHLG, want: []string{"tonemap_vaapi", "scale_vaapi", "h264_vaapi"}},
 		{name: "NVENC", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: "tonemap_cuda", sourceKind: tonemap.SourcePQ, want: []string{"color_trc=smpte2084", "tonemap_cuda", "scale_cuda", "h264_nvenc"}},
+		{name: "VideoToolbox", mode: tonemap.ModeHardware, hwAccel: "videotoolbox", filter: "scale_vt", sourceKind: tonemap.SourcePQ, want: []string{"-hwaccel videotoolbox", "-hwaccel_output_format videotoolbox_vld", "scale_vt=w=-2:h=1080", "hwdownload,format=p010le,format=nv12", "h264_videotoolbox"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,8 +44,11 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 			if tt.mode == tonemap.ModeSoftware && !strings.Contains(joined, "-colorspace bt709") {
 				t.Fatalf("software args omit explicit output matrix: %s", joined)
 			}
-			if tt.mode == tonemap.ModeHardware && strings.Contains(joined, "-colorspace bt709") {
+			if tt.mode == tonemap.ModeHardware && tt.hwAccel != transcodeHWVideoToolbox && strings.Contains(joined, "-colorspace bt709") {
 				t.Fatalf("hardware args request an incompatible software colorspace conversion: %s", joined)
+			}
+			if tt.hwAccel == transcodeHWVideoToolbox && !strings.Contains(joined, "-colorspace bt709") {
+				t.Fatalf("VideoToolbox args omit the required output matrix: %s", joined)
 			}
 			if tt.mode == tonemap.ModeHardware && strings.Contains(joined, "-pix_fmt yuv420p") {
 				t.Fatalf("hardware graph requested a software pixel format conversion: %s", joined)
@@ -87,6 +91,7 @@ func TestEveryToneMapSourceKindBuildsEveryExecutorGraph(t *testing.T) {
 		{name: "qsv", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, encoder: "h264_qsv"},
 		{name: "vaapi", mode: tonemap.ModeHardware, hwAccel: "vaapi", filter: tonemap.HardwareFilterVAAPI, encoder: "h264_vaapi"},
 		{name: "nvenc", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, encoder: "h264_nvenc"},
+		{name: "videotoolbox", mode: tonemap.ModeHardware, hwAccel: "videotoolbox", filter: tonemap.HardwareFilterVideoToolbox, encoder: "h264_videotoolbox"},
 	}
 	for _, kind := range tonemap.AllSourceKinds() {
 		for _, executor := range executors {
@@ -104,7 +109,7 @@ func TestEveryToneMapSourceKindBuildsEveryExecutorGraph(t *testing.T) {
 					}
 				}
 				hasLuminanceToneMap := strings.Contains(joined, "tonemap=hable") || strings.Contains(joined, "tonemap_opencl") || strings.Contains(joined, "tonemap_vaapi") || strings.Contains(joined, "tonemap_cuda")
-				if hasLuminanceToneMap == tonemap.IsSDRSource(kind) {
+				if executor.hwAccel != transcodeHWVideoToolbox && hasLuminanceToneMap == tonemap.IsSDRSource(kind) {
 					t.Fatalf("%s/%s luminance tone-map decision is wrong: %s", kind, executor.name, joined)
 				}
 			})
@@ -123,6 +128,7 @@ func TestHardwareToneMapRemovesMetadataAfterHardwareFormatConversion(t *testing.
 		{name: "QSV", hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, before: "hwmap=derive_device=qsv"},
 		{name: "VAAPI", hwAccel: "vaapi", filter: tonemap.HardwareFilterVAAPI, before: "scale_vaapi"},
 		{name: "NVENC", hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, before: "scale_cuda"},
+		{name: "VideoToolbox", hwAccel: "videotoolbox", filter: tonemap.HardwareFilterVideoToolbox, before: "scale_vt"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -170,6 +176,51 @@ func TestToneMapGraphOrdersTextAndBitmapSubtitles(t *testing.T) {
 	assertTokenOrder(bitmapGraph, "tonemapx=tonemap=bt2390", "overlay=eof_action=pass", "scale=-2:1080")
 }
 
+func TestVideoToolboxToneMapDownloadsBeforeSubtitleComposition(t *testing.T) {
+	base := TranscodeOpts{
+		InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), SourceVideoBitDepth: 10,
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p",
+		HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareOnly,
+		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ,
+		ToneMapFilter:        tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+		SubtitleBurnIn:       true, SubtitleTrackIndex: 0,
+	}
+	for _, codec := range []string{"subrip", "hdmv_pgs_subtitle"} {
+		t.Run(codec, func(t *testing.T) {
+			opts := base
+			opts.SubtitleCodec = codec
+			graph := strings.Join(buildFFmpegArgs(opts), " ")
+			convert := strings.Index(graph, "scale_vt=w=-2:h=1080")
+			download := strings.Index(graph, "hwdownload,format=p010le,format=nv12")
+			compose := strings.Index(graph, "subtitles=")
+			if codec == "hdmv_pgs_subtitle" {
+				compose = strings.Index(graph, "overlay=eof_action=pass")
+			}
+			metadata := strings.Index(graph, "sidedata=mode=delete")
+			if convert < 0 || download <= convert || compose <= download || metadata <= compose {
+				t.Fatalf("unsafe VideoToolbox subtitle order: %s", graph)
+			}
+			if strings.Contains(graph, "scale=-2:1080") {
+				t.Fatalf("VideoToolbox scaling ran a second time on the CPU: %s", graph)
+			}
+		})
+	}
+}
+
+func TestValidateToneMapOptsAcceptsVideoToolbox(t *testing.T) {
+	err := validateToneMapOpts(TranscodeOpts{
+		TargetCodecVideo: "h264", HWAccel: transcodeHWVideoToolbox,
+		ToneMapPolicy: tonemap.PolicyHardwareOnly, ToneMapMode: tonemap.ModeHardware,
+		ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion:  TransformationHDRToSDRToneMapRecipeVersionV3,
+		ToneMapSourceRevision: tonemap.SourceRevision{MediaFileID: 1, FileSize: 1, FileModifiedUnixNano: 1, FileHash: "hash", ProbeUpdatedUnixNano: 1, StreamSignature: "stream"},
+	})
+	if err != nil {
+		t.Fatalf("VideoToolbox tone-map recipe rejected: %v", err)
+	}
+}
+
 // TestSDRBaseGraphsBypassLuminanceToneMapping verifies SDR-compatible bases avoid needless luminance mapping.
 func TestSDRBaseGraphsBypassLuminanceToneMapping(t *testing.T) {
 	tests := []struct {
@@ -185,6 +236,7 @@ func TestSDRBaseGraphsBypassLuminanceToneMapping(t *testing.T) {
 		{name: "QSV", mode: tonemap.ModeHardware, hwAccel: "qsv", filter: tonemap.HardwareFilterOpenCL, sourceKind: tonemap.SourceSDRBT709, want: []string{"scale_vaapi=format=nv12", "hwmap=derive_device=qsv"}},
 		{name: "VAAPI", mode: tonemap.ModeHardware, hwAccel: "vaapi", filter: tonemap.HardwareFilterVAAPI, sourceKind: tonemap.SourceSDRBT2020, want: []string{"scale_vaapi=format=nv12", "h264_vaapi"}},
 		{name: "NVENC", mode: tonemap.ModeHardware, hwAccel: "nvenc", filter: tonemap.HardwareFilterCUDA, sourceKind: tonemap.SourceSDRBT2020, want: []string{"hwdownload,format=p010le", "zscale=p=bt709", "hwupload_cuda", "h264_nvenc"}},
+		{name: "VideoToolbox", mode: tonemap.ModeHardware, hwAccel: "videotoolbox", filter: tonemap.HardwareFilterVideoToolbox, sourceKind: tonemap.SourceSDRBT2020, want: []string{"scale_vt", "hwdownload,format=p010le,format=nv12", "h264_videotoolbox"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

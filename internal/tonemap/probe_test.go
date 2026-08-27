@@ -30,6 +30,34 @@ func TestHardwareSmokeFilterNVENCPreservesSourceBitDepth(t *testing.T) {
 	}
 }
 
+func TestVideoToolboxSmokeUsesHardwareFramesAndEightBitOutput(t *testing.T) {
+	args := hardwareSmokeArgs("/tmp/probe.hevc", BackendVideoToolbox, "", SourcePQ)
+	joined := strings.Join(args, " ")
+	for _, token := range []string{
+		"-hwaccel videotoolbox",
+		"-hwaccel_output_format videotoolbox_vld",
+		"scale_vt=w=iw:h=ih:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709",
+		"hwdownload,format=p010le,format=nv12",
+		"sidedata=mode=delete:type=DOVI_RPU_BUFFER",
+		"-c:v h264_videotoolbox",
+	} {
+		if !strings.Contains(joined, token) {
+			t.Fatalf("VideoToolbox smoke args missing %q: %s", token, joined)
+		}
+	}
+}
+
+func TestVideoToolboxListingGateRequiresCompletePipeline(t *testing.T) {
+	filters := []byte("scale_vt hwdownload sidedata")
+	encoders := []byte("h264_videotoolbox")
+	if !hardwareProbeAvailable(BackendVideoToolbox, filters, encoders) {
+		t.Fatal("complete VideoToolbox pipeline was not accepted")
+	}
+	if hardwareProbeAvailable(BackendVideoToolbox, []byte("scale_vt hwdownload"), encoders) {
+		t.Fatal("VideoToolbox pipeline without metadata removal was accepted")
+	}
+}
+
 // TestProbeTotalTimeoutCoversBoundedCommandMatrix verifies the deadline covers every possible probe command.
 func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 	tests := []struct {
@@ -41,6 +69,7 @@ func TestProbeTotalTimeoutCoversBoundedCommandMatrix(t *testing.T) {
 		{name: "software", backend: BackendSoftware, count: 7},
 		{name: "one hardware device", backend: BackendQSV, device: "/dev/dri/renderD128", count: 12},
 		{name: "two hardware devices", backend: BackendVAAPI, device: "/dev/dri/renderD128,/dev/dri/renderD129", count: 17},
+		{name: "VideoToolbox", backend: BackendVideoToolbox, count: 12},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

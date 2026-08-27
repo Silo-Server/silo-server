@@ -139,7 +139,7 @@ func probeCacheKey(ffmpegPath, hardwareBackend, hardwareDevice string) string {
 	device := strings.TrimSpace(hardwareDevice)
 	driverIdentities := make([]string, 0)
 	switch backend {
-	case BackendQSV, BackendVAAPI, BackendNVENC:
+	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
 		devices := probeDevices(device, backend)
 		driverIdentities = make([]string, 0, len(devices))
 		for _, configuredDevice := range devices {
@@ -161,7 +161,7 @@ func ProbeTotalTimeout(hardwareBackend, hardwareDevice string) time.Duration {
 	commandCount := 2 + len(AllSourceKinds())
 	backend := strings.ToLower(strings.TrimSpace(hardwareBackend))
 	switch backend {
-	case BackendQSV, BackendVAAPI, BackendNVENC:
+	case BackendQSV, BackendVAAPI, BackendNVENC, BackendVideoToolbox:
 		commandCount += len(AllSourceKinds()) * len(probeDevices(hardwareDevice, backend))
 	}
 	return time.Duration(commandCount)*probeCommandTimeout + probeTimeoutSlack
@@ -261,6 +261,9 @@ func probeDevices(value, backend string) []string {
 		if backend == BackendNVENC {
 			return []string{"0"}
 		}
+		if backend == BackendVideoToolbox {
+			return []string{""}
+		}
 		return []string{defaultDRIRenderDevice}
 	}
 	return devices
@@ -288,6 +291,8 @@ func hardwareFilter(backend string) string {
 		return HardwareFilterOpenCL
 	case BackendNVENC:
 		return HardwareFilterCUDA
+	case BackendVideoToolbox:
+		return HardwareFilterVideoToolbox
 	default:
 		return HardwareFilterVAAPI
 	}
@@ -322,6 +327,8 @@ func hardwareProbeAvailable(backend string, filters, encoders []byte) bool {
 		return hasToken(filters, HardwareFilterVAAPI) && hasToken(filters, "scale_vaapi") && hasToken(encoders, "h264_vaapi")
 	case BackendNVENC:
 		return hasToken(filters, HardwareFilterCUDA) && hasToken(filters, "scale_cuda") && hasToken(encoders, "h264_nvenc")
+	case BackendVideoToolbox:
+		return hasToken(filters, HardwareFilterVideoToolbox) && hasToken(filters, "hwdownload") && hasToken(filters, "sidedata") && hasToken(encoders, "h264_videotoolbox")
 	default:
 		return false
 	}
@@ -359,7 +366,7 @@ func softwareSmokeArgs(fixturePath string, kind SourceKind, filterName string) [
 // command for one hardware backend, device, and source kind.
 func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceKind) []string {
 	device := firstDevice(hardwareDevice)
-	if device == "" && backend != BackendNVENC {
+	if device == "" && backend != BackendNVENC && backend != BackendVideoToolbox {
 		device = defaultDRIRenderDevice
 	}
 	base := []string{ffmpegHideBannerArg, ffmpegLogLevelArg, ffmpegErrorLogLevel}
@@ -380,6 +387,8 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 			cudaDevice = "0"
 		}
 		base = append(base, "-init_hw_device", "cuda=cu:"+cudaDevice, "-filter_hw_device", "cu", "-hwaccel", "cuda", "-hwaccel_output_format", "cuda")
+	case BackendVideoToolbox:
+		base = append(base, "-hwaccel", BackendVideoToolbox, "-hwaccel_output_format", "videotoolbox_vld")
 	}
 	base = append(base,
 		"-f", codecHEVC, "-i", fixturePath,
@@ -392,6 +401,9 @@ func hardwareSmokeArgs(fixturePath, backend, hardwareDevice string, kind SourceK
 // hardwareSmokeFilter builds the backend-specific graph used to validate both
 // HDR and already-SDR Dolby Vision base layers.
 func hardwareSmokeFilter(backend string, kind SourceKind, sourceVideoBitDepth int) string {
+	if backend == BackendVideoToolbox {
+		return VideoToolboxFilter("iw", "ih") + "," + VideoToolboxDownloadFilter(sourceVideoBitDepth) + "," + HDRMetadataRemovalFilter()
+	}
 	if backend == BackendNVENC {
 		if IsSDRSource(kind) {
 			return "hwdownload,format=" + NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth) + "," + SoftwareFilter(kind, "") + ",format=nv12,hwupload_cuda"
@@ -437,6 +449,8 @@ func hardwareEncoder(backend string) string {
 		return "h264_qsv"
 	case BackendVAAPI:
 		return "h264_vaapi"
+	case BackendVideoToolbox:
+		return "h264_videotoolbox"
 	default:
 		return "h264_nvenc"
 	}

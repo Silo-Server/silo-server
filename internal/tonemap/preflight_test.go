@@ -517,6 +517,30 @@ func TestSourceConversionPreflightMirrorsSoftwareDecodeForVAAPI(t *testing.T) {
 	}
 }
 
+func TestSourceConversionPreflightBuildsVideoToolboxPaths(t *testing.T) {
+	for _, softwareDecode := range []bool{false, true} {
+		t.Run(strconv.FormatBool(softwareDecode), func(t *testing.T) {
+			args := sourceConversionPreflightArgs(SourcePreflightRequest{
+				Mode: ModeHardware, Backend: BackendVideoToolbox, Kind: SourcePQ,
+				SourceBitDepth: 10, SoftwareVideoDecode: softwareDecode,
+			}, 0, "")
+			joined := strings.Join(args, " ")
+			for _, token := range []string{"scale_vt", "hwdownload,format=p010le,format=nv12", "sidedata=mode=delete:type=DOVI_RPU_BUFFER", "h264_videotoolbox"} {
+				if !strings.Contains(joined, token) {
+					t.Fatalf("VideoToolbox preflight missing %q: %s", token, joined)
+				}
+			}
+			if softwareDecode {
+				if !strings.Contains(joined, "-init_hw_device videotoolbox=vt") || !strings.Contains(joined, "format=p010le,hwupload") || strings.Contains(joined, "-hwaccel videotoolbox") {
+					t.Fatalf("software-decode VideoToolbox preflight is wrong: %s", joined)
+				}
+			} else if !strings.Contains(joined, "-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld") {
+				t.Fatalf("hardware-decode VideoToolbox preflight is wrong: %s", joined)
+			}
+		})
+	}
+}
+
 // TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion verifies hardware graphs avoid an invalid conversion.
 func TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion(t *testing.T) {
 	tests := []struct {
@@ -529,6 +553,7 @@ func TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion(t *te
 		{name: "QSV", mode: ModeHardware, backend: BackendQSV},
 		{name: "VAAPI", mode: ModeHardware, backend: BackendVAAPI},
 		{name: "NVENC", mode: ModeHardware, backend: BackendNVENC},
+		{name: "VideoToolbox", mode: ModeHardware, backend: BackendVideoToolbox, wantColorspace: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
