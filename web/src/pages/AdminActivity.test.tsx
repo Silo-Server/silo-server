@@ -74,7 +74,9 @@ describe("AdminActivity", () => {
       </MemoryRouter>,
     );
 
-    expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(true);
+    // include_idle stays OFF here: it reveals unclaimed_idle rows too, which are ENDED
+    // sessions the registry still remembers. A "live" count must not include them.
+    expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(false);
     expect(screen.getAllByText("Live Endpoint Movie")).not.toHaveLength(0);
     expect(screen.getByText("measured")).toBeInTheDocument();
   });

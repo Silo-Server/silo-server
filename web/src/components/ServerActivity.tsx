@@ -34,7 +34,7 @@ interface ServerActivityProps {
 // Channel subscriptions are owned by the parent layout
 // (AdminLayoutEventChannels / AdminEventChannels), not here.
 function useServerActivityData() {
-  const { data: liveSessions } = useAdminLiveSessions(true);
+  const { data: liveSessions } = useAdminLiveSessions(false);
   const sessions = liveSessions?.sessions ?? [];
   const { data: tasks = [] } = useTasks();
   const { data: scans } = useActiveScans();

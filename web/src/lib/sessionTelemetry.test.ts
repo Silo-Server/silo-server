@@ -192,6 +192,17 @@ describe("describeLiveSessionsSource", () => {
     );
   });
 
+  // The server withholds two classes behind one include_idle switch. Counting only
+  // no_delivery made an all-unclaimed_idle fleet unreachable: no count, no control.
+  it("offers the reveal control for withheld unclaimed-idle rows too", () => {
+    const source = describeLiveSessionsSource(
+      responseWith({ no_delivery_count: 0, unclaimed_idle_count: 3 }),
+    );
+
+    expect(source.canRevealHidden).toBe(true);
+    expect(source.hiddenCount).toBe(3);
+  });
+
   // Once revealed, the control has to stay available to toggle back.
   it("keeps the control available while hidden rows are shown", () => {
     const source = describeLiveSessionsSource(

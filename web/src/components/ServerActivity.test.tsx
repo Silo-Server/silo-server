@@ -50,6 +50,8 @@ describe("ServerActivity task progress", () => {
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.getByText("Processed 1,000 images across 1 batch")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
-    expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(true);
+    // include_idle stays OFF here: it reveals unclaimed_idle rows too, which are ENDED
+    // sessions the registry still remembers. A "live" count must not include them.
+    expect(mocks.useAdminLiveSessions).toHaveBeenCalledWith(false);
   });
 });

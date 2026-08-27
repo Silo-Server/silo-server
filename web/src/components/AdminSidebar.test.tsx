@@ -98,7 +98,9 @@ describe("AdminSidebar", () => {
   it("counts sessions from the live endpoint including idle rows", () => {
     renderSidebar();
 
-    expect(mockUseAdminLiveSessions).toHaveBeenCalledWith(true);
+    // include_idle stays OFF here: it reveals unclaimed_idle rows too, which are ENDED
+    // sessions the registry still remembers. A "live" badge must not count them.
+    expect(mockUseAdminLiveSessions).toHaveBeenCalledWith(false);
   });
 
   it("renders as an embedded rail inside the mobile drawer", () => {

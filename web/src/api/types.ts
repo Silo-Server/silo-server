@@ -2661,6 +2661,14 @@ export interface AdminLiveSessionsResponse {
   /** How many rows are reported-as-playing with no measured bytes. */
   no_delivery_count: number;
   no_delivery_shown: boolean;
+  /**
+   * The server withholds TWO classes of row behind the same `include_idle` switch:
+   * `no_delivery` (claimed but nothing was ever sent) and `unclaimed_idle` (bytes were
+   * measured, nobody claims it any more, delivery has gone quiet). Reading only the
+   * no-delivery pair leaves the second class unreachable — no count, and no reveal control.
+   */
+  unclaimed_idle_count: number;
+  unclaimed_idle_shown: boolean;
   sessions: AdminSession[];
 }
 

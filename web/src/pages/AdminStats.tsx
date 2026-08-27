@@ -18,7 +18,7 @@ import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminStats() {
   const statsQuery = useAdminStats();
-  const sessionsQuery = useAdminLiveSessions(true);
+  const sessionsQuery = useAdminLiveSessions(false);
   const sessions = sessionsQuery.data?.sessions ?? [];
 
   return (

@@ -121,10 +121,20 @@ export function describeLiveSessionsSource(
   if (!response) {
     return { label: "", detail: "", trustworthy: false, canRevealHidden: false, hiddenCount: 0 };
   }
-  const hiddenCount = response.no_delivery_count ?? 0;
+  // Both withheld classes, because one `include_idle` switch reveals both. Counting
+  // only no_delivery made unclaimed_idle rows unreachable: with nothing claimed-but-
+  // undelivered and three ended-but-still-measured sessions, the toggle never rendered
+  // and there was no way to see them at all.
+  const hiddenCount = (response.no_delivery_count ?? 0) + (response.unclaimed_idle_count ?? 0);
   // The reveal control stays available once the rows are shown, so the toggle
   // can be turned back off.
-  const canRevealHidden = hiddenCount > 0 || response.no_delivery_shown;
+  // Coerced rather than left to `||`: an older or partial payload can omit either
+  // *_shown field, and `undefined` leaking out of a boolean flows straight into a
+  // JSX conditional that then renders nothing with no error.
+  const canRevealHidden =
+    hiddenCount > 0 ||
+    Boolean(response.no_delivery_shown) ||
+    Boolean(response.unclaimed_idle_shown);
 
   if (!response.telemetry_enabled) {
     return {

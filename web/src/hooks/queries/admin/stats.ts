@@ -29,10 +29,14 @@ export function useAdminStats() {
  * - `measured` — bytes went out; no session manager claims them.
  * - `both` — an ordinary, corroborated viewer.
  *
- * Rows reported as playing with no measured delivery are held back unless
- * `includeHidden` is set; `no_delivery_count` says how many, whether or not they
- * are shown. Check `view_complete` before reading the count at face value: an
- * incomplete view is missing sessions by construction.
+ * Two classes of row are held back unless `includeHidden` is set, and one switch
+ * reveals both: rows reported as playing that delivered nothing
+ * (`no_delivery_count`), and rows whose measured delivery has gone quiet with
+ * nobody claiming them any more (`unclaimed_idle_count`) — normally ended
+ * sessions, which the registry remembers for a while after the fact. Both counts
+ * report regardless of whether the rows are shown. Check `view_complete` before
+ * reading either at face value: an incomplete view is missing sessions by
+ * construction.
  *
  * @param includeHidden keep the rows reported as playing that delivered nothing.
  */
@@ -52,6 +56,8 @@ export function useAdminLiveSessions(includeHidden: boolean) {
             view_age_ms: 0,
             no_delivery_count: 0,
             no_delivery_shown: includeHidden,
+            unclaimed_idle_count: 0,
+            unclaimed_idle_shown: includeHidden,
             sessions: [],
           },
       ),

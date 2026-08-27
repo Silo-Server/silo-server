@@ -32,7 +32,7 @@ interface AdminSidebarProps {
 }
 
 function useSessionCount() {
-  const { data } = useAdminLiveSessions(true);
+  const { data } = useAdminLiveSessions(false);
   return data?.sessions.length ?? 0;
 }
 

@@ -76,7 +76,7 @@ function routeSortValue(session: AdminSession): string {
 }
 
 export default function AdminActivity() {
-  const { data: liveSessions, isLoading, refetch: refresh } = useAdminLiveSessions(true);
+  const { data: liveSessions, isLoading, refetch: refresh } = useAdminLiveSessions(false);
   const sessions = liveSessions?.sessions ?? [];
   const sessionsSource = describeLiveSessionsSource(liveSessions);
   const { connectionState } = useRealtimeEvents();
