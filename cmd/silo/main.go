@@ -3424,7 +3424,7 @@ func reloadMarkerPluginProviders(
 				return fmt.Errorf("decode marker provider capability %d/%s: %w", installation.ID, capability.ID, err)
 			}
 			metadataMap := markerCapabilityMetadata(descriptor)
-			provider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
+			pluginProvider, err := markers.NewPluginProvider(markers.PluginProviderOptions{
 				InstallationID:      installation.ID,
 				CapabilityID:        capability.ID,
 				DisplayName:         firstNonEmptyMarkerText(descriptor.GetDisplayName(), capability.ID),
@@ -3433,6 +3433,10 @@ func reloadMarkerPluginProviders(
 			}, resolver)
 			if err != nil {
 				return err
+			}
+			var provider markers.Provider = pluginProvider
+			if !markers.PluginSupportsContributionFromMetadata(metadataMap) {
+				provider = markers.NewReadOnlyPluginProvider(pluginProvider)
 			}
 			providers = append(providers, provider)
 
