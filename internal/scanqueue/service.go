@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -46,12 +48,114 @@ type Service struct {
 	stop                   chan struct{}
 	stopOnce               sync.Once
 	runningMu              sync.Mutex
-	runningCancels         map[string]runningCancel
+	runningCancels         map[scanClaimKey]runningCancel
 }
 
 type runningCancel struct {
 	libraryID int
 	cancel    context.CancelFunc
+}
+
+type scanClaimKey struct {
+	runID      string
+	claimToken string
+}
+
+type claimLease struct {
+	cancel     context.CancelCauseFunc
+	staleAfter time.Duration
+	deadline   atomic.Int64
+	renewed    chan struct{}
+	done       chan struct{}
+	doneOnce   sync.Once
+}
+
+type claimLeaseContext struct {
+	context.Context
+	lease *claimLease
+}
+
+func newClaimLeaseContext(
+	parent context.Context,
+	cancel context.CancelCauseFunc,
+	staleAfter time.Duration,
+	renewedAt time.Time,
+) (context.Context, *claimLease) {
+	lease := &claimLease{
+		cancel:     cancel,
+		staleAfter: staleAfter,
+		renewed:    make(chan struct{}, 1),
+		done:       make(chan struct{}),
+	}
+	lease.deadline.Store(renewedAt.Add(staleAfter).UnixNano())
+	context.AfterFunc(parent, lease.closeDone)
+	return &claimLeaseContext{Context: parent, lease: lease}, lease
+}
+
+func (c *claimLeaseContext) Done() <-chan struct{} {
+	c.lease.expireIfDue(time.Now())
+	if c.Context.Err() != nil {
+		c.lease.closeDone()
+	}
+	return c.lease.done
+}
+
+func (c *claimLeaseContext) Err() error {
+	c.lease.expireIfDue(time.Now())
+	if err := c.Context.Err(); err != nil {
+		c.lease.closeDone()
+		return err
+	}
+	select {
+	case <-c.lease.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+func (l *claimLease) closeDone() {
+	l.doneOnce.Do(func() { close(l.done) })
+}
+
+func (l *claimLease) expireIfDue(now time.Time) bool {
+	for {
+		deadline := l.deadline.Load()
+		if deadline <= 0 {
+			return true
+		}
+		if now.UnixNano() < deadline {
+			return false
+		}
+		if l.deadline.CompareAndSwap(deadline, 0) {
+			l.closeDone()
+			l.cancel(ErrScanRunClaimLost)
+			return true
+		}
+	}
+}
+
+func (l *claimLease) renew(succeededAt time.Time) bool {
+	for {
+		deadline := l.deadline.Load()
+		if deadline <= 0 || succeededAt.UnixNano() >= deadline {
+			l.expireIfDue(time.Now())
+			return false
+		}
+		newDeadline := succeededAt.Add(l.staleAfter).UnixNano()
+		if time.Now().UnixNano() >= newDeadline {
+			l.expireIfDue(time.Now())
+			return false
+		}
+		if !l.deadline.CompareAndSwap(deadline, newDeadline) {
+			continue
+		}
+		select {
+		case l.renewed <- struct{}{}:
+		default:
+		}
+		return true
+	}
 }
 
 func NewService(
@@ -84,7 +188,7 @@ func NewService(
 		heartbeatInterval:      defaultHeartbeatInterval,
 		staleAfter:             defaultStaleAfter,
 		stop:                   make(chan struct{}),
-		runningCancels:         make(map[string]runningCancel),
+		runningCancels:         make(map[scanClaimKey]runningCancel),
 	}
 }
 
@@ -194,11 +298,6 @@ func (s *Service) CancelByLibrary(ctx context.Context, libraryID int) (int, erro
 		return 0, nil
 	}
 
-	cancelled, err := s.CancelAcceptedByLibrary(ctx, libraryID)
-	if err != nil {
-		return 0, err
-	}
-
 	s.runningMu.Lock()
 	for _, running := range s.runningCancels {
 		if running.libraryID != libraryID || running.cancel == nil {
@@ -208,26 +307,14 @@ func (s *Service) CancelByLibrary(ctx context.Context, libraryID int) (int, erro
 	}
 	s.runningMu.Unlock()
 
-	activeRuns, err := s.repo.ListActive(ctx)
+	activeRuns, err := s.repo.CancelActiveByLibrary(ctx, libraryID)
 	if err != nil {
-		return cancelled, err
+		return 0, err
 	}
 	for _, run := range activeRuns {
-		if run == nil || run.MediaFolderID != libraryID {
-			continue
-		}
-		_, changed, err := s.repo.MarkCancelled(ctx, run.ID)
-		if err != nil {
-			return cancelled, err
-		}
-		if changed {
-			cancelled++
-			if cancelledRun, err := s.repo.GetByID(ctx, run.ID); err == nil {
-				s.publish(ctx, "scan.cancelled", cancelledRun)
-			}
-		}
+		s.publish(ctx, "scan.cancelled", run)
 	}
-	return cancelled, nil
+	return len(activeRuns), nil
 }
 
 func (s *Service) ListActive(ctx context.Context) ([]evt.ScanRun, error) {
@@ -288,8 +375,12 @@ func (s *Service) requeueStale() {
 		slog.Warn("scan queue: failed to requeue stale runs", "error", err)
 		return
 	}
-	if requeued > 0 {
-		slog.Info("scan queue: requeued stale runs", "count", requeued)
+	for _, retry := range requeued {
+		s.publish(ctx, "scan.failed", retry.Retired)
+		s.publish(ctx, "scan.accepted", retry.Successor)
+	}
+	if len(requeued) > 0 {
+		slog.Info("scan queue: requeued stale runs", "count", len(requeued))
 	}
 }
 
@@ -316,7 +407,6 @@ func (s *Service) workerLoop() {
 			continue
 		}
 
-		s.publish(context.Background(), "scan.started", run)
 		s.process(run)
 	}
 }
@@ -337,27 +427,64 @@ func (s *Service) process(run *models.ScanRun) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(s.appCtx)
+	ctx, cancelCause := context.WithCancelCause(s.appCtx)
+	heartbeatStartedAt := time.Now()
+	ctx, lease := newClaimLeaseContext(ctx, cancelCause, s.staleAfter, heartbeatStartedAt)
+	cancel := func() {
+		cancelCause(context.Canceled)
+		lease.closeDone()
+	}
 	defer cancel()
-	s.trackRunning(run.ID, run.MediaFolderID, cancel)
-	defer s.untrackRunning(run.ID)
-	progressReporter := newScanProgressReporter(s, run)
+	s.trackRunning(run, cancel)
+	defer s.untrackRunning(run)
+
+	touchCtx, touchCancel := context.WithTimeout(ctx, 15*time.Second)
+	err := s.repo.TouchHeartbeat(touchCtx, run.ID, run.ClaimToken)
+	touchCancel()
+	if errors.Is(err, ErrScanRunClaimLost) {
+		return
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "scan queue: failed to establish claim lease", "component", "scanqueue", "scan_id", run.ID, "error", err)
+		return
+	}
+	if lease.expireIfDue(time.Now()) || ctx.Err() != nil {
+		return
+	}
+	ctx = libraryingest.WithLeaseGuard(ctx, func() error {
+		if lease.expireIfDue(time.Now()) {
+			return ErrScanRunClaimLost
+		}
+		return nil
+	})
+	var afterCommitMu sync.Mutex
+	afterCommit := make([]func(context.Context), 0, 1)
+	ctx = libraryingest.WithAfterCommitRegistrar(ctx, func(callback func(context.Context)) {
+		afterCommitMu.Lock()
+		defer afterCommitMu.Unlock()
+		afterCommit = append(afterCommit, callback)
+	})
+	progressReporter := newScanProgressReporter(s, run, ctx, cancelCause)
 	ctx = libraryingest.WithProgressReporter(ctx, progressReporter.Report)
+	s.publish(context.Background(), "scan.started", run)
 
 	heartbeatStop := make(chan struct{})
-	go s.heartbeatLoop(ctx, run.ID, heartbeatStop)
+	go s.claimLeaseWatchdog(ctx, run, lease)
+	go s.heartbeatLoop(ctx, run, cancelCause, heartbeatStop, lease)
 	defer close(heartbeatStop)
 
 	folder, err := s.folders.GetByID(ctx, run.MediaFolderID)
 	switch {
+	case errors.Is(context.Cause(ctx), ErrScanRunClaimLost):
+		return
 	case errors.Is(err, catalog.ErrFolderNotFound):
-		s.cancelRun(run.ID)
+		s.cancelRun(run)
 		return
 	case err != nil:
-		s.failRun(run.ID, fmt.Errorf("load library for scan: %w", err))
+		s.failRun(run, fmt.Errorf("load library for scan: %w", err))
 		return
 	case folder == nil || !folder.Enabled:
-		s.cancelRun(run.ID)
+		s.cancelRun(run)
 		return
 	}
 
@@ -372,32 +499,61 @@ func (s *Service) process(run *models.ScanRun) {
 	default:
 		err = fmt.Errorf("unsupported scan mode %q", run.Mode)
 	}
+	if s.finishRun(ctx, lease, run, result, err) {
+		afterCommitMu.Lock()
+		callbacks := slices.Clone(afterCommit)
+		afterCommitMu.Unlock()
+		for _, callback := range callbacks {
+			go callback(context.Background())
+		}
+	}
+}
+
+func (s *Service) finishRun(
+	ctx context.Context,
+	lease *claimLease,
+	run *models.ScanRun,
+	result *libraryingest.Result,
+	runErr error,
+) bool {
+	lease.expireIfDue(time.Now())
 	switch {
-	case errors.Is(err, context.Canceled):
-		s.cancelRun(run.ID)
-	case err != nil:
-		s.failRun(run.ID, err)
+	case errors.Is(context.Cause(ctx), ErrScanRunClaimLost):
+		return false
+	case errors.Is(runErr, context.Canceled), errors.Is(ctx.Err(), context.Canceled):
+		s.cancelRun(run)
+		return false
+	case runErr != nil:
+		s.failRun(run, runErr)
+		return false
 	default:
-		s.completeRun(run.ID, result)
+		return s.completeRun(run, result)
 	}
 }
 
 type scanProgressReporter struct {
 	service *Service
 	run     *models.ScanRun
+	ctx     context.Context
+	cancel  context.CancelCauseFunc
 	mu      sync.Mutex
 	last    evt.ScanRunResult
 }
 
-func newScanProgressReporter(service *Service, run *models.ScanRun) *scanProgressReporter {
+func newScanProgressReporter(service *Service, run *models.ScanRun, ctx context.Context, cancel context.CancelCauseFunc) *scanProgressReporter {
 	return &scanProgressReporter{
 		service: service,
 		run:     run,
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
 func (r *scanProgressReporter) Report(update libraryingest.ProgressUpdate) {
 	if r == nil || r.service == nil || r.service.repo == nil || r.run == nil {
+		return
+	}
+	if context.Cause(r.ctx) != nil {
 		return
 	}
 
@@ -418,9 +574,13 @@ func (r *scanProgressReporter) Report(update libraryingest.ProgressUpdate) {
 	r.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	run, err := r.service.repo.UpdateProgress(ctx, r.run.ID, &current)
+	run, err := r.service.repo.UpdateProgress(ctx, r.run.ID, r.run.ClaimToken, &current)
 	cancel()
-	if err != nil && !errors.Is(err, ErrScanRunNotFound) {
+	if errors.Is(err, ErrScanRunClaimLost) {
+		r.cancel(ErrScanRunClaimLost)
+		return
+	}
+	if err != nil {
 		slog.Warn("scan queue: failed to persist scan progress", "scan_id", r.run.ID, "error", err)
 		return
 	}
@@ -439,28 +599,64 @@ func (r *scanProgressReporter) Report(update libraryingest.ProgressUpdate) {
 	}
 }
 
-func (s *Service) trackRunning(runID string, libraryID int, cancel context.CancelFunc) {
-	if s == nil || cancel == nil {
+func (s *Service) trackRunning(run *models.ScanRun, cancel context.CancelFunc) {
+	if s == nil || run == nil || cancel == nil {
 		return
 	}
 	s.runningMu.Lock()
 	defer s.runningMu.Unlock()
-	s.runningCancels[runID] = runningCancel{
-		libraryID: libraryID,
+	s.runningCancels[scanClaimKey{runID: run.ID, claimToken: run.ClaimToken}] = runningCancel{
+		libraryID: run.MediaFolderID,
 		cancel:    cancel,
 	}
 }
 
-func (s *Service) untrackRunning(runID string) {
-	if s == nil {
+func (s *Service) untrackRunning(run *models.ScanRun) {
+	if s == nil || run == nil {
 		return
 	}
 	s.runningMu.Lock()
 	defer s.runningMu.Unlock()
-	delete(s.runningCancels, runID)
+	delete(s.runningCancels, scanClaimKey{runID: run.ID, claimToken: run.ClaimToken})
 }
 
-func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan struct{}) {
+func (s *Service) claimLeaseWatchdog(
+	ctx context.Context,
+	run *models.ScanRun,
+	lease *claimLease,
+) {
+	timer := time.NewTimer(time.Until(time.Unix(0, lease.deadline.Load())))
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-lease.renewed:
+		case <-timer.C:
+		}
+
+		if lease.expireIfDue(time.Now()) {
+			slog.InfoContext(ctx, "scan queue: local claim lease expired; canceling ingestion", "component", "scanqueue", "scan_id", run.ID)
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(time.Until(time.Unix(0, lease.deadline.Load())))
+	}
+}
+
+func (s *Service) heartbeatLoop(
+	ctx context.Context,
+	run *models.ScanRun,
+	cancelClaim context.CancelCauseFunc,
+	stop <-chan struct{},
+	lease *claimLease,
+) {
 	ticker := time.NewTicker(s.heartbeatInterval)
 	defer ticker.Stop()
 
@@ -471,52 +667,72 @@ func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan s
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			heartbeatStartedAt := time.Now()
 			touchCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			err := s.repo.TouchHeartbeat(touchCtx, runID)
+			err := s.repo.TouchHeartbeat(touchCtx, run.ID, run.ClaimToken)
 			cancel()
-			if err != nil && !errors.Is(err, ErrScanRunNotFound) {
-				slog.WarnContext(ctx, "scan queue: failed to touch heartbeat", "component", "scanqueue", "scan_id", runID, "error", err)
+			if errors.Is(err, ErrScanRunClaimLost) {
+				slog.InfoContext(ctx, "scan queue: claim lost; canceling ingestion", "component", "scanqueue", "scan_id", run.ID)
+				cancelClaim(ErrScanRunClaimLost)
+				return
+			}
+			if err != nil {
+				slog.WarnContext(ctx, "scan queue: failed to touch heartbeat", "component", "scanqueue", "scan_id", run.ID, "error", err)
+				continue
+			}
+			if !lease.renew(heartbeatStartedAt) {
+				slog.InfoContext(ctx, "scan queue: heartbeat arrived after local claim lease expiry", "component", "scanqueue", "scan_id", run.ID)
+				cancelClaim(ErrScanRunClaimLost)
+				return
 			}
 		}
 	}
 }
 
-func (s *Service) cancelRun(runID string) {
+func (s *Service) cancelRun(claim *models.ScanRun) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, changed, err := s.repo.MarkCancelled(ctx, runID)
-	if err != nil {
-		slog.Warn("scan queue: failed to mark cancelled", "scan_id", runID, "error", err)
+	run, err := s.repo.CancelClaim(ctx, claim.ID, claim.ClaimToken)
+	if errors.Is(err, ErrScanRunClaimLost) {
 		return
 	}
-	if changed {
-		s.publish(context.Background(), "scan.cancelled", run)
+	if err != nil {
+		slog.Warn("scan queue: failed to mark canceled", "scan_id", claim.ID, "error", err)
+		return
 	}
+	s.publish(context.Background(), "scan.cancelled", run)
 }
 
-func (s *Service) failRun(runID string, runErr error) {
+func (s *Service) failRun(claim *models.ScanRun, runErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, err := s.repo.Fail(ctx, runID, errString(runErr))
+	run, err := s.repo.Fail(ctx, claim.ID, claim.ClaimToken, errString(runErr))
+	if errors.Is(err, ErrScanRunClaimLost) {
+		return
+	}
 	if err != nil {
-		slog.Warn("scan queue: failed to mark failed", "scan_id", runID, "error", err)
+		slog.Warn("scan queue: failed to mark failed", "scan_id", claim.ID, "error", err)
 		return
 	}
 	s.publish(context.Background(), "scan.failed", run)
 }
 
-func (s *Service) completeRun(runID string, result *libraryingest.Result) {
+func (s *Service) completeRun(claim *models.ScanRun, result *libraryingest.Result) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	run, err := s.repo.Complete(ctx, runID, scanResultFromIngest(result))
+	run, err := s.repo.Complete(ctx, claim.ID, claim.ClaimToken, scanResultFromIngest(result))
+	if errors.Is(err, ErrScanRunClaimLost) {
+		return false
+	}
 	if err != nil {
-		slog.Warn("scan queue: failed to mark completed", "scan_id", runID, "error", err)
-		return
+		slog.Warn("scan queue: failed to mark completed", "scan_id", claim.ID, "error", err)
+		return false
 	}
 	s.publish(context.Background(), "scan.completed", run)
+	return true
 }
 
 func (s *Service) publish(ctx context.Context, eventName string, run *models.ScanRun) {

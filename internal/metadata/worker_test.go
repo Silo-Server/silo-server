@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/claimcontext"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -296,6 +298,37 @@ func TestProcessSeriesRoots_ReleasesUnfinishedBatchOnCancellation(t *testing.T) 
 	}
 	if processed != 0 {
 		t.Fatalf("processed = %d, want 0", processed)
+	}
+	if got := repo.releasedLeases; len(got) != 1 || got[0] != leaseToken {
+		t.Fatalf("released leases = %v, want [%s]", got, leaseToken)
+	}
+}
+
+func TestProcessSeriesRootsPreservesOwnershipGuard(t *testing.T) {
+	const leaseToken = "series-ownership-guard"
+	repo := newFakeSeriesQueueRepo()
+	worker := NewMatchWorker(nil, nil, 2, 10, 0)
+	worker.seriesClaimer = repo
+	var claimLost atomic.Bool
+	ctx := claimcontext.WithOwnershipGuard(t.Context(), func() error {
+		if claimLost.Load() {
+			return errors.New("scan claim lost")
+		}
+		return nil
+	})
+	claimLost.Store(true)
+
+	processed, err := worker.processSeriesRoots(ctx, []models.SeriesRootMatchJob{
+		{MediaFolderID: 1, ObservedRootPath: "/shows/One", LeaseToken: leaseToken},
+	})
+	if err != nil {
+		t.Fatalf("process series roots: %v", err)
+	}
+	if processed != 0 {
+		t.Fatalf("processed = %d, want 0", processed)
+	}
+	if len(repo.deleted) != 0 || len(repo.errors) != 0 {
+		t.Fatalf("lost claim mutated series queue: deleted=%v errors=%v", repo.deleted, repo.errors)
 	}
 	if got := repo.releasedLeases; len(got) != 1 || got[0] != leaseToken {
 		t.Fatalf("released leases = %v, want [%s]", got, leaseToken)

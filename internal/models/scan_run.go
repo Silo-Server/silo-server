@@ -16,6 +16,7 @@ type ScanRun struct {
 	ResultPayload   json.RawMessage
 	ErrorMessage    string
 	AutoscanEventID *int64
+	ClaimToken      string
 	RequestedAt     time.Time
 	StartedAt       *time.Time
 	CompletedAt     *time.Time

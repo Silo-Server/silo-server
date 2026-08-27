@@ -2626,7 +2626,7 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 		return ctx, cancel
 	}
 
-	watchCtx, cancel := context.WithCancel(ctx)
+	watchCtx, cancel := WithGuardedCancel(ctx)
 	enabled, err := s.folderEnabledState(watchCtx, folderID)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: failed to load folder state", "component", "scanner", "folder_id", folderID, "error", err)

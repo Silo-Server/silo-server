@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/claimcontext"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -1038,7 +1039,7 @@ func (w *MatchWorker) processSeriesRoots(ctx context.Context, jobs []models.Seri
 	}
 	defer w.releaseSeriesLeases(jobs)
 
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := claimcontext.WithGuardedCancel(ctx)
 	defer cancel()
 
 	jobChan := make(chan models.SeriesRootMatchJob, len(jobs))

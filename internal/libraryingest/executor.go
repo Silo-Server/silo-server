@@ -58,6 +58,39 @@ type Result struct {
 	Skipped                bool
 }
 
+type afterCommitRegistrarKey struct{}
+
+// WithLeaseGuard installs a synchronous ownership check that survives the
+// executor's derived scan context and its descendants.
+func WithLeaseGuard(ctx context.Context, guard func() error) context.Context {
+	return scanner.WithOwnershipGuard(ctx, guard)
+}
+
+func withIngestCancel(ctx context.Context) (context.Context, context.CancelFunc) {
+	return scanner.WithGuardedCancel(ctx)
+}
+
+// WithAfterCommitRegistrar lets a queue owner defer best-effort side effects
+// until it has durably committed the ingest result. Direct callers retain the
+// executor's existing immediate behavior.
+func WithAfterCommitRegistrar(ctx context.Context, register func(func(context.Context))) context.Context {
+	if register == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, afterCommitRegistrarKey{}, register)
+}
+
+// DeferUntilCommitted registers callback with a queue owner when one is
+// present. It returns false when the caller should run callback immediately.
+func DeferUntilCommitted(ctx context.Context, callback func(context.Context)) bool {
+	register, ok := ctx.Value(afterCommitRegistrarKey{}).(func(func(context.Context)))
+	if !ok || register == nil {
+		return false
+	}
+	register(callback)
+	return true
+}
+
 type scopeMode string
 
 const (
@@ -152,7 +185,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	}
 
 	// Wrap the caller's context so we can cancel from CancelLibrary.
-	scanCtx, cancel := context.WithCancel(ctx)
+	scanCtx, cancel := withIngestCancel(ctx)
 	defer cancel()
 
 	claim := scopeClaim{
@@ -364,10 +397,9 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	}
 
 	// Content availability runs after matching/reconcile so releases are tied
-	// to resolved items. It runs detached: the detector is best-effort with
-	// its own deadline (it detaches from scanCtx internally, surviving its
-	// cancellation), and a slow pass must not delay scan completion or the
-	// serialized scan queue.
+	// to resolved items. Queue-owned ingests defer it until the queue has
+	// durably accepted the fenced completion. Other callers retain the existing
+	// detached, best-effort behavior.
 	if e.availability != nil {
 		lk := librarykind.Of(folder.Type)
 		// Audiobook/ebook are dedicated library types, never part of "mixed"
@@ -379,7 +411,12 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 			Ebooks:     lk.Ebook,
 		}
 		if kinds.Any() {
-			go e.availability.HandleIngestCompleted(scanCtx, folder.ID, mode == scopeModeLibrary, matchScopes, kinds)
+			callback := func(afterCommitCtx context.Context) {
+				e.availability.HandleIngestCompleted(afterCommitCtx, folder.ID, mode == scopeModeLibrary, matchScopes, kinds)
+			}
+			if !DeferUntilCommitted(scanCtx, callback) {
+				go callback(context.Background())
+			}
 		}
 	}
 
