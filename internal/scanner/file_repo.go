@@ -835,6 +835,12 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		return nil, fmt.Errorf("marshaling chapters: %w", err)
 	}
 
+	// Marker ranges describe one exact generation of a file. When a scan sees
+	// different non-empty content hashes at the same path, clear every range and
+	// its provenance in the upsert below; the new generation can then take its
+	// own hash-keyed S3 markers or be repopulated lazily at playback. A missing
+	// hash on either side is not enough evidence to discard existing markers.
+
 	// Convert empty strings to nil for nullable text columns.
 	var contentID *string
 	if mf.ContentID != "" {
@@ -914,6 +920,36 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		file_size = EXCLUDED.file_size,
 		file_modified_at = EXCLUDED.file_modified_at,
 		file_hash = EXCLUDED.file_hash,
+		intro_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_start END,
+		intro_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_end END,
+		credits_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_start END,
+		credits_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_end END,
+		recap_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_start END,
+		recap_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_end END,
+		preview_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_start END,
+		preview_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_end END,
+		markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.markers_source END,
+		markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.markers_confidence END,
+		intro_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_source END,
+		intro_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_provider END,
+		intro_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_confidence END,
+		intro_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_algorithm END,
+		intro_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_detected_at END,
+		credits_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_source END,
+		credits_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_provider END,
+		credits_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_confidence END,
+		credits_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_algorithm END,
+		credits_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_detected_at END,
+		recap_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_source END,
+		recap_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_provider END,
+		recap_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_confidence END,
+		recap_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_algorithm END,
+		recap_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_detected_at END,
+		preview_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_source END,
+		preview_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_provider END,
+		preview_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_confidence END,
+		preview_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_algorithm END,
+		preview_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_detected_at END,
 		codec_video = EXCLUDED.codec_video,
 		codec_audio = EXCLUDED.codec_audio,
 		resolution = EXCLUDED.resolution,
