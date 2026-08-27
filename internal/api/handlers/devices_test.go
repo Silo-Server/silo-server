@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -428,5 +429,264 @@ func TestForgetDevice_NonPrimaryCannotForgetSiblingsDevice(t *testing.T) {
 	}
 	if !exists {
 		t.Error("a non-primary profile removed a sibling's device")
+	}
+}
+
+// --- devices.forget_requires_primary ---
+
+func restrictedForgetHandler(t *testing.T, value string) (*DeviceHandler, userstore.UserStore) {
+	t.Helper()
+	handler, store := householdDevicesHandler(t)
+	handler.ServerSettings = &fakeServerSettingsStore{values: map[string]string{
+		forgetRequiresPrimarySettingKey: value,
+	}}
+	return handler, store
+}
+
+// erroringSettingsReader simulates the server-settings store being
+// unreachable, the one state where the forget policy cannot be evaluated.
+type erroringSettingsReader struct{}
+
+func (erroringSettingsReader) Get(context.Context, string) (string, error) {
+	return "", errors.New("settings store unavailable")
+}
+
+// An unreadable policy must reject the forget rather than guess: failing open
+// would let a non-primary profile forget devices while the operator believes
+// the restriction is enforced. The device and its settings must survive.
+func TestForgetDevice_SettingReadErrorRejectsAndKeepsDevice(t *testing.T) {
+	handler, store := householdDevicesHandler(t)
+	handler.ServerSettings = erroringSettingsReader{}
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+	seedDeviceValue(t, store, "profile-2", "device-9", "player.hdr_enabled", `false`)
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9", "device-9",
+		"profile-2", handler.HandleForgetDevice)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("forget with unreadable policy = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-9")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if !exists {
+		t.Error("a rejected forget still removed the device")
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-9" {
+		t.Errorf("a rejected forget still removed the setting row (device %q)", got)
+	}
+}
+
+// Clear-settings never consults the forget policy, so an unreadable settings
+// store must not affect it.
+func TestClearDeviceSettings_SettingReadErrorStillClears(t *testing.T) {
+	handler, store := householdDevicesHandler(t)
+	handler.ServerSettings = erroringSettingsReader{}
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9/settings", "device-9",
+		"profile-2", handler.HandleClearDeviceSettings)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("clear with unreadable policy = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The restriction is opt-in: with the setting stored as false a non-primary
+// profile keeps forgetting its own devices, exactly as before the setting
+// existed. The unwired case (no ServerSettings at all) is every other forget
+// test in this file.
+func TestForgetDevice_RequirePrimaryOff_NonPrimaryForgetsOwnDevice(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "false")
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9", "device-9",
+		"profile-2", handler.HandleForgetDevice)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE with restriction off = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForgetDevice_RequirePrimaryOn_NonPrimaryOwnDeviceForbidden(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+	seedDeviceValue(t, store, "profile-2", "device-9", "player.hdr_enabled", `false`)
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9", "device-9",
+		"profile-2", handler.HandleForgetDevice)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("restricted non-primary forget = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-9")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if !exists {
+		t.Error("a refused forget still removed the device")
+	}
+	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "device-9" {
+		t.Errorf("a refused forget still removed the setting row (device %q)", got)
+	}
+}
+
+func TestForgetDevice_RequirePrimaryOn_PrimaryForgetsOwnDevice(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-1", "device-1",
+		"profile-1", handler.HandleForgetDevice)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("restricted primary forget = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An admin account passes the guard regardless of which profile is active:
+// canManageHousehold answers for admins before it ever looks at profiles.
+func TestForgetDevice_RequirePrimaryOn_AdminForgetsOwnDevice(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	req := httptest.NewRequest(http.MethodDelete, "/devices/device-9", nil)
+	req.Header.Set(deviceIDHeader, "device-1")
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-2"))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("device_id", "device-9")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	handler.HandleForgetDevice(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("restricted admin forget = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Clearing settings is a recoverable reset, not a removal, so the restriction
+// deliberately leaves it open to every profile.
+func TestClearDeviceSettings_RequirePrimaryOn_NonPrimaryStillClears(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+	seedDeviceValue(t, store, "profile-2", "device-9", "player.hdr_enabled", `false`)
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9/settings", "device-9",
+		"profile-2", handler.HandleClearDeviceSettings)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("restricted non-primary clear = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	exists, err := registry.DeviceExists(context.Background(), "profile-2", "device-9")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if !exists {
+		t.Error("clear removed the registry row under the restriction")
+	}
+}
+
+// Cross-profile forgets already required the primary profile; the setting must
+// not narrow what the household parent could do.
+func TestForgetDevice_RequirePrimaryOn_PrimaryStillForgetsHouseholdDevice(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-2", "device-9", "Robin's iPad")
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-9?profile_id=profile-2",
+		"device-9", "profile-1", handler.HandleForgetDevice)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("restricted household forget = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForgetDevice_RequirePrimaryOn_NonPrimaryCrossProfileStillForbidden(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
+
+	rec := routeDevice(t, handler, http.MethodDelete, "/devices/device-1?profile_id=profile-1",
+		"device-1", "profile-2", handler.HandleForgetDevice)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("restricted cross-profile forget = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// pinLockedForgetRequest drives HandleForgetDevice as the primary profile with
+// a session-bearing claim, optionally presenting an X-Profile-Token. The
+// shared devicesRequest helper carries no session id, which a profile token
+// must bind to, so the PIN tests build their request here.
+func pinLockedForgetRequest(
+	t *testing.T, handler *DeviceHandler, deviceID, token string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodDelete, "/devices/"+deviceID, nil)
+	req.Header.Set(deviceIDHeader, "device-1")
+	if token != "" {
+		req.Header.Set("X-Profile-Token", token)
+	}
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, SessionID: "session-1"})
+	req = req.WithContext(apimw.SetProfileID(ctx, "profile-1"))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("device_id", deviceID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rec := httptest.NewRecorder()
+	handler.HandleForgetDevice(rec, req)
+	return rec
+}
+
+func pinLockPrimary(t *testing.T, store userstore.UserStore) {
+	t.Helper()
+	pin := "1234"
+	if err := store.UpdateProfile(context.Background(), "profile-1", userstore.UpdateProfileInput{
+		PIN: &pin,
+	}); err != nil {
+		t.Fatalf("set pin: %v", err)
+	}
+}
+
+// The restriction rides canManageHousehold, so a PIN-locked primary must
+// verify its PIN even to forget its own device: with a valid token the forget
+// goes through.
+func TestForgetDevice_RequirePrimaryOn_PinLockedPrimaryWithTokenForgets(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	pinLockPrimary(t, store)
+	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
+
+	token, _, err := handler.ProfileTokens.Mint(access.ProfileTokenClaims{
+		UserID: 1, SessionID: "session-1", ProfileID: "profile-1", PolicyRevision: 0,
+	})
+	if err != nil {
+		t.Fatalf("issuing token: %v", err)
+	}
+
+	rec := pinLockedForgetRequest(t, handler, "device-1", token)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("pin-locked primary with token = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ...and without the token, X-Profile-Id alone cannot walk past the profile
+// lock — the refusal names the PIN so the client knows which door to knock on.
+func TestForgetDevice_RequirePrimaryOn_PinLockedPrimaryWithoutTokenForbidden(t *testing.T) {
+	handler, store := restrictedForgetHandler(t, "true")
+	pinLockPrimary(t, store)
+	seedDevice(t, store, "profile-1", "device-1", "Sam's laptop")
+
+	rec := pinLockedForgetRequest(t, handler, "device-1", "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("pin-locked primary without token = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "verifying the primary profile PIN") {
+		t.Errorf("refusal should name the PIN verification, got: %s", rec.Body.String())
+	}
+
+	registry := store.(userstore.DeviceRegistry)
+	exists, err := registry.DeviceExists(context.Background(), "profile-1", "device-1")
+	if err != nil {
+		t.Fatalf("DeviceExists: %v", err)
+	}
+	if !exists {
+		t.Error("an unverified forget still removed the device")
 	}
 }

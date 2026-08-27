@@ -11,6 +11,7 @@ const KEYS = [
   "server.log_level",
   "server.log_quiet",
   "clientip.trusted_proxies",
+  "devices.forget_requires_primary",
 ];
 
 export default function GeneralSettings() {
@@ -116,6 +117,16 @@ export default function GeneralSettings() {
               </li>
             </ul>
           </div>
+        </FieldGroup>
+
+        <FieldGroup label="Devices">
+          <SettingField
+            label="Only Primary Profile Can Forget Devices"
+            type="toggle"
+            hint="Reserve forgetting a device for the household's primary profile and server admins. Any profile can still reset its own device's settings."
+            value={form.getValue("devices.forget_requires_primary")}
+            onChange={(v) => form.setValue("devices.forget_requires_primary", v)}
+          />
         </FieldGroup>
       </div>
 

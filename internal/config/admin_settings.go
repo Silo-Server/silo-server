@@ -179,6 +179,7 @@ var adminSettingDefaults = map[string]string{
 	"opslog.max_size_mb":              "1024",
 	"overlays.enabled":                "true",
 	"signup.enabled":                  "false",
+	"devices.forget_requires_primary": "false",
 
 	"catalog.search.provider":                             "postgres",
 	"catalog.search.meilisearch.index":                    "silo_media_items",
@@ -310,7 +311,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
-		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style":
+		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
+		"devices.forget_requires_primary":
 		return normalizeAdminBool(key, value)
 
 	case "database.max_connections":

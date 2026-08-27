@@ -878,6 +878,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			deviceHandler.UserRepo = userRepo
 		}
 		deviceHandler.ProfileTokens = profileTokenService
+		if settingsRepo != nil {
+			deviceHandler.ServerSettings = settingsRepo
+		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
 		subtitlePrefHandler = handlers.NewSubtitlePrefHandler(deps.UserStoreProvider)
