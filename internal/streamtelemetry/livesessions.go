@@ -57,8 +57,8 @@ type LiveByteFacts struct {
 
 // LiveByteFactsFromGlobalView projects the merged view into per-session byte
 // facts, keyed by session id.
-func LiveByteFactsFromGlobalView(view GlobalMonitoringView) map[string]LiveByteFacts {
-	facts := make(map[string]LiveByteFacts, len(view.Sessions))
+func LiveByteFactsFromGlobalView(view GlobalMonitoringView) LiveSnapshot {
+	facts := make(LiveSnapshot, len(view.Sessions))
 	for _, session := range view.Sessions {
 		ips := append([]string(nil), session.ViewerIPs...)
 		sort.Strings(ips)
@@ -94,7 +94,8 @@ func LiveByteFactsFromGlobalView(view GlobalMonitoringView) map[string]LiveByteF
 	return facts
 }
 
-// LiveSnapshot is a view build projected into per-session byte facts.
+// LiveSnapshot is a view build projected into per-session byte facts, keyed by
+// session id.
 //
 // There is no "is this authoritative?" flag any more, and its absence is the
 // point. It existed when telemetry saw only measured families, so a session
@@ -104,9 +105,11 @@ func LiveByteFactsFromGlobalView(view GlobalMonitoringView) map[string]LiveByteF
 // session anyone knows about, so an absent session means absent. Completeness is
 // still reported, but it now qualifies the FACTS on a row rather than deciding
 // whether the list may be trusted at all.
-type LiveSnapshot struct {
-	Facts map[string]LiveByteFacts
-}
+//
+// That is also why this is the map itself rather than a struct wrapping it: the
+// second field it existed to carry is gone, and every caller immediately
+// unwrapped the one that was left.
+type LiveSnapshot map[string]LiveByteFacts
 
 // publisherIDs flattens publisher refs for a consumer that only needs the names.
 func publisherIDs(refs []PublisherRef) []string {
@@ -151,7 +154,12 @@ func (c *ViewCache) updateRatesLocked(view GlobalMonitoringView, at time.Time) {
 	next := make(map[string]rateSample, len(view.Sessions))
 	for _, session := range view.Sessions {
 		bytes := session.ViewerBytesAccepted
-		contributors := contributorKey(publisherIDs(session.Publishers))
+		// Fingerprint the byte SOURCES, not every contributor. ViewerBytesAccepted
+		// sums viewer-egress routes only, so a reporting publisher contributes
+		// nothing to the total while still changing a Publishers-derived key —
+		// which would reset the rate every time the session manager starts or
+		// stops reporting a session that is streaming normally.
+		contributors := contributorKey(publisherIDs(session.ViewerEdgePublishers))
 		sample := rateSample{bytes: bytes, at: at, contributors: contributors}
 		previous, seen := c.rates[session.SessionID]
 		switch {

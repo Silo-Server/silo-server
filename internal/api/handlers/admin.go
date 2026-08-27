@@ -120,7 +120,7 @@ type ImpersonationService interface {
 type AdminHandler struct {
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
-	SessionsLoader     *PlaybackSessionsLoader
+	SessionsLoader     playbackSessionsReader
 	storeProv          userstore.UserStoreProvider
 	accountProvisioner *auth.AccountProvisioner
 	DetailSvc          *catalog.DetailService
@@ -1080,8 +1080,17 @@ func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request
 	return loader.Load(ctx, r, PlaybackSessionsQuery{})
 }
 
+// playbackSessionIDChunk bounds one display lookup. The enriched admin SELECT
+// carries seven LEFT JOINs and a per-row poster presign, so the whole merged view
+// — up to MaxMergedSessions, 50,000 — must not arrive as one ANY() on a request
+// path the dashboard hits on every refresh.
+const playbackSessionIDChunk = 500
+
 // loadPlaybackSessionsByID fetches display rows for exactly these sessions. An
 // empty id set means the caller wants nothing, not everything.
+//
+// The id set is chunked: it comes from the telemetry view, whose only bound is
+// the merged-session cap, and the caller is a live-dashboard endpoint.
 func (h *AdminHandler) loadPlaybackSessionsByID(
 	ctx context.Context, r *http.Request, sessionIDs []string,
 ) ([]playbackSessionRow, error) {
@@ -1092,7 +1101,19 @@ func (h *AdminHandler) loadPlaybackSessionsByID(
 	if err != nil {
 		return nil, err
 	}
-	return loader.Load(ctx, r, PlaybackSessionsQuery{SessionIDs: sessionIDs})
+	if len(sessionIDs) <= playbackSessionIDChunk {
+		return loader.Load(ctx, r, PlaybackSessionsQuery{SessionIDs: sessionIDs})
+	}
+	rows := make([]playbackSessionRow, 0, len(sessionIDs))
+	for start := 0; start < len(sessionIDs); start += playbackSessionIDChunk {
+		end := min(start+playbackSessionIDChunk, len(sessionIDs))
+		chunk, err := loader.Load(ctx, r, PlaybackSessionsQuery{SessionIDs: sessionIDs[start:end]})
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, chunk...)
+	}
+	return rows, nil
 }
 
 // HandleListPlaybackHistory handles GET /admin/playback-history.

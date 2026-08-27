@@ -92,6 +92,27 @@ type liveSessionsResponse struct {
 	Sessions        []playbackSessionRow `json:"sessions"`
 }
 
+// serveLegacyLiveSessions answers from the legacy projection when the merged view
+// cannot be the spine — telemetry switched off, or no view built yet. Both
+// callers want byte-identical behavior, so this is one function rather than two
+// copies that can drift apart.
+//
+// NoDeliveryShown is forced true regardless of include_idle: nothing was
+// classified on this path, so nothing was withheld, and reporting the request's
+// own include_idle back would tell a client rows had been hidden when the list
+// is the unfiltered legacy set.
+func (h *AdminHandler) serveLegacyLiveSessions(w http.ResponseWriter, r *http.Request, response *liveSessionsResponse) {
+	rows, err := h.loadPlaybackSessions(r.Context(), r)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list sessions")
+		return
+	}
+	response.Sessions = rows
+	response.NoDeliveryShown = true
+	sortPlaybackSessionRows(response.Sessions)
+	writeJSON(w, http.StatusOK, *response)
+}
+
 // HandleListLiveSessions handles GET /api/v1/admin/sessions/live.
 //
 // The MERGED TELEMETRY VIEW IS THE SPINE. Every process publishes into it — the
@@ -119,14 +140,7 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 		// Telemetry is switched off, so there is no merged view to be the spine
 		// and the legacy projection is all there is. Rows carry no telemetry
 		// block, which is how a client tells this apart from a measured answer.
-		rows, err := h.loadPlaybackSessions(r.Context(), r)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list sessions")
-			return
-		}
-		response.Sessions = rows
-		sortPlaybackSessionRows(response.Sessions)
-		writeJSON(w, http.StatusOK, response)
+		h.serveLegacyLiveSessions(w, r, &response)
 		return
 	}
 	response.TelemetryEnabled = true
@@ -141,14 +155,7 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 	if !status.Available {
 		// Before the first build there is no view to walk. Serving the legacy set
 		// is right; serving an empty list would read as "nothing is streaming".
-		rows, err := h.loadPlaybackSessions(r.Context(), r)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list sessions")
-			return
-		}
-		response.Sessions = rows
-		sortPlaybackSessionRows(response.Sessions)
-		writeJSON(w, http.StatusOK, response)
+		h.serveLegacyLiveSessions(w, r, &response)
 		return
 	}
 
@@ -161,8 +168,8 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 	// still knows who is streaming, so the list degrades to identity-only rather
 	// than failing - hiding every live viewer because a display join was down
 	// would defeat the point of measuring them.
-	sessionIDs := make([]string, 0, len(snapshot.Facts))
-	for sessionID := range snapshot.Facts {
+	sessionIDs := make([]string, 0, len(snapshot))
+	for sessionID := range snapshot {
 		sessionIDs = append(sessionIDs, sessionID)
 	}
 	rows, err := h.loadPlaybackSessionsByID(r.Context(), r, sessionIDs)
@@ -211,9 +218,9 @@ func decorateLiveSessions(
 		display[row.SessionID] = row
 	}
 
-	sessions := make([]playbackSessionRow, 0, len(snapshot.Facts))
+	sessions := make([]playbackSessionRow, 0, len(snapshot))
 	noDelivery := 0
-	for _, facts := range snapshot.Facts {
+	for _, facts := range snapshot {
 		row, known := display[facts.SessionID]
 		if !known {
 			// In the view but not in Postgres. Usually a session that ended

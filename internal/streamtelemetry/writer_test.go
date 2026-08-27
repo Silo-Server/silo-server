@@ -280,3 +280,60 @@ func (r *cuttingReader) Read(p []byte) (int, error) {
 	}
 	return int(n), nil
 }
+
+// A cut transfer is not a completed delivery, whatever the write path managed to
+// record. The two protocol shapes reach the cut differently — HTTP/1.1 has a
+// ReaderFrom and stops between sendfile slices, while the HTTP/2 writer has none
+// and falls back to Write — and both entry guards return before a byte is
+// attempted, so firstWriteErr can still be nil when the observation is released.
+// Classifying on that alone reported a deliberately severed stream as a full
+// delivery, which is the one thing an operator who just killed a session must
+// never read on the row they killed.
+func TestObservedWriterCutIsNeverReleasedAsCompleted(t *testing.T) {
+	tests := []struct {
+		name string
+		// readerFrom mirrors HTTP/1.1, whose writer has one; its absence mirrors
+		// HTTP/2, which drives the same cut through Write instead.
+		readerFrom bool
+		// cutAtEntry sets the flag before the first write, so nothing is ever
+		// attempted and no write error can exist to classify on.
+		cutAtEntry bool
+	}{
+		{name: "h1 cut mid transfer", readerFrom: true},
+		{name: "h2 cut mid transfer"},
+		{name: "cut before the first write", readerFrom: true, cutAtEntry: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewRegistry(testConfig(), NewLocalStore(), nil)
+			obs := registry.begin(testRoute(ClassPlayback), CaptureSet{Method: http.MethodGet, Pattern: "/media/{id}", ReceivedAt: time.Now()})
+			registry.attach(obs, testAttachment("session-cut"))
+
+			var inner http.ResponseWriter = httptest.NewRecorder()
+			if test.readerFrom {
+				inner = &readerFromRecorder{ResponseRecorder: httptest.NewRecorder()}
+			}
+			writer := &observedWriter{w: inner, observation: obs, bodyEligible: true}
+			if test.cutAtEntry {
+				obs.cut.Store(true)
+			}
+			// A cut on the first byte read keeps the transfer to one slice; the
+			// point is which outcome is recorded, not how much escaped first.
+			_, copyErr := writer.ReadFrom(&cuttingReader{
+				remaining: 4 * httpstream.ReadFromChunkDefault, cutAt: 1, observation: obs,
+			})
+			if copyErr == nil {
+				t.Fatal("cut transfer returned no error")
+			}
+
+			registry.release(obs, obs.outcome(nil, true))
+			session := registry.Sweep().Sessions[0]
+			if session.Outcomes[httpstream.OutcomeCompleted] != 0 {
+				t.Fatalf("a cut transfer was released as completed: %+v", session.Outcomes)
+			}
+			if session.Outcomes[httpstream.OutcomeClientGone] != 1 {
+				t.Fatalf("outcomes = %+v, want one %s", session.Outcomes, httpstream.OutcomeClientGone)
+			}
+		})
+	}
+}

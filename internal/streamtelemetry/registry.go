@@ -2,7 +2,6 @@ package streamtelemetry
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"hash/maphash"
 	"log/slog"
@@ -434,11 +433,11 @@ func maxPendingRealtimePerShard(maxSessions int64) int64 {
 // observing the same logical transfer would emit different ids, which is exactly
 // the cross-publisher agreement the merge is entitled to assume.
 func transferKey(a Attachment, capture CaptureSet) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{
+	digest := digest128([]byte(strings.Join([]string{
 		string(a.Subject.Kind), a.Subject.ID, a.ProfileID, strconv.Itoa(a.MediaFileID),
 		capture.Method, capture.Pattern, capture.ViewerIP, capture.DeviceID,
 	}, "\x00")))
-	return hex.EncodeToString(sum[:16])
+	return hex.EncodeToString(digest[:])
 }
 
 func (r *Registry) shard(id string) *sessionShard {

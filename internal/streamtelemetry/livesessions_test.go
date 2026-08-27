@@ -130,3 +130,45 @@ func TestUpdateRatesDropsSessionsAbsentFromTheNewView(t *testing.T) {
 		t.Fatal("live session dropped")
 	}
 }
+
+// The rate key fingerprints where the bytes came from, and a reporting publisher
+// is not one of those places: ViewerBytesAccepted sums viewer-egress routes only,
+// so the session manager joining or leaving changes nothing about the total it is
+// a delta of. Keying on every contributor blanked the delivery rate on a
+// perfectly healthy stream the moment its session manager started reporting it,
+// and the dashboard rendered that as "not yet known" on a session it had been
+// measuring for hours.
+func TestUpdateRatesSurvivesAReportingPublisherJoining(t *testing.T) {
+	cache := &ViewCache{}
+	base := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	edge := []PublisherRef{{PublisherID: "api"}}
+	view := GlobalMonitoringView{Sessions: []GlobalSessionView{{
+		SessionID: "s1", ViewerBytesAccepted: 0,
+		Publishers: edge, ViewerEdgePublishers: edge,
+	}}}
+	cache.updateRatesLocked(view, base)
+
+	// Same viewer edge, same bytes, one extra publisher that delivered none of
+	// them. 125 000 bytes over 10s is 1 Mbit/s == 100 kbps in this unit.
+	view.Sessions[0].ViewerBytesAccepted = 125_000
+	view.Sessions[0].Publishers = []PublisherRef{{PublisherID: "api"}, {PublisherID: "api#reported"}}
+	cache.updateRatesLocked(view, base.Add(10*time.Second))
+
+	sample := cache.rates["s1"]
+	if !sample.known {
+		t.Fatal("rate reset by a publisher that contributed no viewer bytes")
+	}
+	if got := sample.kbps; got < 99.9 || got > 100.1 {
+		t.Fatalf("rate = %f kbps, want ~100", got)
+	}
+
+	// A change to the viewer edge itself still resets: those totals genuinely are
+	// summed over different publishers, so the level jump is not this interval's
+	// traffic.
+	view.Sessions[0].ViewerBytesAccepted = 250_000
+	view.Sessions[0].ViewerEdgePublishers = []PublisherRef{{PublisherID: "api"}, {PublisherID: "node-2"}}
+	cache.updateRatesLocked(view, base.Add(20*time.Second))
+	if cache.rates["s1"].known {
+		t.Fatal("rate survived a viewer-edge publisher joining; the two totals are not comparable")
+	}
+}

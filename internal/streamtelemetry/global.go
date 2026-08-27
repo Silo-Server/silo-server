@@ -395,9 +395,16 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	subjectValues, profileValues, mediaValues := map[string][]PublisherRef{}, map[string][]PublisherRef{}, map[string][]PublisherRef{}
 	winningRank := 0
 	winningTimes := map[int64]struct{}{}
+	// Normalize once. The viewer-edge pre-pass and the merge below both need the
+	// stripped view, and normalizing twice per contribution is pure duplicate work
+	// on the hot path for a function whose whole job is to be deterministic.
+	normalized := make([]SessionView, len(contributions))
+	for i, contribution := range contributions {
+		normalized[i] = normalizeProvenance(contribution.view, contribution.ref)
+	}
 	hasViewerEdge := false
-	for _, contribution := range contributions {
-		for _, route := range normalizeProvenance(contribution.view, contribution.ref).Routes {
+	for _, session := range normalized {
+		for _, route := range session.Routes {
 			if route.Role == RoleViewerEgress {
 				hasViewerEdge = true
 				break
@@ -407,8 +414,8 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 			break
 		}
 	}
-	for _, contribution := range contributions {
-		session, ref := normalizeProvenance(contribution.view, contribution.ref), contribution.ref
+	for i, contribution := range contributions {
+		session, ref := normalized[i], contribution.ref
 		result.Publishers = append(result.Publishers, ref)
 		viewerEdge := false
 		for _, route := range session.Routes {
@@ -761,19 +768,51 @@ func cloneTransfer(value TransferView) TransferView {
 // reporting id reports, and one whose only routes are relays relays.
 func normalizeProvenance(view SessionView, ref PublisherRef) SessionView {
 	if strings.HasSuffix(ref.PublisherID, ReportedPublisherSuffix) {
-		view.Routes = nil
+		// An allowlist, not a list of fields to zero. Stripping named fields
+		// silently re-opens this hole every time SessionView grows one, and the
+		// merge folds far more than routes and bytes: LastByteAccepted,
+		// OpenObservations and RequestCount are enough on their own to fabricate
+		// measured-looking liveness on a session nothing was sent for. Rebuilding
+		// from what a session manager actually knows makes the claim
+		// unrepresentable rather than merely unmade.
+		return SessionView{
+			Subject:                 view.Subject,
+			ProfileID:               view.ProfileID,
+			SessionID:               view.SessionID,
+			MediaFileID:             view.MediaFileID,
+			PlayMethod:              view.PlayMethod,
+			StartedAt:               view.StartedAt,
+			StartedAtSource:         view.StartedAtSource,
+			StartedAtDegraded:       view.StartedAtDegraded,
+			RealtimeConnectionAlive: view.RealtimeConnectionAlive,
+			Reported:                view.Reported,
+			ReportedPaused:          view.ReportedPaused,
+			ReportedPositionSeconds: view.ReportedPositionSeconds,
+			ReportedAt:              view.ReportedAt,
+		}
+	}
+	viewerEdge := false
+	for _, route := range view.Routes {
+		if route.Role == RoleViewerEgress {
+			viewerEdge = true
+			break
+		}
+	}
+	if !viewerEdge {
+		// Gated positively on an egress route being present, never on a relay
+		// role being absent: mergeSession unions ViewerIPs with no provenance
+		// check, so a relay that recorded the proxy address in front of it would
+		// otherwise land it in the viewer set. Publishers in this repository omit
+		// it by convention (transcodenode/media_routes.go); this enforces it.
 		view.ViewerIPs = nil
-		view.BytesAccepted = 0
-		return view
+		view.ViewerIPsOverflowed = false
 	}
 	if !view.Reported {
 		return view
 	}
-	for _, route := range view.Routes {
-		if route.Role == RoleViewerEgress {
-			// A real viewer edge that also reports: keep both, it is entitled to.
-			return view
-		}
+	if viewerEdge {
+		// A real viewer edge that also reports: keep both, it is entitled to.
+		return view
 	}
 	// Anything else claiming Reported is not a reporter — most importantly a
 	// relay, which cannot know who is watching and would otherwise supply

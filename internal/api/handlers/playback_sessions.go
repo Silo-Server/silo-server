@@ -191,12 +191,17 @@ type playbackSessionsReader interface {
 	Load(ctx context.Context, r *http.Request, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
 }
 
+// resolvePlaybackSessionsLoader returns the injected reader when there is one and
+// otherwise builds the Postgres-backed loader. The parameter and result are the
+// interface rather than the concrete type so a caller can substitute a reader —
+// the chunking in loadPlaybackSessionsByID is only observable by counting the
+// loads it issues, which needs a seam that does not require a database.
 func resolvePlaybackSessionsLoader(
-	loader *PlaybackSessionsLoader,
+	loader playbackSessionsReader,
 	pool *pgxpool.Pool,
 	storeProv userstore.UserStoreProvider,
 	detailSvc *catalog.DetailService,
-) (*PlaybackSessionsLoader, error) {
+) (playbackSessionsReader, error) {
 	if loader != nil {
 		return loader, nil
 	}
@@ -322,9 +327,15 @@ func (l *PlaybackSessionsLoader) Load(
 	}
 	sql += " ORDER BY s.started_at DESC"
 	if len(query.SessionIDs) == 0 {
-		// The page cap applies only to the unfiltered listing. An explicit id set
-		// is already bounded by its caller.
+		// The page cap applies only to the unfiltered listing.
 		sql += " LIMIT 200"
+	} else {
+		// An id set is bounded in the SQL, not in a comment. The live handler
+		// feeds this every session id in the merged view, which is capped by
+		// MaxMergedSessions (50,000) and not by anything nearer. The caller
+		// chunks, so this bound is per chunk and never truncates a result.
+		args = append(args, len(query.SessionIDs))
+		sql += " LIMIT $" + strconv.Itoa(len(args))
 	}
 
 	rows, err := l.pool.Query(ctx, sql, args...)

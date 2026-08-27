@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func globalTestParams() ViewParams {
@@ -95,15 +97,77 @@ func TestBuildGlobalViewRelayCannotClaimReportedIdentityFallback(t *testing.T) {
 
 func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
 	at := time.Now()
+	// Everything below the identity block is measured provenance: a session
+	// manager knows what a client told it, never what left the building. The
+	// fields are enumerated one by one because the guard is an allowlist — a
+	// SessionView field the merge folds but the allowlist does not name is a fresh
+	// way to fabricate measured-looking liveness for a session nothing was sent
+	// for, and this test is what fails when the struct grows one.
 	reporter := Snapshot{PublisherID: "api#reported", CapturedAt: at, Sessions: []SessionView{{
 		SessionID: "s", Subject: UserSubject(9), Reported: true, ReportedAt: at,
 		ViewerIPs: []string{"192.0.2.1"}, BytesAccepted: 99,
-		Routes: []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 99}},
+		Routes:             []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 99}},
+		LastByteAccepted:   at,
+		LastObservationEnd: at,
+		OpenObservations:   3,
+		RequestCount:       7,
+		DeviceIDs:          []string{"device-1"},
+		UserAgents:         []string{"Silo/1.0"},
+		ClientVariants:     []ClientVariant{{Name: "Silo", Version: "1.0"}},
+		MediaFileIDs:       []int{404},
+		TokenIssuedAts:     []time.Time{at},
+		Outcomes:           map[httpstream.StreamOutcome]int64{OutcomeUnknown: 5},
 	}}}
 	session := BuildGlobalView(globalSet(at, reporter), at, globalTestParams()).Sessions[0]
 	if !session.Reported || session.ViewerBytesAccepted != 0 || len(session.ViewerIPs) != 0 ||
 		len(session.ViewerEdgePublishers) != 0 || len(session.Routes) != 0 {
 		t.Fatalf("reporter supplied measured provenance: %+v", session)
+	}
+	// Liveness. Any one of these on its own makes a session nothing is being sent
+	// for read as one that is actively being served, which is the #666 shape this
+	// whole view exists to tell apart.
+	if !session.LastByteAccepted.IsZero() || !session.LastObservationEnd.IsZero() ||
+		session.OpenObservations != 0 || session.RequestCount != 0 {
+		t.Fatalf("reporter supplied measured liveness: %+v", session)
+	}
+	// Client identity and per-request history, every field of which is read off an
+	// observed request that a reporting publisher never sees.
+	if len(session.DeviceIDs) != 0 || len(session.UserAgents) != 0 || len(session.ClientVariants) != 0 ||
+		len(session.MediaFileIDs) != 0 || len(session.TokenIssuedAts) != 0 || len(session.Outcomes) != 0 {
+		t.Fatalf("reporter supplied measured client identity: %+v", session)
+	}
+}
+
+// A relay is not a viewer edge: the only address it can see is the proxy in front
+// of it, not the viewer's. mergeSession unions ViewerIPs with no provenance check
+// of its own, so a relay that recorded one would put an internal hop into the set
+// an operator reads as "who is watching" — and an implausible count in that set is
+// the abuse signal it exists for. Publishers omit it by convention today; this
+// pins that the merge does not depend on the convention holding.
+func TestBuildGlobalViewRelayDoesNotSupplyViewerIPs(t *testing.T) {
+	at := time.Now()
+	relay := Snapshot{PublisherID: "relay", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", ViewerIPs: []string{"10.10.10.100"}, ViewerIPsOverflowed: true,
+		Routes: []RouteActivityView{{Role: RoleInternalRelay, BytesAccepted: 20}},
+	}}}
+	edge := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", ViewerIPs: []string{"203.0.113.7"},
+		Routes: []RouteActivityView{viewerRoute(20)},
+	}}}
+
+	merged := BuildGlobalView(globalSet(at, relay, edge), at, globalTestParams()).Sessions[0]
+	if !reflect.DeepEqual(merged.ViewerIPs, []string{"203.0.113.7"}) {
+		t.Fatalf("viewer IPs = %v, want only the viewer edge's", merged.ViewerIPs)
+	}
+	if merged.ViewerIPsOverflowed {
+		t.Fatal("a relay's overflow flag survived the address it was counting")
+	}
+
+	// With no edge present at all the relay still supplies none: an empty set is
+	// the honest answer, not a licence to fall back on whatever the hop could see.
+	relayOnly := BuildGlobalView(globalSet(at, relay), at, globalTestParams()).Sessions[0]
+	if len(relayOnly.ViewerIPs) != 0 || relayOnly.ViewerIPsOverflowed {
+		t.Fatalf("relay-only viewer IPs = %v (overflowed=%t), want none", relayOnly.ViewerIPs, relayOnly.ViewerIPsOverflowed)
 	}
 }
 

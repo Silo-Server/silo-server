@@ -164,18 +164,27 @@ func (c *ViewCache) View(ctx context.Context) (GlobalMonitoringView, ViewCacheSt
 // alongside so a caller can still tell a complete view from a degraded one.
 func (c *ViewCache) Live(ctx context.Context) (LiveSnapshot, GlobalMonitoringView, ViewCacheStatus) {
 	view, status := c.View(ctx)
-	snapshot := LiveSnapshot{Facts: map[string]LiveByteFacts{}}
+	snapshot := LiveSnapshot{}
 	if !status.Available {
 		return snapshot, view, status
 	}
 
-	snapshot.Facts = LiveByteFactsFromGlobalView(view)
+	snapshot = LiveByteFactsFromGlobalView(view)
 	c.mu.Lock()
-	for sessionID, facts := range snapshot.Facts {
-		if sample, ok := c.rates[sessionID]; ok && sample.known {
-			facts.DeliveryRateKbps = sample.kbps
-			facts.RateAvailable = true
-			snapshot.Facts[sessionID] = facts
+	// View releases c.mu before returning, so a concurrent build can swap in a
+	// rate table for the NEXT generation while the projection above is still
+	// running over this one. Attaching those rates would report a kbps computed
+	// across an interval the returned byte levels do not span. Refreshes is
+	// bumped only on a successful build, so it is exactly the view generation:
+	// if it moved, this response goes out without rates, which renders as "not
+	// yet known" rather than as a wrong number.
+	if c.status.Refreshes == status.Refreshes {
+		for sessionID, facts := range snapshot {
+			if sample, ok := c.rates[sessionID]; ok && sample.known {
+				facts.DeliveryRateKbps = sample.kbps
+				facts.RateAvailable = true
+				snapshot[sessionID] = facts
+			}
 		}
 	}
 	c.mu.Unlock()

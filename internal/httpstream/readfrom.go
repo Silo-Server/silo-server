@@ -72,6 +72,12 @@ func CopyChunkedUntil(rf io.ReaderFrom, src io.Reader, chunk int64, record func(
 		for lr.N > 0 {
 			if stop != nil {
 				if err := stop(); err != nil {
+					// The stop error is the transfer's first write error. Without
+					// recording it the wrapper's accounting stays clean and the
+					// cut classifies as a completed delivery.
+					if record != nil {
+						record(0, err)
+					}
 					return total, err
 				}
 			}
@@ -97,6 +103,9 @@ func CopyChunkedUntil(rf io.ReaderFrom, src io.Reader, chunk int64, record func(
 	for {
 		if stop != nil {
 			if err := stop(); err != nil {
+				if record != nil {
+					record(0, err)
+				}
 				return total, err
 			}
 		}
