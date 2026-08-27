@@ -122,6 +122,10 @@ type wireTransfer struct {
 	Client             wireClientVariant                  `json:"client"`
 	UserAgent          string                             `json:"ua"`
 	Outcomes           map[httpstream.StreamOutcome]int64 `json:"out"`
+	// Overflowed is additive at codec v1: omitempty keeps a record written by an
+	// un-upgraded publisher decodable, exactly as the cov field and the reported
+	// block are.
+	Overflowed bool `json:"ovf,omitempty"`
 }
 
 type publisherMeta struct {
@@ -133,18 +137,23 @@ type publisherMeta struct {
 	// present object with fam:[] explicitly observes no families. Bumping the
 	// codec version instead would make every un-upgraded publisher undecodable
 	// during the rolling deploy this declaration is meant to describe safely.
-	Coverage                 *wireCoverage `json:"cov,omitempty"`
-	NodeID                   string        `json:"nid"`
-	Epoch                    int64         `json:"ep"`
-	Sequence                 uint64        `json:"sq"`
-	CapturedAtUnixNano       int64         `json:"cap"`
-	Truncated                bool          `json:"tr"`
-	DroppedObservations      int64         `json:"do"`
-	DroppedBytes             int64         `json:"db"`
-	UnattributedObservations int64         `json:"uo"`
-	UnattributedBytes        int64         `json:"ub"`
-	SessionCount             int           `json:"sc"`
-	TransferCount            int           `json:"tc"`
+	Coverage            *wireCoverage `json:"cov,omitempty"`
+	NodeID              string        `json:"nid"`
+	Epoch               int64         `json:"ep"`
+	Sequence            uint64        `json:"sq"`
+	CapturedAtUnixNano  int64         `json:"cap"`
+	Truncated           bool          `json:"tr"`
+	DroppedObservations int64         `json:"do"`
+	// Transfer-table blindness is additive at codec v1, for the same reason the
+	// cov field and the reported block are: omitempty keeps an un-upgraded
+	// publisher's meta decodable through a rolling deploy.
+	TransfersTruncated          bool  `json:"ttr,omitempty"`
+	DroppedTransferObservations int64 `json:"dto,omitempty"`
+	DroppedBytes                int64 `json:"db"`
+	UnattributedObservations    int64 `json:"uo"`
+	UnattributedBytes           int64 `json:"ub"`
+	SessionCount                int   `json:"sc"`
+	TransferCount               int   `json:"tc"`
 }
 
 type wireCoverage struct {
@@ -292,7 +301,8 @@ func encodeTransfer(value TransferView) ([]byte, error) {
 	w := wireTransfer{V: codecVersion, ID: value.ID, Subject: wireSubject{Kind: value.Subject.Kind, ID: value.Subject.ID}, ProfileID: value.ProfileID, MediaFileID: value.MediaFileID,
 		Method: value.Method, Pattern: value.Pattern, Role: value.Role, BytesAccepted: value.BytesAccepted, LastByteAccepted: timeToUnixNano(value.LastByteAccepted), LastObservationEnd: timeToUnixNano(value.LastObservationEnd),
 		OpenObservations: value.OpenObservations, RequestCount: value.RequestCount, ViewerIP: value.ViewerIP, DeviceID: value.DeviceID,
-		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes}
+		Client: wireClientVariant(value.Client), UserAgent: value.UserAgent, Outcomes: value.Outcomes,
+		Overflowed: value.Overflowed}
 	return json.Marshal(w)
 }
 
@@ -317,7 +327,8 @@ func decodeTransfer(data []byte) (TransferView, error) {
 	}
 	return TransferView{ID: w.ID, Subject: Subject{Kind: w.Subject.Kind, ID: w.Subject.ID}, ProfileID: w.ProfileID, MediaFileID: w.MediaFileID, Method: w.Method, Pattern: w.Pattern, Role: w.Role,
 		BytesAccepted: w.BytesAccepted, LastByteAccepted: timeFromUnixNano(w.LastByteAccepted), LastObservationEnd: timeFromUnixNano(w.LastObservationEnd), OpenObservations: w.OpenObservations,
-		RequestCount: w.RequestCount, ViewerIP: w.ViewerIP, DeviceID: w.DeviceID, Client: ClientVariant(w.Client), UserAgent: w.UserAgent, Outcomes: w.Outcomes}, nil
+		RequestCount: w.RequestCount, ViewerIP: w.ViewerIP, DeviceID: w.DeviceID, Client: ClientVariant(w.Client), UserAgent: w.UserAgent, Outcomes: w.Outcomes,
+		Overflowed: w.Overflowed}, nil
 }
 
 func encodeMeta(value publisherMeta) ([]byte, error) {
@@ -336,7 +347,7 @@ func decodeMeta(data []byte) (publisherMeta, error) {
 	if err := checkVersion(value.V); err != nil {
 		return publisherMeta{}, err
 	}
-	if value.DroppedObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
+	if value.DroppedObservations < 0 || value.DroppedTransferObservations < 0 || value.DroppedBytes < 0 || value.UnattributedObservations < 0 || value.UnattributedBytes < 0 || value.SessionCount < 0 || value.TransferCount < 0 {
 		return publisherMeta{}, errors.New("negative publisher metadata counter")
 	}
 	if value.SessionCount > maxWireSlice || value.TransferCount > maxWireSlice {

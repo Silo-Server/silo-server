@@ -90,7 +90,7 @@ func TestTransferCodecRoundTrip(t *testing.T) {
 	want := TransferView{ID: "transfer", Subject: Subject{Kind: SubjectIP, ID: "203.0.113.4"}, ProfileID: "p", MediaFileID: 5,
 		Method: "GET", Pattern: "/download", Role: RoleViewerEgress, BytesAccepted: 12, LastByteAccepted: time.Unix(10, 11),
 		OpenObservations: 1, RequestCount: 2, ViewerIP: "203.0.113.4", DeviceID: "d", Client: ClientVariant{Name: "c"}, UserAgent: "ua",
-		Outcomes: map[httpstream.StreamOutcome]int64{httpstream.OutcomeCompleted: 1}}
+		Outcomes: map[httpstream.StreamOutcome]int64{httpstream.OutcomeCompleted: 1}, Overflowed: true}
 	encoded, err := encodeTransfer(want)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,8 @@ func TestTransferCodecRoundTrip(t *testing.T) {
 func TestPublisherMetaCodecRoundTrip(t *testing.T) {
 	want := publisherMeta{PublisherID: "pub", NodeID: "node", Epoch: 4, Sequence: 5, CapturedAtUnixNano: 6, Truncated: true,
 		Coverage:            &wireCoverage{Families: []string{"native", "future_family"}},
-		DroppedObservations: 7, DroppedBytes: 8, UnattributedObservations: 9, UnattributedBytes: 10, SessionCount: 11, TransferCount: 12}
+		DroppedObservations: 7, TransfersTruncated: true, DroppedTransferObservations: 13,
+		DroppedBytes: 8, UnattributedObservations: 9, UnattributedBytes: 10, SessionCount: 11, TransferCount: 12}
 	encoded, err := encodeMeta(want)
 	if err != nil {
 		t.Fatal(err)
@@ -207,5 +208,31 @@ func TestCodecRejectsNegativeCounter(t *testing.T) {
 	}
 	if _, err := decodeMeta([]byte(`{"v":1,"do":-1}`)); err == nil {
 		t.Fatal("negative metadata counter accepted")
+	}
+	// The negative-counter guard is security-sensitive, so every counter that
+	// crosses the wire has to be inside it, including the newest one.
+	if _, err := decodeMeta([]byte(`{"v":1,"dto":-1}`)); err == nil {
+		t.Fatal("negative dropped-transfer counter accepted")
+	}
+}
+
+// The transfer-blindness fields are additive at codec v1: a publisher running
+// older code omits them entirely, and its records must stay decodable through a
+// rolling deploy rather than reading as a corrupt payload.
+func TestCodecDecodesTransferBlindnessFromAnOlderPublisher(t *testing.T) {
+	meta, err := decodeMeta([]byte(`{"v":1,"pid":"pub","nid":"node","do":3}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.TransfersTruncated || meta.DroppedTransferObservations != 0 {
+		t.Fatalf("absent transfer blindness = %v/%d, want the zero value",
+			meta.TransfersTruncated, meta.DroppedTransferObservations)
+	}
+	transfer, err := decodeTransfer([]byte(`{"v":1,"id":"t","ba":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transfer.Overflowed {
+		t.Fatal("a record with no ovf field decoded as a fold row")
 	}
 }

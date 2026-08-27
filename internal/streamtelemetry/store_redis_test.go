@@ -156,10 +156,17 @@ func TestMaxFieldsPerPublisherCoversEveryPublishableField(t *testing.T) {
 func TestSnapshotHashFieldsRoundTripAndDeterministicCap(t *testing.T) {
 	snapshot := Snapshot{PublisherID: "publisher", NodeID: "node", PublisherEpoch: 1, Sequence: 2, CapturedAt: time.Unix(3, 4),
 		Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, Family("future_family")}},
+		// Transfer-table blindness and the per-subject fold marker travel in the
+		// hash like every other field: a publisher that dropped them here would
+		// look healthy to every reader of the merged view.
+		TransfersTruncated: true, DroppedTransferObservations: 6,
 		Sessions: []SessionView{
 			{SessionID: "z", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
 			{SessionID: "a", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
-		}, Transfers: []TransferView{{ID: "z", Outcomes: map[httpstream.StreamOutcome]int64{}}, {ID: "a", Outcomes: map[httpstream.StreamOutcome]int64{}}}}
+		}, Transfers: []TransferView{
+			{ID: "z", Outcomes: map[httpstream.StreamOutcome]int64{}},
+			{ID: "a", Overflowed: true, Outcomes: map[httpstream.StreamOutcome]int64{}},
+		}}
 	encoded, err := snapshotHashFields(snapshot)
 	if err != nil {
 		t.Fatal(err)

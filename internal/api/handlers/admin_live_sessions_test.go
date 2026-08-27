@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -618,5 +619,78 @@ func TestLoadPlaybackSessionsByIDChunkedQueriesAreBoundedInSQL(t *testing.T) {
 		if seen[id] != 1 {
 			t.Fatalf("session %s came back %d times, want exactly once", id, seen[id])
 		}
+	}
+}
+
+// stubPlaybackSessionsReader stands in for the Postgres display join so a handler
+// test can exercise the response envelope without a database.
+type stubPlaybackSessionsReader struct{ rows []playbackSessionRow }
+
+func (s stubPlaybackSessionsReader) Load(
+	_ context.Context, _ *http.Request, _ PlaybackSessionsQuery,
+) ([]playbackSessionRow, error) {
+	return s.rows, nil
+}
+
+// A publisher whose transfer table filled is an advisory, not incompleteness. The
+// view stays complete, ghost classification keeps running — the whole point, since
+// a transfer key is minted partly from client-supplied device ids — and the
+// advisory still reaches the operator in the response body.
+func TestAdvisoryViewStillClassifiesAndIsReported(t *testing.T) {
+	cfg := streamtelemetry.DefaultConfig("node")
+	cfg.Enabled = true
+	// A reported session only counts when a REPORTING publisher says so: the role
+	// is positional, decided by the id suffix, so the stand-in publisher wears it.
+	cfg.PublisherID = "publisher-1" + streamtelemetry.ReportedPublisherSuffix
+	cfg.PublisherEpoch = 1
+	store := streamtelemetry.NewLocalStore()
+	registry := streamtelemetry.NewRegistry(cfg, store, nil)
+	published := streamtelemetry.Snapshot{
+		PublisherID: cfg.PublisherID, NodeID: "node", PublisherEpoch: 1, Sequence: 1,
+		CapturedAt: time.Now(),
+		Coverage: streamtelemetry.PublisherCoverage{
+			Declared: true, ConfiguredFamilies: append([]streamtelemetry.Family(nil), streamtelemetry.AllFamilies...),
+		},
+		TransfersTruncated: true, DroppedTransferObservations: 9,
+		Sessions: []streamtelemetry.SessionView{{
+			SessionID: "ghost", Reported: true, StartedAt: time.Now().Add(-time.Hour),
+			ReportedAt: time.Now(),
+		}},
+	}
+	if err := store.Publish(context.Background(), published); err != nil {
+		t.Fatal(err)
+	}
+	handler := &AdminHandler{
+		StreamTelemetry:          registry,
+		StreamTelemetryViewCache: streamtelemetry.NewViewCache(registry, time.Minute, nil),
+		SessionsLoader:           stubPlaybackSessionsReader{rows: []playbackSessionRow{{SessionID: "ghost"}}},
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.HandleListLiveSessions(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/sessions/live?include_idle=true", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		ViewComplete                bool     `json:"view_complete"`
+		IncompleteReasons           []string `json:"incomplete_reasons"`
+		ViewAdvisories              []string `json:"view_advisories"`
+		DroppedTransferObservations int64    `json:"dropped_transfer_observations"`
+		NoDeliveryCount             int      `json:"no_delivery_count"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode %s: %v", recorder.Body.String(), err)
+	}
+	if !response.ViewComplete || len(response.IncompleteReasons) != 0 {
+		t.Fatalf("advisory made the view incomplete: %+v", response)
+	}
+	if !slices.Contains(response.ViewAdvisories, "publisher_transfer_capacity") {
+		t.Fatalf("view_advisories = %v, want publisher_transfer_capacity", response.ViewAdvisories)
+	}
+	if response.DroppedTransferObservations != 9 {
+		t.Fatalf("dropped_transfer_observations = %d, want 9", response.DroppedTransferObservations)
+	}
+	if response.NoDeliveryCount != 1 {
+		t.Fatalf("no_delivery_count = %d, want the ghost still classified", response.NoDeliveryCount)
 	}
 }

@@ -20,16 +20,22 @@ const (
 	tombstoneRetentionEnv = "SILO_STREAM_TELEMETRY_TOMBSTONE_RETENTION"
 	maxSessionsEnv        = "SILO_STREAM_TELEMETRY_MAX_SESSIONS"
 	maxTransfersEnv       = "SILO_STREAM_TELEMETRY_MAX_TRANSFERS"
-	maxObservationsEnv    = "SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS"
-	distributedEnv        = "SILO_STREAM_TELEMETRY_DISTRIBUTED"
-	freshnessEnv          = "SILO_STREAM_TELEMETRY_FRESHNESS"
-	membershipTTLEnv      = "SILO_STREAM_TELEMETRY_MEMBERSHIP_TTL"
-	keyPrefixEnv          = "SILO_STREAM_TELEMETRY_KEY_PREFIX"
-	fullResyncEveryEnv    = "SILO_STREAM_TELEMETRY_FULL_RESYNC_EVERY"
-	maxPublishersEnv      = "SILO_STREAM_TELEMETRY_MAX_PUBLISHERS"
-	maxMergedSessionsEnv  = "SILO_STREAM_TELEMETRY_MAX_MERGED_SESSIONS"
-	maxMergedTransfersEnv = "SILO_STREAM_TELEMETRY_MAX_MERGED_TRANSFERS"
-	viewTTLEnv            = "SILO_STREAM_TELEMETRY_VIEW_TTL"
+	// maxTransfersPerSubjectEnv sizes the per-principal sub-allocation of the
+	// transfer table. It is parsed with parsePositive, so a zero, negative or
+	// unparseable value lands in coreInvalid and disables telemetry — the house
+	// semantic for a broken core cap. There is deliberately NO env kill switch
+	// for this budget: turning it off restores the exhaustion it exists to stop.
+	maxTransfersPerSubjectEnv = "SILO_STREAM_TELEMETRY_MAX_TRANSFERS_PER_SUBJECT"
+	maxObservationsEnv        = "SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS"
+	distributedEnv            = "SILO_STREAM_TELEMETRY_DISTRIBUTED"
+	freshnessEnv              = "SILO_STREAM_TELEMETRY_FRESHNESS"
+	membershipTTLEnv          = "SILO_STREAM_TELEMETRY_MEMBERSHIP_TTL"
+	keyPrefixEnv              = "SILO_STREAM_TELEMETRY_KEY_PREFIX"
+	fullResyncEveryEnv        = "SILO_STREAM_TELEMETRY_FULL_RESYNC_EVERY"
+	maxPublishersEnv          = "SILO_STREAM_TELEMETRY_MAX_PUBLISHERS"
+	maxMergedSessionsEnv      = "SILO_STREAM_TELEMETRY_MAX_MERGED_SESSIONS"
+	maxMergedTransfersEnv     = "SILO_STREAM_TELEMETRY_MAX_MERGED_TRANSFERS"
+	viewTTLEnv                = "SILO_STREAM_TELEMETRY_VIEW_TTL"
 )
 
 type Config struct {
@@ -76,8 +82,32 @@ type Config struct {
 	MaxMergedSessions  int
 	MaxMergedTransfers int
 
-	MaxSessions                    int64
-	MaxTransfers                   int64
+	MaxSessions  int64
+	MaxTransfers int64
+	// MaxTransfersPerSubject bounds how many distinct transfer identities one
+	// principal may hold in the shared transfer table.
+	//
+	// A transfer key is (subject, profile, file, method, pattern, viewer IP,
+	// device id) and the last two are raw client input: the X-Silo-Device-ID
+	// header (internal/api/media_routes.go) and the MediaBrowser DeviceId
+	// (internal/jellycompat/media_routes.go). Cardinality per principal was
+	// unbounded and free, so one authenticated client could fill the shared
+	// MaxTransfers table and take every other principal's attribution with it.
+	//
+	// 128 is sized from the real ceiling, not a round number. Method is part of
+	// the key and every download client issues HEAD then GET, so each pour costs
+	// two keys; a household runs several devices, may hold more than one address
+	// inside one 5-minute Retention window, and the native family alone mounts
+	// eleven transfer-class (method, pattern) pairs. Four devices times two
+	// addresses times three concurrent files times two methods is 48; 128 leaves
+	// better than 2x headroom over that. It also caps one principal at ~1.3% of
+	// the default 10 000-entry table, so filling it takes 78 distinct principals
+	// rather than one client.
+	//
+	// Overflow past this point is degradation of DETAIL, not loss: the bytes stay
+	// attributed to the principal in its catch-all record. That asymmetry is why
+	// the bound can be tight.
+	MaxTransfersPerSubject         int64
 	MaxObservations                int64
 	MaxObservationsPerSession      int
 	MaxViewerIPsPerSession         int
@@ -102,7 +132,7 @@ func DefaultConfig(nodeID string) Config {
 		Freshness:          defaultFreshness, MembershipTTL: time.Minute, KeyPrefix: "silo:stelem",
 		ViewTTL:         DefaultViewTTL,
 		FullResyncEvery: 60, MaxPublishers: 512, MaxMergedSessions: 50_000, MaxMergedTransfers: 50_000,
-		MaxSessions: 10_000, MaxTransfers: 10_000, MaxObservations: 50_000,
+		MaxSessions: 10_000, MaxTransfers: 10_000, MaxTransfersPerSubject: 128, MaxObservations: 50_000,
 		MaxObservationsPerSession: 64, MaxViewerIPsPerSession: 32,
 		MaxIdentityConflictsPerSession: 16, MaxDeviceIDsPerSession: 32,
 		MaxClientVariantsPerSession: 16, MaxMediaFileIDsPerSession: 32,
@@ -184,6 +214,7 @@ func ConfigFromEnv(nodeID string) Config {
 	parseDuration(tombstoneRetentionEnv, &cfg.TombstoneRetention)
 	parsePositive(maxSessionsEnv, &cfg.MaxSessions)
 	parsePositive(maxTransfersEnv, &cfg.MaxTransfers)
+	parsePositive(maxTransfersPerSubjectEnv, &cfg.MaxTransfersPerSubject)
 	parsePositive(maxObservationsEnv, &cfg.MaxObservations)
 	parseDistributedDuration(freshnessEnv, &cfg.Freshness)
 	parseDistributedDuration(membershipTTLEnv, &cfg.MembershipTTL)
@@ -252,6 +283,7 @@ func ConfigFromEnv(nodeID string) Config {
 			cfg.SweepInterval = cfg.Freshness / 3
 		}
 	}
+	cfg.resolve()
 	// A snapshot older than three sweeps is stale; overflow-guard the
 	// multiplication the comparison depends on.
 	if cfg.SweepInterval <= 0 || cfg.SweepInterval > time.Duration(1<<63-1)/3 || cfg.Freshness < 3*cfg.SweepInterval {
@@ -295,6 +327,24 @@ func ConfigFromEnv(nodeID string) Config {
 		cfg.DistributedExplicit = true
 	}
 	return cfg
+}
+
+// resolve settles the cross-setting invariants a Config must satisfy however it
+// was built. ConfigFromEnv and NewRegistry both call it, so a Config assembled in
+// code — as every test does — gets the same invariants as one parsed from the
+// environment, rather than the two silently diverging.
+func (c *Config) resolve() {
+	// The per-subject budget is a SUB-allocation of the global table: if an
+	// operator lowers MaxTransfers below it, one principal could reserve
+	// everything and the budget would protect nobody. Bound it to an eighth of
+	// the table, floor 1, so there is always room for other principals. With the
+	// defaults (10 000 / 128) this clamp does not bind.
+	if share := c.MaxTransfers / 8; c.MaxTransfersPerSubject > share {
+		c.MaxTransfersPerSubject = share
+		if c.MaxTransfersPerSubject < 1 {
+			c.MaxTransfersPerSubject = 1
+		}
+	}
 }
 
 // ObservesFamily reports whether routes in this family are wrapped. It is read

@@ -93,6 +93,10 @@ type transfer struct {
 	requestCount       int64
 	route              MediaRoute
 	capture            CaptureSet
+	// overflow marks the per-subject catch-all record: one principal exceeded
+	// MaxTransfersPerSubject and its further transfer identities fold here. Every
+	// identity field but subject is deliberately left zero on such a record.
+	overflow bool
 	// observations holds every in-flight request folded into this transfer.
 	// Ranged byte routes (audiobook file reads, download resumes, ebook page
 	// fetches) issue many overlapping small GETs for the same file, so a

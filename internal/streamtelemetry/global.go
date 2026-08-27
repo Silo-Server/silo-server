@@ -37,7 +37,12 @@ type PublisherStatus struct {
 	State         PublisherState
 	DecodeErrors  int
 	Truncated     bool
-	Reason        string
+	// TransfersTruncated is this publisher's transfer-table blindness. It is
+	// reported but deliberately does NOT make the publisher Degraded: Degraded is
+	// an input to the completeness reasoning, and a signal a client can mint at
+	// will must stay out of it. See Registry.dropTransfer.
+	TransfersTruncated bool
+	Reason             string
 }
 
 type AttributedValue struct {
@@ -139,6 +144,12 @@ type GlobalMonitoringView struct {
 	UnattributedBytes        int64
 	DecodeErrors             int
 	ClockSkewSuspected       bool
+	// Advisories are operator-visible degradations that are NOT completeness
+	// claims. They never affect Complete: the admin reader keys classification off
+	// Complete, and a signal a client can mint at will must not reach it.
+	Advisories                  []string
+	TransfersTruncated          bool
+	DroppedTransferObservations int64
 }
 
 type ViewParams struct {
@@ -227,7 +238,8 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		snapshot, hasSnapshot := snapshots[member.PublisherID]
 		ref := PublisherRef{PublisherID: member.PublisherID, NodeID: snapshot.NodeID}
 		status := PublisherStatus{PublisherRef: ref, LastHeartbeat: member.LastHeartbeat, CapturedAt: snapshot.CapturedAt,
-			Epoch: snapshot.PublisherEpoch, Sequence: snapshot.Sequence, Truncated: snapshot.Truncated}
+			Epoch: snapshot.PublisherEpoch, Sequence: snapshot.Sequence, Truncated: snapshot.Truncated,
+			TransfersTruncated: snapshot.TransfersTruncated}
 		// Skew is only detectable in one direction from a single sample. A
 		// publisher whose clock runs AHEAD stamps a future time and is caught
 		// here. One running BEHIND is indistinguishable from one that stopped
@@ -321,6 +333,9 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		if (status.State == PublisherFresh || status.State == PublisherDegraded) && status.Truncated {
 			addReason(&view, "publisher_truncated")
 		}
+		if (status.State == PublisherFresh || status.State == PublisherDegraded) && status.TransfersTruncated {
+			addAdvisory(&view, "publisher_transfer_capacity")
+		}
 		if status.DecodeErrors > 0 || status.Reason == publisherReasonCountMismatch || status.Reason == publisherReasonDecode {
 			addReason(&view, "decode_errors")
 		}
@@ -371,15 +386,31 @@ func addReason(view *GlobalMonitoringView, reason string) {
 	sort.Strings(view.IncompleteReasons)
 }
 
+// addAdvisory mirrors addReason, but writes the advisory list. It is a separate
+// function and a separate list precisely so an advisory can never be mistaken
+// for an incomplete reason: view.Complete is computed from IncompleteReasons
+// alone, and nothing here may move it.
+func addAdvisory(view *GlobalMonitoringView, advisory string) {
+	for _, existing := range view.Advisories {
+		if existing == advisory {
+			return
+		}
+	}
+	view.Advisories = append(view.Advisories, advisory)
+	sort.Strings(view.Advisories)
+}
+
 func mergeContributions(view *GlobalMonitoringView, contributions []publisherContribution, params ViewParams) {
 	sort.Slice(contributions, func(i, j int) bool { return refLess(contributions[i].ref, contributions[j].ref) })
 	bySession := make(map[string][]sessionContribution)
 	for _, contribution := range contributions {
 		view.DroppedObservations = saturatingAdd(view.DroppedObservations, contribution.snapshot.DroppedObservations)
+		view.DroppedTransferObservations = saturatingAdd(view.DroppedTransferObservations, contribution.snapshot.DroppedTransferObservations)
 		view.DroppedBytes = saturatingAdd(view.DroppedBytes, contribution.snapshot.DroppedBytes)
 		view.UnattributedObservations = saturatingAdd(view.UnattributedObservations, contribution.snapshot.UnattributedObservations)
 		view.UnattributedBytes = saturatingAdd(view.UnattributedBytes, contribution.snapshot.UnattributedBytes)
 		view.Truncated = view.Truncated || contribution.snapshot.Truncated
+		view.TransfersTruncated = view.TransfersTruncated || contribution.snapshot.TransfersTruncated
 		for _, session := range contribution.snapshot.Sessions {
 			bySession[session.SessionID] = append(bySession[session.SessionID], sessionContribution{ref: contribution.ref, view: session})
 		}

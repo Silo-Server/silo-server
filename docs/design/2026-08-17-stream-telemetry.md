@@ -248,6 +248,33 @@ monotonic dropped counters grow, and the registry emits at most one warning per 
 Bounded sets drop the newest value and expose their own overflow flag. Saturation
 serving through is a P0 decision — a fail-closed download policy belongs to P1.
 
+Transfer-table saturation is deliberately kept OUT of `Truncated`. It sets
+`TransfersTruncated` and grows `DroppedTransferObservations`, which surface as the
+`publisher_transfer_capacity` advisory rather than as an incomplete reason.
+`Truncated` is a claim about the SESSION picture, and it makes the merged view
+incomplete, which makes the live-sessions handler stop classifying `no_delivery`
+and `unclaimed_idle` for every reader on every row. Transfers feed no live-session
+facts, so an exhausted transfer table says nothing about session completeness —
+and a transfer key is minted partly from client-supplied input (the
+`X-Silo-Device-ID` header, the MediaBrowser `DeviceId`, and a viewer address that
+ordinary CGNAT churn rotates), so letting it reach `Truncated` handed one
+authenticated client a fleet-wide off switch for ghost detection.
+
+For the same reason a principal gets its own transfer budget,
+`MaxTransfersPerSubject`. Past it, that principal's further transfer identities
+fold into ONE catch-all row rather than being dropped: the bytes are real and
+belong to it, and dropping is exactly what let one client's device-id churn starve
+everybody else's attribution. A fold row carries only the subject, the byte
+totals, the request count and the outcomes — every other identity field is zeroed,
+because the first arrival's file, route, address and device asserted over many
+pours is a plausible wrong answer, which is worse for an operator than an absent
+one. A subject therefore holds at most `MaxTransfersPerSubject + 1` records, the
+fold row not counting against its own allowance.
+
+An un-upgraded publisher still sets `Truncated` on transfer exhaustion and still
+makes the view incomplete. The new fields are `omitempty`, so it stays decodable;
+the defect simply persists on that process and clears as the deploy completes.
+
 ### 2.3 Transport: a `SnapshotStore` in every mode, never `nil`
 
 An explicit `SnapshotStore` interface with a **local in-process implementation** rather
@@ -327,7 +354,8 @@ excluded, named in `MissingPublishers`, and does block it. `Complete` is true on
 all six hold:
 
 1. no publisher is missing or stale;
-2. no merged snapshot is truncated;
+2. no merged snapshot reports session or observation truncation (transfer-table
+   exhaustion is an advisory, not a completeness claim — see Bounds);
 3. the reader hit no publisher/session/transfer cap;
 4. no publisher has decode errors, a count mismatch, or an oversized hash;
 5. every contributing publisher declares its coverage;
@@ -951,6 +979,7 @@ evidence that a session is absent.
 | `SILO_STREAM_TELEMETRY_RETENTION` | `5m` | core | How long a session survives its last observation. |
 | `SILO_STREAM_TELEMETRY_MAX_SESSIONS` | `10000` | core | Local session cap. |
 | `SILO_STREAM_TELEMETRY_MAX_TRANSFERS` | `10000` | core | Local transfer cap. |
+| `SILO_STREAM_TELEMETRY_MAX_TRANSFERS_PER_SUBJECT` | `128` | core | Distinct transfer identities one principal may hold before the rest fold into a single catch-all row. Clamped to an eighth of `MAX_TRANSFERS`, floor 1, so a lowered table cannot let one principal own all of it. |
 | `SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS` | `50000` | core | Local in-flight observation cap. |
 | `SILO_STREAM_TELEMETRY_DISTRIBUTED` | auto (on when Redis is configured) | distributed | Publish and read snapshots through Redis. Setting it pins the mode either way and stops the derivation; a rejected distributed configuration also pins it off. |
 | `SILO_STREAM_TELEMETRY_FRESHNESS` | `5s` | distributed | Maximum usable snapshot age; at least three sweep intervals. |

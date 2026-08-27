@@ -525,6 +525,48 @@ func TestBuildGlobalViewBoundsTransfersAndSaturation(t *testing.T) {
 	}
 }
 
+// A publisher whose transfer table filled is an operator-visible degradation and
+// nothing more. It must never reach IncompleteReasons or Complete: the admin
+// reader keys ghost classification off Complete, and a transfer key is minted
+// partly from client-supplied device ids, so a client could otherwise switch
+// detection off for the whole fleet.
+func TestBuildGlobalViewTransferTruncationIsAdvisoryOnly(t *testing.T) {
+	at := time.Now()
+	full := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(), TransfersTruncated: true,
+		DroppedTransferObservations: 4}
+	view := BuildGlobalView(globalSet(at, full), at, globalTestParams())
+	if !view.Complete {
+		t.Fatalf("transfer truncation made the view incomplete: %v", view.IncompleteReasons)
+	}
+	if slices.Contains(view.IncompleteReasons, "publisher_transfer_capacity") ||
+		slices.Contains(view.IncompleteReasons, "publisher_truncated") {
+		t.Fatalf("incomplete reasons = %v", view.IncompleteReasons)
+	}
+	if !slices.Contains(view.Advisories, "publisher_transfer_capacity") {
+		t.Fatalf("advisories = %v, want publisher_transfer_capacity", view.Advisories)
+	}
+	if !view.TransfersTruncated || view.DroppedTransferObservations != 4 {
+		t.Fatalf("merged transfer counters = %v/%d", view.TransfersTruncated, view.DroppedTransferObservations)
+	}
+	// Degraded is an input to the completeness reasoning, so it stays out of a
+	// client's reach too.
+	if view.Publishers[0].State != PublisherFresh || !view.Publishers[0].TransfersTruncated {
+		t.Fatalf("publisher status = %+v", view.Publishers[0])
+	}
+}
+
+// The merged transfer counter saturates like every other Dropped* counter rather
+// than wrapping negative.
+func TestBuildGlobalViewSaturatesDroppedTransferObservations(t *testing.T) {
+	at := time.Now()
+	one := Snapshot{PublisherID: "a", CapturedAt: at, Coverage: fullCoverage(), DroppedTransferObservations: math.MaxInt64}
+	two := Snapshot{PublisherID: "b", CapturedAt: at, Coverage: fullCoverage(), DroppedTransferObservations: 5}
+	view := BuildGlobalView(globalSet(at, one, two), at, globalTestParams())
+	if view.DroppedTransferObservations != math.MaxInt64 {
+		t.Fatalf("dropped transfer observations wrapped: %d", view.DroppedTransferObservations)
+	}
+}
+
 func TestBuildGlobalViewWholeViewPermutationInvariant(t *testing.T) {
 	at := time.Now()
 	one := Snapshot{PublisherID: "b", PublisherEpoch: 2, Sequence: 3, CapturedAt: at, Sessions: []SessionView{

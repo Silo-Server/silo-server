@@ -222,6 +222,7 @@ func (c *ViewCache) snapshotLocked(age time.Duration, forceStale bool) (GlobalMo
 func (v GlobalMonitoringView) clone() GlobalMonitoringView {
 	out := v
 	out.IncompleteReasons = append([]string(nil), v.IncompleteReasons...)
+	out.Advisories = append([]string(nil), v.Advisories...)
 	out.Publishers = append([]PublisherStatus(nil), v.Publishers...)
 	out.MissingPublishers = append([]PublisherRef(nil), v.MissingPublishers...)
 	out.Sessions = append([]GlobalSessionView(nil), v.Sessions...)

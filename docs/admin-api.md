@@ -59,22 +59,22 @@ viewer's session.
 
 Some settings are only read at startup. Two routes carry that contract:
 
-| Route | Auth | Purpose |
-|---|---|---|
-| `GET /api/v1/admin/server/status` | admin | Process start time and pending-restart state. |
+| Route                                     | Auth  | Purpose                                                                                                          |
+| ----------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/admin/server/status`         | admin | Process start time and pending-restart state.                                                                    |
 | `GET /api/v1/admin/settings/restart-keys` | admin | The compiled registry of setting keys that only take effect after a restart (`internal/config/restart_keys.go`). |
 
 `GET /api/v1/admin/server/status` response:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `started_at` | RFC3339 string | When this process started. |
-| `restart_required` | bool | A restart-required change was saved. Latches true for the life of the process; a real restart clears it by starting a new process. |
-| `restart_required_at` | RFC3339 string | When the flag first latched. Omitted until then. |
-| `restart_required_reason` | string | The reason of the **last** restart-required save only — later saves overwrite it. |
-| `restart_required_reasons` | string[] | Every distinct reason since boot, first-seen order. Settings saves record one `setting:<key>` entry per restart-required key, so a client can scope a pending restart to the subsystem it belongs to. |
-| `restart_mark_count` | int | Increments on every restart-required save. Because the boolean latches, this counter is the only signal that a **new** requirement arrived — the admin UI re-arms its dismissed restart banner on it. |
-| `restart_requested`, `restart_requested_at` | bool, RFC3339 string | An in-app restart was requested, and when. |
+| Field                                       | Type                 | Meaning                                                                                                                                                                                               |
+| ------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `started_at`                                | RFC3339 string       | When this process started.                                                                                                                                                                            |
+| `restart_required`                          | bool                 | A restart-required change was saved. Latches true for the life of the process; a real restart clears it by starting a new process.                                                                    |
+| `restart_required_at`                       | RFC3339 string       | When the flag first latched. Omitted until then.                                                                                                                                                      |
+| `restart_required_reason`                   | string               | The reason of the **last** restart-required save only — later saves overwrite it.                                                                                                                     |
+| `restart_required_reasons`                  | string[]             | Every distinct reason since boot, first-seen order. Settings saves record one `setting:<key>` entry per restart-required key, so a client can scope a pending restart to the subsystem it belongs to. |
+| `restart_mark_count`                        | int                  | Increments on every restart-required save. Because the boolean latches, this counter is the only signal that a **new** requirement arrived — the admin UI re-arms its dismissed restart banner on it. |
+| `restart_requested`, `restart_requested_at` | bool, RFC3339 string | An in-app restart was requested, and when.                                                                                                                                                            |
 
 ## Playback node routing
 
@@ -93,13 +93,13 @@ advertises the supported contract:
 
 The existing atomic admin settings update writes the five primitive policies:
 
-| Setting | Default |
-|---|---|
-| `playback.routing.direct_play_egress` | `prefer_proxy` |
-| `playback.routing.remux_execution` | `prefer_transcode` |
-| `playback.routing.remux_egress` | `prefer_proxy` |
+| Setting                                      | Default            |
+| -------------------------------------------- | ------------------ |
+| `playback.routing.direct_play_egress`        | `prefer_proxy`     |
+| `playback.routing.remux_execution`           | `prefer_transcode` |
+| `playback.routing.remux_egress`              | `prefer_proxy`     |
 | `playback.routing.video_transcode_execution` | `prefer_transcode` |
-| `playback.routing.video_transcode_egress` | `prefer_proxy` |
+| `playback.routing.video_transcode_egress`    | `prefer_proxy`     |
 
 `prefer_*` permits fallback; `*_only` is a hard boundary. An atomic update is
 rejected when API-only execution is combined with proxy-only egress for remux
@@ -154,26 +154,26 @@ configuration, last health result, and last stored hardware inventory.
 
 Always `200 OK` with a JSON array.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `id`, `name`, `type`, `url` | int, string, string, string | Identity. `type` is `proxy` or `transcode`. `url` is the backend address: what the API server dials for health checks, capability fetches, and dispatch, and what a proxy dials to reach a transcode node — a private/internal address is fine and keeps that traffic off the public network. |
-| `public_url` | string \| null | Client-facing base URL, when it differs from `url`. Stream and download URLs handed to players are built on it. Only meaningful on proxy nodes — clients never talk to transcode nodes. Absent or `null` means clients use `url`, which must then be publicly reachable. |
-| `enabled` | bool | Whether the node is eligible for selection at all. |
-| `healthy` | bool | Result of the last health check. |
-| `active_jobs`, `egress_kbps` | int | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only. |
-| `group` | string \| null | Co-location group. A group is only eligible while every enabled member is healthy. |
-| `max_jobs`, `max_bandwidth_kbps` | int \| null | Capacity caps. `null` means unlimited. |
-| `last_health_check` | RFC3339 string \| null | When the node was last checked. |
-| `created_at` | RFC3339 string | When the node was registered. |
-| `capabilities` | object | The node's last stored capability report — the same body `GET /hw-capabilities` returns on the node. Omitted until one has been stored. |
-| `capabilities_hash` | string | Identity of that report, as computed by the node. Omitted with `capabilities`. |
-| `advertised_capabilities_hash` | string | The hash the node named on its last health check. It differs from `capabilities_hash` while a refetch is outstanding or failing — the one case a recent `last_health_check` cannot rule out, since that check keeps succeeding while the refetch does not. Derived per sweep rather than stored, so it is **absent** until the first check after an API restart; **present and empty** when the node answered but named no hash at all, as a build predating capability reports does. Absent says nothing about the stored report; empty says the node is no longer confirming it. |
-| `capabilities_refreshed_at` | RFC3339 string | When the report was fetched. This is the age of the *inventory*, not of the health check: an unchanged node keeps a report from hours ago. |
-| `physical_gpu_keys` | string[] | Stable identities of the GPUs behind this node, derived from `capabilities` (see below). Omitted when the node reports no identifiable GPU. |
-| `last_stats` | object | The node's most recent host resource sample — `{"system": …, "gpu": […]}` in the shape below. Omitted when the node reported none. |
-| `hw_accel_override`, `hw_device_override` | string | This node's own acceleration policy (see below). Omitted when the node inherits the cluster-wide settings, which is the normal case. |
-| `capability_drift` | string | Human-readable note describing how the node's hardware got worse at the last capability refetch. Omitted when the last refetch found no regression (see below). |
-| `capability_drift_baseline` | object | What that note is waiting on — `{"backends": ["nvenc"], "devices": [{"uuid": "GPU-8a7b…", "aliases": ["GPU-8a7b…", "0000:03:00.0", "/dev/dri/renderD128"]}]}`. Never present without `capability_drift`; absent with it only for a note written before this field existed (see below). Each device carries every stable name it answered to, so it is recognized if it returns renumbered; `uuid` is held apart because it is the only name that can prove a *different* card, a replacement in the same slot inheriting both the slot and the render path. Either key is omitted when empty. |
+| Field                                     | Type                        | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `name`, `type`, `url`               | int, string, string, string | Identity. `type` is `proxy` or `transcode`. `url` is the backend address: what the API server dials for health checks, capability fetches, and dispatch, and what a proxy dials to reach a transcode node — a private/internal address is fine and keeps that traffic off the public network.                                                                                                                                                                                                                                                                                                 |
+| `public_url`                              | string \                    | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Client-facing base URL, when it differs from `url`. Stream and download URLs handed to players are built on it. Only meaningful on proxy nodes — clients never talk to transcode nodes. Absent or `null` means clients use `url`, which must then be publicly reachable. |
+| `enabled`                                 | bool                        | Whether the node is eligible for selection at all.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `healthy`                                 | bool                        | Result of the last health check.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `active_jobs`, `egress_kbps`              | int                         | Last health-reported load. `egress_kbps` is a rolling average and is currently non-zero for proxy nodes only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `group`                                   | string \                    | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Co-location group. A group is only eligible while every enabled member is healthy.                                                                                                                                                                                       |
+| `max_jobs`, `max_bandwidth_kbps`          | int \                       | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Capacity caps. `null` means unlimited.                                                                                                                                                                                                                                   |
+| `last_health_check`                       | RFC3339 string \            | null                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | When the node was last checked.                                                                                                                                                                                                                                          |
+| `created_at`                              | RFC3339 string              | When the node was registered.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `capabilities`                            | object                      | The node's last stored capability report — the same body `GET /hw-capabilities` returns on the node. Omitted until one has been stored.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `capabilities_hash`                       | string                      | Identity of that report, as computed by the node. Omitted with `capabilities`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `advertised_capabilities_hash`            | string                      | The hash the node named on its last health check. It differs from `capabilities_hash` while a refetch is outstanding or failing — the one case a recent `last_health_check` cannot rule out, since that check keeps succeeding while the refetch does not. Derived per sweep rather than stored, so it is **absent** until the first check after an API restart; **present and empty** when the node answered but named no hash at all, as a build predating capability reports does. Absent says nothing about the stored report; empty says the node is no longer confirming it.            |
+| `capabilities_refreshed_at`               | RFC3339 string              | When the report was fetched. This is the age of the *inventory*, not of the health check: an unchanged node keeps a report from hours ago.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `physical_gpu_keys`                       | string[]                    | Stable identities of the GPUs behind this node, derived from `capabilities` (see below). Omitted when the node reports no identifiable GPU.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `last_stats`                              | object                      | The node's most recent host resource sample — `{"system": …, "gpu": […]}` in the shape below. Omitted when the node reported none.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `hw_accel_override`, `hw_device_override` | string                      | This node's own acceleration policy (see below). Omitted when the node inherits the cluster-wide settings, which is the normal case.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `capability_drift`                        | string                      | Human-readable note describing how the node's hardware got worse at the last capability refetch. Omitted when the last refetch found no regression (see below).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `capability_drift_baseline`               | object                      | What that note is waiting on — `{"backends": ["nvenc"], "devices": [{"uuid": "GPU-8a7b…", "aliases": ["GPU-8a7b…", "0000:03:00.0", "/dev/dri/renderD128"]}]}`. Never present without `capability_drift`; absent with it only for a note written before this field existed (see below). Each device carries every stable name it answered to, so it is recognized if it returns renumbered; `uuid` is held apart because it is the only name that can prove a *different* card, a replacement in the same slot inheriting both the slot and the render path. Either key is omitted when empty. |
 
 ### Acceleration overrides
 
@@ -271,25 +271,25 @@ bind-mounts lxcfs's virtualized `/proc` files in — see the LXC section of
 
 `last_stats.system`:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `cpu_pct` | int | Aggregate busy percentage across all cores over the last sampling interval (5s), 0-100. Idle and iowait both count as not busy. Under a cgroup this is the container's own consumption against its own quota, not the host's. |
-| `load1` | float | 1-minute load average. Unlike `cpu_pct` it also counts tasks blocked on storage, so a node stuck on I/O looks idle in one and busy in the other. Always host-wide: the kernel keeps no per-cgroup load average. |
-| `cores` | int | CPUs this process may run on — the cgroup's CPU quota rounded up where one is set, otherwise every CPU the kernel reports. This is what `cpu_pct` is normalized against and what `load1` must be read relative to. |
-| `mem_used_mb`, `mem_total_mb` | int | Memory. Under a cgroup with a concrete limit these are the cgroup's limit and working set (page cache excluded); otherwise both are the host's. The pair always comes from one domain — a container with no limit publishes a readable working set, and reporting that against host RAM would read as idle on a machine that is nearly out of memory. |
-| `disks` | object[] | Sampled mounts, transcode scratch first, deduplicated by filesystem and capped at 8 — unmeasurable paths included, so the array never grows with the library count. The cap is on what is *probed*, not only on what is reported: each mount costs a `statfs` goroutine per interval that a dead network mount parks indefinitely. Roots past the cap are not sampled, and the number left out is logged (`component=nodemetrics`) rather than left to look like a clean bill of health. A second ceiling bounds probes outstanding at once across every path ever offered, so reconfiguring library roots while mounts are wedged cannot accumulate parked goroutines. |
-| `net_rx_bps`, `net_tx_bps` | int | Aggregate throughput in **bits** per second, loopback excluded. In a container this is the container's own network namespace. |
+| Field                         | Type     | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cpu_pct`                     | int      | Aggregate busy percentage across all cores over the last sampling interval (5s), 0-100. Idle and iowait both count as not busy. Under a cgroup this is the container's own consumption against its own quota, not the host's.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `load1`                       | float    | 1-minute load average. Unlike `cpu_pct` it also counts tasks blocked on storage, so a node stuck on I/O looks idle in one and busy in the other. Always host-wide: the kernel keeps no per-cgroup load average.                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `cores`                       | int      | CPUs this process may run on — the cgroup's CPU quota rounded up where one is set, otherwise every CPU the kernel reports. This is what `cpu_pct` is normalized against and what `load1` must be read relative to.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `mem_used_mb`, `mem_total_mb` | int      | Memory. Under a cgroup with a concrete limit these are the cgroup's limit and working set (page cache excluded); otherwise both are the host's. The pair always comes from one domain — a container with no limit publishes a readable working set, and reporting that against host RAM would read as idle on a machine that is nearly out of memory.                                                                                                                                                                                                                                                                                                                   |
+| `disks`                       | object[] | Sampled mounts, transcode scratch first, deduplicated by filesystem and capped at 8 — unmeasurable paths included, so the array never grows with the library count. The cap is on what is *probed*, not only on what is reported: each mount costs a `statfs` goroutine per interval that a dead network mount parks indefinitely. Roots past the cap are not sampled, and the number left out is logged (`component=nodemetrics`) rather than left to look like a clean bill of health. A second ceiling bounds probes outstanding at once across every path ever offered, so reconfiguring library roots while mounts are wedged cannot accumulate parked goroutines. |
+| `net_rx_bps`, `net_tx_bps`    | int      | Aggregate throughput in **bits** per second, loopback excluded. In a container this is the container's own network namespace.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Each entry in `disks`:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `path` | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own bearer-authed `/status`, and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`. |
-| `role` | string | What the mount is for: `scratch`, or `library-N` positionally per media root. Assigned when the sample is built, so it names the same mount on `/health`, `/status`, `/admin/system/resources` and the `streamapp_node_disk_*` series, and it stays with the mount even when a probe cannot measure it. |
-| `used_gb`, `total_gb` | float | Capacity in GiB. `used_gb` counts filesystem-reserved blocks, as `df` does. `total_gb` is the capacity usable by the node process — used plus still-available — so it reads lower than the device's nameplate size on a volume that reserves blocks for root, and `used_gb`/`total_gb` is the ratio `df` prints as Use%. |
-| `stale` | bool | The numbers are real but carried over from an earlier pass because the current probe has not returned — the normal reading for a network mount whose server went away. Omitted when false. |
-| `unavailable` | bool | The path has never been measured on this node (it does not exist here, or the first probe is still hanging). `used_gb`/`total_gb` are meaningless. Omitted when false. |
-| `scratch` | bool | This is the node's transcode working directory. Set on at most one entry; a media root sharing that volume is deduplicated onto it. Omitted when false. |
+| Field                 | Type   | Meaning                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`                | string | Where the mount is. Absent from a node's `last_stats`: the node reports it on its own bearer-authed `/status`, and the API host reports its own on `GET /admin/system/resources`, but a node's `/health` takes no credential and withholds it. Use `role`.                                                               |
+| `role`                | string | What the mount is for: `scratch`, or `library-N` positionally per media root. Assigned when the sample is built, so it names the same mount on `/health`, `/status`, `/admin/system/resources` and the `streamapp_node_disk_*` series, and it stays with the mount even when a probe cannot measure it.                  |
+| `used_gb`, `total_gb` | float  | Capacity in GiB. `used_gb` counts filesystem-reserved blocks, as `df` does. `total_gb` is the capacity usable by the node process — used plus still-available — so it reads lower than the device's nameplate size on a volume that reserves blocks for root, and `used_gb`/`total_gb` is the ratio `df` prints as Use%. |
+| `stale`               | bool   | The numbers are real but carried over from an earlier pass because the current probe has not returned — the normal reading for a network mount whose server went away. Omitted when false.                                                                                                                               |
+| `unavailable`         | bool   | The path has never been measured on this node (it does not exist here, or the first probe is still hanging). `used_gb`/`total_gb` are meaningless. Omitted when false.                                                                                                                                                   |
+| `scratch`             | bool   | This is the node's transcode working directory. Set on at most one entry; a media root sharing that volume is deduplicated onto it. Omitted when false.                                                                                                                                                                  |
 
 `scratch` exists because this server does not know a node's transcode directory —
 the node does. It is the one mount whose filling up breaks transcoding rather
@@ -325,15 +325,15 @@ non-streaming transcode reservations used by prepared downloads.
 
 Each entry in `last_stats.gpu`:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `device` | string | The render node path (`/dev/dri/renderD128`), or `cuda:N` for an NVIDIA GPU with no readable DRM node. |
-| `vendor` | string | `intel`, `nvidia` or `amd`. Omitted when sysfs names a vendor we do not recognize. |
-| `sessions` | int | GPU workloads this node currently has pinned to the device. It comes from the playback device balancer, so it is exact for Silo's own work and blind to any other tenant's. With no `playback.hw_device` configured the workload is counted against the render device the transcode will actually open — the one auto-detection verified the backend on, or the first available render node when the backend was named explicitly and no detection walk ran. It goes uncounted only on a host with no render device at all. |
-| `video_busy_pct`, `render_busy_pct` | int | Engine busy percentages over the sampling interval. |
-| `total_busy_pct` | int | Whole-GPU utilization *including other tenants*. |
-| `vram_used_mb`, `vram_total_mb` | int | GPU memory. |
-| `source` | string | What produced the numbers: `fdinfo`, `nvidia-smi`, `fdinfo+nvidia-smi`, or `unavailable`. |
+| Field                               | Type   | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `device`                            | string | The render node path (`/dev/dri/renderD128`), or `cuda:N` for an NVIDIA GPU with no readable DRM node.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `vendor`                            | string | `intel`, `nvidia` or `amd`. Omitted when sysfs names a vendor we do not recognize.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `sessions`                          | int    | GPU workloads this node currently has pinned to the device. It comes from the playback device balancer, so it is exact for Silo's own work and blind to any other tenant's. With no `playback.hw_device` configured the workload is counted against the render device the transcode will actually open — the one auto-detection verified the backend on, or the first available render node when the backend was named explicitly and no detection walk ran. It goes uncounted only on a host with no render device at all. |
+| `video_busy_pct`, `render_busy_pct` | int    | Engine busy percentages over the sampling interval.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `total_busy_pct`                    | int    | Whole-GPU utilization *including other tenants*.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `vram_used_mb`, `vram_total_mb`     | int    | GPU memory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `source`                            | string | What produced the numbers: `fdinfo`, `nvidia-smi`, `fdinfo+nvidia-smi`, or `unavailable`.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Every measurement field above is omitted when nothing measured it, and
 availability is per field rather than per device: absent is not zero and must
@@ -527,11 +527,11 @@ an admin who does not want to wait for the next 30-second sweep.
 Always `200 OK`; an unreachable node is reported as `healthy: false` rather
 than as an error status. `404 Not Found` for an unknown id.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `healthy` | bool | The node answered its health endpoint. |
-| `active_jobs`, `egress_kbps` | int | What it reported. Zero when unhealthy. |
-| `capabilities_hash` | string | The hash the node advertised on this check. Omitted when the node reports none. |
+| Field                        | Type   | Meaning                                                                         |
+| ---------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `healthy`                    | bool   | The node answered its health endpoint.                                          |
+| `active_jobs`, `egress_kbps` | int    | What it reported. Zero when unhealthy.                                          |
+| `capabilities_hash`          | string | The hash the node advertised on this check. Omitted when the node reports none. |
 
 The check also persists the node's resource sample, so `last_stats` on the list
 response reflects this check immediately. The sample itself is not echoed here.
@@ -567,14 +567,14 @@ Body: none. Always `200 OK`; a node that refused or could not be reached is
 reported in the body rather than as an HTTP error status, matching
 `{id}/check` and `{id}/force-reload`. `404 Not Found` for an unknown id.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `node_id`, `node_name` | int, string | The node this action ran against. |
-| `status` | string | `ok` or `error`. |
-| `error` | string | Why the node failed. Omitted on success. |
-| `resolved` | string | The backend the node picked after re-probing. Omitted on failure. |
-| `capability_hash` | string | The snapshot the node published. Compare it against `capabilities_hash` from the list response taken *before* the call to see whether anything changed. Omitted on failure. |
-| `capabilities_refreshed` | bool | Whether this server also stored the node's new inventory before answering. |
+| Field                    | Type        | Meaning                                                                                                                                                                     |
+| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node_id`, `node_name`   | int, string | The node this action ran against.                                                                                                                                           |
+| `status`                 | string      | `ok` or `error`.                                                                                                                                                            |
+| `error`                  | string      | Why the node failed. Omitted on success.                                                                                                                                    |
+| `resolved`               | string      | The backend the node picked after re-probing. Omitted on failure.                                                                                                           |
+| `capability_hash`        | string      | The snapshot the node published. Compare it against `capabilities_hash` from the list response taken *before* the call to see whether anything changed. Omitted on failure. |
+| `capabilities_refreshed` | bool        | Whether this server also stored the node's new inventory before answering.                                                                                                  |
 
 `capabilities_refreshed: false` with `status: ok` means the node re-probed but
 the stored row has not caught up yet — a refresh for that node was already
@@ -623,38 +623,38 @@ Always `200 OK`. A node that failed its probe is reported in `nodes` with an
 
 Top-level (and each node's own report):
 
-| Field | Type | Meaning |
-|---|---|---|
-| `resolved` | string | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why. |
-| `render_devices` | string[] | Every accessible `/dev/dri/renderD*` path. |
-| `render_device_details` | object[] | One entry per device (see below). |
-| `intel_detected` | bool | An Intel GPU is present in the inventory. |
-| `detected_backends` | object[] | One entry per backend that had candidate hardware, with the outcome of its FFmpeg verification (see below). |
-| `boot_id` | string | The host's kernel boot identity (Linux only). Pairs with a device's `pci_address` to distinguish the same GPU from the same slot after a reboot. |
-| `nvidia_gpu_uuids` | string[] | Every GPU `nvidia-smi` reports on this host, sorted. Independent of `render_device_details`, because a card is not always reachable through a DRM node — an NVIDIA container is routinely given `/dev/nvidia*` and the toolkit with no `/dev/dri` at all. Omitted where `nvidia-smi` is absent. |
-| `capability_hash` | string | `sha256:<hex>` over this report's hardware identity and capability fields — not over `source`, `node_url`, the probe budget, or itself. Two reports of unchanged hardware hash identically regardless of probe order. |
-| `source` | string | `local` for a probe of this host. |
-| `node_url` | string | Set on a node's report. |
-| `transformations`, `tone_map_capabilities` | object[] | What this host can execute, as advertised to the planner. |
+| Field                                      | Type     | Meaning                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolved`                                 | string   | The backend that would actually be used: `nvenc`, `qsv`, `vaapi`, or `none`. An explicitly configured backend wins even when its probe failed — read `detected_backends` for why.                                                                                                               |
+| `render_devices`                           | string[] | Every accessible `/dev/dri/renderD*` path.                                                                                                                                                                                                                                                      |
+| `render_device_details`                    | object[] | One entry per device (see below).                                                                                                                                                                                                                                                               |
+| `intel_detected`                           | bool     | An Intel GPU is present in the inventory.                                                                                                                                                                                                                                                       |
+| `detected_backends`                        | object[] | One entry per backend that had candidate hardware, with the outcome of its FFmpeg verification (see below).                                                                                                                                                                                     |
+| `boot_id`                                  | string   | The host's kernel boot identity (Linux only). Pairs with a device's `pci_address` to distinguish the same GPU from the same slot after a reboot.                                                                                                                                                |
+| `nvidia_gpu_uuids`                         | string[] | Every GPU `nvidia-smi` reports on this host, sorted. Independent of `render_device_details`, because a card is not always reachable through a DRM node — an NVIDIA container is routinely given `/dev/nvidia*` and the toolkit with no `/dev/dri` at all. Omitted where `nvidia-smi` is absent. |
+| `capability_hash`                          | string   | `sha256:<hex>` over this report's hardware identity and capability fields — not over `source`, `node_url`, the probe budget, or itself. Two reports of unchanged hardware hash identically regardless of probe order.                                                                           |
+| `source`                                   | string   | `local` for a probe of this host.                                                                                                                                                                                                                                                               |
+| `node_url`                                 | string   | Set on a node's report.                                                                                                                                                                                                                                                                         |
+| `transformations`, `tone_map_capabilities` | object[] | What this host can execute, as advertised to the planner.                                                                                                                                                                                                                                       |
 
 `render_device_details` entries:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `path` | string | The `/dev/dri` path. Assigned by enumeration order, so it moves when hardware is added or removed. |
-| `pci_address` | string | The device's PCI slot (e.g. `0000:03:00.0`), read from sysfs. Omitted when the device has no PCI identity. |
-| `gpu_uuid` | string | NVIDIA's permanent GPU identity. Reported only for NVIDIA devices on hosts with `nvidia-smi` installed; omitted otherwise. |
-| `description` | string | Short human label, e.g. `NVIDIA GPU (0x2204)`. |
+| Field         | Type   | Meaning                                                                                                                    |
+| ------------- | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `path`        | string | The `/dev/dri` path. Assigned by enumeration order, so it moves when hardware is added or removed.                         |
+| `pci_address` | string | The device's PCI slot (e.g. `0000:03:00.0`), read from sysfs. Omitted when the device has no PCI identity.                 |
+| `gpu_uuid`    | string | NVIDIA's permanent GPU identity. Reported only for NVIDIA devices on hosts with `nvidia-smi` installed; omitted otherwise. |
+| `description` | string | Short human label, e.g. `NVIDIA GPU (0x2204)`.                                                                             |
 
 `detected_backends` entries:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `backend` | string | `nvenc`, `qsv`, or `vaapi`. |
-| `verified` | bool | At least one candidate device passed a real single-frame encode, not just an FFmpeg build-flag listing. |
-| `devices` | string[] | Every candidate considered for this backend. |
-| `device` | string | The candidate whose probe passed. Empty for NVENC, which addresses its GPU through CUDA rather than a render node. |
-| `reason` | string | Why verification failed, attributed per device when several were tried. |
+| Field      | Type     | Meaning                                                                                                            |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `backend`  | string   | `nvenc`, `qsv`, or `vaapi`.                                                                                        |
+| `verified` | bool     | At least one candidate device passed a real single-frame encode, not just an FFmpeg build-flag listing.            |
+| `devices`  | string[] | Every candidate considered for this backend.                                                                       |
+| `device`   | string   | The candidate whose probe passed. Empty for NVENC, which addresses its GPU through CUDA rather than a render node. |
+| `reason`   | string   | Why verification failed, attributed per device when several were tried.                                            |
 
 Each entry in `nodes` carries `node_url` and `node_name` plus either that
 node's `resolved`, `render_devices` and `render_device_details`, or an `error`
@@ -676,12 +676,12 @@ and its view of a media mount is the authoritative one.
 Always `200 OK`. It reads a snapshot the sampler already published, so it costs
 nothing and cannot hang regardless of what a mount or a GPU query is doing.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `available` | bool | This host can be sampled. False on a non-Linux host, before the first sample lands, or when no sampler is running — in which case the fields below are absent. |
-| `sampled_at` | RFC3339 string | When the sample was taken. Omitted when there is none. |
-| `system` | object | Same shape as `last_stats.system` above. |
-| `gpu` | object[] | Same shape as `last_stats.gpu` above. |
+| Field        | Type           | Meaning                                                                                                                                                        |
+| ------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `available`  | bool           | This host can be sampled. False on a non-Linux host, before the first sample lands, or when no sampler is running — in which case the fields below are absent. |
+| `sampled_at` | RFC3339 string | When the sample was taken. Omitted when there is none.                                                                                                         |
+| `system`     | object         | Same shape as `last_stats.system` above.                                                                                                                       |
+| `gpu`        | object[]       | Same shape as `last_stats.gpu` above.                                                                                                                          |
 
 Sampling is Linux-only: `available: false` on macOS or Windows is expected and
 is not an error. History and alerting are Prometheus's job — the same numbers
@@ -722,29 +722,29 @@ agreement.
 
 `view`:
 
-| Field                                 | Type             | Meaning                                                                                                                                                                                            |
-| ------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `available`                           | bool             | A merged view exists. |
-| `built_at`                            | RFC3339 string   | When it was built. Omitted if never. |
-| `age_ms`, `stale`                     | int, bool        | Age of the cached view, and whether it exceeded the TTL. |
-| `build_took_ms`                       | int              | Cost of the last rebuild. |
-| `refreshes`, `failures`, `last_error` | int, int, string | Cache counters since process start. |
-| `complete`                            | bool             | No publisher is missing or stale, no snapshot is truncated, no reader cap was hit, no publisher is degraded, every contributor declares coverage, and every measuring contributor observes all five families. |
-| `incomplete_reasons`                  | string[]         | Why `complete` is false — e.g. `missing_publisher`, `publisher_truncated`, `decode_errors`, `truncated`, `unknown_publisher_coverage`, `partial_family_observation`. |
-| `missing_publishers`                  | string[]         | Publisher ids with no usable contribution: stale/unusable roster entries and declared reporting companions that are absent. Each id appears at most once. Undeclared coverage adds `unknown_publisher_coverage` but no id here: the publisher contributed; it could not describe what it covers. |
-| `clock_skew_suspected`                | bool             | A publisher stamped a time in the future. A clock running *behind* is indistinguishable from a stalled publisher in one sample; compare `publishers` sequence across two reads to tell them apart. |
-| `publishers`                          | string[]         | `<publisher-id>=<state>`, where state is `fresh`, `degraded`, `stale` or `departed`. |
-| `session_count`, `transfer_count`     | int              | Sizes of the merged view. |
+| Field                                 | Type             | Meaning                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `available`                           | bool             | A merged view exists.                                                                                                                                                                                                                                                                                                                       |
+| `built_at`                            | RFC3339 string   | When it was built. Omitted if never.                                                                                                                                                                                                                                                                                                        |
+| `age_ms`, `stale`                     | int, bool        | Age of the cached view, and whether it exceeded the TTL.                                                                                                                                                                                                                                                                                    |
+| `build_took_ms`                       | int              | Cost of the last rebuild.                                                                                                                                                                                                                                                                                                                   |
+| `refreshes`, `failures`, `last_error` | int, int, string | Cache counters since process start.                                                                                                                                                                                                                                                                                                         |
+| `complete`                            | bool             | No publisher is missing or stale, no snapshot reports session or observation truncation, no reader cap was hit, no publisher is degraded, every contributor declares coverage, and every measuring contributor observes all five families. Transfer-table exhaustion is deliberately excluded: it is an advisory, not a completeness claim. |
+| `incomplete_reasons`                  | string[]         | Why `complete` is false — e.g. `missing_publisher`, `publisher_truncated`, `decode_errors`, `truncated`, `unknown_publisher_coverage`, `partial_family_observation`.                                                                                                                                                                        |
+| `missing_publishers`                  | string[]         | Publisher ids with no usable contribution: stale/unusable roster entries and declared reporting companions that are absent. Each id appears at most once. Undeclared coverage adds `unknown_publisher_coverage` but no id here: the publisher contributed; it could not describe what it covers.                                            |
+| `clock_skew_suspected`                | bool             | A publisher stamped a time in the future. A clock running *behind* is indistinguishable from a stalled publisher in one sample; compare `publishers` sequence across two reads to tell them apart.                                                                                                                                          |
+| `publishers`                          | string[]         | `<publisher-id>=<state>`, where state is `fresh`, `degraded`, `stale` or `departed`.                                                                                                                                                                                                                                                        |
+| `session_count`, `transfer_count`     | int              | Sizes of the merged view.                                                                                                                                                                                                                                                                                                                   |
 
 Each entry in `sources`:
 
-| Field       | Type     | Meaning                                      |
-| ----------- | -------- | -------------------------------------------- |
+| Field       | Type     | Meaning                                            |
+| ----------- | -------- | -------------------------------------------------- |
 | `source`    | string   | `playback_sessions_sync` or `node_sessions_redis`. |
-| `available` | bool     | The projection could be read.                |
-| `error`     | string   | Why it could not.                            |
-| `notes`     | string[] | Caveats that apply to this comparison.       |
-| `report`    | object   | The diff, when available.                    |
+| `available` | bool     | The projection could be read.                      |
+| `error`     | string   | Why it could not.                                  |
+| `notes`     | string[] | Caveats that apply to this comparison.             |
+| `report`    | object   | The diff, when available.                          |
 
 `report`:
 
@@ -816,10 +816,10 @@ server document but does have a local one — uploads that local layout once.
 `200 OK`. Both fields are `null` when this admin has never saved a layout; that
 is the normal first-load answer, not an error.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `layout` | object \| null | The stored document, exactly as it was written. |
-| `updated_at` | RFC3339 string \| null | When it was last written. |
+| Field        | Type             | Meaning |
+| ------------ | ---------------- | ------- |
+| `layout`     | object \         | null    | The stored document, exactly as it was written. |
+| `updated_at` | RFC3339 string \ | null    | When it was last written.                       |
 
 ```json
 {
@@ -850,16 +850,16 @@ here is additive: a server that has this endpoint answers `true` for all of
 them, and a server that predates the dashboard answers `404`. That is how a
 client tells "this deployment is older than my build" from "the request failed".
 
-| Field | Meaning |
-|---|---|
-| `server_layouts` | `GET`/`PUT`/`DELETE /admin/dashboard/layout` store the widget arrangement per admin account. |
-| `timeseries` | `GET /admin/stats/timeseries` serves sampled concurrent-stream and egress history. |
-| `playback_activity` | `GET /admin/stats/playback-activity` serves the rolling playback activity aggregate. |
-| `top_activity` | `GET /admin/stats/top-activity` serves the leaderboards. |
-| `health` | `GET /admin/server/status` carries the additive `health` object. |
-| `log_level_list` | `GET /admin/logs/app` accepts a multi-level filter. |
-| `watch_providers` | `GET /admin/stats` carries the per-provider `watch_providers` array. |
-| `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
+| Field               | Meaning                                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `server_layouts`    | `GET`/`PUT`/`DELETE /admin/dashboard/layout` store the widget arrangement per admin account.                                               |
+| `timeseries`        | `GET /admin/stats/timeseries` serves sampled concurrent-stream and egress history.                                                         |
+| `playback_activity` | `GET /admin/stats/playback-activity` serves the rolling playback activity aggregate.                                                       |
+| `top_activity`      | `GET /admin/stats/top-activity` serves the leaderboards.                                                                                   |
+| `health`            | `GET /admin/server/status` carries the additive `health` object.                                                                           |
+| `log_level_list`    | `GET /admin/logs/app` accepts a multi-level filter.                                                                                        |
+| `watch_providers`   | `GET /admin/stats` carries the per-provider `watch_providers` array.                                                                       |
+| `downloads_stats`   | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 
 ```json
 {
@@ -879,13 +879,13 @@ client tells "this deployment is older than my build" from "the request failed".
 Library, user, and playback totals for the dashboard, plus one entry per watch
 provider. Cached in-process for 15s and bypassed with `?refresh=1`.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `total_items`, `total_files`, `total_users` | int | Catalog and account totals. |
-| `total_movies`, `total_movie_files`, `total_shows`, `total_show_files` | int | Per-kind catalog totals. |
-| `active_streams` | int | Playback sessions currently synced as live. |
-| `total_storage_bytes` | int | Sum of every scanned media file's size. |
-| `watch_providers` | object[] | One entry per watch provider, ordered by `provider`. Always an array, never null. |
+| Field                                                                  | Type     | Meaning                                                                           |
+| ---------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `total_items`, `total_files`, `total_users`                            | int      | Catalog and account totals.                                                       |
+| `total_movies`, `total_movie_files`, `total_shows`, `total_show_files` | int      | Per-kind catalog totals.                                                          |
+| `active_streams`                                                       | int      | Playback sessions currently synced as live.                                       |
+| `total_storage_bytes`                                                  | int      | Sum of every scanned media file's size.                                           |
+| `watch_providers`                                                      | object[] | One entry per watch provider, ordered by `provider`. Always an array, never null. |
 
 `watch_providers` covers the union of the providers registered in the watchsync
 registry — built-in and plugin-contributed alike, so a provider installed by a
@@ -896,22 +896,22 @@ visible after a provider's plugin is uninstalled; such an entry carries
 
 Each entry:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `provider` | string | Provider key (`trakt`, `simkl`, `mdblist`, a plugin's key). |
-| `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
-| `registered` | bool | False when the provider only exists in stored rows. |
-| `scrobbling` | bool | The provider declares the scrobble-playback capability. |
-| `exporting` | bool | The provider declares the export-watched capability. |
-| `connected_profiles` | int | Profiles with a connection to this provider. |
-| `enabled_profiles` | int | Connected profiles with at least one sync direction enabled. |
-| `export_enabled_profiles`, `scrobble_enabled_profiles` | int | Connected profiles with that toggle on. |
-| `last_sync_completed_at` | string | RFC3339 timestamp of the newest completed sync run. Omitted when there is none. |
-| `sync_runs_24h`, `sync_errors_24h` | int | Sync runs started in the last 24h, and how many of those failed. |
-| `imported_watched_24h`, `imported_progress_24h`, `exported_watched_24h` | int | Rows moved by those runs. |
-| `pending_exports`, `failed_exports` | int | Queued history exports by status, all-time. |
-| `open_scrobbles` | int | Scrobble sessions started but not yet stopped. |
-| `scrobbles_24h` | int | Scrobble sessions touched in the last 24h. |
+| Field                                                                   | Type   | Meaning                                                                         |
+| ----------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `provider`                                                              | string | Provider key (`trakt`, `simkl`, `mdblist`, a plugin's key).                     |
+| `display_name`                                                          | string | Human name from the registry, or the key when the provider is not registered.   |
+| `registered`                                                            | bool   | False when the provider only exists in stored rows.                             |
+| `scrobbling`                                                            | bool   | The provider declares the scrobble-playback capability.                         |
+| `exporting`                                                             | bool   | The provider declares the export-watched capability.                            |
+| `connected_profiles`                                                    | int    | Profiles with a connection to this provider.                                    |
+| `enabled_profiles`                                                      | int    | Connected profiles with at least one sync direction enabled.                    |
+| `export_enabled_profiles`, `scrobble_enabled_profiles`                  | int    | Connected profiles with that toggle on.                                         |
+| `last_sync_completed_at`                                                | string | RFC3339 timestamp of the newest completed sync run. Omitted when there is none. |
+| `sync_runs_24h`, `sync_errors_24h`                                      | int    | Sync runs started in the last 24h, and how many of those failed.                |
+| `imported_watched_24h`, `imported_progress_24h`, `exported_watched_24h` | int    | Rows moved by those runs.                                                       |
+| `pending_exports`, `failed_exports`                                     | int    | Queued history exports by status, all-time.                                     |
+| `open_scrobbles`                                                        | int    | Scrobble sessions started but not yet stopped.                                  |
+| `scrobbles_24h`                                                         | int    | Scrobble sessions touched in the last 24h.                                      |
 
 ```json
 {
@@ -978,10 +978,10 @@ Sampled history for the concurrent-streams and egress charts. Cached in-process
 for 30s, dropped early on playback or admin activity, and bypassed with
 `?refresh=1`.
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `hours` | int | Window length. Default 24, clamped to 1..744 (31 days, the retention window). A non-numeric value is `400 bad_request`. |
-| `refresh` | bool | Bypass the cache for this read. |
+| Parameter | Type | Meaning                                                                                                                 |
+| --------- | ---- | ----------------------------------------------------------------------------------------------------------------------- |
+| `hours`   | int  | Window length. Default 24, clamped to 1..744 (31 days, the retention window). A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read.                                                                                         |
 
 Neither series can be reconstructed after the fact — live sessions leave no
 per-minute trace once they end, and node egress is a rolling average that each
@@ -993,12 +993,12 @@ Reads bucket those minutes down so a response stays under ~750 points at any
 window. `resolution_seconds` reports the bucket that was used — read it rather
 than assuming the sampler's minute:
 
-| Requested window | `resolution_seconds` |
-|---|---|
-| ≤ 2 hours | 60 |
-| ≤ 48 hours | 300 |
-| ≤ 336 hours (14 days) | 1800 |
-| wider | 7200 |
+| Requested window      | `resolution_seconds` |
+| --------------------- | -------------------- |
+| ≤ 2 hours             | 60                   |
+| ≤ 48 hours            | 300                  |
+| ≤ 336 hours (14 days) | 1800                 |
+| wider                 | 7200                 |
 
 A bucket wider than a minute reports the **peak** minute of each column, never
 an average: these charts are read to answer "how bad did it get", and a mean
@@ -1068,10 +1068,10 @@ admin dashboard. Answers are cached in-process for 60s and dropped early when
 the shared event bus reports playback or admin activity; `?refresh=1` drops the
 cache before reading.
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `hours` | int | Window length. Default 24, clamped to 1..744. A non-numeric value is `400 bad_request`. |
-| `refresh` | bool | Bypass the cache for this read. |
+| Parameter | Type | Meaning                                                                                 |
+| --------- | ---- | --------------------------------------------------------------------------------------- |
+| `hours`   | int  | Window length. Default 24, clamped to 1..744. A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read.                                                         |
 
 Buckets are hourly up to a 48-hour window and daily beyond it; `bucket_seconds`
 is `3600` or `86400` accordingly. A bucket's `hour` field is its start instant
@@ -1134,11 +1134,11 @@ Most-watched titles and most-active profiles over a multi-day window. Cached
 for 5 minutes — a seven-day ranking barely moves within minutes — with the same
 `?refresh=1` escape hatch.
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `days` | int | Window length. Default 7, clamped to 1..30. |
-| `limit` | int | Rows per list. Default 10, clamped to 1..25. |
-| `refresh` | bool | Bypass the cache for this read. |
+| Parameter | Type | Meaning                                      |
+| --------- | ---- | -------------------------------------------- |
+| `days`    | int  | Window length. Default 7, clamped to 1..30.  |
+| `limit`   | int  | Rows per list. Default 10, clamped to 1..25. |
+| `refresh` | bool | Bypass the cache for this read.              |
 
 `plays` on both lists counts `user_watch_history` rows with the same source
 exclusions as `profiles_active_24h` above, so marking something watched counts
@@ -1198,10 +1198,10 @@ Offline-download aggregate for the dashboard's downloads widget. Cached
 in-process for 60s, dropped early on admin activity from the shared event bus,
 and bypassed with `?refresh=1`.
 
-| Parameter | Type | Meaning |
-|---|---|---|
-| `limit` | int | Rows in `top_users`. Default 10, clamped to 1..25. A non-numeric value is `400 bad_request`. |
-| `refresh` | bool | Bypass the cache for this read. |
+| Parameter | Type | Meaning                                                                                      |
+| --------- | ---- | -------------------------------------------------------------------------------------------- |
+| `limit`   | int  | Rows in `top_users`. Default 10, clamped to 1..25. A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read.                                                              |
 
 The aggregate reads the `downloads` table, which carries two lifecycles: a
 **managed device entry** (a device keeps the item offline; `device_id` set) and
@@ -1212,15 +1212,15 @@ cancellation, or revocation. The headline numbers and `top_users` count active
 managed entries only; the 24-hour counters cover both lifecycles, so one-shot
 web downloads show up there.
 
-| Field | Type | Meaning |
-|---|---|---|
-| `users_with_downloads` | int | Distinct accounts (login accounts, not household profiles) with at least one active managed download. |
-| `active_downloads` | int | Active managed entries. A series batch contributes one entry per episode. |
-| `total_bytes` | int | Sum of `file_size` over completed managed entries — bytes sitting on devices as far as the server can know without devices reporting back. |
-| `downloads_started_24h` | int | Rows created in the last 24 hours, both lifecycles. |
-| `downloads_completed_24h` | int | Rows that reached `completed` in the last 24 hours, both lifecycles. |
-| `limit` | int | The clamped `top_users` size the response was built with. |
-| `top_users` | object[] | Accounts ranked by active managed downloads; `[]` when nobody downloads, never `null`. |
+| Field                     | Type     | Meaning                                                                                                                                    |
+| ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users_with_downloads`    | int      | Distinct accounts (login accounts, not household profiles) with at least one active managed download.                                      |
+| `active_downloads`        | int      | Active managed entries. A series batch contributes one entry per episode.                                                                  |
+| `total_bytes`             | int      | Sum of `file_size` over completed managed entries — bytes sitting on devices as far as the server can know without devices reporting back. |
+| `downloads_started_24h`   | int      | Rows created in the last 24 hours, both lifecycles.                                                                                        |
+| `downloads_completed_24h` | int      | Rows that reached `completed` in the last 24 hours, both lifecycles.                                                                       |
+| `limit`                   | int      | The clamped `top_users` size the response was built with.                                                                                  |
+| `top_users`               | object[] | Accounts ranked by active managed downloads; `[]` when nobody downloads, never `null`.                                                     |
 
 Each `top_users` entry: `user_id`, `username`, `downloads` (active managed
 entries), and `total_bytes` (completed managed entries only, like the headline).
@@ -1314,8 +1314,8 @@ should not be dropped.
 
 ### Query parameters
 
-| Parameter | Default | Meaning |
-|---|---|---|
+| Parameter      | Default | Meaning                                                                                                                |
+| -------------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `include_idle` | `false` | Keep rows classified as `no_delivery` or `unclaimed_idle`. Their envelope counts report how many there are either way. |
 
 ### Reading the envelope
@@ -1337,6 +1337,16 @@ should not be dropped.
   operator configuration error for a complete fleet view. A declared reporting
   companion that is absent produces the narrower
   `missing_reported_publisher` reason.
+- `view_advisories` names degradations that are NOT completeness claims: they
+  never make `view_complete` false and never suppress classification. Currently
+  the only one is `publisher_transfer_capacity` — a publisher whose transfer table
+  filled, with `dropped_transfer_observations` counting the download and probe
+  observations that lost their per-transfer attribution as a result. This is
+  reported separately from `incomplete_reasons` on purpose: a transfer identity is
+  minted partly from a client-supplied device id and the viewer address, so one
+  authenticated client could otherwise fill the table and switch ghost detection
+  off for every reader. Transfers feed no live-session facts, so an exhausted
+  transfer table says nothing about whether the session picture is complete.
 - `no_delivery_count` is how many rows were held back, whether or not shown.
 - `unclaimed_idle_count` is how many measured-only rows were held back after
   their viewer-edge delivery went idle, whether or not shown.
@@ -1349,11 +1359,11 @@ should not be dropped.
 
 `evidence` is the first field to read, and it is the whole diagnosis:
 
-| `evidence` | Meaning |
-|---|---|
+| `evidence` | Meaning                                                       |
+| ---------- | ------------------------------------------------------------- |
 | `reported` | A client claims to be watching. Nothing was measured leaving. |
-| `measured` | Bytes went out. No session manager claims them. |
-| `both` | An ordinary, corroborated viewer. |
+| `measured` | Bytes went out. No session manager claims them.               |
+| `both`     | An ordinary, corroborated viewer.                             |
 
 `no_delivery` marks the anomalous half of `reported`: a session reported as
 **playing**, older than a short grace window, with no current or remembered

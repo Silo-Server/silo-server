@@ -128,6 +128,11 @@ type TransferView struct {
 	Client             ClientVariant
 	UserAgent          string
 	Outcomes           map[httpstream.StreamOutcome]int64
+	// Overflowed marks a per-subject catch-all row: one principal exceeded
+	// MaxTransfersPerSubject and its further transfer identities fold here. Only
+	// Subject, BytesAccepted, RequestCount, Outcomes and the timestamps mean
+	// anything on such a row; every other identity field is deliberately zero.
+	Overflowed bool
 }
 
 // PublisherCoverage is a publisher's own statement of what its configuration
@@ -172,19 +177,23 @@ type Snapshot struct {
 	// report" from "this process's reporter has not been seen yet". Empty means
 	// an explicit "no reporter" only when Coverage.Declared; an un-upgraded
 	// publisher's silence says nothing about whether a companion should exist.
-	ReportingPublisherID     string
-	Coverage                 PublisherCoverage
-	NodeID                   string
-	PublisherEpoch           int64
-	Sequence                 uint64
-	CapturedAt               time.Time
-	Sessions                 []SessionView
-	Transfers                []TransferView
-	Truncated                bool
-	DroppedObservations      int64
-	DroppedBytes             int64
-	UnattributedObservations int64
-	UnattributedBytes        int64
+	ReportingPublisherID string
+	Coverage             PublisherCoverage
+	NodeID               string
+	PublisherEpoch       int64
+	Sequence             uint64
+	CapturedAt           time.Time
+	Sessions             []SessionView
+	Transfers            []TransferView
+	Truncated            bool
+	DroppedObservations  int64
+	// TransfersTruncated is transfer-table blindness, deliberately kept apart from
+	// Truncated so it cannot become a completeness claim. See Registry.dropTransfer.
+	TransfersTruncated          bool
+	DroppedTransferObservations int64
+	DroppedBytes                int64
+	UnattributedObservations    int64
+	UnattributedBytes           int64
 }
 
 func sessionViewOf(s *logicalSession) SessionView {
@@ -253,7 +262,8 @@ func transferViewOf(t *transfer) TransferView {
 		BytesAccepted: t.lastSweptBytes, LastByteAccepted: t.lastByteAccepted,
 		LastObservationEnd: t.lastObservationEnd, OpenObservations: t.openObservations,
 		RequestCount: t.requestCount, ViewerIP: t.capture.ViewerIP, DeviceID: t.capture.DeviceID,
-		Client: t.capture.Client, UserAgent: t.capture.UserAgent, Outcomes: cloneOutcomes(t.outcomes)}
+		Client: t.capture.Client, UserAgent: t.capture.UserAgent, Outcomes: cloneOutcomes(t.outcomes),
+		Overflowed: t.overflow}
 }
 
 func cloneSnapshot(source Snapshot) Snapshot {

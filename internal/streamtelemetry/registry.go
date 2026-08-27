@@ -63,11 +63,22 @@ type Registry struct {
 
 	transfersMu sync.RWMutex
 	transfers   map[string]*transfer
+	// transfersBySubject counts the ORDINARY transfer records each principal
+	// holds, so one client's device-id churn cannot mint an unbounded share of
+	// the shared table. It is guarded by transfersMu, the lock that already
+	// guards the map it counts, so no new lock and no new ordering enter the
+	// attach path. The per-subject catch-all row is deliberately NOT counted
+	// here (see attach), so a subject holds at most MaxTransfersPerSubject + 1
+	// records.
+	transfersBySubject map[string]int64
 
-	sessionReservations      atomic.Int64
-	transferReservations     atomic.Int64
-	observationReservations  atomic.Int64
-	droppedObservations      atomic.Int64
+	sessionReservations     atomic.Int64
+	transferReservations    atomic.Int64
+	observationReservations atomic.Int64
+	droppedObservations     atomic.Int64
+	// droppedBytes covers bytes lost to BOTH drop paths — drop and dropTransfer
+	// alike — because the release path only knows obs.countingOnly and cannot
+	// tell which table refused the observation.
 	droppedBytes             atomic.Int64
 	unattributedObservations atomic.Int64
 	unattributedBytes        atomic.Int64
@@ -77,18 +88,28 @@ type Registry struct {
 	// decay, otherwise one transient burst marks a process degraded until it
 	// restarts and a later real truncation is indistinguishable. The monotonic
 	// Dropped* counters remain the permanent record.
-	lastDropUnixNano        atomic.Int64
-	lastWarnUnixNano        atomic.Int64
-	lastPublishWarnUnixNano atomic.Int64
-	sequence                atomic.Uint64
-	reportingPublisherID    atomic.Value
-	startOnce               sync.Once
-	stopOnce                sync.Once
-	stop                    chan struct{}
-	done                    chan struct{}
-	started                 atomic.Bool
-	leaveMu                 sync.Mutex
-	left                    bool
+	lastDropUnixNano atomic.Int64
+	// The transfer-table drop bookkeeping is kept entirely separate from the
+	// session one. See dropTransfer for why.
+	droppedTransferObservations atomic.Int64
+	lastTransferDropUnixNano    atomic.Int64
+	lastTransferWarnUnixNano    atomic.Int64
+	lastWarnUnixNano            atomic.Int64
+	// lastTombstoneWarnUnixNano is separate from lastWarnUnixNano so that ordinary
+	// tombstone-capacity turnover, which is expected under churn and costs nothing,
+	// cannot suppress a genuine capacity-exhausted warning for the following
+	// minute. The transfer path was given its own stamp for exactly this reason.
+	lastTombstoneWarnUnixNano atomic.Int64
+	lastPublishWarnUnixNano   atomic.Int64
+	sequence                  atomic.Uint64
+	reportingPublisherID      atomic.Value
+	startOnce                 sync.Once
+	stopOnce                  sync.Once
+	stop                      chan struct{}
+	done                      chan struct{}
+	started                   atomic.Bool
+	leaveMu                   sync.Mutex
+	left                      bool
 }
 
 func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry {
@@ -104,7 +125,10 @@ func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry
 	if logger == nil {
 		logger = slog.Default()
 	}
-	r := &Registry{cfg: cfg, store: store, logger: logger, seed: maphash.MakeSeed(), transfers: make(map[string]*transfer), stop: make(chan struct{}), done: make(chan struct{})}
+	cfg.resolve()
+	r := &Registry{cfg: cfg, store: store, logger: logger, seed: maphash.MakeSeed(),
+		transfers: make(map[string]*transfer), transfersBySubject: make(map[string]int64),
+		stop: make(chan struct{}), done: make(chan struct{})}
 	for i := range r.shards {
 		r.shards[i].sessions = make(map[string]*logicalSession)
 		r.shards[i].tombstones = make(map[string]sessionTombstone)
@@ -193,35 +217,66 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	}
 	if obs.route.Class.foldsIntoTransfer() {
 		key := transferKey(attachment, obs.Capture)
+		budget := subjectBudgetKey(attachment.Subject)
 		r.transfersMu.Lock()
 		t := r.transfers[key]
+		overflow := false
+		if t == nil && r.cfg.MaxTransfersPerSubject > 0 &&
+			r.transfersBySubject[budget] >= r.cfg.MaxTransfersPerSubject {
+			// This principal has minted its allowance of distinct transfer
+			// identities. Fold the rest into ONE catch-all record for the subject
+			// rather than dropping the observation: the bytes are real and belong
+			// to this principal, and dropping is exactly what let one client's
+			// device-id churn starve everybody else's attribution.
+			overflow = true
+			key = overflowTransferKey(attachment.Subject)
+			t = r.transfers[key]
+		}
 		if t == nil {
 			if !reserve(&r.transferReservations, r.cfg.MaxTransfers) {
 				r.transfersMu.Unlock()
 				obs.countingOnly = true
-				r.drop("transfer capacity exhausted")
+				r.dropTransfer("transfer capacity exhausted")
 				return
 			}
-			t = &transfer{id: key, subject: attachment.Subject, profileID: attachment.ProfileID,
+			record := &transfer{id: key, subject: attachment.Subject, profileID: attachment.ProfileID,
 				mediaFileID: attachment.MediaFileID, route: obs.route, capture: obs.Capture,
+				overflow:     overflow,
 				observations: make(map[string]*Observation),
 				outcomes:     make(map[httpstream.StreamOutcome]int64)}
-			r.transfers[key] = t
+			if overflow {
+				// A fold row is many pours by one principal. Every identity field
+				// but the subject would be the first arrival's, asserted over bytes
+				// that belong to many files, routes, addresses and devices — a
+				// plausible wrong answer, which is worse for an operator than an
+				// absent one. Only Subject, the byte totals, RequestCount and
+				// Outcomes mean anything here.
+				record.profileID, record.mediaFileID = "", 0
+				record.route = MediaRoute{}
+				record.capture = CaptureSet{}
+			}
+			r.transfers[key] = record
+			if !overflow {
+				r.transfersBySubject[budget]++
+			}
+			t = record
 		}
 		t.mu.Lock()
 		if len(t.observations) >= r.cfg.MaxObservationsPerSession {
 			t.mu.Unlock()
 			r.transfersMu.Unlock()
 			obs.countingOnly = true
-			r.drop("per-transfer observation capacity exhausted")
+			r.dropTransfer("per-transfer observation capacity exhausted")
 			return
 		}
 		t.observations[obs.id] = obs
 		t.openObservations++
 		t.requestCount++
-		// The newest request's capture wins: viewer IP, device and client can
-		// legitimately change across a resumed download.
-		t.capture = obs.Capture
+		if !t.overflow {
+			// The newest request's capture wins: viewer IP, device and client can
+			// legitimately change across a resumed download.
+			t.capture = obs.Capture
+		}
 		t.mu.Unlock()
 		r.transfersMu.Unlock()
 		obs.attachment = &attachment
@@ -352,6 +407,25 @@ func (r *Registry) drop(reason string) {
 	r.warnRateLimited(reason, &r.lastWarnUnixNano)
 }
 
+// dropTransfer records blindness in the TRANSFER table only. It deliberately
+// does not stamp lastDropUnixNano, because Snapshot.Truncated is a claim about
+// the SESSION picture: BuildGlobalView turns it into publisher_truncated, which
+// makes the merged view incomplete, which makes the admin live-sessions handler
+// clear no_delivery and unclaimed_idle on every row for every reader. Transfers
+// feed no LiveByteFacts — livesessions.go reads view.Sessions only — so a full
+// transfer table says nothing about whether the session picture is complete.
+// And a transfer key is minted partly from client-supplied input (the
+// X-Silo-Device-ID header, the MediaBrowser DeviceId, and the viewer address
+// that ordinary CGNAT churn rotates), so letting it drive that flag handed one
+// authenticated client a fleet-wide off switch for ghost detection. The
+// exhaustion is still recorded and still surfaced, as its own signal:
+// TransfersTruncated and DroppedTransferObservations.
+func (r *Registry) dropTransfer(reason string) {
+	r.lastTransferDropUnixNano.Store(now().UnixNano())
+	r.droppedTransferObservations.Add(1)
+	r.warnRateLimited(reason, &r.lastTransferWarnUnixNano)
+}
+
 // DeclareReportingPublisher records that this process also runs a reporting
 // publisher under the given id, so consumers of the merged view can tell an
 // absent reporter from a process that simply has nothing to report. A process
@@ -395,11 +469,14 @@ func warnRateLimited(logger *slog.Logger, stamp *atomic.Int64, message string, a
 	}
 }
 
-// truncatedAt reports whether the registry was blind recently enough for the
+// decayedAt reports whether the registry was blind recently enough for the
 // snapshot at `at` to be incomplete. The window matches Freshness, which is the
 // same horizon BuildGlobalView uses to decide a publisher is still current.
-func (r *Registry) truncatedAt(at time.Time) bool {
-	last := r.lastDropUnixNano.Load()
+//
+// Factored so the session flag and the transfer flag cannot drift apart: they
+// decay on one horizon, and only the stamp they read differs.
+func (r *Registry) decayedAt(stamp *atomic.Int64, at time.Time) bool {
+	last := stamp.Load()
 	if last == 0 {
 		return false
 	}
@@ -411,6 +488,12 @@ func (r *Registry) truncatedAt(at time.Time) bool {
 		at = now()
 	}
 	return at.Sub(time.Unix(0, last)) < window
+}
+
+func (r *Registry) truncatedAt(at time.Time) bool { return r.decayedAt(&r.lastDropUnixNano, at) }
+
+func (r *Registry) transfersTruncatedAt(at time.Time) bool {
+	return r.decayedAt(&r.lastTransferDropUnixNano, at)
 }
 
 // maxPendingRealtimePerShard spreads the session budget over the shards so held
@@ -464,6 +547,21 @@ func transferKey(a Attachment, capture CaptureSet) string {
 		string(a.Subject.Kind), a.Subject.ID, a.ProfileID, strconv.Itoa(a.MediaFileID),
 		capture.Method, capture.Pattern, capture.ViewerIP, capture.DeviceID,
 	}, "\x00")))
+	return hex.EncodeToString(digest[:])
+}
+
+// subjectBudgetKey names one principal for the per-subject transfer allowance.
+// It is an internal map key only — never published, never a Redis field name —
+// so it stays readable rather than hashed.
+func subjectBudgetKey(s Subject) string { return string(s.Kind) + "\x00" + s.ID }
+
+// overflowTransferKey is the id of a principal's catch-all transfer record. The
+// "overflow" domain prefix cannot collide with transferKey, which joins a fixed
+// eight-element tuple. It is hashed for the same reason transferKey is: it
+// becomes a Redis hash field name, and key names surface in SCAN, MONITOR,
+// slowlog and RDB dumps.
+func overflowTransferKey(s Subject) string {
+	digest := digest128([]byte("overflow\x00" + string(s.Kind) + "\x00" + s.ID))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -615,7 +713,7 @@ func (r *Registry) sweep(sweepStart time.Time) Snapshot {
 						}
 						if oldestID != "" {
 							delete(shard.tombstones, oldestID)
-							r.warnRateLimited("session tombstone capacity exhausted", &r.lastWarnUnixNano)
+							r.warnRateLimited("session tombstone capacity exhausted", &r.lastTombstoneWarnUnixNano)
 						}
 					}
 					if limit > 0 {
@@ -646,10 +744,21 @@ func (r *Registry) sweep(sweepStart time.Time) Snapshot {
 		}
 		t.lastSweptBytes = total
 		prune := t.openObservations == 0 && !t.lastObservationEnd.IsZero() && sweepStart.Sub(t.lastObservationEnd) >= r.cfg.Retention
+		isOverflow, subject := t.overflow, t.subject
 		t.mu.Unlock()
 		if prune {
 			delete(r.transfers, id)
 			r.transferReservations.Add(-1)
+			if !isOverflow {
+				budget := subjectBudgetKey(subject)
+				// Deleting at zero matters: without it the map grows one entry per
+				// principal ever seen and never shrinks.
+				if remaining := r.transfersBySubject[budget] - 1; remaining > 0 {
+					r.transfersBySubject[budget] = remaining
+				} else {
+					delete(r.transfersBySubject, budget)
+				}
+			}
 		}
 	}
 	r.transfersMu.Unlock()
@@ -669,7 +778,9 @@ func (r *Registry) SnapshotAt(capturedAt time.Time) Snapshot {
 		Coverage: r.coverage(),
 		NodeID:   r.cfg.NodeID, PublisherEpoch: r.cfg.PublisherEpoch, Sequence: r.sequence.Load(), CapturedAt: capturedAt,
 		Truncated: r.truncatedAt(capturedAt), DroppedObservations: r.droppedObservations.Load(),
-		DroppedBytes: r.droppedBytes.Load(), UnattributedObservations: r.unattributedObservations.Load(),
+		TransfersTruncated:          r.transfersTruncatedAt(capturedAt),
+		DroppedTransferObservations: r.droppedTransferObservations.Load(),
+		DroppedBytes:                r.droppedBytes.Load(), UnattributedObservations: r.unattributedObservations.Load(),
 		UnattributedBytes: r.unattributedBytes.Load()}
 	for i := range r.shards {
 		shard := &r.shards[i]

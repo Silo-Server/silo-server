@@ -268,6 +268,43 @@ func TestConfigFromEnvValidation(t *testing.T) {
 			t.Fatalf("config = %+v", cfg)
 		}
 	})
+	// The per-subject transfer budget follows the house semantics for a core cap:
+	// a broken value disables telemetry rather than quietly removing the bound
+	// that stops one client exhausting the shared table.
+	t.Run("per-subject transfer budget defaults", func(t *testing.T) {
+		clearConfigEnv(t)
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfersPerSubject != 128 {
+			t.Fatalf("per-subject budget default = %+v", cfg)
+		}
+	})
+	t.Run("valid per-subject transfer budget override", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(maxTransfersPerSubjectEnv, "64")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfersPerSubject != 64 {
+			t.Fatalf("per-subject budget override = %+v", cfg)
+		}
+	})
+	for _, value := range []string{"0", "-1", "many"} {
+		t.Run("invalid per-subject transfer budget "+value+" disables telemetry", func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv(maxTransfersPerSubjectEnv, value)
+			cfg := ConfigFromEnv("node")
+			if cfg.Enabled || cfg.MaxTransfersPerSubject != 128 {
+				t.Fatalf("invalid per-subject budget = %+v", cfg)
+			}
+		})
+	}
+	t.Run("per-subject transfer budget is clamped to a share of a lowered table", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(maxTransfersEnv, "16")
+		t.Setenv(maxTransfersPerSubjectEnv, "128")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.MaxTransfers != 16 || cfg.MaxTransfersPerSubject != 2 {
+			t.Fatalf("clamped per-subject budget = %+v", cfg)
+		}
+	})
 	t.Run("membership expiry overflow", func(t *testing.T) {
 		clearConfigEnv(t)
 		t.Setenv(enabledEnv, "true")
@@ -282,7 +319,7 @@ func TestConfigFromEnvValidation(t *testing.T) {
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, tombstoneRetentionEnv, maxSessionsEnv, maxTransfersEnv, maxObservationsEnv,
+	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, tombstoneRetentionEnv, maxSessionsEnv, maxTransfersEnv, maxTransfersPerSubjectEnv, maxObservationsEnv,
 		distributedEnv, freshnessEnv, membershipTTLEnv, keyPrefixEnv, fullResyncEveryEnv, maxPublishersEnv, maxMergedSessionsEnv, maxMergedTransfersEnv,
 		familiesEnv, viewTTLEnv} {
 		t.Setenv(name, "")

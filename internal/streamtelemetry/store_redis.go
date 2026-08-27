@@ -64,7 +64,8 @@ func snapshotHashFields(snapshot Snapshot) (map[string][]byte, error) {
 		Coverage: coverage,
 		NodeID:   snapshot.NodeID, Epoch: snapshot.PublisherEpoch,
 		Sequence: snapshot.Sequence, CapturedAtUnixNano: timeToUnixNano(snapshot.CapturedAt), Truncated: snapshot.Truncated,
-		DroppedObservations: snapshot.DroppedObservations, DroppedBytes: snapshot.DroppedBytes,
+		DroppedObservations: snapshot.DroppedObservations, TransfersTruncated: snapshot.TransfersTruncated,
+		DroppedTransferObservations: snapshot.DroppedTransferObservations, DroppedBytes: snapshot.DroppedBytes,
 		UnattributedObservations: snapshot.UnattributedObservations, UnattributedBytes: snapshot.UnattributedBytes,
 		SessionCount: len(snapshot.Sessions), TransferCount: len(snapshot.Transfers),
 	})
@@ -317,6 +318,11 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 // tight by fifteen fields and a saturated tombstone table overshot it by the
 // whole tombstone budget.
 //
+// The per-subject transfer budget (Config.MaxTransfersPerSubject) does not widen
+// this bound: a principal's catch-all fold row still takes an ordinary
+// MaxTransfers reservation, so the budget is a sub-allocation of that table and
+// the worst-case number of t: fields stays MaxTransfers.
+//
 // Getting this wrong is expensive and silent. An oversized hash is not truncated
 // and carries no Truncated flag — it is skipped entirely, which makes the
 // publisher missing, which makes the view incomplete, which disables no_delivery
@@ -369,6 +375,7 @@ func decodeSnapshotHash(publisherID string, fields map[string]string, maxSession
 	snapshot := Snapshot{PublisherID: meta.PublisherID, ReportingPublisherID: meta.ReportingPublisherID, Coverage: coverage,
 		NodeID: meta.NodeID, PublisherEpoch: meta.Epoch, Sequence: meta.Sequence,
 		CapturedAt: timeFromUnixNano(meta.CapturedAtUnixNano), Truncated: meta.Truncated, DroppedObservations: meta.DroppedObservations,
+		TransfersTruncated: meta.TransfersTruncated, DroppedTransferObservations: meta.DroppedTransferObservations,
 		DroppedBytes: meta.DroppedBytes, UnattributedObservations: meta.UnattributedObservations, UnattributedBytes: meta.UnattributedBytes}
 	names := make([]string, 0, len(fields))
 	for field := range fields {

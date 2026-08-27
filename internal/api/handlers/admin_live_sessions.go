@@ -91,6 +91,15 @@ type liveSessionsResponse struct {
 	ViewStale         bool     `json:"view_stale"`
 	ViewAgeMS         int64    `json:"view_age_ms"`
 	IncompleteReasons []string `json:"incomplete_reasons,omitempty"`
+	// ViewAdvisories names degradations that do NOT make the view incomplete and do
+	// not suppress classification — currently publisher_transfer_capacity, a
+	// publisher whose transfer table filled. Separate from IncompleteReasons on
+	// purpose: a client can mint transfer identities at will, so this signal is
+	// reported to the operator without being allowed to switch ghost detection off.
+	ViewAdvisories []string `json:"view_advisories,omitempty"`
+	// DroppedTransferObservations is the monotonic count of download/probe
+	// observations that lost attribution to a full transfer table.
+	DroppedTransferObservations int64 `json:"dropped_transfer_observations,omitempty"`
 	// NoDeliveryCount is how many rows are reported-as-playing with no current or
 	// remembered viewer-edge delivery. Always reported, whether or not those rows
 	// are included, so the UI can offer to reveal them.
@@ -162,6 +171,8 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 	response.ViewStale = status.Stale
 	response.ViewAgeMS = status.Age.Milliseconds()
 	response.IncompleteReasons = view.IncompleteReasons
+	response.ViewAdvisories = view.Advisories
+	response.DroppedTransferObservations = view.DroppedTransferObservations
 
 	if !status.Available {
 		// Before the first build there is no view to walk. Serving the legacy set
