@@ -334,7 +334,11 @@ func ffmpegSupportsVideoToolboxContext(ctx context.Context, ffmpegPath string) (
 }
 
 func videoToolboxSupportsTargetCodec(ffmpegPath, codec string) (bool, string) {
-	result := cachedVideoToolboxProbe(ffmpegPath)
+	return videoToolboxSupportsTargetCodecContext(context.Background(), ffmpegPath, codec)
+}
+
+func videoToolboxSupportsTargetCodecContext(ctx context.Context, ffmpegPath, codec string) (bool, string) {
+	result := cachedVideoToolboxProbeContext(ctx, ffmpegPath)
 	if strings.EqualFold(strings.TrimSpace(codec), "hevc") {
 		if result.hevcAvailable {
 			return true, ""
@@ -360,7 +364,7 @@ func cachedVideoToolboxProbeContext(ctx context.Context, ffmpegPath string) hard
 	// collides with the PATH-resolved executable, which can be a different
 	// binary with different capabilities.
 	execPath := probeExecFFmpegPath(ffmpegPath)
-	cacheKey := execPath
+	cacheKey := videoToolboxProbeCacheKey(execPath)
 	videoToolboxProbes.Lock()
 	if entry, ok := videoToolboxProbes.byPath[cacheKey]; ok {
 		if entry.expiresAt.IsZero() || time.Now().Before(entry.expiresAt) {
@@ -409,6 +413,14 @@ func cachedVideoToolboxProbeContext(ctx context.Context, ffmpegPath string) hard
 	case <-ctx.Done():
 		return hardwareProbeResult{reason: ctx.Err().Error()}
 	}
+}
+
+// videoToolboxProbeCacheKey keeps configured spellings distinct while also
+// invalidating a cached verdict when that spelling resolves to a replaced
+// executable. This matters for Homebrew upgrades that swap a symlink target
+// while Silo remains running.
+func videoToolboxProbeCacheKey(execPath string) string {
+	return execPath + "\x00" + nvencProbeCacheKey(execPath)
 }
 
 // StartupRetryHWAccel returns the acceleration for the single retry after a

@@ -1433,6 +1433,12 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 						"session", sessionID, "playback_session_id", sessionID)
 					return nil, err
 				}
+				if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
+					_ = session.Close()
+					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
+						"session", sessionID, "playback_session_id", sessionID)
+					return nil, retryErr
+				}
 			}
 		}
 	}

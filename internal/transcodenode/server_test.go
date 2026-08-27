@@ -2003,6 +2003,58 @@ func TestCopyModeReconstruct_SkipsFastSeek(t *testing.T) {
 	}
 }
 
+func TestSpawnReconstructDoesNotRegisterFailedSoftwareRetry(t *testing.T) {
+	server := newTestServer(t)
+	dir := t.TempDir()
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	logPath := filepath.Join(dir, "invocations.log")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n" +
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
+		"  *) exit 1 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := server.watcher.Config()
+	cfg.Playback.FFmpegPath = ffmpegPath
+	cfg.Playback.HWAccel = tonemap.BackendVideoToolbox
+
+	const sessionID = "failed-reconstruct-retry"
+	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: sessionID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
+		SegmentDuration: 2,
+	})
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if session != nil {
+		_ = session.Close()
+		t.Fatal("failed software retry returned a session")
+	}
+	if err == nil {
+		t.Fatal("failed software retry returned no error")
+	}
+	server.mu.RLock()
+	_, registered := server.sessions[sessionID]
+	server.mu.RUnlock()
+	if registered {
+		t.Fatal("failed software retry was registered")
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if got := strings.Count(string(logData), "-f hls"); got != 2 {
+		t.Fatalf("real transcode attempts = %d, want hardware plus software retry:\n%s", got, logData)
+	}
+	if !strings.Contains(string(logData), "libx264") {
+		t.Fatalf("reconstruction did not attempt the software retry:\n%s", logData)
+	}
+}
+
 // A fresh /transcode/start must resolve this node's configured hw_device list
 // through the shared GPU pool — the same path reconstruction uses — rather
 // than bypassing it with an empty device.

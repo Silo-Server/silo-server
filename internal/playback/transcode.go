@@ -295,7 +295,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
-	opts = normalizeTranscodeOpts(opts)
+	opts = normalizeTranscodeOptsContext(ctx, opts)
 	if err := validateToneMapOpts(opts); err != nil {
 		return nil, err
 	}
@@ -468,6 +468,10 @@ func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
 // must pass through this helper so streaming and prepared-file recipes cannot
 // disagree about whether a source may use hardware decode or encode.
 func normalizeTranscodeOpts(opts TranscodeOpts) TranscodeOpts {
+	return normalizeTranscodeOptsContext(context.Background(), opts)
+}
+
+func normalizeTranscodeOptsContext(ctx context.Context, opts TranscodeOpts) TranscodeOpts {
 	opts.FFmpegPath = ResolveFFmpegPath(opts.FFmpegPath)
 	opts = resolveSoftwareVideoDecode(opts)
 	if opts.ToneMapMode == tonemap.ModeSoftware {
@@ -475,7 +479,7 @@ func normalizeTranscodeOpts(opts TranscodeOpts) TranscodeOpts {
 		opts.HWAccel = HWAccelNone
 		return opts
 	}
-	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	opts.HWAccel = resolveEffectiveTranscodeHWAccelContext(ctx, opts)
 	return opts
 }
 
@@ -749,7 +753,11 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 // resolveEffectiveTranscodeHWAccel returns the backend that will actually execute the recipe.
 func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
-	hwAccel := ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath)
+	return resolveEffectiveTranscodeHWAccelContext(context.Background(), opts)
+}
+
+func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts TranscodeOpts) string {
+	hwAccel := ResolveHWAccelWithFFmpegContext(ctx, opts.HWAccel, opts.FFmpegPath)
 	if hwAccel == "" {
 		return ""
 	}
@@ -760,8 +768,8 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 		return HWAccelNone
 	}
 	if hwAccel == transcodeHWVideoToolbox {
-		if ok, reason := videoToolboxSupportsTargetCodec(opts.FFmpegPath, opts.TargetCodecVideo); !ok {
-			slog.Warn("VideoToolbox target encoder unavailable; using software encoding",
+		if ok, reason := videoToolboxSupportsTargetCodecContext(ctx, opts.FFmpegPath, opts.TargetCodecVideo); !ok {
+			slog.WarnContext(ctx, "VideoToolbox target encoder unavailable; using software encoding",
 				"target_codec", opts.TargetCodecVideo, "reason", reason)
 			return transcodeHWNone
 		}
@@ -771,7 +779,7 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 		// bitrate fallback visibly degrades high-resolution sources, so keep
 		// these on the software encoder.
 		if opts.TargetBitrateKbps <= 0 && opts.TargetResolution == "" {
-			slog.Info("VideoToolbox skipped for unconstrained transcode; using quality-based software encoding")
+			slog.InfoContext(ctx, "VideoToolbox skipped for unconstrained transcode; using quality-based software encoding")
 			return transcodeHWNone
 		}
 	}

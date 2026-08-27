@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 func TestBuildPrepareFileArgsEmitsFaststartMP4(t *testing.T) {
@@ -287,5 +288,67 @@ func TestPrepareFileRetriesVideoToolboxFailureInSoftware(t *testing.T) {
 	}
 	if !strings.Contains(string(log), "libx264") {
 		t.Fatalf("retry should encode with libx264:\n%s", log)
+	}
+}
+
+func TestPrepareFileDoesNotDropHardwareToneMapGraphOnSoftwareRetry(t *testing.T) {
+	setupHWAccelTest(t)
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := models.VideoTrack{
+		Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, FrameRate: "23.976",
+		ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
+		BitDepth: 10, PixelFormat: "yuv420p10le",
+	}
+	revision := tonemap.RevisionForFile(&models.MediaFile{ID: 42, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}})
+
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	logPath := filepath.Join(dir, "invocations.log")
+	ffmpegScript := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; echo ' V..... hevc_videotoolbox x'; exit 0 ;;\n" +
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
+		"  *) exit 1 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	liveJSON := `{"streams":[{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","level":153,"width":3840,"height":2160,"avg_frame_rate":"24000/1001","pix_fmt":"yuv420p10le","bits_per_raw_sample":"10","color_range":"tv","color_primaries":"bt2020","color_transfer":"smpte2084","color_space":"bt2020nc"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte("#!/bin/sh\nprintf '%s' '"+liveJSON+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "artifact.mp4")
+	err = PrepareFile(t.Context(), TranscodeOpts{
+		InputPath: inputPath, FFmpegPath: ffmpegPath,
+		SourceVideoCodec: "hevc", SourceVideoBitDepth: 10,
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", TargetBitrateKbps: 8000,
+		HWAccel:       transcodeHWVideoToolbox,
+		ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tonemap.ModeHardware,
+		ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: revision,
+		AudioTrackIndex: -1,
+	}, outputPath)
+	if err == nil {
+		t.Fatal("PrepareFile() succeeded after the hardware tone-map encode failed")
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(logData), "libx264") {
+		t.Fatalf("hardware tone-map failure retried without a valid software recipe:\n%s", logData)
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid tone-mapped artifact was published: %v", statErr)
 	}
 }

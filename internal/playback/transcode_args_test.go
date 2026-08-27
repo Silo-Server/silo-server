@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -1204,6 +1205,34 @@ func TestResolveEffectiveTranscodeHWAccelVideoToolboxChecksTargetEncoder(t *test
 	if got := resolveEffectiveTranscodeHWAccel(hevc); got != "none" {
 		t.Fatalf("HEVC target resolved to %q, want software fallback", got)
 	}
+}
+
+func TestNormalizeTranscodeOptsVideoToolboxHonorsCallerDeadline(t *testing.T) {
+	setupHWAccelTest(t)
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	opts := normalizeTranscodeOptsContext(ctx, TranscodeOpts{
+		FFmpegPath:        ffmpeg.path,
+		HWAccel:           transcodeHWVideoToolbox,
+		TargetCodecVideo:  "h264",
+		TargetBitrateKbps: 2000,
+	})
+	if opts.HWAccel != HWAccelNone {
+		t.Fatalf("HWAccel = %q, want software after caller deadline", opts.HWAccel)
+	}
+	if elapsed := time.Since(started); elapsed >= 150*time.Millisecond {
+		t.Fatalf("normalization took %s, want less than the probe command timeout", elapsed)
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("context error = %v, want deadline exceeded", ctx.Err())
+	}
+
+	// Let the bounded shared probe finish before setupHWAccelTest restores its
+	// package globals during cleanup.
+	_ = cachedVideoToolboxProbe(ffmpeg.path)
 }
 
 func TestResolveEffectiveTranscodeHWAccelVideoToolboxUnconstrainedUsesSoftware(t *testing.T) {

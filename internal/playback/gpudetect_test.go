@@ -757,16 +757,17 @@ func TestCachedVideoToolboxProbeRetriesNegativeResultsAfterExpiry(t *testing.T) 
 	}
 }
 
-func TestCachedVideoToolboxProbeCachesFullyCapableResultsForever(t *testing.T) {
+func TestCachedVideoToolboxProbeInvalidatesWhenExecutableIsReplaced(t *testing.T) {
 	setupHWAccelTest(t)
 	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
 	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
 		t.Fatalf("capable fake should probe available, got %q", result.reason)
 	}
 
-	// Break the binary; the cached positive verdict must keep serving.
+	// Replace the binary at the same configured spelling. Its identity is part
+	// of the cache key, so the old positive verdict must not survive.
 	writeFakeFFmpegScript(t, ffmpeg.path, ffmpeg.logPath, fakeFFmpegProbe{})
-	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
-		t.Fatal("fully capable results should be cached for the process lifetime")
+	if result := cachedVideoToolboxProbe(ffmpeg.path); result.available {
+		t.Fatal("replacement binary reused the previous executable's positive verdict")
 	}
 }

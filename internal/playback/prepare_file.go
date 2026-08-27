@@ -74,7 +74,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	if outputPath == "" {
 		return fmt.Errorf("prepare-file: empty output path")
 	}
-	opts = normalizeTranscodeOpts(opts)
+	opts = normalizeTranscodeOptsContext(ctx, opts)
 	if err := validateToneMapOpts(opts); err != nil {
 		return fmt.Errorf("prepare-file: %w", err)
 	}
@@ -119,11 +119,12 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 	}
 
 	err := runOnce(opts)
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && opts.ToneMapMode != tonemap.ModeHardware {
 		// Mirror the transport startup retry: a VideoToolbox encode the
 		// hardware cannot perform (e.g. at the artifact's dimensions) retries
-		// once in software instead of failing every artifact rebuild with the
-		// same hardware command.
+		// once in software. A frozen hardware tone-map recipe cannot take this
+		// shortcut: changing only HWAccel would drop its conversion graph while
+		// still tagging the unconverted output as SDR.
 		if retryAccel := StartupRetryHWAccel(opts.HWAccel, opts.FFmpegPath); retryAccel != opts.HWAccel {
 			slog.WarnContext(ctx, "prepared encode failed; retrying with software encoding",
 				"hw_accel", opts.HWAccel, "output", outputPath, "error", err)
