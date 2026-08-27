@@ -104,68 +104,77 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	ctx, cancelRead := context.WithCancel(r.Context())
 	defer cancelRead()
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
+	helloReceived := false
 
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
-		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
+		sendMarkerSnapshot, err := h.handleRealtimeClientMessage(sessionID, data, &helloReceived)
+		if err != nil {
 			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			continue
+		}
+		if sendMarkerSnapshot {
+			go h.sendCurrentMarkerSnapshot(sessionID)
 		}
 	}
 }
 
-func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []byte) error {
+func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []byte, helloReceived *bool) (bool, error) {
 	var base realtimeClientMessage
 	if err := json.Unmarshal(data, &base); err != nil {
-		return err
+		return false, err
 	}
 
 	switch base.Type {
 	case playback.RealtimeMessageTypeHello:
 		var hello playback.HelloEnvelope
 		if err := json.Unmarshal(data, &hello); err != nil {
-			return err
+			return false, err
 		}
 		if err := hello.Validate(); err != nil {
-			return err
+			return false, err
 		}
 		if hello.SessionID != sessionID {
-			return playback.ErrInvalidRealtimePayload
+			return false, playback.ErrInvalidRealtimePayload
+		}
+		sendMarkerSnapshot := helloReceived == nil || !*helloReceived
+		if helloReceived != nil {
+			*helloReceived = true
 		}
 		if h.setRealtimeConnectionState(sessionID, true) {
 			h.syncSessionsNow(context.Background(), "realtime_hello")
-			go h.sendCurrentMarkerSnapshot(sessionID)
 		}
 		h.touchSessionActivity(sessionID)
-		return nil
+		return sendMarkerSnapshot, nil
 	case playback.RealtimeMessageTypeAck:
 		var ack playback.AckEnvelope
 		if err := json.Unmarshal(data, &ack); err != nil {
-			return err
+			return false, err
 		}
 		if err := ack.Validate(); err != nil {
-			return err
+			return false, err
 		}
 		if ack.SessionID != sessionID {
-			return playback.ErrInvalidRealtimePayload
+			return false, playback.ErrInvalidRealtimePayload
 		}
 		h.touchSessionActivity(sessionID)
 		if h.CommandTracker != nil {
 			h.CommandTracker.Ack(ack.CommandID)
 		}
-		return nil
+		return false, nil
 	case playback.RealtimeMessageTypeResult:
 		var result playback.ResultEnvelope
 		if err := json.Unmarshal(data, &result); err != nil {
-			return err
+			return false, err
 		}
 		if err := result.Validate(); err != nil {
-			return err
+			return false, err
 		}
 		if result.SessionID != sessionID {
-			return playback.ErrInvalidRealtimePayload
+			return false, playback.ErrInvalidRealtimePayload
 		}
 		h.touchSessionActivity(sessionID)
 		// Establish ownership before mutating anything: a result naming another
@@ -175,13 +184,13 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		// is normal traffic.
 		record, ok := h.getRealtimeCommand(result.CommandID)
 		if ok && record.SessionID != sessionID {
-			return playback.ErrInvalidRealtimePayload
+			return false, playback.ErrInvalidRealtimePayload
 		}
 		if h.CommandTracker != nil {
 			h.CommandTracker.Result(result.CommandID)
 		}
 		if !ok {
-			return nil
+			return false, nil
 		}
 		h.forgetRealtimeCommand(result.CommandID)
 		if result.Status != playback.RealtimeResultStatusCompleted {
@@ -197,7 +206,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 					slog.Error("failed to stop playback after a rejected plan invalidation", "session", sessionID, "playback_session_id", sessionID, "error", err)
 				}
 			}
-			return nil
+			return false, nil
 		}
 		switch record.Name {
 		case playback.CommandStop, playback.CommandTerminate:
@@ -209,9 +218,9 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			// Completion means the client replanned itself; the session stays
 			// alive on its replacement plan and nothing else is required here.
 		}
-		return nil
+		return false, nil
 	default:
-		return playback.ErrInvalidRealtimePayload
+		return false, playback.ErrInvalidRealtimePayload
 	}
 }
 

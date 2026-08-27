@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,16 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
-
-type countingPlaybackFileResolver struct {
-	file  *models.MediaFile
-	calls chan struct{}
-}
-
-func (r countingPlaybackFileResolver) GetByID(_ context.Context, _ int) (*models.MediaFile, error) {
-	r.calls <- struct{}{}
-	return r.file, nil
-}
 
 func TestHandleSessionWebSocket_RequiresHelloBeforeRealtimeReady(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
@@ -153,19 +142,13 @@ func TestSendCurrentMarkerSnapshotLoadsPersistedSharedMarkers(t *testing.T) {
 	}
 }
 
-func TestHandleRealtimeClientMessageSendsMarkerSnapshotOnlyOnInitialHello(t *testing.T) {
+func TestHandleRealtimeClientMessageRequestsMarkerSnapshotOncePerConnection(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
 	session, err := sessionMgr.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	resolver := countingPlaybackFileResolver{
-		file:  &models.MediaFile{ID: 100},
-		calls: make(chan struct{}, 2),
-	}
-	handler := NewPlaybackHandler(sessionMgr, resolver)
-	handler.RealtimeHub = playback.NewRealtimeHub()
-	handler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(sessionMgr, handler.RealtimeHub)
+	handler := NewPlaybackHandler(sessionMgr)
 	hello, err := json.Marshal(playback.HelloEnvelope{
 		Type:      playback.RealtimeMessageTypeHello,
 		SessionID: session.ID,
@@ -178,22 +161,29 @@ func TestHandleRealtimeClientMessageSendsMarkerSnapshotOnlyOnInitialHello(t *tes
 		t.Fatalf("json.Marshal(hello): %v", err)
 	}
 
-	if err := handler.handleRealtimeClientMessage(session.ID, hello); err != nil {
+	helloReceived := false
+	sendMarkerSnapshot, err := handler.handleRealtimeClientMessage(session.ID, hello, &helloReceived)
+	if err != nil {
 		t.Fatalf("first hello: %v", err)
 	}
-	if err := handler.handleRealtimeClientMessage(session.ID, hello); err != nil {
+	if !sendMarkerSnapshot {
+		t.Fatal("initial hello did not request a marker snapshot")
+	}
+	sendMarkerSnapshot, err = handler.handleRealtimeClientMessage(session.ID, hello, &helloReceived)
+	if err != nil {
 		t.Fatalf("second hello: %v", err)
 	}
-
-	select {
-	case <-resolver.calls:
-	case <-time.After(time.Second):
-		t.Fatal("initial hello did not load a marker snapshot")
+	if sendMarkerSnapshot {
+		t.Fatal("repeated hello requested a second marker snapshot")
 	}
-	select {
-	case <-resolver.calls:
-		t.Fatal("repeated hello loaded a second marker snapshot")
-	case <-time.After(100 * time.Millisecond):
+
+	replacementHelloReceived := false
+	sendMarkerSnapshot, err = handler.handleRealtimeClientMessage(session.ID, hello, &replacementHelloReceived)
+	if err != nil {
+		t.Fatalf("replacement connection hello: %v", err)
+	}
+	if !sendMarkerSnapshot {
+		t.Fatal("replacement connection did not request a fresh marker snapshot")
 	}
 }
 
