@@ -586,6 +586,27 @@ func TestResolveHWAccelWithFFmpegDarwinUsesVideoToolbox(t *testing.T) {
 	}
 }
 
+func TestResolveHWAccelWithFFmpegContextDarwinHonorsCallerDeadline(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if got := ResolveHWAccelWithFFmpegContext(ctx, "auto", ffmpeg.path); got != HWAccelNone {
+		t.Fatalf("ResolveHWAccelWithFFmpegContext() = %q, want none", got)
+	}
+	if elapsed := time.Since(started); elapsed >= 150*time.Millisecond {
+		t.Fatalf("caller deadline took %s, want less than per-command timeout", elapsed)
+	}
+	if ctx.Err() != context.DeadlineExceeded {
+		t.Fatalf("context error = %v, want deadline exceeded", ctx.Err())
+	}
+	// Let the bounded shared probe finish before test cleanup restores globals.
+	_ = cachedVideoToolboxProbe(ffmpeg.path)
+}
+
 func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenProbeFails(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = "darwin"

@@ -179,18 +179,22 @@ func ResolveHWAccelWithFFmpeg(hwAccel string, ffmpegPath string) string {
 	return ResolveHWAccelWithFFmpegContext(context.Background(), hwAccel, ffmpegPath)
 }
 
-// ResolveHWAccelWithFFmpegContext resolves auto hardware without allowing any
-// FFmpeg capability probe to outlive ctx.
+// ResolveHWAccelWithFFmpegContext resolves auto hardware without blocking the
+// caller past ctx. A coalesced probe may continue for other callers and cache
+// its bounded result after this caller leaves.
 func ResolveHWAccelWithFFmpegContext(ctx context.Context, hwAccel string, ffmpegPath string) string {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if hwAccel != "auto" {
 		return hwAccel
 	}
 	if currentGOOS == darwinGOOS {
-		if ok, reason := ffmpegSupportsVideoToolbox(ffmpegPath); ok {
-			slog.Info("hw_accel=auto: macOS detected, using VideoToolbox")
+		if ok, reason := ffmpegSupportsVideoToolboxContext(ctx, ffmpegPath); ok {
+			slog.InfoContext(ctx, "hw_accel=auto: macOS detected, using VideoToolbox")
 			return transcodeHWVideoToolbox
 		} else {
-			slog.Warn("hw_accel=auto: macOS detected but FFmpeg VideoToolbox probe failed",
+			slog.WarnContext(ctx, "hw_accel=auto: macOS detected but FFmpeg VideoToolbox probe failed",
 				"ffmpeg", normalizeFFmpegPath(ffmpegPath), "reason", reason)
 		}
 		return transcodeHWNone
@@ -324,8 +328,8 @@ func nvencProbeCacheKey(ffmpegPath string) string {
 	return fmt.Sprintf("%s\x00%d\x00%d", identityPath, info.Size(), info.ModTime().UnixNano())
 }
 
-func ffmpegSupportsVideoToolbox(ffmpegPath string) (bool, string) {
-	result := cachedVideoToolboxProbe(ffmpegPath)
+func ffmpegSupportsVideoToolboxContext(ctx context.Context, ffmpegPath string) (bool, string) {
+	result := cachedVideoToolboxProbeContext(ctx, ffmpegPath)
 	return result.available, result.reason
 }
 
@@ -344,6 +348,13 @@ func videoToolboxSupportsTargetCodec(ffmpegPath, codec string) (bool, string) {
 }
 
 func cachedVideoToolboxProbe(ffmpegPath string) hardwareProbeResult {
+	return cachedVideoToolboxProbeContext(context.Background(), ffmpegPath)
+}
+
+func cachedVideoToolboxProbeContext(ctx context.Context, ffmpegPath string) hardwareProbeResult {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Execute the exact path the transcode will run and cache on that same
 	// spelling: filepath.Clean would turn "./ffmpeg" into a bare name that
 	// collides with the PATH-resolved executable, which can be a different
@@ -363,25 +374,41 @@ func cachedVideoToolboxProbe(ffmpegPath string) hardwareProbeResult {
 	// overwrite a success).
 	if call, ok := videoToolboxProbes.inFlight[cacheKey]; ok {
 		videoToolboxProbes.Unlock()
-		<-call.done
-		return call.result
+		select {
+		case <-call.done:
+			return call.result
+		case <-ctx.Done():
+			return hardwareProbeResult{reason: ctx.Err().Error()}
+		}
 	}
 	call := &videoToolboxProbeCall{done: make(chan struct{})}
 	videoToolboxProbes.inFlight[cacheKey] = call
 	videoToolboxProbes.Unlock()
 
-	result := probeFFmpegVideoToolbox(execPath)
-	entry := videoToolboxProbeEntry{result: result}
-	if !result.available || !result.hevcAvailable {
-		entry.expiresAt = time.Now().Add(videoToolboxProbeRetryDelay)
+	commandTimeout := nvencProbeCommandTimeout
+	retryDelay := videoToolboxProbeRetryDelay
+	go func() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), 4*commandTimeout+time.Second)
+		defer cancel()
+		result := probeFFmpegVideoToolboxContext(probeCtx, execPath, commandTimeout)
+		entry := videoToolboxProbeEntry{result: result}
+		if !result.available || !result.hevcAvailable {
+			entry.expiresAt = time.Now().Add(retryDelay)
+		}
+		videoToolboxProbes.Lock()
+		videoToolboxProbes.byPath[cacheKey] = entry
+		call.result = result
+		delete(videoToolboxProbes.inFlight, cacheKey)
+		close(call.done)
+		videoToolboxProbes.Unlock()
+	}()
+
+	select {
+	case <-call.done:
+		return call.result
+	case <-ctx.Done():
+		return hardwareProbeResult{reason: ctx.Err().Error()}
 	}
-	videoToolboxProbes.Lock()
-	videoToolboxProbes.byPath[cacheKey] = entry
-	call.result = result
-	delete(videoToolboxProbes.inFlight, cacheKey)
-	close(call.done)
-	videoToolboxProbes.Unlock()
-	return result
 }
 
 // StartupRetryHWAccel returns the acceleration for the single retry after a
@@ -416,14 +443,14 @@ func probeExecFFmpegPath(ffmpegPath string) string {
 // an HEVC recipe falls back to software. No filter probes: the VideoToolbox
 // pipeline keeps decoded frames in system memory, so the regular software
 // filter graph applies (see appendHWAccelArgs).
-func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
-	if output, err := runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
+func probeFFmpegVideoToolboxContext(ctx context.Context, ffmpegPath string, commandTimeout time.Duration) hardwareProbeResult {
+	if output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
 		return hardwareProbeResult{reason: "hwaccels probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	} else if !ffmpegOutputHasToken(output, "videotoolbox") {
 		return hardwareProbeResult{reason: "videotoolbox hwaccel unavailable"}
 	}
 
-	output, err := runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, "-hide_banner", "-encoders")
+	output, err := runFFmpegProbe(ctx, commandTimeout, ffmpegPath, "-hide_banner", "-encoders")
 	if err != nil {
 		return hardwareProbeResult{reason: "encoders probe failed: " + FormatFFmpegProbeFailure(err, output)}
 	}
@@ -449,7 +476,7 @@ func probeFFmpegVideoToolbox(ffmpegPath string) hardwareProbeResult {
 			"-f", "null",
 			"-",
 		)
-		return runFFmpegProbe(context.Background(), nvencProbeCommandTimeout, ffmpegPath, args...)
+		return runFFmpegProbe(ctx, commandTimeout, ffmpegPath, args...)
 	}
 
 	h264Output, err := smoke("h264_videotoolbox")
