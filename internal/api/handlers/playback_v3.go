@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,6 +49,7 @@ const (
 	subtitleUnavailableReasonV3  = "subtitle_artifact_unavailable"
 	transcodeStartFailedReasonV3 = "transcode_start_failed"
 	seekRestorationPlayerV3      = "player_position"
+	outputRouteChangedReasonV3   = "output_route_changed"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -3335,6 +3337,17 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 		return
 	}
+	// Older Android clients can report a Spatializer callback as an output-route
+	// change even though the sink and every planning capability stayed the same.
+	// Replanning remounts Media3, which can fire the callback again and create a
+	// direct/remux/transcode loop. Keep the active route mounted when only the
+	// opaque route token or Spatializer runtime state changed.
+	if req.EffectiveOperation() == playback.ReplanOperationFailureRecoveryV3 &&
+		req.Failure.Classification == outputRouteChangedReasonV3 &&
+		sameLegacyOutputRouteReplanV3(record, req) {
+		writeError(w, http.StatusConflict, "output_route_unchanged", "Output route capabilities did not change")
+		return
+	}
 	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
 	if replanErr != nil {
 		if transport != nil {
@@ -3398,6 +3411,49 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	h.raceCopySafetyV3(updated.EffectiveMediaFileID, response.PlaybackPlan)
 	writeJSON(w, http.StatusOK, response)
+}
+
+func sameLegacyOutputRouteReplanV3(record *playback.AttemptRecordV3, next playback.ReplanRequestV3) bool {
+	if record == nil {
+		return false
+	}
+	current := record.NormalizedRequest
+	if nextQuality := strings.TrimSpace(next.QualityPreference); nextQuality != "" {
+		normalized, _ := playback.NormalizeQualityV3(nextQuality)
+		if normalized != current.QualityPreference {
+			return false
+		}
+	}
+	if next.Metered != current.Metered ||
+		!reflect.DeepEqual(next.BandwidthEstimateKbps, current.BandwidthEstimateKbps) ||
+		!reflect.DeepEqual(next.BandwidthCapKbps, current.BandwidthCapKbps) ||
+		!sameSelectedTracksV3(next.SelectedTracks, record.CurrentPlan.SelectedTracks) ||
+		!reflect.DeepEqual(next.ClientFeatures, current.ClientFeatures) {
+		return false
+	}
+	currentCapabilities := current.Capabilities
+	nextCapabilities := next.Capabilities
+	currentCapabilities.AudioPassthrough = withoutSpatializerV3(currentCapabilities.AudioPassthrough)
+	nextCapabilities.AudioPassthrough = withoutSpatializerV3(nextCapabilities.AudioPassthrough)
+	if !reflect.DeepEqual(currentCapabilities, nextCapabilities) {
+		return false
+	}
+	currentContext := current.ClientPlaybackContext
+	nextContext := next.ClientPlaybackContext
+	currentContext.Output.OutputContextID = ""
+	nextContext.Output.OutputContextID = ""
+	currentContext.Output.AudioPassthrough = withoutSpatializerV3(currentContext.Output.AudioPassthrough)
+	nextContext.Output.AudioPassthrough = withoutSpatializerV3(nextContext.Output.AudioPassthrough)
+	return reflect.DeepEqual(currentContext, nextContext)
+}
+
+func withoutSpatializerV3(value *playback.AudioPassthroughV3) *playback.AudioPassthroughV3 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.SpatializerEnabled = false
+	return &copy
 }
 
 // raceCopySafetyV3 resolves an unknown H.264 copy-safety verdict behind a plan
@@ -3485,7 +3541,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
 			case "subtitle_track_changed":
 				intentChange = subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
-			case "output_route_changed":
+			case outputRouteChangedReasonV3:
 				intentChange = req.ClientPlaybackContext.Output.OutputContextID != start.ClientPlaybackContext.Output.OutputContextID
 			}
 		}
