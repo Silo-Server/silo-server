@@ -276,18 +276,30 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 		view.Publishers = append(view.Publishers, status)
 		contributions = append(contributions, publisherContribution{ref: ref, snapshot: snapshot})
 	}
-	// A process that declared a reporting companion but whose companion is not
-	// contributing leaves the view blind to exactly the sessions telemetry cannot
-	// measure: paused ones, and ones that have not delivered a byte yet. That is
-	// invisible without this check, because the measuring publisher looks perfectly
-	// healthy. It is the normal state during a rolling deploy, when an un-upgraded
-	// process publishes no reported state at all - so the view must say so rather
-	// than report itself complete over a set it knows is short.
+	// Coverage is pessimistic across rolling deploys: an un-upgraded contributor
+	// cannot tell us which families or reporting companion it covers, so its
+	// silence makes the whole view incomplete. That fleet-wide consequence is
+	// deliberate because the admin classifier treats incompleteness as blindness,
+	// suppressing no-delivery and unclaimed-idle rather than manufacturing ghosts.
 	contributing := make(map[string]struct{}, len(contributions))
 	for _, contribution := range contributions {
 		contributing[contribution.ref.PublisherID] = struct{}{}
 	}
 	for _, contribution := range contributions {
+		coverage := contribution.snapshot.Coverage
+		if !coverage.Declared {
+			addReason(&view, "unknown_publisher_coverage")
+			continue
+		}
+		// Role is positional, exactly as normalizeProvenance decides it. A
+		// reporting id measures nothing, so no family expectation applies to it,
+		// and no self-declared role can move a publisher into or out of this set.
+		if strings.HasSuffix(contribution.ref.PublisherID, ReportedPublisherSuffix) {
+			continue
+		}
+		if !observesAllFamilies(coverage.ConfiguredFamilies) {
+			addReason(&view, "partial_family_observation")
+		}
 		companion := contribution.snapshot.ReportingPublisherID
 		if companion == "" {
 			continue
@@ -317,6 +329,19 @@ func BuildGlobalView(set PublisherSet, at time.Time, params ViewParams) GlobalMo
 	view.Epoch = globalEpoch(contributions)
 	view.Complete = len(view.IncompleteReasons) == 0
 	return view
+}
+
+func observesAllFamilies(configured []Family) bool {
+	observed := make(map[Family]struct{}, len(configured))
+	for _, family := range configured {
+		observed[family] = struct{}{}
+	}
+	for _, family := range AllFamilies {
+		if _, ok := observed[family]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // addMissingPublisher keeps the roster projection unique by publisher id. A

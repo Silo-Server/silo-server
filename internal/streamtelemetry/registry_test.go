@@ -397,6 +397,20 @@ type lifecycleStore struct {
 	failFirstLeave bool
 }
 
+type firstSnapshotStore struct {
+	published chan Snapshot
+}
+
+func (s *firstSnapshotStore) Publish(_ context.Context, snapshot Snapshot) error {
+	select {
+	case s.published <- snapshot:
+	default:
+	}
+	return nil
+}
+
+func (s *firstSnapshotStore) Load(context.Context) (Snapshot, error) { return Snapshot{}, nil }
+
 func (s *lifecycleStore) Publish(_ context.Context, snapshot Snapshot) error {
 	s.mu.Lock()
 	s.published = append(s.published, snapshot)
@@ -507,7 +521,7 @@ func TestRegistryGlobalView(t *testing.T) {
 	at := time.Now()
 	store := NewLocalStore()
 	registry := NewRegistry(testConfig(), store, nil)
-	if err := store.Publish(context.Background(), Snapshot{PublisherID: "test-publisher", PublisherEpoch: 1, Sequence: 1, CapturedAt: at}); err != nil {
+	if err := store.Publish(context.Background(), Snapshot{PublisherID: "test-publisher", PublisherEpoch: 1, Sequence: 1, CapturedAt: at, Coverage: fullCoverage()}); err != nil {
 		t.Fatal(err)
 	}
 	originalNow := now
@@ -529,6 +543,40 @@ func TestRegistryGlobalView(t *testing.T) {
 	var nilRegistry *Registry
 	if zero, err := nilRegistry.GlobalView(context.Background()); err != nil || !reflect.DeepEqual(zero, GlobalMonitoringView{}) {
 		t.Fatalf("nil view = %+v, %v", zero, err)
+	}
+}
+
+func TestRegistryDeclaresConfiguredCoverageAndPredeclaredReporter(t *testing.T) {
+	cfg := testConfig()
+	cfg.SweepInterval = time.Millisecond
+	store := &firstSnapshotStore{published: make(chan Snapshot, 1)}
+	registry := NewRegistry(cfg, store, nil)
+	registry.DeclareReportingPublisher("test-publisher#reported")
+	ctx, cancel := context.WithCancel(context.Background())
+	registry.Start(ctx)
+	var first Snapshot
+	select {
+	case first = <-store.published:
+	case <-time.After(time.Second):
+		t.Fatal("registry did not publish its first snapshot")
+	}
+	cancel()
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	if err := registry.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if !first.Coverage.Declared || !reflect.DeepEqual(first.Coverage.ConfiguredFamilies, AllFamilies) {
+		t.Fatalf("default coverage = %+v", first.Coverage)
+	}
+	if first.ReportingPublisherID != "test-publisher#reported" {
+		t.Fatalf("first snapshot reporter = %q", first.ReportingPublisherID)
+	}
+
+	cfg.Families = map[Family]bool{FamilyProxy: true}
+	narrowed := NewRegistry(cfg, NewLocalStore(), nil).SnapshotAt(time.Unix(1, 0))
+	if !narrowed.Coverage.Declared || !reflect.DeepEqual(narrowed.Coverage.ConfiguredFamilies, []Family{FamilyProxy}) {
+		t.Fatalf("narrowed coverage = %+v", narrowed.Coverage)
 	}
 }
 

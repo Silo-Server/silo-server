@@ -106,6 +106,7 @@ func TestTransferCodecRoundTrip(t *testing.T) {
 
 func TestPublisherMetaCodecRoundTrip(t *testing.T) {
 	want := publisherMeta{PublisherID: "pub", NodeID: "node", Epoch: 4, Sequence: 5, CapturedAtUnixNano: 6, Truncated: true,
+		Coverage:            &wireCoverage{Families: []string{"native", "future_family"}},
 		DroppedObservations: 7, DroppedBytes: 8, UnattributedObservations: 9, UnattributedBytes: 10, SessionCount: 11, TransferCount: 12}
 	encoded, err := encodeMeta(want)
 	if err != nil {
@@ -118,6 +119,53 @@ func TestPublisherMetaCodecRoundTrip(t *testing.T) {
 	want.V = codecVersion
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestPublisherMetaCoverageTriStateAndBounds(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		meta publisherMeta
+	}{
+		{name: "declared empty", meta: publisherMeta{Coverage: &wireCoverage{}}},
+		{name: "undeclared", meta: publisherMeta{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := encodeMeta(test.meta)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := decodeMeta(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.meta.Coverage == nil {
+				if got.Coverage != nil {
+					t.Fatalf("coverage = %#v, want absent", got.Coverage)
+				}
+				return
+			}
+			if got.Coverage == nil || got.Coverage.Families == nil || len(got.Coverage.Families) != 0 {
+				t.Fatalf("declared empty coverage = %#v", got.Coverage)
+			}
+		})
+	}
+
+	atLimit := make([]string, maxWireMap)
+	encoded, err := encodeMeta(publisherMeta{Coverage: &wireCoverage{Families: atLimit}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeMeta(encoded); err != nil {
+		t.Fatalf("coverage at bound rejected: %v", err)
+	}
+	overLimit := make([]string, maxWireMap+1)
+	encoded, err = encodeMeta(publisherMeta{Coverage: &wireCoverage{Families: overLimit}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeMeta(encoded); err == nil {
+		t.Fatal("coverage over bound accepted")
 	}
 }
 

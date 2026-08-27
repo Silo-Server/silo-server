@@ -125,20 +125,30 @@ type wireTransfer struct {
 }
 
 type publisherMeta struct {
-	V                        int    `json:"v"`
-	PublisherID              string `json:"pid"`
-	ReportingPublisherID     string `json:"rpid,omitempty"`
-	NodeID                   string `json:"nid"`
-	Epoch                    int64  `json:"ep"`
-	Sequence                 uint64 `json:"sq"`
-	CapturedAtUnixNano       int64  `json:"cap"`
-	Truncated                bool   `json:"tr"`
-	DroppedObservations      int64  `json:"do"`
-	DroppedBytes             int64  `json:"db"`
-	UnattributedObservations int64  `json:"uo"`
-	UnattributedBytes        int64  `json:"ub"`
-	SessionCount             int    `json:"sc"`
-	TransferCount            int    `json:"tc"`
+	V                    int    `json:"v"`
+	PublisherID          string `json:"pid"`
+	ReportingPublisherID string `json:"rpid,omitempty"`
+	// Coverage is additive metadata under codec v1. The pointer is the wire
+	// tri-state: absent means an older publisher made no declaration, while a
+	// present object with fam:[] explicitly observes no families. Bumping the
+	// codec version instead would make every un-upgraded publisher undecodable
+	// during the rolling deploy this declaration is meant to describe safely.
+	Coverage                 *wireCoverage `json:"cov,omitempty"`
+	NodeID                   string        `json:"nid"`
+	Epoch                    int64         `json:"ep"`
+	Sequence                 uint64        `json:"sq"`
+	CapturedAtUnixNano       int64         `json:"cap"`
+	Truncated                bool          `json:"tr"`
+	DroppedObservations      int64         `json:"do"`
+	DroppedBytes             int64         `json:"db"`
+	UnattributedObservations int64         `json:"uo"`
+	UnattributedBytes        int64         `json:"ub"`
+	SessionCount             int           `json:"sc"`
+	TransferCount            int           `json:"tc"`
+}
+
+type wireCoverage struct {
+	Families []string `json:"fam"`
 }
 
 func timeToUnixNano(value time.Time) int64 {
@@ -311,6 +321,9 @@ func decodeTransfer(data []byte) (TransferView, error) {
 }
 
 func encodeMeta(value publisherMeta) ([]byte, error) {
+	if value.Coverage != nil && value.Coverage.Families == nil {
+		value.Coverage = &wireCoverage{Families: []string{}}
+	}
 	value.V = codecVersion
 	return json.Marshal(value)
 }
@@ -328,6 +341,9 @@ func decodeMeta(data []byte) (publisherMeta, error) {
 	}
 	if value.SessionCount > maxWireSlice || value.TransferCount > maxWireSlice {
 		return publisherMeta{}, errors.New("publisher count too large")
+	}
+	if value.Coverage != nil && len(value.Coverage.Families) > maxWireMap {
+		return publisherMeta{}, errors.New("publisher coverage too large")
 	}
 	return value, nil
 }

@@ -308,6 +308,19 @@ func (c Config) ObservesFamily(family Family) bool {
 	return c.Families[family]
 }
 
+// ObservesAllFamilies reports whether observation is un-narrowed. It checks the
+// canonical family set through ObservesFamily rather than comparing map sizes,
+// because future or otherwise unknown keys must not make a partial declaration
+// look complete by count.
+func (c Config) ObservesAllFamilies() bool {
+	for _, family := range AllFamilies {
+		if !c.ObservesFamily(family) {
+			return false
+		}
+	}
+	return true
+}
+
 // ObservedFamilies lists the observed families in a stable order, for the
 // startup log that makes the resolved set visible.
 func (c Config) ObservedFamilies() []string {

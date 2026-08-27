@@ -116,6 +116,7 @@ func (p *ReportedPublisher) PublisherID() string {
 // SnapshotAt renders the current reported state without publishing it.
 func (p *ReportedPublisher) SnapshotAt(capturedAt time.Time) Snapshot {
 	snapshot := Snapshot{PublisherID: p.cfg.PublisherID, NodeID: p.cfg.NodeID,
+		Coverage:       PublisherCoverage{Declared: true},
 		PublisherEpoch: p.cfg.PublisherEpoch, Sequence: p.sequence.Load(), CapturedAt: capturedAt}
 	if p.source == nil {
 		return snapshot

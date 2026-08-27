@@ -30,6 +30,13 @@ func TestReportedPublisherUsesASuffixedPublisherID(t *testing.T) {
 	}
 }
 
+func TestReportedPublisherDeclaresNoMeasuredFamilies(t *testing.T) {
+	snapshot := NewReportedPublisher(reportedConfig(t), stubReportedSource{}, NewLocalStore(), nil).SnapshotAt(time.Unix(0, 0))
+	if !snapshot.Coverage.Declared || len(snapshot.Coverage.ConfiguredFamilies) != 0 {
+		t.Fatalf("reported coverage = %+v", snapshot.Coverage)
+	}
+}
+
 // The whole contract of this publisher: it says a session EXISTS and what the
 // client claimed about it, and nothing about delivery. Publishing bytes or a
 // viewer address here would let a claim be read as a measurement.

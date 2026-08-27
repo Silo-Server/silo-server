@@ -17,6 +17,12 @@ func (r *Registry) Observe(route MediaRoute) func(http.Handler) http.Handler {
 		// Evaluated once at mount time — Observe returns the middleware, and the
 		// closure below is what runs per request — so the family gate costs
 		// nothing on the hot path.
+		// An unobserved family is declared in publisher coverage and makes the
+		// merged view incomplete, so sessions skipped here cannot be mistaken for
+		// ghosts. An unenrolled route is deliberately not declared: routes do not
+		// exist until routers are built after publishers start, and declarations
+		// are mutable package-global state. Each family's media-route manifest test
+		// instead enforces enrollment as a static invariant.
 		if r == nil || !r.cfg.Enabled || !route.Enrolled || !r.cfg.ObservesFamily(route.Family) {
 			return next
 		}

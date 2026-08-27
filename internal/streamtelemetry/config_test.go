@@ -371,3 +371,22 @@ func TestConfigFamilyGate(t *testing.T) {
 		}
 	})
 }
+
+func TestConfigObservesAllFamilies(t *testing.T) {
+	if !DefaultConfig("node").ObservesAllFamilies() {
+		t.Fatal("unset family configuration is not full coverage")
+	}
+	narrowed := DefaultConfig("node")
+	narrowed.Families = map[Family]bool{FamilyProxy: true}
+	if narrowed.ObservesAllFamilies() {
+		t.Fatal("narrowed family configuration reported full coverage")
+	}
+	explicit := DefaultConfig("node")
+	explicit.Families = make(map[Family]bool, len(AllFamilies))
+	for _, family := range AllFamilies {
+		explicit.Families[family] = true
+	}
+	if !explicit.ObservesAllFamilies() {
+		t.Fatal("explicit canonical family set did not report full coverage")
+	}
+}

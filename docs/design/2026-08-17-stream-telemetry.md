@@ -324,12 +324,31 @@ publisher is alive; it cannot say which publishers *must* be present before a de
 is safe. A publisher whose heartbeat is older than the membership TTL has departed and
 does not block completeness; a roster member without a usable fresh snapshot is stale,
 excluded, named in `MissingPublishers`, and does block it. `Complete` is true only when
-all four hold:
+all six hold:
 
 1. no publisher is missing or stale;
 2. no merged snapshot is truncated;
 3. the reader hit no publisher/session/transfer cap;
-4. no publisher has decode errors, a count mismatch, or an oversized hash.
+4. no publisher has decode errors, a count mismatch, or an oversized hash;
+5. every contributing publisher declares its coverage;
+6. every contributing measuring publisher observes all canonical families.
+
+Each snapshot declares the route families its configuration observes. The declaration
+is tri-state: an absent declaration identifies a pre-field binary and makes the view
+incomplete; a present empty family set means "observes none", never "all". This
+pessimistic default is intentional during rolling deploys: otherwise an older
+contributor is indistinguishable from a fully covered one and ghost classification can
+resume over evidence known to be short. Measuring publishers must name every family in
+the canonical set; reporting publishers are identified positionally by their
+`#reported` id and measure no families by construction.
+
+The coverage declaration deliberately does not carry route enrollment. Route
+declarations are mutable package-global state populated only when routers are built,
+after the measuring publisher has already started; publishing that state would be
+vacuously complete during the startup window and would let one test declaration
+contaminate later snapshots. Enrollment is instead a static invariant enforced for
+each family by its media-route manifest test, which fails if any declared route has
+`Enrolled:false`. There is therefore no runtime `unenrolled_media_routes` reason.
 
 **What the flag buys is telling blindness apart from absence.** A session that leaves
 the view because the viewer closed the player, one whose bytes stop growing because the
@@ -584,7 +603,10 @@ observed as soon as telemetry is enabled.
 **The family gate.** `SILO_STREAM_TELEMETRY_FAMILIES` defaults to every declared
 family — `native`, `proxy`, `transcode_node`, `jellycompat`, `abs`. The variable exists
 to narrow observation or drop one misbehaving family without losing the rest, not to
-stage a rollout: naming it takes away families rather than adding them.
+stage a rollout: naming it takes away families rather than adding them. A narrowed
+measuring publisher declares that fact, so the merged view is incomplete by design and
+fleet-wide `no_delivery` / `unclaimed_idle` classification remains suppressed until
+all five families are observed again.
 
 Since `SILO_STREAM_TELEMETRY_ENABLED` now defaults on, that master switch decides
 whether a process observes at all, and the family list — left unset by default — no
@@ -906,10 +928,15 @@ but cannot be parsed is treated as `false`, not as the default, because an opera
 mistypes a kill switch was reaching for "stop", and a mistyped disable that quietly left
 the feature running is the failure that costs them.
 
+Narrowing `SILO_STREAM_TELEMETRY_FAMILIES` is visible at startup and intentionally
+makes the merged view incomplete. The consequence is fleet-wide suppression of
+`no_delivery` and `unclaimed_idle`: a family omitted anywhere is blindness, not
+evidence that a session is absent.
+
 | Variable | Default | Scope | Meaning |
 |---|---:|---|---|
 | `SILO_STREAM_TELEMETRY_ENABLED` | `true` | core | Master switch, per process. Set it to `false` to stop observing; a value that cannot be parsed also reads as off. |
-| `SILO_STREAM_TELEMETRY_FAMILIES` | all five (`native,proxy,transcode_node,jellycompat,abs`) | core | Which route families are wrapped. Narrows or kills observation; naming it takes families away rather than staging them in. |
+| `SILO_STREAM_TELEMETRY_FAMILIES` | all five (`native,proxy,transcode_node,jellycompat,abs`) | core | Which route families are wrapped. Narrows or kills observation; naming it takes families away rather than staging them in, and makes the merged view incomplete until all five are restored. |
 | `SILO_STREAM_TELEMETRY_SWEEP_INTERVAL` | `1s` | core | Collector period. |
 | `SILO_STREAM_TELEMETRY_RETENTION` | `5m` | core | How long a session survives its last observation. |
 | `SILO_STREAM_TELEMETRY_MAX_SESSIONS` | `10000` | core | Local session cap. |

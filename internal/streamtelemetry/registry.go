@@ -666,7 +666,8 @@ func (r *Registry) Snapshot() Snapshot { return r.SnapshotAt(now()) }
 // most recent sweep; callers that need current totals must call Sweep.
 func (r *Registry) SnapshotAt(capturedAt time.Time) Snapshot {
 	view := Snapshot{PublisherID: r.cfg.PublisherID, ReportingPublisherID: r.reportingCompanion(),
-		NodeID: r.cfg.NodeID, PublisherEpoch: r.cfg.PublisherEpoch, Sequence: r.sequence.Load(), CapturedAt: capturedAt,
+		Coverage: r.coverage(),
+		NodeID:   r.cfg.NodeID, PublisherEpoch: r.cfg.PublisherEpoch, Sequence: r.sequence.Load(), CapturedAt: capturedAt,
 		Truncated: r.truncatedAt(capturedAt), DroppedObservations: r.droppedObservations.Load(),
 		DroppedBytes: r.droppedBytes.Load(), UnattributedObservations: r.unattributedObservations.Load(),
 		UnattributedBytes: r.unattributedBytes.Load()}
@@ -693,4 +694,14 @@ func (r *Registry) SnapshotAt(capturedAt time.Time) Snapshot {
 	sort.Slice(view.Sessions, func(i, j int) bool { return view.Sessions[i].SessionID < view.Sessions[j].SessionID })
 	sort.Slice(view.Transfers, func(i, j int) bool { return view.Transfers[i].ID < view.Transfers[j].ID })
 	return cloneSnapshot(view)
+}
+
+func (r *Registry) coverage() PublisherCoverage {
+	families := make([]Family, 0, len(AllFamilies))
+	for _, family := range AllFamilies {
+		if r.cfg.ObservesFamily(family) {
+			families = append(families, family)
+		}
+	}
+	return PublisherCoverage{Declared: true, ConfiguredFamilies: families}
 }

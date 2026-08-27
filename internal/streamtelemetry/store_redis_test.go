@@ -126,6 +126,7 @@ func TestRedisStoreKeyBuilders(t *testing.T) {
 
 func TestSnapshotHashFieldsRoundTripAndDeterministicCap(t *testing.T) {
 	snapshot := Snapshot{PublisherID: "publisher", NodeID: "node", PublisherEpoch: 1, Sequence: 2, CapturedAt: time.Unix(3, 4),
+		Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, Family("future_family")}},
 		Sessions: []SessionView{
 			{SessionID: "z", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
 			{SessionID: "a", TokenIssuedAtSources: map[TokenIssuedAtSource]int64{}, Outcomes: map[httpstream.StreamOutcome]int64{}},
@@ -202,12 +203,14 @@ func TestRedisStoreIntegration(t *testing.T) {
 		prefix := "test:stelem:" + uuid.NewString()
 		store := newStore(prefix, "p1")
 		t.Cleanup(func() { _ = client.Del(ctx, store.rosterKey(), store.snapshotKey("p1")).Err() })
-		first := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: time.Now(), Sessions: []SessionView{{SessionID: "a"}, {SessionID: "removed"}}}
+		first := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: time.Now(),
+			Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, FamilyProxy}},
+			Sessions: []SessionView{{SessionID: "a"}, {SessionID: "removed"}}}
 		if err := store.Publish(ctx, first); err != nil {
 			t.Fatal(err)
 		}
 		set, err := store.LoadAll(ctx)
-		if err != nil || len(set.Snapshots) != 1 || len(set.Snapshots[0].Sessions) != 2 {
+		if err != nil || len(set.Snapshots) != 1 || len(set.Snapshots[0].Sessions) != 2 || !reflect.DeepEqual(set.Snapshots[0].Coverage, first.Coverage) {
 			t.Fatalf("first load = %+v, %v", set, err)
 		}
 		second := cloneSnapshot(first)

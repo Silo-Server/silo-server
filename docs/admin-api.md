@@ -724,17 +724,17 @@ agreement.
 
 | Field                                 | Type             | Meaning                                                                                                                                                                                            |
 | ------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `available`                           | bool             | A merged view exists.                                                                                                                                                                              |
-| `built_at`                            | RFC3339 string   | When it was built. Omitted if never.                                                                                                                                                               |
-| `age_ms`, `stale`                     | int, bool        | Age of the cached view, and whether it exceeded the TTL.                                                                                                                                           |
-| `build_took_ms`                       | int              | Cost of the last rebuild.                                                                                                                                                                          |
-| `refreshes`, `failures`, `last_error` | int, int, string | Cache counters since process start.                                                                                                                                                                |
-| `complete`                            | bool             | No publisher was stale, degraded or truncated.                                                                                                                                                     |
-| `incomplete_reasons`                  | string[]         | Why `complete` is false — e.g. `missing_publisher`, `publisher_truncated`, `decode_errors`, `truncated`.                                                                                           |
-| `missing_publishers`                  | string[]         | Publisher ids with no usable contribution: stale/unusable roster entries and declared reporting companions that are absent. Each id appears at most once. |
-| `clock_skew_suspected`                | bool             | A publisher stamped a time in the future. A clock running _behind_ is indistinguishable from a stalled publisher in one sample; compare `publishers` sequence across two reads to tell them apart. |
-| `publishers`                          | string[]         | `<publisher-id>=<state>`, where state is `fresh`, `degraded`, `stale` or `departed`.                                                                                                               |
-| `session_count`, `transfer_count`     | int              | Sizes of the merged view.                                                                                                                                                                          |
+| `available`                           | bool             | A merged view exists. |
+| `built_at`                            | RFC3339 string   | When it was built. Omitted if never. |
+| `age_ms`, `stale`                     | int, bool        | Age of the cached view, and whether it exceeded the TTL. |
+| `build_took_ms`                       | int              | Cost of the last rebuild. |
+| `refreshes`, `failures`, `last_error` | int, int, string | Cache counters since process start. |
+| `complete`                            | bool             | No publisher is missing or stale, no snapshot is truncated, no reader cap was hit, no publisher is degraded, every contributor declares coverage, and every measuring contributor observes all five families. |
+| `incomplete_reasons`                  | string[]         | Why `complete` is false — e.g. `missing_publisher`, `publisher_truncated`, `decode_errors`, `truncated`, `unknown_publisher_coverage`, `partial_family_observation`. |
+| `missing_publishers`                  | string[]         | Publisher ids with no usable contribution: stale/unusable roster entries and declared reporting companions that are absent. Each id appears at most once. Undeclared coverage adds `unknown_publisher_coverage` but no id here: the publisher contributed; it could not describe what it covers. |
+| `clock_skew_suspected`                | bool             | A publisher stamped a time in the future. A clock running *behind* is indistinguishable from a stalled publisher in one sample; compare `publishers` sequence across two reads to tell them apart. |
+| `publishers`                          | string[]         | `<publisher-id>=<state>`, where state is `fresh`, `degraded`, `stale` or `departed`. |
+| `session_count`, `transfer_count`     | int              | Sizes of the merged view. |
 
 Each entry in `sources`:
 
@@ -1306,7 +1306,12 @@ should not be dropped.
   that is missing, so the classification stops being evidence of anything. The
   same rule applies while `view_stale` is true: an old complete view is still
   blindness about what is happening now.
-  `missing_reported_publisher` is the reason to expect during a rolling deploy.
+  During a mixed-version rolling deploy, an older contributing binary produces
+  `unknown_publisher_coverage`. `partial_family_observation` means a measuring
+  publisher started with a narrowed `SILO_STREAM_TELEMETRY_FAMILIES`; that is an
+  operator configuration error for a complete fleet view. A declared reporting
+  companion that is absent produces the narrower
+  `missing_reported_publisher` reason.
 - `no_delivery_count` is how many rows were held back, whether or not shown.
 - `unclaimed_idle_count` is how many measured-only rows were held back after
   their viewer-edge delivery went idle, whether or not shown.
@@ -1399,10 +1404,13 @@ one unable to.
 
 **A declared reporter that is not contributing makes the view incomplete.** A
 measuring publisher names its companion in its snapshot, so the merge can tell "no
-sessions to report" from "the reporter has not been seen". Without it, an
-un-upgraded process during a rolling deploy would publish measuring state only and
-the view would call itself complete while every paused and pre-delivery session
-that process owns was missing from it.
+sessions to report" from "the reporter has not been seen". Without that companion
+declaration, even an upgraded process could publish measuring state only and the
+view would call itself complete while every paused and pre-delivery session that
+process owns was missing from it. A publisher with declared coverage and an empty
+companion id explicitly runs no reporter. If coverage itself is undeclared, the
+empty id says nothing and the view is incomplete with
+`unknown_publisher_coverage` rather than inventing a missing publisher id.
 
 Two further merge rules follow from this and are worth not relitigating:
 

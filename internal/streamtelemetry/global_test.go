@@ -30,6 +30,10 @@ func globalSet(at time.Time, snapshots ...Snapshot) PublisherSet {
 	return set
 }
 
+func fullCoverage() PublisherCoverage {
+	return PublisherCoverage{Declared: true, ConfiguredFamilies: append([]Family(nil), AllFamilies...)}
+}
+
 func viewerRoute(bytes int64) RouteActivityView {
 	return RouteActivityView{Method: "GET", Pattern: "/stream", Role: RoleViewerEgress, BytesAccepted: bytes}
 }
@@ -38,12 +42,12 @@ func TestBuildGlobalViewMergeRules(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0)
 	claim := at.Add(-time.Minute)
 	firstSeen := at.Add(-2 * time.Minute)
-	one := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: at,
+	one := Snapshot{PublisherID: "p1", NodeID: "n1", PublisherEpoch: 1, Sequence: 1, CapturedAt: at, Coverage: fullCoverage(),
 		Sessions: []SessionView{{SessionID: "session", Subject: UserSubject(1), ProfileID: "profile", MediaFileID: 10, PlayMethod: "direct",
 			StartedAt: firstSeen, StartedAtSource: StartedAtSourceFirstSeen, StartedAtDegraded: true, ViewerIPs: []string{"192.0.2.1"}, OpenObservations: 2, RequestCount: 3,
 			Routes:       []RouteActivityView{viewerRoute(100), {Method: "GET", Pattern: "/relay", Role: RoleInternalRelay, BytesAccepted: 50}},
 			MediaFileIDs: []int{10}, PlayMethods: []string{"direct"}}}}
-	two := Snapshot{PublisherID: "p2", NodeID: "n2", PublisherEpoch: 2, Sequence: 2, CapturedAt: at,
+	two := Snapshot{PublisherID: "p2", NodeID: "n2", PublisherEpoch: 2, Sequence: 2, CapturedAt: at, Coverage: fullCoverage(),
 		Sessions: []SessionView{{SessionID: "session", Subject: UserSubject(1), ProfileID: "profile", MediaFileID: 10, PlayMethod: "remux",
 			StartedAt: claim, StartedAtSource: StartedAtSourceClaim, ViewerIPs: []string{"192.0.2.2"}, OpenObservations: 4, RequestCount: 5,
 			Routes: []RouteActivityView{viewerRoute(200)}, MediaFileIDs: []int{10, 11}, PlayMethods: []string{"remux"}}}}
@@ -346,7 +350,7 @@ func TestBuildGlobalViewMergesSeparateViewerAndRelayPublishers(t *testing.T) {
 func TestBuildGlobalViewCompleteness(t *testing.T) {
 	at := time.Now()
 	params := globalTestParams()
-	fresh := Snapshot{PublisherID: "p", NodeID: "n", CapturedAt: at}
+	fresh := Snapshot{PublisherID: "p", NodeID: "n", CapturedAt: at, Coverage: fullCoverage()}
 	tests := []struct {
 		name     string
 		set      PublisherSet
@@ -354,7 +358,7 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 		complete bool
 	}{
 		{name: "fresh", set: globalSet(at, fresh), complete: true},
-		{name: "stale", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}, Snapshots: []Snapshot{{PublisherID: "p", NodeID: "n", CapturedAt: at.Add(-params.Freshness - time.Second)}}}, reason: "missing_publisher"},
+		{name: "stale", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}, Snapshots: []Snapshot{{PublisherID: "p", NodeID: "n", CapturedAt: at.Add(-params.Freshness - time.Second), Coverage: fullCoverage()}}}, reason: "missing_publisher"},
 		{name: "never published", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at}}}, reason: "missing_publisher"},
 		{name: "departed", set: PublisherSet{Members: []Member{{PublisherID: "p", LastHeartbeat: at.Add(-params.MembershipTTL - time.Second)}}}, complete: true},
 		{name: "publisher truncated", set: globalSet(at, func() Snapshot { value := fresh; value.Truncated = true; return value }()), reason: "publisher_truncated"},
@@ -380,8 +384,9 @@ func TestBuildGlobalViewCompleteness(t *testing.T) {
 func TestBuildGlobalViewDistinguishesEmptyReporterFromMissingReporter(t *testing.T) {
 	at := time.Now()
 	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
-		ReportingPublisherID: "api#reported"}
-	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at}
+		ReportingPublisherID: "api#reported", Coverage: fullCoverage()}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at,
+		Coverage: PublisherCoverage{Declared: true}}
 
 	complete := BuildGlobalView(globalSet(at, measuring, reporting), at, globalTestParams())
 	if !complete.Complete || len(complete.MissingPublishers) != 0 {
@@ -396,15 +401,30 @@ func TestBuildGlobalViewDistinguishesEmptyReporterFromMissingReporter(t *testing
 	if len(missing.MissingPublishers) != 1 || missing.MissingPublishers[0].PublisherID != "api#reported" {
 		t.Fatalf("missing publishers = %+v, want the declared reporter once", missing.MissingPublishers)
 	}
+
+	noReporter := measuring
+	noReporter.ReportingPublisherID = ""
+	explicitNone := BuildGlobalView(globalSet(at, noReporter), at, globalTestParams())
+	if !explicitNone.Complete || slices.Contains(explicitNone.IncompleteReasons, "missing_reported_publisher") {
+		t.Fatalf("declared no-reporter process = complete %v reasons %v", explicitNone.Complete, explicitNone.IncompleteReasons)
+	}
+
+	undeclared := noReporter
+	undeclared.Coverage = PublisherCoverage{}
+	unknown := BuildGlobalView(globalSet(at, undeclared), at, globalTestParams())
+	if unknown.Complete || !slices.Contains(unknown.IncompleteReasons, "unknown_publisher_coverage") ||
+		slices.Contains(unknown.IncompleteReasons, "missing_reported_publisher") || len(unknown.MissingPublishers) != 0 {
+		t.Fatalf("undeclared coverage = complete %v reasons %v missing %+v", unknown.Complete, unknown.IncompleteReasons, unknown.MissingPublishers)
+	}
 }
 
 func TestBuildGlobalViewDoesNotDuplicateStaleDeclaredReporter(t *testing.T) {
 	at := time.Now()
 	params := globalTestParams()
 	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at,
-		ReportingPublisherID: "api#reported"}
+		ReportingPublisherID: "api#reported", Coverage: fullCoverage()}
 	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node",
-		CapturedAt: at.Add(-params.Freshness - time.Second)}
+		CapturedAt: at.Add(-params.Freshness - time.Second), Coverage: PublisherCoverage{Declared: true}}
 	view := BuildGlobalView(globalSet(at, measuring, reporting), at, params)
 
 	if len(view.MissingPublishers) != 1 || view.MissingPublishers[0].PublisherID != "api#reported" {
@@ -412,6 +432,57 @@ func TestBuildGlobalViewDoesNotDuplicateStaleDeclaredReporter(t *testing.T) {
 	}
 	if !slices.Contains(view.IncompleteReasons, "missing_reported_publisher") {
 		t.Fatalf("reasons = %v, want missing_reported_publisher", view.IncompleteReasons)
+	}
+}
+
+func TestBuildGlobalViewUndeclaredCoverageIsIncomplete(t *testing.T) {
+	at := time.Now()
+	view := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "old", CapturedAt: at}), at, globalTestParams())
+	if view.Complete || !slices.Contains(view.IncompleteReasons, "unknown_publisher_coverage") ||
+		slices.Contains(view.IncompleteReasons, "missing_reported_publisher") || len(view.MissingPublishers) != 0 {
+		t.Fatalf("view = complete %v reasons %v missing %+v", view.Complete, view.IncompleteReasons, view.MissingPublishers)
+	}
+}
+
+func TestBuildGlobalViewFullyDeclaredFleetIsComplete(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: at, Coverage: fullCoverage(), ReportingPublisherID: "api#reported"}
+	reporting := Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: at, Coverage: PublisherCoverage{Declared: true}}
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, globalTestParams())
+	if !view.Complete || len(view.IncompleteReasons) != 0 {
+		t.Fatalf("fully declared fleet = complete %v reasons %v", view.Complete, view.IncompleteReasons)
+	}
+}
+
+func TestBuildGlobalViewNarrowedFamiliesIsIncomplete(t *testing.T) {
+	at := time.Now()
+	for _, test := range []struct {
+		name     string
+		families []Family
+	}{
+		{name: "missing one", families: append([]Family(nil), AllFamilies[:len(AllFamilies)-1]...)},
+		{name: "empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			view := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api", CapturedAt: at,
+				Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: test.families}}), at, globalTestParams())
+			if view.Complete || !slices.Contains(view.IncompleteReasons, "partial_family_observation") {
+				t.Fatalf("view = complete %v reasons %v", view.Complete, view.IncompleteReasons)
+			}
+		})
+	}
+}
+
+func TestBuildGlobalViewReportingPublisherNeedsNoFamilies(t *testing.T) {
+	at := time.Now()
+	empty := PublisherCoverage{Declared: true}
+	reporting := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api#reported", CapturedAt: at, Coverage: empty}), at, globalTestParams())
+	if !reporting.Complete || slices.Contains(reporting.IncompleteReasons, "partial_family_observation") {
+		t.Fatalf("reporting view = complete %v reasons %v", reporting.Complete, reporting.IncompleteReasons)
+	}
+	measuring := BuildGlobalView(globalSet(at, Snapshot{PublisherID: "api", CapturedAt: at, Coverage: empty}), at, globalTestParams())
+	if measuring.Complete || !slices.Contains(measuring.IncompleteReasons, "partial_family_observation") {
+		t.Fatalf("measuring view = complete %v reasons %v", measuring.Complete, measuring.IncompleteReasons)
 	}
 }
 

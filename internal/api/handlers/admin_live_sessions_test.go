@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -179,6 +180,68 @@ func TestStaleViewNeitherClassifiesNorHides(t *testing.T) {
 		if row.Telemetry.NoDelivery || row.Telemetry.UnclaimedIdle {
 			t.Fatalf("stale row classified: %+v", row.Telemetry)
 		}
+	}
+}
+
+func TestIncompleteCoverageReasonsSuppressGhostClassification(t *testing.T) {
+	configuredAll := append([]streamtelemetry.Family(nil), streamtelemetry.AllFamilies...)
+	params := streamtelemetry.ViewParams{Freshness: time.Hour, MembershipTTL: time.Hour,
+		MaxMergedSessions: 10, MaxMergedTransfers: 10, MaxViewerIPsPerSession: 10,
+		MaxDeviceIDsPerSession: 10, MaxClientVariantsPerSession: 10, MaxUserAgentsPerSession: 10,
+		MaxMediaFileIDsPerSession: 10, MaxPlayMethodsPerSession: 10, MaxTokenIssuedAtPerSession: 10,
+		MaxRoutesPerSession: 10, MaxIdentityConflictsPerSession: 10}
+	tests := []struct {
+		name     string
+		coverage streamtelemetry.PublisherCoverage
+		reason   string
+		complete bool
+	}{
+		{name: "complete control", coverage: streamtelemetry.PublisherCoverage{Declared: true, ConfiguredFamilies: configuredAll}, complete: true},
+		{name: "unknown publisher coverage", reason: "unknown_publisher_coverage"},
+		{name: "partial family observation", coverage: streamtelemetry.PublisherCoverage{Declared: true}, reason: "partial_family_observation"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			measuring := streamtelemetry.Snapshot{PublisherID: "api", NodeID: "node", CapturedAt: readAt,
+				ReportingPublisherID: "api#reported", Coverage: test.coverage,
+				Sessions: []streamtelemetry.SessionView{{SessionID: "ended", StartedAt: settled,
+					Routes: []streamtelemetry.RouteActivityView{{Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 1, LastByteAccepted: settled}}}}}
+			reporting := streamtelemetry.Snapshot{PublisherID: "api#reported", NodeID: "node", CapturedAt: readAt,
+				Coverage: streamtelemetry.PublisherCoverage{Declared: true}, Sessions: []streamtelemetry.SessionView{{
+					SessionID: "ghost", StartedAt: settled, Reported: true, ReportedAt: readAt}}}
+			set := streamtelemetry.PublisherSet{
+				Members:   []streamtelemetry.Member{{PublisherID: "api", LastHeartbeat: readAt}, {PublisherID: "api#reported", LastHeartbeat: readAt}},
+				Snapshots: []streamtelemetry.Snapshot{measuring, reporting},
+			}
+			view := streamtelemetry.BuildGlobalView(set, readAt, params)
+			if view.Complete != test.complete {
+				t.Fatalf("complete = %v, reasons %v", view.Complete, view.IncompleteReasons)
+			}
+			if test.reason != "" && !slices.Contains(view.IncompleteReasons, test.reason) {
+				t.Fatalf("reasons = %v, want %q", view.IncompleteReasons, test.reason)
+			}
+			rows, noDelivery, unclaimedIdle := decorateLiveSessions(
+				streamtelemetry.LiveByteFactsFromGlobalView(view), []playbackSessionRow{{SessionID: "ghost"}}, true,
+				view.Complete, false, readAt, minimumDeliveryIdleWindow,
+			)
+			if len(rows) != 2 {
+				t.Fatalf("rows = %+v", rows)
+			}
+			if test.complete {
+				if noDelivery != 1 || unclaimedIdle != 1 {
+					t.Fatalf("control counts = %d/%d", noDelivery, unclaimedIdle)
+				}
+				return
+			}
+			if noDelivery != 0 || unclaimedIdle != 0 {
+				t.Fatalf("incomplete counts = %d/%d", noDelivery, unclaimedIdle)
+			}
+			for _, row := range rows {
+				if row.Telemetry.NoDelivery || row.Telemetry.UnclaimedIdle {
+					t.Fatalf("incomplete row classified: %+v", row.Telemetry)
+				}
+			}
+		})
 	}
 }
 

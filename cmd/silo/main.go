@@ -349,6 +349,10 @@ func newStreamTelemetryRegistry(ctx context.Context, nodeID string, redisClient 
 	if streamTelemetryConfig.Enabled {
 		slog.InfoContext(ctx, "stream telemetry observing families",
 			"families", strings.Join(streamTelemetryConfig.ObservedFamilies(), ","))
+		if !streamTelemetryConfig.ObservesAllFamilies() {
+			slog.WarnContext(ctx, "stream telemetry family observation is narrowed; merged live-session view will be incomplete and no_delivery/unclaimed_idle classification will be suppressed fleet-wide",
+				"variable", "SILO_STREAM_TELEMETRY_FAMILIES", "families", strings.Join(streamTelemetryConfig.ObservedFamilies(), ","))
+		}
 	}
 	return streamtelemetry.NewRegistry(streamTelemetryConfig, store, slog.Default())
 }
@@ -1152,6 +1156,15 @@ func main() {
 
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient, streamTelemetryHub)
+		// The reporter id is deterministic and is claimed before the first
+		// publish. The measuring publisher starts long before the session manager
+		// exists, and declared coverage with no companion means this process runs
+		// no reporter; declaring it later would make that blind startup window
+		// look complete while paused and pre-delivery sessions were missing.
+		if streamTelemetryRegistry.Enabled() {
+			streamTelemetryRegistry.DeclareReportingPublisher(
+				streamtelemetry.ReportedPublisherIDFor(streamTelemetryRegistry.Config().PublisherID))
+		}
 		streamTelemetryRegistry.Start(appCtx)
 		streamTelemetryViewCache = newStreamTelemetryViewCache(streamTelemetryRegistry)
 	}

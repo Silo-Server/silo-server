@@ -130,15 +130,50 @@ type TransferView struct {
 	Outcomes           map[httpstream.StreamOutcome]int64
 }
 
+// PublisherCoverage is a publisher's own statement of what its configuration
+// lets it see. It exists because absence on the wire used to be read
+// optimistically: a snapshot that said nothing about its coverage was merged as
+// though it covered everything, so an un-upgraded publisher and a fully
+// upgraded one were indistinguishable to BuildGlobalView.
+//
+// Declared is the tri-state discriminator, and it is the whole point of the
+// type. A zero PublisherCoverage means the publisher said nothing because its
+// binary predates the field. That is never the same as declaring empty
+// coverage, and it resolves to an incomplete view so no-delivery and unclaimed-
+// idle classification stay suppressed while the fleet's evidence is uncertain.
+//
+// PublisherCoverage deliberately carries no role. Whether a publisher measures
+// or reports is positional, decided by the #reported id suffix just as merge
+// provenance is, so a buggy or compromised publisher cannot declare its way out
+// of family expectations. It also carries no route-enrollment claim: enrollment
+// is enforced by each family's manifest test because route declarations do not
+// exist until after publishers start and are mutable package-global test state.
+type PublisherCoverage struct {
+	// Declared distinguishes an explicit coverage statement from the zero value
+	// decoded from an older publisher. Unknown coverage makes the global view
+	// incomplete because treating mixed-version silence as full coverage would
+	// re-enable ghost classification over a fleet the reader cannot fully see.
+	Declared bool
+	// ConfiguredFamilies is the set of route families this publisher's config
+	// observes: SILO_STREAM_TELEMETRY_FAMILIES resolved against AllFamilies. It
+	// is deliberately not derived from routes the process mounted: a transcode
+	// node mounts one family while its config can observe all five, so mounted
+	// routes would make every non-API publisher look partial. Under a declaration
+	// an empty set means it observes none; it never means all, because that
+	// optimistic interpretation is the ambiguity this declaration removes.
+	ConfiguredFamilies []Family
+}
+
+// Snapshot is one publisher's bounded telemetry state at a single instant.
 type Snapshot struct {
 	PublisherID string
 	// ReportingPublisherID names this process's reporting companion, when it runs
 	// one. It is what lets BuildGlobalView tell "this process has no sessions to
-	// report" from "this process's reporter has not been seen yet" — during a
-	// rolling deploy an un-upgraded process publishes no reported state at all,
-	// and without this declaration the view would call itself complete while every
-	// paused and pre-delivery session it owns was missing.
+	// report" from "this process's reporter has not been seen yet". Empty means
+	// an explicit "no reporter" only when Coverage.Declared; an un-upgraded
+	// publisher's silence says nothing about whether a companion should exist.
 	ReportingPublisherID     string
+	Coverage                 PublisherCoverage
 	NodeID                   string
 	PublisherEpoch           int64
 	Sequence                 uint64
@@ -223,6 +258,7 @@ func transferViewOf(t *transfer) TransferView {
 
 func cloneSnapshot(source Snapshot) Snapshot {
 	destination := source
+	destination.Coverage.ConfiguredFamilies = append([]Family(nil), source.Coverage.ConfiguredFamilies...)
 	destination.Sessions = make([]SessionView, len(source.Sessions))
 	for i := range source.Sessions {
 		destination.Sessions[i] = source.Sessions[i]
