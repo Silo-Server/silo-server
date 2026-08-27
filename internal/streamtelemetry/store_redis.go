@@ -309,8 +309,22 @@ func (s *RedisStore) LoadAll(ctx context.Context) (PublisherSet, error) {
 	return set, nil
 }
 
+// maxFieldsPerPublisher bounds what one publisher's hash may contain before the
+// reader refuses it outright. It has to be derived from everything that can
+// become a field, not from the session RESERVATION counter: a pruned session
+// gives its reservation back and then lives on as a tombstone, which is still
+// published as an ordinary s: field. Counting only MaxSessions left the bound
+// tight by fifteen fields and a saturated tombstone table overshot it by the
+// whole tombstone budget.
+//
+// Getting this wrong is expensive and silent. An oversized hash is not truncated
+// and carries no Truncated flag — it is skipped entirely, which makes the
+// publisher missing, which makes the view incomplete, which disables no_delivery
+// and unclaimed_idle classification for the WHOLE fleet. And it does not
+// self-correct: the publisher rewrites the same oversized hash every sweep.
 func (s *RedisStore) maxFieldsPerPublisher() int64 {
-	maximum := s.cfg.MaxSessions + s.cfg.MaxTransfers + 16
+	maximum := s.cfg.MaxSessions + maxTombstonesPerShard(s.cfg.MaxSessions)*shardCount +
+		s.cfg.MaxTransfers + 16
 	if maximum < 16 {
 		return int64(^uint64(0) >> 1)
 	}

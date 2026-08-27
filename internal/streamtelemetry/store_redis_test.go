@@ -124,6 +124,35 @@ func TestRedisStoreKeyBuilders(t *testing.T) {
 	}
 }
 
+// TestMaxFieldsPerPublisherCoversEveryPublishableField pins the bound against the
+// caps it is derived from, rather than against a number someone once computed.
+//
+// It exists because the derivation silently went stale: the bound was
+// MaxSessions + MaxTransfers + 16, which left exactly fifteen fields of headroom,
+// and then tombstones started contributing s: fields of their own without being
+// counted by the session reservations the bound was reasoning about. Nothing
+// failed — a saturated tombstone table simply pushed the hash past the bound,
+// where the reader skips the publisher entirely, which reads downstream as a
+// missing publisher and switches off ghost classification for the whole fleet.
+//
+// So this asserts the invariant directly: whatever a publisher is permitted to
+// hold must fit in what the reader is willing to read.
+func TestMaxFieldsPerPublisherCoversEveryPublishableField(t *testing.T) {
+	base := testRedisStoreConfig("publisher")
+	for _, caps := range [][2]int64{{base.MaxSessions, base.MaxTransfers}, {1, 1}, {50_000, 10}} {
+		cfg := base
+		cfg.MaxSessions, cfg.MaxTransfers = caps[0], caps[1]
+		store := NewRedisStore(nil, cfg, nil)
+		// One meta field, every live session, every tombstone the registry may
+		// retain across all shards, and every transfer.
+		worst := int64(1) + cfg.MaxSessions + maxTombstonesPerShard(cfg.MaxSessions)*shardCount + cfg.MaxTransfers
+		if got := store.maxFieldsPerPublisher(); got < worst {
+			t.Fatalf("maxFieldsPerPublisher = %d for sessions=%d transfers=%d, but a publisher may hold %d fields",
+				got, cfg.MaxSessions, cfg.MaxTransfers, worst)
+		}
+	}
+}
+
 func TestSnapshotHashFieldsRoundTripAndDeterministicCap(t *testing.T) {
 	snapshot := Snapshot{PublisherID: "publisher", NodeID: "node", PublisherEpoch: 1, Sequence: 2, CapturedAt: time.Unix(3, 4),
 		Coverage: PublisherCoverage{Declared: true, ConfiguredFamilies: []Family{FamilyNative, Family("future_family")}},
@@ -304,9 +333,12 @@ func TestRedisStoreIntegration(t *testing.T) {
 		}
 
 		one.cfg.MaxSessions, one.cfg.MaxTransfers = 1, 1
+		// Derived from the bound rather than hardcoded: the bound is computed from
+		// the caps, and a literal here silently stops being oversized the moment
+		// the derivation gains a term.
 		oversized := map[string]any{}
-		for i := 0; i < 19; i++ {
-			oversized[fmt.Sprintf("junk:%02d", i)] = "x"
+		for i := int64(0); i <= one.maxFieldsPerPublisher(); i++ {
+			oversized[fmt.Sprintf("junk:%04d", i)] = "x"
 		}
 		if err := client.HSet(ctx, one.snapshotKey("oversized"), oversized).Err(); err != nil {
 			t.Fatal(err)
