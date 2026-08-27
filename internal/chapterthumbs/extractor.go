@@ -27,6 +27,7 @@ type FrameExtractOptions struct {
 	RunFunc              func(ctx context.Context, ffmpegPath string, args []string) ([]byte, error)
 
 	softwareToneMapResolver *softwareToneMapFilterResolver
+	resolveHWAccel          func(ctx context.Context, hwAccel, ffmpegPath string) string
 }
 
 const (
@@ -174,6 +175,10 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 	if softwareToneMapResolver == nil {
 		softwareToneMapResolver = defaultSoftwareToneMapFilterResolver
 	}
+	resolveHWAccel := opts.resolveHWAccel
+	if resolveHWAccel == nil {
+		resolveHWAccel = playback.ResolveHWAccelWithFFmpegContext
+	}
 	cpuOpts := cpuFrameExtractOptions{
 		ctx:                     ctx,
 		inputPath:               opts.InputPath,
@@ -184,7 +189,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 		softwareToneMapResolver: softwareToneMapResolver,
 	}
 
-	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
+	resolvedAccel := resolveHWAccel(ctx, opts.HWAccel, ffmpegPath)
 	if supportsHardwareFrameExtract(resolvedAccel) {
 		softwareToneMapFilter := ""
 		if resolvedAccel == hwAccelVideoToolbox && opts.ToneMap {

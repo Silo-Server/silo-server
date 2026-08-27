@@ -241,6 +241,34 @@ func TestExtractFrameSoftwareHDRWithoutHardware(t *testing.T) {
 	assertApproximateDeadline(t, remaining, cpuExtractTimeoutHDR)
 }
 
+func TestExtractFramePassesCallerContextToHWAccelResolution(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	called := false
+	_, _, _ = ExtractFrame(ctx, FrameExtractOptions{
+		InputPath:  "/media/movie.mkv",
+		FFmpegPath: "/test/ffmpeg",
+		HWAccel:    "auto",
+		resolveHWAccel: func(gotCtx context.Context, hwAccel, ffmpegPath string) string {
+			called = true
+			if gotCtx != ctx {
+				t.Fatal("hardware probe did not receive the extraction context")
+			}
+			if hwAccel != "auto" || ffmpegPath != "/test/ffmpeg" {
+				t.Fatalf("hardware probe arguments = %q, %q", hwAccel, ffmpegPath)
+			}
+			return hwAccelNone
+		},
+		RunFunc: func(context.Context, string, []string) ([]byte, error) {
+			return nil, context.Canceled
+		},
+	})
+	if !called {
+		t.Fatal("hardware probe was not called")
+	}
+}
+
 func TestExtractFrameSoftwareHDRDisabledByDefault(t *testing.T) {
 	resolver := newSoftwareToneMapFilterResolver(func(string) ([]byte, error) {
 		t.Fatal("software filter probe should not run while CPU tone mapping is disabled")

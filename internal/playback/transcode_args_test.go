@@ -33,7 +33,7 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 			args := buildFFmpegArgs(TranscodeOpts{
 				InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
 				FFmpegPath:       videoToolboxTestFFmpegFor(t, tt.hwAccel),
-				SourceVideoCodec: "hevc",
+				SourceVideoCodec: "hevc", SourceVideoProfile: "Main 10", SourceVideoBitDepth: 10,
 				TargetResolution: "1080p", HWAccel: tt.hwAccel, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
 				ToneMapMode: tt.mode, ToneMapSourceKind: tt.sourceKind, ToneMapFilter: tt.filter,
 				ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -60,28 +60,68 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgs_VideoToolboxToneMapUnprobedCodecUsesSoftwareDecodeUpload(t *testing.T) {
-	args := buildFFmpegArgs(TranscodeOpts{
-		InputPath: "/media/hdr-av1.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
-		FFmpegPath: videoToolboxTestFFmpeg(t), SourceVideoCodec: "av1", SourceVideoBitDepth: 10,
-		TargetResolution: "1080p", HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
-		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
-		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
-	})
-	joined := strings.Join(args, " ")
-	for _, forbidden := range []string{"-hwaccel videotoolbox", "-hwaccel_output_format videotoolbox_vld"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("unprobed source codec must not use VideoToolbox decoding, found %q: %s", forbidden, joined)
-		}
-	}
-	for _, required := range []string{
-		"-init_hw_device videotoolbox=vt", "-filter_hw_device vt",
-		"setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,format=p010le,hwupload",
-		"scale_vt=w=-2:h=1080", "-c:v h264_videotoolbox",
+func TestBuildFFmpegArgs_VideoToolboxToneMapUnprobedSourceUsesSoftwareDecodeUpload(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		codec    string
+		profile  string
+		bitDepth int
+	}{
+		{name: "AV1", codec: "av1", profile: "Main", bitDepth: 10},
+		{name: "HEVC Main 12", codec: "hevc", profile: "Main 12", bitDepth: 12},
 	} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("software-decode VideoToolbox tone map missing %q: %s", required, joined)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			args := buildFFmpegArgs(TranscodeOpts{
+				InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+				FFmpegPath: videoToolboxTestFFmpeg(t), SourceVideoCodec: tt.codec, SourceVideoProfile: tt.profile, SourceVideoBitDepth: tt.bitDepth,
+				TargetResolution: "1080p", HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
+				ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+				ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+			})
+			joined := strings.Join(args, " ")
+			for _, forbidden := range []string{"-hwaccel videotoolbox", "-hwaccel_output_format videotoolbox_vld"} {
+				if strings.Contains(joined, forbidden) {
+					t.Fatalf("unprobed source shape must not use VideoToolbox decoding, found %q: %s", forbidden, joined)
+				}
+			}
+			for _, required := range []string{
+				"-init_hw_device videotoolbox=vt", "-filter_hw_device vt",
+				"setparams=range=tv:color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc,format=p010le,hwupload",
+				"scale_vt=w=-2:h=1080", "-c:v h264_videotoolbox",
+			} {
+				if !strings.Contains(joined, required) {
+					t.Fatalf("software-decode VideoToolbox tone map missing %q: %s", required, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveVideoToolboxToneMapDecodeUsesOnlyProbedSourceShape(t *testing.T) {
+	tests := []struct {
+		name     string
+		codec    string
+		profile  string
+		bitDepth int
+		wantCPU  bool
+	}{
+		{name: "HEVC Main 10", codec: "hevc", profile: "Main 10", bitDepth: 10},
+		{name: "HEVC Main 12", codec: "hevc", profile: "Main 12", bitDepth: 12, wantCPU: true},
+		{name: "HEVC range extensions", codec: "hevc", profile: "Rext", bitDepth: 10, wantCPU: true},
+		{name: "HEVC unknown bit depth", codec: "hevc", profile: "Main 10", wantCPU: true},
+		{name: "HEVC mismatched bit depth", codec: "hevc", profile: "Main 10", bitDepth: 12, wantCPU: true},
+		{name: "AV1", codec: "av1", profile: "Main", bitDepth: 10, wantCPU: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := resolveVideoToolboxToneMapDecode(TranscodeOpts{
+				HWAccel: transcodeHWVideoToolbox, ToneMapMode: tonemap.ModeHardware,
+				SourceVideoCodec: tt.codec, SourceVideoProfile: tt.profile, SourceVideoBitDepth: tt.bitDepth,
+			})
+			if opts.SoftwareVideoDecode != tt.wantCPU {
+				t.Fatalf("SoftwareVideoDecode = %v, want %v", opts.SoftwareVideoDecode, tt.wantCPU)
+			}
+		})
 	}
 }
 
@@ -1274,6 +1314,15 @@ func TestResolveEffectiveTranscodeHWAccelVideoToolboxUnconstrainedUsesSoftware(t
 	}
 	if got := resolveEffectiveTranscodeHWAccel(unconstrained); got != "none" {
 		t.Fatalf("unconstrained transcode resolved to %q, want software (quality-based CRF)", got)
+	}
+
+	toneMap := unconstrained
+	toneMap.SourceVideoCodec = transcodeCodecHEVC
+	toneMap.SourceVideoProfile = "Main 10"
+	toneMap.SourceVideoBitDepth = 10
+	toneMap.ToneMapMode = tonemap.ModeHardware
+	if got := resolveEffectiveTranscodeHWAccel(toneMap); got != transcodeHWVideoToolbox {
+		t.Fatalf("unconstrained hardware tone map resolved to %q, want VideoToolbox", got)
 	}
 
 	withResolution := unconstrained

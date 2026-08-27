@@ -436,8 +436,12 @@ func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
 	if normalizeCodecV3(codec) != transcodeCodecH264 {
 		return false
 	}
-	normalizedProfile := strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(profile)))
+	normalizedProfile := normalizeVideoProfile(profile)
 	return bitDepth > 8 || normalizedProfile == "high10" || normalizedProfile == "high10intra" || normalizedProfile == "hi10p"
+}
+
+func normalizeVideoProfile(profile string) string {
+	return strings.NewReplacer(" ", "", "-", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(profile)))
 }
 
 // SourceVideoTranscodeFacts returns the primary source facts needed to choose
@@ -465,16 +469,21 @@ func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
 }
 
 // resolveVideoToolboxToneMapDecode keeps hardware decoding only for the HEVC
-// source path exercised by the VideoToolbox tone-map capability probe. Other
-// codecs may still use scale_vt and the hardware encoder after CPU decoding,
-// but must upload their frames explicitly rather than requesting unsupported
-// VideoToolbox decoder surfaces.
+// Main 10 HEVC source shape exercised by the VideoToolbox tone-map capability
+// probe. Other source shapes may still use scale_vt and the hardware encoder
+// after CPU decoding, but must upload their frames explicitly rather than
+// requesting unprobed VideoToolbox decoder surfaces.
 func resolveVideoToolboxToneMapDecode(opts TranscodeOpts) TranscodeOpts {
-	if opts.ToneMapMode == tonemap.ModeHardware && opts.HWAccel == transcodeHWVideoToolbox &&
-		normalizeCodecV3(opts.SourceVideoCodec) != transcodeCodecHEVC {
+	if opts.ToneMapMode == tonemap.ModeHardware && opts.HWAccel == transcodeHWVideoToolbox && !videoToolboxToneMapHardwareDecodeSupported(opts) {
 		opts.SoftwareVideoDecode = true
 	}
 	return opts
+}
+
+func videoToolboxToneMapHardwareDecodeSupported(opts TranscodeOpts) bool {
+	return normalizeCodecV3(opts.SourceVideoCodec) == transcodeCodecHEVC &&
+		normalizeVideoProfile(opts.SourceVideoProfile) == "main10" &&
+		opts.SourceVideoBitDepth == 10
 }
 
 // normalizeTranscodeOpts resolves source-specific decode safety and the
@@ -792,8 +801,10 @@ func resolveEffectiveTranscodeHWAccelContext(ctx context.Context, opts Transcode
 		// e.g. the jellycompat paths) has always encoded with quality-based
 		// CRF. VideoToolbox has no portable constant-quality mode and a flat
 		// bitrate fallback visibly degrades high-resolution sources, so keep
-		// these on the software encoder.
-		if opts.TargetBitrateKbps <= 0 && opts.TargetResolution == "" {
+		// ordinary unconstrained transcodes on the software encoder. A frozen
+		// hardware tone-map recipe cannot change executors here; VideoToolbox's
+		// default bitrate remains the safe executable form of that recipe.
+		if opts.TargetBitrateKbps <= 0 && opts.TargetResolution == "" && opts.ToneMapMode != tonemap.ModeHardware {
 			slog.InfoContext(ctx, "VideoToolbox skipped for unconstrained transcode; using quality-based software encoding")
 			return transcodeHWNone
 		}
