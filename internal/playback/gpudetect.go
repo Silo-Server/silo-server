@@ -339,7 +339,7 @@ func videoToolboxSupportsTargetCodec(ffmpegPath, codec string) (bool, string) {
 
 func videoToolboxSupportsTargetCodecContext(ctx context.Context, ffmpegPath, codec string) (bool, string) {
 	result := cachedVideoToolboxProbeContext(ctx, ffmpegPath)
-	if strings.EqualFold(strings.TrimSpace(codec), "hevc") {
+	if strings.EqualFold(strings.TrimSpace(codec), transcodeCodecHEVC) {
 		if result.hevcAvailable {
 			return true, ""
 		}

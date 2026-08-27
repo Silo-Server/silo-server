@@ -139,6 +139,7 @@ func VideoSampleEntryForDVCopy(dvProfile int) string {
 
 const (
 	transcodeCodecH264       = "h264"
+	transcodeCodecHEVC       = "hevc"
 	HWAccelNone              = "none"
 	transcodeHWQSV           = "qsv"
 	transcodeHWVAAPI         = "vaapi"
@@ -470,7 +471,7 @@ func resolveSoftwareVideoDecode(opts TranscodeOpts) TranscodeOpts {
 // VideoToolbox decoder surfaces.
 func resolveVideoToolboxToneMapDecode(opts TranscodeOpts) TranscodeOpts {
 	if opts.ToneMapMode == tonemap.ModeHardware && opts.HWAccel == transcodeHWVideoToolbox &&
-		normalizeCodecV3(opts.SourceVideoCodec) != "hevc" {
+		normalizeCodecV3(opts.SourceVideoCodec) != transcodeCodecHEVC {
 		opts.SoftwareVideoDecode = true
 	}
 	return opts
@@ -1012,7 +1013,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		} else {
 			args = append(args, "-c:v", "h264_qsv", "-preset", preset, "-global_quality", "23")
 		}
-	case opts.HWAccel == "qsv" && codec == "hevc":
+	case opts.HWAccel == "qsv" && codec == transcodeCodecHEVC:
 		if hasBitrateCap {
 			args = append(args, "-c:v", "hevc_qsv", "-preset", preset,
 				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
@@ -1028,7 +1029,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
 				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
 		}
-	case opts.HWAccel == "vaapi" && codec == "hevc":
+	case opts.HWAccel == "vaapi" && codec == transcodeCodecHEVC:
 		args = append(args, "-c:v", "hevc_vaapi", "-qp", "28")
 		if hasBitrateCap {
 			args = append(args,
@@ -1045,7 +1046,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		} else {
 			args = append(args, "-cq:v", "23", "-b:v", "0")
 		}
-	case opts.HWAccel == transcodeHWNVENC && codec == "hevc":
+	case opts.HWAccel == transcodeHWNVENC && codec == transcodeCodecHEVC:
 		args = append(args, "-c:v", "hevc_nvenc", "-rc:v", "vbr")
 		if hasBitrateCap {
 			args = append(args,
@@ -1066,7 +1067,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		}
 		args = append(args, "-profile:v", "high")
 		args = appendVideoToolboxRateControl(args, opts)
-	case opts.HWAccel == transcodeHWVideoToolbox && codec == "hevc":
+	case opts.HWAccel == transcodeHWVideoToolbox && codec == transcodeCodecHEVC:
 		// pix_fmt is left to the input: 10-bit sources encode as p010
 		// (HDR10 passthrough), matching the other hardware HEVC paths.
 		args = append(args, "-c:v", "hevc_videotoolbox")
@@ -1075,7 +1076,7 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		// CPU fallback — match Jellyfin's proven browser-compatible settings.
 		// Force yuv420p to ensure 8-bit output (10-bit sources produce High 10
 		// Profile which browsers cannot decode via MSE).
-		if codec == "hevc" {
+		if codec == transcodeCodecHEVC {
 			args = append(args, "-c:v", "libx265", "-preset", preset, "-crf", "28", "-pix_fmt", "yuv420p")
 		} else {
 			args = append(args, "-c:v", "libx264", "-preset", preset, "-crf", "23",
