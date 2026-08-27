@@ -31,6 +31,7 @@ func TestToneMapFFmpegGraphsCoverSupportedExecutors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := buildFFmpegArgs(TranscodeOpts{
 				InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+				FFmpegPath:       videoToolboxTestFFmpegFor(t, tt.hwAccel),
 				TargetResolution: "1080p", HWAccel: tt.hwAccel, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
 				ToneMapMode: tt.mode, ToneMapSourceKind: tt.sourceKind, ToneMapFilter: tt.filter,
 				ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -98,6 +99,7 @@ func TestEveryToneMapSourceKindBuildsEveryExecutorGraph(t *testing.T) {
 			t.Run(string(kind)+"/"+executor.name, func(t *testing.T) {
 				args := buildPrepareFileArgs(TranscodeOpts{
 					InputPath: "/media/source.mkv", SourceVideoBitDepth: 10, TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+					FFmpegPath:       videoToolboxTestFFmpegFor(t, executor.hwAccel),
 					TargetResolution: "720p", ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
 					ToneMapMode: executor.mode, ToneMapSourceKind: kind, ToneMapFilter: executor.filter,
 					ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, HWAccel: executor.hwAccel,
@@ -134,6 +136,7 @@ func TestHardwareToneMapRemovesMetadataAfterHardwareFormatConversion(t *testing.
 		t.Run(tt.name, func(t *testing.T) {
 			graph := strings.Join(buildFFmpegArgs(TranscodeOpts{
 				InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+				FFmpegPath:       videoToolboxTestFFmpegFor(t, tt.hwAccel),
 				TargetResolution: "1080p", HWAccel: tt.hwAccel, ToneMapPolicy: tonemap.PolicyHardwareOnly,
 				ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tt.filter,
 				ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -179,6 +182,7 @@ func TestToneMapGraphOrdersTextAndBitmapSubtitles(t *testing.T) {
 func TestVideoToolboxToneMapDownloadsBeforeSubtitleComposition(t *testing.T) {
 	base := TranscodeOpts{
 		InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), SourceVideoBitDepth: 10,
+		FFmpegPath:       videoToolboxTestFFmpeg(t),
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p",
 		HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareOnly,
 		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ,
@@ -242,6 +246,7 @@ func TestSDRBaseGraphsBypassLuminanceToneMapping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			args := buildFFmpegArgs(TranscodeOpts{
 				InputPath: "/media/dovi.mkv", OutputDir: t.TempDir(), SourceVideoBitDepth: 10,
+				FFmpegPath:       videoToolboxTestFFmpegFor(t, tt.hwAccel),
 				TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", HWAccel: tt.hwAccel,
 				ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tt.mode,
 				ToneMapSourceKind: tt.sourceKind, ToneMapFilter: tt.filter, ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
@@ -1412,6 +1417,14 @@ func videoToolboxTestFFmpeg(t *testing.T) string {
 	resetNVENCProbeCacheForTest()
 	t.Cleanup(resetNVENCProbeCacheForTest)
 	return writeFakeFFmpeg(t, successfulVideoToolboxProbe()).path
+}
+
+func videoToolboxTestFFmpegFor(t *testing.T, hwAccel string) string {
+	t.Helper()
+	if hwAccel != transcodeHWVideoToolbox {
+		return ""
+	}
+	return videoToolboxTestFFmpeg(t)
 }
 
 func TestBuildFFmpegArgs_VideoToolboxH264UsesSoftwareFilters(t *testing.T) {
