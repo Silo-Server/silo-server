@@ -18,19 +18,14 @@ function measuredSession(startedAt: string): AdminSession {
 describe("SessionDeliveryBadges", () => {
   it("shows unclaimed delivery for an old session in a complete view", () => {
     render(
-      <SessionDeliveryBadges session={measuredSession("2020-01-01T00:00:00Z")} viewComplete />,
+      <SessionDeliveryBadges session={measuredSession("2020-01-01T00:00:00Z")} viewBlind={false} />,
     );
 
     expect(screen.getByText("unclaimed")).toBeInTheDocument();
   });
 
   it("hides unclaimed framing for an incomplete view", () => {
-    render(
-      <SessionDeliveryBadges
-        session={measuredSession("2020-01-01T00:00:00Z")}
-        viewComplete={false}
-      />,
-    );
+    render(<SessionDeliveryBadges session={measuredSession("2020-01-01T00:00:00Z")} viewBlind />);
 
     expect(screen.queryByText("unclaimed")).not.toBeInTheDocument();
   });
@@ -39,7 +34,7 @@ describe("SessionDeliveryBadges", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-27T12:00:00Z"));
     render(
-      <SessionDeliveryBadges session={measuredSession("2026-08-27T11:59:55Z")} viewComplete />,
+      <SessionDeliveryBadges session={measuredSession("2026-08-27T11:59:55Z")} viewBlind={false} />,
     );
 
     expect(screen.queryByText("unclaimed")).not.toBeInTheDocument();

@@ -49,12 +49,19 @@ export const SESSION_DELIVERY_GRACE_MS = 30_000;
 
 export interface SessionDeliveryContext {
   /**
-   * The envelope's `view_complete`. An incomplete view is blindness, not disagreement: the
-   * publisher holding this session's bytes may be exactly the one that is missing.
-   * Omitted means "nothing is known to be missing" — the six pure-helper call sites that
-   * pass no context keep their existing behavior.
+   * True when the merged view cannot be reasoned about: it is incomplete, or it is stale.
+   * Mirrors the server's own `!viewComplete || viewStale` suppression in
+   * internal/api/handlers/admin_live_sessions.go, and must keep mirroring it — an
+   * incomplete view is blindness rather than disagreement (the publisher holding this
+   * session's bytes may be exactly the one that is missing), and a stale view is blindness
+   * about NOW: the cache serves its last good view after a failed refresh, and that view
+   * stays complete while it ages.
+   *
+   * One flag rather than two because the server draws no distinction between them either.
+   * Omitted means "nothing is known to be wrong" — the pure-helper call sites that pass no
+   * context keep their existing behavior.
    */
-  viewComplete?: boolean;
+  viewBlind?: boolean;
   /** Reading instant. Injectable so tests do not depend on wall-clock. Defaults to Date.now(). */
   now?: number;
 }
@@ -74,7 +81,7 @@ export function describeSessionDelivery(
   const now = context.now ?? Date.now();
   const startedAtMs = parseSessionStartedAt(session.started_at);
   const withinGrace = startedAtMs !== null && now - startedAtMs < SESSION_DELIVERY_GRACE_MS;
-  const blind = context.viewComplete === false;
+  const blind = context.viewBlind === true;
   return {
     bytes: formatFileSize(telemetry.viewer_bytes, { fallback: "0 B" }),
     rate:

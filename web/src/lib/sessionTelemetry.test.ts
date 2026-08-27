@@ -83,7 +83,22 @@ describe("describeSessionDelivery", () => {
       started_at: "2026-08-27T11:59:00Z",
     };
 
-    expect(describeSessionDelivery(session, { viewComplete: true, now })?.unclaimed).toBe(true);
+    expect(describeSessionDelivery(session, { viewBlind: false, now })?.unclaimed).toBe(true);
+  });
+
+  it("suppresses unclaimed framing when the merged view is merely stale", () => {
+    // A stale view is blindness about NOW, not disagreement: the cache keeps serving its
+    // last good view after a failed refresh, and that view stays COMPLETE while it ages.
+    // The server suppresses on `!viewComplete || viewStale` for exactly this reason, so a
+    // client that only mirrored completeness would badge every healthy session in the
+    // window where the server had already stopped drawing conclusions.
+    const now = Date.parse("2026-08-27T12:00:00Z");
+    const session = {
+      ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
+      started_at: "2026-08-27T11:59:00Z",
+    };
+
+    expect(describeSessionDelivery(session, { viewBlind: true, now })?.unclaimed).toBe(false);
   });
 
   it("suppresses unclaimed framing when the merged view is incomplete", () => {
@@ -92,7 +107,7 @@ describe("describeSessionDelivery", () => {
       ...sessionWith({ evidence: "measured", viewer_bytes: 8192 }),
       started_at: "2026-08-27T11:59:00Z",
     };
-    const delivery = describeSessionDelivery(session, { viewComplete: false, now });
+    const delivery = describeSessionDelivery(session, { viewBlind: true, now });
 
     expect(delivery?.unclaimed).toBe(false);
     expect(session.telemetry?.evidence).toBe("measured");
@@ -114,7 +129,7 @@ describe("describeSessionDelivery", () => {
 
     expect(
       describeSessionDelivery(session, {
-        viewComplete: true,
+        viewBlind: false,
         now: Date.parse("2026-08-27T12:00:00Z"),
       })?.unclaimed,
     ).toBe(expected);

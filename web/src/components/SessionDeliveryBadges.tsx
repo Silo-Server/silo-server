@@ -3,12 +3,12 @@ import { describeSessionDelivery } from "@/lib/sessionTelemetry";
 
 export function SessionDeliveryBadges({
   session,
-  viewComplete,
+  viewBlind,
 }: {
   session: AdminSession;
-  viewComplete: boolean;
+  viewBlind: boolean;
 }) {
-  const delivery = describeSessionDelivery(session, { viewComplete });
+  const delivery = describeSessionDelivery(session, { viewBlind });
   if (!delivery) return null;
 
   return (
