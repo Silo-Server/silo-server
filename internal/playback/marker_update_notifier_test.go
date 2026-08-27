@@ -251,6 +251,9 @@ func TestMarkerSnapshotFromReplacedConnectionDoesNotReachReplacement(t *testing.
 	}()
 	<-entered
 
+	if !hub.Unregister(oldRegistration) {
+		t.Fatal("old connection did not unregister")
+	}
 	newConn := &dispatchTestConn{}
 	newRegistration := hub.Register(session.ID, newConn)
 	if newRegistration == nil {
