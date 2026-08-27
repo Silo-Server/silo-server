@@ -55,6 +55,27 @@ func TestLiveByteFactsOmitDisputedPlayMethod(t *testing.T) {
 	}
 }
 
+func TestLiveByteFactsViewerRecencyIgnoresRelayRoutes(t *testing.T) {
+	viewerAt := time.Unix(100, 0)
+	relayAt := time.Unix(200, 0)
+	view := GlobalMonitoringView{Sessions: []GlobalSessionView{
+		{SessionID: "mixed", LastByteAccepted: relayAt, OpenObservations: 5, MeasurementPruned: true, Routes: []RouteActivityView{
+			{Role: RoleViewerEgress, Open: 2, LastByteAccepted: viewerAt},
+			{Role: RoleInternalRelay, Open: 3, LastByteAccepted: relayAt},
+		}},
+		{SessionID: "relay-only", LastByteAccepted: relayAt, OpenObservations: 3, Routes: []RouteActivityView{
+			{Role: RoleInternalRelay, Open: 3, LastByteAccepted: relayAt},
+		}},
+	}}
+	facts := LiveByteFactsFromGlobalView(view)
+	if got := facts["mixed"]; !got.ViewerLastByteAt.Equal(viewerAt) || got.ViewerOpenObservations != 2 || !got.MeasurementPruned {
+		t.Fatalf("mixed viewer recency = %+v", got)
+	}
+	if got := facts["relay-only"]; !got.ViewerLastByteAt.IsZero() || got.ViewerOpenObservations != 0 || !got.LastByteAt.Equal(relayAt) {
+		t.Fatalf("relay-only viewer recency = %+v", got)
+	}
+}
+
 // The merged view carries a byte level, not a rate. The rate is the delta between
 // two builds, so it cannot exist on the first sighting of a session.
 func TestUpdateRatesNeedsTwoSightings(t *testing.T) {

@@ -1291,7 +1291,7 @@ should not be dropped.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `include_idle` | `false` | Keep rows reported as playing that delivered nothing. `no_delivery_count` reports how many there are either way. |
+| `include_idle` | `false` | Keep rows classified as `no_delivery` or `unclaimed_idle`. Their envelope counts report how many there are either way. |
 
 ### Reading the envelope
 
@@ -1301,11 +1301,19 @@ should not be dropped.
   with this false means "not known yet", never "nothing is streaming".
 - `view_complete` false means publishers are missing, so sessions they serve may
   be absent or under-counted; `incomplete_reasons` says which. **While the view is
-  incomplete nothing is classified `no_delivery` and nothing is hidden** — the
-  publisher holding a session's bytes may be exactly the one that is missing, so
-  the classification stops being evidence of anything.
+  incomplete nothing is classified `no_delivery` or `unclaimed_idle` and nothing
+  is hidden** — the publisher holding a session's bytes may be exactly the one
+  that is missing, so the classification stops being evidence of anything. The
+  same rule applies while `view_stale` is true: an old complete view is still
+  blindness about what is happening now.
   `missing_reported_publisher` is the reason to expect during a rolling deploy.
 - `no_delivery_count` is how many rows were held back, whether or not shown.
+- `unclaimed_idle_count` is how many measured-only rows were held back after
+  their viewer-edge delivery went idle, whether or not shown.
+- `no_delivery_shown` and `unclaimed_idle_shown` say whether their corresponding
+  rows are present. The same `include_idle` switch reveals both classes. On the
+  legacy fallback path both are true because that path classifies and withholds
+  nothing.
 
 ### The per-row `telemetry` block
 
@@ -1318,14 +1326,32 @@ should not be dropped.
 | `both` | An ordinary, corroborated viewer. |
 
 `no_delivery` marks the anomalous half of `reported`: a session reported as
-**playing**, older than a short grace window, with no measured bytes — the #666 shape, where a dead session keeps
-posting progress while nothing leaves the building. A session reported as
+**playing**, older than a short grace window, with no current or remembered
+viewer-edge delivery — the #666 shape, where a dead session keeps posting
+progress while nothing leaves the building. Internal relay activity never counts
+as viewer delivery. A session reported as
 **paused** is never flagged, because a paused client stops pulling bytes and
 silence is the expected shape (issue #243). Nor is one that has only just
 started: a session exists from the moment `/playback/start` returns, before
 anything has asked it for a byte, so for the first seconds of every ordinary play
 it wears the same shape as a ghost. Both facts are read off one row now rather
 than reconciled between stores.
+
+`unclaimed_idle` marks the opposite stale shape: viewer-edge bytes were measured,
+no session manager currently claims the session, and the viewer edge has neither an open
+observation nor a recent accepted byte. These normally ended sessions are hidden
+by default instead of lingering as red unclaimed-delivery rows; `include_idle`
+reveals them for diagnosis.
+
+`measurement_pruned` means the measuring publisher retired the idle observations
+after `Retention` but retained a bounded memory of the delivered byte total and
+its routes. The total therefore survives measurement retirement, while viewer
+addresses, device identifiers, user agents and outcome counters empty out to keep
+the memory small. That memory expires after `TombstoneRetention`; byte totals can
+then decrease, and a session still reported unpaused becomes `no_delivery` again.
+With the defaults, the combined horizon is 35 minutes. This is deliberately a
+bounded horizon: a fully buffered long audiobook can become a false positive
+after it, while a genuinely stuck reported session is detected again.
 
 The rest:
 

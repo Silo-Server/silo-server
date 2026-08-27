@@ -17,6 +17,7 @@ const (
 	familiesEnv           = "SILO_STREAM_TELEMETRY_FAMILIES"
 	sweepIntervalEnv      = "SILO_STREAM_TELEMETRY_SWEEP_INTERVAL"
 	retentionEnv          = "SILO_STREAM_TELEMETRY_RETENTION"
+	tombstoneRetentionEnv = "SILO_STREAM_TELEMETRY_TOMBSTONE_RETENTION"
 	maxSessionsEnv        = "SILO_STREAM_TELEMETRY_MAX_SESSIONS"
 	maxTransfersEnv       = "SILO_STREAM_TELEMETRY_MAX_TRANSFERS"
 	maxObservationsEnv    = "SILO_STREAM_TELEMETRY_MAX_OBSERVATIONS"
@@ -55,11 +56,12 @@ type Config struct {
 	// without losing the rest; it is a kill switch, not a staged rollout.
 	Families map[Family]bool
 
-	SweepInterval time.Duration
-	Retention     time.Duration
-	Freshness     time.Duration
-	MembershipTTL time.Duration
-	KeyPrefix     string
+	SweepInterval      time.Duration
+	Retention          time.Duration
+	TombstoneRetention time.Duration
+	Freshness          time.Duration
+	MembershipTTL      time.Duration
+	KeyPrefix          string
 	// ViewTTL bounds how stale a served merged view may be. It gates a rebuild
 	// that measured ~347 ms at the 50 000-session cap, so it is a cost control
 	// rather than a freshness preference.
@@ -96,7 +98,8 @@ const defaultFreshness = 5 * time.Second
 func DefaultConfig(nodeID string) Config {
 	return Config{
 		NodeID: nodeID, SweepInterval: time.Second, Retention: 5 * time.Minute,
-		Freshness: defaultFreshness, MembershipTTL: time.Minute, KeyPrefix: "silo:stelem",
+		TombstoneRetention: 30 * time.Minute,
+		Freshness:          defaultFreshness, MembershipTTL: time.Minute, KeyPrefix: "silo:stelem",
 		ViewTTL:         DefaultViewTTL,
 		FullResyncEvery: 60, MaxPublishers: 512, MaxMergedSessions: 50_000, MaxMergedTransfers: 50_000,
 		MaxSessions: 10_000, MaxTransfers: 10_000, MaxObservations: 50_000,
@@ -178,6 +181,7 @@ func ConfigFromEnv(nodeID string) Config {
 	}
 	parseDuration(sweepIntervalEnv, &cfg.SweepInterval)
 	parseDuration(retentionEnv, &cfg.Retention)
+	parseDuration(tombstoneRetentionEnv, &cfg.TombstoneRetention)
 	parsePositive(maxSessionsEnv, &cfg.MaxSessions)
 	parsePositive(maxTransfersEnv, &cfg.MaxTransfers)
 	parsePositive(maxObservationsEnv, &cfg.MaxObservations)
@@ -226,6 +230,13 @@ func ConfigFromEnv(nodeID string) Config {
 	// Repair first, then validate the RESOLVED values. Repairs only ever move a
 	// knob the operator left at its default, and are ordered so a later one
 	// cannot undo an earlier one.
+	if !explicit[tombstoneRetentionEnv] && cfg.TombstoneRetention <= cfg.Retention {
+		if cfg.Retention > time.Duration(1<<63-1)/2 {
+			cfg.TombstoneRetention = time.Duration(1<<63 - 1)
+		} else {
+			cfg.TombstoneRetention = 2 * cfg.Retention
+		}
+	}
 	if !explicit[freshnessEnv] && cfg.SweepInterval <= time.Duration(1<<63-1)/3 && cfg.Freshness < 3*cfg.SweepInterval {
 		cfg.Freshness = 3 * cfg.SweepInterval
 	}

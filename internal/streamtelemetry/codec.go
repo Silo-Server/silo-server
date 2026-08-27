@@ -96,6 +96,7 @@ type wireSession struct {
 	// code stays decodable and simply contributes no reported state. That is why
 	// adding them needs no codecVersion bump, which would have made every older
 	// publisher's records undecodable through a rolling deploy.
+	MeasurementPruned       bool    `json:"mprn,omitempty"`
 	Reported                bool    `json:"rep,omitempty"`
 	ReportedPaused          bool    `json:"reppa,omitempty"`
 	ReportedPositionSeconds float64 `json:"reppos,omitempty"`
@@ -179,7 +180,8 @@ func encodeSession(value SessionView) ([]byte, error) {
 		TokenIssuedAtsOverflowed: value.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources:     value.TokenIssuedAtSources, Outcomes: value.Outcomes, HasIdentityConflict: value.HasIdentityConflict,
 		IdentityConflictsOverflowed: value.IdentityConflictsOverflowed, ClientVariantsOverflowed: value.ClientVariantsOverflowed,
-		Reported: value.Reported, ReportedPaused: value.ReportedPaused,
+		MeasurementPruned: value.MeasurementPruned,
+		Reported:          value.Reported, ReportedPaused: value.ReportedPaused,
 		ReportedPositionSeconds: value.ReportedPositionSeconds, ReportedAt: timeToUnixNano(value.ReportedAt)}
 	for _, route := range value.Routes {
 		w.Routes = append(w.Routes, wireRouteActivity{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeToUnixNano(route.LastByteAccepted), LastObservationEnd: timeToUnixNano(route.LastObservationEnd)})
@@ -216,7 +218,8 @@ func decodeSession(data []byte) (SessionView, error) {
 		UserAgents: w.UserAgents, UserAgentsOverflowed: w.UserAgentsOverflowed, TokenIssuedAtsOverflowed: w.TokenIssuedAtsOverflowed,
 		TokenIssuedAtSources: w.TokenIssuedAtSources, Outcomes: w.Outcomes, HasIdentityConflict: w.HasIdentityConflict,
 		IdentityConflictsOverflowed: w.IdentityConflictsOverflowed, ClientVariantsOverflowed: w.ClientVariantsOverflowed,
-		Reported: w.Reported, ReportedPaused: w.ReportedPaused,
+		MeasurementPruned: w.MeasurementPruned,
+		Reported:          w.Reported, ReportedPaused: w.ReportedPaused,
 		ReportedPositionSeconds: w.ReportedPositionSeconds, ReportedAt: timeFromUnixNano(w.ReportedAt)}
 	for _, route := range w.Routes {
 		v.Routes = append(v.Routes, RouteActivityView{Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class, CapRelevant: route.CapRelevant, Open: route.Open, Requests: route.Requests, BytesAccepted: route.BytesAccepted, LastByteAccepted: timeFromUnixNano(route.LastByteAccepted), LastObservationEnd: timeFromUnixNano(route.LastObservationEnd)})
@@ -255,6 +258,12 @@ func validateSessionWire(w wireSession) error {
 		if route.Open < 0 || route.Requests < 0 || route.BytesAccepted < 0 {
 			return errors.New("negative route counter")
 		}
+		if w.MeasurementPruned && route.Open > 0 {
+			return errors.New("pruned measurement has open route")
+		}
+	}
+	if w.MeasurementPruned && w.OpenObservations > 0 {
+		return errors.New("pruned measurement has open observation")
 	}
 	for _, value := range w.TokenIssuedAtSources {
 		if value < 0 {

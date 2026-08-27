@@ -23,7 +23,8 @@ var now = time.Now
 
 type sessionShard struct {
 	sync.RWMutex
-	sessions map[string]*logicalSession
+	sessions   map[string]*logicalSession
+	tombstones map[string]sessionTombstone
 	// pendingRealtime holds realtime-connection state that arrived before the
 	// session existed. Clients open the control socket as soon as they have a
 	// sessionId — before the first byte route is hit — so in the normal
@@ -31,6 +32,21 @@ type sessionShard struct {
 	// would report RealtimeConnectionAlive=false. Applied on session creation
 	// and pruned by the sweep, so it cannot grow without bound.
 	pendingRealtime map[string]pendingRealtime
+}
+
+// sessionTombstone is what the registry remembers about a session whose
+// measurement it retired for idleness. It is the last view the session would
+// have published, with every live quantity zeroed: the bytes on it are memory,
+// not a current total, and nothing about it may read as activity.
+//
+// Without this memory a fully-buffered session is byte-for-byte
+// indistinguishable from a session that never delivered anything once prune
+// takes LastByteAccepted with it. The reporting publisher keeps publishing the
+// session, so the merged row would otherwise become "reported, nothing
+// measured" and hide a viewer who is still watching.
+type sessionTombstone struct {
+	view     SessionView
+	prunedAt time.Time
 }
 
 type pendingRealtime struct {
@@ -91,6 +107,7 @@ func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry
 	r := &Registry{cfg: cfg, store: store, logger: logger, seed: maphash.MakeSeed(), transfers: make(map[string]*transfer), stop: make(chan struct{}), done: make(chan struct{})}
 	for i := range r.shards {
 		r.shards[i].sessions = make(map[string]*logicalSession)
+		r.shards[i].tombstones = make(map[string]sessionTombstone)
 		r.shards[i].pendingRealtime = make(map[string]pendingRealtime)
 	}
 	return r
@@ -227,6 +244,7 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 			return
 		}
 		s = newLogicalSession(attachment, r.cfg, observedAt)
+		delete(shard.tombstones, attachment.SessionID)
 		if pending, ok := shard.pendingRealtime[attachment.SessionID]; ok {
 			s.realtimeAlive = pending.connected
 			delete(shard.pendingRealtime, attachment.SessionID)
@@ -404,6 +422,15 @@ func maxPendingRealtimePerShard(maxSessions int64) int64 {
 	return maxSessions/shardCount + 1
 }
 
+// maxTombstonesPerShard spreads the session budget over the shards so retired
+// measurement memory can never outgrow the live sessions it supplements.
+func maxTombstonesPerShard(maxSessions int64) int64 {
+	if maxSessions <= 0 {
+		return 0
+	}
+	return maxSessions/shardCount + 1
+}
+
 // transferKey identifies one logical transfer: the same principal pulling the
 // same file over the same route from the same place. Deliberately excludes
 // anything per-request so overlapping Range GETs for the same file fold into a
@@ -534,6 +561,11 @@ func (r *Registry) sweep(sweepStart time.Time) Snapshot {
 	for i := range r.shards {
 		shard := &r.shards[i]
 		shard.Lock()
+		for id, tombstone := range shard.tombstones {
+			if sweepStart.Sub(tombstone.prunedAt) >= r.cfg.TombstoneRetention {
+				delete(shard.tombstones, id)
+			}
+		}
 		for id, s := range shard.sessions {
 			s.mu.Lock()
 			total := s.bytesFolded
@@ -561,10 +593,35 @@ func (r *Registry) sweep(sweepStart time.Time) Snapshot {
 				activity.LastSweptBytes = totalForRoute
 			}
 			prune := s.openObservations == 0 && !s.lastObservationEnd.IsZero() && sweepStart.Sub(s.lastObservationEnd) >= r.cfg.Retention
+			var tombstone SessionView
+			remember := false
+			if prune {
+				tombstone, remember = tombstoneViewOf(s)
+			}
 			s.mu.Unlock()
 			if prune {
 				delete(shard.sessions, id)
 				r.sessionReservations.Add(-1)
+				if remember {
+					limit := maxTombstonesPerShard(r.cfg.MaxSessions)
+					if int64(len(shard.tombstones)) >= limit {
+						oldestID := ""
+						var oldestAt time.Time
+						for tombstoneID, candidate := range shard.tombstones {
+							if oldestID == "" || candidate.prunedAt.Before(oldestAt) ||
+								(candidate.prunedAt.Equal(oldestAt) && tombstoneID < oldestID) {
+								oldestID, oldestAt = tombstoneID, candidate.prunedAt
+							}
+						}
+						if oldestID != "" {
+							delete(shard.tombstones, oldestID)
+							r.warnRateLimited("session tombstone capacity exhausted", &r.lastWarnUnixNano)
+						}
+					}
+					if limit > 0 {
+						shard.tombstones[id] = sessionTombstone{view: tombstone, prunedAt: sweepStart}
+					}
+				}
 			}
 		}
 		// Realtime state whose session never arrived — a socket that opened and
@@ -620,6 +677,9 @@ func (r *Registry) SnapshotAt(capturedAt time.Time) Snapshot {
 			s.mu.Lock()
 			view.Sessions = append(view.Sessions, sessionViewOf(s))
 			s.mu.Unlock()
+		}
+		for _, tombstone := range shard.tombstones {
+			view.Sessions = append(view.Sessions, tombstone.view)
 		}
 		shard.RUnlock()
 	}

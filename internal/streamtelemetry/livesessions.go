@@ -42,9 +42,16 @@ type LiveByteFacts struct {
 	RateAvailable    bool
 	LastByteAt       time.Time
 	OpenObservations int64
-	RequestCount     int64
-	ViewerIPs        []string
-	RealtimeAlive    bool
+	// ViewerLastByteAt and ViewerOpenObservations are scoped to viewer-egress
+	// routes. The role-agnostic pair above also includes internal relay traffic,
+	// which can answer whether anything is moving but never whether the viewer is
+	// being served.
+	ViewerLastByteAt       time.Time
+	ViewerOpenObservations int64
+	MeasurementPruned      bool
+	RequestCount           int64
+	ViewerIPs              []string
+	RealtimeAlive          bool
 	// IdentityConflict marks a session whose publishers disagreed about who is
 	// watching. Per the identity-disagreement rule this is an abuse signal, so it
 	// is surfaced rather than resolved.
@@ -68,6 +75,17 @@ func LiveByteFactsFromGlobalView(view GlobalMonitoringView) LiveSnapshot {
 			// disagree (§2.5); a single unioned value is the only unambiguous one.
 			playMethod = session.PlayMethods[0]
 		}
+		var viewerLastByteAt time.Time
+		var viewerOpenObservations int64
+		for _, route := range session.Routes {
+			if route.Role != RoleViewerEgress {
+				continue
+			}
+			if route.LastByteAccepted.After(viewerLastByteAt) {
+				viewerLastByteAt = route.LastByteAccepted
+			}
+			viewerOpenObservations = saturatingAdd(viewerOpenObservations, int64(route.Open))
+		}
 		facts[session.SessionID] = LiveByteFacts{
 			SessionID:               session.SessionID,
 			Subject:                 session.Subject,
@@ -83,6 +101,9 @@ func LiveByteFactsFromGlobalView(view GlobalMonitoringView) LiveSnapshot {
 			BytesDegraded:           session.BytesDegraded,
 			LastByteAt:              session.LastByteAccepted,
 			OpenObservations:        session.OpenObservations,
+			ViewerLastByteAt:        viewerLastByteAt,
+			ViewerOpenObservations:  viewerOpenObservations,
+			MeasurementPruned:       session.MeasurementPruned,
 			RequestCount:            session.RequestCount,
 			ViewerIPs:               ips,
 			RealtimeAlive:           session.RealtimeConnectionAlive,

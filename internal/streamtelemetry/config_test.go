@@ -11,9 +11,40 @@ func TestConfigFromEnvValidation(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		clearConfigEnv(t)
 		cfg := ConfigFromEnv("node")
-		if !cfg.Enabled || cfg.Distributed || cfg.DistributedExplicit || cfg.SweepInterval != time.Second || cfg.Retention != 5*time.Minute || cfg.MaxObservations != 50_000 ||
+		if !cfg.Enabled || cfg.Distributed || cfg.DistributedExplicit || cfg.SweepInterval != time.Second || cfg.Retention != 5*time.Minute || cfg.TombstoneRetention != 30*time.Minute || cfg.MaxObservations != 50_000 ||
 			cfg.Freshness != 5*time.Second || cfg.MembershipTTL != time.Minute || cfg.KeyPrefix != "silo:stelem" || cfg.FullResyncEvery != 60 || cfg.MaxPublishers != 512 || cfg.MaxMergedSessions != 50_000 || cfg.MaxMergedTransfers != 50_000 {
 			t.Fatalf("defaults = %+v", cfg)
+		}
+	})
+	t.Run("valid tombstone retention override", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(tombstoneRetentionEnv, "2h")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.TombstoneRetention != 2*time.Hour {
+			t.Fatalf("tombstone retention override = %+v", cfg)
+		}
+	})
+	t.Run("invalid tombstone retention disables telemetry", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(tombstoneRetentionEnv, "eventually")
+		if cfg := ConfigFromEnv("node"); cfg.Enabled {
+			t.Fatalf("invalid tombstone retention remained enabled: %+v", cfg)
+		}
+	})
+	t.Run("default tombstone retention follows a longer retention", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(retentionEnv, "45m")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.Retention != 45*time.Minute || cfg.TombstoneRetention != 90*time.Minute {
+			t.Fatalf("retention repair = %+v", cfg)
+		}
+	})
+	t.Run("default tombstone retention repair clamps overflow", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv(retentionEnv, "2000000h")
+		cfg := ConfigFromEnv("node")
+		if !cfg.Enabled || cfg.TombstoneRetention != time.Duration(1<<63-1) {
+			t.Fatalf("overflowing retention repair = %+v", cfg)
 		}
 	})
 	// The kill switch has to work, and has to fail towards off: an operator who
@@ -251,7 +282,7 @@ func TestConfigFromEnvValidation(t *testing.T) {
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, maxSessionsEnv, maxTransfersEnv, maxObservationsEnv,
+	for _, name := range []string{enabledEnv, sweepIntervalEnv, retentionEnv, tombstoneRetentionEnv, maxSessionsEnv, maxTransfersEnv, maxObservationsEnv,
 		distributedEnv, freshnessEnv, membershipTTLEnv, keyPrefixEnv, fullResyncEveryEnv, maxPublishersEnv, maxMergedSessionsEnv, maxMergedTransfersEnv,
 		familiesEnv, viewTTLEnv} {
 		t.Setenv(name, "")

@@ -56,6 +56,36 @@ func TestSessionCodecEmptyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionCodecRoundTripsPrunedMeasurement(t *testing.T) {
+	want := SessionView{SessionID: "remembered", MeasurementPruned: true, Routes: []RouteActivityView{{
+		Role: RoleViewerEgress, BytesAccepted: 12,
+	}}}
+	encoded, err := encodeSession(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeSession(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pruned round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionCodecRejectsPrunedMeasurementWithOpenState(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"observation": []byte(`{"v":1,"mprn":true,"oo":1}`),
+		"route":       []byte(`{"v":1,"mprn":true,"routes":[{"o":1}]}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeSession(data); err == nil {
+				t.Fatal("contradictory pruned session decoded")
+			}
+		})
+	}
+}
+
 func TestTransferCodecRoundTrip(t *testing.T) {
 	want := TransferView{ID: "transfer", Subject: Subject{Kind: SubjectIP, ID: "203.0.113.4"}, ProfileID: "p", MediaFileID: 5,
 		Method: "GET", Pattern: "/download", Role: RoleViewerEgress, BytesAccepted: 12, LastByteAccepted: time.Unix(10, 11),

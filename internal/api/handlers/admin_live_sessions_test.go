@@ -34,6 +34,12 @@ func snapshotOf(facts ...streamtelemetry.LiveByteFacts) streamtelemetry.LiveSnap
 	return snapshot
 }
 
+func decorateAtRead(
+	snapshot streamtelemetry.LiveSnapshot, rows []playbackSessionRow, includeIdle, viewComplete bool,
+) ([]playbackSessionRow, int, int) {
+	return decorateLiveSessions(snapshot, rows, includeIdle, viewComplete, false, readAt, minimumDeliveryIdleWindow)
+}
+
 // The defect this endpoint exists to correct: a client reports progress forever
 // while nothing leaves the building. It is held back by default and counted.
 func TestReportedSessionWithNoBytesIsHeldBack(t *testing.T) {
@@ -43,7 +49,7 @@ func TestReportedSessionWithNoBytesIsHeldBack(t *testing.T) {
 		streamtelemetry.LiveByteFacts{SessionID: "ghost", Reported: true, StartedAt: settled},
 	)
 
-	sessions, noDelivery := decorateLiveSessions(snapshot, rows, false, true, readAt)
+	sessions, noDelivery, _ := decorateAtRead(snapshot, rows, false, true)
 	if len(sessions) != 1 || sessions[0].SessionID != "flowing" {
 		t.Fatalf("sessions = %+v, want only the flowing one", sessions)
 	}
@@ -54,7 +60,7 @@ func TestReportedSessionWithNoBytesIsHeldBack(t *testing.T) {
 		t.Fatalf("evidence = %q, want %q", sessions[0].Telemetry.Evidence, evidenceBoth)
 	}
 
-	shown, _ := decorateLiveSessions(snapshot, rows, true, true, readAt)
+	shown, _, _ := decorateAtRead(snapshot, rows, true, true)
 	if len(shown) != 2 {
 		t.Fatalf("with include_idle: %+v, want both", shown)
 	}
@@ -69,7 +75,7 @@ func TestPausedSessionWithNoBytesIsNotFlagged(t *testing.T) {
 		SessionID: "paused", Reported: true, ReportedPaused: true, StartedAt: settled,
 	})
 
-	sessions, noDelivery := decorateLiveSessions(snapshot, rows, false, true, readAt)
+	sessions, noDelivery, _ := decorateAtRead(snapshot, rows, false, true)
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %+v, want the paused session kept", sessions)
 	}
@@ -88,12 +94,12 @@ func TestPausedSessionWithNoBytesIsNotFlagged(t *testing.T) {
 // survive into the list even though Postgres has no row to decorate it with.
 func TestMeasuredSessionWithNoLegacyRowStillAppears(t *testing.T) {
 	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{
-		SessionID: "unclaimed", ViewerBytes: 8192,
+		SessionID: "unclaimed", ViewerBytes: 8192, ViewerLastByteAt: readAt.Add(-time.Second),
 		Subject: streamtelemetry.UserSubject(42), ProfileID: "p1", MediaFileID: 9,
 		PlayMethod: "direct", StartedAt: time.Unix(1000, 0),
 	})
 
-	sessions, noDelivery := decorateLiveSessions(snapshot, nil, false, true, readAt)
+	sessions, noDelivery, _ := decorateAtRead(snapshot, nil, false, true)
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %+v, want the unclaimed delivery", sessions)
 	}
@@ -114,12 +120,128 @@ func TestMeasuredSessionWithNoLegacyRowStillAppears(t *testing.T) {
 	}
 }
 
+func TestReportedPrunedMeasurementIsNotFlaggedAsGhost(t *testing.T) {
+	rows := []playbackSessionRow{{SessionID: "buffered"}}
+	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{
+		SessionID: "buffered", Reported: true, ViewerBytes: 4096,
+		ViewerLastByteAt: settled, MeasurementPruned: true, StartedAt: settled,
+	})
+	sessions, noDelivery, unclaimedIdle := decorateAtRead(snapshot, rows, false, true)
+	if len(sessions) != 1 || noDelivery != 0 || unclaimedIdle != 0 {
+		t.Fatalf("reported tombstone = sessions %+v, counts %d/%d", sessions, noDelivery, unclaimedIdle)
+	}
+	if sessions[0].Telemetry.Evidence != evidenceBoth || sessions[0].Telemetry.NoDelivery ||
+		!sessions[0].Telemetry.MeasurementPruned {
+		t.Fatalf("reported tombstone telemetry = %+v", sessions[0].Telemetry)
+	}
+}
+
+// ABS reports paused=false at both call sites, so a fully buffered audiobook
+// must be protected by remembered viewer bytes rather than the paused exception.
+func TestABSShapedPrunedSessionRemainsVisible(t *testing.T) {
+	facts := streamtelemetry.LiveByteFacts{
+		SessionID: "abs", Reported: true, ReportedPaused: false, ViewerBytes: 1,
+		MeasurementPruned: true, StartedAt: readAt.Add(-8 * time.Hour),
+	}
+	sessions, noDelivery, _ := decorateAtRead(snapshotOf(facts), []playbackSessionRow{{SessionID: "abs"}}, false, true)
+	if len(sessions) != 1 || noDelivery != 0 || sessions[0].Telemetry.NoDelivery {
+		t.Fatalf("ABS-shaped tombstone = sessions %+v, no-delivery %d", sessions, noDelivery)
+	}
+}
+
+func TestMeasuredOnlyIdleSessionIsSuppressedAndRevealable(t *testing.T) {
+	facts := streamtelemetry.LiveByteFacts{
+		SessionID: "ended", ViewerBytes: 8192, ViewerLastByteAt: readAt.Add(-2 * minimumDeliveryIdleWindow),
+	}
+	hidden, noDelivery, unclaimedIdle := decorateAtRead(snapshotOf(facts), nil, false, true)
+	if len(hidden) != 0 || noDelivery != 0 || unclaimedIdle != 1 {
+		t.Fatalf("default idle filtering = sessions %+v, counts %d/%d", hidden, noDelivery, unclaimedIdle)
+	}
+	shown, _, shownIdle := decorateAtRead(snapshotOf(facts), nil, true, true)
+	if len(shown) != 1 || shownIdle != 1 || !shown[0].Telemetry.UnclaimedIdle {
+		t.Fatalf("revealed idle session = %+v, count %d", shown, shownIdle)
+	}
+}
+
+func TestStaleViewNeitherClassifiesNorHides(t *testing.T) {
+	snapshot := snapshotOf(
+		streamtelemetry.LiveByteFacts{SessionID: "ghost", Reported: true, StartedAt: settled},
+		streamtelemetry.LiveByteFacts{SessionID: "ended", ViewerBytes: 1, ViewerLastByteAt: settled},
+	)
+	rows := []playbackSessionRow{{SessionID: "ghost"}, {SessionID: "ended"}}
+	sessions, noDelivery, unclaimedIdle := decorateLiveSessions(
+		snapshot, rows, false, true, true, readAt, minimumDeliveryIdleWindow,
+	)
+	if len(sessions) != 2 || noDelivery != 0 || unclaimedIdle != 0 {
+		t.Fatalf("stale view = sessions %+v, counts %d/%d", sessions, noDelivery, unclaimedIdle)
+	}
+	for _, row := range sessions {
+		if row.Telemetry.NoDelivery || row.Telemetry.UnclaimedIdle {
+			t.Fatalf("stale row classified: %+v", row.Telemetry)
+		}
+	}
+}
+
+func TestInternalRelayActivityDoesNotVouchForViewerDelivery(t *testing.T) {
+	facts := streamtelemetry.LiveByteFacts{
+		SessionID: "relay-open", Reported: true, StartedAt: settled,
+		OpenObservations: 1, LastByteAt: readAt, // role-agnostic relay activity
+	}
+	_, noDelivery, _ := decorateAtRead(snapshotOf(facts), []playbackSessionRow{{SessionID: "relay-open"}}, false, true)
+	if noDelivery != 1 {
+		t.Fatalf("no-delivery count = %d, want relay activity ignored", noDelivery)
+	}
+}
+
+func TestOpenUnclaimedRelayOnlySessionIsNotIdle(t *testing.T) {
+	facts := streamtelemetry.LiveByteFacts{
+		SessionID: "relay-only", RelayBytes: 4096, OpenObservations: 1, LastByteAt: readAt,
+	}
+	sessions, noDelivery, unclaimedIdle := decorateAtRead(snapshotOf(facts), nil, false, true)
+	if len(sessions) != 1 || noDelivery != 0 || unclaimedIdle != 0 {
+		t.Fatalf("relay-only session = sessions %+v, counts %d/%d", sessions, noDelivery, unclaimedIdle)
+	}
+	if sessions[0].Telemetry.UnclaimedIdle {
+		t.Fatalf("open relay-only session classified as unclaimed idle: %+v", sessions[0].Telemetry)
+	}
+}
+
+func TestOpenViewerRequestPreventsNoDeliveryDuringSlowStart(t *testing.T) {
+	facts := streamtelemetry.LiveByteFacts{
+		SessionID: "slow-start", Reported: true, StartedAt: settled, ViewerOpenObservations: 1,
+	}
+	sessions, noDelivery, _ := decorateAtRead(snapshotOf(facts), []playbackSessionRow{{SessionID: "slow-start"}}, false, true)
+	if len(sessions) != 1 || noDelivery != 0 || sessions[0].Telemetry.NoDelivery {
+		t.Fatalf("open viewer request classified as no delivery: %+v", sessions)
+	}
+}
+
+func TestDeliveryIdleWindowTracksSweepAndViewTTL(t *testing.T) {
+	if got := deliveryIdleWindow(streamtelemetry.Config{SweepInterval: time.Second, ViewTTL: time.Second}); got != minimumDeliveryIdleWindow {
+		t.Fatalf("default floor = %v", got)
+	}
+	if got := deliveryIdleWindow(streamtelemetry.Config{SweepInterval: 20 * time.Second, ViewTTL: 10 * time.Second}); got != 100*time.Second {
+		t.Fatalf("derived window = %v, want 100s", got)
+	}
+}
+
+func TestLegacyLiveSessionsMarksBothIdleClassesShown(t *testing.T) {
+	handler := &AdminHandler{SessionsLoader: &fakePlaybackSessionsReader{known: map[string]struct{}{}}}
+	response := liveSessionsResponse{}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/admin/sessions/live", nil)
+	handler.serveLegacyLiveSessions(recorder, request, &response)
+	if recorder.Code != http.StatusOK || !response.NoDeliveryShown || !response.UnclaimedIdleShown {
+		t.Fatalf("legacy envelope = status %d, response %+v", recorder.Code, response)
+	}
+}
+
 // The legacy row supplies the display fields; the view supplies the facts.
 func TestLegacyRowSuppliesDisplayFields(t *testing.T) {
 	rows := []playbackSessionRow{{SessionID: "s1", MediaTitle: "Dune", PosterURL: "/p.jpg", Username: "ada"}}
 	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{SessionID: "s1", Reported: true, ViewerBytes: 10})
 
-	sessions, _ := decorateLiveSessions(snapshot, rows, false, true, readAt)
+	sessions, _, _ := decorateAtRead(snapshot, rows, false, true)
 	if sessions[0].MediaTitle != "Dune" || sessions[0].PosterURL != "/p.jpg" || sessions[0].Username != "ada" {
 		t.Fatalf("display fields lost: %+v", sessions[0])
 	}
@@ -128,7 +250,7 @@ func TestLegacyRowSuppliesDisplayFields(t *testing.T) {
 // An absent rate must stay absent on the wire. Rendering "not yet measured" as
 // zero would read as a stalled stream on a session that is streaming fine.
 func TestSessionTelemetryOmitsUnmeasuredRate(t *testing.T) {
-	block := newSessionTelemetry(streamtelemetry.LiveByteFacts{ViewerBytes: 10})
+	block := newSessionTelemetry(streamtelemetry.LiveByteFacts{ViewerBytes: 10}, readAt, minimumDeliveryIdleWindow)
 	if block.DeliveryRateKbps != nil {
 		t.Fatalf("delivery rate = %v, want absent", *block.DeliveryRateKbps)
 	}
@@ -139,7 +261,7 @@ func TestSessionTelemetryOmitsUnmeasuredRate(t *testing.T) {
 	at := time.Now()
 	block = newSessionTelemetry(streamtelemetry.LiveByteFacts{
 		ViewerBytes: 10, DeliveryRateKbps: 1234.5, RateAvailable: true, LastByteAt: at,
-	})
+	}, readAt, minimumDeliveryIdleWindow)
 	if block.DeliveryRateKbps == nil || *block.DeliveryRateKbps != 1234.5 {
 		t.Fatalf("delivery rate = %+v, want 1234.5", block.DeliveryRateKbps)
 	}
@@ -188,7 +310,7 @@ func TestIncompleteViewNeitherFlagsNorHides(t *testing.T) {
 	rows := []playbackSessionRow{{SessionID: "ghost"}}
 	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{SessionID: "ghost", Reported: true, StartedAt: settled})
 
-	sessions, noDelivery := decorateLiveSessions(snapshot, rows, false, false, readAt)
+	sessions, noDelivery, _ := decorateAtRead(snapshot, rows, false, false)
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %+v, want the row kept while the view is incomplete", sessions)
 	}
@@ -211,7 +333,7 @@ func TestFreshlyStartedSessionIsNotYetUndelivered(t *testing.T) {
 		SessionID: "starting", Reported: true, StartedAt: readAt.Add(-noDeliveryGrace / 2),
 	})
 
-	sessions, noDelivery := decorateLiveSessions(snapshot, rows, false, true, readAt)
+	sessions, noDelivery, _ := decorateAtRead(snapshot, rows, false, true)
 	if len(sessions) != 1 {
 		t.Fatalf("sessions = %+v, want the just-started session shown", sessions)
 	}
@@ -226,7 +348,7 @@ func TestFreshlyStartedSessionIsNotYetUndelivered(t *testing.T) {
 	aged := snapshotOf(streamtelemetry.LiveByteFacts{
 		SessionID: "starting", Reported: true, StartedAt: readAt.Add(-2 * noDeliveryGrace),
 	})
-	if _, count := decorateLiveSessions(aged, rows, false, true, readAt); count != 1 {
+	if _, count, _ := decorateAtRead(aged, rows, false, true); count != 1 {
 		t.Fatalf("no-delivery count = %d past the grace window, want 1", count)
 	}
 }
@@ -237,7 +359,7 @@ func TestUnknownStartInstantStillClassifies(t *testing.T) {
 	rows := []playbackSessionRow{{SessionID: "ageless"}}
 	snapshot := snapshotOf(streamtelemetry.LiveByteFacts{SessionID: "ageless", Reported: true})
 
-	if _, count := decorateLiveSessions(snapshot, rows, false, true, readAt); count != 1 {
+	if _, count, _ := decorateAtRead(snapshot, rows, false, true); count != 1 {
 		t.Fatalf("no-delivery count = %d for an unknown start instant, want 1", count)
 	}
 }

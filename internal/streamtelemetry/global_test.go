@@ -105,7 +105,8 @@ func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
 	// for, and this test is what fails when the struct grows one.
 	reporter := Snapshot{PublisherID: "api#reported", CapturedAt: at, Sessions: []SessionView{{
 		SessionID: "s", Subject: UserSubject(9), Reported: true, ReportedAt: at,
-		ViewerIPs: []string{"192.0.2.1"}, BytesAccepted: 99,
+		MeasurementPruned: true,
+		ViewerIPs:         []string{"192.0.2.1"}, BytesAccepted: 99,
 		Routes:             []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 99}},
 		LastByteAccepted:   at,
 		LastObservationEnd: at,
@@ -119,7 +120,7 @@ func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
 		Outcomes:           map[httpstream.StreamOutcome]int64{OutcomeUnknown: 5},
 	}}}
 	session := BuildGlobalView(globalSet(at, reporter), at, globalTestParams()).Sessions[0]
-	if !session.Reported || session.ViewerBytesAccepted != 0 || len(session.ViewerIPs) != 0 ||
+	if !session.Reported || session.MeasurementPruned || session.ViewerBytesAccepted != 0 || len(session.ViewerIPs) != 0 ||
 		len(session.ViewerEdgePublishers) != 0 || len(session.Routes) != 0 {
 		t.Fatalf("reporter supplied measured provenance: %+v", session)
 	}
@@ -135,6 +136,71 @@ func TestBuildGlobalViewReporterCannotClaimMeasuredProvenance(t *testing.T) {
 	if len(session.DeviceIDs) != 0 || len(session.UserAgents) != 0 || len(session.ClientVariants) != 0 ||
 		len(session.MediaFileIDs) != 0 || len(session.TokenIssuedAts) != 0 || len(session.Outcomes) != 0 {
 		t.Fatalf("reporter supplied measured client identity: %+v", session)
+	}
+}
+
+func TestBuildGlobalViewMergesTombstoneAsAttributedViewerMemory(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "edge", NodeID: "node", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", MeasurementPruned: true, RoutesOverflowed: true,
+		Routes: []RouteActivityView{{Role: RoleViewerEgress, BytesAccepted: 4096, LastByteAccepted: at.Add(-time.Minute)}},
+	}}}
+	session := BuildGlobalView(globalSet(at, tombstone), at, globalTestParams()).Sessions[0]
+	if !session.MeasurementPruned || session.ViewerBytesAccepted != 4096 || !session.BytesDegraded {
+		t.Fatalf("tombstone merge = %+v", session)
+	}
+	if len(session.ViewerEdgePublishers) != 1 || session.ViewerEdgePublishers[0].PublisherID != "edge" {
+		t.Fatalf("viewer edge publishers = %+v", session.ViewerEdgePublishers)
+	}
+}
+
+func TestBuildGlobalViewLiveMeasurementOverridesPrunedFlag(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "old", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(10)},
+	}}}
+	live := Snapshot{PublisherID: "live", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Routes: []RouteActivityView{viewerRoute(20)},
+	}}}
+	session := BuildGlobalView(globalSet(at, live, tombstone), at, globalTestParams()).Sessions[0]
+	if session.MeasurementPruned || session.ViewerBytesAccepted != 30 {
+		t.Fatalf("mixed live/pruned merge = %+v", session)
+	}
+}
+
+func TestBuildGlobalViewReportedAndTombstoneKeepsEdgeIdentity(t *testing.T) {
+	at := time.Now()
+	tombstone := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(7), ProfileID: "profile", MeasurementPruned: true,
+		Routes: []RouteActivityView{viewerRoute(100)},
+	}}}
+	reporter := Snapshot{PublisherID: "edge#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "s", Subject: UserSubject(99), ProfileID: "other", Reported: true, ReportedAt: at,
+	}}}
+	session := BuildGlobalView(globalSet(at, reporter, tombstone), at, globalTestParams()).Sessions[0]
+	if !session.Reported || session.Subject != UserSubject(7) || session.ProfileID != "profile" {
+		t.Fatalf("reported tombstone identity = %+v", session)
+	}
+}
+
+func TestBuildGlobalViewTruncationPrefersLiveAndReportedSessions(t *testing.T) {
+	at := time.Now()
+	measuring := Snapshot{PublisherID: "edge", CapturedAt: at, Sessions: []SessionView{
+		{SessionID: "a-tombstone", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(1)}},
+		{SessionID: "b-tombstone", MeasurementPruned: true, Routes: []RouteActivityView{viewerRoute(1)}},
+		{SessionID: "z-live", Routes: []RouteActivityView{viewerRoute(1)}},
+	}}
+	reporting := Snapshot{PublisherID: "edge#reported", CapturedAt: at, Sessions: []SessionView{{
+		SessionID: "z-reported", Reported: true, ReportedAt: at,
+	}}}
+	params := globalTestParams()
+	params.MaxMergedSessions = 2
+	view := BuildGlobalView(globalSet(at, measuring, reporting), at, params)
+	if len(view.Sessions) != 2 || view.Sessions[0].SessionID != "z-live" || view.Sessions[1].SessionID != "z-reported" {
+		t.Fatalf("truncated sessions = %+v, want live and reported ids", view.Sessions)
+	}
+	if !view.Truncated {
+		t.Fatal("session truncation was not reported")
 	}
 }
 

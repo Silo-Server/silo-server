@@ -101,6 +101,9 @@ type GlobalSessionView struct {
 	Publishers                  []PublisherRef
 	ViewerEdgePublishers        []PublisherRef
 	PerPublisherPlayMethods     []PublisherValue
+	// MeasurementPruned means every measuring contribution is bounded memory
+	// retained after idleness; no publisher is measuring this session right now.
+	MeasurementPruned bool
 
 	// Reported is true when a playback session manager told us this session
 	// exists. Together with ViewerBytesAccepted it is the whole #666 signal:
@@ -359,11 +362,25 @@ func mergeContributions(view *GlobalMonitoringView, contributions []publisherCon
 			view.Transfers = append(view.Transfers, GlobalTransferView{TransferView: cloneTransfer(transfer), Publisher: contribution.ref})
 		}
 	}
-	ids := make([]string, 0, len(bySession))
-	for id := range bySession {
-		ids = append(ids, id)
+	priorityIDs := make([]string, 0, len(bySession))
+	tombstoneOnlyIDs := make([]string, 0, len(bySession))
+	for id, sessions := range bySession {
+		priority := false
+		for _, session := range sessions {
+			if !session.view.MeasurementPruned || session.view.Reported {
+				priority = true
+				break
+			}
+		}
+		if priority {
+			priorityIDs = append(priorityIDs, id)
+		} else {
+			tombstoneOnlyIDs = append(tombstoneOnlyIDs, id)
+		}
 	}
-	sort.Strings(ids)
+	sort.Strings(priorityIDs)
+	sort.Strings(tombstoneOnlyIDs)
+	ids := append(priorityIDs, tombstoneOnlyIDs...)
 	if params.MaxMergedSessions > 0 && len(ids) > params.MaxMergedSessions {
 		ids = ids[:params.MaxMergedSessions]
 		view.Truncated = true
@@ -403,17 +420,22 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		normalized[i] = normalizeProvenance(contribution.view, contribution.ref)
 	}
 	hasViewerEdge := false
+	hasLiveMeasurement := false
+	hasPrunedMeasurement := false
 	for _, session := range normalized {
+		if session.MeasurementPruned {
+			hasPrunedMeasurement = true
+		} else if len(session.Routes) > 0 {
+			hasLiveMeasurement = true
+		}
 		for _, route := range session.Routes {
 			if route.Role == RoleViewerEgress {
 				hasViewerEdge = true
 				break
 			}
 		}
-		if hasViewerEdge {
-			break
-		}
 	}
+	result.MeasurementPruned = hasPrunedMeasurement && !hasLiveMeasurement
 	for i, contribution := range contributions {
 		session, ref := normalized[i], contribution.ref
 		result.Publishers = append(result.Publishers, ref)

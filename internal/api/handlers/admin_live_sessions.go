@@ -28,8 +28,8 @@ const (
 type sessionTelemetry struct {
 	// Evidence is the first field to read. See the constants above.
 	Evidence string `json:"evidence"`
-	// NoDelivery marks a session reported as PLAYING for which telemetry measured
-	// no bytes at all — the #666 shape, where a dead session keeps posting
+	// NoDelivery marks a session reported as PLAYING with no current or remembered
+	// viewer-edge delivery — the #666 shape, where a dead session keeps posting
 	// progress while nothing leaves the building.
 	//
 	// A session reported as PAUSED is deliberately not flagged: a paused client
@@ -37,6 +37,13 @@ type sessionTelemetry struct {
 	// anomaly (issue #243). That is now read off two fields of one row instead of
 	// reconciling two stores.
 	NoDelivery bool `json:"no_delivery,omitempty"`
+	// UnclaimedIdle marks measured delivery whose reporter has gone away and
+	// whose viewer edge is no longer active. It is hidden with no-delivery rows
+	// unless include_idle asks to reveal both idle classes.
+	UnclaimedIdle bool `json:"unclaimed_idle,omitempty"`
+	// MeasurementPruned says the byte total is bounded memory from a retired
+	// measurement, not a publisher that is still observing the session.
+	MeasurementPruned bool `json:"measurement_pruned,omitempty"`
 	// ViewerBytes is delivery at the outermost viewer edge. RelayBytes is
 	// internal proxy-to-node traffic and is never cap-relevant.
 	ViewerBytes int64 `json:"viewer_bytes"`
@@ -84,12 +91,14 @@ type liveSessionsResponse struct {
 	ViewStale         bool     `json:"view_stale"`
 	ViewAgeMS         int64    `json:"view_age_ms"`
 	IncompleteReasons []string `json:"incomplete_reasons,omitempty"`
-	// NoDeliveryCount is how many rows are reported-as-playing with no measured
-	// bytes. Always reported, whether or not those rows are included, so the UI
-	// can offer to reveal them.
-	NoDeliveryCount int                  `json:"no_delivery_count"`
-	NoDeliveryShown bool                 `json:"no_delivery_shown"`
-	Sessions        []playbackSessionRow `json:"sessions"`
+	// NoDeliveryCount is how many rows are reported-as-playing with no current or
+	// remembered viewer-edge delivery. Always reported, whether or not those rows
+	// are included, so the UI can offer to reveal them.
+	NoDeliveryCount    int                  `json:"no_delivery_count"`
+	NoDeliveryShown    bool                 `json:"no_delivery_shown"`
+	UnclaimedIdleCount int                  `json:"unclaimed_idle_count"`
+	UnclaimedIdleShown bool                 `json:"unclaimed_idle_shown"`
+	Sessions           []playbackSessionRow `json:"sessions"`
 }
 
 // serveLegacyLiveSessions answers from the legacy projection when the merged view
@@ -109,6 +118,7 @@ func (h *AdminHandler) serveLegacyLiveSessions(w http.ResponseWriter, r *http.Re
 	}
 	response.Sessions = rows
 	response.NoDeliveryShown = true
+	response.UnclaimedIdleShown = true
 	sortPlaybackSessionRows(response.Sessions)
 	writeJSON(w, http.StatusOK, *response)
 }
@@ -130,11 +140,12 @@ func (h *AdminHandler) serveLegacyLiveSessions(w http.ResponseWriter, r *http.Re
 //
 // Query parameters:
 //
-//	include_idle=true  keep rows reported as playing that have delivered nothing.
-//	                   Default false.
+//	include_idle=true  keep no-delivery and unclaimed-idle rows. Default false.
 func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Request) {
 	includeIdle := parseBoolFormValue(r.URL.Query().Get("include_idle"))
-	response := liveSessionsResponse{Sessions: []playbackSessionRow{}, NoDeliveryShown: includeIdle}
+	response := liveSessionsResponse{
+		Sessions: []playbackSessionRow{}, NoDeliveryShown: includeIdle, UnclaimedIdleShown: includeIdle,
+	}
 
 	if h.StreamTelemetryViewCache == nil || h.StreamTelemetry == nil || !h.StreamTelemetry.Enabled() {
 		// Telemetry is switched off, so there is no merged view to be the spine
@@ -184,8 +195,9 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 	// measured bytes" stops being evidence of anything - classifying on it would
 	// flag healthy viewers, and hiding on it would remove them from the operator's
 	// screen during the rolling deploy that caused it.
-	response.Sessions, response.NoDeliveryCount = decorateLiveSessions(
-		snapshot, rows, includeIdle, view.Complete, time.Now())
+	window := deliveryIdleWindow(h.StreamTelemetry.Config())
+	response.Sessions, response.NoDeliveryCount, response.UnclaimedIdleCount = decorateLiveSessions(
+		snapshot, rows, includeIdle, view.Complete, status.Stale, time.Now(), window)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -206,13 +218,48 @@ func (h *AdminHandler) HandleListLiveSessions(w http.ResponseWriter, r *http.Req
 // costs nothing in detection and removes the whole false-positive class.
 const noDeliveryGrace = 30 * time.Second
 
+const minimumDeliveryIdleWindow = 45 * time.Second
+
+// deliveryIdleWindow covers the lag between accepting a byte and serving the
+// view that contains it. LastByteAccepted advances only on a sweep, and the
+// merged cache may then remain valid for ViewTTL, so a fixed window would call a
+// healthy session idle on deployments configured for slower collection.
+func deliveryIdleWindow(cfg streamtelemetry.Config) time.Duration {
+	const maxDuration = time.Duration(1<<63 - 1)
+	if cfg.SweepInterval > maxDuration/4 {
+		return maxDuration
+	}
+	window := 4 * cfg.SweepInterval
+	if cfg.ViewTTL > (maxDuration-window)/2 {
+		return maxDuration
+	}
+	window += 2 * cfg.ViewTTL
+	if window < minimumDeliveryIdleWindow {
+		return minimumDeliveryIdleWindow
+	}
+	return window
+}
+
+// deliveringWithin reports whether the VIEWER EDGE has evidence of bytes for
+// this session inside window: an observation open at the last sweep, or a byte
+// accepted inside window. It is the single activity-recency notion this file
+// classifies on. The ghost predicate and unclaimed-idle suppression differ in
+// what they conclude from it, never in how they measure it, and both use the
+// viewer-scoped fields so internal relay traffic cannot vouch for a viewer.
+func deliveringWithin(facts streamtelemetry.LiveByteFacts, at time.Time, window time.Duration) bool {
+	if facts.ViewerOpenObservations > 0 {
+		return true
+	}
+	return !facts.ViewerLastByteAt.IsZero() && at.Sub(facts.ViewerLastByteAt) < window
+}
+
 // decorateLiveSessions walks the merged view and attaches the display fields
-// Postgres owns, returning the rows to serve and how many were held back. at is
-// the reading instant, against which a session's age is measured.
+// Postgres owns, returning the rows to serve and the two idle-class counts. at
+// is the reading instant, against which a session's age is measured.
 func decorateLiveSessions(
-	snapshot streamtelemetry.LiveSnapshot, rows []playbackSessionRow, includeIdle, viewComplete bool,
-	at time.Time,
-) ([]playbackSessionRow, int) {
+	snapshot streamtelemetry.LiveSnapshot, rows []playbackSessionRow, includeIdle, viewComplete, viewStale bool,
+	at time.Time, window time.Duration,
+) ([]playbackSessionRow, int, int) {
 	display := make(map[string]playbackSessionRow, len(rows))
 	for _, row := range rows {
 		display[row.SessionID] = row
@@ -220,6 +267,7 @@ func decorateLiveSessions(
 
 	sessions := make([]playbackSessionRow, 0, len(snapshot))
 	noDelivery := 0
+	unclaimedIdle := 0
 	for _, facts := range snapshot {
 		row, known := display[facts.SessionID]
 		if !known {
@@ -229,10 +277,11 @@ func decorateLiveSessions(
 			// dropping. Carry what the view knows.
 			row = rowFromTelemetry(facts)
 		}
-		row.Telemetry = newSessionTelemetry(facts)
-		if !viewComplete {
+		row.Telemetry = newSessionTelemetry(facts, at, window)
+		if !viewComplete || viewStale {
 			// Cannot be told apart from a publisher we simply cannot see.
 			row.Telemetry.NoDelivery = false
+			row.Telemetry.UnclaimedIdle = false
 		}
 		// Too young to have been measured yet. A zero StartedAt is left flagged:
 		// its age is unknown, and suppressing on an unknown age would give any
@@ -243,14 +292,17 @@ func decorateLiveSessions(
 		}
 		if row.Telemetry.NoDelivery {
 			noDelivery++
-			if !includeIdle {
-				continue
-			}
+		}
+		if row.Telemetry.UnclaimedIdle {
+			unclaimedIdle++
+		}
+		if (row.Telemetry.NoDelivery || row.Telemetry.UnclaimedIdle) && !includeIdle {
+			continue
 		}
 		sessions = append(sessions, row)
 	}
 	sortPlaybackSessionRows(sessions)
-	return sessions, noDelivery
+	return sessions, noDelivery, unclaimedIdle
 }
 
 // rowFromTelemetry builds the display row for a session Postgres has no record
@@ -272,13 +324,15 @@ func rowFromTelemetry(facts streamtelemetry.LiveByteFacts) playbackSessionRow {
 	return row
 }
 
-func newSessionTelemetry(facts streamtelemetry.LiveByteFacts) *sessionTelemetry {
+func newSessionTelemetry(facts streamtelemetry.LiveByteFacts, at time.Time, window time.Duration) *sessionTelemetry {
 	block := &sessionTelemetry{
 		Evidence: evidenceMeasured, ViewerBytes: facts.ViewerBytes, RelayBytes: facts.RelayBytes,
 		BytesDegraded: facts.BytesDegraded, OpenObservations: facts.OpenObservations,
 		RequestCount: facts.RequestCount, ViewerIPs: facts.ViewerIPs,
 		RealtimeAlive: facts.RealtimeAlive, IdentityConflict: facts.IdentityConflict,
 		Publishers: facts.Publishers, ViewerEdgePublishers: facts.ViewerEdgePublishers,
+		UnclaimedIdle:     facts.ViewerBytes > 0 && !facts.Reported && !deliveringWithin(facts, at, window),
+		MeasurementPruned: facts.MeasurementPruned,
 	}
 	switch {
 	case facts.Reported && facts.ViewerBytes > 0:
@@ -287,7 +341,7 @@ func newSessionTelemetry(facts streamtelemetry.LiveByteFacts) *sessionTelemetry 
 		block.Evidence = evidenceReported
 		// Reported as playing, nothing measured. A paused client is expected to
 		// go quiet, so only an unpaused one is an anomaly.
-		block.NoDelivery = !facts.ReportedPaused
+		block.NoDelivery = !facts.ReportedPaused && !deliveringWithin(facts, at, window)
 	}
 	if facts.RateAvailable {
 		rate := facts.DeliveryRateKbps

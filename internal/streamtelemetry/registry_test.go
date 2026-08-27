@@ -3,6 +3,7 @@ package streamtelemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -203,6 +204,126 @@ func TestPruneReleasesReservations(t *testing.T) {
 	registry.sweep(time.Now().Add(2 * cfg.Retention))
 	if registry.sessionReservations.Load() != 0 || registry.observationReservations.Load() != 0 {
 		t.Fatalf("reservations leaked: sessions=%d observations=%d", registry.sessionReservations.Load(), registry.observationReservations.Load())
+	}
+}
+
+func recordSessionBytes(t *testing.T, registry *Registry, id, pattern string, role Role, bytes int64, endedAt time.Time) {
+	t.Helper()
+	route := testRoute(ClassPlayback)
+	route.Pattern = pattern
+	route.Role = role
+	obs := registry.begin(route, CaptureSet{Method: http.MethodGet, Pattern: pattern, ReceivedAt: endedAt.Add(-time.Second)})
+	registry.attach(obs, testAttachment(id))
+	obs.AddBytes(bytes)
+	previousNow := now
+	now = func() time.Time { return endedAt }
+	registry.release(obs, httpstreamOutcomeCompleted)
+	now = previousNow
+}
+
+func TestPruneLeavesFrozenByteTombstone(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "remembered", "/viewer", RoleViewerEgress, 4096, endedAt)
+
+	prunedAt := endedAt.Add(2 * cfg.Retention)
+	snapshot := registry.sweep(prunedAt)
+	if len(snapshot.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want one tombstone", snapshot.Sessions)
+	}
+	got := snapshot.Sessions[0]
+	if !got.MeasurementPruned || got.BytesAccepted != 4096 || got.OpenObservations != 0 || got.RealtimeConnectionAlive {
+		t.Fatalf("tombstone liveness/bytes = %+v", got)
+	}
+	if len(got.Routes) != 1 || got.Routes[0].Role != RoleViewerEgress || got.Routes[0].BytesAccepted != 4096 ||
+		got.Routes[0].Open != 0 || !got.Routes[0].LastByteAccepted.Equal(prunedAt) {
+		t.Fatalf("tombstone routes = %+v", got.Routes)
+	}
+	if len(got.ViewerIPs) != 0 || len(got.DeviceIDs) != 0 || len(got.UserAgents) != 0 ||
+		len(got.ClientVariants) != 0 || len(got.MediaFileIDs) != 0 || len(got.PlayMethods) != 0 ||
+		len(got.TokenIssuedAts) != 0 || len(got.IdentityConflicts) != 0 || len(got.Outcomes) != 0 {
+		t.Fatalf("tombstone retained bounded-set state: %+v", got)
+	}
+}
+
+func TestPruneWithoutBytesLeavesNoTombstone(t *testing.T) {
+	cfg := testConfig()
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "empty", "/viewer", RoleViewerEgress, 0, endedAt)
+	if snapshot := registry.sweep(endedAt.Add(2 * cfg.Retention)); len(snapshot.Sessions) != 0 {
+		t.Fatalf("byte-less session left a tombstone: %+v", snapshot.Sessions)
+	}
+}
+
+func TestReattachClearsSessionTombstone(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "revived", "/viewer", RoleViewerEgress, 100, endedAt)
+	registry.sweep(endedAt.Add(2 * cfg.Retention))
+
+	recordSessionBytes(t, registry, "revived", "/viewer", RoleViewerEgress, 7, endedAt.Add(time.Minute))
+	snapshot := registry.sweep(endedAt.Add(time.Minute + cfg.Retention/2))
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].MeasurementPruned || snapshot.Sessions[0].BytesAccepted != 7 {
+		t.Fatalf("revived session counted against its tombstone: %+v", snapshot.Sessions)
+	}
+}
+
+func TestTombstonesExpireAtRetention(t *testing.T) {
+	cfg := testConfig()
+	cfg.TombstoneRetention = 10 * time.Millisecond
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "expires", "/viewer", RoleViewerEgress, 1, endedAt)
+	prunedAt := endedAt.Add(2 * cfg.Retention)
+	registry.sweep(prunedAt)
+	if snapshot := registry.sweep(prunedAt.Add(cfg.TombstoneRetention)); len(snapshot.Sessions) != 0 {
+		t.Fatalf("expired tombstone remained: %+v", snapshot.Sessions)
+	}
+}
+
+func TestTombstoneBoundEvictsOldest(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxSessions = 1
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), slog.New(slog.DiscardHandler))
+	ids := make([]string, 0, 2)
+	for candidate := 0; len(ids) < 2; candidate++ {
+		id := fmt.Sprintf("same-shard-%d", candidate)
+		if len(ids) == 0 || registry.shard(id) == registry.shard(ids[0]) {
+			ids = append(ids, id)
+		}
+	}
+	base := time.Unix(1_700_000_000, 0)
+	for i, id := range ids {
+		endedAt := base.Add(time.Duration(i) * time.Minute)
+		recordSessionBytes(t, registry, id, "/viewer", RoleViewerEgress, int64(i+1), endedAt)
+		registry.sweep(endedAt.Add(2 * cfg.Retention))
+	}
+	snapshot := registry.SnapshotAt(base.Add(2 * time.Minute))
+	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].SessionID != ids[1] {
+		t.Fatalf("bounded tombstones = %+v, want only freshest %q", snapshot.Sessions, ids[1])
+	}
+	if snapshot.Truncated || snapshot.DroppedObservations != 0 {
+		t.Fatalf("tombstone eviction reported observation loss: truncated=%v dropped=%d", snapshot.Truncated, snapshot.DroppedObservations)
+	}
+}
+
+func TestTombstoneKeepsRouteOverflowDegradation(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxRoutesPerSession = 1
+	cfg.TombstoneRetention = time.Hour
+	registry := NewRegistry(cfg, NewLocalStore(), nil)
+	endedAt := time.Unix(1_700_000_000, 0)
+	recordSessionBytes(t, registry, "overflow", "/one", RoleViewerEgress, 1, endedAt)
+	recordSessionBytes(t, registry, "overflow", "/two", RoleViewerEgress, 2, endedAt)
+	snapshot := registry.sweep(endedAt.Add(2 * cfg.Retention))
+	if len(snapshot.Sessions) != 1 || !snapshot.Sessions[0].MeasurementPruned || !snapshot.Sessions[0].RoutesOverflowed {
+		t.Fatalf("route-overflow tombstone = %+v", snapshot.Sessions)
 	}
 }
 

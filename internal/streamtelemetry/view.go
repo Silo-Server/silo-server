@@ -56,6 +56,11 @@ type SessionView struct {
 	HasIdentityConflict         bool
 	IdentityConflicts           []IdentityConflict
 	IdentityConflictsOverflowed bool
+	// MeasurementPruned marks a contribution the publisher no longer measures:
+	// its observations went idle for longer than Retention and were retired, and
+	// what remains is bounded memory of what it delivered. Live quantities are
+	// zero by construction, so nothing about it can read as activity.
+	MeasurementPruned bool
 
 	// Reported marks a session a playback session manager told us about, as
 	// opposed to one observed delivering bytes. It is the OTHER half of the
@@ -73,6 +78,36 @@ type SessionView struct {
 	// takes the newest, so a session that moved between processes reads as its
 	// current owner reports it.
 	ReportedAt time.Time
+}
+
+// tombstoneViewOf returns the small frozen view worth retaining after an idle
+// session is removed. The caller holds s.mu.
+func tombstoneViewOf(s *logicalSession) (SessionView, bool) {
+	if s.lastSweptBytes == 0 {
+		return SessionView{}, false
+	}
+	view := SessionView{
+		Subject: s.subject, ProfileID: s.profileID, SessionID: s.sessionID,
+		MediaFileID: s.mediaFileID, PlayMethod: s.playMethod,
+		StartedAt: s.startedAt, StartedAtSource: s.startedAtSource, StartedAtDegraded: s.startedDegraded,
+		BytesAccepted: s.lastSweptBytes, LastByteAccepted: s.lastByteAccepted,
+		LastObservationEnd: s.lastObservationEnd, RequestCount: s.requestCount,
+		RoutesOverflowed: s.routesOverflowed, MeasurementPruned: true,
+	}
+	for _, route := range s.routes {
+		if route.LastSweptBytes == 0 {
+			continue
+		}
+		view.Routes = append(view.Routes, RouteActivityView{
+			Method: route.Method, Pattern: route.Pattern, Role: route.Role, Class: route.Class,
+			CapRelevant: route.CapRelevant, Requests: route.Requests, BytesAccepted: route.LastSweptBytes,
+			LastByteAccepted: route.LastByteAccepted, LastObservationEnd: route.LastObservationEnd,
+		})
+	}
+	sort.Slice(view.Routes, func(i, j int) bool {
+		return routeViewKey(view.Routes[i]) < routeViewKey(view.Routes[j])
+	})
+	return view, true
 }
 
 type TransferView struct {
