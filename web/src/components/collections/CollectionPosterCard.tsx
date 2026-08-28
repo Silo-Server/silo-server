@@ -75,7 +75,7 @@ export function CollectionPosterCard({
               label: collection.title,
             });
           }}
-          className={`absolute top-2 left-2 rounded-lg p-1.5 transition-[background-color,color,opacity] duration-[--duration-fast] ${
+          className={`absolute top-2 left-2 rounded-lg p-1.5 transition-[background-color,color,opacity] duration-(--duration-fast) ${
             pinned
               ? "bg-primary/90 text-primary-foreground"
               : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"

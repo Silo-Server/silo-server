@@ -38,7 +38,7 @@ function CastCarousel({ cast, limit = 20, fullBleed = false }: CastCarouselProps
           type="button"
           onClick={scrollPrev}
           className={cn(
-            "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100",
+            "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100",
             fullBleed ? "left-4 sm:left-6 lg:left-10 xl:left-12" : "left-0",
           )}
           aria-label="Scroll left"
@@ -77,7 +77,7 @@ function CastCarousel({ cast, limit = 20, fullBleed = false }: CastCarouselProps
           type="button"
           onClick={scrollNext}
           className={cn(
-            "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100",
+            "from-background/90 absolute top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100",
             fullBleed ? "right-4 sm:right-6 lg:right-10 xl:right-12" : "right-0",
           )}
           aria-label="Scroll right"

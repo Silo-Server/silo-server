@@ -41,7 +41,7 @@ export default function SeasonCarousel({ seasons, parentSeriesHref }: SeasonCaro
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll left"
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -66,7 +66,7 @@ export default function SeasonCarousel({ seasons, parentSeriesHref }: SeasonCaro
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll right"
           >
             <ChevronRight className="text-foreground h-6 w-6" />
@@ -132,7 +132,7 @@ function SeasonCard({
           {(isCompleted || hasProgress) && (
             <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
               <div
-                className="h-full rounded-full transition-[width] duration-[--duration-fast]"
+                className="h-full rounded-full transition-[width] duration-(--duration-fast)"
                 style={{
                   width: isCompleted ? "100%" : `${progressPercent}%`,
                   background: isCompleted ? "#4caf50" : "var(--primary)",

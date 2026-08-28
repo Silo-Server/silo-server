@@ -27,7 +27,7 @@
  *      uses --font-display; everything else uses --font-body.
  *
  * 4. MOTION: Use duration/easing CSS variables for transitions.
- *      className="transition-all duration-[--duration-normal]"
+ *      className="transition-all duration-(--duration-normal)"
  *
  * 5. PATTERNS: Use the utility classes defined in app.css.
  *      .hero-gradient, .glass, .glass-subtle, .media-card, etc.
@@ -339,7 +339,7 @@ export const LAYOUT = {
 export const MOTION = {
   /**
    * Interaction duration tokens — exposed as CSS custom properties.
-   * Use via: transition-all duration-[--duration-normal]
+   * Use via: transition-all duration-(--duration-normal)
    */
   duration: {
     instant: "0ms",

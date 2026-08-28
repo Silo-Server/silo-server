@@ -461,7 +461,7 @@ function MangaSection({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="bg-background hover:bg-muted/40 sticky top-0 z-10 flex w-full items-center justify-between px-4 py-2 transition-colors duration-[--duration-fast]"
+        className="bg-background hover:bg-muted/40 sticky top-0 z-10 flex w-full items-center justify-between px-4 py-2 transition-colors duration-(--duration-fast)"
       >
         <span className="text-muted-foreground text-sm font-bold tracking-tight uppercase">
           {entry.label}

@@ -212,7 +212,7 @@ export default function AudiobookContent({
                 <div>
                   <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
                     <div
-                      className="bg-primary h-full rounded-full transition-[width] duration-[--duration-fast]"
+                      className="bg-primary h-full rounded-full transition-[width] duration-(--duration-fast)"
                       style={{ width: `${Math.min(100, (resumeSeconds / durationTotal) * 100)}%` }}
                     />
                   </div>

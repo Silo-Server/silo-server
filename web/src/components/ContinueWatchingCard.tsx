@@ -262,7 +262,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             {!isNextUp && progressPercent > 0 && (
               <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
-                  className="h-full rounded-full transition-[width] duration-[--duration-fast]"
+                  className="h-full rounded-full transition-[width] duration-(--duration-fast)"
                   style={{
                     width: `${Math.min(progressPercent, 100)}%`,
                     background: "var(--primary)",
@@ -284,7 +284,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             to={watchHref}
             onClick={handleWatchClick}
             aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
-            className="media-card-play-trigger bg-primary text-primary-foreground hover:bg-primary/90 absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-[transform,background-color] duration-[--duration-fast] hover:scale-110 active:scale-95"
+            className="media-card-play-trigger bg-primary text-primary-foreground hover:bg-primary/90 absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-[transform,background-color] duration-(--duration-fast) hover:scale-110 active:scale-95"
           >
             {card.type === "ebook" ? (
               <BookOpen className="h-5 w-5" />

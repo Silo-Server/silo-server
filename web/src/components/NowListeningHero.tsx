@@ -194,7 +194,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
               <div className="mt-6 max-w-xl">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
                   <div
-                    className="bg-primary h-full rounded-full transition-[width] duration-[--duration-normal]"
+                    className="bg-primary h-full rounded-full transition-[width] duration-(--duration-normal)"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -208,7 +208,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
                 <Link
                   to={playHref}
                   onClick={handleResumeClick}
-                  className="pill pill-primary transition-colors duration-[--duration-fast]"
+                  className="pill pill-primary transition-colors duration-(--duration-fast)"
                 >
                   {isActivePlaying ? (
                     <Pause className="h-4 w-4 fill-current" />
@@ -219,7 +219,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
                 </Link>
                 <ViewTransitionLink
                   to={itemHref}
-                  className="pill pill-glass transition-colors duration-[--duration-fast]"
+                  className="pill pill-glass transition-colors duration-(--duration-fast)"
                 >
                   <Info className="h-4 w-4" />
                   More Info

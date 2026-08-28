@@ -207,6 +207,7 @@ describe("HeroBanner", () => {
       </MemoryRouter>,
     );
 
+    expect(markup).toContain('src="/backdrop.jpg"');
     expect(markup).not.toContain("will-change-transform");
     expect(markup).not.toContain("--animate-ken-burns");
   });

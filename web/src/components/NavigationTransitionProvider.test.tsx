@@ -14,8 +14,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import NavigationTransitionProvider from "./NavigationTransitionProvider";
 import PageBack from "./PageBack";
 import ViewTransitionLink from "./ViewTransitionLink";
-import { isExpectedNavigationCommit, pruneNavigationHistory } from "@/lib/backNavigation";
-import { DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE } from "./sidebarItemNavigation";
+import {
+  isExpectedNavigationCommit,
+  NAVIGATION_COMMIT_FALLBACK_MS,
+  NAVIGATION_HISTORY_PATHS_STORAGE_KEY,
+  pruneNavigationHistory,
+} from "@/lib/backNavigation";
+import {
+  DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE,
+  DETAIL_MAIN_STAGE_MOTION_END_EVENT,
+} from "./sidebarItemNavigation";
 import { useNavigationTransition } from "./navigationTransitionContext";
 
 const originalStartViewTransition = Object.getOwnPropertyDescriptor(
@@ -46,6 +54,22 @@ function MainStageCommitRaceControls() {
       </button>
       <button type="button" onClick={() => navigate("/item/season-1")}>
         Commit intended
+      </button>
+    </>
+  );
+}
+
+function HistoryControls() {
+  const transitionNavigate = useNavigationTransition();
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <button type="button" onClick={() => transitionNavigate?.(1)}>
+        Go forward
+      </button>
+      <button type="button" onClick={() => navigate("/person/1", { replace: true })}>
+        Replace with person
       </button>
     </>
   );
@@ -186,6 +210,7 @@ function renderBrowserRoutes() {
     <BrowserRouter>
       <NavigationTransitionProvider>
         <LocationOutput />
+        <HistoryControls />
         <Routes>
           <Route
             path="/item/movie-a"
@@ -197,7 +222,16 @@ function renderBrowserRoutes() {
               </div>
             }
           />
-          <Route path="/item/movie-b" element={<PageBack />} />
+          <Route
+            path="/item/movie-b"
+            element={
+              <div>
+                <PageBack />
+                <ViewTransitionLink to="/item/movie-c">Movie C</ViewTransitionLink>
+              </div>
+            }
+          />
+          <Route path="/item/movie-c" element={<PageBack />} />
           <Route path="/person/1" element={<PageBack />} />
         </Routes>
       </NavigationTransitionProvider>
@@ -289,8 +323,9 @@ afterEach(() => {
     Reflect.deleteProperty(HTMLElement.prototype, "animate");
   }
   window.history.replaceState(null, "", "/");
-  window.sessionStorage.removeItem("silo:navigation-history-paths:v1");
+  window.sessionStorage.removeItem(NAVIGATION_HISTORY_PATHS_STORAGE_KEY);
   document.documentElement.removeAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -323,13 +358,21 @@ describe("NavigationTransitionProvider", () => {
     expect(paths.get(93)).toBe("/item/93");
     expect(paths.has(92)).toBe(false);
 
-    // A 120-entry Back jump remains inside the bounded window. After the
-    // destination commits (and could be reloaded), its immediate Back target
-    // is still retained while discarded forward entries are gone.
+    // A Back jump must retain reachable Forward provenance.
     pruneNavigationHistory(paths, 100);
+    expect(paths.size).toBe(128);
     expect(paths.get(99)).toBe("/item/99");
     expect(paths.get(100)).toBe("/item/100");
-    expect(paths.has(101)).toBe(false);
+    expect(paths.get(101)).toBe("/item/101");
+    expect(paths.get(220)).toBe("/item/220");
+
+    // The current entry always wins the fixed budget, even after a large jump.
+    paths.set(0, "/item/0");
+    pruneNavigationHistory(paths, 0);
+    expect(paths.size).toBe(128);
+    expect(paths.get(0)).toBe("/item/0");
+    expect(paths.get(219)).toBe("/item/219");
+    expect(paths.has(220)).toBe(false);
   });
 
   it("keeps a Series to Season update pending until the Season location commits", async () => {
@@ -444,6 +487,57 @@ describe("NavigationTransitionProvider", () => {
     await waitFor(() => expect(mainStage.animate).toHaveBeenCalledOnce());
 
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/season-1");
+  });
+
+  it("releases a direct item motion when its destination never commits", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const mainStage = installMainStageAnimationMock();
+    const onMotionEnd = vi.fn();
+    window.addEventListener(DETAIL_MAIN_STAGE_MOTION_END_EVENT, onMotionEnd);
+    renderRoutes(["/item/series-1"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue intended then stale" }));
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/episode-1");
+    expect(document.documentElement).toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+    expect(mainStage.animate).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(NAVIGATION_COMMIT_FALLBACK_MS);
+
+    expect(document.documentElement).not.toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+    expect(onMotionEnd).toHaveBeenCalledOnce();
+    expect(mainStage.animate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Commit intended" }));
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/season-1");
+    expect(mainStage.animate).not.toHaveBeenCalled();
+    window.removeEventListener(DETAIL_MAIN_STAGE_MOTION_END_EVENT, onMotionEnd);
+  });
+
+  it("does not let the commit fallback end an active main-stage animation", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const mainStage = installMainStageAnimationMock();
+    renderRoutes(["/item/series-1"]);
+
+    fireEvent.click(screen.getByRole("link", { name: "Season 1" }));
+    expect(mainStage.animate).toHaveBeenCalledOnce();
+    expect(document.documentElement).toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+
+    vi.advanceTimersByTime(NAVIGATION_COMMIT_FALLBACK_MS);
+
+    expect(document.documentElement).toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+    expect(mainStage.animate).toHaveBeenCalledOnce();
   });
 
   it("settles a narrow-screen transition when native Back commits a different item", async () => {
@@ -617,6 +711,85 @@ describe("NavigationTransitionProvider", () => {
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-a");
     expect(transition.pathsWhenUpdatesResolve).toEqual(["/item/movie-b", "/item/movie-a"]);
     expect(transition.directionsWhenUpdatesResolve).toEqual(["forward", "back"]);
+  });
+
+  it("restores reachable Forward history after Back and a reload", async () => {
+    window.history.replaceState({ idx: 0, key: "initial", usr: null }, "", "/item/movie-a");
+    const transition = installViewTransitionMock();
+    const firstRender = renderBrowserRoutes();
+
+    await userEvent.click(screen.getByRole("link", { name: "Recommended movie" }));
+    await transition.updates[0];
+    await userEvent.click(screen.getByRole("link", { name: "Movie C" }));
+    await transition.updates[1];
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await transition.updates[2];
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-b");
+    firstRender.unmount();
+
+    renderBrowserRoutes();
+    await userEvent.click(screen.getByRole("button", { name: "Go forward" }));
+    await transition.updates[3];
+
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-c");
+    expect(transition.pathsWhenUpdatesResolve[transition.pathsWhenUpdatesResolve.length - 1]).toBe(
+      "/item/movie-c",
+    );
+    expect(
+      transition.directionsWhenUpdatesResolve[transition.directionsWhenUpdatesResolve.length - 1],
+    ).toBe("forward");
+    expect(transition.startViewTransition).toHaveBeenCalledTimes(4);
+  });
+
+  it("invalidates the old Forward branch when a PUSH reuses its URL", async () => {
+    window.history.replaceState({ idx: 0, key: "initial", usr: null }, "", "/item/movie-a");
+    const transition = installViewTransitionMock();
+    renderBrowserRoutes();
+
+    await userEvent.click(screen.getByRole("link", { name: "Recommended movie" }));
+    await transition.updates[0];
+    await userEvent.click(screen.getByRole("link", { name: "Movie C" }));
+    await transition.updates[1];
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await transition.updates[2];
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await transition.updates[3];
+    await userEvent.click(screen.getByRole("link", { name: "Recommended movie" }));
+    await transition.updates[4];
+
+    const stored = JSON.parse(
+      window.sessionStorage.getItem(NAVIGATION_HISTORY_PATHS_STORAGE_KEY) ?? "{}",
+    ) as { paths?: Array<[number, string]> };
+    expect(stored.paths).toEqual([
+      [0, "/item/movie-a"],
+      [1, "/item/movie-b"],
+    ]);
+  });
+
+  it("retains Forward history when the current entry is replaced", async () => {
+    window.history.replaceState({ idx: 0, key: "initial", usr: null }, "", "/item/movie-a");
+    const transition = installViewTransitionMock();
+    renderBrowserRoutes();
+
+    await userEvent.click(screen.getByRole("link", { name: "Recommended movie" }));
+    await transition.updates[0];
+    await userEvent.click(screen.getByRole("link", { name: "Movie C" }));
+    await transition.updates[1];
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await transition.updates[2];
+    await userEvent.click(screen.getByRole("button", { name: "Replace with person" }));
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/person/1");
+
+    await userEvent.click(screen.getByRole("button", { name: "Go forward" }));
+    await transition.updates[3];
+
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-c");
+    expect(transition.pathsWhenUpdatesResolve[transition.pathsWhenUpdatesResolve.length - 1]).toBe(
+      "/item/movie-c",
+    );
+    expect(
+      transition.directionsWhenUpdatesResolve[transition.directionsWhenUpdatesResolve.length - 1],
+    ).toBe("forward");
   });
 
   it("restores breadcrumb provenance after a reload without duplicating the Series entry", async () => {

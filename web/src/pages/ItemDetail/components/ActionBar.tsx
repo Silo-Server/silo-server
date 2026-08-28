@@ -56,7 +56,7 @@ import SubtitlesPopover from "./SubtitlesPopover";
 // Keep hover feedback on the compositor. Repainting these controls while the detail backdrop is
 // animating can stall the main thread on image-heavy movie and series pages.
 const responsivePrimaryActionClass =
-  "transform-gpu transition-transform duration-[--duration-fast] motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
+  "transform-gpu transition-transform duration-(--duration-fast) motion-safe:hover:scale-[1.02] motion-safe:active:scale-[0.98]";
 const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-primary motion-reduce:hover:bg-primary/90`;
 const staticGlassActionClass = "transition-none";
 

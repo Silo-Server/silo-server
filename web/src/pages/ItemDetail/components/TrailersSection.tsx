@@ -31,7 +31,7 @@ export default function TrailersSection({ videos }: TrailersSectionProps) {
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll left"
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -52,7 +52,7 @@ export default function TrailersSection({ videos }: TrailersSectionProps) {
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll right"
           >
             <ChevronRight className="text-foreground h-6 w-6" />
@@ -83,8 +83,8 @@ function TrailerCard({ video, onPlay }: { video: ItemVideo; onPlay: () => void }
           decoding="async"
         />
         <div className="absolute inset-0 flex items-center justify-center">
-          <span className="pointer-events-none absolute inset-0 bg-black/30 opacity-0 transition-opacity duration-[--duration-fast] group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100" />
-          <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-black/85 opacity-0 transition-opacity duration-[--duration-fast] group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100">
+          <span className="pointer-events-none absolute inset-0 bg-black/30 opacity-0 transition-opacity duration-(--duration-fast) group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100" />
+          <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-black/85 opacity-0 transition-opacity duration-(--duration-fast) group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100">
             <Play className="ml-0.5 h-5 w-5 fill-white text-white" />
           </span>
         </div>
