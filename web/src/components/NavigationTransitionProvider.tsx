@@ -24,6 +24,7 @@ interface PendingCommit {
   sourceLocationKey: string;
   destinationPath: string | null;
   navigationSequence: number;
+  acceptDestinationMismatch: boolean;
   resolve: () => void;
   timeout: number;
 }
@@ -32,6 +33,7 @@ interface PendingMainStageMotion {
   sourceLocationKey: string;
   destinationPath: string | null;
   navigationSequence: number;
+  acceptDestinationMismatch: boolean;
   direction: NavigationTransitionDirection;
   token: string;
 }
@@ -273,45 +275,64 @@ export default function NavigationTransitionProvider({ children }: { children: R
     }
 
     const pendingMainStageMotion = pendingMainStageMotionRef.current;
-    if (
-      pendingMainStageMotion &&
-      isExpectedNavigationCommit(
+    if (pendingMainStageMotion) {
+      const committedExpectedDestination = isExpectedNavigationCommit(
         pendingMainStageMotion.destinationPath,
         pendingMainStageMotion.navigationSequence,
         navigationSequenceRef.current,
         pendingMainStageMotion.sourceLocationKey,
         location.key,
         createPath(location),
-      )
-    ) {
-      pendingMainStageMotionRef.current = null;
-      if (activeMainStageAnimationRef.current) {
-        activeMainStageAnimationRef.current.animation.cancel();
-        finishMainStageMotion(activeMainStageAnimationRef.current.token);
-      }
-      const animation = startMainStageMotion(pendingMainStageMotion.direction);
-      const activeMotion = animation ? { animation, token: pendingMainStageMotion.token } : null;
-      activeMainStageAnimationRef.current = activeMotion;
-      if (animation) {
-        void animation.finished
-          .catch(() => undefined)
-          .finally(() => {
-            if (activeMainStageAnimationRef.current === activeMotion) {
-              // `fill: both` exposes the incoming offset before the first
-              // paint. Once finished, cancel the inert effect so normal page
-              // scrolling does not retain a route-sized animation layer.
-              animation.cancel();
-              activeMainStageAnimationRef.current = null;
-              finishMainStageMotion(pendingMainStageMotion.token);
-            }
-          });
-      } else {
+      );
+      const committedHistoryDestination =
+        pendingMainStageMotion.acceptDestinationMismatch &&
+        isExpectedNavigationCommit(
+          pendingMainStageMotion.destinationPath,
+          pendingMainStageMotion.navigationSequence,
+          navigationSequenceRef.current,
+          pendingMainStageMotion.sourceLocationKey,
+          location.key,
+          createPath(location),
+          true,
+        );
+
+      if (committedHistoryDestination && !committedExpectedDestination) {
+        pendingMainStageMotionRef.current = null;
+        // A native POP can legitimately land somewhere other than the logical
+        // fallback (for example after a reload or restricted sessionStorage).
+        // Never hold the committed page hidden while waiting for a route that
+        // the browser did not choose, and do not animate a guessed direction.
         finishMainStageMotion(pendingMainStageMotion.token);
+      } else if (committedExpectedDestination) {
+        pendingMainStageMotionRef.current = null;
+        if (activeMainStageAnimationRef.current) {
+          activeMainStageAnimationRef.current.animation.cancel();
+          finishMainStageMotion(activeMainStageAnimationRef.current.token);
+        }
+        const animation = startMainStageMotion(pendingMainStageMotion.direction);
+        const activeMotion = animation ? { animation, token: pendingMainStageMotion.token } : null;
+        activeMainStageAnimationRef.current = activeMotion;
+        if (animation) {
+          void animation.finished
+            .catch(() => undefined)
+            .finally(() => {
+              if (activeMainStageAnimationRef.current === activeMotion) {
+                // `fill: both` exposes the incoming offset before the first
+                // paint. Once finished, cancel the inert effect so normal page
+                // scrolling does not retain a route-sized animation layer.
+                animation.cancel();
+                activeMainStageAnimationRef.current = null;
+                finishMainStageMotion(pendingMainStageMotion.token);
+              }
+            });
+        } else {
+          finishMainStageMotion(pendingMainStageMotion.token);
+        }
       }
     }
 
     const pending = pendingCommitRef.current;
-    if (
+    const committedDestination =
       pending &&
       isExpectedNavigationCommit(
         pending.destinationPath,
@@ -320,8 +341,14 @@ export default function NavigationTransitionProvider({ children }: { children: R
         pending.sourceLocationKey,
         location.key,
         createPath(location),
-      )
-    ) {
+        pending.acceptDestinationMismatch,
+      );
+    if (committedDestination) {
+      // A changed location key is authoritative for a native history
+      // traversal, whose actual destination can differ from a logical
+      // fallback when provenance is unavailable. Push/replace navigation must
+      // still match its exact target so an intermediate commit cannot finish
+      // a newer transition.
       resolvePendingCommit();
     }
   }, [location, resolvePendingCommit]);
@@ -456,6 +483,7 @@ export default function NavigationTransitionProvider({ children }: { children: R
           sourceLocationKey: currentLocation.key,
           destinationPath: nextPath,
           navigationSequence,
+          acceptDestinationMismatch: historyDelta !== null,
           direction,
           token,
         };
@@ -484,6 +512,7 @@ export default function NavigationTransitionProvider({ children }: { children: R
               sourceLocationKey,
               destinationPath: nextPath,
               navigationSequence,
+              acceptDestinationMismatch: historyDelta !== null,
               resolve,
               timeout,
             };

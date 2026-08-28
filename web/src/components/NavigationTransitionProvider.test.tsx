@@ -6,6 +6,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
   type InitialEntry,
 } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,7 @@ import PageBack from "./PageBack";
 import ViewTransitionLink from "./ViewTransitionLink";
 import { isExpectedNavigationCommit, pruneNavigationHistory } from "@/lib/backNavigation";
 import { DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE } from "./sidebarItemNavigation";
+import { useNavigationTransition } from "./navigationTransitionContext";
 
 const originalStartViewTransition = Object.getOwnPropertyDescriptor(
   document,
@@ -25,6 +27,28 @@ const originalElementAnimate = Object.getOwnPropertyDescriptor(HTMLElement.proto
 function LocationOutput() {
   const location = useLocation();
   return <output aria-label="location">{location.pathname}</output>;
+}
+
+function MainStageCommitRaceControls() {
+  const transitionNavigate = useNavigationTransition();
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          transitionNavigate?.("/item/season-1");
+          navigate("/item/episode-1");
+        }}
+      >
+        Queue intended then stale
+      </button>
+      <button type="button" onClick={() => navigate("/item/season-1")}>
+        Commit intended
+      </button>
+    </>
+  );
 }
 
 function transitionResult(finished: Promise<void>) {
@@ -100,6 +124,7 @@ function renderRoutes(initialEntries: InitialEntry[]) {
       <NavigationTransitionProvider>
         <div className="sidebar-main-stage" />
         <LocationOutput />
+        <MainStageCommitRaceControls />
         <Routes>
           <Route
             path="/"
@@ -279,6 +304,12 @@ describe("NavigationTransitionProvider", () => {
     expect(isExpectedNavigationCommit("/item/c", 2, 2, sourceKey, "location-c", "/item/c")).toBe(
       true,
     );
+    expect(
+      isExpectedNavigationCommit("/item/c", 2, 2, sourceKey, "location-b", "/item/b", true),
+    ).toBe(true);
+    expect(
+      isExpectedNavigationCommit("/item/c", 2, 3, sourceKey, "location-b", "/item/b", true),
+    ).toBe(false);
   });
 
   it("bounds long-running history around a deeply backed-to entry", () => {
@@ -367,6 +398,73 @@ describe("NavigationTransitionProvider", () => {
       },
     );
     expect(mainStage.cancel).toHaveBeenCalled();
+  });
+
+  it("clears nested motion immediately when native Back commits a different item", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    window.history.replaceState({ idx: 1 }, "");
+    const viewTransition = installViewTransitionMock();
+    const mainStage = installMainStageAnimationMock();
+    renderRoutes(["/item/series-1", "/item/episode-1"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/series-1"),
+    );
+
+    expect(viewTransition.startViewTransition).not.toHaveBeenCalled();
+    expect(mainStage.animate).not.toHaveBeenCalled();
+    expect(document.documentElement).not.toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+  });
+
+  it("keeps the latest direct item motion pending through an intermediate commit", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    const mainStage = installMainStageAnimationMock();
+    renderRoutes(["/item/series-1"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Queue intended then stale" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/episode-1"),
+    );
+
+    expect(mainStage.animate).not.toHaveBeenCalled();
+    expect(document.documentElement).toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+
+    await userEvent.click(screen.getByRole("button", { name: "Commit intended" }));
+    await waitFor(() => expect(mainStage.animate).toHaveBeenCalledOnce());
+
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/season-1");
+  });
+
+  it("settles a narrow-screen transition when native Back commits a different item", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    window.history.replaceState({ idx: 1 }, "");
+    const transition = installViewTransitionMock();
+    renderRoutes(["/item/series-1", "/item/episode-1"]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await waitFor(() =>
+      expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/series-1"),
+    );
+    await waitFor(() => expect(transition.pathsWhenUpdatesResolve).toEqual(["/item/series-1"]));
+
+    expect(transition.startViewTransition).toHaveBeenCalledOnce();
+    expect(transition.directionsWhenUpdatesResolve).toEqual(["back"]);
   });
 
   it("awaits the committed Series page on Season back and preserves the next back to Home", async () => {

@@ -25,10 +25,11 @@ export function isExpectedNavigationCommit(
   sourceLocationKey: string,
   currentLocationKey: string,
   currentPath: string,
+  acceptPathMismatch = false,
 ): boolean {
   return (
     expectedSequence === currentSequence &&
     sourceLocationKey !== currentLocationKey &&
-    (expectedPath === null || expectedPath === currentPath)
+    (acceptPathMismatch || expectedPath === null || expectedPath === currentPath)
   );
 }

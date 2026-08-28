@@ -77,7 +77,9 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
     return (
       <div className="px-4 py-6 sm:px-6 sm:py-10 lg:px-12">
         <ViewTransitionLink
-          to={seriesId ? `/item/${seriesId}` : "/"}
+          to={seriesHref}
+          preferHistory={enteredFromParentSeries}
+          replace
           transitionDirection="back"
           className="text-muted-foreground hover:text-foreground text-sm"
         >
