@@ -77,37 +77,45 @@ type markerInvalidationColumn struct {
 	sourceColumn string
 }
 
+const (
+	markerSourceColumnShared  = "markers_source"
+	markerSourceColumnIntro   = "intro_markers_source"
+	markerSourceColumnCredits = "credits_markers_source"
+	markerSourceColumnRecap   = "recap_markers_source"
+	markerSourceColumnPreview = "preview_markers_source"
+)
+
 var markerInvalidationColumns = []markerInvalidationColumn{
-	{name: "intro_start", sourceColumn: "intro_markers_source"},
-	{name: "intro_end", sourceColumn: "intro_markers_source"},
-	{name: "credits_start", sourceColumn: "credits_markers_source"},
-	{name: "credits_end", sourceColumn: "credits_markers_source"},
-	{name: "recap_start", sourceColumn: "recap_markers_source"},
-	{name: "recap_end", sourceColumn: "recap_markers_source"},
-	{name: "preview_start", sourceColumn: "preview_markers_source"},
-	{name: "preview_end", sourceColumn: "preview_markers_source"},
-	{name: "markers_source", sourceColumn: "markers_source"},
-	{name: "markers_confidence", sourceColumn: "markers_source"},
-	{name: "intro_markers_source", sourceColumn: "intro_markers_source"},
-	{name: "intro_markers_provider", sourceColumn: "intro_markers_source"},
-	{name: "intro_markers_confidence", sourceColumn: "intro_markers_source"},
-	{name: "intro_markers_algorithm", sourceColumn: "intro_markers_source"},
-	{name: "intro_markers_detected_at", sourceColumn: "intro_markers_source"},
-	{name: "credits_markers_source", sourceColumn: "credits_markers_source"},
-	{name: "credits_markers_provider", sourceColumn: "credits_markers_source"},
-	{name: "credits_markers_confidence", sourceColumn: "credits_markers_source"},
-	{name: "credits_markers_algorithm", sourceColumn: "credits_markers_source"},
-	{name: "credits_markers_detected_at", sourceColumn: "credits_markers_source"},
-	{name: "recap_markers_source", sourceColumn: "recap_markers_source"},
-	{name: "recap_markers_provider", sourceColumn: "recap_markers_source"},
-	{name: "recap_markers_confidence", sourceColumn: "recap_markers_source"},
-	{name: "recap_markers_algorithm", sourceColumn: "recap_markers_source"},
-	{name: "recap_markers_detected_at", sourceColumn: "recap_markers_source"},
-	{name: "preview_markers_source", sourceColumn: "preview_markers_source"},
-	{name: "preview_markers_provider", sourceColumn: "preview_markers_source"},
-	{name: "preview_markers_confidence", sourceColumn: "preview_markers_source"},
-	{name: "preview_markers_algorithm", sourceColumn: "preview_markers_source"},
-	{name: "preview_markers_detected_at", sourceColumn: "preview_markers_source"},
+	{name: "intro_start", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_end", sourceColumn: markerSourceColumnIntro},
+	{name: "credits_start", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_end", sourceColumn: markerSourceColumnCredits},
+	{name: "recap_start", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_end", sourceColumn: markerSourceColumnRecap},
+	{name: "preview_start", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_end", sourceColumn: markerSourceColumnPreview},
+	{name: markerSourceColumnShared, sourceColumn: markerSourceColumnShared},
+	{name: "markers_confidence", sourceColumn: markerSourceColumnShared},
+	{name: markerSourceColumnIntro, sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_provider", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_confidence", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_algorithm", sourceColumn: markerSourceColumnIntro},
+	{name: "intro_markers_detected_at", sourceColumn: markerSourceColumnIntro},
+	{name: markerSourceColumnCredits, sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_provider", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_confidence", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_algorithm", sourceColumn: markerSourceColumnCredits},
+	{name: "credits_markers_detected_at", sourceColumn: markerSourceColumnCredits},
+	{name: markerSourceColumnRecap, sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_provider", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_confidence", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_algorithm", sourceColumn: markerSourceColumnRecap},
+	{name: "recap_markers_detected_at", sourceColumn: markerSourceColumnRecap},
+	{name: markerSourceColumnPreview, sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_provider", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_confidence", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_algorithm", sourceColumn: markerSourceColumnPreview},
+	{name: "preview_markers_detected_at", sourceColumn: markerSourceColumnPreview},
 }
 
 const markerInvalidationPredicate = `media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash`
@@ -123,7 +131,7 @@ func markerInvalidationAssignments() string {
 			b.WriteString(",\n\t\t")
 		}
 		sourceExpr := "COALESCE(media_files." + column.sourceColumn + ", '')"
-		if column.sourceColumn != "markers_source" {
+		if column.sourceColumn != markerSourceColumnShared {
 			sourceExpr = "COALESCE(media_files." + column.sourceColumn + ", media_files.markers_source, '')"
 		}
 		fmt.Fprintf(
