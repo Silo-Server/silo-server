@@ -13,6 +13,8 @@ import {
   MAX_TRACKED_HISTORY_PATHS,
   pruneNavigationHistory,
 } from "@/lib/backNavigation";
+import { SIDEBAR_RAIL_WIDTH, SIDEBAR_SURFACE_WIDTH } from "@/components/AppSidebar.logic";
+import { SIDEBAR_COLLAPSE_DURATION_MS } from "@/components/sidebarItemNavigation";
 
 interface PendingCommit {
   sourceLocationKey: string;
@@ -20,6 +22,13 @@ interface PendingCommit {
   navigationSequence: number;
   resolve: () => void;
   timeout: number;
+}
+
+interface PendingMainStageMotion {
+  sourceLocationKey: string;
+  destinationPath: string | null;
+  navigationSequence: number;
+  direction: NavigationTransitionDirection;
 }
 
 interface ViewTransitionHandle {
@@ -139,6 +148,40 @@ function isDesktopItemBoundaryChange(currentPathname: string, nextPathname: stri
   return currentIsItem !== nextIsItem && window.matchMedia("(min-width: 64rem)").matches;
 }
 
+function isDesktopItemToItemChange(currentPathname: string, nextPathname: string): boolean {
+  if (typeof window.matchMedia !== "function") return false;
+  return (
+    currentPathname.startsWith("/item/") &&
+    nextPathname.startsWith("/item/") &&
+    window.matchMedia("(min-width: 64rem)").matches
+  );
+}
+
+function startMainStageMotion(direction: NavigationTransitionDirection): Animation | null {
+  const mainStage = document.querySelector<HTMLElement>(".sidebar-main-stage");
+  if (!mainStage || typeof mainStage.animate !== "function") return null;
+
+  const travel = SIDEBAR_SURFACE_WIDTH - SIDEBAR_RAIL_WIDTH;
+  const rootStyles = window.getComputedStyle(document.documentElement);
+  const easing =
+    rootStyles.getPropertyValue("--ease-sidebar-collapse").trim() ||
+    "cubic-bezier(0.32, 0.72, 0, 1)";
+  const initialOffset = direction === "back" ? -travel : travel;
+
+  // Home swaps to the destination route at its previous visual edge, then
+  // carries that new page 196px with the sidebar's compositor timeline. Do
+  // the same for nested item routes without snapshotting the variable-height
+  // scrolling main element (which previously caused layout work per frame).
+  return mainStage.animate(
+    [{ transform: `translateX(${initialOffset}px)` }, { transform: "translateX(0)" }],
+    {
+      duration: SIDEBAR_COLLAPSE_DURATION_MS,
+      easing,
+      fill: "both",
+    },
+  );
+}
+
 /**
  * Owns same-document route transitions for the declarative BrowserRouter.
  *
@@ -154,6 +197,8 @@ export default function NavigationTransitionProvider({ children }: { children: R
   const locationRef = useRef<LocationSnapshot>(location);
   const pendingCommitRef = useRef<PendingCommit | null>(null);
   const activeTransitionRef = useRef<ViewTransitionHandle | null>(null);
+  const pendingMainStageMotionRef = useRef<PendingMainStageMotion | null>(null);
+  const activeMainStageAnimationRef = useRef<Animation | null>(null);
   const navigationSequenceRef = useRef(0);
   const navigationHistoryRef = useRef<NavigationHistorySession | null>(null);
   if (!navigationHistoryRef.current) {
@@ -193,6 +238,38 @@ export default function NavigationTransitionProvider({ children }: { children: R
       pruneNavigationHistory(navigationHistory.paths, historyIndex);
       persistNavigationHistory(navigationHistory, historyIndex);
     }
+
+    const pendingMainStageMotion = pendingMainStageMotionRef.current;
+    if (
+      pendingMainStageMotion &&
+      isExpectedNavigationCommit(
+        pendingMainStageMotion.destinationPath,
+        pendingMainStageMotion.navigationSequence,
+        navigationSequenceRef.current,
+        pendingMainStageMotion.sourceLocationKey,
+        location.key,
+        createPath(location),
+      )
+    ) {
+      pendingMainStageMotionRef.current = null;
+      activeMainStageAnimationRef.current?.cancel();
+      const animation = startMainStageMotion(pendingMainStageMotion.direction);
+      activeMainStageAnimationRef.current = animation;
+      if (animation) {
+        void animation.finished
+          .catch(() => undefined)
+          .finally(() => {
+            if (activeMainStageAnimationRef.current === animation) {
+              // `fill: both` exposes the incoming offset before the first
+              // paint. Once finished, cancel the inert effect so normal page
+              // scrolling does not retain a route-sized animation layer.
+              animation.cancel();
+              activeMainStageAnimationRef.current = null;
+            }
+          });
+      }
+    }
+
     const pending = pendingCommitRef.current;
     if (
       pending &&
@@ -212,6 +289,8 @@ export default function NavigationTransitionProvider({ children }: { children: R
   useLayoutEffect(
     () => () => {
       activeTransitionRef.current?.skipTransition?.();
+      activeMainStageAnimationRef.current?.cancel();
+      pendingMainStageMotionRef.current = null;
       resolvePendingCommit();
       delete document.documentElement.dataset.navigationDirection;
     },
@@ -283,6 +362,9 @@ export default function NavigationTransitionProvider({ children }: { children: R
 
       const navigationSequence = ++navigationSequenceRef.current;
       activeTransitionRef.current?.skipTransition?.();
+      activeMainStageAnimationRef.current?.cancel();
+      activeMainStageAnimationRef.current = null;
+      pendingMainStageMotionRef.current = null;
       resolvePendingCommit();
       delete document.documentElement.dataset.navigationDirection;
 
@@ -304,6 +386,24 @@ export default function NavigationTransitionProvider({ children }: { children: R
         nextPath &&
         isDesktopItemBoundaryChange(currentLocation.pathname, resolvePath(nextPath).pathname)
       ) {
+        performNavigation();
+        return;
+      }
+
+      const nextPathname = nextPath ? resolvePath(nextPath).pathname : null;
+      const mainStage = document.querySelector<HTMLElement>(".sidebar-main-stage");
+      if (
+        nextPathname &&
+        typeof mainStage?.animate === "function" &&
+        isDesktopItemToItemChange(currentLocation.pathname, nextPathname) &&
+        !prefersReducedMotion()
+      ) {
+        pendingMainStageMotionRef.current = {
+          sourceLocationKey: currentLocation.key,
+          destinationPath: nextPath,
+          navigationSequence,
+          direction,
+        };
         performNavigation();
         return;
       }

@@ -58,7 +58,7 @@ export default function EpisodeCarousel({
         )}
 
         <div ref={emblaRef} className="embla__viewport overflow-hidden py-4 pl-4">
-          <ul role="list" className="embla__container flex cursor-grab list-none gap-3">
+          <ul role="list" className="embla__container flex list-none gap-3">
             {episodes.map((ep) => (
               <EpisodeCarouselCard
                 key={ep.content_id}

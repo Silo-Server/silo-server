@@ -1497,6 +1497,14 @@ html[data-navigation-direction="back"]::view-transition-new(root) {
     contain-intrinsic-size: auto 24rem;
   }
 
+  /* A detail page may mount several Embla rails close enough to the viewport
+     that the browser keeps all of them render-relevant. Isolate each clipped
+     viewport so a browser-chrome resize or vertical page scroll cannot make
+     an episode/cast rail invalidate neighbouring detail sections. */
+  .detail-supporting-content .embla__viewport {
+    contain: layout paint style;
+  }
+
   /* Card actions stay hidden at rest so touch devices get clean artwork; a
      long press opens the action sheet instead. Keyboard focus and an open
      menu reveal them on every device so keyboard and assistive-tech users

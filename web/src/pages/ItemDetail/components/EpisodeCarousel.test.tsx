@@ -39,6 +39,16 @@ describe("EpisodeCarousel", () => {
     prefetchEpisodeDetail.mockClear();
   });
 
+  it("keeps the empty carousel track on the normal cursor", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <EpisodeCarousel currentEpisodeNumber={1} episodes={[]} />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelector(".embla__container")).not.toHaveClass("cursor-grab");
+  });
+
   it("prefetches only after a card shows sustained navigation intent", () => {
     vi.useFakeTimers();
     try {

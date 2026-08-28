@@ -128,7 +128,7 @@ export default function MediaCarousel({
         >
           <ul
             role="list"
-            className={`embla__container flex cursor-grab list-none gap-4 lg:gap-5${containerPadX}`}
+            className={`embla__container flex list-none gap-4 lg:gap-5${containerPadX}`}
           >
             {slideChildren.map((child, index) => (
               <li key={index} className="embla__slide shrink-0">

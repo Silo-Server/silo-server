@@ -189,7 +189,7 @@ describe("responsive rendering containment", () => {
     expect(css).toMatch(/button:disabled,\s*\[role="button"\]\[aria-disabled="true"\]/);
   });
 
-  it("uses inverse compositor-only motion for nested detail-page returns", () => {
+  it("keeps the root snapshot motion as the non-desktop navigation fallback", () => {
     expect(css).toMatch(/@keyframes route-forward-in[\s\S]*?transform: translateX\(12px\)/);
     expect(css).toMatch(/@keyframes route-back-in[\s\S]*?transform: translateX\(-12px\)/);
     expect(css).toContain('html[data-navigation-direction="back"]::view-transition-old(root)');
@@ -201,6 +201,9 @@ describe("responsive rendering containment", () => {
     const supporting = ruleBody(".detail-supporting-content > * {");
     expect(supporting).toContain("content-visibility: auto");
     expect(supporting).toContain("contain-intrinsic-size: auto 24rem");
+    expect(ruleBody(".detail-supporting-content .embla__viewport {")).toContain(
+      "contain: layout paint style",
+    );
   });
 
   it("keeps shared card and button hover feedback off CSS filters", () => {

@@ -19,6 +19,7 @@ const originalStartViewTransition = Object.getOwnPropertyDescriptor(
   document,
   "startViewTransition",
 );
+const originalElementAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 
 function LocationOutput() {
   const location = useLocation();
@@ -61,10 +62,26 @@ function installViewTransitionMock() {
   return { directionsWhenUpdatesResolve, pathsWhenUpdatesResolve, startViewTransition, updates };
 }
 
+function installMainStageAnimationMock() {
+  const cancel = vi.fn();
+  const animate = vi.fn(() => {
+    const finished = Promise.resolve({} as Animation);
+    return { cancel, finished } as unknown as Animation;
+  });
+
+  Object.defineProperty(HTMLElement.prototype, "animate", {
+    configurable: true,
+    value: animate,
+  });
+
+  return { animate, cancel };
+}
+
 function renderRoutes(initialEntries: InitialEntry[]) {
   return render(
     <MemoryRouter initialEntries={initialEntries} initialIndex={initialEntries.length - 1}>
       <NavigationTransitionProvider>
+        <div className="sidebar-main-stage" />
         <LocationOutput />
         <Routes>
           <Route
@@ -224,6 +241,11 @@ afterEach(() => {
   } else {
     Reflect.deleteProperty(document, "startViewTransition");
   }
+  if (originalElementAnimate) {
+    Object.defineProperty(HTMLElement.prototype, "animate", originalElementAnimate);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  }
   window.history.replaceState(null, "", "/");
   window.sessionStorage.removeItem("silo:navigation-history-paths:v1");
   vi.unstubAllGlobals();
@@ -274,6 +296,47 @@ describe("NavigationTransitionProvider", () => {
     expect(transition.startViewTransition).toHaveBeenCalledOnce();
     expect(transition.pathsWhenUpdatesResolve).toEqual(["/item/season-1"]);
     expect(transition.directionsWhenUpdatesResolve).toEqual(["forward"]);
+  });
+
+  it("matches Home's desktop compositor motion when opening and backing out of a Season", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(min-width: 64rem)",
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    window.history.replaceState({ idx: 1 }, "");
+    const viewTransition = installViewTransitionMock();
+    const mainStage = installMainStageAnimationMock();
+    renderRoutes(["/item/series-1"]);
+
+    await userEvent.click(screen.getByRole("link", { name: "Season 1" }));
+    await waitFor(() => expect(mainStage.animate).toHaveBeenCalledTimes(1));
+
+    expect(viewTransition.startViewTransition).not.toHaveBeenCalled();
+    expect(mainStage.animate).toHaveBeenNthCalledWith(
+      1,
+      [{ transform: "translateX(196px)" }, { transform: "translateX(0)" }],
+      {
+        duration: 300,
+        easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+        fill: "both",
+      },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+    await waitFor(() => expect(mainStage.animate).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/series-1");
+    expect(mainStage.animate).toHaveBeenNthCalledWith(
+      2,
+      [{ transform: "translateX(-196px)" }, { transform: "translateX(0)" }],
+      {
+        duration: 300,
+        easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+        fill: "both",
+      },
+    );
   });
 
   it("awaits the committed Series page on Season back and preserves the next back to Home", async () => {

@@ -170,6 +170,7 @@ describe("SeasonEpisodeGrid", () => {
     expect(viewport).toHaveClass("embla__viewport");
     expect(viewport.querySelectorAll(".embla__slide")).toHaveLength(2);
     expect(viewport.querySelector(".grid")).toBeNull();
+    expect(viewport.querySelector(".embla__container")).not.toHaveClass("cursor-grab");
   });
 
   it("does not prefetch episodes during a fast pointer sweep", () => {
