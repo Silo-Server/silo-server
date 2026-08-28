@@ -90,7 +90,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	if shouldRunOnline && hasCompleteOnlinePlaybackSkipMarkers(file) {
 		shouldRunOnline = false
 	}
-	if shouldRunOnline && h.hasRecentOnlineMarkerAttempt(file.ID, time.Now()) {
+	if shouldRunOnline && h.hasRecentOnlineMarkerAttempt(file, time.Now()) {
 		shouldRunOnline = false
 	}
 
@@ -178,7 +178,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		"mode", mode)
 
 	if runOnline {
-		h.recordOnlineMarkerAttempt(file.ID, time.Now())
+		h.recordOnlineMarkerAttempt(file, time.Now())
 		wrote, err := h.fetchOnlineMarkersForPlayback(ctx, file)
 		if err != nil {
 			slog.Warn("playback lazy markers: online fetch failed",
@@ -355,38 +355,52 @@ func hasCompleteOnlinePlaybackSkipMarkers(file *models.MediaFile) bool {
 		isDurableOnlineSource(file.CreditsMarkersSource)
 }
 
-func (h *PlaybackHandler) hasRecentOnlineMarkerAttempt(fileID int, now time.Time) bool {
-	if h == nil || fileID <= 0 {
+type playbackLazyOnlineAttemptKey struct {
+	fileID   int
+	fileHash string
+}
+
+func playbackLazyOnlineAttemptKeyFor(file *models.MediaFile) (playbackLazyOnlineAttemptKey, bool) {
+	if file == nil || file.ID <= 0 {
+		return playbackLazyOnlineAttemptKey{}, false
+	}
+	return playbackLazyOnlineAttemptKey{fileID: file.ID, fileHash: strings.TrimSpace(file.FileHash)}, true
+}
+
+func (h *PlaybackHandler) hasRecentOnlineMarkerAttempt(file *models.MediaFile, now time.Time) bool {
+	key, ok := playbackLazyOnlineAttemptKeyFor(file)
+	if h == nil || !ok {
 		return false
 	}
 	h.markerLazyOnlineAttemptMu.Lock()
 	defer h.markerLazyOnlineAttemptMu.Unlock()
-	attemptedAt, ok := h.markerLazyOnlineAttempts[fileID]
+	attemptedAt, ok := h.markerLazyOnlineAttempts[key]
 	if !ok {
 		return false
 	}
 	if now.Sub(attemptedAt) >= playbackLazyOnlineRetryInterval {
-		delete(h.markerLazyOnlineAttempts, fileID)
+		delete(h.markerLazyOnlineAttempts, key)
 		return false
 	}
 	return true
 }
 
-func (h *PlaybackHandler) recordOnlineMarkerAttempt(fileID int, attemptedAt time.Time) {
-	if h == nil || fileID <= 0 {
+func (h *PlaybackHandler) recordOnlineMarkerAttempt(file *models.MediaFile, attemptedAt time.Time) {
+	key, ok := playbackLazyOnlineAttemptKeyFor(file)
+	if h == nil || !ok {
 		return
 	}
 	h.markerLazyOnlineAttemptMu.Lock()
 	defer h.markerLazyOnlineAttemptMu.Unlock()
 	if h.markerLazyOnlineAttempts == nil {
-		h.markerLazyOnlineAttempts = make(map[int]time.Time)
+		h.markerLazyOnlineAttempts = make(map[playbackLazyOnlineAttemptKey]time.Time)
 	}
-	for cachedFileID, cachedAt := range h.markerLazyOnlineAttempts {
+	for cachedKey, cachedAt := range h.markerLazyOnlineAttempts {
 		if attemptedAt.Sub(cachedAt) >= playbackLazyOnlineRetryInterval {
-			delete(h.markerLazyOnlineAttempts, cachedFileID)
+			delete(h.markerLazyOnlineAttempts, cachedKey)
 		}
 	}
-	h.markerLazyOnlineAttempts[fileID] = attemptedAt
+	h.markerLazyOnlineAttempts[key] = attemptedAt
 }
 
 // hasAnyMarker reports whether the file has at least one populated marker

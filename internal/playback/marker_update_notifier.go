@@ -15,9 +15,34 @@ type markerUpdateSessionLookup interface {
 }
 
 type markerFileState struct {
-	mu    sync.Mutex
+	token chan struct{}
 	epoch atomic.Uint64
 	refs  int
+}
+
+func newMarkerFileState() *markerFileState {
+	state := &markerFileState{token: make(chan struct{}, 1)}
+	state.token <- struct{}{}
+	return state
+}
+
+func (s *markerFileState) lock() {
+	<-s.token
+}
+
+func (s *markerFileState) lockContext(ctx context.Context, registrationDone <-chan struct{}) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-registrationDone:
+		return false
+	case <-s.token:
+		return true
+	}
+}
+
+func (s *markerFileState) unlock() {
+	s.token <- struct{}{}
 }
 
 type markerSnapshotPayload struct {
@@ -59,10 +84,10 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(ctx context.Context, file *models.
 	}
 
 	state := n.acquireFileState(file.ID)
-	state.mu.Lock()
+	state.lock()
 	epoch := state.epoch.Add(1)
 	payload := markerSnapshotPayloadFromFile(file)
-	state.mu.Unlock()
+	state.unlock()
 
 	sessionIDs := make([]string, 0)
 	for _, session := range n.sessions.GetSessionsByMediaFileID(file.ID) {
@@ -109,19 +134,28 @@ func (n *MarkerUpdateNotifier) SendSessionSnapshotFromLoader(
 
 	state := n.acquireFileState(fileID)
 	defer n.releaseFileState(fileID, state)
-	state.mu.Lock()
+	if !state.lockContext(ctx, registration.Done()) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	if err := ctx.Err(); err != nil {
-		state.mu.Unlock()
+		state.unlock()
 		return false, err
+	}
+	if !n.hub.HasRegistration(registration) {
+		state.unlock()
+		return false, nil
 	}
 	file, err := loader.GetByID(ctx, fileID)
 	if err != nil {
-		state.mu.Unlock()
+		state.unlock()
 		return false, err
 	}
 	epoch := state.epoch.Load()
 	payload := markerSnapshotPayloadFromFile(file)
-	state.mu.Unlock()
+	state.unlock()
 	if file == nil || !payload.hasAnyMarker() {
 		return false, nil
 	}
@@ -143,7 +177,7 @@ func (n *MarkerUpdateNotifier) acquireFileState(fileID int) *markerFileState {
 	defer n.stateMu.Unlock()
 	state := n.states[fileID]
 	if state == nil {
-		state = &markerFileState{}
+		state = newMarkerFileState()
 		n.states[fileID] = state
 	}
 	state.refs++

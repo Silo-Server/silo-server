@@ -228,7 +228,7 @@ type PlaybackHandler struct {
 	MarkerLazyContext         context.Context
 	MarkerLazyInFlight        sync.Map
 	markerLazyOnlineAttemptMu sync.Mutex
-	markerLazyOnlineAttempts  map[int]time.Time
+	markerLazyOnlineAttempts  map[playbackLazyOnlineAttemptKey]time.Time
 	SubtitleRepo              subtitles.Repository // optional; enables downloaded subtitles in playback
 	RealtimeHub               *playback.RealtimeHub
 	CommandTracker            *playback.CommandTracker

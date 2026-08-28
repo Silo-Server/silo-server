@@ -284,6 +284,73 @@ func TestMarkerSnapshotFromReplacedConnectionDoesNotReachReplacement(t *testing.
 	}
 }
 
+func TestQueuedMarkerSnapshotStopsBeforeLoadWhenConnectionIsReplaced(t *testing.T) {
+	sessions := NewSessionManager(0, 0)
+	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)
+	hub := NewRealtimeHub()
+	oldRegistration := hub.Register(session.ID, &dispatchTestConn{})
+	notifier := NewMarkerUpdateNotifier(sessions, hub)
+
+	introStart, introEnd := 1.0, 50.0
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := notifier.SendSessionSnapshotFromLoader(context.Background(), oldRegistration, 100, blockingMarkerSnapshotLoader{
+			file:    &models.MediaFile{ID: 100, IntroStart: &introStart, IntroEnd: &introEnd},
+			entered: entered, release: release,
+		})
+		firstDone <- err
+	}()
+	<-entered
+
+	queuedLoaderCalled := make(chan struct{})
+	queuedDone := make(chan error, 1)
+	go func() {
+		_, err := notifier.SendSessionSnapshotFromLoader(
+			context.Background(), oldRegistration, 100, observedMarkerSnapshotLoader{called: queuedLoaderCalled},
+		)
+		queuedDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		notifier.stateMu.Lock()
+		refs := notifier.states[100].refs
+		notifier.stateMu.Unlock()
+		if refs == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second snapshot did not queue behind the file state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	newRegistration := hub.Register(session.ID, &dispatchTestConn{})
+	if newRegistration == nil {
+		t.Fatal("replacement connection did not register")
+	}
+	defer hub.Unregister(newRegistration)
+	select {
+	case err := <-queuedDone:
+		if err != nil {
+			t.Fatalf("queued snapshot: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued snapshot did not stop after its registration was replaced")
+	}
+	select {
+	case <-queuedLoaderCalled:
+		t.Fatal("queued stale snapshot called the loader")
+	default:
+	}
+
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first snapshot: %v", err)
+	}
+}
+
 func TestMarkerSnapshotSkipsEmptyRows(t *testing.T) {
 	sessions := NewSessionManager(0, 0)
 	session, _ := sessions.StartSession(1, "profile-a", 100, PlayDirect, false)

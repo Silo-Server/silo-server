@@ -499,23 +499,29 @@ func TestHasCompleteOnlinePlaybackSkipMarkers(t *testing.T) {
 func TestPlaybackLazyOnlineAttemptCooldown(t *testing.T) {
 	handler := &PlaybackHandler{}
 	now := time.Unix(1_700_000_000, 0)
+	file := &models.MediaFile{ID: 42, FileHash: "old-hash"}
 
-	if handler.hasRecentOnlineMarkerAttempt(42, now) {
+	if handler.hasRecentOnlineMarkerAttempt(file, now) {
 		t.Fatal("missing attempt reported as recent")
 	}
-	handler.recordOnlineMarkerAttempt(42, now)
-	if !handler.hasRecentOnlineMarkerAttempt(42, now.Add(playbackLazyOnlineRetryInterval-time.Second)) {
+	handler.recordOnlineMarkerAttempt(file, now)
+	if !handler.hasRecentOnlineMarkerAttempt(file, now.Add(playbackLazyOnlineRetryInterval-time.Second)) {
 		t.Fatal("attempt inside retry interval was not throttled")
 	}
-	if handler.hasRecentOnlineMarkerAttempt(42, now.Add(playbackLazyOnlineRetryInterval)) {
+	replacement := &models.MediaFile{ID: file.ID, FileHash: "new-hash"}
+	if handler.hasRecentOnlineMarkerAttempt(replacement, now.Add(time.Second)) {
+		t.Fatal("replacement file version inherited the old version's cooldown")
+	}
+	if handler.hasRecentOnlineMarkerAttempt(file, now.Add(playbackLazyOnlineRetryInterval)) {
 		t.Fatal("expired attempt remained throttled")
 	}
-	if _, ok := handler.markerLazyOnlineAttempts[42]; ok {
+	if _, ok := handler.markerLazyOnlineAttempts[playbackLazyOnlineAttemptKey{fileID: file.ID, fileHash: file.FileHash}]; ok {
 		t.Fatal("expired attempt was not removed")
 	}
-	handler.recordOnlineMarkerAttempt(1, now.Add(-playbackLazyOnlineRetryInterval))
-	handler.recordOnlineMarkerAttempt(2, now)
-	if _, ok := handler.markerLazyOnlineAttempts[1]; ok {
+	expired := &models.MediaFile{ID: 1}
+	handler.recordOnlineMarkerAttempt(expired, now.Add(-playbackLazyOnlineRetryInterval))
+	handler.recordOnlineMarkerAttempt(&models.MediaFile{ID: 2}, now)
+	if _, ok := handler.markerLazyOnlineAttempts[playbackLazyOnlineAttemptKey{fileID: expired.ID}]; ok {
 		t.Fatal("recording an attempt did not prune expired entries")
 	}
 }
