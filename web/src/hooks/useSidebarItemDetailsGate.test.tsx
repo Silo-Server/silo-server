@@ -28,6 +28,22 @@ describe("useSidebarItemDetailsGate", () => {
     expect(result.current.pendingLocationKey).toBeNull();
   });
 
+  it("gates nested item commits until their shared main-stage motion settles", () => {
+    const { result, rerender } = renderHook(
+      ({ locationKey }: { locationKey: string }) => useSidebarItemDetailsGate(locationKey, true),
+      { initialProps: { locationKey: "series" } },
+    );
+
+    expect(result.current.itemDetailsReady).toBe(true);
+
+    rerender({ locationKey: "season" });
+    expect(result.current.itemDetailsReady).toBe(false);
+    expect(result.current.pendingLocationKey).toBe("season");
+
+    act(() => result.current.reveal("season"));
+    expect(result.current.itemDetailsReady).toBe(true);
+  });
+
   it("discards an abandoned gate and allows the next item entry", () => {
     const { result, rerender } = renderHook(
       ({ locationKey, isItem }: { locationKey: string; isItem: boolean }) =>

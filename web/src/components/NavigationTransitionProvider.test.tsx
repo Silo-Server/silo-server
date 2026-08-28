@@ -14,6 +14,7 @@ import NavigationTransitionProvider from "./NavigationTransitionProvider";
 import PageBack from "./PageBack";
 import ViewTransitionLink from "./ViewTransitionLink";
 import { isExpectedNavigationCommit, pruneNavigationHistory } from "@/lib/backNavigation";
+import { DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE } from "./sidebarItemNavigation";
 
 const originalStartViewTransition = Object.getOwnPropertyDescriptor(
   document,
@@ -64,17 +65,33 @@ function installViewTransitionMock() {
 
 function installMainStageAnimationMock() {
   const cancel = vi.fn();
-  const animate = vi.fn(() => {
-    const finished = Promise.resolve({} as Animation);
-    return { cancel, finished } as unknown as Animation;
-  });
+  const pause = vi.fn();
+  const play = vi.fn();
+  const animationState = { playState: "running" };
+  const animation = {
+    cancel,
+    currentTime: null as number | null,
+    finished: new Promise<Animation>(() => undefined),
+    pause: () => {
+      animationState.playState = "paused";
+      pause();
+    },
+    play: () => {
+      animationState.playState = "running";
+      play();
+    },
+    get playState() {
+      return animationState.playState;
+    },
+  } as unknown as Animation;
+  const animate = vi.fn(() => animation);
 
   Object.defineProperty(HTMLElement.prototype, "animate", {
     configurable: true,
     value: animate,
   });
 
-  return { animate, cancel };
+  return { animate, cancel, pause, play };
 }
 
 function renderRoutes(initialEntries: InitialEntry[]) {
@@ -248,6 +265,7 @@ afterEach(() => {
   }
   window.history.replaceState(null, "", "/");
   window.sessionStorage.removeItem("silo:navigation-history-paths:v1");
+  document.documentElement.removeAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
   vi.unstubAllGlobals();
 });
 
@@ -299,6 +317,11 @@ describe("NavigationTransitionProvider", () => {
   });
 
   it("matches Home's desktop compositor motion when opening and backing out of a Season", async () => {
+    const animationFrames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: query === "(min-width: 64rem)",
       media: query,
@@ -314,6 +337,8 @@ describe("NavigationTransitionProvider", () => {
     await waitFor(() => expect(mainStage.animate).toHaveBeenCalledTimes(1));
 
     expect(viewTransition.startViewTransition).not.toHaveBeenCalled();
+    expect(document.documentElement).toHaveAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+    expect(mainStage.pause).toHaveBeenCalledOnce();
     expect(mainStage.animate).toHaveBeenNthCalledWith(
       1,
       [{ transform: "translateX(196px)" }, { transform: "translateX(0)" }],
@@ -323,6 +348,10 @@ describe("NavigationTransitionProvider", () => {
         fill: "both",
       },
     );
+    animationFrames.shift()?.(16);
+    animationFrames.shift()?.(32);
+    animationFrames.shift()?.(48);
+    expect(mainStage.play).toHaveBeenCalledOnce();
 
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
     await waitFor(() => expect(mainStage.animate).toHaveBeenCalledTimes(2));
@@ -337,6 +366,7 @@ describe("NavigationTransitionProvider", () => {
         fill: "both",
       },
     );
+    expect(mainStage.cancel).toHaveBeenCalled();
   });
 
   it("awaits the committed Series page on Season back and preserves the next back to Home", async () => {

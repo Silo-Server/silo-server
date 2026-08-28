@@ -14,7 +14,11 @@ import {
   pruneNavigationHistory,
 } from "@/lib/backNavigation";
 import { SIDEBAR_RAIL_WIDTH, SIDEBAR_SURFACE_WIDTH } from "@/components/AppSidebar.logic";
-import { SIDEBAR_COLLAPSE_DURATION_MS } from "@/components/sidebarItemNavigation";
+import {
+  DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE,
+  DETAIL_MAIN_STAGE_MOTION_END_EVENT,
+  SIDEBAR_COLLAPSE_DURATION_MS,
+} from "@/components/sidebarItemNavigation";
 
 interface PendingCommit {
   sourceLocationKey: string;
@@ -29,6 +33,12 @@ interface PendingMainStageMotion {
   destinationPath: string | null;
   navigationSequence: number;
   direction: NavigationTransitionDirection;
+  token: string;
+}
+
+interface ActiveMainStageMotion {
+  animation: Animation;
+  token: string;
 }
 
 interface ViewTransitionHandle {
@@ -172,7 +182,7 @@ function startMainStageMotion(direction: NavigationTransitionDirection): Animati
   // carries that new page 196px with the sidebar's compositor timeline. Do
   // the same for nested item routes without snapshotting the variable-height
   // scrolling main element (which previously caused layout work per frame).
-  return mainStage.animate(
+  const animation = mainStage.animate(
     [{ transform: `translateX(${initialOffset}px)` }, { transform: "translateX(0)" }],
     {
       duration: SIDEBAR_COLLAPSE_DURATION_MS,
@@ -180,6 +190,29 @@ function startMainStageMotion(direction: NavigationTransitionDirection): Animati
       fill: "both",
     },
   );
+
+  // Home paints the committed lightweight shell at its inverse offset before
+  // the visual state changes and the CSS transition begins. Hold this effect
+  // at its first keyframe across the same two-painted-frame handoff so nested
+  // routes neither jump on commit nor feel a frame shorter than Home.
+  animation.pause();
+  animation.currentTime = 0;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (animation.playState === "paused") animation.play();
+      });
+    });
+  });
+
+  return animation;
+}
+
+function finishMainStageMotion(token: string): void {
+  const root = document.documentElement;
+  if (root.getAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE) !== token) return;
+  root.removeAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+  window.dispatchEvent(new Event(DETAIL_MAIN_STAGE_MOTION_END_EVENT));
 }
 
 /**
@@ -198,7 +231,7 @@ export default function NavigationTransitionProvider({ children }: { children: R
   const pendingCommitRef = useRef<PendingCommit | null>(null);
   const activeTransitionRef = useRef<ViewTransitionHandle | null>(null);
   const pendingMainStageMotionRef = useRef<PendingMainStageMotion | null>(null);
-  const activeMainStageAnimationRef = useRef<Animation | null>(null);
+  const activeMainStageAnimationRef = useRef<ActiveMainStageMotion | null>(null);
   const navigationSequenceRef = useRef(0);
   const navigationHistoryRef = useRef<NavigationHistorySession | null>(null);
   if (!navigationHistoryRef.current) {
@@ -252,21 +285,28 @@ export default function NavigationTransitionProvider({ children }: { children: R
       )
     ) {
       pendingMainStageMotionRef.current = null;
-      activeMainStageAnimationRef.current?.cancel();
+      if (activeMainStageAnimationRef.current) {
+        activeMainStageAnimationRef.current.animation.cancel();
+        finishMainStageMotion(activeMainStageAnimationRef.current.token);
+      }
       const animation = startMainStageMotion(pendingMainStageMotion.direction);
-      activeMainStageAnimationRef.current = animation;
+      const activeMotion = animation ? { animation, token: pendingMainStageMotion.token } : null;
+      activeMainStageAnimationRef.current = activeMotion;
       if (animation) {
         void animation.finished
           .catch(() => undefined)
           .finally(() => {
-            if (activeMainStageAnimationRef.current === animation) {
+            if (activeMainStageAnimationRef.current === activeMotion) {
               // `fill: both` exposes the incoming offset before the first
               // paint. Once finished, cancel the inert effect so normal page
               // scrolling does not retain a route-sized animation layer.
               animation.cancel();
               activeMainStageAnimationRef.current = null;
+              finishMainStageMotion(pendingMainStageMotion.token);
             }
           });
+      } else {
+        finishMainStageMotion(pendingMainStageMotion.token);
       }
     }
 
@@ -289,7 +329,13 @@ export default function NavigationTransitionProvider({ children }: { children: R
   useLayoutEffect(
     () => () => {
       activeTransitionRef.current?.skipTransition?.();
-      activeMainStageAnimationRef.current?.cancel();
+      if (activeMainStageAnimationRef.current) {
+        activeMainStageAnimationRef.current.animation.cancel();
+        finishMainStageMotion(activeMainStageAnimationRef.current.token);
+      }
+      if (pendingMainStageMotionRef.current) {
+        finishMainStageMotion(pendingMainStageMotionRef.current.token);
+      }
       pendingMainStageMotionRef.current = null;
       resolvePendingCommit();
       delete document.documentElement.dataset.navigationDirection;
@@ -362,7 +408,13 @@ export default function NavigationTransitionProvider({ children }: { children: R
 
       const navigationSequence = ++navigationSequenceRef.current;
       activeTransitionRef.current?.skipTransition?.();
-      activeMainStageAnimationRef.current?.cancel();
+      if (activeMainStageAnimationRef.current) {
+        activeMainStageAnimationRef.current.animation.cancel();
+        finishMainStageMotion(activeMainStageAnimationRef.current.token);
+      }
+      if (pendingMainStageMotionRef.current) {
+        finishMainStageMotion(pendingMainStageMotionRef.current.token);
+      }
       activeMainStageAnimationRef.current = null;
       pendingMainStageMotionRef.current = null;
       resolvePendingCommit();
@@ -398,11 +450,14 @@ export default function NavigationTransitionProvider({ children }: { children: R
         isDesktopItemToItemChange(currentLocation.pathname, nextPathname) &&
         !prefersReducedMotion()
       ) {
+        const token = String(navigationSequence);
+        document.documentElement.setAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE, token);
         pendingMainStageMotionRef.current = {
           sourceLocationKey: currentLocation.key,
           destinationPath: nextPath,
           navigationSequence,
           direction,
+          token,
         };
         performNavigation();
         return;

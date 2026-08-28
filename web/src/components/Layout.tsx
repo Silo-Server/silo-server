@@ -22,6 +22,8 @@ import {
 } from "@/hooks/useImmediateSidebarCollapse";
 import SidebarItemNavigationProvider from "@/components/SidebarItemNavigationProvider";
 import {
+  DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE,
+  DETAIL_MAIN_STAGE_MOTION_END_EVENT,
   hasRunningSidebarTransition,
   isCollapsedSidebarSurface,
   parseItemNavigationHref,
@@ -124,12 +126,16 @@ export default function Layout({ children }: LayoutProps) {
     const revealWhenSettled = () => {
       if (cancelled) return;
       const surface = document.querySelector<HTMLElement>(".sidebar-surface");
+      const nestedDetailMotionPending = document.documentElement.hasAttribute(
+        DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE,
+      );
       const deadlineReached =
         prefersReducedMotion() || Date.now() - startedAt >= SIDEBAR_DETAILS_REVEAL_DEADLINE_MS;
       if (
         !deadlineReached &&
-        surface &&
-        (!isCollapsedSidebarSurface(surface) || hasRunningSidebarTransition(surface))
+        (nestedDetailMotionPending ||
+          (surface &&
+            (!isCollapsedSidebarSurface(surface) || hasRunningSidebarTransition(surface))))
       ) {
         const remaining = SIDEBAR_DETAILS_REVEAL_DEADLINE_MS - (Date.now() - startedAt);
         timer = window.setTimeout(revealWhenSettled, Math.min(50, Math.max(0, remaining)));
@@ -138,10 +144,12 @@ export default function Layout({ children }: LayoutProps) {
       revealItemDetails(pendingLocationKey);
     };
 
+    window.addEventListener(DETAIL_MAIN_STAGE_MOTION_END_EVENT, revealWhenSettled);
     revealWhenSettled();
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.removeEventListener(DETAIL_MAIN_STAGE_MOTION_END_EVENT, revealWhenSettled);
     };
   }, [isItemRoute, pendingLocationKey, revealItemDetails]);
 

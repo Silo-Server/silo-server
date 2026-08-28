@@ -204,6 +204,7 @@ describe("responsive rendering containment", () => {
     expect(ruleBody(".detail-supporting-content .embla__viewport {")).toContain(
       "contain: layout paint style",
     );
+    expect(ruleBody(".season-episode-card {")).toContain("contain: layout paint style");
   });
 
   it("keeps shared card and button hover feedback off CSS filters", () => {

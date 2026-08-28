@@ -92,7 +92,7 @@ function SeasonEpisodeCard({
   return (
     <div
       ref={cardRef}
-      className="group/card media-card media-card-longpress w-[260px] shrink-0 sm:w-[315px]"
+      className="season-episode-card group/card media-card media-card-longpress w-[260px] shrink-0 sm:w-[315px]"
       {...prefetchHandlers}
     >
       <div className="relative">

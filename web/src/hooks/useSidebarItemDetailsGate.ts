@@ -24,7 +24,12 @@ export function useSidebarItemDetailsGate(locationKey: string, gatesItemDetails:
     currentState = {
       locationKey,
       gatesItemDetails,
-      pendingLocationKey: gatesItemDetails && !state.gatesItemDetails ? locationKey : null,
+      // Every committed desktop item route receives the same lightweight-shell
+      // handoff. Home-to-item uses the live sidebar transition; nested
+      // Series/Season/Episode routes use the matching main-stage transition.
+      // Direct initial item renders still use the initialized state above and
+      // do not wait on motion that never started.
+      pendingLocationKey: gatesItemDetails ? locationKey : null,
     };
     // React discards this render and retries before rendering children, so the
     // item route never briefly receives `itemDetailsReady=true` on entry.

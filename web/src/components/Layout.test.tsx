@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { catalogKeys } from "@/hooks/queries/keys";
-import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "./sidebarItemNavigation";
+import {
+  DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE,
+  DETAIL_MAIN_STAGE_MOTION_END_EVENT,
+  SIDEBAR_DETAILS_REVEAL_DEADLINE_MS,
+} from "./sidebarItemNavigation";
 
 const mocks = vi.hoisted(() => ({
   location: { pathname: "/", search: "", key: "home" },
@@ -151,6 +155,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  document.documentElement.removeAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
 });
 
 describe("Layout mobile profile", () => {
@@ -237,6 +242,31 @@ describe("Layout item navigation", () => {
 });
 
 describe("Layout detail reveal", () => {
+  it("holds nested item details until the shared main-stage motion finishes", () => {
+    setRoute("/item/series-1", "series");
+    const view = renderLayout();
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+
+    document.documentElement.setAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE, "2");
+    setRoute("/item/season-1", "season");
+    act(() =>
+      view.rerender(
+        <MemoryRouter>
+          <Layout>
+            <Harness />
+          </Layout>
+        </MemoryRouter>,
+      ),
+    );
+
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("false");
+
+    document.documentElement.removeAttribute(DETAIL_MAIN_STAGE_MOTION_ATTRIBUTE);
+    act(() => window.dispatchEvent(new Event(DETAIL_MAIN_STAGE_MOTION_END_EVENT)));
+
+    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
+  });
+
   it("reveals immediately when the sidebar surface is absent", () => {
     mocks.renderSurface = false;
     const view = renderLayout();

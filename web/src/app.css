@@ -1505,6 +1505,15 @@ html[data-navigation-direction="back"]::view-transition-new(root) {
     contain: layout paint style;
   }
 
+  /* Wide episode cards sit inside a clipped, transformed Embla track. During
+     a browser-chrome resize Chrome otherwise folds their artwork and text back
+     into the document paint on every frame. Card-level containment keeps the
+     same responsive row and hero artwork while bounding that repeated paint
+     to each card's stable surface. */
+  .season-episode-card {
+    contain: layout paint style;
+  }
+
   /* Card actions stay hidden at rest so touch devices get clean artwork; a
      long press opens the action sheet instead. Keyboard focus and an open
      menu reveal them on every device so keyboard and assistive-tech users
