@@ -12,7 +12,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
-const playbackLazyMarkerTimeout = 10 * time.Minute
+const (
+	playbackLazyMarkerTimeout       = 10 * time.Minute
+	playbackLazyOnlineRetryInterval = 30 * time.Minute
+)
 
 type PlaybackIntroEligibilityChecker interface {
 	IntroDetectionEligibleForPlayback(ctx context.Context, fileID int) (bool, error)
@@ -84,7 +87,10 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	hasOnline := h.hasOnlineMarkerProviders()
 	shouldRunLocal := markers.ShouldRunLocal(mode)
 	shouldRunOnline := (mode == markers.ModeOnline || mode == markers.ModeBoth) && hasOnline
-	if shouldRunOnline && hasCompletePlaybackSkipMarkers(file) {
+	if shouldRunOnline && hasCompleteOnlinePlaybackSkipMarkers(file) {
+		shouldRunOnline = false
+	}
+	if shouldRunOnline && h.hasRecentOnlineMarkerAttempt(file.ID, time.Now()) {
 		shouldRunOnline = false
 	}
 
@@ -172,6 +178,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 		"mode", mode)
 
 	if runOnline {
+		h.recordOnlineMarkerAttempt(file.ID, time.Now())
 		wrote, err := h.fetchOnlineMarkersForPlayback(ctx, file)
 		if err != nil {
 			slog.Warn("playback lazy markers: online fetch failed",
@@ -179,7 +186,7 @@ func (h *PlaybackHandler) runLazyPlaybackMarkers(
 				"file_id", file.ID,
 				"episode_id", file.EpisodeID,
 				"mode", mode,
-				"error", err.Error())
+				"error", err)
 		}
 		if wrote {
 			if refreshed := h.reloadPlaybackMarkerFile(ctx, file.ID); hasAnyMarker(refreshed) {
@@ -320,18 +327,66 @@ func (h *PlaybackHandler) notifyPlaybackMarkers(
 		"mode", mode)
 }
 
-// hasCompletePlaybackSkipMarkers reports whether the two playback skip
-// segments supplied by online marker providers are already populated. A
-// partial online result must remain eligible: TheIntroDB can gain a missing
-// intro or credits marker after the first playback, and the next fresh
-// playback session is the inexpensive opportunity to fill it for every user.
-// Provider-side caching prevents repeated external requests for a recent miss.
-func hasCompletePlaybackSkipMarkers(file *models.MediaFile) bool {
+// hasCompleteOnlinePlaybackSkipMarkers reports whether both playback skip
+// segments are populated by a source that online lookup cannot improve. Local
+// scanner and S3 ranges remain eligible because online providers outrank them.
+func hasCompleteOnlinePlaybackSkipMarkers(file *models.MediaFile) bool {
 	if file == nil {
 		return false
 	}
+	isDurableOnlineSource := func(segmentSource *string) bool {
+		source := segmentSource
+		if source == nil {
+			source = file.MarkersSource
+		}
+		if source == nil {
+			return false
+		}
+		switch *source {
+		case models.MarkerSourceOnline, models.MarkerSourcePlugin, models.MarkerSourceManual:
+			return true
+		default:
+			return false
+		}
+	}
 	return file.IntroStart != nil && file.IntroEnd != nil &&
-		file.CreditsStart != nil && file.CreditsEnd != nil
+		file.CreditsStart != nil && file.CreditsEnd != nil &&
+		isDurableOnlineSource(file.IntroMarkersSource) &&
+		isDurableOnlineSource(file.CreditsMarkersSource)
+}
+
+func (h *PlaybackHandler) hasRecentOnlineMarkerAttempt(fileID int, now time.Time) bool {
+	if h == nil || fileID <= 0 {
+		return false
+	}
+	h.markerLazyOnlineAttemptMu.Lock()
+	defer h.markerLazyOnlineAttemptMu.Unlock()
+	attemptedAt, ok := h.markerLazyOnlineAttempts[fileID]
+	if !ok {
+		return false
+	}
+	if now.Sub(attemptedAt) >= playbackLazyOnlineRetryInterval {
+		delete(h.markerLazyOnlineAttempts, fileID)
+		return false
+	}
+	return true
+}
+
+func (h *PlaybackHandler) recordOnlineMarkerAttempt(fileID int, attemptedAt time.Time) {
+	if h == nil || fileID <= 0 {
+		return
+	}
+	h.markerLazyOnlineAttemptMu.Lock()
+	defer h.markerLazyOnlineAttemptMu.Unlock()
+	if h.markerLazyOnlineAttempts == nil {
+		h.markerLazyOnlineAttempts = make(map[int]time.Time)
+	}
+	for cachedFileID, cachedAt := range h.markerLazyOnlineAttempts {
+		if attemptedAt.Sub(cachedAt) >= playbackLazyOnlineRetryInterval {
+			delete(h.markerLazyOnlineAttempts, cachedFileID)
+		}
+	}
+	h.markerLazyOnlineAttempts[fileID] = attemptedAt
 }
 
 // hasAnyMarker reports whether the file has at least one populated marker

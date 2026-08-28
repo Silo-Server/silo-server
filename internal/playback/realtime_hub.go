@@ -150,45 +150,71 @@ func (h *RealtimeHub) Unregister(reg *RealtimeRegistration) bool {
 
 // Send writes a message to the active connection for the given session.
 func (h *RealtimeHub) Send(sessionID string, message any) error {
+	_, err := h.sendIf(sessionID, message, nil)
+	return err
+}
+
+func (h *RealtimeHub) sendIf(sessionID string, message any, predicate func() bool) (bool, error) {
 	if h == nil || sessionID == "" {
-		return ErrRealtimeConnectionNotFound
+		return false, ErrRealtimeConnectionNotFound
 	}
 
 	h.mu.RLock()
 	lane, ok := h.connections[sessionID]
 	if !ok || lane == nil {
 		h.mu.RUnlock()
-		return ErrRealtimeConnectionNotFound
+		return false, ErrRealtimeConnectionNotFound
 	}
 	h.mu.RUnlock()
 
 	lane.mu.Lock()
 	if lane.closed || lane.conn == nil {
 		lane.mu.Unlock()
-		return ErrRealtimeConnectionNotFound
+		return false, ErrRealtimeConnectionNotFound
+	}
+	if predicate != nil && !predicate() {
+		lane.mu.Unlock()
+		return false, nil
 	}
 	err := lane.conn.WriteJSON(message)
 	lane.mu.Unlock()
-	return err
+	return true, err
 }
 
-// SendRegistered writes only when reg still owns the active connection. It is
-// used for connection-specific work that must not spill into a replacement
-// websocket after a reconnect.
-func (h *RealtimeHub) SendRegistered(reg *RealtimeRegistration, message any) error {
-	if !h.HasRegistration(reg) {
-		return ErrRealtimeConnectionNotFound
+func (h *RealtimeHub) sendRegisteredIf(reg *RealtimeRegistration, message any, predicate func() bool) (bool, error) {
+	if h == nil || reg == nil || reg.sessionID == "" || reg.lane == nil {
+		return false, ErrRealtimeConnectionNotFound
 	}
-
 	lane := reg.lane
 	lane.mu.Lock()
 	if lane.closed || lane.conn == nil || lane.generation != reg.generation {
 		lane.mu.Unlock()
-		return ErrRealtimeConnectionNotFound
+		return false, ErrRealtimeConnectionNotFound
+	}
+	if predicate != nil && !predicate() {
+		lane.mu.Unlock()
+		return false, nil
 	}
 	err := lane.conn.WriteJSON(message)
 	lane.mu.Unlock()
-	return err
+	return true, err
+}
+
+// HasConnection reports whether a session currently has a registered socket.
+func (h *RealtimeHub) HasConnection(sessionID string) bool {
+	if h == nil || sessionID == "" {
+		return false
+	}
+	h.mu.RLock()
+	lane := h.connections[sessionID]
+	h.mu.RUnlock()
+	if lane == nil {
+		return false
+	}
+	lane.mu.Lock()
+	active := !lane.closed && lane.conn != nil
+	lane.mu.Unlock()
+	return active
 }
 
 // HasRegistration reports whether reg still owns the active connection.

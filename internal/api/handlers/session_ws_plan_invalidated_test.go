@@ -38,9 +38,10 @@ func TestRealtimeRejectedPlanInvalidationStopsSession(t *testing.T) {
 	}
 	handler.rememberRealtimeCommand("cmd-1", session.ID, playback.CommandPlanInvalidated)
 
-	if _, err := handler.handleRealtimeClientMessage(session.ID,
-		realtimeResultMessage(t, session.ID, "cmd-1", playback.RealtimeResultStatusRejected), nil); err != nil {
-		t.Fatalf("handleRealtimeClientMessage: %v", err)
+	client := testSessionRealtimeClient(handler, session.ID)
+	if err := client.handleMessage(
+		realtimeResultMessage(t, session.ID, "cmd-1", playback.RealtimeResultStatusRejected)); err != nil {
+		t.Fatalf("handleMessage: %v", err)
 	}
 
 	if _, err := sessionMgr.GetSession(session.ID); err == nil {
@@ -62,9 +63,10 @@ func TestRealtimeCompletedPlanInvalidationKeepsSession(t *testing.T) {
 	}
 	handler.rememberRealtimeCommand("cmd-1", session.ID, playback.CommandPlanInvalidated)
 
-	if _, err := handler.handleRealtimeClientMessage(session.ID,
-		realtimeResultMessage(t, session.ID, "cmd-1", playback.RealtimeResultStatusCompleted), nil); err != nil {
-		t.Fatalf("handleRealtimeClientMessage: %v", err)
+	client := testSessionRealtimeClient(handler, session.ID)
+	if err := client.handleMessage(
+		realtimeResultMessage(t, session.ID, "cmd-1", playback.RealtimeResultStatusCompleted)); err != nil {
+		t.Fatalf("handleMessage: %v", err)
 	}
 
 	if _, err := sessionMgr.GetSession(session.ID); err != nil {
@@ -97,10 +99,11 @@ func TestRealtimeResultForOtherSessionCommandLeavesTrackerArmed(t *testing.T) {
 	fired := make(chan struct{})
 	handler.CommandTracker.Track("cmd-1", 20*time.Millisecond, func() { close(fired) })
 
-	_, err = handler.handleRealtimeClientMessage(sessionA.ID,
-		realtimeResultMessage(t, sessionA.ID, "cmd-1", playback.RealtimeResultStatusCompleted), nil)
+	client := testSessionRealtimeClient(handler, sessionA.ID)
+	err = client.handleMessage(
+		realtimeResultMessage(t, sessionA.ID, "cmd-1", playback.RealtimeResultStatusCompleted))
 	if !errors.Is(err, playback.ErrInvalidRealtimePayload) {
-		t.Fatalf("handleRealtimeClientMessage: %v, want ErrInvalidRealtimePayload", err)
+		t.Fatalf("handleMessage: %v, want ErrInvalidRealtimePayload", err)
 	}
 
 	if _, ok := handler.getRealtimeCommand("cmd-1"); !ok {

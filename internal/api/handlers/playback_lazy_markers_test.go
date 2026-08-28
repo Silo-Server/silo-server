@@ -416,11 +416,14 @@ func lazyMarkerTestFile() *models.MediaFile {
 	}
 }
 
-func TestHasCompletePlaybackSkipMarkers(t *testing.T) {
+func TestHasCompleteOnlinePlaybackSkipMarkers(t *testing.T) {
 	start := 10.0
 	introEnd := 60.0
 	creditsStart := 1700.0
 	creditsEnd := 1800.0
+	online := models.MarkerSourceOnline
+	plugin := models.MarkerSourcePlugin
+	scannerSource := models.MarkerSourceScanner
 
 	tests := []struct {
 		name string
@@ -439,10 +442,46 @@ func TestHasCompletePlaybackSkipMarkers(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "both skip markers stop lookup",
+			name: "unattributed complete markers remain eligible",
 			file: &models.MediaFile{
 				IntroStart: &start, IntroEnd: &introEnd,
 				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+			},
+			want: false,
+		},
+		{
+			name: "scanner markers remain eligible for online upgrade",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &scannerSource, CreditsMarkersSource: &scannerSource,
+			},
+			want: false,
+		},
+		{
+			name: "mixed online and scanner markers remain eligible",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &online, CreditsMarkersSource: &scannerSource,
+			},
+			want: false,
+		},
+		{
+			name: "complete online and plugin markers stop lookup",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				IntroMarkersSource: &online, CreditsMarkersSource: &plugin,
+			},
+			want: true,
+		},
+		{
+			name: "legacy shared online source stops lookup",
+			file: &models.MediaFile{
+				IntroStart: &start, IntroEnd: &introEnd,
+				CreditsStart: &creditsStart, CreditsEnd: &creditsEnd,
+				MarkersSource: &online,
 			},
 			want: true,
 		},
@@ -450,9 +489,33 @@ func TestHasCompletePlaybackSkipMarkers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasCompletePlaybackSkipMarkers(tt.file); got != tt.want {
-				t.Fatalf("hasCompletePlaybackSkipMarkers() = %v, want %v", got, tt.want)
+			if got := hasCompleteOnlinePlaybackSkipMarkers(tt.file); got != tt.want {
+				t.Fatalf("hasCompleteOnlinePlaybackSkipMarkers() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPlaybackLazyOnlineAttemptCooldown(t *testing.T) {
+	handler := &PlaybackHandler{}
+	now := time.Unix(1_700_000_000, 0)
+
+	if handler.hasRecentOnlineMarkerAttempt(42, now) {
+		t.Fatal("missing attempt reported as recent")
+	}
+	handler.recordOnlineMarkerAttempt(42, now)
+	if !handler.hasRecentOnlineMarkerAttempt(42, now.Add(playbackLazyOnlineRetryInterval-time.Second)) {
+		t.Fatal("attempt inside retry interval was not throttled")
+	}
+	if handler.hasRecentOnlineMarkerAttempt(42, now.Add(playbackLazyOnlineRetryInterval)) {
+		t.Fatal("expired attempt remained throttled")
+	}
+	if _, ok := handler.markerLazyOnlineAttempts[42]; ok {
+		t.Fatal("expired attempt was not removed")
+	}
+	handler.recordOnlineMarkerAttempt(1, now.Add(-playbackLazyOnlineRetryInterval))
+	handler.recordOnlineMarkerAttempt(2, now)
+	if _, ok := handler.markerLazyOnlineAttempts[1]; ok {
+		t.Fatal("recording an attempt did not prune expired entries")
 	}
 }

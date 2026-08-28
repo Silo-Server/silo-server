@@ -72,6 +72,73 @@ const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 	codec_video, codec_audio, resolution, audio_channels, hdr, container,
 	video_tracks, audio_tracks, subtitle_tracks, external_subtitles, edition_key`
 
+type markerInvalidationColumn struct {
+	name         string
+	sourceColumn string
+}
+
+var markerInvalidationColumns = []markerInvalidationColumn{
+	{name: "intro_start", sourceColumn: "intro_markers_source"},
+	{name: "intro_end", sourceColumn: "intro_markers_source"},
+	{name: "credits_start", sourceColumn: "credits_markers_source"},
+	{name: "credits_end", sourceColumn: "credits_markers_source"},
+	{name: "recap_start", sourceColumn: "recap_markers_source"},
+	{name: "recap_end", sourceColumn: "recap_markers_source"},
+	{name: "preview_start", sourceColumn: "preview_markers_source"},
+	{name: "preview_end", sourceColumn: "preview_markers_source"},
+	{name: "markers_source", sourceColumn: "markers_source"},
+	{name: "markers_confidence", sourceColumn: "markers_source"},
+	{name: "intro_markers_source", sourceColumn: "intro_markers_source"},
+	{name: "intro_markers_provider", sourceColumn: "intro_markers_source"},
+	{name: "intro_markers_confidence", sourceColumn: "intro_markers_source"},
+	{name: "intro_markers_algorithm", sourceColumn: "intro_markers_source"},
+	{name: "intro_markers_detected_at", sourceColumn: "intro_markers_source"},
+	{name: "credits_markers_source", sourceColumn: "credits_markers_source"},
+	{name: "credits_markers_provider", sourceColumn: "credits_markers_source"},
+	{name: "credits_markers_confidence", sourceColumn: "credits_markers_source"},
+	{name: "credits_markers_algorithm", sourceColumn: "credits_markers_source"},
+	{name: "credits_markers_detected_at", sourceColumn: "credits_markers_source"},
+	{name: "recap_markers_source", sourceColumn: "recap_markers_source"},
+	{name: "recap_markers_provider", sourceColumn: "recap_markers_source"},
+	{name: "recap_markers_confidence", sourceColumn: "recap_markers_source"},
+	{name: "recap_markers_algorithm", sourceColumn: "recap_markers_source"},
+	{name: "recap_markers_detected_at", sourceColumn: "recap_markers_source"},
+	{name: "preview_markers_source", sourceColumn: "preview_markers_source"},
+	{name: "preview_markers_provider", sourceColumn: "preview_markers_source"},
+	{name: "preview_markers_confidence", sourceColumn: "preview_markers_source"},
+	{name: "preview_markers_algorithm", sourceColumn: "preview_markers_source"},
+	{name: "preview_markers_detected_at", sourceColumn: "preview_markers_source"},
+}
+
+const markerInvalidationPredicate = `media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash`
+
+// markerInvalidationAssignments builds the conflict-update fragment in one
+// place so every range and provenance column follows the same file-generation
+// rule. Manual segments survive a remux or replacement because there is no
+// external source from which their admin-entered ranges can be restored.
+func markerInvalidationAssignments() string {
+	var b strings.Builder
+	for i, column := range markerInvalidationColumns {
+		if i > 0 {
+			b.WriteString(",\n\t\t")
+		}
+		sourceExpr := "COALESCE(media_files." + column.sourceColumn + ", '')"
+		if column.sourceColumn != "markers_source" {
+			sourceExpr = "COALESCE(media_files." + column.sourceColumn + ", media_files.markers_source, '')"
+		}
+		fmt.Fprintf(
+			&b,
+			"%s = CASE WHEN %s AND %s <> '%s' THEN NULL ELSE media_files.%s END",
+			column.name,
+			markerInvalidationPredicate,
+			sourceExpr,
+			models.MarkerSourceManual,
+			column.name,
+		)
+	}
+	return b.String()
+}
+
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
 const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.season_number, mf.episode_number,
@@ -835,12 +902,6 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		return nil, fmt.Errorf("marshaling chapters: %w", err)
 	}
 
-	// Marker ranges describe one exact generation of a file. When a scan sees
-	// different non-empty content hashes at the same path, clear every range and
-	// its provenance in the upsert below; the new generation can then take its
-	// own hash-keyed S3 markers or be repopulated lazily at playback. A missing
-	// hash on either side is not enough evidence to discard existing markers.
-
 	// Convert empty strings to nil for nullable text columns.
 	var contentID *string
 	if mf.ContentID != "" {
@@ -920,36 +981,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		file_size = EXCLUDED.file_size,
 		file_modified_at = EXCLUDED.file_modified_at,
 		file_hash = EXCLUDED.file_hash,
-		intro_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_start END,
-		intro_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_end END,
-		credits_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_start END,
-		credits_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_end END,
-		recap_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_start END,
-		recap_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_end END,
-		preview_start = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_start END,
-		preview_end = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_end END,
-		markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.markers_source END,
-		markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.markers_confidence END,
-		intro_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_source END,
-		intro_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_provider END,
-		intro_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_confidence END,
-		intro_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_algorithm END,
-		intro_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.intro_markers_detected_at END,
-		credits_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_source END,
-		credits_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_provider END,
-		credits_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_confidence END,
-		credits_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_algorithm END,
-		credits_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.credits_markers_detected_at END,
-		recap_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_source END,
-		recap_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_provider END,
-		recap_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_confidence END,
-		recap_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_algorithm END,
-		recap_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.recap_markers_detected_at END,
-		preview_markers_source = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_source END,
-		preview_markers_provider = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_provider END,
-		preview_markers_confidence = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_confidence END,
-		preview_markers_algorithm = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_algorithm END,
-		preview_markers_detected_at = CASE WHEN media_files.file_hash IS NOT NULL AND EXCLUDED.file_hash IS NOT NULL AND media_files.file_hash IS DISTINCT FROM EXCLUDED.file_hash THEN NULL ELSE media_files.preview_markers_detected_at END,
+		` + markerInvalidationAssignments() + `,
 		codec_video = EXCLUDED.codec_video,
 		codec_audio = EXCLUDED.codec_audio,
 		resolution = EXCLUDED.resolution,
