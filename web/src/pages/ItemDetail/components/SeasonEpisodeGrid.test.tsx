@@ -20,6 +20,16 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
   usePrefetchCatalogItemDetail: () => vi.fn(),
 }));
 
+vi.mock("@/hooks/useCarouselEmbla", () => ({
+  useCarouselEmbla: () => ({
+    emblaRef: vi.fn(),
+    canScrollPrev: false,
+    canScrollNext: false,
+    scrollPrev: vi.fn(),
+    scrollNext: vi.fn(),
+  }),
+}));
+
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
@@ -117,5 +127,46 @@ describe("SeasonEpisodeGrid", () => {
     expect(watchedIndicator.closest(".media-card-image")).toBeNull();
     expect(screen.getByText("Episode 2").parentElement).not.toContainElement(watchedIndicator);
     expect(screen.getAllByLabelText("Watched")).toHaveLength(1);
+  });
+
+  it("renders the season in the shared horizontal media carousel", () => {
+    render(
+      <MemoryRouter>
+        <SeasonEpisodeGrid
+          isLoading={false}
+          episodes={[
+            {
+              content_id: "ep-1",
+              season_number: 1,
+              episode_number: 1,
+              title: "Pilot",
+              overview: "A beginning.",
+              air_date: null,
+              runtime: 42,
+              still_url: "",
+              still_thumbhash: "",
+              files: [],
+            },
+            {
+              content_id: "ep-2",
+              season_number: 1,
+              episode_number: 2,
+              title: "Next",
+              overview: "Another episode.",
+              air_date: null,
+              runtime: 43,
+              still_url: "",
+              still_thumbhash: "",
+              files: [],
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    const viewport = screen.getByLabelText("Media carousel");
+    expect(viewport).toHaveClass("embla__viewport");
+    expect(viewport.querySelectorAll(".embla__slide")).toHaveLength(2);
+    expect(viewport.querySelector(".grid")).toBeNull();
   });
 });

@@ -4,13 +4,14 @@ import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
+import MediaCarousel from "@/components/MediaCarousel";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
-import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
 interface SeasonEpisodeGridProps {
@@ -28,7 +29,18 @@ export default function SeasonEpisodeGrid({
   const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
 
   if (isLoading) {
-    return <EpisodeGridSkeleton />;
+    return (
+      <MediaCarousel title="Episodes" edgePadding={false} showHeader={false}>
+        {Array.from({ length: 5 }, (_, index) => (
+          <div key={index} className="w-[260px] shrink-0 sm:w-[315px]">
+            <Skeleton className="aspect-video w-full rounded-lg" />
+            <Skeleton className="mt-2 h-3 w-16" />
+            <Skeleton className="mt-1 h-4 w-24" />
+            <Skeleton className="mt-1.5 h-3 w-20" />
+          </div>
+        ))}
+      </MediaCarousel>
+    );
   }
 
   if (episodes.length === 0) {
@@ -40,7 +52,7 @@ export default function SeasonEpisodeGrid({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 min-[460px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+    <MediaCarousel title="Episodes" edgePadding={false} showHeader={false}>
       {episodes.map((episode) => (
         <SeasonEpisodeCard
           key={episode.content_id}
@@ -51,7 +63,7 @@ export default function SeasonEpisodeGrid({
           onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
         />
       ))}
-    </div>
+    </MediaCarousel>
   );
 }
 
@@ -78,7 +90,7 @@ function SeasonEpisodeCard({
   return (
     <div
       ref={cardRef}
-      className="group/card media-card media-card-longpress"
+      className="group/card media-card media-card-longpress w-[260px] shrink-0 sm:w-[315px]"
       onMouseEnter={onPrefetch}
       onFocus={onPrefetch}
       onTouchStart={onPrefetch}
