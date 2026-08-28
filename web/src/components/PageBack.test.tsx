@@ -84,6 +84,18 @@ describe("PageBack", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/collections");
   });
 
+  it("uses the app route transition for an explicit target when requested", async () => {
+    render(
+      <MemoryRouter>
+        <PageBack to="/item/series-1" preferHistory={false} viewTransition />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(mocks.navigate).toHaveBeenCalledWith("/item/series-1", { viewTransition: true });
+  });
+
   it("applies the documented positioning and glass styling", () => {
     render(
       <MemoryRouter>

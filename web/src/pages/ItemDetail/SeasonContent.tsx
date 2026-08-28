@@ -91,7 +91,13 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
       <DetailHero
         variant="compact"
         title={displayTitle}
-        topNav={<PageBack />}
+        topNav={
+          <PageBack
+            to={seriesId ? `/item/${seriesId}` : "/"}
+            preferHistory={false}
+            viewTransition
+          />
+        }
         context={breadcrumb}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}

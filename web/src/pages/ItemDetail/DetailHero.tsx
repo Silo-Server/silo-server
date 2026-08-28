@@ -138,10 +138,10 @@ export default function DetailHero({
       <div
         className={`page-shell-wide relative flex flex-col justify-end pb-8 ${
           isCompact
-            ? // min-height (not fixed height) below lg: bottom-justified content
-              // taller than the hero would otherwise overflow out the top, under
-              // the floating back button.
-              "min-h-[max(35vh,300px)] pt-20 lg:h-[42vh]"
+            ? // Keep this flexible at every breakpoint: long season summaries
+              // must grow the hero downward instead of overflowing above its
+              // clipped backdrop and hiding the breadcrumb/title.
+              "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
             : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >

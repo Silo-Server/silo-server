@@ -13,6 +13,8 @@ interface PageBackProps {
    * button sits just inside the page content area.
    */
   floating?: boolean;
+  /** Use the app's route cross-fade when following an explicit target. */
+  viewTransition?: boolean;
 }
 
 export default function PageBack({
@@ -20,6 +22,7 @@ export default function PageBack({
   to = "/",
   preferHistory = true,
   floating = false,
+  viewTransition = false,
 }: PageBackProps) {
   const navigate = useNavigate();
   const position = floating
@@ -29,6 +32,11 @@ export default function PageBack({
   function goBack() {
     if (preferHistory && hasRouterHistory()) {
       navigate(-1);
+      return;
+    }
+
+    if (viewTransition) {
+      navigate(to, { viewTransition: true });
       return;
     }
 

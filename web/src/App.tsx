@@ -1,4 +1,12 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   BrowserRouter,
   Routes,
@@ -128,7 +136,9 @@ const ProfileCustomizeHome = lazy(() => import("@/pages/ProfileCustomizeHome"));
 /** Scrolls to top on pathname change (custom replacement for ScrollRestoration which requires data router). */
 function useScrollRestoration() {
   const { pathname } = useLocation();
-  useEffect(() => {
+  // Run before paint so route transitions never capture one frame at the
+  // previous page's scroll offset and then visibly jump to the top.
+  useLayoutEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
 }
