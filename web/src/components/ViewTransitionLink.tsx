@@ -2,51 +2,88 @@ import { forwardRef } from "react";
 import { createPath, Link, useResolvedPath } from "react-router";
 import type { LinkProps } from "react-router";
 import { useSidebarItemNavigation } from "@/components/sidebarItemNavigationContext";
+import {
+  useNavigationTransition,
+  type NavigationTransitionDirection,
+} from "@/components/navigationTransitionContext";
+
+type ViewTransitionLinkProps = LinkProps &
+  React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+    transitionDirection?: NavigationTransitionDirection;
+    preferHistory?: boolean;
+  };
 
 /**
- * Opts into React Router view transitions and lets the desktop layout prepare
- * item-detail navigation so its heavy content cannot overlap sidebar motion.
+ * Uses the app-level route transition and lets the desktop layout prepare item
+ * details before navigation. Modified clicks and links targeting another
+ * browsing context retain the browser's native behavior.
  */
-const ViewTransitionLink = forwardRef<
-  HTMLAnchorElement,
-  LinkProps & React.AnchorHTMLAttributes<HTMLAnchorElement>
->(function ViewTransitionLink({ to, replace, state, onClick, children, ...rest }, ref) {
-  const beginSidebarItemNavigation = useSidebarItemNavigation();
-  const resolvedPath = useResolvedPath(to);
+const ViewTransitionLink = forwardRef<HTMLAnchorElement, ViewTransitionLinkProps>(
+  function ViewTransitionLink(
+    {
+      to,
+      replace,
+      state,
+      transitionDirection = "forward",
+      preferHistory = false,
+      onClick,
+      children,
+      ...rest
+    },
+    ref,
+  ) {
+    const beginSidebarItemNavigation = useSidebarItemNavigation();
+    const transitionNavigate = useNavigationTransition();
+    const resolvedPath = useResolvedPath(to);
 
-  return (
-    <Link
-      ref={ref}
-      to={to}
-      replace={replace}
-      state={state}
-      onClick={(event) => {
-        onClick?.(event);
-        if (
-          event.defaultPrevented ||
-          event.button !== 0 ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey ||
-          event.altKey ||
-          (rest.target && rest.target !== "_self")
-        ) {
-          return;
-        }
+    return (
+      <Link
+        ref={ref}
+        to={to}
+        replace={replace}
+        state={state}
+        onClick={(event) => {
+          onClick?.(event);
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            rest.download != null ||
+            (rest.target && rest.target !== "_self")
+          ) {
+            return;
+          }
 
-        const intercepted = beginSidebarItemNavigation?.({
-          href: createPath(resolvedPath),
-          replace,
-          state,
-        });
-        if (intercepted) event.preventDefault();
-      }}
-      viewTransition
-      {...rest}
-    >
-      {children}
-    </Link>
-  );
-});
+          const href = createPath(resolvedPath);
+          const intercepted = beginSidebarItemNavigation?.({
+            href,
+            replace,
+            state,
+          });
+          if (intercepted) {
+            event.preventDefault();
+            return;
+          }
+
+          if (transitionNavigate) {
+            event.preventDefault();
+            transitionNavigate(href, {
+              replace,
+              state,
+              direction: transitionDirection,
+              preferHistory,
+            });
+          }
+        }}
+        {...rest}
+      >
+        {children}
+      </Link>
+    );
+  },
+);
 
 export default ViewTransitionLink;

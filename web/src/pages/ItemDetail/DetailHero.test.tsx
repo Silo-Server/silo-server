@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import DetailHero from "./DetailHero";
@@ -49,9 +50,29 @@ describe("DetailHero artwork revisions", () => {
     const backdrop = container.querySelector('img[src="/backdrop.rev-a.webp"]');
     const artwork = backdrop?.parentElement;
     expect(backdrop).not.toHaveClass("will-change-transform");
+    expect(backdrop).toHaveAttribute("decoding", "async");
     expect(backdrop?.getAttribute("style") ?? "").not.toContain("animation");
     expect(artwork).toHaveClass("hero-backdrop-artwork");
     expect(artwork?.getAttribute("style") ?? "").not.toContain("filter");
+  });
+
+  it("preserves the ambient glow between the consolidated detail scrims", () => {
+    const { container } = render(<DetailHero title="Blade Runner" backdropUrl="/backdrop.webp" />);
+
+    const lowerScrim = container.querySelector(".detail-hero-scrim-under");
+    const ambient = container.querySelector(".detail-hero-ambient");
+    const upperScrim = container.querySelector(".detail-hero-scrim-over");
+
+    expect(container.querySelectorAll(".detail-hero-scrim")).toHaveLength(2);
+    expect(lowerScrim).not.toBeNull();
+    expect(ambient).toHaveClass("ambient-glow");
+    expect(upperScrim).not.toBeNull();
+    expect(lowerScrim?.compareDocumentPosition(ambient!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(ambient?.compareDocumentPosition(upperScrim!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(container.querySelector(".detail-hero-copy")).toBeInTheDocument();
+    expect(container.querySelector(".hero-gradient-left")).not.toBeInTheDocument();
+    expect(container.querySelector(".hero-gradient")).not.toBeInTheDocument();
+    expect(container.querySelector(".hero-vignette")).not.toBeInTheDocument();
   });
 
   it("places every detail-page action surface inside the opaque action boundary", () => {
@@ -61,6 +82,23 @@ describe("DetailHero artwork revisions", () => {
 
     expect(container.querySelector(".detail-action-bar")).toContainElement(
       screen.getByRole("button", { name: "Play" }),
+    );
+  });
+
+  it("keeps genre navigation inside the app transition flow", () => {
+    render(
+      <MemoryRouter>
+        <DetailHero
+          title="Blade Runner"
+          genres={["Science Fiction"]}
+          genreHref={() => "/catalog?genre=Science+Fiction"}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Science Fiction" })).toHaveAttribute(
+      "href",
+      "/catalog?genre=Science+Fiction",
     );
   });
 });

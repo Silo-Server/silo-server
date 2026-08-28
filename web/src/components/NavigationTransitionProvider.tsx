@@ -1,0 +1,369 @@
+import { useCallback, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLocation, useNavigate, type To } from "react-router";
+import { createPath, resolvePath } from "react-router";
+import {
+  NavigationTransitionContext,
+  type NavigationHistoryTransitionOptions,
+  type NavigationTransitionDirection,
+  type NavigationTransitionNavigate,
+  type NavigationTransitionOptions,
+} from "@/components/navigationTransitionContext";
+import {
+  isExpectedNavigationCommit,
+  MAX_TRACKED_HISTORY_PATHS,
+  pruneNavigationHistory,
+} from "@/lib/backNavigation";
+
+interface PendingCommit {
+  sourceLocationKey: string;
+  destinationPath: string | null;
+  navigationSequence: number;
+  resolve: () => void;
+  timeout: number;
+}
+
+interface ViewTransitionHandle {
+  finished: Promise<unknown>;
+  skipTransition?: () => void;
+}
+
+type StartViewTransition = (update: () => void | Promise<void>) => ViewTransitionHandle;
+
+const COMMIT_FALLBACK_MS = 2_000;
+
+interface LocationSnapshot {
+  pathname: string;
+  search: string;
+  hash: string;
+  key: string;
+}
+
+interface StoredNavigationHistory {
+  sessionId: string;
+  paths: Array<[number, string]>;
+}
+
+interface NavigationHistorySession {
+  sessionId: string;
+  paths: Map<number, string>;
+}
+
+const HISTORY_SESSION_STATE_KEY = "__siloNavigationSession";
+const HISTORY_PATHS_STORAGE_KEY = "silo:navigation-history-paths:v1";
+
+function browserHistoryState(): Record<string, unknown> {
+  const state = window.history.state;
+  return state && typeof state === "object" ? (state as Record<string, unknown>) : {};
+}
+
+function newHistorySessionId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+}
+
+function restoreNavigationHistory(): NavigationHistorySession {
+  const stateSessionId = browserHistoryState()[HISTORY_SESSION_STATE_KEY];
+  if (typeof stateSessionId !== "string") {
+    return { sessionId: newHistorySessionId(), paths: new Map() };
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(HISTORY_PATHS_STORAGE_KEY);
+    const stored = raw ? (JSON.parse(raw) as Partial<StoredNavigationHistory>) : null;
+    if (stored?.sessionId !== stateSessionId || !Array.isArray(stored.paths)) {
+      return { sessionId: stateSessionId, paths: new Map() };
+    }
+
+    const paths = new Map<number, string>();
+    for (const entry of stored.paths.slice(-MAX_TRACKED_HISTORY_PATHS)) {
+      if (Array.isArray(entry) && Number.isInteger(entry[0]) && typeof entry[1] === "string") {
+        paths.set(entry[0], entry[1]);
+      }
+    }
+    return { sessionId: stateSessionId, paths };
+  } catch {
+    return { sessionId: stateSessionId, paths: new Map() };
+  }
+}
+
+function persistNavigationHistory(session: NavigationHistorySession, currentIndex: number): void {
+  try {
+    const paths: Array<[number, string]> = [];
+    const firstRetainedIndex = Math.max(0, currentIndex - (MAX_TRACKED_HISTORY_PATHS - 1));
+    for (let index = firstRetainedIndex; index <= currentIndex; index += 1) {
+      const path = session.paths.get(index);
+      if (path != null) paths.push([index, path]);
+    }
+    window.sessionStorage.setItem(
+      HISTORY_PATHS_STORAGE_KEY,
+      JSON.stringify({ sessionId: session.sessionId, paths } satisfies StoredNavigationHistory),
+    );
+  } catch {
+    // History persistence is an enhancement; restricted storage must never
+    // block navigation or route transitions.
+  }
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function getStartViewTransition(): StartViewTransition | undefined {
+  return (
+    document as Document & {
+      startViewTransition?: StartViewTransition;
+    }
+  ).startViewTransition;
+}
+
+function browserHistoryIndex(): number | null {
+  const index = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof index === "number" && Number.isInteger(index) ? index : null;
+}
+
+function destinationPath(to: To, current: LocationSnapshot): string | null {
+  try {
+    return createPath(resolvePath(to, current.pathname));
+  } catch {
+    return null;
+  }
+}
+
+function isDesktopItemBoundaryChange(currentPathname: string, nextPathname: string): boolean {
+  if (typeof window.matchMedia !== "function") return false;
+  const currentIsItem = currentPathname.startsWith("/item/");
+  const nextIsItem = nextPathname.startsWith("/item/");
+  return currentIsItem !== nextIsItem && window.matchMedia("(min-width: 64rem)").matches;
+}
+
+/**
+ * Owns same-document route transitions for the declarative BrowserRouter.
+ *
+ * React Router's `viewTransition` navigation option is only implemented by its
+ * data routers. Silo currently uses BrowserRouter, so this provider starts the
+ * browser transition itself and keeps its update callback pending until the
+ * destination location has committed. That commit barrier is important for
+ * POP navigation, whose history event and React render are asynchronous.
+ */
+export default function NavigationTransitionProvider({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const locationRef = useRef<LocationSnapshot>(location);
+  const pendingCommitRef = useRef<PendingCommit | null>(null);
+  const activeTransitionRef = useRef<ViewTransitionHandle | null>(null);
+  const navigationSequenceRef = useRef(0);
+  const navigationHistoryRef = useRef<NavigationHistorySession | null>(null);
+  if (!navigationHistoryRef.current) {
+    navigationHistoryRef.current = restoreNavigationHistory();
+  }
+
+  const resolvePendingCommit = useCallback(() => {
+    const pending = pendingCommitRef.current;
+    if (!pending) return;
+
+    pendingCommitRef.current = null;
+    window.clearTimeout(pending.timeout);
+    pending.resolve();
+  }, []);
+
+  useLayoutEffect(() => {
+    locationRef.current = location;
+    const historyIndex = browserHistoryIndex();
+    if (historyIndex !== null) {
+      const navigationHistory = navigationHistoryRef.current!;
+      const state = browserHistoryState();
+      if (state[HISTORY_SESSION_STATE_KEY] !== navigationHistory.sessionId) {
+        window.history.replaceState(
+          { ...state, [HISTORY_SESSION_STATE_KEY]: navigationHistory.sessionId },
+          "",
+        );
+      }
+
+      const currentPath = createPath(location);
+      const previouslyTrackedPath = navigationHistory.paths.get(historyIndex);
+      if (previouslyTrackedPath != null && previouslyTrackedPath !== currentPath) {
+        for (const index of navigationHistory.paths.keys()) {
+          if (index >= historyIndex) navigationHistory.paths.delete(index);
+        }
+      }
+      navigationHistory.paths.set(historyIndex, currentPath);
+      pruneNavigationHistory(navigationHistory.paths, historyIndex);
+      persistNavigationHistory(navigationHistory, historyIndex);
+    }
+    const pending = pendingCommitRef.current;
+    if (
+      pending &&
+      isExpectedNavigationCommit(
+        pending.destinationPath,
+        pending.navigationSequence,
+        navigationSequenceRef.current,
+        pending.sourceLocationKey,
+        location.key,
+        createPath(location),
+      )
+    ) {
+      resolvePendingCommit();
+    }
+  }, [location, resolvePendingCommit]);
+
+  useLayoutEffect(
+    () => () => {
+      activeTransitionRef.current?.skipTransition?.();
+      resolvePendingCommit();
+      delete document.documentElement.dataset.navigationDirection;
+    },
+    [resolvePendingCommit],
+  );
+
+  const transitionNavigate = useCallback<NavigationTransitionNavigate>(
+    ((
+      to: To | number,
+      options?: NavigationTransitionOptions | NavigationHistoryTransitionOptions,
+    ) => {
+      const currentLocation = locationRef.current;
+      const transitionOptions =
+        typeof to === "number" ? undefined : (options as NavigationTransitionOptions | undefined);
+      const {
+        direction: requestedDirection,
+        preferHistory = false,
+        ...navigateOptions
+      } = transitionOptions ?? {};
+      const trackedHistoryTarget = (() => {
+        if (typeof to !== "number") return null;
+        const currentHistoryIndex = browserHistoryIndex();
+        if (currentHistoryIndex === null) return null;
+        return navigationHistoryRef.current!.paths.get(currentHistoryIndex + to) ?? null;
+      })();
+      const expectedTo =
+        typeof to === "number"
+          ? (trackedHistoryTarget ??
+            (options as NavigationHistoryTransitionOptions | undefined)?.expectedTo)
+          : to;
+      const nextPath = expectedTo ? destinationPath(expectedTo, currentLocation) : null;
+      const currentPath = createPath(currentLocation);
+      const matchingHistoryDelta = (() => {
+        if (typeof to === "number" || !preferHistory || !nextPath) return null;
+        const currentHistoryIndex = browserHistoryIndex();
+        if (currentHistoryIndex === null) return null;
+
+        for (let index = currentHistoryIndex - 1; index >= 0; index -= 1) {
+          if (navigationHistoryRef.current!.paths.get(index) === nextPath) {
+            return index - currentHistoryIndex;
+          }
+        }
+        return null;
+      })();
+      const historyDelta = typeof to === "number" ? to : matchingHistoryDelta;
+      const direction: NavigationTransitionDirection =
+        historyDelta !== null
+          ? historyDelta < 0
+            ? "back"
+            : "forward"
+          : (requestedDirection ?? "forward");
+
+      // ViewTransitionLink prevents the native click once it reaches this
+      // coordinator. Do not create a duplicate history entry or hold a browser
+      // transition open when the destination URL is already current.
+      if (to === 0 || (typeof to !== "number" && nextPath === currentPath)) {
+        return;
+      }
+
+      const performNavigation = () => {
+        if (typeof to === "number") {
+          navigate(to);
+        } else if (matchingHistoryDelta !== null) {
+          navigate(matchingHistoryDelta);
+        } else {
+          navigate(to, navigateOptions);
+        }
+      };
+
+      const navigationSequence = ++navigationSequenceRef.current;
+      activeTransitionRef.current?.skipTransition?.();
+      resolvePendingCommit();
+      delete document.documentElement.dataset.navigationDirection;
+
+      // A freshly opened tab, an older pre-upgrade history entry, or blocked
+      // session storage can leave a POP destination unknowable until after it
+      // commits. Navigate it live instead of guessing and risking a root
+      // snapshot over the sidebar's compositor transition.
+      if (typeof to === "number" && !nextPath) {
+        performNavigation();
+        return;
+      }
+
+      // Home's existing desktop entry/exit motion is a live compositor
+      // transform shared by the sidebar and main stage. A document snapshot
+      // would cover that motion with the root pseudo-element, so preserve the
+      // established path at this boundary. Item-to-item changes keep the
+      // sidebar collapsed and use the commit-aware route transition below.
+      if (
+        nextPath &&
+        isDesktopItemBoundaryChange(currentLocation.pathname, resolvePath(nextPath).pathname)
+      ) {
+        performNavigation();
+        return;
+      }
+
+      const startViewTransition = getStartViewTransition();
+      if (!startViewTransition || prefersReducedMotion()) {
+        performNavigation();
+        return;
+      }
+
+      let updateStarted = false;
+      try {
+        document.documentElement.dataset.navigationDirection = direction;
+        const transition = startViewTransition.call(document, async () => {
+          // Skipping an in-flight ViewTransition stops its animation but does
+          // not cancel its update callback. Only the latest intent may route.
+          if (navigationSequence !== navigationSequenceRef.current) return;
+          updateStarted = true;
+          const sourceLocationKey = locationRef.current.key;
+          const committed = new Promise<void>((resolve) => {
+            const timeout = window.setTimeout(resolve, COMMIT_FALLBACK_MS);
+            pendingCommitRef.current = {
+              sourceLocationKey,
+              destinationPath: nextPath,
+              navigationSequence,
+              resolve,
+              timeout,
+            };
+          });
+
+          try {
+            performNavigation();
+            await committed;
+          } finally {
+            resolvePendingCommit();
+          }
+        });
+
+        activeTransitionRef.current = transition;
+        void transition.finished
+          .catch(() => undefined)
+          .finally(() => {
+            if (activeTransitionRef.current === transition) {
+              activeTransitionRef.current = null;
+              delete document.documentElement.dataset.navigationDirection;
+            }
+          });
+      } catch {
+        delete document.documentElement.dataset.navigationDirection;
+        // A synchronous API failure before the update callback starts must not
+        // prevent navigation. If the callback already ran, it owns navigation.
+        if (!updateStarted) performNavigation();
+      }
+    }) as NavigationTransitionNavigate,
+    [navigate, resolvePendingCommit],
+  );
+
+  return (
+    <NavigationTransitionContext.Provider value={transitionNavigate}>
+      {children}
+    </NavigationTransitionContext.Provider>
+  );
+}

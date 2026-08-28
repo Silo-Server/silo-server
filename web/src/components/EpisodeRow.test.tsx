@@ -39,6 +39,8 @@ describe("EpisodeRow", () => {
     );
 
     expect(markup).toContain("width:25%");
+    expect(markup).toContain("glass-hover glass-hover-accent-subtle");
+    expect(markup).not.toContain("hover:bg-accent/60");
   });
 
   it("renders a watched indicator from inline episode user_data", () => {

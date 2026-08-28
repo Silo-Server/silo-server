@@ -2,6 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { type To, useNavigate } from "react-router";
 
 import { hasRouterHistory } from "@/lib/backNavigation";
+import { useNavigationTransition } from "@/components/navigationTransitionContext";
 
 interface PageBackProps {
   label?: string;
@@ -13,7 +14,7 @@ interface PageBackProps {
    * button sits just inside the page content area.
    */
   floating?: boolean;
-  /** Use the app's route cross-fade when following an explicit target. */
+  /** Request a router cross-fade when rendered outside the app transition provider. */
   viewTransition?: boolean;
   /** Replace the current entry when falling back to an explicit parent route. */
   replace?: boolean;
@@ -21,41 +22,44 @@ interface PageBackProps {
 
 export default function PageBack({
   label = "Go back",
-  to = "/",
+  to,
   preferHistory = true,
   floating = false,
   viewTransition = false,
   replace = false,
 }: PageBackProps) {
   const navigate = useNavigate();
+  const transitionNavigate = useNavigationTransition();
   const position = floating
     ? "absolute top-4 left-2 sm:top-6 lg:fixed lg:left-[268px]"
     : "absolute top-4 left-2 sm:top-6";
 
   function goBack() {
     if (preferHistory && hasRouterHistory()) {
-      const startViewTransition = (
-        document as Document & {
-          startViewTransition?: (update: () => void) => unknown;
-        }
-      ).startViewTransition;
-      if (viewTransition && startViewTransition) {
-        startViewTransition.call(document, () => navigate(-1));
+      if (transitionNavigate) {
+        transitionNavigate(-1, { expectedTo: to });
       } else {
         navigate(-1);
       }
       return;
     }
 
+    const fallbackTo = to ?? "/";
+
+    if (transitionNavigate) {
+      transitionNavigate(fallbackTo, { replace, direction: "back" });
+      return;
+    }
+
     if (viewTransition || replace) {
-      navigate(to, {
+      navigate(fallbackTo, {
         ...(viewTransition && { viewTransition: true }),
         ...(replace && { replace }),
       });
       return;
     }
 
-    navigate(to);
+    navigate(fallbackTo);
   }
 
   return (

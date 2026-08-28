@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BookOpen, Check, Download } from "lucide-react";
-import { Link } from "react-router";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import MediaLocations from "@/components/MediaLocations";
@@ -149,7 +149,7 @@ export default function EbookContent({
                 asChild
                 className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
               >
-                <Link to={readerHref}>
+                <ViewTransitionLink to={readerHref}>
                   <BookOpen className="size-[18px]" />
                   {hasSavedProgress ? "Continue" : "Read"}
                   {progressLabel && (
@@ -157,7 +157,7 @@ export default function EbookContent({
                       {progressLabel}
                     </span>
                   )}
-                </Link>
+                </ViewTransitionLink>
               </Button>
             )}
             {canDownload && (

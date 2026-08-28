@@ -101,6 +101,7 @@ function CastCard({ member, href }: { member: CastMember; href: string | null })
             alt={member.name}
             className="h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="bg-surface text-muted-foreground flex h-full w-full items-center justify-center text-lg font-semibold">

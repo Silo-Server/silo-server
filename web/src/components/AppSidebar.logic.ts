@@ -20,7 +20,7 @@ export const SIDEBAR_SURFACE_WIDTH = 260;
  * The `<aside>` is always {@link SIDEBAR_SURFACE_WIDTH} wide — nothing about it
  * reflows between states. This drives `data-collapsed`, which app.css turns into
  * paired transform animation, so the only things that move are compositor
- * layers over a surface whose 40px backdrop blur has fixed geometry.
+ * layers over a surface whose geometry stays fixed.
  */
 export function isSidebarRailCollapsed(collapsed: boolean, sidebarExpanded: boolean) {
   return collapsed && !sidebarExpanded;

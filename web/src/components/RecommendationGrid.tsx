@@ -25,7 +25,13 @@ function RecommendationItemCard({ itemId }: RecommendationItemCardProps) {
         <ViewTransitionLink to={`/item/${encodeURIComponent(itemId)}`} className="group block">
           <div className="media-card-image aspect-[2/3] overflow-hidden rounded-lg">
             {item.poster_url ? (
-              <img src={item.poster_url} alt={item.title} className="h-full w-full object-cover" />
+              <img
+                src={item.poster_url}
+                alt={item.title}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                decoding="async"
+              />
             ) : (
               <div className="bg-surface text-muted-foreground flex h-full items-center justify-center text-xs">
                 {item.title}

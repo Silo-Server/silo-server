@@ -33,7 +33,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
   return (
     <ViewTransitionLink
       to={`/item/${episode.content_id}`}
-      className={`media-card group hover:bg-accent/60 flex items-center gap-4 rounded-lg px-3.5 py-3 transition-colors duration-[--duration-fast] ${
+      className={`media-card glass-hover glass-hover-accent-subtle group flex items-center gap-4 rounded-lg px-3.5 py-3 ${
         hasProgress ? "bg-accent/5" : ""
       }`}
     >
@@ -50,6 +50,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             alt={episode.title || `Episode ${episode.episode_number}`}
             className="h-full w-full object-cover"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="text-muted-foreground/50 flex h-full w-full items-center justify-center">

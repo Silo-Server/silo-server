@@ -73,7 +73,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
     <button
       type="button"
       onClick={onPlay}
-      className="group/extra border-border bg-surface hover:bg-surface-hover flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors duration-[--duration-fast]"
+      className="glass-hover glass-hover-surface-solid group/extra border-border bg-surface flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left"
     >
       <span className="bg-muted text-foreground group-hover/extra:bg-primary group-hover/extra:text-primary-foreground flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-[--duration-fast]">
         <Play className="ml-0.5 h-4 w-4 fill-current" />

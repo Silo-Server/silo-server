@@ -1,5 +1,5 @@
-import { Link } from "react-router";
 import type { CrewMember } from "@/api/types";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
 
 interface HeroCrewLineProps {
@@ -20,12 +20,12 @@ function CrewNames({ people }: { people: CrewPerson[] }) {
         <span key={p.name}>
           {i > 0 && ", "}
           {p.personId ? (
-            <Link
+            <ViewTransitionLink
               to={buildPersonCatalogHref(p.personId)}
               className="text-foreground/70 hover:text-foreground/90 font-medium transition-colors"
             >
               {p.name}
-            </Link>
+            </ViewTransitionLink>
           ) : (
             <span className="text-foreground/70 font-medium">{p.name}</span>
           )}

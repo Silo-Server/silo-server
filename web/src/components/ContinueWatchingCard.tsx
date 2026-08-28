@@ -1,6 +1,6 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { BookOpen, Play } from "lucide-react";
-import { useCallback, useRef } from "react";
+import { useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import type { ProgressEntry } from "@/api/types";
@@ -133,6 +133,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
+  const watchHref = card.watchHref;
   const episodeLabel = hasEpisodeMeta
     ? `Season ${card.seasonNumber} Episode ${card.episodeNumber}`
     : null;
@@ -158,39 +159,36 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
           : `${Math.round((card.durationSeconds - card.positionSeconds) / 60)} min left`
         : "\u00A0";
-  const handleWatchClick = useCallback(
-    (event: React.MouseEvent<HTMLAnchorElement>) => {
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.shiftKey
-      ) {
-        return;
-      }
+  function handleWatchClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
 
-      if (!isVideoWatchHref(card.watchHref)) {
-        return;
-      }
+    if (!isVideoWatchHref(watchHref)) {
+      return;
+    }
 
-      const parsed = parseWatchHref(card.watchHref);
-      if (!parsed) {
-        return;
-      }
+    const parsed = parseWatchHref(watchHref);
+    if (!parsed) {
+      return;
+    }
 
-      event.preventDefault();
-      playbackController.startPlayback({
-        contentId: parsed.contentId,
-        fileId: parsed.fileId,
-        libraryId: parsed.libraryId,
-        restart: parsed.restart,
-        returnHref: `${location.pathname}${location.search}`,
-      });
-    },
-    [card.watchHref, location.pathname, location.search, playbackController],
-  );
+    event.preventDefault();
+    playbackController.startPlayback({
+      contentId: parsed.contentId,
+      fileId: parsed.fileId,
+      libraryId: parsed.libraryId,
+      restart: parsed.restart,
+      returnHref: `${location.pathname}${location.search}`,
+    });
+  }
 
   const variant = props.variant ?? "wide";
   const isPoster = variant === "poster";
@@ -240,6 +238,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
                 alt={heading}
                 className="h-full w-full object-cover"
                 loading="lazy"
+                decoding="async"
               />
             ) : (
               <div className="text-muted-foreground bg-surface flex h-full w-full items-center justify-center text-sm">
@@ -256,7 +255,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
 
             {/* Hover dim behind the play button */}
-            <div className="media-card-hover-dim absolute inset-0 bg-black/0 transition-colors duration-[--duration-fast]" />
+            <div className="media-card-hover-dim absolute inset-0" />
 
             {/* Progress bar — inset pill so a full bar doesn't read as a
                 stray edge along the artwork */}
@@ -273,7 +272,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
           </div>
         </ViewTransitionLink>
-        {isPoster && playableContentId && isVideoWatchHref(card.watchHref) ? (
+        {isPoster && playableContentId && isVideoWatchHref(watchHref) ? (
           <CardPlayOverlay
             contentId={playableContentId}
             title={playTitle}
@@ -282,7 +281,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           />
         ) : (
           <ViewTransitionLink
-            to={card.watchHref}
+            to={watchHref}
             onClick={handleWatchClick}
             aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
             className="media-card-play-trigger bg-primary text-primary-foreground hover:bg-primary/90 absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-[transform,background-color] duration-[--duration-fast] hover:scale-110 active:scale-95"

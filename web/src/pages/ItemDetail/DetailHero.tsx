@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { Languages } from "lucide-react";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 
@@ -117,6 +118,7 @@ export default function DetailHero({
               key={backdropUrl}
               src={backdropUrl}
               alt=""
+              decoding="async"
               className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
               onLoad={onBackdropLoad}
             />
@@ -124,15 +126,13 @@ export default function DetailHero({
         </div>
       )}
 
-      {/* Left-to-right gradient */}
-      <div className="hero-gradient-left" />
-
-      {/* Ambient glow from artwork */}
-      <div className="ambient-glow" />
-
-      {/* Bottom-to-top gradient */}
-      <div className="hero-gradient" />
-      <div className="hero-vignette" />
+      {/* Keep the detail treatment on three contained paint surfaces while
+          preserving its original stacking: tint/left fade, ambient artwork
+          glow, then the bottom fades and vignette. Previously five full-hero
+          elements were independently invalidated during browser-chrome resize. */}
+      <div className="detail-hero-scrim detail-hero-scrim-under" />
+      <div className="ambient-glow detail-hero-ambient" />
+      <div className="detail-hero-scrim detail-hero-scrim-over" />
 
       <div
         className={`page-shell-wide relative flex flex-col justify-end pb-8 ${
@@ -161,6 +161,7 @@ export default function DetailHero({
                       key={posterUrl}
                       src={posterUrl}
                       alt={title}
+                      decoding="async"
                       className={`w-full object-cover ${posterAspect} ${posterLoaded ? "opacity-100" : "opacity-0"}`}
                       onLoad={onPosterLoad}
                     />
@@ -190,7 +191,7 @@ export default function DetailHero({
 
             {/* Info column */}
             <div
-              className="max-w-3xl"
+              className="detail-hero-copy max-w-3xl"
               style={{ textShadow: "var(--hero-text-shadow, 0 1px 3px rgb(0 0 0 / 40%))" }}
             >
               {context && (
@@ -209,6 +210,7 @@ export default function DetailHero({
                   <img
                     src={logoUrl}
                     alt=""
+                    decoding="async"
                     className="mb-4 max-h-20 max-w-[420px] object-contain object-left lg:max-h-28 lg:max-w-[480px]"
                   />
                 </>
@@ -276,13 +278,13 @@ export default function DetailHero({
                 <div className="mt-4 flex flex-wrap gap-2">
                   {genres.map((genre) =>
                     genreHref ? (
-                      <a
+                      <ViewTransitionLink
                         key={genre}
-                        href={genreHref(genre)}
+                        to={genreHref(genre)}
                         className="metadata-badge hover:bg-foreground/10 transition-colors"
                       >
                         {genre}
-                      </a>
+                      </ViewTransitionLink>
                     ) : (
                       <span key={genre} className="metadata-badge">
                         {genre}

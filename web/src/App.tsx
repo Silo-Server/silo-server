@@ -32,6 +32,7 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
 import { RealtimeEventsProvider } from "@/components/RealtimeEventsProvider";
+import NavigationTransitionProvider from "@/components/NavigationTransitionProvider";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
@@ -675,38 +676,40 @@ function PlaybackCapabilityPrewarmer() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <QueryClientProvider client={queryClient}>
-          <ErrorBoundary>
-            <BrandingProvider>
-              <ThemeProvider>
-                <CustomThemeProvider>
-                  <DateTimeFormatProvider>
-                    <WatchPlaybackProvider>
-                      <AudiobookPlaybackProvider>
-                        <RealtimeEventsProvider>
-                          <PlaybackCapabilityPrewarmer />
-                          <RealtimeEventChannels />
-                          <ScrollRestorationManager />
-                          <RouteAnnouncer />
-                          <QueryCacheManager />
-                          <AppChrome />
-                          <Suspense fallback={<RouteLoading />}>
-                            <ReactiveAppRoutes />
-                          </Suspense>
-                          <WatchPlaybackHost />
-                          <WatchPlaybackBar />
-                          <Toaster />
-                        </RealtimeEventsProvider>
-                      </AudiobookPlaybackProvider>
-                    </WatchPlaybackProvider>
-                  </DateTimeFormatProvider>
-                </CustomThemeProvider>
-              </ThemeProvider>
-            </BrandingProvider>
-          </ErrorBoundary>
-        </QueryClientProvider>
-      </AuthProvider>
+      <NavigationTransitionProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            <ErrorBoundary>
+              <BrandingProvider>
+                <ThemeProvider>
+                  <CustomThemeProvider>
+                    <DateTimeFormatProvider>
+                      <WatchPlaybackProvider>
+                        <AudiobookPlaybackProvider>
+                          <RealtimeEventsProvider>
+                            <PlaybackCapabilityPrewarmer />
+                            <RealtimeEventChannels />
+                            <ScrollRestorationManager />
+                            <RouteAnnouncer />
+                            <QueryCacheManager />
+                            <AppChrome />
+                            <Suspense fallback={<RouteLoading />}>
+                              <ReactiveAppRoutes />
+                            </Suspense>
+                            <WatchPlaybackHost />
+                            <WatchPlaybackBar />
+                            <Toaster />
+                          </RealtimeEventsProvider>
+                        </AudiobookPlaybackProvider>
+                      </WatchPlaybackProvider>
+                    </DateTimeFormatProvider>
+                  </CustomThemeProvider>
+                </ThemeProvider>
+              </BrandingProvider>
+            </ErrorBoundary>
+          </QueryClientProvider>
+        </AuthProvider>
+      </NavigationTransitionProvider>
     </BrowserRouter>
   );
 }

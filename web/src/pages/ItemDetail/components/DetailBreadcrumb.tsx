@@ -1,5 +1,5 @@
-import { Link } from "react-router";
 import { ChevronRight } from "lucide-react";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 
 interface BreadcrumbSegment {
   label: string;
@@ -22,12 +22,15 @@ export default function DetailBreadcrumb({ segments }: DetailBreadcrumbProps) {
             <span key={i} className="flex items-center gap-1.5">
               {i > 0 && <ChevronRight className="text-muted-foreground/40 size-4" />}
               {segment.href && !isLast ? (
-                <Link
+                <ViewTransitionLink
                   to={segment.href}
+                  replace
+                  preferHistory
+                  transitionDirection="back"
                   className="text-muted-foreground hover:text-foreground text-[13px] transition-colors"
                 >
                   {segment.label}
-                </Link>
+                </ViewTransitionLink>
               ) : (
                 <span
                   className="text-muted-foreground/60 text-[13px]"

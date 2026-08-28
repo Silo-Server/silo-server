@@ -115,6 +115,7 @@ function SeasonCard({
               alt={getSeasonDisplayTitle(season)}
               className="h-full w-full object-cover"
               loading="lazy"
+              decoding="async"
             />
           ) : (
             <div className="text-muted-foreground bg-surface flex h-full items-center justify-center p-4 text-center text-sm font-medium">

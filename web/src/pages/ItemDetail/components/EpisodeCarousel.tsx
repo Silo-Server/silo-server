@@ -150,6 +150,7 @@ function EpisodeCarouselCard({
                   alt={episodeTitle}
                   className="h-full w-full object-cover"
                   loading="lazy"
+                  decoding="async"
                 />
               ) : (
                 <div className="bg-accent/30 flex h-full w-full items-center justify-center">

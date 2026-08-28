@@ -96,29 +96,6 @@ describe("PageBack", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/item/series-1", { viewTransition: true });
   });
 
-  it("uses a view transition while returning through history", async () => {
-    window.history.replaceState({ idx: 1 }, "");
-    const startViewTransition = vi.fn((update: () => void) => update());
-    Object.defineProperty(document, "startViewTransition", {
-      configurable: true,
-      value: startViewTransition,
-    });
-    try {
-      render(
-        <MemoryRouter>
-          <PageBack viewTransition />
-        </MemoryRouter>,
-      );
-
-      await userEvent.click(screen.getByRole("button", { name: "Go back" }));
-
-      expect(startViewTransition).toHaveBeenCalledOnce();
-      expect(mocks.navigate).toHaveBeenCalledWith(-1);
-    } finally {
-      Reflect.deleteProperty(document, "startViewTransition");
-    }
-  });
-
   it("replaces an explicit parent fallback so back cannot loop", async () => {
     render(
       <MemoryRouter>

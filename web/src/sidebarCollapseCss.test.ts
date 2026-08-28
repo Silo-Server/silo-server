@@ -182,6 +182,21 @@ describe("sidebar collapse CSS", () => {
   });
 });
 describe("responsive rendering containment", () => {
+  it("shows the interactive cursor for every enabled button surface", () => {
+    expect(css).toMatch(
+      /button:not\(:disabled\),\s*\[role="button"\]:not\(\[aria-disabled="true"\]\)/,
+    );
+    expect(css).toMatch(/button:disabled,\s*\[role="button"\]\[aria-disabled="true"\]/);
+  });
+
+  it("uses inverse compositor-only motion for nested detail-page returns", () => {
+    expect(css).toMatch(/@keyframes route-forward-in[\s\S]*?transform: translateX\(12px\)/);
+    expect(css).toMatch(/@keyframes route-back-in[\s\S]*?transform: translateX\(-12px\)/);
+    expect(css).toContain('html[data-navigation-direction="back"]::view-transition-old(root)');
+    expect(css).toContain('html[data-navigation-direction="back"]::view-transition-new(root)');
+    expect(css).not.toContain("::view-transition-old(main-content)");
+  });
+
   it("defers off-screen item detail sections during viewport changes", () => {
     const supporting = ruleBody(".detail-supporting-content > * {");
     expect(supporting).toContain("content-visibility: auto");
@@ -194,13 +209,28 @@ describe("responsive rendering containment", () => {
     expect(ruleBody(".media-card-image img {")).toContain(
       "transform var(--duration-fast) var(--ease-gentle)",
     );
+    const continueDim = ruleBody("\n  .media-card-hover-dim {");
+    expect(continueDim).toContain("transition: opacity");
+    expect(continueDim).not.toContain("background-color");
+    expect(ruleBody(".glass-hover-surface-solid {")).toContain(
+      "--glass-hover-color: var(--surface-hover)",
+    );
+    expect(ruleBody(".glass-hover-accent-subtle {")).toContain(
+      "color-mix(in srgb, var(--accent) 60%, transparent)",
+    );
   });
 
   it("keeps item hero artwork off the filtered resize path", () => {
     const artwork = ruleBody(".hero-backdrop-artwork {");
-    expect(artwork).toContain("contain: layout paint");
+    expect(artwork).toContain("contain: strict");
     expect(artwork).not.toContain("filter:");
-    expect(ruleBody(".hero-backdrop-artwork::after {")).toContain("background: color-mix");
+    const hero = ruleBody(".item-detail-hero {");
+    expect(hero).toContain("contain: layout paint style");
+    expect(ruleBody(".detail-hero-copy {")).toContain("transform: translateZ(0)");
+    expect(ruleBody(".detail-hero-scrim {")).toContain("contain: paint");
+    expect(ruleBody(".detail-hero-scrim-under {")).toContain("background:");
+    expect(ruleBody(".detail-hero-scrim-over {")).toContain("background:");
+    expect(ruleBody(".detail-hero-ambient {")).toContain("transition: none");
   });
 
   it("keeps detail actions and overflow menus opaque and immediately interactive", () => {

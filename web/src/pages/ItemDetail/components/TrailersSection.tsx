@@ -80,9 +80,11 @@ function TrailerCard({ video, onPlay }: { video: ItemVideo; onPlay: () => void }
           alt={label}
           className="h-full w-full object-cover"
           loading="lazy"
+          decoding="async"
         />
-        <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-[--duration-fast] group-hover/trailer:bg-black/30">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/85 opacity-0 transition-opacity duration-[--duration-fast] group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="pointer-events-none absolute inset-0 bg-black/30 opacity-0 transition-opacity duration-[--duration-fast] group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100" />
+          <span className="relative flex h-11 w-11 items-center justify-center rounded-full bg-black/85 opacity-0 transition-opacity duration-[--duration-fast] group-hover/trailer:opacity-100 group-focus-visible/trailer:opacity-100">
             <Play className="ml-0.5 h-5 w-5 fill-white text-white" />
           </span>
         </div>

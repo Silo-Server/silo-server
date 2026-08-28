@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -393,6 +393,23 @@ describe("EpisodeContent", () => {
 
     expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
     expect(markup).toContain(">Season 99<");
+    const topNav = mocks.capturedDetailHeroProps.value?.topNav;
+    expect(isValidElement(topNav)).toBe(true);
+    if (
+      isValidElement<{
+        to?: string;
+        preferHistory?: boolean;
+        viewTransition?: boolean;
+        replace?: boolean;
+      }>(topNav)
+    ) {
+      expect(topNav.props).toMatchObject({
+        to: "/item/season-99",
+        preferHistory: true,
+        viewTransition: true,
+        replace: true,
+      });
+    }
   });
 
   it("passes on-view translation controls to the hero", () => {

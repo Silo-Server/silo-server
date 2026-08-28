@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Menu, Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -31,6 +31,7 @@ import {
 import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 
 interface LayoutProps {
   children: ReactNode;
@@ -38,7 +39,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useViewTransitionNavigate();
   const queryClient = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Tracks whether the mobile header should slide off-screen on scroll.
@@ -91,7 +92,7 @@ export default function Layout({ children }: LayoutProps) {
   const beginItemNavigation = useCallback(
     (request: SidebarItemNavigationRequest) => {
       const itemTarget = parseItemNavigationHref(request.href, window.location.origin);
-      if (isItemRoute || !itemTarget || !hasDesktopSidebar) {
+      if (!itemTarget) {
         return false;
       }
 
@@ -99,10 +100,12 @@ export default function Layout({ children }: LayoutProps) {
         queryKey: catalogKeys.itemDetail(itemTarget.contentId, itemTarget.libraryId),
         queryFn: () => fetchCatalogItemDetail(itemTarget.contentId, itemTarget.libraryId),
       });
+      if (isItemRoute || !hasDesktopSidebar) {
+        return false;
+      }
       navigate(request.href, {
         replace: request.replace,
         state: request.state,
-        viewTransition: true,
       });
       return true;
     },
@@ -310,7 +313,6 @@ export default function Layout({ children }: LayoutProps) {
           className={`sidebar-main-stage relative min-h-screen ${
             targetDetailImmersion ? "lg:ml-16" : "lg:ml-[260px]"
           } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
-          style={{ viewTransitionName: "main-content" }}
         >
           {needsNoPadding ? (
             children

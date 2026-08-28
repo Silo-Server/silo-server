@@ -181,6 +181,9 @@ describe("Layout item navigation", () => {
     fireEvent.click(begin);
     expect(mocks.beginResult).toBe(false);
     expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.prefetchQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: catalogKeys.itemDetail("movie-1", 2) }),
+    );
 
     setRoute("/", "home-2");
     view.rerender(

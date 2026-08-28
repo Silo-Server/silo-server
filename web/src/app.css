@@ -181,6 +181,46 @@
     opacity: 0;
   }
 }
+@keyframes route-forward-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+@keyframes route-forward-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes route-back-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+@keyframes route-back-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
 @keyframes ken-burns-a {
   0% {
     transform: scale(1) translate(0, 0);
@@ -244,17 +284,32 @@
    and animates between them.
    ================================================================ */
 
-::view-transition-old(main-content) {
-  animation: 200ms cubic-bezier(0, 0, 0.2, 1) both fade-out;
+/* Route motion uses the viewport-sized root snapshot. Naming the variable-
+   height scrolling <main> makes the browser interpolate its width, height,
+   and screen position with layout work on every frame—especially visible
+   when a scrolled season returns to a shorter series page. Desktop item
+   entry/exit still bypasses snapshots so its live sidebar motion is preserved. */
+::view-transition-old(root) {
+  animation: 180ms cubic-bezier(0.4, 0, 1, 1) both route-forward-out;
+  mix-blend-mode: normal;
 }
 
-::view-transition-new(main-content) {
-  animation: 300ms cubic-bezier(0, 0, 0.2, 1) both slide-up;
+::view-transition-new(root) {
+  animation: 260ms cubic-bezier(0.22, 1, 0.36, 1) both route-forward-in;
+  mix-blend-mode: normal;
+}
+
+html[data-navigation-direction="back"]::view-transition-old(root) {
+  animation-name: route-back-out;
+}
+
+html[data-navigation-direction="back"]::view-transition-new(root) {
+  animation-name: route-back-in;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(main-content),
-  ::view-transition-new(main-content) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
     animation: none;
   }
   :root {
@@ -720,6 +775,14 @@
   html[data-text-scale="x-large"] .text-\[38px\] {
     font-size: calc(38px * var(--ui-text-scale-factor)) !important;
   }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
   body {
     background-color: var(--background);
     color: var(--foreground);
@@ -868,20 +931,82 @@
       opacity var(--duration-cinematic) var(--ease-gentle);
   }
 
-  /* Item pages used to darken the entire viewport-sized artwork through a CSS
-     filter. Browser chrome that animates the viewport (notably Brave's hover
-     sidebar) made that filtered surface re-rasterize on every resize frame.
-     Tinting with a normal paint layer preserves the cinematic treatment while
-     leaving the image on the browser's inexpensive image/composite path. */
-  .hero-backdrop-artwork {
-    contain: layout paint;
+  /* Keep the detail hero as one contained layout/paint boundary. Browser UI
+     that animates the content viewport can then resize this surface without
+     invalidating every supporting rail below it. */
+  .item-detail-hero {
+    contain: layout paint style;
   }
-  .hero-backdrop-artwork::after {
-    content: "";
+
+  /* Keep the text and controls on a stable compositor surface while the
+     browser changes the viewport (for example, Brave's hover sidebar). The
+     hero copy itself does not move at desktop widths, so repainting it for
+     every intermediate viewport size only stalls the browser UI animation. */
+  .detail-hero-copy {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  /* Item artwork stays on the browser's inexpensive image/composite path. */
+  .hero-backdrop-artwork {
+    contain: strict;
+  }
+
+  /* Detail pages previously stacked a tint, two separate bottom fades, two
+     separate side fades, and a vignette as five full-hero elements. Group the
+     static treatment into two contained surfaces around the ambient glow so
+     resize does less paint work without changing the artwork's layer order. */
+  .detail-hero-scrim {
     position: absolute;
     inset: 0;
-    background: color-mix(in srgb, var(--background) 25%, transparent);
+    contain: paint;
     pointer-events: none;
+  }
+
+  /* These layers sat below the ambient artwork glow in the original hero. */
+  .detail-hero-scrim-under {
+    background:
+      linear-gradient(
+        to right,
+        var(--background) 0%,
+        color-mix(in srgb, var(--background) 80%, transparent) 20%,
+        color-mix(in srgb, var(--background) 40%, transparent) 40%,
+        transparent 60%
+      ),
+      linear-gradient(
+        color-mix(in srgb, var(--background) 25%, transparent),
+        color-mix(in srgb, var(--background) 25%, transparent)
+      );
+  }
+
+  /* These layers sat above the ambient artwork glow in the original hero. */
+  .detail-hero-scrim-over {
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--background) 92%, transparent) 0%,
+        color-mix(in srgb, var(--background) 64%, transparent) 28%,
+        transparent 58%
+      ),
+      linear-gradient(
+        to top,
+        var(--background) 0%,
+        color-mix(in srgb, var(--background) 75%, transparent) 28%,
+        transparent 62%
+      ),
+      linear-gradient(
+        to top,
+        var(--background) 0%,
+        color-mix(in srgb, var(--background) 92%, transparent) 20%,
+        color-mix(in srgb, var(--background) 55%, transparent) 50%,
+        color-mix(in srgb, var(--background) 20%, transparent) 75%,
+        transparent 100%
+      );
+  }
+
+  .detail-hero-ambient {
+    contain: paint;
+    transition: none;
   }
 
   /* ── Sidebar Immersion ─────────────────────────────────────── */
@@ -893,9 +1018,7 @@
      lightweight shell first; metadata and artwork stay gated until this
      compositor motion has completed.
      Nothing here touches width, margin, or any other layout property, so the
-     document is laid out once per navigation instead of once per frame. Holding
-     the surface at a constant size also means its 40px backdrop blur is
-     rasterized against unchanging geometry rather than re-blurred each frame. */
+     document is laid out once per navigation instead of once per frame. */
   /* Two transforms that cancel out. `.sidebar-surface` is a 260px frame with
      `overflow: hidden` that slides 196px left, so its right edge — and the
      border drawn on it — sweeps from x=260 down to x=64. `.sidebar-inner`
@@ -1059,8 +1182,16 @@
     /* 25% surface over the existing 40% glass equals the previous 55% hover. */
     --glass-hover-color: color-mix(in srgb, var(--surface) 25%, transparent);
   }
+  .glass-hover-surface-solid {
+    /* Opaque cards need the actual hover token; another surface tint would be
+       visually identical over their existing `--surface` background. */
+    --glass-hover-color: var(--surface-hover);
+  }
   .glass-hover-accent {
     --glass-hover-color: var(--accent);
+  }
+  .glass-hover-accent-subtle {
+    --glass-hover-color: color-mix(in srgb, var(--accent) 60%, transparent);
   }
 
   /* Detail actions sit directly over large hero artwork. Repainting several
@@ -1388,13 +1519,26 @@
      even while an attached mouse is actively hovering the card. */
   @media (any-hover: hover) and (any-pointer: fine) {
     .group\/media:hover .media-card-hover-dim {
-      background-color: rgb(0 0 0 / 0.3);
+      opacity: 1;
     }
     .group\/card:hover .media-card-action-trigger,
     .group\/media:hover .media-card-play-trigger {
       opacity: 1;
       pointer-events: auto;
     }
+  }
+
+  /* Continue Watching uses the same compositor-only dim reveal as trailer
+     cards. Changing a full-card background color repaints the artwork when a
+     pointer is swept across the row; fading this fixed overlay does not. */
+  .media-card-hover-dim {
+    background: rgb(0 0 0 / 0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-fast) var(--ease-default);
+  }
+  .group\/media:focus-within .media-card-hover-dim {
+    opacity: 1;
   }
 
   /* A long press on a card opens the action sheet, so the browser's own image

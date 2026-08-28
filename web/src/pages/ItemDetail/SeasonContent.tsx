@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useItemEpisodes } from "@/hooks/queries/episodes";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
@@ -12,6 +12,7 @@ import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import PageBack from "@/components/PageBack";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import WatchedActionBar from "./components/WatchedActionBar";
@@ -75,12 +76,13 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   if (episodesError) {
     return (
       <div className="px-4 py-6 sm:px-6 sm:py-10 lg:px-12">
-        <Link
+        <ViewTransitionLink
           to={seriesId ? `/item/${seriesId}` : "/"}
+          transitionDirection="back"
           className="text-muted-foreground hover:text-foreground text-sm"
         >
           &larr; Back to {seriesTitle}
-        </Link>
+        </ViewTransitionLink>
         <p className="text-muted-foreground mt-6 text-sm">
           {episodesError instanceof Error ? episodesError.message : "Season not found"}
         </p>
