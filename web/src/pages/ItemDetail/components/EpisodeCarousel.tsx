@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { Link } from "react-router";
 import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
@@ -7,10 +6,12 @@ import { toEpisodeUserState } from "@/components/episodeUserState";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 interface EpisodeCarouselProps {
@@ -49,7 +50,7 @@ export default function EpisodeCarousel({
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll left"
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -75,7 +76,7 @@ export default function EpisodeCarousel({
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll right"
           >
             <ChevronRight className="text-foreground h-6 w-6" />
@@ -100,6 +101,7 @@ function EpisodeCarouselCard({
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle = ep.title || `Episode ${ep.episode_number}`;
   const progress =
@@ -119,13 +121,11 @@ function EpisodeCarouselCard({
     <li data-episode={ep.episode_number} className="embla__slide shrink-0">
       <div
         ref={cardRef}
-        className="media-card-longpress group/card w-[240px]"
-        onMouseEnter={onPrefetch}
-        onFocus={onPrefetch}
-        onTouchStart={onPrefetch}
+        className="media-card media-card-longpress group/card w-[240px]"
+        {...prefetchHandlers}
       >
         <div className="relative">
-          <Link
+          <ViewTransitionLink
             to={`/item/${ep.content_id}`}
             state={episodeLinkState}
             aria-current={isCurrent ? "page" : undefined}
@@ -133,7 +133,7 @@ function EpisodeCarouselCard({
           >
             <div
               className={cn(
-                "surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border transition-[border-color,box-shadow] duration-200",
+                "media-card-image surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border transition-[border-color,box-shadow] duration-[--duration-fast]",
                 isCurrent
                   ? "border-transparent shadow-[0_0_0_2px_var(--primary)]"
                   : "border-border/30",
@@ -174,7 +174,7 @@ function EpisodeCarouselCard({
                 </div>
               )}
             </div>
-          </Link>
+          </ViewTransitionLink>
           <MediaItemMenu
             contentId={ep.content_id}
             mediaType="episode"
@@ -188,7 +188,7 @@ function EpisodeCarouselCard({
             itemTitle={episodeTitle}
           />
         </div>
-        <Link
+        <ViewTransitionLink
           to={`/item/${ep.content_id}`}
           state={episodeLinkState}
           aria-current={isCurrent ? "page" : undefined}
@@ -205,7 +205,7 @@ function EpisodeCarouselCard({
             {episodeTitle}
           </p>
           {ep.runtime > 0 && <p className="text-muted-foreground/70 text-xs">{ep.runtime}m</p>}
-        </Link>
+        </ViewTransitionLink>
       </div>
     </li>
   );

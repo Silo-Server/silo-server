@@ -181,3 +181,42 @@ describe("sidebar collapse CSS", () => {
     ).toBe("@media (min-width: 1024px)");
   });
 });
+describe("responsive rendering containment", () => {
+  it("defers off-screen item detail sections during viewport changes", () => {
+    const supporting = ruleBody(".detail-supporting-content > * {");
+    expect(supporting).toContain("content-visibility: auto");
+    expect(supporting).toContain("contain-intrinsic-size: auto 24rem");
+  });
+
+  it("keeps shared card and button hover feedback off CSS filters", () => {
+    expect(css).not.toMatch(/\.media-card:hover\s*\{[^}]*filter:/s);
+    expect(ruleBody(".pill-primary:hover {")).not.toContain("filter:");
+    expect(ruleBody(".media-card-image img {")).toContain(
+      "transform var(--duration-fast) var(--ease-gentle)",
+    );
+  });
+
+  it("keeps item hero artwork off the filtered resize path", () => {
+    const artwork = ruleBody(".hero-backdrop-artwork {");
+    expect(artwork).toContain("contain: layout paint");
+    expect(artwork).not.toContain("filter:");
+    expect(ruleBody(".hero-backdrop-artwork::after {")).toContain("background: color-mix");
+  });
+
+  it("keeps detail actions and overflow menus opaque and immediately interactive", () => {
+    const actions = ruleBody(".detail-action-bar .glass-subtle {");
+    expect(actions).toContain("backdrop-filter: none");
+    expect(actions).toContain("-webkit-backdrop-filter: none");
+    const overflow = ruleBody(".detail-overflow-menu {");
+    expect(overflow).toContain("animation: none");
+    expect(overflow).toContain("transition: none");
+  });
+
+  it("uses opaque shared glass primitives without live backdrop sampling", () => {
+    for (const selector of [".glass {", ".glass-subtle {", ".glass-chip {", ".glass-dark {"]) {
+      const body = ruleBody(`\n  ${selector}`);
+      expect(body).toContain("backdrop-filter: none");
+      expect(body).toContain("-webkit-backdrop-filter: none");
+    }
+  });
+});

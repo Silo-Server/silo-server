@@ -39,10 +39,10 @@ export function RelatedRail({
           <ViewTransitionLink
             key={item.content_id}
             to={`/item/${encodeURIComponent(item.content_id)}`}
-            className={`block ${carouselCardWidthClasses(cardPresentation.poster_size)}`}
+            className={`media-card block ${carouselCardWidthClasses(cardPresentation.poster_size)}`}
           >
             <div
-              className={`bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg ${
+              className={`media-card-image bg-muted relative ${coverAspectClass} overflow-hidden rounded-lg ${
                 item.highlight ? "ring-primary ring-offset-background ring-2 ring-offset-2" : ""
               }`}
             >

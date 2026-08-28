@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +10,22 @@ vi.mock("@/components/CardPlayOverlay", () => ({
   default: ({ contentId, title }: { contentId: string; title: string }) => (
     <a href={`/watch/${contentId}`} aria-label={`Play ${title}`} />
   ),
+}));
+
+const prefetchSeason = vi.hoisted(() => vi.fn());
+
+vi.mock("@/hooks/queries/catalogRead", () => ({
+  usePrefetchCatalogSeason: () => prefetchSeason,
+}));
+
+vi.mock("@/hooks/useCarouselEmbla", () => ({
+  useCarouselEmbla: () => ({
+    emblaRef: vi.fn(),
+    canScrollPrev: false,
+    canScrollNext: false,
+    scrollPrev: vi.fn(),
+    scrollNext: vi.fn(),
+  }),
 }));
 
 function makeSeason(overrides: Partial<Season> = {}): Season {
@@ -60,5 +77,32 @@ describe("SeasonCarousel", () => {
     expect(markup).toContain('href="/item/season-1"');
     expect(markup).toContain('href="/watch/episode-2"');
     expect(markup).toContain('aria-label="Play Season 1"');
+  });
+
+  it("does not prefetch seasons during a fast pointer sweep", () => {
+    vi.useFakeTimers();
+    try {
+      prefetchSeason.mockClear();
+      render(
+        <MemoryRouter>
+          <SeasonCarousel seasons={[makeSeason()]} />
+        </MemoryRouter>,
+      );
+
+      const card = screen.getAllByText("Season 1")[0]?.closest(".media-card");
+      expect(card).not.toBeNull();
+      fireEvent.mouseEnter(card!);
+      act(() => vi.advanceTimersByTime(100));
+      fireEvent.mouseLeave(card!);
+      act(() => vi.advanceTimersByTime(100));
+      expect(prefetchSeason).not.toHaveBeenCalled();
+
+      fireEvent.mouseEnter(card!);
+      act(() => vi.advanceTimersByTime(140));
+      expect(prefetchSeason).toHaveBeenCalledOnce();
+      expect(prefetchSeason).toHaveBeenCalledWith("season-1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

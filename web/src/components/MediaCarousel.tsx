@@ -87,7 +87,7 @@ export default function MediaCarousel({
           {onViewAll && (
             <button
               onClick={onViewAll}
-              className="text-muted-foreground hover:text-primary text-[12px] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]"
+              className="text-muted-foreground hover:text-primary text-[12px] font-semibold tracking-[0.16em] uppercase transition-colors active:scale-[0.98]"
             >
               Explore all
             </button>

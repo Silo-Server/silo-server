@@ -249,7 +249,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
+              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-colors active:scale-[0.98]"
               aria-label="Open menu"
             >
               <Menu className="h-5 w-5" />
@@ -261,7 +261,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center gap-2">
             <ViewTransitionLink
               to={buildQueryCatalogHref()}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
+              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-colors active:scale-[0.98]"
             >
               <Search className="h-5 w-5" />
             </ViewTransitionLink>

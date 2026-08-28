@@ -868,6 +868,22 @@
       opacity var(--duration-cinematic) var(--ease-gentle);
   }
 
+  /* Item pages used to darken the entire viewport-sized artwork through a CSS
+     filter. Browser chrome that animates the viewport (notably Brave's hover
+     sidebar) made that filtered surface re-rasterize on every resize frame.
+     Tinting with a normal paint layer preserves the cinematic treatment while
+     leaving the image on the browser's inexpensive image/composite path. */
+  .hero-backdrop-artwork {
+    contain: layout paint;
+  }
+  .hero-backdrop-artwork::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--background) 25%, transparent);
+    pointer-events: none;
+  }
+
   /* ── Sidebar Immersion ─────────────────────────────────────── */
   /* The desktop sidebar is physically 260px wide in EVERY state. Entering a
      detail page snaps the real layout — main's margin, the impersonation
@@ -995,12 +1011,14 @@
   }
 
   /* ── Glass Surfaces ──────────────────────────────────────── */
-  /* Frosted glass effect for floating controls, overlay panels.
+  /* Glass-like floating controls and overlay panels. These use opaque token
+     blends instead of live backdrop sampling so hover and viewport changes
+     remain compositor-friendly on every browser.
      Usage: <div class="glass">...</div>                        */
   .glass {
-    background: color-mix(in srgb, var(--surface) 70%, transparent);
-    backdrop-filter: blur(20px) saturate(1.2);
-    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    background: color-mix(in srgb, var(--surface) 88%, var(--background));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.06),
@@ -1008,15 +1026,15 @@
   }
 
   .glass-subtle {
-    background: color-mix(in srgb, var(--surface) 40%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
-    -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    background: color-mix(in srgb, var(--surface) 82%, var(--background));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
 
-  /* Preserve glass hover color while fading a composited overlay
-     instead of repainting the backdrop-filtered element on every frame. */
+  /* Preserve the glass-like hover color while fading a composited overlay
+     instead of repainting the control surface on every frame. */
   .glass-hover {
     position: relative;
     isolation: isolate;
@@ -1055,15 +1073,16 @@
     -webkit-backdrop-filter: none;
   }
 
-  /* The detail overflow menu opens without an entrance transition so it is
-     immediately interactive. Pointer hover is CSS-only. */
+  /* Detail menus should be ready on the first frame. Their opaque background
+     avoids sampling the large hero behind them, and no entrance transition
+     delays pointer or keyboard interaction. */
   .detail-overflow-menu {
     animation: none !important;
     transition: none !important;
   }
 
-  /* Rating hover stays entirely in CSS so moving across stars does not
-     schedule React renders or recomposite a live backdrop-filter surface. */
+  /* Rating previews are CSS-only so moving across stars never schedules a
+     React render or recomposites a live backdrop-filter surface. */
   .star-rating {
     contain: layout paint;
     background: color-mix(in srgb, var(--surface) 82%, transparent);
@@ -1125,9 +1144,9 @@
   /* Less-transparent glass for small chips that sit over busy cover art
      (manga count/status pills) so the label stays legible. */
   .glass-chip {
-    background: color-mix(in srgb, var(--surface) 78%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
-    -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    background: color-mix(in srgb, var(--surface) 88%, var(--background));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
   }
@@ -1143,9 +1162,9 @@
   }
 
   .glass-dark {
-    background: color-mix(in srgb, var(--background) 80%, transparent);
-    backdrop-filter: blur(24px) saturate(1.3);
-    -webkit-backdrop-filter: blur(24px) saturate(1.3);
+    background: color-mix(in srgb, var(--background) 92%, var(--surface));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.04),
@@ -1180,11 +1199,11 @@
      barely-there glass disc that gains opacity on hover so the
      frame stays clear during playback.                          */
   .player-disc-secondary {
-    background: rgb(255 255 255 / 0.06);
+    background: rgb(28 28 31);
     color: rgb(255 255 255 / 0.92);
     border: 1px solid rgb(255 255 255 / 0.1);
-    backdrop-filter: blur(14px) saturate(1.1);
-    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     box-shadow:
       0 10px 30px -14px rgb(0 0 0 / 0.6),
       inset 0 1px 0 rgb(255 255 255 / 0.08);
@@ -1194,7 +1213,7 @@
       border-color var(--duration-fast) var(--ease-default);
   }
   .player-disc-secondary:hover {
-    background: rgb(255 255 255 / 0.14);
+    background: rgb(43 43 47);
     border-color: rgb(255 255 255 / 0.22);
     transform: scale(1.06);
   }
@@ -1319,24 +1338,14 @@
   }
 
   /* ── Media Card ──────────────────────────────────────────── */
-  /* Hover effect for poster/backdrop cards.
-     Scale is applied to the image inside the overflow-hidden
-     .media-card-image container so it stays visually contained
-     and doesn't overlap adjacent carousels.
+  /* Hover effect for poster/backdrop cards. Keep feedback on the image-only
+     transform below: animating a filter and a second transform on every card
+     briefly keeps several rasterized card surfaces alive when the pointer is
+     swept across a row.
      Usage: <div class="media-card">
               <div class="media-card-image"><img … /></div>
               <div>Title</div>
             </div>                                              */
-  .media-card {
-    transition:
-      transform var(--duration-normal) var(--ease-gentle),
-      filter var(--duration-fast) var(--ease-default);
-  }
-  .media-card:hover {
-    filter: brightness(1.1);
-    transform: translateY(-4px);
-  }
-
   /* Home/library pages can contain hundreds of cards across off-screen rows.
      Let supporting engines skip layout and paint for those rows until they
      approach the viewport. Browsers without content-visibility ignore this
@@ -1346,6 +1355,15 @@
   .media-carousel {
     content-visibility: auto;
     contain-intrinsic-size: auto var(--carousel-intrinsic-h, 23rem);
+  }
+
+  /* Detail pages can contain several image-heavy rails below the fold. Match
+     the home carousel strategy so a viewport resize only lays out and paints
+     the supporting sections near the user. The remembered intrinsic size
+     prevents already-visited sections from shifting the scroll position. */
+  .detail-supporting-content > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 24rem;
   }
 
   /* Card actions stay hidden at rest so touch devices get clean artwork; a
@@ -1404,7 +1422,7 @@
   }
   .media-card-image img {
     transition:
-      transform var(--duration-normal) var(--ease-gentle),
+      transform var(--duration-fast) var(--ease-gentle),
       opacity var(--duration-normal) var(--ease-default);
   }
   .media-card:hover .media-card-image img {
@@ -1446,11 +1464,11 @@
     line-height: 1rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+    background-color: color-mix(in srgb, var(--foreground) 8%, var(--background));
     color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
     border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   /* ── Pill Button ─────────────────────────────────────────── */
@@ -1466,7 +1484,11 @@
     font-size: 0.84rem;
     font-weight: 700;
     letter-spacing: 0.01em;
-    transition: all var(--duration-fast) var(--ease-default);
+    transition:
+      background-color var(--duration-fast) var(--ease-default),
+      color var(--duration-fast) var(--ease-default),
+      transform var(--duration-fast) var(--ease-default),
+      box-shadow var(--duration-fast) var(--ease-default);
   }
   .pill-primary {
     background-color: var(--primary);
@@ -1474,7 +1496,7 @@
     box-shadow: 0 16px 36px -20px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .pill-primary:hover {
-    filter: brightness(0.96);
+    background-color: color-mix(in srgb, var(--primary) 94%, black);
     transform: translateY(-1px);
   }
   .pill-secondary {
@@ -1485,14 +1507,14 @@
     background-color: var(--surface-hover);
   }
   .pill-glass {
-    background: color-mix(in srgb, var(--foreground) 12%, transparent);
+    background: color-mix(in srgb, var(--foreground) 12%, var(--background));
     color: var(--foreground);
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .pill-glass:hover {
-    background: color-mix(in srgb, var(--foreground) 18%, transparent);
+    background: color-mix(in srgb, var(--foreground) 18%, var(--background));
   }
 
   /* ── Action Circle ───────────────────────────────────────── */
@@ -1595,13 +1617,12 @@
     gap: 1.5rem;
     padding: 0.9rem 1rem;
     border-bottom: 1px solid transparent;
-    background: color-mix(in srgb, var(--background) 82%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
-    -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    background: color-mix(in srgb, var(--background) 92%, var(--surface));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
     transition:
       background var(--duration-normal) var(--ease-default),
-      backdrop-filter var(--duration-normal) var(--ease-default),
       border-color var(--duration-normal) var(--ease-default);
   }
   @media (min-width: 1024px) {
@@ -1618,9 +1639,9 @@
     border-bottom-color: transparent;
   }
   .library-marquee-header.is-overlay[data-scrolled="true"] {
-    background: color-mix(in srgb, var(--background) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
-    -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    background: color-mix(in srgb, var(--background) 92%, var(--surface));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border-bottom-color: color-mix(in srgb, var(--border) 50%, transparent);
   }
   @media (min-width: 640px) {
@@ -1753,10 +1774,10 @@
     gap: 0.15rem;
     padding: 0.25rem;
     border-radius: 9999px;
-    background: color-mix(in srgb, #fff 8%, transparent);
+    background: color-mix(in srgb, #fff 8%, var(--background));
     border: 1px solid color-mix(in srgb, #fff 10%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
   .library-marquee-header:not(.is-overlay) .marquee-tab-bar {
     background: color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -2124,11 +2145,11 @@
     position: sticky;
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--background) 94%, transparent),
-      color-mix(in srgb, var(--background) 88%, transparent)
+      color-mix(in srgb, var(--background) 96%, var(--surface)),
+      color-mix(in srgb, var(--background) 92%, var(--surface))
     );
-    backdrop-filter: blur(20px) saturate(1.3);
-    -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     border-bottom: 1px solid color-mix(in srgb, var(--impersonation-accent) 16%, var(--border));
     box-shadow:
       inset 0 1px 0 color-mix(in srgb, var(--impersonation-accent) 22%, transparent),

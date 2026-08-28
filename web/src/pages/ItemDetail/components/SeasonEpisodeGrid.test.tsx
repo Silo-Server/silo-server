@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeasonEpisodeGrid from "./SeasonEpisodeGrid";
 
 const capturedMenuProps: Record<string, unknown>[] = [];
+const prefetchDetail = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/MediaItemMenu", () => ({
   default: (props: Record<string, unknown>) => {
@@ -17,7 +18,7 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: () => vi.fn(),
+  usePrefetchCatalogItemDetail: () => prefetchDetail,
 }));
 
 vi.mock("@/hooks/useCarouselEmbla", () => ({
@@ -33,6 +34,7 @@ vi.mock("@/hooks/useCarouselEmbla", () => ({
 describe("SeasonEpisodeGrid", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
+    prefetchDetail.mockClear();
   });
 
   it("enables the watched shortcut on episode cards", () => {
@@ -168,5 +170,47 @@ describe("SeasonEpisodeGrid", () => {
     expect(viewport).toHaveClass("embla__viewport");
     expect(viewport.querySelectorAll(".embla__slide")).toHaveLength(2);
     expect(viewport.querySelector(".grid")).toBeNull();
+  });
+
+  it("does not prefetch episodes during a fast pointer sweep", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <SeasonEpisodeGrid
+            isLoading={false}
+            episodes={[
+              {
+                content_id: "ep-1",
+                season_number: 1,
+                episode_number: 1,
+                title: "Pilot",
+                overview: "A beginning.",
+                air_date: null,
+                runtime: 42,
+                still_url: "/pilot.jpg",
+                still_thumbhash: "",
+                files: [],
+              },
+            ]}
+          />
+        </MemoryRouter>,
+      );
+
+      const card = screen.getByText("Episode 1").closest(".media-card");
+      expect(card).not.toBeNull();
+      fireEvent.mouseEnter(card!);
+      act(() => vi.advanceTimersByTime(100));
+      fireEvent.mouseLeave(card!);
+      act(() => vi.advanceTimersByTime(100));
+      expect(prefetchDetail).not.toHaveBeenCalled();
+
+      fireEvent.mouseEnter(card!);
+      act(() => vi.advanceTimersByTime(140));
+      expect(prefetchDetail).toHaveBeenCalledOnce();
+      expect(prefetchDetail).toHaveBeenCalledWith("ep-1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

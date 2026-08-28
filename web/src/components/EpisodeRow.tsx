@@ -33,7 +33,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
   return (
     <ViewTransitionLink
       to={`/item/${episode.content_id}`}
-      className={`group hover:bg-accent/60 flex items-center gap-4 rounded-lg px-3.5 py-3 transition-colors duration-150 ${
+      className={`media-card group hover:bg-accent/60 flex items-center gap-4 rounded-lg px-3.5 py-3 transition-colors duration-[--duration-fast] ${
         hasProgress ? "bg-accent/5" : ""
       }`}
     >
@@ -43,12 +43,12 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
       </div>
 
       {/* Thumbnail */}
-      <div className="bg-muted/50 relative h-20 w-[140px] shrink-0 overflow-hidden rounded-lg">
+      <div className="media-card-image bg-muted/50 relative h-20 w-[140px] shrink-0 overflow-hidden rounded-lg">
         {episode.still_url ? (
           <img
             src={episode.still_url}
             alt={episode.title || `Episode ${episode.episode_number}`}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            className="h-full w-full object-cover"
             loading="lazy"
           />
         ) : (

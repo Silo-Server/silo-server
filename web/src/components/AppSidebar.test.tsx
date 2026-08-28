@@ -485,15 +485,13 @@ describe("sidebar collapse surface", () => {
     }
   });
 
-  it("puts the blur on the counter-translated layer, not the sliding frame", () => {
-    // The inner layer is screen-static, so its 40px backdrop is sampled from a
-    // region that never moves; on the frame it would be re-blurred per frame.
+  it("keeps the sidebar surface opaque enough to avoid a live viewport-height blur", () => {
     const markup = renderSidebar("/item/42", { collapsed: true });
     const aside = markup.match(/<aside[^>]*class="([^"]*)"/)?.[1] ?? "";
 
     expect(aside).not.toContain("backdrop-blur");
-    expect(markup).toContain("bg-sidebar/88 sidebar-inner");
-    expect(markup).toContain("backdrop-blur-2xl");
+    expect(markup).toContain("bg-sidebar/96 sidebar-inner");
+    expect(markup).not.toContain("backdrop-blur-2xl");
   });
 
   it("keeps the rail border on the frame so it rides along to x=64", () => {

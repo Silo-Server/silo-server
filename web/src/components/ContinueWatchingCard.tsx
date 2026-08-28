@@ -230,7 +230,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const imageSrc = imagePrimary || imageFallback;
 
   return (
-    <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
+    <div ref={cardRef} className={`media-card media-card-longpress group/card ${containerWidth}`}>
       <div className="group/media relative">
         <ViewTransitionLink to={detailHref} className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
@@ -238,7 +238,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
               <img
                 src={imageSrc}
                 alt={heading}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover/media:scale-105"
+                className="h-full w-full object-cover"
                 loading="lazy"
               />
             ) : (
@@ -256,14 +256,14 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
 
             {/* Hover dim behind the play button */}
-            <div className="media-card-hover-dim absolute inset-0 bg-black/0 transition-colors duration-150" />
+            <div className="media-card-hover-dim absolute inset-0 bg-black/0 transition-colors duration-[--duration-fast]" />
 
             {/* Progress bar — inset pill so a full bar doesn't read as a
                 stray edge along the artwork */}
             {!isNextUp && progressPercent > 0 && (
               <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
-                  className="h-full rounded-full transition-all duration-300"
+                  className="h-full rounded-full transition-[width] duration-[--duration-fast]"
                   style={{
                     width: `${Math.min(progressPercent, 100)}%`,
                     background: "var(--primary)",
@@ -285,7 +285,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             to={card.watchHref}
             onClick={handleWatchClick}
             aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
-            className="media-card-play-trigger bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95"
+            className="media-card-play-trigger bg-primary text-primary-foreground hover:bg-primary/90 absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full shadow-lg transition-[transform,background-color] duration-[--duration-fast] hover:scale-110 active:scale-95"
           >
             {card.type === "ebook" ? (
               <BookOpen className="h-5 w-5" />
@@ -340,7 +340,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
           {showMetadata && premiereBadge && (
             <div className="mt-1">
               <span
-                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase ${upcomingBadgeClass(
                   premiereBadge,
                 )}`}
               >

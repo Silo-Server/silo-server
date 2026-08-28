@@ -33,16 +33,14 @@ export function CollectionPosterCard({
     : buildLibraryCollectionCatalogHref(collection.id, collection.title, libraryId);
 
   return (
-    <div className="group/card relative w-full text-left">
+    <div className="media-card group/card relative w-full text-left">
       <button type="button" onClick={() => navigate(href)} className="block w-full text-left">
         <div className="media-card-image relative aspect-[2/3] overflow-hidden rounded-xl">
           {collection.poster_url ? (
             <img
               src={collection.poster_url}
               alt={collection.title}
-              className={`h-full w-full object-cover transition duration-300 group-hover/card:scale-[1.05] ${
-                loaded ? "opacity-100" : "opacity-0"
-              }`}
+              className={`h-full w-full object-cover ${loaded ? "opacity-100" : "opacity-0"}`}
               loading="lazy"
               onLoad={onLoad}
             />
@@ -52,7 +50,7 @@ export function CollectionPosterCard({
               <span className="line-clamp-3 font-medium">{collection.title}</span>
             </div>
           )}
-          <span className="bg-background/60 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[11px] font-bold backdrop-blur-sm">
+          <span className="bg-background/90 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[11px] font-bold">
             {collection.item_count}
           </span>
         </div>
@@ -77,7 +75,7 @@ export function CollectionPosterCard({
               label: collection.title,
             });
           }}
-          className={`absolute top-2 left-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
+          className={`absolute top-2 left-2 rounded-lg p-1.5 transition-[background-color,color,opacity] duration-[--duration-fast] ${
             pinned
               ? "bg-primary/90 text-primary-foreground"
               : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"

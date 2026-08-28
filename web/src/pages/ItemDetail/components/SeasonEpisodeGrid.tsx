@@ -1,15 +1,16 @@
 import { useRef } from "react";
-import { Link } from "react-router";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaCarousel from "@/components/MediaCarousel";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
@@ -81,6 +82,7 @@ function SeasonEpisodeCard({
   onPrefetch: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const hasPartialProgress =
     !episode.user_data?.played &&
     (episode.user_data?.position_seconds ?? 0) > 0 &&
@@ -91,18 +93,20 @@ function SeasonEpisodeCard({
     <div
       ref={cardRef}
       className="group/card media-card media-card-longpress w-[260px] shrink-0 sm:w-[315px]"
-      onMouseEnter={onPrefetch}
-      onFocus={onPrefetch}
-      onTouchStart={onPrefetch}
+      {...prefetchHandlers}
     >
       <div className="relative">
-        <Link to={`/item/${episode.content_id}`} state={episodeLinkState} className="group block">
+        <ViewTransitionLink
+          to={`/item/${episode.content_id}`}
+          state={episodeLinkState}
+          className="group block"
+        >
           <div className="media-card-image relative aspect-video">
             {episode.still_url ? (
               <img
                 src={episode.still_url}
                 alt={episodeTitle}
-                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                className="h-full w-full object-cover"
                 loading="lazy"
               />
             ) : (
@@ -137,7 +141,7 @@ function SeasonEpisodeCard({
               </div>
             )}
           </div>
-        </Link>
+        </ViewTransitionLink>
         <MediaItemMenu
           contentId={episode.content_id}
           mediaType="episode"
@@ -151,7 +155,11 @@ function SeasonEpisodeCard({
           itemTitle={episodeTitle}
         />
       </div>
-      <Link to={`/item/${episode.content_id}`} state={episodeLinkState} className="block">
+      <ViewTransitionLink
+        to={`/item/${episode.content_id}`}
+        state={episodeLinkState}
+        className="block"
+      >
         <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
           <span>Episode {episode.episode_number}</span>
           {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
@@ -176,7 +184,7 @@ function SeasonEpisodeCard({
             </p>
           )}
         </div>
-      </Link>
+      </ViewTransitionLink>
     </div>
   );
 }

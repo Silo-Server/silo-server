@@ -397,7 +397,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && (
           <MediaLocations
             title="Media locations"

@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EpisodeCarousel from "./EpisodeCarousel";
@@ -40,32 +39,40 @@ describe("EpisodeCarousel", () => {
     prefetchEpisodeDetail.mockClear();
   });
 
-  it("prefetches episode details when a card shows navigation intent", async () => {
-    render(
-      <MemoryRouter>
-        <EpisodeCarousel
-          currentEpisodeNumber={2}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
+  it("prefetches only after a card shows sustained navigation intent", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <MemoryRouter>
+          <EpisodeCarousel
+            currentEpisodeNumber={2}
+            episodes={[
+              {
+                content_id: "ep-1",
+                season_number: 1,
+                episode_number: 1,
+                title: "Pilot",
+                overview: "",
+                air_date: null,
+                runtime: 42,
+                still_url: "",
+                still_thumbhash: "",
+                files: [],
+              },
+            ]}
+          />
+        </MemoryRouter>,
+      );
 
-    await userEvent.hover(screen.getAllByRole("link", { name: /Pilot/ })[0]!);
-
-    expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
+      const card = screen.getByText("Episode 1").closest(".media-card");
+      fireEvent.mouseEnter(card!);
+      act(() => vi.advanceTimersByTime(139));
+      expect(prefetchEpisodeDetail).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1));
+      expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("passes partial-progress restart eligibility to episode menus", () => {

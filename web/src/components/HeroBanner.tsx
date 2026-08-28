@@ -185,9 +185,8 @@ export default function HeroBanner({
               <img
                 src={slide.backdrop_url}
                 alt=""
-                className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-[--duration-slow] will-change-transform ${loaded[i] ? "opacity-100" : "opacity-0"}`}
+                className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-[--duration-slow] ${loaded[i] ? "opacity-100" : "opacity-0"}`}
                 style={{
-                  animation: `var(--animate-ken-burns-${i % 2 === 0 ? "a" : "b"})`,
                   filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))`,
                 }}
                 onLoad={() => setLoaded((prev) => ({ ...prev, [i]: true }))}

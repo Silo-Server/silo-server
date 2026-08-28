@@ -212,7 +212,7 @@ export default function AudiobookContent({
                 <div>
                   <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
                     <div
-                      className="bg-primary h-full rounded-full transition-all"
+                      className="bg-primary h-full rounded-full transition-[width] duration-[--duration-fast]"
                       style={{ width: `${Math.min(100, (resumeSeconds / durationTotal) * 100)}%` }}
                     />
                   </div>
@@ -253,7 +253,7 @@ export default function AudiobookContent({
       />
 
       <div
-        className="page-shell space-y-12 py-10 sm:space-y-14"
+        className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14"
         style={isPlayerOpen ? { paddingBottom: "8rem" } : undefined}
       >
         {narrator && <NarratorCard narrator={narrator} />}

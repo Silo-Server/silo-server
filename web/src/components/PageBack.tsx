@@ -15,6 +15,8 @@ interface PageBackProps {
   floating?: boolean;
   /** Use the app's route cross-fade when following an explicit target. */
   viewTransition?: boolean;
+  /** Replace the current entry when falling back to an explicit parent route. */
+  replace?: boolean;
 }
 
 export default function PageBack({
@@ -23,6 +25,7 @@ export default function PageBack({
   preferHistory = true,
   floating = false,
   viewTransition = false,
+  replace = false,
 }: PageBackProps) {
   const navigate = useNavigate();
   const position = floating
@@ -31,12 +34,24 @@ export default function PageBack({
 
   function goBack() {
     if (preferHistory && hasRouterHistory()) {
-      navigate(-1);
+      const startViewTransition = (
+        document as Document & {
+          startViewTransition?: (update: () => void) => unknown;
+        }
+      ).startViewTransition;
+      if (viewTransition && startViewTransition) {
+        startViewTransition.call(document, () => navigate(-1));
+      } else {
+        navigate(-1);
+      }
       return;
     }
 
-    if (viewTransition) {
-      navigate(to, { viewTransition: true });
+    if (viewTransition || replace) {
+      navigate(to, {
+        ...(viewTransition && { viewTransition: true }),
+        ...(replace && { replace }),
+      });
       return;
     }
 

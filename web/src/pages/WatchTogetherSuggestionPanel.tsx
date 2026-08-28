@@ -35,16 +35,14 @@ function SuggestionCard({
   const [posterLoaded, setPosterLoaded] = useState(false);
 
   return (
-    <div className="group/suggestion relative flex flex-col">
+    <div className="media-card group/suggestion relative flex flex-col">
       {/* Poster */}
       <div className="media-card-image relative aspect-[2/3] overflow-hidden">
         {suggestion.poster_url ? (
           <img
             src={suggestion.poster_url}
             alt={suggestion.title}
-            className={`h-full w-full object-cover transition-opacity duration-300 ${
-              posterLoaded ? "opacity-100" : "opacity-0"
-            }`}
+            className={`h-full w-full object-cover ${posterLoaded ? "opacity-100" : "opacity-0"}`}
             loading="lazy"
             onLoad={() => setPosterLoaded(true)}
           />
@@ -66,7 +64,7 @@ function SuggestionCard({
               ? `Remove vote for ${suggestion.title}`
               : `Vote for ${suggestion.title}`
           }
-          className={`absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-all duration-200 ${
+          className={`absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold tabular-nums transition-[background-color,border-color,color,opacity] duration-[--duration-fast] ${
             suggestion.voted_by_me
               ? "border-primary/40 bg-primary/20 text-primary"
               : "border-white/20 bg-black/50 text-white/80 hover:border-white/40 hover:bg-black/70"
@@ -78,13 +76,13 @@ function SuggestionCard({
 
         {/* Host: Play overlay */}
         {isHost ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-200 group-focus-within/suggestion:bg-black/40 group-focus-within/suggestion:opacity-100 group-hover/suggestion:bg-black/40 group-hover/suggestion:opacity-100">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-[background-color,opacity] duration-[--duration-fast] group-focus-within/suggestion:bg-black/40 group-focus-within/suggestion:opacity-100 group-hover/suggestion:bg-black/40 group-hover/suggestion:opacity-100">
             <button
               type="button"
               onClick={onPromote}
               disabled={isLoading}
               aria-label={`Play ${suggestion.title} for everyone`}
-              className="pointer-events-auto z-10 flex size-10 items-center justify-center rounded-full border border-white/30 bg-white/15 text-white backdrop-blur-sm transition-transform duration-200 group-hover/suggestion:scale-100 focus-visible:opacity-100"
+              className="pointer-events-auto z-10 flex size-10 items-center justify-center rounded-full border border-white/30 bg-neutral-900 text-white focus-visible:opacity-100"
             >
               <Play className="size-4 fill-white" />
             </button>
@@ -98,7 +96,7 @@ function SuggestionCard({
             onClick={onDelete}
             disabled={isLoading}
             aria-label={`Remove suggestion ${suggestion.title}`}
-            className="absolute top-2 left-2 z-10 flex size-6 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 group-focus-within/suggestion:opacity-100 group-hover/suggestion:opacity-100 hover:border-red-500/40 hover:bg-red-500/20 hover:text-red-300 focus-visible:opacity-100"
+            className="absolute top-2 left-2 z-10 flex size-6 items-center justify-center rounded-full border border-white/15 bg-black/85 text-white/60 opacity-0 transition-[background-color,border-color,color,opacity] duration-[--duration-fast] group-focus-within/suggestion:opacity-100 group-hover/suggestion:opacity-100 hover:border-red-500/40 hover:bg-red-950 hover:text-red-300 focus-visible:opacity-100"
             title="Remove suggestion"
           >
             <Trash2 className="size-3" />

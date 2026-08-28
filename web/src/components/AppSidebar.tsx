@@ -429,7 +429,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
     navLinkClassForState(isActive(href, exact));
 
   const navLinkClassForState = (active: boolean) =>
-    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[13px] font-medium transition-all duration-200 ${
+    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[13px] font-medium transition-colors duration-150 ${
       active
         ? "text-sidebar-accent-foreground bg-sidebar-accent/90 shadow-[0_16px_30px_-24px_rgba(0,0,0,0.7)]"
         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
@@ -470,10 +470,10 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
     >
       {/* Counter-translated by exactly what the frame above moves, so every
           pixel of the sidebar stays put on screen while the frame's edge wipes
-          across it. The blur lives here rather than on the frame precisely
-          because this layer never moves relative to the viewport — its 40px
-          backdrop is sampled from a region that never changes. */}
-      <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
+          across it. Keep this surface nearly opaque instead of maintaining a
+          viewport-height backdrop filter: browser chrome and responsive
+          viewport changes otherwise re-rasterize that filter on every frame. */}
+      <div className="bg-sidebar/96 sidebar-inner flex h-full w-[260px] flex-col">
         {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
           variant outright would pop at the very start of the collapse. */}
         <ViewTransitionLink

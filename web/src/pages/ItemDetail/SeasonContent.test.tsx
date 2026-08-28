@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -257,5 +257,47 @@ describe("SeasonContent", () => {
       overviewTranslating: true,
       onTranslateOverview: onTranslate,
     });
+  });
+
+  it("returns through history when the season was opened from its series", () => {
+    renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/item/season-1",
+            state: { parentSeriesHref: "/item/series-1" },
+          },
+        ]}
+      >
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+
+    const topNav = mocks.capturedDetailHeroProps.value?.topNav as ReactElement<{
+      preferHistory: boolean;
+      replace: boolean;
+      to: string;
+      viewTransition: boolean;
+    }>;
+    expect(topNav.props).toMatchObject({
+      to: "/item/series-1",
+      preferHistory: true,
+      replace: true,
+      viewTransition: true,
+    });
+  });
+
+  it("replaces a directly opened season with its parent series", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1"]}>
+        <SeasonContent item={makeSeasonItem()} />
+      </MemoryRouter>,
+    );
+
+    const topNav = mocks.capturedDetailHeroProps.value?.topNav as ReactElement<{
+      preferHistory: boolean;
+      replace: boolean;
+    }>;
+    expect(topNav.props).toMatchObject({ preferHistory: false, replace: true });
   });
 });

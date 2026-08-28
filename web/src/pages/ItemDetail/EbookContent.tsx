@@ -185,7 +185,7 @@ export default function EbookContent({
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {item.ebook?.series && item.ebook.series.entries.length > 0 && (
           <RelatedRail
             heading={item.ebook.series.name ? `In ${item.ebook.series.name}` : "In this series"}

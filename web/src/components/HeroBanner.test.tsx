@@ -200,6 +200,17 @@ describe("HeroBanner", () => {
     expect(markup).toContain("More Info");
   });
 
+  it("keeps hero artwork static between crossfades", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <HeroBanner items={[movieSlide({ backdrop_url: "/backdrop.jpg" })]} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).not.toContain("will-change-transform");
+    expect(markup).not.toContain("--animate-ken-burns");
+  });
+
   it("renders editorial metadata in the approved order and caps genres at two", () => {
     const { container } = render(
       <MemoryRouter>

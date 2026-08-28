@@ -69,7 +69,7 @@ function DiscoverCard({
   return (
     <div
       className={cn(
-        "group/req-card relative block focus-within:outline-none",
+        "media-card group/req-card relative block focus-within:outline-none",
         fluid ? "w-full" : POSTER_WIDTH,
       )}
     >
@@ -93,7 +93,7 @@ function DiscoverCard({
           {requestable && onRequest && (
             <div
               data-testid="request-poster-hover-overlay"
-              className="pointer-events-none absolute inset-0 translate-y-2 bg-gradient-to-t from-black/85 via-black/45 to-transparent opacity-0 transition-all duration-200 ease-out group-focus-within/req-card:translate-y-0 group-focus-within/req-card:opacity-100 group-hover/req-card:translate-y-0 group-hover/req-card:opacity-100"
+              className="pointer-events-none absolute inset-0 translate-y-2 bg-gradient-to-t from-black/85 via-black/45 to-transparent opacity-0 transition-[transform,opacity] duration-[--duration-fast] ease-out group-focus-within/req-card:translate-y-0 group-focus-within/req-card:opacity-100 group-hover/req-card:translate-y-0 group-hover/req-card:opacity-100"
             />
           )}
         </PosterFrame>
@@ -107,7 +107,7 @@ function DiscoverCard({
       </Link>
 
       {requestable && onRequest && (
-        <div className="pointer-events-none absolute top-0 left-0 flex aspect-[2/3] w-full translate-y-2 items-end justify-center pb-3 opacity-0 transition-all duration-200 ease-out group-focus-within/req-card:translate-y-0 group-focus-within/req-card:opacity-100 group-hover/req-card:translate-y-0 group-hover/req-card:opacity-100">
+        <div className="pointer-events-none absolute top-0 left-0 flex aspect-[2/3] w-full translate-y-2 items-end justify-center pb-3 opacity-0 transition-[transform,opacity] duration-[--duration-fast] ease-out group-focus-within/req-card:translate-y-0 group-focus-within/req-card:opacity-100 group-hover/req-card:translate-y-0 group-hover/req-card:opacity-100">
           <button
             type="button"
             disabled={Boolean(isSubmitting)}
@@ -116,7 +116,7 @@ function DiscoverCard({
               e.stopPropagation();
               onRequest();
             }}
-            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-[12px] font-semibold tracking-wide text-black shadow-lg shadow-black/40 transition-all hover:scale-[1.03] active:scale-[0.97] disabled:opacity-70"
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-[12px] font-semibold tracking-wide text-black shadow-lg shadow-black/40 transition-[transform,background-color,opacity] duration-[--duration-fast] hover:scale-[1.03] active:scale-[0.97] disabled:opacity-70"
           >
             {isSubmitting ? (
               <>
@@ -154,7 +154,7 @@ function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }
   return (
     <div
       className={cn(
-        "group/req-card relative block focus:outline-none focus-visible:outline-none",
+        "media-card group/req-card relative block focus:outline-none focus-visible:outline-none",
         fluid ? "w-full" : POSTER_WIDTH,
       )}
     >
@@ -208,7 +208,7 @@ function LibraryCardLink({ contentID, title }: { contentID: string; title: strin
     <ViewTransitionLink
       to={`/item/${encodeURIComponent(contentID)}`}
       aria-label={`Open ${title} in library`}
-      className="absolute top-2 left-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/70 px-2 py-[3px] text-[10px] leading-none font-semibold tracking-[0.06em] text-white uppercase shadow-sm ring-1 shadow-white/15 backdrop-blur-md transition-colors hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+      className="absolute top-2 left-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/85 px-2 py-[3px] text-[10px] leading-none font-semibold tracking-[0.06em] text-white uppercase shadow-sm ring-1 shadow-white/15 transition-colors duration-[--duration-fast] hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
     >
       <Library className="h-3 w-3 shrink-0" strokeWidth={2.4} aria-hidden />
       <span className="truncate">Library</span>
@@ -236,10 +236,7 @@ function PosterFrame({
           src={poster}
           alt={title ? `${title} poster` : "Poster"}
           loading="lazy"
-          className={cn(
-            "h-full w-full object-cover transition-[transform,filter] duration-300 group-hover/req-card:scale-[1.04]",
-            dim && "brightness-[0.85] saturate-[0.8]",
-          )}
+          className={cn("h-full w-full object-cover", dim && "brightness-[0.85] saturate-[0.8]")}
         />
       ) : (
         <PosterFallback title={title} mediaType={mediaType} dim={dim} />
@@ -370,7 +367,7 @@ function StatusRibbon({
   return (
     <span
       className={cn(
-        "absolute top-2 right-2 inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-[10px] leading-none font-medium tracking-[0.06em] uppercase shadow-sm ring-1 shadow-black/40 backdrop-blur-md",
+        "absolute top-2 right-2 inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-[10px] leading-none font-medium tracking-[0.06em] uppercase shadow-sm ring-1 shadow-black/40",
         reserveLibrarySpace ? "max-w-[calc(100%-5.75rem)]" : "max-w-[calc(100%-1rem)]",
         RIBBON_STYLES[kind],
       )}

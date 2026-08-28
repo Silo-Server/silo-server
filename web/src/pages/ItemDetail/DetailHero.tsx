@@ -101,9 +101,8 @@ export default function DetailHero({
       {topNav}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
           style={{
-            filter: `brightness(var(--hero-backdrop-brightness, 0.4)) saturate(var(--hero-backdrop-saturate, 1.15))`,
             ...(backdropPlaceholder && !backdropLoaded
               ? {
                   backgroundImage: `url(${backdropPlaceholder})`,
@@ -294,7 +293,7 @@ export default function DetailHero({
               )}
 
               {actions && (
-                <div className="mt-6" style={{ textShadow: "none" }}>
+                <div className="detail-action-bar mt-6" style={{ textShadow: "none" }}>
                   {actions}
                 </div>
               )}
