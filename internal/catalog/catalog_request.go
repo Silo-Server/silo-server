@@ -35,4 +35,10 @@ type CatalogRequest struct {
 	// timestamp, preventing offset-based pagination drift when new items are
 	// added during a scan.  Nil means the server will generate a snapshot.
 	SnapshotAt *time.Time
+	// ResolvedSort freezes saved/default sort resolution the same way SnapshotAt
+	// freezes the result set. A caller that pages a single logical request
+	// (grouped browse) sets it from the first page's EffectiveSort so a
+	// preference edited mid-pagination cannot order later pages differently than
+	// the order already advertised to the client. Nil resolves normally.
+	ResolvedSort *QuerySort
 }

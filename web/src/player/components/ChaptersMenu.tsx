@@ -2,11 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListVideo } from "lucide-react";
 import type { PlayerChapter } from "../types";
 import { formatTime } from "./SeekBar";
+import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface ChaptersMenuProps {
   chapters: PlayerChapter[];
   currentTime: number;
   onSeek: (seconds: number) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
 }
 
 function findActiveChapterIndex(chapters: PlayerChapter[], currentTime: number): number {
@@ -15,8 +19,24 @@ function findActiveChapterIndex(chapters: PlayerChapter[], currentTime: number):
   );
 }
 
-export function ChaptersMenu({ chapters, currentTime, onSeek }: ChaptersMenuProps) {
-  const [open, setOpen] = useState(false);
+export function ChaptersMenu({
+  chapters,
+  currentTime,
+  onSeek,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: ChaptersMenuProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (value: boolean | ((previous: boolean) => boolean)) => {
+      const next = typeof value === "function" ? value(open) : value;
+      if (controlledOpen === undefined) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange, open],
+  );
   const menuRef = useRef<HTMLDivElement>(null);
   const menuItemsRef = useRef<(HTMLButtonElement | null)[]>([]);
   const activeIndex = useMemo(
@@ -75,21 +95,23 @@ export function ChaptersMenu({ chapters, currentTime, onSeek }: ChaptersMenuProp
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
-      <button
-        type="button"
-        className="player-utility-btn"
-        onClick={() => setOpen((value) => !value)}
-        aria-label="Chapters"
-        aria-expanded={open}
-        aria-haspopup="menu"
-      >
-        <ListVideo className="h-[18px] w-[18px]" />
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          className="player-utility-btn"
+          onClick={() => setOpen((value) => !value)}
+          aria-label="Chapters"
+          aria-expanded={open}
+          aria-haspopup="menu"
+        >
+          <ListVideo className="h-[18px] w-[18px]" />
+        </button>
+      )}
 
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 bottom-full mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+        <PlayerMenuSurface
+          className="absolute right-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="px-3 py-1.5 text-xs font-medium tracking-wide text-white/50 uppercase">
@@ -139,7 +161,7 @@ export function ChaptersMenu({ chapters, currentTime, onSeek }: ChaptersMenuProp
               </span>
             </button>
           ))}
-        </div>
+        </PlayerMenuSurface>
       )}
     </div>
   );

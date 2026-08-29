@@ -48,10 +48,19 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
       };
     case "adaptation_exhausted":
     case "adaptation_unavailable":
-    case "no_alternate_version":
       return {
         title: "No playable version found",
         message:
+          "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
+      };
+    case "no_alternate_version":
+      return {
+        title: "No playable version found",
+        // The server names the policy that ruled the source out (4K
+        // transcoding disabled, for one); the generic sentence only covers a
+        // missing message.
+        message:
+          terminal.message?.trim() ||
           "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
       };
     case "hdr_transcode_unsupported":
@@ -73,7 +82,12 @@ export function describePlanTerminal(terminal: TerminalV3): PlaybackPolicyErrorD
     case "transcode_start_failed":
       return {
         title: "Playback unavailable",
-        message: "The server couldn't start converting this file. Please try again.",
+        // The server names which part of the conversion path failed (no
+        // transcode node, settings unavailable, transport refused to start);
+        // the generic sentence only covers a missing message.
+        message:
+          terminal.message?.trim() ||
+          "The server couldn't start converting this file. Please try again.",
       };
     case "capacity_unavailable":
       return {

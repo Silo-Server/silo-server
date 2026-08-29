@@ -68,7 +68,7 @@ import {
   Send,
   Bell,
 } from "lucide-react";
-import { useTheme } from "@/hooks/useTheme";
+import { isKeyboardFocus, useTheme } from "@/hooks/useTheme";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -1067,7 +1067,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                         }}
                         onMouseEnter={() => previewTheme(id)}
                         onMouseLeave={resetPreviewTheme}
-                        onFocus={() => previewTheme(id)}
+                        // Radix focuses whichever item the pointer is over, so
+                        // an unconditional focus preview would bypass the hover
+                        // intent delay. Keyboard focus only.
+                        onFocus={(event) => {
+                          if (isKeyboardFocus(event.currentTarget)) previewTheme(id);
+                        }}
                         onBlur={resetPreviewTheme}
                         aria-label={def.label}
                         title={def.label}

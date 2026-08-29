@@ -170,6 +170,22 @@ describe("HeroBanner", () => {
     playbackMocks.toggleActivePlayback.mockClear();
   });
 
+  it("names the ken burns tokens literally so tailwind keeps them", () => {
+    // Tailwind drops a theme variable it cannot find referenced by name in the
+    // scanned source. Building the name from a template literal tree-shook the
+    // real values out of the bundle, leaving `var(--animate-ken-burns-a)` to
+    // resolve to nothing — the hero simply never animated. app.css still sets
+    // both to `none` under prefers-reduced-motion.
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <HeroBanner items={[movieSlide({ backdrop_url: "/backdrop.jpg" })]} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('src="/backdrop.jpg"');
+    expect(markup).toContain("var(--animate-ken-burns-a)");
+  });
+
   it("does not render the desktop spotlighting card", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>

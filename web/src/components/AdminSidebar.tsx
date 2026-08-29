@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SiloBrand } from "@/components/SiloBrand";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   buildAdminNavSections,
   buildAdminPluginNavItems,
@@ -154,15 +155,17 @@ export default function AdminSidebar({ onNavigate, embedded = false }: AdminSide
             {buildDisplay}
           </div>
         </div>
-        {/* Back to app */}
-        <Link
+        {/* Back to app — admin was almost always entered from the app, so this
+            plays the motion backwards rather than as a descent. */}
+        <ViewTransitionLink
           to="/"
+          up
           onClick={onNavigate}
           className="text-muted-foreground hover:text-foreground hover:bg-accent/70 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors duration-150"
         >
           <ArrowLeft className="h-[18px] w-[18px]" />
           <span>Back to App</span>
-        </Link>
+        </ViewTransitionLink>
       </div>
     </aside>
   );

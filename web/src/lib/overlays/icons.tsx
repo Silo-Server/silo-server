@@ -1,4 +1,4 @@
-import type { ReactElement, SVGProps } from "react";
+import type { CSSProperties, ReactElement, SVGProps } from "react";
 import {
   Award,
   Building2,
@@ -145,18 +145,25 @@ const BRAND_ICONS: Partial<Record<OverlayIconId, BrandIcon>> = {
 interface OverlayIconProps {
   iconId: OverlayIconId;
   size?: number;
+  cssSize?: string;
   className?: string;
 }
 
-export function OverlayIcon({ iconId, size = 10, className }: OverlayIconProps) {
+export function OverlayIcon({ iconId, size = 10, cssSize, className }: OverlayIconProps) {
+  const lucideStyle: CSSProperties | undefined = cssSize
+    ? { width: cssSize, height: cssSize }
+    : undefined;
+  const brandStyle: CSSProperties | undefined = cssSize
+    ? { width: "auto", height: cssSize }
+    : undefined;
   const Lucide = LUCIDE_ICONS[iconId];
   if (Lucide) {
-    return <Lucide size={size} className={className} aria-hidden />;
+    return <Lucide size={size} style={lucideStyle} className={className} aria-hidden />;
   }
   const Brand = BRAND_ICONS[iconId];
   if (Brand) {
     // Brand marks use viewBox aspect ratios; width auto-scales from height.
-    return <Brand height={size} className={className} aria-hidden />;
+    return <Brand height={size} style={brandStyle} className={className} aria-hidden />;
   }
   return null;
 }

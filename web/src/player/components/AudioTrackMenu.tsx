@@ -7,12 +7,16 @@ import {
   compactAudioMeta,
   formatLanguageName,
 } from "@/pages/ItemDetail/components/versionFormatUtils";
+import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface AudioTrackMenuProps {
   tracks: PlayerAudioTrack[];
   activeIndex: number;
   onSelect: (index: number, currentPosition: number) => void;
   currentPosition: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
 }
 
 /**
@@ -54,8 +58,20 @@ export function AudioTrackMenu({
   activeIndex,
   onSelect,
   currentPosition,
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
 }: AudioTrackMenuProps) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (value: boolean | ((previous: boolean) => boolean)) => {
+      const next = typeof value === "function" ? value(open) : value;
+      if (controlledOpen === undefined) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange, open],
+  );
   const menuRef = useRef<HTMLDivElement>(null);
 
   const handleSelect = useCallback(
@@ -121,22 +137,24 @@ export function AudioTrackMenu({
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
-      <button
-        type="button"
-        className={`player-utility-btn ${disabled ? "cursor-default opacity-40" : ""}`}
-        onClick={disabled ? undefined : () => setOpen((v) => !v)}
-        aria-label="Audio tracks"
-        aria-expanded={open}
-        aria-disabled={disabled}
-        aria-haspopup="menu"
-      >
-        <AudioLines className="h-[18px] w-[18px]" />
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          className={`player-utility-btn ${disabled ? "cursor-default opacity-40" : ""}`}
+          onClick={disabled ? undefined : () => setOpen((v) => !v)}
+          aria-label="Audio tracks"
+          aria-expanded={open}
+          aria-disabled={disabled}
+          aria-haspopup="menu"
+        >
+          <AudioLines className="h-[18px] w-[18px]" />
+        </button>
+      )}
 
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 bottom-full mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+        <PlayerMenuSurface
+          className="absolute right-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="px-3 py-1.5 text-xs font-medium tracking-wide text-white/50 uppercase">
@@ -179,7 +197,7 @@ export function AudioTrackMenu({
               </button>
             );
           })}
-        </div>
+        </PlayerMenuSurface>
       )}
     </div>
   );

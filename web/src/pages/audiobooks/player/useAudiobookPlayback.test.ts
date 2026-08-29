@@ -9,6 +9,7 @@ import {
 } from "./useAudiobookPlayback";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
+import { resetCodecDetectionForTests } from "@/player/hooks/useCodecDetection";
 
 const realtimeOptions = vi.hoisted(() => ({
   current: null as null | {
@@ -215,6 +216,7 @@ describe("useAudiobookPlayback", () => {
   });
 
   afterEach(() => {
+    resetCodecDetectionForTests();
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -249,6 +251,38 @@ describe("useAudiobookPlayback", () => {
       progress_persistence: "client",
       quality_preference: "original",
     });
+  });
+
+  it("waits for the capability probe before starting playback", async () => {
+    let resolveProbe!: (value: MediaCapabilitiesDecodingInfo) => void;
+    const probeResult = new Promise<MediaCapabilitiesDecodingInfo>((resolve) => {
+      resolveProbe = resolve;
+    });
+    vi.stubGlobal("navigator", {
+      userAgent: "test-browser",
+      mediaCapabilities: { decodingInfo: vi.fn(() => probeResult) },
+    });
+
+    const { result } = renderAudiobookPlayback();
+    await act(async () => Promise.resolve());
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
+    ).toHaveLength(0);
+
+    await act(async () => {
+      resolveProbe({
+        supported: false,
+        smooth: false,
+        powerEfficient: false,
+        keySystemAccess: null,
+      });
+      await probeResult;
+    });
+    await flushAsyncWork();
+    expect(result.current.streamUrl).toBe("/api/v1/stream/session-1?token=token");
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/playback/start")),
+    ).toHaveLength(1);
   });
 
   it("advertises the delivery classes the audio-only planner routes to", async () => {

@@ -1,10 +1,16 @@
 package jellycompat
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func compatImageProxyTagVariantMiddleware(codec *ResourceIDCodec) func(http.Handler) http.Handler {
@@ -51,6 +57,35 @@ func (w *compatImageProxyTagResponseWriter) Write(p []byte) (int, error) {
 		return w.ResponseWriter.Write(p)
 	}
 	return w.body.Write(p)
+}
+
+func (w *compatImageProxyTagResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+	if w.passthrough {
+		return w.readFromPassthrough(src)
+	}
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if isJSONResponse(w.Header().Get("Content-Type")) {
+		return io.Copy(&w.body, src)
+	}
+	w.passthrough = true
+	w.ResponseWriter.WriteHeader(w.status)
+	return w.readFromPassthrough(src)
+}
+
+func (w *compatImageProxyTagResponseWriter) readFromPassthrough(src io.Reader) (int64, error) {
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
+}
+
+func (w *compatImageProxyTagResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *compatImageProxyTagResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
 
 // Flush implements http.Flusher for the passthrough (non-JSON) path only.

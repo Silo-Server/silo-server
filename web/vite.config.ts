@@ -1,10 +1,42 @@
-import { defineConfig, loadEnv } from "vite";
+import { readFileSync, writeFileSync } from "node:fs";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import os from "os";
 
 /// <reference types="vitest" />
+
+const PRECOMPRESS_MIN_BYTES = 1024;
+
+function precompressStaticAssets(): Plugin {
+  return {
+    name: "precompress-static-assets",
+    apply: "build",
+    writeBundle(options, bundle) {
+      if (!options.dir) return;
+
+      for (const output of Object.values(bundle)) {
+        if (!/\.(?:css|js)$/.test(output.fileName)) continue;
+
+        // Read the written file rather than the generateBundle value: later
+        // Rollup hooks can still finalize chunk bytes before they reach disk.
+        const filePath = path.resolve(options.dir, output.fileName);
+        const bytes = readFileSync(filePath);
+        if (bytes.byteLength < PRECOMPRESS_MIN_BYTES) continue;
+
+        writeFileSync(
+          `${filePath}.br`,
+          brotliCompressSync(bytes, {
+            params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
+          }),
+        );
+        writeFileSync(`${filePath}.gz`, gzipSync(bytes, { level: 9 }));
+      }
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -31,7 +63,7 @@ export default defineConfig(({ mode }) => {
   );
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), precompressStaticAssets()],
     worker: {
       format: "es",
     },

@@ -3,9 +3,10 @@ package templates
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
 // validate sanity-checks a template definition before it joins the registry.
@@ -254,12 +255,8 @@ func validateMDBList(spec MDBListSpec) error {
 		// placeholder that simply opens the standard MDBList import form.
 		return nil
 	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
+	if _, err := collectionutil.CanonicalMDBListURL(trimmed); err != nil {
 		return fmt.Errorf("mdblist url: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("mdblist url: scheme must be http or https")
 	}
 	return nil
 }

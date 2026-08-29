@@ -202,6 +202,9 @@ func writeInvitationSendError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "email_taken", "An account with this email already exists")
 	case errors.Is(err, invitations.ErrRoleNotAllowed):
 		writeError(w, http.StatusForbidden, "role_not_allowed", "You may not grant this role")
+	case errors.Is(err, invitations.ErrAdminGrouped):
+		writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity",
+			"Admin accounts cannot belong to an access group")
 	case errors.Is(err, invitations.ErrNoLinkBase):
 		writeError(w, http.StatusConflict, "no_link_base",
 			"Configure notifications.email.external_url (or a server public URL) so invitation links can be built")

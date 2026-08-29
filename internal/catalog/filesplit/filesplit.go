@@ -138,8 +138,13 @@ func Move(ctx context.Context, tx pgx.Tx, opts Options) (*Result, error) {
 			return nil, fmt.Errorf("filesplit: relinking target episodes: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			INSERT INTO episode_libraries (
+				episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
+			)
+			SELECT mf.episode_id,
+			       mf.media_folder_id,
+			       MIN(mf.created_at),
+			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]
 			FROM media_files mf
 			WHERE mf.id = ANY($1::int[])
 			  AND mf.episode_id IS NOT NULL

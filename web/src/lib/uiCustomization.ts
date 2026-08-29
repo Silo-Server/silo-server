@@ -277,6 +277,24 @@ export function carouselCardWidthClasses(size: PosterSize): string {
   }
 }
 
+/**
+ * Placeholder height for an off-screen carousel row rendered under
+ * content-visibility: the row header plus a 2:3 poster at this size's card
+ * width plus the tallest caption. Kept beside carouselCardWidthClasses so a
+ * card-size change updates both; underestimating makes the scrollbar jump as
+ * rows render on approach.
+ */
+export function carouselIntrinsicHeight(size: PosterSize): string {
+  switch (size) {
+    case "compact":
+      return "21rem";
+    case "large":
+      return "27rem";
+    default:
+      return "23rem";
+  }
+}
+
 export function cardTextAreaHeight(caption: CardCaption): number {
   if (caption === "artwork") return 0;
   return caption === "title" ? 28 : 44;

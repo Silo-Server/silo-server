@@ -1103,26 +1103,6 @@ func currentProcessToken() string {
 	return processToken(os.Getpid())
 }
 
-func processToken(pid int) string {
-	if pid <= 0 {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return ""
-	}
-	stat := string(data)
-	commEnd := strings.LastIndex(stat, ") ")
-	if commEnd == -1 || commEnd+2 >= len(stat) {
-		return ""
-	}
-	fields := strings.Fields(stat[commEnd+2:])
-	if len(fields) < 20 {
-		return ""
-	}
-	return fields[19]
-}
-
 func finishWebOperation(root, id string, err error) *WebComponentOperationStatus {
 	now := time.Now().UTC().Format(time.RFC3339)
 

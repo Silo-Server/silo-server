@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,8 +15,10 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -119,6 +123,7 @@ func (r *s3BucketRecorder) CORSRequests() int {
 	return r.corsRequests
 }
 
+// TestBuildLiveSessionSync_UsesTransportPlayMethod verifies sync reports the active transport method.
 func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +143,7 @@ func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 				PlayMethod:           playback.PlayTranscode,
 				BasePlayMethod:       playback.PlayRemux,
 				TranscodeHWAccel:     "qsv",
+				ToneMapMode:          tonemap.ModeHardware,
 				Position:             125.5,
 				IsPaused:             true,
 			},
@@ -183,6 +189,9 @@ func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 			}
 			if got.TranscodeHWAccel != tc.session.TranscodeHWAccel {
 				t.Fatalf("TranscodeHWAccel = %q, want %q", got.TranscodeHWAccel, tc.session.TranscodeHWAccel)
+			}
+			if got.ToneMapMode != string(tc.session.ToneMapMode) {
+				t.Fatalf("ToneMapMode = %q, want %q", got.ToneMapMode, tc.session.ToneMapMode)
 			}
 		})
 	}
@@ -286,5 +295,193 @@ func TestReloadWatchSyncPluginProvidersDropsStaleProvidersOnCapabilityReadFailur
 	}
 	if _, ok := registry.Get(provider.Key()); ok {
 		t.Fatalf("stale provider %q remained registered", provider.Key())
+	}
+}
+
+// The sampler treats the returned root set as the whole truth: paths outside it
+// are pruned — losing their cached capacity readings — and omitted from the
+// sample. Returning nothing on a transient database error would therefore blank
+// every library mount from the admin panel and from Prometheus, and leave the
+// next pass reporting them unavailable until fresh probes land, all while the
+// mounts are healthy.
+func TestCachedLibraryPathsReusesTheLastGoodSetOnError(t *testing.T) {
+	var (
+		paths []string
+		err   error
+	)
+	provider := cachedLibraryPaths(func(context.Context) ([]string, error) { return paths, err })
+
+	paths = []string{"/mnt/movies", "/mnt/shows"}
+	if got := provider(context.Background()); !slices.Equal(got, paths) {
+		t.Fatalf("first read = %v, want %v", got, paths)
+	}
+
+	paths, err = nil, errors.New("database is not answering")
+	if got := provider(context.Background()); !slices.Equal(got, []string{"/mnt/movies", "/mnt/shows"}) {
+		t.Fatalf("read after an error = %v, want the last good set", got)
+	}
+
+	// Recovery replaces it rather than merging.
+	paths, err = []string{"/mnt/movies"}, nil
+	if got := provider(context.Background()); !slices.Equal(got, []string{"/mnt/movies"}) {
+		t.Fatalf("read after recovery = %v, want the fresh set", got)
+	}
+}
+
+// An empty set the database actually returned is a real answer: an operator who
+// removed their last library has no roots, and holding the old ones would keep
+// reporting mounts the deployment no longer has.
+func TestCachedLibraryPathsCachesADeliberateEmptyResult(t *testing.T) {
+	var (
+		paths = []string{"/mnt/movies"}
+		err   error
+	)
+	provider := cachedLibraryPaths(func(context.Context) ([]string, error) { return paths, err })
+	provider(context.Background())
+
+	paths = nil
+	if got := provider(context.Background()); len(got) != 0 {
+		t.Fatalf("read = %v, want the deliberate empty result", got)
+	}
+	// And that empty result is what a later failure falls back to.
+	err = errors.New("database is not answering")
+	if got := provider(context.Background()); len(got) != 0 {
+		t.Fatalf("read after an error = %v, want the cached empty result", got)
+	}
+}
+
+// The cache is what a failed read falls back to, so a caller scribbling on the
+// slice it was handed must not be able to corrupt it — in either direction: the
+// value returned from a successful read, or the one returned from the fallback
+// itself.
+func TestCachedLibraryPathsDoesNotShareItsCachedSlice(t *testing.T) {
+	failing := false
+	provider := cachedLibraryPaths(func(context.Context) ([]string, error) {
+		if failing {
+			return nil, errors.New("database is not answering")
+		}
+		return []string{"/mnt/movies"}, nil
+	})
+
+	provider(context.Background())[0] = "/tmp/clobbered"
+
+	failing = true
+	fallback := provider(context.Background())
+	if !slices.Equal(fallback, []string{"/mnt/movies"}) {
+		t.Fatalf("fallback = %v, want the cache untouched by the caller's mutation", fallback)
+	}
+
+	fallback[0] = "/tmp/clobbered-again"
+	if got := provider(context.Background()); !slices.Equal(got, []string{"/mnt/movies"}) {
+		t.Fatalf("fallback = %v, want the cache untouched by a mutation of an earlier fallback", got)
+	}
+}
+
+// The stored capability payload has to be the node's own bytes.
+//
+// Re-marshaling the decoded struct drops every field this build has no member
+// for, which is exactly what happens during a rolling upgrade where a node is
+// newer than the API reading it — and the truncation is then stored under the
+// node's own hash. After the API is upgraded, the sweep sees the hashes agree
+// and never refetches, so the durable inventory stays missing fields the new
+// code reads until something unrelated moves the hash.
+func TestNodeCapabilityFetcherStoresTheNodesOwnBytes(t *testing.T) {
+	const body = `{"resolved":"nvenc","render_devices":["/dev/dri/renderD128"],` +
+		`"capability_hash":"sha256:abc","a_field_this_build_has_never_heard_of":{"nested":[1,2,3]}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hw-capabilities" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+
+	payload, hash, err := nodeCapabilityFetcher("secret", nodeCapabilityProbeBudget(nil))(
+		context.Background(), &nodepool.Node{ID: 1, URL: server.URL})
+	if err != nil {
+		t.Fatalf("nodeCapabilityFetcher: %v", err)
+	}
+	if hash != "sha256:abc" {
+		t.Fatalf("hash = %q, want the node's own", hash)
+	}
+
+	var stored map[string]any
+	if err := json.Unmarshal(payload, &stored); err != nil {
+		t.Fatalf("stored payload is not valid JSON: %v (%s)", err, payload)
+	}
+	if _, ok := stored["a_field_this_build_has_never_heard_of"]; !ok {
+		t.Fatalf("a field this build does not know was dropped, but its hash was kept: %s", payload)
+	}
+	if stored["resolved"] != "nvenc" {
+		t.Fatalf("resolved = %v, want the report's own value", stored["resolved"])
+	}
+}
+
+// A cold node's answer runs the whole FFmpeg probe matrix, and that matrix grows
+// with the configured device count: a node with two render devices legitimately
+// advertises a request budget past two minutes. Bounding every fetch at a fixed
+// two minutes abandons such a node mid-probe and reports a failure for a node
+// operating inside its published contract.
+func TestNodeCapabilityProbeBudgetTracksTheConfiguredDevices(t *testing.T) {
+	single := &config.Config{}
+	single.Playback.HWAccel, single.Playback.HWDevice = "qsv", "/dev/dri/renderD128"
+	pair := &config.Config{}
+	pair.Playback.HWAccel, pair.Playback.HWDevice = "qsv", "/dev/dri/renderD128,/dev/dri/renderD129"
+
+	clusterNode := &nodepool.Node{ID: 1, URL: "http://gpu-1"}
+	oneDevice := nodeCapabilityProbeBudget(func() *config.Config { return single })(clusterNode)
+	twoDevices := nodeCapabilityProbeBudget(func() *config.Config { return pair })(clusterNode)
+
+	if want := playback.CapabilityRequestTimeout("qsv", pair.Playback.HWDevice); twoDevices != want {
+		t.Fatalf("two-device budget = %v, want the node's own advertised %v", twoDevices, want)
+	}
+	if twoDevices <= nodeCapabilityRequestTimeout {
+		t.Fatalf("two-device budget = %v, want more than the %v floor — that is the case that was being cut short",
+			twoDevices, nodeCapabilityRequestTimeout)
+	}
+	if twoDevices <= oneDevice {
+		t.Fatalf("two-device budget %v is not above the one-device %v; the budget does not track the matrix",
+			twoDevices, oneDevice)
+	}
+
+	// A node's own override wins over the cluster setting, because the worker
+	// probes the policy it will actually run. This is the case a cluster-wide
+	// read cannot see: one device configured centrally, two on this node.
+	twoDeviceOverride := pair.Playback.HWDevice
+	overridden := &nodepool.Node{ID: 1, URL: "http://gpu-1", HWDeviceOverride: &twoDeviceOverride}
+	if got := nodeCapabilityProbeBudget(func() *config.Config { return single })(overridden); got != twoDevices {
+		t.Fatalf("overridden node budget = %v, want the two-device %v its own policy needs", got, twoDevices)
+	}
+
+	// An override set to the empty string means "inherit", not "no devices".
+	empty := ""
+	inheriting := &nodepool.Node{ID: 1, URL: "http://gpu-1", HWDeviceOverride: &empty, HWAccelOverride: &empty}
+	if got := nodeCapabilityProbeBudget(func() *config.Config { return pair })(inheriting); got != twoDevices {
+		t.Fatalf("inheriting node budget = %v, want the cluster's %v", got, twoDevices)
+	}
+
+	// Nothing configured, no live config, or no node at all still gets a usable
+	// bound rather than zero.
+	if got := nodeCapabilityProbeBudget(nil)(clusterNode); got < nodeCapabilityRequestTimeout {
+		t.Fatalf("budget with no configuration = %v, want at least the %v floor", got, nodeCapabilityRequestTimeout)
+	}
+	if got := nodeCapabilityProbeBudget(func() *config.Config { return nil })(nil); got < nodeCapabilityRequestTimeout {
+		t.Fatalf("budget with a nil config and nil node = %v, want at least the %v floor", got, nodeCapabilityRequestTimeout)
+	}
+}
+
+// The backstop the health sweep puts around the same fetch must never be the
+// thing that cuts it short, or the budget above is decorative.
+func TestCapabilityFetchBackstopExceedsTheAdvertisedBudget(t *testing.T) {
+	pair := &config.Config{}
+	pair.Playback.HWAccel, pair.Playback.HWDevice = "qsv", "/dev/dri/renderD128,/dev/dri/renderD129"
+	budget := nodeCapabilityProbeBudget(func() *config.Config { return pair })(&nodepool.Node{ID: 1, URL: "http://gpu-1"})
+
+	if nodepool.CapabilityRefreshTimeout <= budget {
+		t.Fatalf("health sweep backstop %v does not exceed the %v a two-device node advertises",
+			nodepool.CapabilityRefreshTimeout, budget)
 	}
 }

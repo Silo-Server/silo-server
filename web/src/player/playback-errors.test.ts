@@ -60,6 +60,69 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("keeps the server's reason for refusing every version of an item", () => {
+    expect(
+      describePlanTerminal({
+        reason: "no_alternate_version",
+        message: "A lower-resolution source is required because 4K transcoding is disabled.",
+        retryable: false,
+      }),
+    ).toEqual({
+      title: "No playable version found",
+      message: "A lower-resolution source is required because 4K transcoding is disabled.",
+    });
+  });
+
+  it("falls back to a generic sentence when no alternate version carries no message", () => {
+    expect(
+      describePlanTerminal({ reason: "no_alternate_version", message: "   ", retryable: false }),
+    ).toEqual({
+      title: "No playable version found",
+      message:
+        "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
+    });
+  });
+
+  it("keeps the generic sentence for an exhausted adaptation search", () => {
+    expect(
+      describePlanTerminal({
+        reason: "adaptation_exhausted",
+        message: "All compatible playback recipes have already failed for this output route.",
+        retryable: false,
+      }),
+    ).toEqual({
+      title: "No playable version found",
+      message:
+        "Silo couldn't find a way to play this file on this device. Try another version if one is available.",
+    });
+  });
+
+  it("keeps the server's explanation of a failed conversion start", () => {
+    expect(
+      describePlanTerminal({
+        reason: "transcode_start_failed",
+        message: "Failed to start the playback transport.",
+        retryable: true,
+      }),
+    ).toEqual({
+      title: "Playback unavailable",
+      message: "Failed to start the playback transport.",
+    });
+  });
+
+  it("falls back to a generic sentence when a conversion failure carries no message", () => {
+    expect(
+      describePlanTerminal({
+        reason: "transcode_node_unavailable",
+        message: " ",
+        retryable: true,
+      }),
+    ).toEqual({
+      title: "Playback unavailable",
+      message: "The server couldn't start converting this file. Please try again.",
+    });
+  });
+
   it("falls back to the server's own message for reasons it does not name", () => {
     expect(
       describePlanTerminal({

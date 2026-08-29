@@ -747,6 +747,7 @@ export type ItemUserData = LeafItemUserData | SeasonUserData;
 
 export interface Season {
   content_id: string;
+  play_content_id?: string;
   season_number: number;
   is_specials: boolean;
   title: string;
@@ -806,8 +807,10 @@ export interface BrowseItemSortMetrics {
 
 export interface BrowseItem {
   content_id: string;
+  play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
+  series_id?: string;
   series_title?: string;
   season_number?: number | null;
   episode_number?: number | null;
@@ -865,10 +868,9 @@ export interface CatalogResponse extends BrowseResponse {
   title?: string;
   snapshot?: string;
   /**
-   * The order a collection source actually resolved in, after the viewer's
-   * saved override and the collection's configured default were applied.
-   * Absent for non-collection sources and when the collection kept its own
-   * source order.
+   * The order a collection or personal-list source actually resolved in after
+   * saved/default precedence was applied. Absent for other sources and when
+   * the source kept its own order.
    */
   effective_sort?: QuerySort;
 }
@@ -1137,6 +1139,7 @@ export interface ItemExtra {
 
 export interface ItemDetail {
   content_id: string;
+  play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
@@ -1384,6 +1387,12 @@ export interface CollectionCapabilitiesResponse {
   collection_default_sort?: boolean;
   collection_sort_preferences?: boolean;
   effective_collection_sort?: boolean;
+  /**
+   * The collection_kind values this server accepts on the sort-preference
+   * endpoints. Absent on servers predating the personal-list kinds, where only
+   * "library" and "user" may be assumed.
+   */
+  sort_preference_kinds?: string[];
 }
 
 export interface QueryRule {
@@ -2455,14 +2464,25 @@ export interface AdminStats {
   total_show_files?: number;
   active_streams: number;
   total_storage_bytes: number;
-  watch_provider_activity: WatchProviderActivity;
+  /**
+   * One entry per watch provider, ordered by `provider`. Covers every provider
+   * registered on the server — including ones a plugin contributes at runtime,
+   * which appear with zeros — plus any provider that still has stored activity
+   * after its plugin was removed (`registered: false`).
+   */
+  watch_providers: WatchProviderStats[];
 }
 
-export interface WatchProviderActivity {
-  trakt_connected_profiles: number;
-  trakt_enabled_profiles: number;
-  trakt_export_enabled: number;
-  trakt_scrobble_enabled: number;
+export interface WatchProviderStats {
+  provider: string;
+  display_name: string;
+  registered: boolean;
+  scrobbling: boolean;
+  exporting: boolean;
+  connected_profiles: number;
+  enabled_profiles: number;
+  export_enabled_profiles: number;
+  scrobble_enabled_profiles: number;
   last_sync_completed_at?: string;
   sync_runs_24h: number;
   sync_errors_24h: number;
@@ -2514,8 +2534,13 @@ export interface AdminSession {
   target_resolution?: string;
   target_video_codec?: string;
   target_audio_codec?: string;
+  /** Channel count the transcode actually encodes. Absent when the reporting
+   * node did not know it — render the target codec with no channel layout
+   * rather than falling back to `source_audio_channels`. */
+  target_audio_channels?: number | null;
   target_bitrate_kbps: number | null;
   transcode_hw_accel?: string;
+  tone_map_mode?: string;
   source_container?: string;
   source_bitrate_kbps: number | null;
   source_video_codec?: string;
@@ -3779,11 +3804,174 @@ export interface UpdatePluginSettingsRequest {
 }
 
 // Stream Nodes
+
+/** One render device in a node's stored capability report. */
+export interface NodeRenderDevice {
+  path: string;
+  /** sysfs PCI slot (e.g. "0000:03:00.0"); absent for a non-PCI device. */
+  pci_address?: string;
+  /** NVIDIA's permanent GPU identity; only present with nvidia-smi installed. */
+  gpu_uuid?: string;
+  description: string;
+}
+
+/** One hardware backend with candidate devices, plus its probe outcome. */
+export interface NodeDetectedBackend {
+  backend: string;
+  /** A real single-frame encode passed, not just an FFmpeg build-flag listing. */
+  verified: boolean;
+  devices?: string[];
+  /** The candidate that passed. Empty for NVENC, which selects via CUDA. */
+  device?: string;
+  /** Why verification failed, attributed per device when several were tried. */
+  reason?: string;
+  /**
+   * No probe was attempted: none of the backend's candidate devices is
+   * accessible to this node (e.g. a proxy reading the cluster-wide hw_device).
+   * Not a driver failure; reason lists the skipped devices.
+   */
+  skipped?: boolean;
+}
+
+/**
+ * A node's stored hardware capability report — the body its /hw-capabilities
+ * endpoint served. The payload also carries the node's transformation and
+ * tone-map advertisements, which no admin surface reads yet.
+ */
+export interface NodeCapabilities {
+  /** Backend that would actually be used: nvenc, qsv, vaapi, or none. */
+  resolved?: string;
+  render_devices?: string[] | null;
+  render_device_details?: NodeRenderDevice[] | null;
+  intel_detected?: boolean;
+  detected_backends?: NodeDetectedBackend[];
+  /** Kernel boot identity (Linux only); scopes pci_address to one boot. */
+  boot_id?: string;
+  /**
+   * Every GPU nvidia-smi reports, sorted. Independent of
+   * render_device_details: an NVIDIA container often has /dev/nvidia* and the
+   * toolkit but no /dev/dri, so this is the only identity such a host has.
+   */
+  nvidia_gpu_uuids?: string[];
+  /** "sha256:<hex>" over the report's hardware identity and capabilities. */
+  capability_hash?: string;
+  source?: string;
+  node_url?: string;
+}
+
+/** One sampled mount inside a resource sample. */
+export interface HostDiskStats {
+  /**
+   * Where the mount is. Present only on credentialed surfaces — a node's
+   * `/status` and `GET /admin/system/resources`. A node's `/health` takes no
+   * credential and therefore omits it, so anything rendered from `last_stats`
+   * must fall back to `role`.
+   */
+  path?: string;
+  /**
+   * What the mount is for: `scratch` for the transcode working directory,
+   * `library-N` positionally for each media root. Assigned server-side when the
+   * sample is built, so it names the same mount on every surface.
+   */
+  role?: string;
+  /** Capacity in GiB. `used_gb` counts filesystem-reserved blocks, as `df` does. */
+  used_gb?: number;
+  /**
+   * Capacity usable by the node process — used plus still-available. Blocks a
+   * filesystem reserves for root are in neither, so this reads lower than the
+   * device's nameplate size, and `used_gb`/`total_gb` is `df`'s Use%.
+   */
+  total_gb?: number;
+  /** Real numbers carried over from an earlier pass because the probe has not returned. */
+  stale?: boolean;
+  /** Never measured on this host: `used_gb`/`total_gb` are meaningless. */
+  unavailable?: boolean;
+  /**
+   * The node's transcode working directory — the one mount whose filling up
+   * breaks transcoding rather than browsing. Set on at most one entry per
+   * sample; a media root sharing that volume is deduplicated onto it. Absent on
+   * every other mount, and on a node predating the flag.
+   */
+  scratch?: boolean;
+}
+
+/**
+ * A host's CPU/memory/disk/network sample. Every field is optional: sampling is
+ * Linux-only, individual probes degrade independently, and a server predating
+ * resource sampling sends none of this.
+ */
+export interface HostSystemStats {
+  /**
+   * Aggregate busy percentage across all cores over the sampling interval, 0-100.
+   * Under a cgroup it is that container's own usage against its own quota.
+   */
+  cpu_pct?: number;
+  /** 1-minute load average; unlike cpu_pct it also counts tasks blocked on storage. */
+  load1?: number;
+  /** CPUs this host may use: the cgroup quota where one is set, otherwise the kernel's count. */
+  cores?: number;
+  mem_used_mb?: number;
+  mem_total_mb?: number;
+  /** Scratch dir first, then media roots; deduplicated by filesystem. */
+  disks?: HostDiskStats[] | null;
+  /** Aggregate throughput in *bits* per second, loopback excluded. */
+  net_rx_bps?: number;
+  net_tx_bps?: number;
+}
+
+/** One GPU's sample. */
+export interface HostGPUStats {
+  /** Render node path (/dev/dri/renderD128), a PCI address, or "cuda:N". */
+  device?: string;
+  vendor?: string;
+  /** Workloads this host has pinned to the device, from the playback balancer. */
+  sessions?: number;
+  /** Engine busy percentages over the sampling interval. */
+  video_busy_pct?: number;
+  render_busy_pct?: number;
+  /** Whole-GPU utilization including other tenants. Absent is not zero. */
+  total_busy_pct?: number | null;
+  vram_used_mb?: number | null;
+  vram_total_mb?: number | null;
+  /** "fdinfo", "nvidia-smi", "fdinfo+nvidia-smi", or "unavailable". */
+  source?: string;
+}
+
+/**
+ * A node's most recent resource sample, written by the same health check that
+ * writes `active_jobs` — so it is exactly as old as `last_health_check` and
+ * never fresher. Absent on a node that reports none, and on every server
+ * predating resource sampling.
+ */
+export interface NodeLastStats {
+  system?: HostSystemStats | null;
+  gpu?: HostGPUStats[] | null;
+}
+
+/**
+ * The API host's own sample (GET /admin/system/resources) — the counterpart to
+ * a node's `last_stats`. `available` is false on a host that cannot be sampled
+ * (non-Linux, no sampler, or before the first sample lands), in which case the
+ * rest is absent.
+ */
+export interface SystemResources {
+  available?: boolean;
+  sampled_at?: string;
+  system?: HostSystemStats | null;
+  gpu?: HostGPUStats[] | null;
+}
+
 export interface StreamNode {
   id: number;
   name: string;
   type: string;
   url: string;
+  /**
+   * Client-facing base URL when it differs from `url`. `url` is the backend
+   * address the server and nodes dial; this is what stream and download URLs
+   * are built on for proxy nodes. Absent or null means clients use `url`.
+   */
+  public_url?: string | null;
   enabled: boolean;
   healthy: boolean;
   active_jobs: number;
@@ -3793,12 +3981,50 @@ export interface StreamNode {
   egress_kbps: number;
   last_health_check: string | null;
   created_at: string;
+  // Capability fields are owned by the background health sweep and are absent
+  // until one report has been stored — and on every server predating them.
+  capabilities?: NodeCapabilities | null;
+  capabilities_hash?: string;
+  /**
+   * The hash the node named on its last health check, present only once a check
+   * has happened. It differs from `capabilities_hash` while a refetch is
+   * outstanding or failing, which is the one case a fresh `last_health_check`
+   * cannot rule out; it is present and empty when the node answers with no hash
+   * at all, as a build predating capability reports does. Absent means nothing
+   * has asked yet, which says nothing about the stored report.
+   */
+  advertised_capabilities_hash?: string;
+  /** When `capabilities` was fetched: the age of the inventory, not the health check. */
+  capabilities_refreshed_at?: string;
+  /** Stable per-GPU identities; two nodes sharing one share hardware. */
+  physical_gpu_keys?: string[];
+  /** The node's resource sample from the last health check. */
+  last_stats?: NodeLastStats | null;
+  /**
+   * This node's own acceleration policy. Absent or null is the normal case:
+   * the node inherits the cluster-wide playback.hw_accel / playback.hw_device
+   * settings. A value here is what the node resolves against from its next
+   * config reload, and what remote transcodes to it are dispatched with.
+   */
+  hw_accel_override?: string | null;
+  /** Comma-separated render device paths pinned to this node; null inherits. */
+  hw_device_override?: string | null;
+  /**
+   * Human-readable note describing how this node's hardware got worse at the
+   * last capability refetch: a backend that used to pass its probe and now
+   * fails, or a render device that is gone. Absent means the last refetch found
+   * no regression — it is not a latched incident, and a repaired node loses the
+   * note on its next refetch. Nothing routes on it.
+   */
+  capability_drift?: string | null;
 }
 
 export interface CreateNodeRequest {
   name: string;
   type: string;
   url: string;
+  // Client-facing base URL, proxy nodes only; empty means clients use `url`.
+  public_url?: string;
   group?: string;
   max_jobs?: number;
   max_bandwidth_kbps?: number;
@@ -3807,17 +4033,45 @@ export interface CreateNodeRequest {
 export interface UpdateNodeRequest {
   name?: string;
   url?: string;
+  // An omitted public_url leaves the stored value alone; an explicit null (or
+  // an empty string) sends clients back to `url`.
+  public_url?: string | null;
   enabled?: boolean;
   // Empty string clears the group; 0 clears the caps (unlimited).
   group?: string;
   max_jobs?: number;
   max_bandwidth_kbps?: number;
+  // An omitted override leaves the stored value alone; an explicit null (or an
+  // empty string) restores inheritance of the cluster-wide playback setting.
+  hw_accel_override?: string | null;
+  hw_device_override?: string | null;
 }
 
 export interface CheckNodeResponse {
   healthy: boolean;
   active_jobs: number;
   egress_kbps: number;
+}
+
+/**
+ * Answer to POST /admin/nodes/{id}/reprobe. The call is always 200: a node that
+ * refused or could not be reached is reported as `status: "error"` here rather
+ * than as an HTTP status, matching the per-node check route.
+ */
+export interface ReprobeNodeResult {
+  node_id: number;
+  node_name: string;
+  status: "ok" | "error";
+  error?: string;
+  /** Backend the node picked after re-probing: nvenc, qsv, vaapi, or none. */
+  resolved?: string;
+  /** Hash of the snapshot the node published; compare against `capabilities_hash`. */
+  capability_hash?: string;
+  /**
+   * This server also refetched and stored the node's new inventory before
+   * answering. False means the stored row catches up on a later health sweep.
+   */
+  capabilities_refreshed: boolean;
 }
 
 // User-facing library (simplified, no admin fields)
@@ -3858,6 +4112,7 @@ export interface SectionItemUpcomingEvent {
 
 export interface SectionItem {
   content_id: string;
+  play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook";
   title: string;
   series_id?: string;
@@ -4343,6 +4598,12 @@ export interface RateLimitConfig {
   active?: boolean;
   /** Backend the running limiter uses; may differ from `backend` until restart. */
   active_backend?: string;
+  /**
+   * Whether the Redis backend can be selected at all (GET responses only).
+   * Sentinel and REDIS_URL deployments have no stored `redis.url`, so only the
+   * server can answer this.
+   */
+  redis_available?: boolean;
 }
 
 export interface RateLimitUpdateResponse {
@@ -4367,13 +4628,176 @@ export interface AdminSettingsUpdateResponse {
   restart_required_keys?: string[];
 }
 
+// Admin dashboard layout (per admin account, server-persisted).
+//
+// The server stores the document verbatim and validates only its size and that
+// it is a JSON object: widget ids, column spans and row heights are the web
+// client's vocabulary. `layout` is therefore typed as `unknown` on the read
+// side so callers must sanitize it before use — a layout written by a newer or
+// older build can name widgets this one does not have, or omit `rows`, which
+// predates two-axis resizing.
+export interface AdminDashboardLayoutEntry {
+  id: string;
+  span: number;
+  rows: number;
+}
+
+export interface AdminDashboardLayoutDocument {
+  version: number;
+  entries: AdminDashboardLayoutEntry[];
+}
+
+export interface AdminDashboardLayoutResponse {
+  layout: unknown;
+  updated_at: string | null;
+}
+
+// One backing service on the admin health strip. `configured: false` means the
+// deployment runs without it — a supported single-node shape for Redis — and
+// `ok` is then absent rather than false, so "not present" and "present but
+// broken" stay distinguishable.
+export interface AdminHealthComponent {
+  configured: boolean;
+  ok?: boolean;
+  latency_ms?: number;
+}
+
+export interface AdminServerHealth {
+  postgres: AdminHealthComponent;
+  redis: AdminHealthComponent;
+  errors_24h: number;
+  warnings_24h: number;
+}
+
 export interface AdminServerStatus {
   started_at: string;
   restart_required: boolean;
   restart_required_at?: string;
   restart_required_reason?: string;
+  /**
+   * Every distinct reason marked since boot ("setting:<key>" for settings
+   * saves), so pending restarts can be scoped per subsystem. The singular
+   * field only remembers the last save.
+   */
+  restart_required_reasons?: string[];
+  /** Increments on every restart-required save; re-arms the dismissed banner. */
+  restart_mark_count?: number;
   restart_requested: boolean;
   restart_requested_at?: string;
+  /** Absent on servers predating the dashboard health summary. */
+  health?: AdminServerHealth;
+}
+
+// GET /admin/stats/playback-activity. `buckets` carries only hours that saw a
+// session, so the client zero-fills the window before charting it.
+export interface AdminPlaybackActivityBucket {
+  hour: string;
+  direct: number;
+  remux: number;
+  transcode: number;
+}
+
+// Time-to-first-frame and failed-start counts are deliberately absent: nothing
+// records playback start events yet. See docs/admin-api.md.
+export interface AdminPlaybackReliability {
+  sessions_started: number;
+  transcode_starts: number;
+  finalized_sessions: number;
+  completed_sessions: number;
+  completion_rate: number;
+  unique_profiles: number;
+}
+
+// `bucket_seconds` is 3600 up to a two-day window and 86400 beyond it; the
+// client zero-fills the window on that grid. `hour` on a bucket is its start
+// instant at either width.
+export interface AdminPlaybackActivity {
+  hours: number;
+  bucket_seconds: number;
+  // The window on the server's clock; the chart anchors its bucket grid on
+  // `to` so client clock skew cannot misplace the boundary buckets. Optional
+  // because responses predating the fields lack them.
+  from?: string;
+  to?: string;
+  buckets: AdminPlaybackActivityBucket[];
+  reliability: AdminPlaybackReliability;
+  profiles_active_24h: number;
+}
+
+// GET /admin/stats/top-activity. Episodes are rolled up to their series, so a
+// title's media_item_id is a series content id for TV.
+export interface AdminTopTitle {
+  media_item_id: string;
+  title: string;
+  media_type: string;
+  plays: number;
+  total_seconds: number;
+}
+
+export interface AdminTopProfile {
+  user_id: number;
+  username: string;
+  profile_id: string;
+  profile_name: string;
+  plays: number;
+  total_seconds: number;
+}
+
+export interface AdminTopActivity {
+  days: number;
+  limit: number;
+  titles: AdminTopTitle[];
+  profiles: AdminTopProfile[];
+}
+
+// GET /admin/stats/timeseries. One point per sampled minute; minutes the
+// sampler missed are absent rather than zero, so charts draw them as gaps.
+export interface AdminTimeseriesPoint {
+  t: string;
+  streams: number;
+  direct: number;
+  remux: number;
+  transcode: number;
+  egress_kbps: number;
+  // File-transfer subset of `egress_kbps` (offline/direct downloads, ebook and
+  // ABS file fetches, API-served only). Always <= egress_kbps; playback egress
+  // is the difference. Optional because responses predating the split lack it,
+  // and 0 on samples written before the split — "not measured", not "no
+  // downloads".
+  download_egress_kbps?: number;
+}
+
+// `oldest_sample_at` is null until the sampler has written anything, which is
+// what the "collecting data" chart state keys off. `resolution_seconds` is the
+// bucket the server aggregated into, which widens with the requested window —
+// read it rather than assuming the sampler's minute.
+export interface AdminTimeseries {
+  resolution_seconds: number;
+  from: string;
+  to: string;
+  oldest_sample_at: string | null;
+  points: AdminTimeseriesPoint[];
+}
+
+// GET /admin/stats/downloads. Headline numbers and top_users count active
+// managed device entries (media somebody keeps offline); the 24h counters also
+// include one-shot web downloads. All zeros with an empty top_users on a
+// deployment where nobody downloads — the widget's empty state, not an error.
+export interface AdminDownloadsUser {
+  user_id: number;
+  username: string;
+  downloads: number;
+  total_bytes: number;
+}
+
+export interface AdminDownloadsStats {
+  users_with_downloads: number;
+  active_downloads: number;
+  total_bytes: number;
+  downloads_started_24h: number;
+  downloads_completed_24h: number;
+  limit: number;
+  top_users: AdminDownloadsUser[];
 }
 
 // IP visibility

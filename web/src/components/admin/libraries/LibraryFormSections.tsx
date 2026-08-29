@@ -294,7 +294,7 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           <p className="text-muted-foreground text-xs">
             When providers have no translation for this library&apos;s language, translate
             descriptions with AI after each refresh. Requires AI description translation in Admin
-            Settings → AI Services.
+            Settings → AI.
           </p>
         </div>
         <Switch

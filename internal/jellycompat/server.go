@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -36,13 +37,16 @@ type Dependencies struct {
 	DB               *pgxpool.Pool
 	SecretCipher     *secret.Cipher // at-rest credential cipher (required when DB is set)
 	ClientIPResolver *clientip.Resolver
-	Now              func() time.Time
-	TokenGenerator   func() string
-	SessionStore     *SessionStore
-	IDCodec          *ResourceIDCodec
-	ImageCache       *ImageCache
-	DeviceProfiles   *DeviceProfileStore
-	PlaybackStore    CompatPlaybackStore
+	// StreamTelemetry is the local observation-only registry shared with the
+	// native API process. May be nil, which makes every media route unobserved.
+	StreamTelemetry *streamtelemetry.Registry
+	Now             func() time.Time
+	TokenGenerator  func() string
+	SessionStore    *SessionStore
+	IDCodec         *ResourceIDCodec
+	ImageCache      *ImageCache
+	DeviceProfiles  *DeviceProfileStore
+	PlaybackStore   CompatPlaybackStore
 	// RecipeNodeStore hands remote-transcode reconstruction recipes to the
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.

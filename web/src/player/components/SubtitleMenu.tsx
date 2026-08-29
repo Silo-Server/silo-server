@@ -11,6 +11,7 @@ import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import { isTranslatableSource } from "./subtitleTranslateRequest";
+import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];
@@ -182,9 +183,9 @@ export function SubtitleMenu({
       </button>
 
       {open && (
-        <div
-          role="menu"
-          className="absolute right-0 bottom-full mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
+        <PlayerMenuSurface
+          className="absolute right-0 bottom-full z-30 mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
+          onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="shrink-0 py-1">
@@ -351,7 +352,7 @@ export function SubtitleMenu({
               Appearance…
             </button>
           </div>
-        </div>
+        </PlayerMenuSurface>
       )}
 
       <SubtitleAppearancePanel open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />

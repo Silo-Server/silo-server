@@ -16,10 +16,9 @@ type collectionPreferenceLibraryReader interface {
 	GetByID(ctx context.Context, id string) (*models.LibraryCollection, error)
 }
 
-// collectionSortPreferenceRequest saves the sort a viewer chose while browsing a
-// collection. An empty Field is meaningful — it pins the viewer to the
-// collection's own source order even if its creator later configures a default.
-// To go back to following the creator's default, DELETE the preference instead.
+// collectionSortPreferenceRequest saves the sort a viewer chose while browsing
+// a collection or personal list. An empty Field pins the viewer to source order.
+// DELETE removes the preference and restores the source's default behavior.
 type collectionSortPreferenceRequest struct {
 	CollectionKind string `json:"collection_kind"`
 	CollectionID   string `json:"collection_id"`
@@ -89,19 +88,14 @@ func (h *CollectionHandler) HandleSetCollectionSortPreference(w http.ResponseWri
 
 	kind, collectionID, ok := normalizeCollectionRef(req.CollectionKind, req.CollectionID)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library' or 'user' and collection_id is required")
+		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
 		return
 	}
 
-	field := strings.ToLower(strings.TrimSpace(req.Field))
-	order := ""
-	if field != "" {
-		qs, valid := catalog.NormalizeCollectionSort(field, req.Order, true)
-		if !valid {
-			writeError(w, http.StatusBadRequest, "bad_request", "Unsupported sort field or order for this collection")
-			return
-		}
-		field, order = qs.Field, qs.Order
+	field, order, valid := normalizeSortPreference(kind, req.Field, req.Order)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported sort field or order for this collection")
+		return
 	}
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
@@ -141,6 +135,8 @@ func (h *CollectionHandler) canSaveCollectionSortPreference(
 	kind, collectionID string,
 ) bool {
 	switch kind {
+	case userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites:
+		return true
 	case userstore.CollectionKindLibrary:
 		if h.LibraryCollections == nil {
 			return false
@@ -156,7 +152,7 @@ func (h *CollectionHandler) canSaveCollectionSortPreference(
 }
 
 // HandleClearCollectionSortPreference handles DELETE /collections/sort-preference,
-// returning the collection to whatever default its creator configured.
+// returning the collection or personal list to its default behavior.
 func (h *CollectionHandler) HandleClearCollectionSortPreference(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
@@ -164,7 +160,7 @@ func (h *CollectionHandler) HandleClearCollectionSortPreference(w http.ResponseW
 	values := r.URL.Query()
 	kind, collectionID, ok := normalizeCollectionRef(values.Get("collection_kind"), values.Get("collection_id"))
 	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library' or 'user' and collection_id is required")
+		writeError(w, http.StatusBadRequest, "bad_request", "collection_kind must be 'library', 'user', 'watchlist', or 'favorites'; collection_id is required for collection kinds")
 		return
 	}
 
@@ -182,8 +178,22 @@ func (h *CollectionHandler) HandleClearCollectionSortPreference(w http.ResponseW
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// sortPreferenceKinds is every collection_kind the sort-preference endpoints
+// accept. The collection capabilities response advertises it so a client can
+// feature-detect the personal-list kinds instead of discovering that an older
+// server rejects them by receiving a 400.
+var sortPreferenceKinds = []string{
+	userstore.CollectionKindLibrary,
+	userstore.CollectionKindUser,
+	userstore.CollectionKindWatchlist,
+	userstore.CollectionKindFavorites,
+}
+
 func normalizeCollectionRef(rawKind, rawID string) (string, string, bool) {
 	kind := strings.ToLower(strings.TrimSpace(rawKind))
+	if isPersonalSortPreferenceKind(kind) {
+		return kind, userstore.PersonalSortPreferenceCollectionID, true
+	}
 	if kind != userstore.CollectionKindLibrary && kind != userstore.CollectionKindUser {
 		return "", "", false
 	}
@@ -192,4 +202,21 @@ func normalizeCollectionRef(rawKind, rawID string) (string, string, bool) {
 		return "", "", false
 	}
 	return kind, collectionID, true
+}
+
+func isPersonalSortPreferenceKind(kind string) bool {
+	return kind == userstore.CollectionKindWatchlist || kind == userstore.CollectionKindFavorites
+}
+
+func normalizeSortPreference(kind, rawField, rawOrder string) (string, string, bool) {
+	field := strings.ToLower(strings.TrimSpace(rawField))
+	if field == "" {
+		return "", "", true
+	}
+	if isPersonalSortPreferenceKind(kind) {
+		qs, ok := catalog.NormalizePersonalSourceSort(field, rawOrder)
+		return qs.Field, qs.Order, ok
+	}
+	qs, ok := catalog.NormalizeCollectionSort(field, rawOrder, true)
+	return qs.Field, qs.Order, ok
 }

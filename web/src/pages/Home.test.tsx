@@ -7,16 +7,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Home from "./Home";
+import { sectionKeys } from "@/hooks/queries/keys";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const mockUseHomeLayout = vi.fn();
+const mockFetchHomeSectionItems = vi.fn();
 
 vi.mock("@/hooks/queries/sections", () => ({
   useHomeLayout: (...args: unknown[]) => mockUseHomeLayout(...args),
-  fetchHomeSectionItems: vi.fn(),
+  fetchHomeSectionItems: (...args: unknown[]) => mockFetchHomeSectionItems(...args),
+  HOME_SECTION_STALE_TIME: 10 * 60 * 1000,
+  HOME_SECTION_GC_TIME: 60 * 60 * 1000,
 }));
 
 vi.mock("@/hooks/useDocumentTitle", () => ({
@@ -54,6 +58,7 @@ describe("Home", () => {
       isError: false,
       refetch: vi.fn(),
     });
+    mockFetchHomeSectionItems.mockReset();
   });
 
   afterEach(async () => {
@@ -78,5 +83,47 @@ describe("Home", () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled();
     invalidateQueries.mockRestore();
+  });
+
+  it("keeps section items cached past the client-wide gc time", async () => {
+    mockUseHomeLayout.mockReturnValue({
+      data: {
+        sections: [
+          {
+            id: "recent",
+            section_type: "recently_added",
+            title: "Recently Added",
+            featured: false,
+            item_limit: 10,
+            is_custom: false,
+            customized: false,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mockFetchHomeSectionItems.mockResolvedValue({
+      section: { id: "recent", items: [], total_count: 0 },
+    });
+    // The client default is what evicts observer-less section entries today.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 10 * 60_000 } } });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <Home />
+        </QueryClientProvider>,
+      );
+      await Promise.resolve();
+    });
+
+    const sectionQuery = queryClient
+      .getQueryCache()
+      .find({ queryKey: sectionKeys.homeItems("recent") });
+
+    expect(sectionQuery).toBeDefined();
+    expect(sectionQuery?.gcTime).toBe(60 * 60 * 1000);
   });
 });

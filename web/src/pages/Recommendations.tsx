@@ -3,6 +3,7 @@ import type { DiscoverRow } from "@/api/types";
 import MediaCarousel from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -149,6 +150,7 @@ export default function Recommendations() {
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
@@ -190,7 +192,11 @@ export default function Recommendations() {
           >
             {row.items.map((item) => (
               <div key={item.content_id} className={posterWidthClasses} role="listitem">
-                <SectionItemCard item={item} />
+                <SectionItemCard
+                  item={item}
+                  overlayPrefs={overlayPrefs}
+                  quickActionMode={quickActionMode}
+                />
               </div>
             ))}
           </MediaCarousel>

@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { resetNavigationHistory } from "@/lib/navigationHistory";
+
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
@@ -17,10 +19,17 @@ vi.mock("react-router", async () => {
 
 import PageBack from "./PageBack";
 
+/** Stands in for the browser having committed the entry at `idx`. */
+function commit(idx: number) {
+  window.history.replaceState({ idx }, "");
+}
+
 describe("PageBack", () => {
   afterEach(() => {
     mocks.navigate.mockClear();
+    resetNavigationHistory();
     window.history.replaceState(null, "");
+    delete document.documentElement.dataset.navigationDirection;
   });
 
   it("renders a button with the default 'Go back' aria-label", () => {
@@ -45,7 +54,7 @@ describe("PageBack", () => {
 
   it("falls back to the default route when there is no router history", async () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
         <PageBack />
       </MemoryRouter>,
     );
@@ -53,11 +62,11 @@ describe("PageBack", () => {
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
-    expect(mocks.navigate).toHaveBeenCalledWith("/");
+    expect(mocks.navigate).toHaveBeenCalledWith("/", { replace: false, viewTransition: true });
   });
 
   it("uses browser history when a router history entry is available", async () => {
-    window.history.replaceState({ idx: 1 }, "");
+    commit(1);
     render(
       <MemoryRouter>
         <PageBack />
@@ -70,18 +79,34 @@ describe("PageBack", () => {
     expect(mocks.navigate).toHaveBeenCalledWith(-1);
   });
 
-  it("uses the explicit target when history preference is disabled", async () => {
-    window.history.replaceState({ idx: 1 }, "");
+  it("navigates to the declared ancestor when it is not behind us", async () => {
+    commit(1);
     render(
       <MemoryRouter>
-        <PageBack to="/collections" preferHistory={false} />
+        <PageBack to="/collections" up />
       </MemoryRouter>,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
 
     expect(mocks.navigate).toHaveBeenCalledTimes(1);
-    expect(mocks.navigate).toHaveBeenCalledWith("/collections");
+    expect(mocks.navigate).toHaveBeenCalledWith("/collections", {
+      replace: false,
+      viewTransition: true,
+    });
+  });
+
+  it("moves the page backwards whichever route it takes", async () => {
+    commit(1);
+    render(
+      <MemoryRouter>
+        <PageBack />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(document.documentElement.dataset.navigationDirection).toBe("back");
   });
 
   it("applies the documented positioning and glass styling", () => {
@@ -94,6 +119,8 @@ describe("PageBack", () => {
     const button = screen.getByRole("button", { name: "Go back" });
     expect(button).toHaveClass(
       "glass",
+      "glass-hover",
+      "glass-hover-accent",
       "absolute",
       "top-4",
       "left-2",
@@ -101,6 +128,8 @@ describe("PageBack", () => {
       "rounded-full",
       "p-1.5",
     );
+    expect(button).not.toHaveClass("hover:bg-accent");
+    expect(button).not.toHaveClass("transition-colors");
   });
 
   it("pins to the viewport on lg+ when floating is set", () => {

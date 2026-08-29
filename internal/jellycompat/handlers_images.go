@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -21,7 +22,7 @@ type ImagesHandler struct {
 	codec        *ResourceIDCodec
 	sessions     *SessionStore
 	images       *ImageCache
-	personRepo   *catalog.PersonRepository
+	personRepo   imagePersonRepository
 	detailSvc    *catalog.DetailService
 	itemRepo     imageItemRepository
 	folderRepo   imageFolderRepository
@@ -47,6 +48,10 @@ type imageItemRepository interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 }
 
+type imagePersonRepository interface {
+	Get(ctx context.Context, id int64) (*models.Person, error)
+}
+
 type imageSeasonRepository interface {
 	GetByID(ctx context.Context, contentID string) (*models.Season, error)
 }
@@ -64,12 +69,19 @@ func NewImagesHandler(content ContentService, codec *ResourceIDCodec, sessions *
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	// A nil concrete repository has to stay nil in the interface field, or the
+	// nil checks guarding the person route would see a non-nil interface holding
+	// a nil pointer and dereference it.
+	var persons imagePersonRepository
+	if personRepo != nil {
+		persons = personRepo
+	}
 	return &ImagesHandler{
 		content:      content,
 		codec:        codec,
 		sessions:     sessions,
 		images:       images,
-		personRepo:   personRepo,
+		personRepo:   persons,
 		detailSvc:    detailSvc,
 		itemRepo:     itemRepo,
 		folderRepo:   folderRepo,
@@ -184,7 +196,11 @@ func (h *ImagesHandler) handlePersonImage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	imageSize := compatRequestImageSize(r, imageType)
-	resolvedImage := compatPresignImageWithExpiry(h.detailSvc, r.Context(), person.PhotoPath, "poster", imageSize)
+	// Headshots ride the profile ladder ({500, 300}), not the poster ladder,
+	// which now carries a w780 rung. Resolving them as posters would name a
+	// profile/w780 key that is never generated — and the server-side ladder
+	// fallback deliberately skips profile, so nothing would rescue it.
+	resolvedImage := compatPresignImageWithExpiry(h.detailSvc, r.Context(), person.PhotoPath, artworkkey.ImageProfile, imageSize)
 	imageURL := resolvedImage.URL
 	if imageURL == "" {
 		writeError(w, http.StatusNotFound, "NotFound", "Image not found")

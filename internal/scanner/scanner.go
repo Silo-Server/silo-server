@@ -2111,12 +2111,49 @@ func compactScanRoots(paths []string) []string {
 	return out
 }
 
+// syncPresentLibraryState repairs the catalog memberships owned by every
+// present media file in a folder.
 func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) error {
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
+	return s.syncPresentState(ctx, folderID, nil)
+}
+
+// syncPresentFileState repairs the catalog memberships owned by one present
+// media file. Single-file Autoscan work must not pay the folder-wide cost of
+// syncPresentLibraryState: a large library can contain hundreds of thousands
+// of files while this path has exactly one changed row to reconcile.
+func (s *Scanner) syncPresentFileState(ctx context.Context, folderID int, filePath string) error {
+	if strings.TrimSpace(filePath) == "" {
+		return fmt.Errorf("syncing present file state: empty file path")
+	}
+	return s.syncPresentState(ctx, folderID, &filePath)
+}
+
+// syncPresentState is the single implementation behind both entry points. When
+// filePath is nil the repair covers every present file in the folder; when it
+// is set the exact same statements are narrowed to that one row.
+//
+// The path predicate is appended in Go rather than expressed as
+// "($2::text IS NULL OR mf.file_path = $2)" so the folder-wide plan is not
+// forced onto a filter the planner cannot use an index for.
+func (s *Scanner) syncPresentState(ctx context.Context, folderID int, filePath *string) error {
+	args := []any{folderID}
+	filePredicate := ""
+	if filePath != nil {
+		args = append(args, *filePath)
+		filePredicate = "\n\t\t  AND mf.file_path = $2"
+	}
+
+	statements := []struct {
+		desc string
+		sql  string
+	}{
+		{
+			desc: "clearing dangling content links",
+			sql: `
 		UPDATE media_files mf
 		SET content_id = NULL,
 			updated_at = NOW()
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1` + filePredicate + `
 		  AND mf.missing_since IS NULL
 		  AND mf.content_id IS NOT NULL
 		  AND NOT EXISTS (
@@ -2124,15 +2161,15 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 			FROM media_items mi
 			WHERE mi.content_id = mf.content_id
 		  )
-	`, folderID); err != nil {
-		return fmt.Errorf("clearing dangling content links: %w", err)
-	}
-
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
+	`,
+		},
+		{
+			desc: "clearing dangling episode links",
+			sql: `
 		UPDATE media_files mf
 		SET episode_id = NULL,
 			updated_at = NOW()
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1` + filePredicate + `
 		  AND mf.missing_since IS NULL
 		  AND mf.episode_id IS NOT NULL
 		  AND NOT EXISTS (
@@ -2140,40 +2177,61 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 			FROM episodes e
 			WHERE e.content_id = mf.episode_id
 		  )
-	`, folderID); err != nil {
-		return fmt.Errorf("clearing dangling episode links: %w", err)
-	}
-
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
+	`,
+		},
+		{
+			desc: "restoring folder memberships",
+			sql: `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 		SELECT DISTINCT mf.content_id, mf.media_folder_id, NOW()
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1` + filePredicate + `
 		  AND mf.missing_since IS NULL
 		  AND mf.content_id IS NOT NULL
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, folderID); err != nil {
-		return fmt.Errorf("restoring folder memberships: %w", err)
-	}
-
-	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		WITH inserted AS (
-			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+	`,
+		},
+		{
+			// target_episode selects the episodes in scope; candidate then
+			// re-joins every active file of those episodes so first_seen_at
+			// and the scan-run provenance aggregate over the whole episode,
+			// not just the scanned path.
+			desc: "restoring episode folder memberships",
+			sql: `
+		WITH target_episode AS (
+			SELECT DISTINCT mf.episode_id, mf.media_folder_id
 			FROM media_files mf
 			JOIN episodes e ON e.content_id = mf.episode_id
-			WHERE mf.media_folder_id = $1
+			WHERE mf.media_folder_id = $1` + filePredicate + `
 			  AND mf.missing_since IS NULL
 			  AND mf.episode_id IS NOT NULL
-			GROUP BY mf.episode_id, mf.media_folder_id
+		),
+		candidate AS (
+			SELECT target.episode_id,
+			       target.media_folder_id,
+			       MIN(mf.created_at) AS first_seen_at,
+			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1] AS first_seen_scan_run_id
+			FROM target_episode target
+			JOIN media_files mf
+			  ON mf.episode_id = target.episode_id
+			 AND mf.media_folder_id = target.media_folder_id
+			 AND mf.missing_since IS NULL
+			GROUP BY target.episode_id, target.media_folder_id
+		),
+		inserted AS (
+			INSERT INTO episode_libraries (
+				episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
+			)
+			SELECT episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
+			FROM candidate
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 			RETURNING episode_id, first_seen_at
 		)
 		-- Bump each parent series' latest-episode-added denorm for the
 		-- genuinely new links ("Latest Episodes" sort, issue #202).
 		UPDATE media_items mi
-		SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+		SET latest_episode_added_at = GREATEST(mi.latest_episode_added_at, sub.latest_added)
 		FROM (
 			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
 			FROM inserted i
@@ -2182,10 +2240,27 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 		) sub
 		WHERE mi.content_id = sub.series_id
 		  AND mi.type = 'series'
-	`, folderID); err != nil {
-		return fmt.Errorf("restoring episode folder memberships: %w", err)
+	`,
+		},
 	}
 
+	// One transaction: a crash part-way through must not leave a row with some
+	// links cleared and its memberships unrepaired.
+	tx, err := s.fileRepo.Pool().Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning present state repair: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	for _, stmt := range statements {
+		if _, err := tx.Exec(ctx, stmt.sql, args...); err != nil {
+			return fmt.Errorf("%s: %w", stmt.desc, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing present state repair: %w", err)
+	}
 	return nil
 }
 
@@ -2403,12 +2478,11 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}
-		// Converting a previously-primary row into an extra clears its
-		// content linkage; run the same membership cleanup a full scan would
-		// so stale library membership doesn't linger until the next scan.
-		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
-			return fmt.Errorf("syncing present library state for extra file: %w", err)
-		}
+		// The Upsert above already nulled this row's content/episode links as
+		// part of converting it into an extra. What still needs repair is the
+		// library membership: if this was the last primary file behind an
+		// item, the folder membership must go away too, which is what
+		// reconcileLibraryMemberships below does.
 		protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
 		if err != nil {
 			return err
@@ -2473,7 +2547,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err := s.reconcileScannedGroups(ctx, folder.ID, false, []string{scopePath}, false, groupInference); err != nil {
 		return fmt.Errorf("reconciling scanned groups for file: %w", err)
 	}
-	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+	if err := s.syncPresentFileState(ctx, folder.ID, filePath); err != nil {
 		return fmt.Errorf("syncing present library state for file: %w", err)
 	}
 	if s.seriesQueueSyncer != nil {
@@ -2709,20 +2783,20 @@ func (s *Scanner) processFile(
 				FilePath:      filePath,
 			}
 			populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
-			switch id, updErr := s.fileRepo.UpdateIdentity(ctx, mf); {
-			case updErr == nil:
-				mf.ID = id
-				if err := s.enqueueMetadataWork(ctx, folder, &mf); err != nil {
-					return 0, nil, fmt.Errorf("enqueueing metadata work for file %s: %w", filePath, err)
-				}
+			applied, persistErr := persistIdentityUpdate(&mf,
+				func(file models.MediaFile) (int, error) { return s.fileRepo.UpdateIdentity(ctx, file) },
+				func(file *models.MediaFile) error { return s.enqueueMetadataWork(ctx, folder, file) },
+			)
+			switch {
+			case persistErr != nil:
+				return 0, nil, fmt.Errorf("persisting identity update for file %s: %w", filePath, persistErr)
+			case applied:
 				return actionUpdated, updateReasons, nil
-			case errors.Is(updErr, ErrFileNotFound):
+			default:
 				// The row vanished between the scan-state snapshot and this
 				// write (concurrent delete). Fall through to the full path,
 				// whose upsert re-ingests the file in this scan — the old
 				// behavior before the fast path existed.
-			default:
-				return 0, nil, fmt.Errorf("updating identity for file %s: %w", filePath, updErr)
 			}
 		}
 
@@ -2733,6 +2807,32 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource := s.probeFile(ctx, filePath)
+		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe) {
+			// Leave the migrated row's probe_updated_at NULL so a later scan
+			// retries without replacing valid metadata with zero values.
+			if len(updateReasons) > 1 {
+				mf := models.MediaFile{MediaFolderID: folder.ID, FilePath: filePath}
+				populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
+				mf.ExternalSubtitles = externalSubtitleModels(loadExternalSubs())
+				applied, persistErr := persistIdentityUpdate(&mf,
+					func(file models.MediaFile) (int, error) {
+						return s.fileRepo.UpdateIdentityAndExternalSubtitles(ctx, file)
+					},
+					func(file *models.MediaFile) error { return s.enqueueMetadataWork(ctx, folder, file) },
+				)
+				switch {
+				case persistErr != nil:
+					return 0, nil, fmt.Errorf("persisting identity update for file %s: %w", filePath, persistErr)
+				case applied:
+					return actionUpdated, updateReasons, nil
+				default:
+					// The old row is gone, so there is no probe metadata left to
+					// preserve. Continue through the normal upsert path.
+				}
+			} else {
+				return actionUnchanged, updateReasons, nil
+			}
+		}
 
 		// Detect external subtitles.
 		externalSubs = loadExternalSubs()
@@ -2763,20 +2863,7 @@ func (s *Scanner) processFile(
 			mf.SubtitleTracks = []models.SubtitleTrack{}
 		}
 
-		modelExternalSubs := make([]models.ExternalSubtitle, len(externalSubs))
-		for i, es := range externalSubs {
-			modelExternalSubs[i] = models.ExternalSubtitle{
-				Path:     es.Path,
-				Language: es.Language,
-				Format:   es.Format,
-				Title:    es.Title,
-				Forced:   es.Forced,
-			}
-		}
-		mf.ExternalSubtitles = modelExternalSubs
-		if mf.ExternalSubtitles == nil {
-			mf.ExternalSubtitles = []models.ExternalSubtitle{}
-		}
+		mf.ExternalSubtitles = externalSubtitleModels(externalSubs)
 
 		upserted, upsertErr := s.fileRepo.Upsert(ctx, mf)
 		if upsertErr != nil {
@@ -3184,11 +3271,14 @@ func sameFileModifiedAt(existing *time.Time, current time.Time) bool {
 }
 
 func normalizeFileModifiedAt(ts time.Time) time.Time {
-	return ts.UTC().Truncate(time.Microsecond)
+	return models.NormalizeFileModifiedAt(ts)
 }
 
 func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if file == nil {
+		return true
+	}
+	if file.DVProvenanceCurrent != nil && !*file.DVProvenanceCurrent {
 		return true
 	}
 	if strings.TrimSpace(file.ProbeSource) == "" || file.ProbeUpdatedAt == nil {
@@ -3232,6 +3322,53 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 		return true
 	}
 	return false
+}
+
+func shouldPreserveExistingProbeAfterProbeFailure(updateReasons []string, probe *ProbeData) bool {
+	if probe != nil || len(updateReasons) == 0 {
+		return false
+	}
+	foundRepair := false
+	for _, reason := range updateReasons {
+		switch reason {
+		case "probe_repair":
+			foundRepair = true
+		case "group_assignment_changed", "root_assignment_changed", "external_subtitle_changed", "external_subtitle_missing":
+		default:
+			return false
+		}
+	}
+	return foundRepair
+}
+
+func externalSubtitleModels(externalSubs []ExternalSubtitleInfo) []models.ExternalSubtitle {
+	result := make([]models.ExternalSubtitle, len(externalSubs))
+	for i, es := range externalSubs {
+		result[i] = models.ExternalSubtitle{
+			Path: es.Path, Language: es.Language, Format: es.Format,
+			Title: es.Title, Forced: es.Forced,
+		}
+	}
+	return result
+}
+
+func persistIdentityUpdate(
+	file *models.MediaFile,
+	update func(models.MediaFile) (int, error),
+	enqueue func(*models.MediaFile) error,
+) (bool, error) {
+	id, err := update(*file)
+	if errors.Is(err, ErrFileNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	file.ID = id
+	if err := enqueue(file); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func (s *Scanner) enqueueMetadataWork(ctx context.Context, folder *models.MediaFolder, file *models.MediaFile) error {
@@ -3640,6 +3777,7 @@ func identityEvidenceEqual(existing, expected []byte) bool {
 	return reflect.DeepEqual(existingValue, expectedValue)
 }
 
+// applyProbeData copies normalized probe facts onto a media file.
 func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) {
 	mf.CodecVideo = probe.CodecVideo
 	mf.CodecAudio = probe.CodecAudio
@@ -3657,32 +3795,36 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 	videoTracks := make([]models.VideoTrack, len(probe.VideoTracks))
 	for i, vt := range probe.VideoTracks {
 		videoTracks[i] = models.VideoTrack{
-			Title:              vt.Title,
-			Codec:              vt.Codec,
-			DolbyVision:        vt.DolbyVision,
-			DVProfile:          vt.DVProfile,
-			DVLevel:            vt.DVLevel,
-			DVBLCompatID:       vt.DVBLCompatID,
-			DVELPresent:        vt.DVELPresent,
-			DVEnhancementLayer: vt.DVEnhancementLayer,
-			HDR10Plus:          vt.HDR10Plus,
-			Profile:            vt.Profile,
-			Level:              vt.Level,
-			Width:              vt.Width,
-			Height:             vt.Height,
-			AspectRatio:        vt.AspectRatio,
-			Interlaced:         vt.Interlaced,
-			FrameRate:          vt.FrameRate,
-			Bitrate:            vt.Bitrate,
-			VideoRange:         vt.VideoRange,
-			VideoRangeType:     vt.VideoRangeType,
-			ColorRange:         vt.ColorRange,
-			ColorPrimaries:     vt.ColorPrimaries,
-			ColorSpace:         vt.ColorSpace,
-			ColorTransfer:      vt.ColorTransfer,
-			BitDepth:           vt.BitDepth,
-			PixelFormat:        vt.PixelFormat,
-			ReferenceFrames:    vt.ReferenceFrames,
+			Title:               vt.Title,
+			Codec:               vt.Codec,
+			DolbyVision:         vt.DolbyVision,
+			DVProfile:           vt.DVProfile,
+			DVLevel:             vt.DVLevel,
+			DVBLCompatID:        vt.DVBLCompatID,
+			DVConfigPresent:     vt.DVConfigPresent,
+			DVBLCompatIDPresent: vt.DVBLCompatIDPresent,
+			DVBLPresent:         vt.DVBLPresent,
+			DVRPUPresent:        vt.DVRPUPresent,
+			DVELPresent:         vt.DVELPresent,
+			DVEnhancementLayer:  vt.DVEnhancementLayer,
+			HDR10Plus:           vt.HDR10Plus,
+			Profile:             vt.Profile,
+			Level:               vt.Level,
+			Width:               vt.Width,
+			Height:              vt.Height,
+			AspectRatio:         vt.AspectRatio,
+			Interlaced:          vt.Interlaced,
+			FrameRate:           vt.FrameRate,
+			Bitrate:             vt.Bitrate,
+			VideoRange:          vt.VideoRange,
+			VideoRangeType:      vt.VideoRangeType,
+			ColorRange:          vt.ColorRange,
+			ColorPrimaries:      vt.ColorPrimaries,
+			ColorSpace:          vt.ColorSpace,
+			ColorTransfer:       vt.ColorTransfer,
+			BitDepth:            vt.BitDepth,
+			PixelFormat:         vt.PixelFormat,
+			ReferenceFrames:     vt.ReferenceFrames,
 		}
 	}
 	mf.VideoTracks = videoTracks

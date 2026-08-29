@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 7,
+  "revision": 8,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -828,7 +828,60 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The admin default and the enabled kill switch stay in server_settings and are not user settings."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled."
+    },
+    {
+      "key": "ui.card_overlays_enabled",
+      "introduced_in": 8,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean", "nullable": true },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Card overlays enabled",
+      "description": "Show overlay badges on media cards.",
+      "recommended_control": "switch",
+      "notes": "null means the profile has not chosen whether overlay badges are enabled, so the server-wide default from the overlay-config endpoint applies. An explicit profile choice overrides the server-wide default in either direction."
+    },
+    {
+      "key": "ui.card_quick_actions",
+      "introduced_in": 8,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "nullable": true,
+        "values": [
+          { "value": "both", "label": "Both" },
+          { "value": "favorites", "label": "Favorites only" },
+          { "value": "watched", "label": "Watch indicator only" }
+        ]
+      },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Card quick actions",
+      "description": "Which favorite and watched shortcuts appear on media cards.",
+      "recommended_control": "select",
+      "notes": "null means the user has not chosen a mode, so the server-wide default from the overlay-config endpoint applies. The mode applies whenever quick actions are effectively enabled for the profile."
+    },
+    {
+      "key": "ui.card_quick_actions_enabled",
+      "introduced_in": 8,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean", "nullable": true },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Card quick actions enabled",
+      "description": "Show the selected favorite and watched shortcuts on media cards.",
+      "recommended_control": "switch",
+      "notes": "null means the profile has not chosen whether quick actions are enabled, so the server-wide default from the overlay-config endpoint applies. An explicit profile choice overrides the server-wide default in either direction."
     },
     {
       "key": "ui.next_up_mode",

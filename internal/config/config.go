@@ -425,7 +425,11 @@ func EffectiveDownloadArtifactDir(artifactDir, transcodeDir string) string {
 	if transcodeDir == "" {
 		transcodeDir = DefaultTranscodeDir
 	}
-	return filepath.Join(filepath.Dir(transcodeDir), "silo-download-artifacts")
+	// Clean first: with a trailing slash, filepath.Dir("/srv/transcode/") is
+	// "/srv/transcode", which would nest the artifact root INSIDE the transcode
+	// dir — where the orphaned-transcode sweep deletes non-active
+	// subdirectories, i.e. it would delete prepared downloads.
+	return filepath.Join(filepath.Dir(filepath.Clean(transcodeDir)), "silo-download-artifacts")
 }
 
 const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
@@ -494,7 +498,7 @@ func setDefaults() *configRaw {
 			EnableTVSeriesRootQueue: true,
 		},
 		Playback: PlaybackConfig{
-			FFmpegPath:                   "/usr/lib/jellyfin-ffmpeg/ffmpeg",
+			FFmpegPath:                   "",
 			TranscodeDir:                 DefaultTranscodeDir,
 			HWAccel:                      "auto",
 			ChapterThumbnailWorkers:      1,

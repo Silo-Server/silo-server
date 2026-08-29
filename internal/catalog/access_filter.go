@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -14,7 +15,7 @@ const LibraryCollectionVisibilityVisible = "visible"
 type AccessFilter struct {
 	AllowedLibraryIDs     []int
 	AllowedContentIDs     []string
-	DisabledLibraryIDs    []int // user-disabled libraries (only set when AllowedLibraryIDs is nil)
+	DisabledLibraryIDs    []int // libraries whose membership globally hides an item
 	PresentationLibraryID *int
 	PresentationLanguage  string
 	// ProfilePreferredLanguage is the viewer profile's preferred metadata
@@ -35,6 +36,13 @@ type AccessFilter struct {
 	// DeviceID identifies the requesting client for device-scoped setting
 	// resolution. It does not participate in catalog access control.
 	DeviceID string
+	// ImageSize is the artwork size the client asked for on this request, and
+	// like DeviceID it does not participate in access control. It rides here
+	// because detail building fans out through a dozen helpers that already
+	// carry the filter, and every artwork URL in one response has to agree on a
+	// size. Unset means the caller expressed no preference, and the per-context
+	// defaults apply. See internal/imagesize.
+	ImageSize imagesize.Size
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so
@@ -140,6 +148,35 @@ func appendLibraryAccessConditions(keyColumn string, filter AccessFilter, condit
 		*argIdx = *argIdx + 1
 	}
 	*conditions = append(*conditions, libraryAccessConditions(keyColumn, allowedIdx, disabledIdx)...)
+}
+
+// ApplyLibraryAccessFilter appends the canonical item-level library allow/deny
+// predicates for keyColumn. It is exported for query builders outside the
+// catalog package that must enforce the same dual-membership invariant.
+func ApplyLibraryAccessFilter(keyColumn string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	appendLibraryAccessConditions(keyColumn, filter, conditions, args, argIdx)
+}
+
+// episodeParentSeriesIDExpr resolves an episode row to its parent series for
+// listing queries that do not already project series_id. The subquery is a PK
+// lookup on episodes.content_id.
+func episodeParentSeriesIDExpr(episodeIDExpr string) string {
+	return fmt.Sprintf("(SELECT e_parent.series_id FROM episodes e_parent WHERE e_parent.content_id = %s)", episodeIDExpr)
+}
+
+// appendEpisodeParentLibraryAccess applies the series-level dual-membership
+// predicates that detail and playback already enforce via
+// EnsureAccessible(series_id). Episode file membership (episode_libraries) can
+// diverge from series membership for multi-folder shows; listing without this
+// check surfaces episodes of a globally hidden series as unopenable tiles.
+// Callers that already join episodes or a read model should pass the projected
+// series ID directly to avoid a redundant correlated lookup.
+func appendEpisodeParentLibraryAccess(seriesIDExpr string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	appendLibraryAccessConditions(seriesIDExpr, filter, conditions, args, argIdx)
+}
+
+func appendEpisodeParentLibraryAccessByEpisodeID(episodeIDExpr string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	appendEpisodeParentLibraryAccess(episodeParentSeriesIDExpr(episodeIDExpr), filter, conditions, args, argIdx)
 }
 
 // ApplySectionAccessFilter applies non-library access constraints to section queries.

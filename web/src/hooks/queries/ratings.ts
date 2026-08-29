@@ -2,7 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type { ItemDetail } from "@/api/types";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
-import { updateCatalogItemDetail } from "./mediaSurfaceRefresh";
+import {
+  cancelItemDetailQueries,
+  isItemDetailQueryKey,
+  updateCatalogItemDetail,
+} from "./mediaSurfaceRefresh";
 
 export function useSetRating(itemId: string) {
   const queryClient = useQueryClient();
@@ -13,14 +17,9 @@ export function useSetRating(itemId: string) {
         body: JSON.stringify({ rating }),
       }),
     onMutate: async (rating: number) => {
-      await queryClient.cancelQueries({ queryKey: ["catalog", "items", itemId, "detail"] });
+      await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "catalog" &&
-          query.queryKey[1] === "items" &&
-          query.queryKey[2] === itemId &&
-          query.queryKey[3] === "detail",
+        predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
       });
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,
@@ -44,14 +43,9 @@ export function useDeleteRating(itemId: string) {
   return useMutation({
     mutationFn: () => api(`/ratings/${itemId}`, { method: "DELETE" }),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ["catalog", "items", itemId, "detail"] });
+      await cancelItemDetailQueries(queryClient, itemId);
       const previous = queryClient.getQueriesData<ItemDetail>({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "catalog" &&
-          query.queryKey[1] === "items" &&
-          query.queryKey[2] === itemId &&
-          query.queryKey[3] === "detail",
+        predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
       });
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({
         ...detail,

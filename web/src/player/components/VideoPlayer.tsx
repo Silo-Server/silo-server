@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
-import { PlayerControls } from "./PlayerControls";
+import { PlayerControls, SKIP_BACK_SECONDS, SKIP_FORWARD_SECONDS } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
@@ -17,6 +17,7 @@ import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
+import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
 import { useNextEpisode } from "../hooks/useNextEpisode";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
@@ -27,6 +28,7 @@ import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { qualityOptionsFromPlanV3 } from "../playback-info";
 import { preconnectToStreamOrigin } from "../stream-url";
 import { WatchTogetherPanel } from "./WatchTogetherPanel";
+import { readPlanInvalidatedPayload, VIDEO_PLAYBACK_COMMANDS } from "../realtime-protocol";
 import type {
   PlaybackRealtimeCommandEnvelope,
   PlaybackRealtimeEventEnvelope,
@@ -34,6 +36,8 @@ import type {
 import { resolvePendingSeekTime } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { HlsStartupGuard } from "../utils/hlsStartupGuard";
+import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
+import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
 import type {
   PlaybackExitState,
@@ -67,6 +71,25 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
+
+let hlsJSModule: Promise<typeof HlsType> | null = null;
+
+function loadHLSJS(): Promise<typeof HlsType> {
+  hlsJSModule ??= import("hls.js").then(
+    (module) => module.default,
+    (error) => {
+      // Drop the memoized rejection so a later playback retries the fetch.
+      hlsJSModule = null;
+      throw error;
+    },
+  );
+  return hlsJSModule;
+}
+
+// Warm the hls.js chunk at module load so the first playback's time to first
+// frame doesn't pay the cold dynamic-import latency on top of plan resolution.
+// A failed warm-up stays quiet here; playback retries and reports it.
+void loadHLSJS().catch(() => {});
 
 // Reserved index for the in-progress live AI translation track. Sits well above
 // any real subtitle index so it never collides.
@@ -109,6 +132,12 @@ interface VideoPlayerProps {
   onSubtitleTrackChange?: (combinedIndex: number | null, currentPosition: number) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   onPlanFailure?: (failure: FailureV3, currentPosition: number) => void;
+  /**
+   * Replan for a plan the server invalidated over the realtime
+   * `plan_invalidated` command. Resolving false rejects the command, which is
+   * what tells the server to stop the session instead.
+   */
+  onPlanInvalidated?: (planId: string, reason: string, currentPosition: number) => Promise<boolean>;
   /** `seek_reanchor` replan when a seek target falls outside the seekable window. */
   onReanchorSeek?: (positionSeconds: number) => void;
   preferredSubtitleLanguage?: string | null;
@@ -158,10 +187,19 @@ interface VideoPlayerProps {
   watchTogetherConnection?: WatchTogetherRoomConnectionResult;
 }
 
-/** Preload hls.js eagerly so it's cached before the first transcode. */
-const hlsPromise: Promise<typeof HlsType> = import("hls.js").then((m) => m.default);
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
+// How often a rejected autoplay is retried, and how many times. A transport
+// swap tears the previous source down with `load()`, and the media element load
+// algorithm is required to reject any play that is still pending with an
+// AbortError — so the first attempt against a replacement transport can fail
+// for a reason that is gone a moment later. The retry is timed rather than
+// purely event-driven because the failure leaves nothing to wake it: once the
+// engine has filled its buffer it stops fetching, so no further readiness event
+// arrives. The budget is small so a genuinely blocked autoplay settles into a
+// paused player with working controls instead of retrying forever.
+const AUTOPLAY_RETRY_DELAY_MS = 400;
+const MAX_AUTOPLAY_ATTEMPTS = 4;
 
 interface PlaybackNoticeState {
   title?: string;
@@ -216,6 +254,7 @@ export function VideoPlayer({
   onQualitySelect,
   onSubtitleTrackChange,
   onPlanFailure,
+  onPlanInvalidated,
   onReanchorSeek,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
@@ -477,9 +516,7 @@ export function VideoPlayer({
   }, [isPlayerReady, planRevision]);
 
   const isFirefoxBrowser =
-    typeof navigator !== "undefined" &&
-    /firefox/i.test(navigator.userAgent) &&
-    !/seamonkey/i.test(navigator.userAgent);
+    typeof navigator !== "undefined" && isFirefoxUserAgent(navigator.userAgent);
   const watchTogether =
     watchTogetherConnection ??
     ({
@@ -1372,6 +1409,7 @@ export function VideoPlayer({
   // Only the bitrate matters for buffer sizing, and the plan states what is
   // actually being delivered rather than what the source file happens to hold.
   const plannedBitrateKbps = plan.effective_recipe.bitrate_kbps ?? 0;
+  const plannedDynamicRange = plan.effective_recipe.dynamic_range;
 
   // -- hls.js lifecycle --
   useEffect(() => {
@@ -1380,14 +1418,24 @@ export function VideoPlayer({
 
     let hls: HlsType | null = null;
     let destroyed = false;
-    let autoplayStarted = false;
+    let playbackStarted = false;
+    let autoplayInFlight = false;
+    let autoplayAttempts = 0;
+    let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
     setAwaitingFirstFrame(true);
 
+    const clearAutoplayRetry = () => {
+      if (autoplayRetryTimer === null) return;
+      clearTimeout(autoplayRetryTimer);
+      autoplayRetryTimer = null;
+    };
+
     const cleanupStartupListeners = () => {
+      clearAutoplayRetry();
       video.removeEventListener("loadeddata", attemptAutoplayWhenReady);
       video.removeEventListener("canplay", attemptAutoplayWhenReady);
       video.removeEventListener("loadedmetadata", attemptAutoplayWhenReady);
@@ -1397,35 +1445,103 @@ export function VideoPlayer({
       }
     };
 
+    // Settles the player into a deliberate paused state: the startup guard is
+    // told playback is viable so it does not report a bogus startup timeout,
+    // and the first frame is shown with the controls up.
+    const settlePaused = () => {
+      playbackStarted = true;
+      cleanupStartupListeners();
+      hlsStartupGuardRef.current?.markPlaybackStarted();
+      setAwaitingFirstFrame(false);
+      setPlaying(false);
+    };
+
     const attemptAutoplayWhenReady = () => {
-      if (destroyed || autoplayStarted || hlsStartupGuardRef.current?.hasFailed()) return;
+      if (destroyed || playbackStarted || autoplayInFlight) return;
+      if (hlsStartupGuardRef.current?.hasFailed()) return;
       // HAVE_FUTURE_DATA means the browser has enough media to advance beyond
       // the current frame. Starting earlier can produce a visible first-frame
       // freeze where audio advances before video begins moving.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-      autoplayStarted = true;
-      cleanupStartupListeners();
       if (!shouldAutoPlay) {
-        hlsStartupGuardRef.current?.markPlaybackStarted();
-        setAwaitingFirstFrame(false);
-        setPlaying(false);
+        settlePaused();
         return;
       }
-      video.play().catch(() => setPlaying(false));
+
+      clearAutoplayRetry();
+      autoplayInFlight = true;
+      autoplayAttempts += 1;
+      video.play().then(
+        () => {
+          autoplayInFlight = false;
+          if (destroyed) return;
+          playbackStarted = true;
+          cleanupStartupListeners();
+        },
+        (error: unknown) => {
+          autoplayInFlight = false;
+          if (destroyed) return;
+          // The element is paused now, whatever happens next, so the transport
+          // reflects that immediately.
+          setPlaying(false);
+          if (autoplayAttempts < MAX_AUTOPLAY_ATTEMPTS) {
+            // Deliberately keeps the readiness listeners armed: whichever
+            // wakes first — a later `canplay` or this timer — retries.
+            autoplayRetryTimer = setTimeout(() => {
+              autoplayRetryTimer = null;
+              attemptAutoplayWhenReady();
+            }, AUTOPLAY_RETRY_DELAY_MS);
+            return;
+          }
+          // Out of retries. The engine has media buffered and simply is not
+          // allowed to start it, so stop pretending startup is still in
+          // progress and leave the viewer a player they can press play on.
+          console.warn("[player] playback did not resume after the transport changed", error);
+          settlePaused();
+        },
+      );
     };
 
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
+
+    const attachNativeHLS = () => {
+      video.src = effectiveStreamUrl;
+      nativeHLSMetadataHandler = () => {
+        video.currentTime = effectiveInitialPosition;
+        attemptAutoplayWhenReady();
+      };
+      video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
+    };
 
     async function init() {
       if (!video || destroyed) return;
 
       if (isHlsStream) {
         try {
-          const Hls = await hlsPromise;
+          const nativeSupported = video.canPlayType("application/vnd.apple.mpegurl") !== "";
+          // Safari's HLS capability evidence comes from its media element, so
+          // keep every Safari plan on that same engine. Chromium can also
+          // advertise native HLS, but treats an in-progress copy remux as live
+          // and jumps toward its rapidly advancing production edge; its
+          // conservative HLS claims and runtime both use hls.js instead.
+          const preferNativeHLS =
+            typeof navigator !== "undefined" && isSafariBrowserV3(navigator.userAgent);
+          const resolution = await resolveHLSEngineV3(
+            plannedDynamicRange,
+            nativeSupported,
+            loadHLSJS,
+            (error) => {
+              console.error("[hls.js] Failed to initialize, falling back to native HLS:", error);
+            },
+            preferNativeHLS,
+          );
           if (destroyed || hlsStartupGuardRef.current?.hasFailed()) return;
 
-          if (Hls.isSupported()) {
+          if (resolution.engine === "native") {
+            attachNativeHLS();
+          } else if (resolution.engine === "hlsjs") {
+            const Hls = resolution.hlsjs;
             const maxBufferLength = plannedBitrateKbps >= 25000 ? 60 : 120;
             const retryingLoadPolicy = {
               maxTimeToFirstByteMs: 45000,
@@ -1523,13 +1639,6 @@ export function VideoPlayer({
             hls.loadSource(effectiveStreamUrl);
             hls.attachMedia(video);
             hlsRef.current = hls;
-          } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = effectiveStreamUrl;
-            nativeHLSMetadataHandler = () => {
-              video.currentTime = effectiveInitialPosition;
-              attemptAutoplayWhenReady();
-            };
-            video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
           } else {
             if (
               !reportCurrentPlanFailure({
@@ -1553,10 +1662,14 @@ export function VideoPlayer({
           }
         }
       } else {
-        // Direct play — set video src directly.
+        // Direct play — set video src directly. Starting playback goes through
+        // the same readiness gate as HLS rather than calling play() against a
+        // src that has not loaded yet: a play issued at HAVE_NOTHING is racing
+        // the load algorithm that is about to seek to the resume position, and
+        // the spec has that algorithm reject it.
         video.src = effectiveStreamUrl;
         video.currentTime = effectiveInitialPosition;
-        if (shouldAutoPlay) video.play().catch(() => setPlaying(false));
+        attemptAutoplayWhenReady();
       }
     }
 
@@ -1586,6 +1699,7 @@ export function VideoPlayer({
     isPlayerReady,
     planRevision,
     plannedBitrateKbps,
+    plannedDynamicRange,
     reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);
@@ -1746,7 +1860,9 @@ export function VideoPlayer({
 
   // -- Control visibility (hover anywhere to show) --
   const [controlsVisible, setControlsVisible] = useState(true);
+  const isCoarsePointer = useCoarsePointer();
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const surfaceTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearControlsTimer = useCallback(() => {
     if (hideTimerRef.current) {
@@ -2171,6 +2287,60 @@ export function VideoPlayer({
     video.pause();
   }, [sessionId, showWatchTogetherNotice, watchTogether, watchTogetherRoomId, watchTogetherSync]);
 
+  const handleSurfaceTap = useCallback(
+    (event?: React.MouseEvent<HTMLElement>) => {
+      if (!isCoarsePointer) {
+        handlePlayPause();
+        return;
+      }
+      if (surfaceTapTimerRef.current) {
+        clearTimeout(surfaceTapTimerRef.current);
+        surfaceTapTimerRef.current = null;
+        const rect = event?.currentTarget.getBoundingClientRect();
+        const relativeX = rect && event ? (event.clientX - rect.left) / rect.width : 0.5;
+        const now = videoRef.current?.currentTime ?? currentTime;
+        if (relativeX < 1 / 3) {
+          handlePlayerSeek(Math.max(0, now - SKIP_BACK_SECONDS));
+          resetControlsTimer();
+        } else if (relativeX > 2 / 3) {
+          handlePlayerSeek(
+            Math.min(duration || now + SKIP_FORWARD_SECONDS, now + SKIP_FORWARD_SECONDS),
+          );
+          resetControlsTimer();
+        } else {
+          handlePlayPause();
+        }
+        return;
+      }
+      surfaceTapTimerRef.current = setTimeout(() => {
+        surfaceTapTimerRef.current = null;
+        if (controlsVisible) {
+          clearControlsTimer();
+          setControlsVisible(false);
+        } else {
+          resetControlsTimer();
+        }
+      }, 250);
+    },
+    [
+      clearControlsTimer,
+      controlsVisible,
+      currentTime,
+      duration,
+      handlePlayPause,
+      handlePlayerSeek,
+      isCoarsePointer,
+      resetControlsTimer,
+    ],
+  );
+
+  useEffect(
+    () => () => {
+      if (surfaceTapTimerRef.current) clearTimeout(surfaceTapTimerRef.current);
+    },
+    [],
+  );
+
   useEffect(() => {
     reportRoomReadyRef.current = watchTogetherSync.reportReady;
   }, [watchTogetherSync.reportReady]);
@@ -2416,6 +2586,28 @@ export function VideoPlayer({
             tone: "warning",
           });
           return;
+        case "plan_invalidated": {
+          // The server decided the route it planned cannot serve this source
+          // after all. Ack (already sent by the transport), replan off it, and
+          // report the outcome: a rejection is the server's cue to stop the
+          // session so the client's own recovery can mint a fresh attempt.
+          const invalidated = readPlanInvalidatedPayload(command.payload);
+          if (!invalidated) {
+            throw new Error("invalid_plan_invalidated_payload");
+          }
+          if (!onPlanInvalidated) {
+            throw new Error("plan_invalidation_unsupported");
+          }
+          const replaced = await onPlanInvalidated(
+            invalidated.plan_id,
+            invalidated.reason,
+            currentTimeRef.current,
+          );
+          if (!replaced) {
+            throw new Error("plan_invalidation_replan_failed");
+          }
+          return;
+        }
         case "stop":
         case "terminate":
           if (command.payload) {
@@ -2436,13 +2628,14 @@ export function VideoPlayer({
           throw new Error("unsupported");
       }
     },
-    [handleExit, performPlayerSeek],
+    [handleExit, onPlanInvalidated, performPlayerSeek],
   );
 
   const realtime = usePlaybackRealtime({
     sessionId,
     onCommand: executeRealtimeCommand,
     onEvent: handleRealtimeEvent,
+    supportedCommands: VIDEO_PLAYBACK_COMMANDS,
   });
 
   useEffect(() => {
@@ -2547,7 +2740,7 @@ export function VideoPlayer({
       {/* Back button + media info */}
       {!isDetached && (
         <div
-          className={`absolute top-4 left-4 z-50 flex items-center gap-3 transition-opacity duration-300 ${
+          className={`absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] z-50 flex items-center gap-3 transition-opacity duration-300 ${
             controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -2711,7 +2904,7 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         className={isDetached ? "h-full w-full" : "absolute inset-0 h-full w-full"}
-        onClick={displayMode === "postroll" ? undefined : handlePlayPause}
+        onClick={displayMode === "postroll" ? undefined : handleSurfaceTap}
         playsInline
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
@@ -2843,6 +3036,7 @@ export function VideoPlayer({
           onVolumeChange={handleVolumeChange}
           onMutedChange={handleMutedChange}
           onFullscreenToggle={handleFullscreenToggle}
+          onSurfaceTap={isCoarsePointer ? handleSurfaceTap : undefined}
           showPlaybackInfo={showPlaybackInfo}
           onTogglePlaybackInfo={() => setShowPlaybackInfo((v) => !v)}
           hasPrevEpisode={!!prevEpisodeRef}

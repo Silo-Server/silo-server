@@ -152,6 +152,11 @@ type ResolvedSection struct {
 	// compatibility endpoint, which must never surface not-yet-started items —
 	// set this; admin/home rendering leaves it false to keep next-up cards.
 	SuppressNextUp bool `json:"-"`
+
+	// DisableTVEventGrouping keeps compatibility callers that require a flat
+	// list of series on the generic recently-added query path. Native TV rails
+	// leave this false to use scan-event-aware episode/series grouping.
+	DisableTVEventGrouping bool `json:"-"`
 }
 
 // FilterConfig represents the rule-group filter structure.

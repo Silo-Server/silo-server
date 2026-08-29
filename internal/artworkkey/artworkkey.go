@@ -11,6 +11,26 @@ import (
 
 const OriginalVariant = "original"
 
+// Image types the variant ladder is keyed by. These name the directory segment
+// in a cached artwork key (".../{imageType}/{variant}.{ext}") and the argument
+// every ladder lookup takes, so they are the shared vocabulary for the packages
+// that resolve artwork rather than five copies of the same string literals.
+const (
+	ImagePoster   = "poster"
+	ImageBackdrop = "backdrop"
+	ImageStill    = "still"
+	ImageLogo     = "logo"
+	ImageProfile  = "profile"
+)
+
+// LadderVersion identifies the current shape of the variant ladder returned by
+// VariantWidths. It MUST be bumped whenever VariantWidths changes so the
+// one-shot ladder backfill re-enqueues already-cached artwork and generates the
+// newly-added rungs. Existing deployments compare their recorded
+// backfilled_version against this value; leaving it stale means clients asking
+// for a new rung keep falling back to the next lower one forever.
+const LadderVersion = 2
+
 // Build returns an object key for a variant under basePath.
 func Build(basePath, variant, revision, ext string) string {
 	basePath = strings.TrimRight(strings.TrimSpace(basePath), "/")
@@ -76,17 +96,24 @@ func Revision(objectPath string) string {
 	return stem[firstDot+1:]
 }
 
-// VariantWidths returns the resize widths generated for an artwork type. This
-// is the single source of truth for the variant ladder: image generation,
-// object-key expansion, and garbage collection all derive from it.
+// VariantWidths returns the resize widths generated for an artwork type,
+// ordered widest first. This is the single source of truth for the variant
+// ladder: image generation, object-key expansion, garbage collection, and the
+// client-selectable image sizes in internal/imagesize all derive from it.
+//
+// Bump LadderVersion whenever this function changes.
 func VariantWidths(imageType string) []int {
 	switch strings.ToLower(strings.TrimSpace(imageType)) {
-	case "backdrop":
+	case ImageBackdrop:
 		return []int{1920, 1280, 300}
-	case "logo":
-		return []int{500}
-	default: // poster, still, profile
+	case ImageLogo:
+		return []int{1280, 500}
+	case ImageProfile:
+		// Cast/crew headshots are only ever rendered at card size; they do not
+		// get the wide rung posters and stills carry.
 		return []int{500, 300}
+	default: // poster, still
+		return []int{780, 500, 300}
 	}
 }
 

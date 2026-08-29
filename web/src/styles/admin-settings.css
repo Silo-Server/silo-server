@@ -1,0 +1,66 @@
+/* ================================================================
+   Admin settings — accent tokens
+   ================================================================
+   The app themes carry no hue accent: `--accent` is a raised surface
+   colour, not a brand hue. One violet carries the active rail item, the
+   advanced-disclosure rail, and the save pill, so it is defined once
+   here instead of being hardcoded per component.
+
+   Imported by the admin settings primitives that reference it
+   (SettingField, AdvancedSection, SaveBar, ProviderTile); Vite dedupes
+   the repeated import.
+   ================================================================ */
+
+:root {
+  --settings-accent: #a78bfa;
+  /* 15% alpha variant for tinted bleeds and soft chip fills. */
+  --settings-accent-soft: color-mix(in srgb, var(--settings-accent) 15%, transparent);
+  /* Slightly stronger, for 1px hairlines that still have to read as violet. */
+  --settings-accent-line: color-mix(in srgb, var(--settings-accent) 32%, transparent);
+}
+
+/* ================================================================
+   Settings rows — alignment contract
+   ================================================================
+   Every settings row is three zones, left to right:
+
+     [ label + description ]   [ control ]   [ unit ]
+
+   The control zone is right-aligned, so an input, a select, a switch
+   and a slider all end on the same vertical edge. The unit zone is a
+   fixed-width trailing slot that is reserved whether or not the row
+   fills it — that reservation is the whole point: without it
+   "Maximum log size [ 500 ] MB" pushes its input left by the width of
+   "MB" while "Maximum log entries [ 1000 ]" sits flush, and a column of
+   number fields comes out ragged.
+
+   Widths are per control kind, not per row, so a number box stays a
+   number box beside a full-width text box and the two still share
+   their right edge. Consume them through `SETTINGS_CONTROL_WIDTH` /
+   `SETTINGS_NUMBER_WIDTH` in SettingField.tsx rather than re-deriving
+   a width per page.
+   ================================================================ */
+
+:root {
+  /* Text, password, and select controls. */
+  --settings-control-w: 15rem;
+  /* Number controls: the values are short, so the box is narrower. */
+  --settings-control-w-num: 10rem;
+  /* Trailing unit slot; sized for the longest unit in use ("per minute"). */
+  --settings-unit-w: 4rem;
+}
+
+/*
+ * A stack of settings rows, hairline-ruled between them and not after the last.
+ * Each separator has exactly one owner: `SettingFieldRow` rules itself (its
+ * `.settings-field-row` class opts it out here, so a row directly in a list is
+ * never double-ruled), and this rule covers the custom blocks (action rows,
+ * notes, wrappers) that sit between fields, which a row's own border cannot.
+ */
+.settings-field-list > *:not(.settings-field-row) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.settings-field-list > *:last-child {
+  border-bottom: 0;
+}

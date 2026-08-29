@@ -23,6 +23,7 @@ describe("SleepTimerMenu", () => {
     const onChange = vi.fn();
     render(<SleepTimerMenu setting={{ kind: "off" }} remainingMs={null} onChange={onChange} />);
     await userEvent.click(screen.getByRole("button", { name: /sleep timer/i }));
+    expect(screen.getByRole("menu")).toHaveClass("z-30");
     await userEvent.click(screen.getByRole("menuitem", { name: "15 min" }));
     expect(onChange).toHaveBeenCalledWith({ kind: "duration", seconds: 900 } as SleepSetting);
   });

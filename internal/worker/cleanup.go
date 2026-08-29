@@ -173,6 +173,9 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 		}
 	}
 
+	// Hub and cache bus are separate audiences (connected admin clients vs
+	// cross-node cache invalidation), so both publish when either is wired —
+	// see the same pattern in the reconciler.
 	if totalDeleted > 0 && c.EventsHub != nil {
 		if err := c.EventsHub.PublishJSON(
 			ctx,
@@ -183,7 +186,8 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 		); err != nil {
 			return int(totalDeleted), fmt.Errorf("publishing playback cleanup invalidation: %w", err)
 		}
-	} else if c.EventBus != nil && totalDeleted > 0 {
+	}
+	if totalDeleted > 0 && c.EventBus != nil {
 		if err := c.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{
 			Type:    cache.EventPlaybackSessionsChanged,
 			Payload: "cleanup",

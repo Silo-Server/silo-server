@@ -50,6 +50,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             alt={episode.title || `Episode ${episode.episode_number}`}
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="text-muted-foreground/50 flex h-full w-full items-center justify-center">
@@ -61,12 +62,13 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             data={overlayDataFromEpisodeListItem(episode)}
             prefs={overlayPrefs}
             variant="wide"
+            hasProgressBar={hasProgress}
           />
         )}
         {hasProgress && (
-          <div className="bg-background/40 absolute inset-x-0 bottom-0 h-[3px]">
+          <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
             <div
-              className="h-full rounded-r-sm"
+              className="h-full rounded-full"
               style={{
                 width: `${derivedProgress}%`,
                 background: "var(--primary)",

@@ -1,10 +1,11 @@
+import { useRef } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
-import { overlayDataFromSectionItem } from "@/lib/overlays";
+import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
+import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import {
   formatUpcomingDate,
@@ -15,31 +16,43 @@ import {
 } from "@/lib/upcomingEventPresentation";
 import type { SectionItem } from "@/api/types";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { buildItemHref } from "@/lib/mediaNavigation";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 
 interface SectionItemCardProps {
   item: SectionItem;
   libraryId?: number;
+  overlayPrefs?: CardOverlayPrefs | null;
+  quickActionMode?: CardQuickActionMode;
 }
 
-export default function SectionItemCard({ item, libraryId }: SectionItemCardProps) {
+export default function SectionItemCard({
+  item,
+  libraryId,
+  overlayPrefs = null,
+  quickActionMode = "none",
+}: SectionItemCardProps) {
   const { loaded, onLoad } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryId ? `?libraryId=${libraryId}` : ""
-  }`;
-  const { prefs: overlayPrefs } = useOverlayPrefs();
+  const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
   const airDateLabel = upcomingEvent ? formatUpcomingDate(upcomingEvent.air_date) : "";
   const airTimeLabel = upcomingEvent ? formatUpcomingTime(upcomingEvent.air_time) : null;
   const episodeLabels = !upcomingEvent ? buildEpisodeCardLabels(item) : null;
+  const headingHref =
+    item.type === "episode" && item.series_id
+      ? buildItemHref({ contentId: item.series_id, libraryId })
+      : itemHref;
   const { cardPresentation } = useUICustomization();
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
+  const cardRef = useRef<HTMLDivElement>(null);
+  const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
 
   return (
-    <div className="media-card group/card">
-      <div className="relative">
+    <div ref={cardRef} className="media-card media-card-longpress group/card">
+      <div className="group/media relative">
         <ViewTransitionLink to={itemHref} className="block overflow-hidden rounded-xl">
           <div
             className={`media-card-image relative ${
@@ -93,33 +106,49 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
             )}
           </div>
         </ViewTransitionLink>
+        {item.play_content_id ? (
+          <CardPlayOverlay
+            contentId={item.play_content_id}
+            title={episodeLabels ? episodeLabels.seriesTitle : item.title}
+            type={item.type === "movie" ? "movie" : "episode"}
+            libraryId={libraryId}
+          />
+        ) : null}
         <MediaItemMenu
           contentId={item.content_id}
           mediaType={item.type}
           libraryId={libraryId}
           userState={item.user_state}
           variant="poster"
+          quickActionMode={quickActionMode}
+          longPressRef={cardRef}
+          itemTitle={displayTitle}
         />
       </div>
       {showCaption ? (
-        <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-          <div className="truncate text-[14px] font-semibold tracking-tight">
-            {episodeLabels ? episodeLabels.seriesTitle : item.title}
-          </div>
+        <div className="px-1 pt-3">
+          <ViewTransitionLink
+            to={headingHref}
+            className="block truncate text-[14px] font-semibold tracking-tight hover:underline"
+          >
+            {displayTitle}
+          </ViewTransitionLink>
           {showMetadata && upcomingEvent ? (
-            <>
+            <ViewTransitionLink to={itemHref} className="block hover:underline">
               {subtitle && (
                 <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
                   {subtitle}
                 </div>
               )}
-              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium">
-                <span className="text-foreground">{airDateLabel}</span>
-                {airTimeLabel && <span className="text-muted-foreground">{airTimeLabel}</span>}
+              <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] font-medium">
+                <span className="text-foreground shrink-0">{airDateLabel}</span>
+                {airTimeLabel && (
+                  <span className="text-muted-foreground min-w-0 truncate">{airTimeLabel}</span>
+                )}
               </div>
-            </>
+            </ViewTransitionLink>
           ) : showMetadata && episodeLabels ? (
-            <>
+            <ViewTransitionLink to={itemHref} className="block hover:underline">
               {episodeLabels.episodeTitle ? (
                 <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
                   {episodeLabels.episodeTitle}
@@ -128,19 +157,25 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
               <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
                 {episodeLabels.episodeCode}
               </div>
-            </>
+            </ViewTransitionLink>
           ) : showMetadata && item.item_source === "next_in_series" && item.series_title ? (
-            <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+            <ViewTransitionLink
+              to={itemHref}
+              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
+            >
               {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
                 .filter(Boolean)
                 .join(" · ")}
-            </div>
+            </ViewTransitionLink>
           ) : showMetadata ? (
-            <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+            <ViewTransitionLink
+              to={itemHref}
+              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
+            >
               {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}
-            </div>
+            </ViewTransitionLink>
           ) : null}
-        </ViewTransitionLink>
+        </div>
       ) : null}
     </div>
   );

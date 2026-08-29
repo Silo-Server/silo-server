@@ -19,13 +19,24 @@ import (
 // fakeEpisodeRepo implements metadataEpisodeRepo with an in-memory store keyed
 // by (series_id, season_number, episode_number).
 type fakeEpisodeRepo struct {
-	mu       sync.Mutex
-	episodes map[string]*models.Episode // key: "seriesID:season:episode"
-	upserts  int
+	mu                 sync.Mutex
+	episodes           map[string]*models.Episode // key: "seriesID:season:episode"
+	listByNumbersErr   error
+	bulkUpsertErr      error
+	upsertErrors       map[string]error
+	getByNumberCalls   int
+	listByNumbersCalls int
+	requestedPairs     int
+	listBySeriesCalls  int
+	upserts            int
+	bulkUpserts        int
 }
 
 func newFakeEpisodeRepo() *fakeEpisodeRepo {
-	return &fakeEpisodeRepo{episodes: make(map[string]*models.Episode)}
+	return &fakeEpisodeRepo{
+		episodes:     make(map[string]*models.Episode),
+		upsertErrors: make(map[string]error),
+	}
 }
 
 func episodeKey(seriesID string, season, episode int) string {
@@ -35,6 +46,7 @@ func episodeKey(seriesID string, season, episode int) string {
 func (r *fakeEpisodeRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, season, episode int) (*models.Episode, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.getByNumberCalls++
 	key := episodeKey(seriesID, season, episode)
 	if ep, ok := r.episodes[key]; ok {
 		cp := *ep
@@ -88,7 +100,38 @@ func (r *fakeEpisodeRepo) ListBySeriesAndAirDates(_ context.Context, seriesID st
 }
 
 func (r *fakeEpisodeRepo) ListBySeries(_ context.Context, seriesID string) ([]*models.Episode, error) {
+	r.mu.Lock()
+	r.listBySeriesCalls++
+	r.mu.Unlock()
 	return r.listBySeries(seriesID), nil
+}
+
+func (r *fakeEpisodeRepo) ListBySeriesAndNumbers(
+	_ context.Context,
+	seriesID string,
+	seasonNumbers []int32,
+	episodeNumbers []int32,
+) ([]*models.Episode, error) {
+	r.mu.Lock()
+	r.listByNumbersCalls++
+	r.requestedPairs = len(seasonNumbers)
+	err := r.listByNumbersErr
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	requested := make(map[string]struct{}, len(seasonNumbers))
+	for i := range seasonNumbers {
+		requested[episodeKey(seriesID, int(seasonNumbers[i]), int(episodeNumbers[i]))] = struct{}{}
+	}
+	all := r.listBySeries(seriesID)
+	result := make([]*models.Episode, 0, len(all))
+	for _, episode := range all {
+		if _, ok := requested[episodeKey(seriesID, episode.SeasonNumber, episode.EpisodeNumber)]; ok {
+			result = append(result, episode)
+		}
+	}
+	return result, nil
 }
 
 func (r *fakeEpisodeRepo) ListBySeasonID(_ context.Context, seasonID string) ([]*models.Episode, error) {
@@ -116,6 +159,14 @@ func (r *fakeEpisodeRepo) Upsert(_ context.Context, ep *models.Episode) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.upserts++
+	if err := r.upsertErrors[episodeKey(ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)]; err != nil {
+		return err
+	}
+	r.applyUpsertLocked(ep)
+	return nil
+}
+
+func (r *fakeEpisodeRepo) applyUpsertLocked(ep *models.Episode) {
 	key := episodeKey(ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)
 	if existing, ok := r.episodes[key]; ok {
 		// Preserve the existing content_id (mirrors the ON CONFLICT behavior).
@@ -127,14 +178,28 @@ func (r *fakeEpisodeRepo) Upsert(_ context.Context, ep *models.Episode) error {
 		cp := *ep
 		r.episodes[key] = &cp
 	}
-	return nil
 }
 
-func (r *fakeEpisodeRepo) BulkUpsert(ctx context.Context, _ string, episodes []*models.Episode) error {
-	for _, ep := range episodes {
-		if err := r.Upsert(ctx, ep); err != nil {
-			return err
+func (r *fakeEpisodeRepo) BulkUpsert(_ context.Context, seriesID string, episodes []*models.Episode) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bulkUpserts++
+	for i, ep := range episodes {
+		if ep == nil {
+			return fmt.Errorf("episode %d is nil", i)
 		}
+		if ep.SeriesID != seriesID {
+			return fmt.Errorf("episode %d belongs to series %q, want %q", i, ep.SeriesID, seriesID)
+		}
+		if !catalog.FitsPostgresInteger(ep.SeasonNumber) || !catalog.FitsPostgresInteger(ep.EpisodeNumber) || !catalog.FitsPostgresInteger(ep.Runtime) {
+			return fmt.Errorf("episode %d has a value outside the PostgreSQL integer range", i)
+		}
+	}
+	if r.bulkUpsertErr != nil {
+		return r.bulkUpsertErr
+	}
+	for _, ep := range episodes {
+		r.applyUpsertLocked(ep)
 	}
 	return nil
 }
@@ -143,6 +208,36 @@ func (r *fakeEpisodeRepo) UpsertCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.upserts
+}
+
+func (r *fakeEpisodeRepo) BulkUpsertCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bulkUpserts
+}
+
+func (r *fakeEpisodeRepo) GetByNumberCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getByNumberCalls
+}
+
+func (r *fakeEpisodeRepo) ListByNumbersCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.listByNumbersCalls
+}
+
+func (r *fakeEpisodeRepo) RequestedPairs() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requestedPairs
+}
+
+func (r *fakeEpisodeRepo) ListBySeriesCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.listBySeriesCalls
 }
 
 // listBySeries returns all episodes for a series, for test assertions.
@@ -162,13 +257,23 @@ func (r *fakeEpisodeRepo) listBySeries(seriesID string) []*models.Episode {
 // fakeSeasonRepo implements metadataSeasonRepo with an in-memory store keyed
 // by (series_id, season_number).
 type fakeSeasonRepo struct {
-	mu      sync.Mutex
-	seasons map[string]*models.Season // key: "seriesID:seasonNum"
-	upserts int
+	mu               sync.Mutex
+	seasons          map[string]*models.Season // key: "seriesID:seasonNum"
+	listErr          error
+	bulkUpsertErr    error
+	upsertErrors     map[string]error
+	getByNumberCalls int
+	listCalls        int
+	requestedNumbers int
+	upserts          int
+	bulkUpserts      int
 }
 
 func newFakeSeasonRepo() *fakeSeasonRepo {
-	return &fakeSeasonRepo{seasons: make(map[string]*models.Season)}
+	return &fakeSeasonRepo{
+		seasons:      make(map[string]*models.Season),
+		upsertErrors: make(map[string]error),
+	}
 }
 
 func seasonKey(seriesID string, seasonNum int) string {
@@ -178,6 +283,7 @@ func seasonKey(seriesID string, seasonNum int) string {
 func (r *fakeSeasonRepo) GetBySeriesAndNumber(_ context.Context, seriesID string, seasonNum int) (*models.Season, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.getByNumberCalls++
 	key := seasonKey(seriesID, seasonNum)
 	if s, ok := r.seasons[key]; ok {
 		cp := *s
@@ -202,6 +308,14 @@ func (r *fakeSeasonRepo) Upsert(_ context.Context, s *models.Season) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.upserts++
+	if err := r.upsertErrors[seasonKey(s.SeriesID, s.SeasonNumber)]; err != nil {
+		return err
+	}
+	r.applyUpsertLocked(s)
+	return nil
+}
+
+func (r *fakeSeasonRepo) applyUpsertLocked(s *models.Season) {
 	key := seasonKey(s.SeriesID, s.SeasonNumber)
 	if existing, ok := r.seasons[key]; ok {
 		// Preserve existing content_id (mirrors ON CONFLICT behavior).
@@ -212,22 +326,231 @@ func (r *fakeSeasonRepo) Upsert(_ context.Context, s *models.Season) error {
 		cp := *s
 		r.seasons[key] = &cp
 	}
+}
+
+func (r *fakeSeasonRepo) BulkUpsert(_ context.Context, seasons []*models.Season) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bulkUpserts++
+	if r.bulkUpsertErr != nil {
+		return r.bulkUpsertErr
+	}
+	for _, s := range seasons {
+		r.applyUpsertLocked(s)
+	}
 	return nil
 }
 
-func (r *fakeSeasonRepo) BulkUpsert(ctx context.Context, seasons []*models.Season) error {
-	for _, s := range seasons {
-		if err := r.Upsert(ctx, s); err != nil {
-			return err
+func (r *fakeSeasonRepo) ListBySeriesAndNumbers(_ context.Context, seriesID string, seasonNumbers []int32) ([]*models.Season, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.listCalls++
+	r.requestedNumbers = len(seasonNumbers)
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	requested := make(map[int]struct{}, len(seasonNumbers))
+	for _, seasonNumber := range seasonNumbers {
+		requested[int(seasonNumber)] = struct{}{}
+	}
+	var result []*models.Season
+	for _, season := range r.seasons {
+		if season.SeriesID == seriesID {
+			if _, ok := requested[season.SeasonNumber]; !ok {
+				continue
+			}
+			cp := *season
+			result = append(result, &cp)
 		}
 	}
-	return nil
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].SeasonNumber < result[j].SeasonNumber
+	})
+	return result, nil
 }
 
 func (r *fakeSeasonRepo) UpsertCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.upserts
+}
+
+func (r *fakeSeasonRepo) BulkUpsertCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bulkUpserts
+}
+
+func (r *fakeSeasonRepo) GetByNumberCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.getByNumberCalls
+}
+
+func (r *fakeSeasonRepo) ListCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.listCalls
+}
+
+func (r *fakeSeasonRepo) RequestedNumbers() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.requestedNumbers
+}
+
+type fakeSeasonLocalizationRepo struct {
+	localizations   map[string]*models.SeasonLocalization
+	bulkGetErr      error
+	bulkUpsertErr   error
+	upsertErrors    map[string]error
+	getCalls        int
+	bulkGetCalls    int
+	upsertCalls     int
+	bulkUpsertCalls int
+}
+
+func newFakeSeasonLocalizationRepo() *fakeSeasonLocalizationRepo {
+	return &fakeSeasonLocalizationRepo{
+		localizations: make(map[string]*models.SeasonLocalization),
+		upsertErrors:  make(map[string]error),
+	}
+}
+
+func seasonLocalizationKey(contentID, language string) string {
+	return contentID + ":" + language
+}
+
+func (r *fakeSeasonLocalizationRepo) Get(_ context.Context, contentID, language string) (*models.SeasonLocalization, error) {
+	r.getCalls++
+	loc := r.localizations[seasonLocalizationKey(contentID, language)]
+	if loc == nil {
+		return nil, nil
+	}
+	cp := *loc
+	return &cp, nil
+}
+
+func (r *fakeSeasonLocalizationRepo) GetBySeasonIDs(
+	_ context.Context,
+	contentIDs []string,
+	language string,
+) (map[string]*models.SeasonLocalization, error) {
+	r.bulkGetCalls++
+	if r.bulkGetErr != nil {
+		return nil, r.bulkGetErr
+	}
+	result := make(map[string]*models.SeasonLocalization, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if loc := r.localizations[seasonLocalizationKey(contentID, language)]; loc != nil {
+			cp := *loc
+			result[contentID] = &cp
+		}
+	}
+	return result, nil
+}
+
+func (r *fakeSeasonLocalizationRepo) Upsert(_ context.Context, loc *models.SeasonLocalization) error {
+	r.upsertCalls++
+	key := seasonLocalizationKey(loc.SeasonContentID, loc.Language)
+	if err := r.upsertErrors[key]; err != nil {
+		return err
+	}
+	r.store(loc)
+	return nil
+}
+
+func (r *fakeSeasonLocalizationRepo) BulkUpsert(_ context.Context, localizations []*models.SeasonLocalization) error {
+	r.bulkUpsertCalls++
+	if r.bulkUpsertErr != nil {
+		return r.bulkUpsertErr
+	}
+	for _, loc := range localizations {
+		r.store(loc)
+	}
+	return nil
+}
+
+func (r *fakeSeasonLocalizationRepo) store(loc *models.SeasonLocalization) {
+	cp := *loc
+	r.localizations[seasonLocalizationKey(loc.SeasonContentID, loc.Language)] = &cp
+}
+
+type fakeEpisodeLocalizationRepo struct {
+	localizations   map[string]*models.EpisodeLocalization
+	bulkGetErr      error
+	bulkUpsertErr   error
+	upsertErrors    map[string]error
+	getCalls        int
+	bulkGetCalls    int
+	upsertCalls     int
+	bulkUpsertCalls int
+}
+
+func newFakeEpisodeLocalizationRepo() *fakeEpisodeLocalizationRepo {
+	return &fakeEpisodeLocalizationRepo{
+		localizations: make(map[string]*models.EpisodeLocalization),
+		upsertErrors:  make(map[string]error),
+	}
+}
+
+func episodeLocalizationKey(contentID, language string) string {
+	return contentID + ":" + language
+}
+
+func (r *fakeEpisodeLocalizationRepo) Get(_ context.Context, contentID, language string) (*models.EpisodeLocalization, error) {
+	r.getCalls++
+	loc := r.localizations[episodeLocalizationKey(contentID, language)]
+	if loc == nil {
+		return nil, nil
+	}
+	cp := *loc
+	return &cp, nil
+}
+
+func (r *fakeEpisodeLocalizationRepo) GetByEpisodeIDs(
+	_ context.Context,
+	contentIDs []string,
+	language string,
+) (map[string]*models.EpisodeLocalization, error) {
+	r.bulkGetCalls++
+	if r.bulkGetErr != nil {
+		return nil, r.bulkGetErr
+	}
+	result := make(map[string]*models.EpisodeLocalization, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if loc := r.localizations[episodeLocalizationKey(contentID, language)]; loc != nil {
+			cp := *loc
+			result[contentID] = &cp
+		}
+	}
+	return result, nil
+}
+
+func (r *fakeEpisodeLocalizationRepo) Upsert(_ context.Context, loc *models.EpisodeLocalization) error {
+	r.upsertCalls++
+	key := episodeLocalizationKey(loc.EpisodeContentID, loc.Language)
+	if err := r.upsertErrors[key]; err != nil {
+		return err
+	}
+	r.store(loc)
+	return nil
+}
+
+func (r *fakeEpisodeLocalizationRepo) BulkUpsert(_ context.Context, localizations []*models.EpisodeLocalization) error {
+	r.bulkUpsertCalls++
+	if r.bulkUpsertErr != nil {
+		return r.bulkUpsertErr
+	}
+	for _, loc := range localizations {
+		r.store(loc)
+	}
+	return nil
+}
+
+func (r *fakeEpisodeLocalizationRepo) store(loc *models.EpisodeLocalization) {
+	cp := *loc
+	r.localizations[episodeLocalizationKey(loc.EpisodeContentID, loc.Language)] = &cp
 }
 
 // fakeEpisodeLinkerFileRepo extends fakeFileRepo with EpisodeLinker methods,

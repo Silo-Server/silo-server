@@ -1,0 +1,128 @@
+name: Native macOS Server
+
+on:
+  # Temporarily manual-only while GitHub's macOS runners cannot reliably
+  # create the VideoToolbox hardware compression session exercised below.
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOPRIVATE: github.com/Silo-Server/*
+  GONOSUMDB: github.com/Silo-Server/*
+  GOWORK: off
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Darwin arm64
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install native dependencies
+        run: brew install vips ffmpeg
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend assets
+        working-directory: web
+        run: pnpm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Validate SDK resolves from the module graph
+        run: |
+          sdk_module_json="$(mktemp)"
+          go list -m -json github.com/Silo-Server/silo-plugin-sdk > "$sdk_module_json"
+          if grep -q '"Replace":' "$sdk_module_json"; then
+            echo "silo-plugin-sdk resolved through a module replacement."
+            cat "$sdk_module_json"
+            exit 1
+          fi
+          if grep -q '"Main": true' "$sdk_module_json"; then
+            echo "silo-plugin-sdk resolved from the local workspace instead of go.mod."
+            cat "$sdk_module_json"
+            exit 1
+          fi
+
+      - name: Test Go on macOS
+        run: go test ./...
+
+      - name: Build native server archive
+        id: build
+        env:
+          BUILDINFO_PKG: github.com/Silo-Server/silo-server/internal/buildinfo
+        run: |
+          built_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          archive="silo-darwin-arm64-${GITHUB_SHA::8}.tar.gz"
+          package_dir="dist/silo-darwin-arm64"
+          mkdir -p "$package_dir"
+
+          go build -trimpath \
+            -ldflags "-X ${BUILDINFO_PKG}.revisionOverride=${GITHUB_SHA} -X ${BUILDINFO_PKG}.dirtyOverride=false -X ${BUILDINFO_PKG}.builtAtOverride=${built_at}" \
+            -o "$package_dir/silo" ./cmd/silo/
+
+          cp LICENSE "$package_dir/LICENSE"
+          go version -m "$package_dir/silo" > "$package_dir/build-info.txt"
+          otool -L "$package_dir/silo" > "$package_dir/linked-libraries.txt"
+          tar -czf "dist/$archive" -C dist silo-darwin-arm64
+          (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Verify native runtime and VideoToolbox
+        env:
+          ARCHIVE: ${{ steps.build.outputs.archive }}
+        run: |
+          file dist/silo-darwin-arm64/silo | grep -q 'Mach-O 64-bit executable arm64'
+          dist/silo-darwin-arm64/silo -h >/dev/null
+          grep -aFq "$GITHUB_SHA" dist/silo-darwin-arm64/silo
+
+          ffmpeg -hide_banner -hwaccels > "$RUNNER_TEMP/ffmpeg-hwaccels.txt" 2>/dev/null
+          grep -Fxq 'videotoolbox' "$RUNNER_TEMP/ffmpeg-hwaccels.txt"
+          ffmpeg -hide_banner -encoders > "$RUNNER_TEMP/ffmpeg-encoders.txt" 2>/dev/null
+          grep -q 'h264_videotoolbox' "$RUNNER_TEMP/ffmpeg-encoders.txt"
+          ffmpeg -hide_banner -loglevel error \
+            -f lavfi -i color=c=black:s=128x72:r=24 \
+            -frames:v 12 -c:v h264_videotoolbox -f null -
+
+          (cd dist && shasum -a 256 -c "$ARCHIVE.sha256")
+
+      - name: Upload native server
+        uses: actions/upload-artifact@v4
+        with:
+          name: silo-darwin-arm64-${{ github.sha }}
+          path: |
+            dist/${{ steps.build.outputs.archive }}
+            dist/${{ steps.build.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 14

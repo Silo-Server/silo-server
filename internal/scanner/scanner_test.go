@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -197,6 +198,58 @@ func TestIdentityOnlyUpdateReasons(t *testing.T) {
 		if got := identityOnlyUpdateReasons(tc.reasons); got != tc.want {
 			t.Errorf("identityOnlyUpdateReasons(%#v) = %v, want %v", tc.reasons, got, tc.want)
 		}
+	}
+}
+
+func TestFailedProbeRepairPreservesExistingProbe(t *testing.T) {
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair"}, nil) {
+		t.Fatal("migration-triggered repair failure would overwrite existing probe metadata")
+	}
+	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "mtime_changed"}, nil) {
+		t.Fatal("changed source must not preserve stale probe metadata")
+	}
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "root_assignment_changed", "group_assignment_changed"}, nil) {
+		t.Fatal("identity-only changes must preserve probe metadata when repair probing fails")
+	}
+	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "size_changed", "root_assignment_changed"}, nil) {
+		t.Fatal("byte changes must not preserve stale probe metadata")
+	}
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_changed"}, nil) {
+		t.Fatal("subtitle-only changes must preserve probe metadata when repair probing fails")
+	}
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_missing", "group_assignment_changed"}, nil) {
+		t.Fatal("missing subtitle and identity changes must preserve probe metadata when repair probing fails")
+	}
+}
+
+func TestPersistIdentityUpdateUsesReturnedIDBeforeEnqueue(t *testing.T) {
+	mf := &models.MediaFile{FilePath: "/library/movie.mkv"}
+	var enqueuedID int
+	applied, err := persistIdentityUpdate(
+		mf,
+		func(models.MediaFile) (int, error) { return 42, nil },
+		func(file *models.MediaFile) error {
+			enqueuedID = file.ID
+			return nil
+		},
+	)
+	if err != nil || !applied {
+		t.Fatalf("persistIdentityUpdate = (%v, %v), want applied", applied, err)
+	}
+	if mf.ID != 42 || enqueuedID != 42 {
+		t.Fatalf("updated/enqueued IDs = %d/%d, want 42/42", mf.ID, enqueuedID)
+	}
+}
+
+func TestPersistIdentityUpdatePropagatesEnqueueFailure(t *testing.T) {
+	want := errors.New("queue unavailable")
+	applied, err := persistIdentityUpdate(
+		&models.MediaFile{FilePath: "/library/movie.mkv"},
+		func(models.MediaFile) (int, error) { return 42, nil },
+		func(*models.MediaFile) error { return want },
+	)
+	if !applied || !errors.Is(err, want) {
+		t.Fatalf("persistIdentityUpdate = (%v, %v), want applied and queue error", applied, err)
 	}
 }
 

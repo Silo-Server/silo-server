@@ -48,7 +48,7 @@ func TestPresignAudiobookPosterURLUsesPosterVariant(t *testing.T) {
 	detail := &DetailService{}
 	detail.SetImageResolver(resolver)
 
-	got := detail.presignAudiobookPosterURL(context.Background(), "local/audiobooks/book/poster/original.webp")
+	got := detail.presignAudiobookPosterURL(context.Background(), "local/audiobooks/book/poster/original.webp", AccessFilter{})
 
 	if !strings.Contains(got, "/w500.webp") {
 		t.Fatalf("resolved URL = %q, want w500 poster variant", got)

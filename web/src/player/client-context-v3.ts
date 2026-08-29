@@ -21,6 +21,7 @@ import {
   type DeliverySubtitleCapabilitiesV3,
   type HDRCapabilitiesV3,
 } from "./protocol-v3";
+import { isSafariBrowserV3 } from "./utils/hlsEngine";
 
 /** App version reported to the server for diagnostics. */
 const WEB_APP_VERSION = "web";
@@ -41,23 +42,33 @@ const WEB_SUBTITLE_CAPABILITIES: DeliverySubtitleCapabilitiesV3 = {
   font_attachments: true,
 };
 
-/** Detects whether either hls.js or the native media element can play HLS. */
-export function detectHLSSupport(): boolean {
+export interface HLSSupportProbe {
+  supported: boolean;
+  native: boolean;
+}
+
+/** Detects whether HLS is available and whether the media element handles it natively. */
+export function detectHLSSupport(): HLSSupportProbe {
   if (typeof document !== "undefined") {
     try {
       const video = document.createElement("video");
-      if (video.canPlayType("application/vnd.apple.mpegurl") !== "") return true;
+      if (video.canPlayType("application/vnd.apple.mpegurl") !== "") {
+        return { supported: true, native: true };
+      }
     } catch {
       // Fall through to the hls.js/MSE probe.
     }
   }
-  if (typeof MediaSource === "undefined") return false;
+  if (typeof MediaSource === "undefined") return { supported: false, native: false };
   try {
     // hls.js muxes into fMP4/TS; the baseline it requires is an MSE that can
     // take an mp4 segment at all.
-    return MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"');
+    return {
+      supported: MediaSource.isTypeSupported('video/mp4; codecs="avc1.42E01E"'),
+      native: false,
+    };
   } catch {
-    return false;
+    return { supported: false, native: false };
   }
 }
 
@@ -70,14 +81,18 @@ export interface WebCapabilityProbe {
   progressiveCodecsVideo: string[];
   /** Audio codec names the browser reported support for. */
   codecsAudio: string[];
+  /** Audio codecs supported specifically inside progressive MP4 delivery. */
+  progressiveCodecsAudio: string[];
   /** Best-effort screen-derived resolution ceiling. */
   maxResolution: string;
   /** Best-effort HDR display detection. */
   hdr: boolean;
   /** Structured HDR formats supported by the active browser output path. */
   hdrDetails: HDRCapabilitiesV3;
-  /** Whether hls.js can be used on this browser. */
+  /** Whether native HLS or hls.js can be used on this browser. */
   hls: boolean;
+  /** Whether HLS is handled by the browser's native media element. */
+  nativeHLS: boolean;
 }
 
 /**
@@ -133,6 +148,7 @@ function buildDeliveryCapability(
  */
 export function buildDeliveriesV3(
   probe: WebCapabilityProbe,
+  userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "",
 ): Partial<Record<DeliveryClassV3, DeliveryCapabilityV3>> {
   const nonProgressiveHDRDetails: HDRCapabilitiesV3 = {
     ...probe.hdrDetails,
@@ -147,18 +163,25 @@ export function buildDeliveriesV3(
   delete nonProgressiveHDRDetails.hdr10_max_height;
   delete nonProgressiveHDRDetails.hdr10_max_frame_rate;
   delete nonProgressiveHDRDetails.hdr10_max_bitrate_kbps;
+  const nativeHLSPreferred = probe.nativeHLS && isSafariBrowserV3(userAgent);
+  const progressiveHDRDetails = nativeHLSPreferred ? nonProgressiveHDRDetails : probe.hdrDetails;
+  const hlsHDRDetails = nativeHLSPreferred ? probe.hdrDetails : nonProgressiveHDRDetails;
+  const hlsVideoCodecs = nativeHLSPreferred ? probe.progressiveCodecsVideo : probe.codecsVideo;
   return {
     original_http: buildDeliveryCapability(probe, {
       hdr_details: nonProgressiveHDRDetails,
     }),
     progressive: buildDeliveryCapability(probe, {
       video_codecs: probe.progressiveCodecsVideo,
+      audio_decode_codecs: probe.progressiveCodecsAudio,
+      hdr_details: progressiveHDRDetails,
     }),
     hls: buildDeliveryCapability(probe, {
       supported_on_device: probe.hls,
       ...(probe.hls ? {} : { failure_reason: "media_source_extensions_unavailable" }),
       containers: ["hls"],
-      hdr_details: nonProgressiveHDRDetails,
+      video_codecs: hlsVideoCodecs,
+      hdr_details: hlsHDRDetails,
     }),
   };
 }
@@ -246,6 +269,9 @@ export function buildClientPlaybackContextV3(probe: WebCapabilityProbe): ClientP
       ...(Object.keys(platformDetails).length > 0 ? { platform_details: platformDetails } : {}),
     },
     output: { hdr_details: probe.hdrDetails },
-    deliveries: buildDeliveriesV3(probe),
+    deliveries: buildDeliveriesV3(
+      probe,
+      typeof navigator !== "undefined" ? navigator.userAgent : "",
+    ),
   };
 }

@@ -16,6 +16,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 type loggingResponseWriter struct {
@@ -33,6 +35,13 @@ func (w *loggingResponseWriter) Write(b []byte) (int, error) {
 		w.status = http.StatusOK
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+func (w *loggingResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
 func (w *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -139,6 +148,27 @@ func (w *debugResponseWriter) Write(b []byte) (int, error) {
 		w.captured += toCapture
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+func (w *debugResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+	ct := strings.TrimSpace(w.Header().Get("Content-Type"))
+	if !w.detected && ct == "" {
+		return io.Copy(httpstream.WriterOnly(w), src)
+	}
+	if !w.detected {
+		w.contentType = ct
+		w.skipBody = !isTextualContentType(ct)
+		w.detected = true
+	}
+	if !w.skipBody {
+		return io.Copy(httpstream.WriterOnly(w), src)
+	}
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, httpstream.ReadFromChunkDefault, func(n int64, _ error) {
+		w.totalBytes += int(n)
+	})
 }
 
 func (w *debugResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

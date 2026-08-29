@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
@@ -219,6 +220,48 @@ func TestProxyDownloadRejectsRemoteArtifactWithInvalidOpaqueID(t *testing.T) {
 	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProxyDownloadToneMapTokenRequiresCompleteAttestation(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("incomplete token reached origin")
+	}))
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID: "download-attested", PlayMethod: streamtoken.PlayMethodToneMapDownload,
+		TranscodeNode: origin.URL, DownloadArtifactID: "artifact-1",
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProxyDownloadAcceptsCompleteToneMapAttestationToken(t *testing.T) {
+	const secret = "download-proxy-secret"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloadprepare.SetResultHeaders(w.Header(), downloadprepare.Result{FileSize: 5, ExecutionFingerprint: "fingerprint"})
+		_, _ = w.Write([]byte("bytes"))
+	}))
+	defer origin.Close()
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID: "download-attested", PlayMethod: streamtoken.PlayMethodToneMapDownload,
+		TranscodeNode: origin.URL, DownloadArtifactID: "artifact-1",
+		DownloadArtifactSize: 5, DownloadExecutionFingerprint: "fingerprint",
+	}, secret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
+	if rr.Code != http.StatusOK || rr.Body.String() != "bytes" {
+		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
 	}
 }
 

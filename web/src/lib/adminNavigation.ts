@@ -14,13 +14,12 @@ import {
   PanelsTopLeft,
   Puzzle,
   Radio,
-  RefreshCw,
   ScrollText,
   Send,
   Server,
+  Settings2,
   ShieldCheck,
   SkipForward,
-  SlidersHorizontal,
   Users,
   UsersRound,
   Wrench,
@@ -29,7 +28,7 @@ import type { LucideIcon } from "lucide-react";
 
 import type { PluginInstallation } from "@/api/types";
 import type { SettingsSearchGroup, SettingsSearchItem } from "@/components/settings/settingsSearch";
-import { ADMIN_SETTINGS_GROUPS } from "@/lib/adminSettingsSearch";
+import { ADMIN_SETTINGS_NAV } from "@/lib/adminSettingsSearch";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
 
 export interface AdminNavItem extends SettingsSearchItem {
@@ -86,8 +85,18 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
     items: [
       {
         label: "Libraries",
-        description: "Media libraries, paths, scanning, and catalog import/export.",
-        keywords: ["library", "paths", "scan", "catalog", "seed"],
+        description: "Media libraries, paths, scanning, autoscan sources, and catalog import.",
+        keywords: [
+          "library",
+          "paths",
+          "scan",
+          "catalog",
+          "seed",
+          "autoscan",
+          "scan queue",
+          "polling",
+          "webhook source",
+        ],
         icon: Library,
         href: "/admin/libraries",
       },
@@ -118,13 +127,6 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
     label: "Automation",
     items: [
       {
-        label: "Autoscan",
-        description: "Autoscan sources, queue state, and poller behavior.",
-        keywords: ["scan queue", "cephfs", "polling", "matcher"],
-        icon: RefreshCw,
-        href: "/admin/autoscan",
-      },
-      {
         label: "Scheduled Tasks",
         description: "Background task schedules, runs, and job history.",
         keywords: ["tasks", "jobs", "scheduler", "sync"],
@@ -132,7 +134,7 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
         href: "/admin/tasks",
       },
       {
-        label: "Subtitles",
+        label: "Subtitle Files",
         description: "Downloaded subtitle records and subtitle admin tools.",
         keywords: ["captions", "subtitle downloads", "providers"],
         icon: Captions,
@@ -195,15 +197,20 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
     ],
   },
   {
-    label: "System",
+    label: "Settings",
     items: [
       {
         label: "Settings",
-        description: "Server-wide settings, integrations, storage, and compatibility proxies.",
-        keywords: ["configuration", "server settings", "admin settings"],
-        icon: SlidersHorizontal,
+        description: "Server configuration, integrations, playback, storage, and access.",
+        keywords: ["settings", "configuration", "server settings", "preferences"],
+        icon: Settings2,
         href: "/admin/settings",
       },
+    ],
+  },
+  {
+    label: "System",
+    items: [
       {
         label: "Plugins",
         description: "Plugin catalog, repositories, installs, and plugin configuration.",
@@ -294,31 +301,30 @@ export function appendAdminPluginNavSection(
   ];
 }
 
-export function appendAdminSettingsNavSection(sections: readonly AdminNavGroup[]): AdminNavGroup[] {
-  return [
-    ...sections.map((section) => ({ ...section, items: [...section.items] })),
-    {
-      label: "Admin Settings",
-      items: ADMIN_SETTINGS_GROUPS.flatMap((group) =>
-        group.items.map((item) => ({
-          label: item.label,
-          description: item.description,
-          keywords: ["admin settings", group.label, ...(item.keywords ?? [])],
-          settings: item.settings,
-          icon: item.icon,
-          href: `/admin/settings?tab=${encodeURIComponent(item.id)}`,
-        })),
-      ),
-    },
-  ];
-}
-
 export function buildAdminCommandNavSections(
   installations: readonly PluginInstallation[] | undefined,
   visibility: AdminNavVisibility = {},
 ): AdminNavGroup[] {
-  return appendAdminPluginNavSection(
-    appendAdminSettingsNavSection(buildAdminNavSections(visibility)),
-    installations,
+  // Keep the persistent sidebar quiet while preserving direct access to every
+  // settings category and individual setting through Cmd+K.
+  const sections = buildAdminNavSections(visibility).map((section) =>
+    section.label === "Settings"
+      ? {
+          ...section,
+          items: [
+            ...section.items,
+            ...ADMIN_SETTINGS_NAV.map((item) => ({
+              label: item.label,
+              description: item.description,
+              keywords: ["settings", "configuration", ...(item.keywords ?? [])],
+              settings: item.settings,
+              icon: item.icon,
+              href: `/admin/settings/${encodeURIComponent(item.id)}`,
+            })),
+          ],
+        }
+      : section,
   );
+
+  return appendAdminPluginNavSection(sections, installations);
 }

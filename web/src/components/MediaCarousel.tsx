@@ -1,9 +1,11 @@
 import { Children } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
+import { useUICustomization } from "@/hooks/useUICustomization";
+import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
 
 interface MediaCarouselProps {
   title: string;
@@ -37,6 +39,7 @@ export default function MediaCarousel({
   edgePadding = true,
 }: MediaCarouselProps) {
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
+  const { cardPresentation } = useUICustomization();
   // Page-edge padding is opt-out so the carousel can also be embedded in an
   // already-padded container without double-padding the header and cards.
   const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
@@ -53,7 +56,14 @@ export default function MediaCarousel({
     : Children.toArray(children);
 
   return (
-    <section className="section-row group/carousel relative isolate">
+    <section
+      className="section-row media-carousel group/carousel relative isolate"
+      style={
+        {
+          "--carousel-intrinsic-h": carouselIntrinsicHeight(cardPresentation.poster_size),
+        } as CSSProperties
+      }
+    >
       <div className={`mb-5 flex items-end justify-between gap-4${headerPadX}`}>
         <div className="flex items-center gap-2">
           {titleHref ? (
@@ -91,7 +101,7 @@ export default function MediaCarousel({
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/80 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/80 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll left"
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -100,7 +110,7 @@ export default function MediaCarousel({
 
         <div
           ref={emblaRef}
-          className={`embla__viewport overflow-hidden${viewportPadX}`}
+          className={`embla__viewport -mt-1 overflow-hidden pt-1${viewportPadX}`}
           tabIndex={0}
           aria-label="Media carousel"
           onKeyDown={(e) => {
@@ -128,7 +138,7 @@ export default function MediaCarousel({
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/80 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-[--duration-fast] group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/80 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
             aria-label="Scroll right"
           >
             <ChevronRight className="text-foreground h-6 w-6" />

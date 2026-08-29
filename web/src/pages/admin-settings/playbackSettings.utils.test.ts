@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHWDeviceRows,
+  chapterThumbnailExecutionOptions,
+  hasUsableTranscodeNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
   toggleHWDevice,
@@ -146,5 +148,57 @@ describe("nodeInventoriesDiverge", () => {
         ],
       } as never),
     ).toBe(true);
+  });
+});
+
+function node(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    name: "node-1",
+    type: "transcode",
+    enabled: true,
+    healthy: true,
+    ...overrides,
+  } as never;
+}
+
+describe("hasUsableTranscodeNode", () => {
+  it("is false without any node list", () => {
+    expect(hasUsableTranscodeNode(undefined)).toBe(false);
+    expect(hasUsableTranscodeNode([])).toBe(false);
+  });
+
+  it("requires a transcode node that is both enabled and healthy", () => {
+    expect(hasUsableTranscodeNode([node({ enabled: false })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ healthy: false })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ type: "streaming" })])).toBe(false);
+    expect(hasUsableTranscodeNode([node({ healthy: false }), node({ id: 2 })])).toBe(true);
+  });
+});
+
+describe("chapterThumbnailExecutionOptions", () => {
+  const disabledValues = (current: string, available: boolean) =>
+    chapterThumbnailExecutionOptions(current, available)
+      .filter((option) => option.disabled)
+      .map((option) => option.value);
+
+  it("enables everything while a transcode node is available", () => {
+    expect(disabledValues("local", true)).toEqual([]);
+  });
+
+  it("disables the node-backed modes when no node can take the work", () => {
+    expect(disabledValues("local", false)).toEqual([
+      "prefer_transcode_nodes",
+      "transcode_nodes_only",
+    ]);
+  });
+
+  it("keeps a saved node-backed mode selectable so it can be changed", () => {
+    expect(disabledValues("transcode_nodes_only", false)).toEqual(["prefer_transcode_nodes"]);
+    expect(disabledValues("prefer_transcode_nodes", false)).toEqual(["transcode_nodes_only"]);
+  });
+
+  it("never disables local extraction", () => {
+    expect(disabledValues("transcode_nodes_only", false)).not.toContain("local");
   });
 });

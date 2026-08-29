@@ -214,6 +214,25 @@ func NormalizePersonalListSort(field, order string) (QuerySort, bool) {
 	return QuerySort{Field: field, Order: order}, true
 }
 
+// NormalizePersonalSourceSort validates a saved Watchlist/Favorites browse
+// preference against the same non-personalized vocabulary accepted by the
+// live personal-source catalog request.
+func NormalizePersonalSourceSort(field, order string) (QuerySort, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+	// Relevance needs a live search query and random is not stable, so neither
+	// is meaningful as a persisted preference if they join the general set.
+	if field == "relevance" || field == "random" || !QuerySortFieldSet(false)[field] {
+		return QuerySort{}, false
+	}
+	order = strings.ToLower(strings.TrimSpace(order))
+	if order == "" {
+		order = querySortDefs[field].defaultOrder
+	} else if order != "asc" && order != "desc" {
+		return QuerySort{}, false
+	}
+	return QuerySort{Field: field, Order: order}, true
+}
+
 // NormalizeCollectionSort validates a collection's default sort (its stored
 // sort_config) or a viewer's saved override, applying the field's default order
 // when none is given. Returns false when the field or a supplied order is

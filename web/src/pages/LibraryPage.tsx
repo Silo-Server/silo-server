@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import type { QueryDefinition } from "@/api/types";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -142,22 +142,38 @@ export default function LibraryPage() {
       return;
     }
 
-    setSavedStateHydratedKey(libraryPageStateKey);
     const nextSearchParams = applySavedLibraryPageSearchParams(
       searchParams,
       rememberLibraryPageState ? (savedLibrarySearch ?? "") : "",
     );
     const hydratedSearch = serializeLibraryPageSearchParams(nextSearchParams);
-    setHydratedLibrarySearch({
+    const nextHydratedLibrarySearch: HydratedLibrarySearch = {
       ownerKey: libraryPageStateOwnerKey,
       libraryId: id,
       search: hydratedSearch,
-    });
-    if (nextSearchParams.toString() !== searchParams.toString()) {
-      applyingSavedSearchParamsRef.current = hydratedSearch;
-      applyingSavedSearchParamsKeyRef.current = libraryPageStateKey;
-      setSearchParams(nextSearchParams, { replace: true });
+    };
+
+    if (nextSearchParams.toString() === searchParams.toString()) {
+      // The saved search already matches the URL, so there is nothing to
+      // navigate to and the page can leave the skeleton immediately.
+      setSavedStateHydratedKey(libraryPageStateKey);
+      setHydratedLibrarySearch(nextHydratedLibrarySearch);
+      return;
     }
+
+    applyingSavedSearchParamsRef.current = hydratedSearch;
+    applyingSavedSearchParamsKeyRef.current = libraryPageStateKey;
+    // react-router wraps setSearchParams in a transition. Marking hydration as
+    // done urgently would commit first, dropping the skeleton while
+    // `searchParams` still read the pre-navigation URL — long enough for the
+    // default Recommended tab to mount and fire its section queries before the
+    // transition lands the saved tab. Keeping all three updates in one
+    // transition commits the marker and the URL together.
+    startTransition(() => {
+      setSavedStateHydratedKey(libraryPageStateKey);
+      setHydratedLibrarySearch(nextHydratedLibrarySearch);
+      setSearchParams(nextSearchParams, { replace: true });
+    });
   }, [
     id,
     libraryPageStateKey,

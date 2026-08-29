@@ -1741,3 +1741,80 @@ func withChiParam(r *http.Request, key, value string) *http.Request {
 	routeCtx.URLParams.Add(key, value)
 	return r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
 }
+
+func TestAdminGetSettingReportsRestartRequired(t *testing.T) {
+	const restartKey = "scanner.max_concurrent_libraries"
+	const liveKey = "server.log_level"
+
+	handler := &AdminHandler{
+		SettingsRepo: &fakeServerSettingsStore{values: map[string]string{
+			restartKey: "4",
+			liveKey:    "debug",
+		}},
+		BootstrapSensitiveValues: map[string]string{
+			"playback.ffmpeg_path": "/opt/ffmpeg",
+		},
+	}
+
+	for _, tc := range []struct {
+		name            string
+		key             string
+		wantValue       string
+		wantRestart     bool
+		wantRestartSeen bool
+	}{
+		{
+			name:            "stored restart-required key",
+			key:             restartKey,
+			wantValue:       "4",
+			wantRestart:     true,
+			wantRestartSeen: true,
+		},
+		{
+			name:      "stored hot-reloading key omits the flag",
+			key:       liveKey,
+			wantValue: "debug",
+		},
+		{
+			name:            "bootstrap value",
+			key:             "playback.ffmpeg_path",
+			wantValue:       "/opt/ffmpeg",
+			wantRestart:     true,
+			wantRestartSeen: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if config.RestartRequired(tc.key) != tc.wantRestart {
+				t.Fatalf("test fixture drifted: config.RestartRequired(%q) = %v", tc.key, !tc.wantRestart)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/admin/settings/"+tc.key, nil)
+			req = withChiParam(req, "key", tc.key)
+			rec := httptest.NewRecorder()
+
+			handler.HandleGetSetting(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Key             string `json:"key"`
+				Value           string `json:"value"`
+				RestartRequired bool   `json:"restart_required"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload.Key != tc.key || payload.Value != tc.wantValue {
+				t.Fatalf("payload = %+v, want key %q value %q", payload, tc.key, tc.wantValue)
+			}
+			if payload.RestartRequired != tc.wantRestart {
+				t.Fatalf("restart_required = %v, want %v", payload.RestartRequired, tc.wantRestart)
+			}
+			// omitempty must keep the flag off the wire for live keys.
+			if seen := strings.Contains(rec.Body.String(), "restart_required"); seen != tc.wantRestartSeen {
+				t.Fatalf("restart_required present = %v, want %v; body=%s", seen, tc.wantRestartSeen, rec.Body.String())
+			}
+		})
+	}
+}

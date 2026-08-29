@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 func RequestLogger(nodeID string) func(http.Handler) http.Handler {
@@ -93,6 +95,13 @@ func (w *requestStatusWriter) Write(b []byte) (int, error) {
 		w.wroteHeader = true
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+func (w *requestStatusWriter) ReadFrom(src io.Reader) (int64, error) {
+	if !w.wroteHeader {
+		w.status, w.wroteHeader = http.StatusOK, true
+	}
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
 func (w *requestStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

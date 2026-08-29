@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 7,
+  "manifest_revision": 8,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -730,6 +730,149 @@
             "textOutlineColor": "#000000",
             "position": "bottom"
           },
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "card_overlays_enabled_profile_opt_out",
+      "description": "A profile that turned its own overlay badges off resolves false at profile scope; the server-wide default is not part of settings resolution.",
+      "keys": ["ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": false
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": false,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_overlays_enabled_profile_opt_in",
+      "description": "A profile that turned its own overlay badges on resolves true at profile scope, which is what lets it override a server-wide default of off.",
+      "keys": ["ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": true,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_overlays_absent_express_no_preference",
+      "description": "Nothing stored resolves both card-overlay keys to null with source \"default\", which is what lets the server-wide admin defaults apply.",
+      "keys": ["ui.card_overlays", "ui.card_overlays_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "ui.card_overlays",
+          "value": null,
+          "source": "default"
+        },
+        {
+          "key": "ui.card_overlays_enabled",
+          "value": null,
+          "source": "default"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_profile_choice_wins",
+      "description": "A profile that picked favorites-only shortcuts resolves at profile scope instead of falling through to the server-wide default.",
+      "keys": ["ui.card_quick_actions"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "favorites"
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions",
+          "value": "favorites",
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_enabled_profile_opt_out",
+      "description": "A profile that turned its own quick actions off resolves false at profile scope; the server-wide default is not part of settings resolution.",
+      "keys": ["ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": false
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": false,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_enabled_profile_opt_in",
+      "description": "A profile that turned its own quick actions on resolves true at profile scope, which is what lets it override a server-wide default of off.",
+      "keys": ["ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": true
+        }
+      ],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": true,
+          "source": "profile"
+        }
+      ]
+    },
+    {
+      "name": "card_quick_actions_absent_express_no_preference",
+      "description": "Nothing stored resolves both quick-action keys to null with source \"default\", which is what lets the server-wide admin defaults apply.",
+      "keys": ["ui.card_quick_actions", "ui.card_quick_actions_enabled"],
+      "context": { "profile_id": "p1" },
+      "stored": [],
+      "expected": [
+        {
+          "key": "ui.card_quick_actions",
+          "value": null,
+          "source": "default"
+        },
+        {
+          "key": "ui.card_quick_actions_enabled",
+          "value": null,
           "source": "default"
         }
       ]

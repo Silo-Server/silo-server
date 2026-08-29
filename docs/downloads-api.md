@@ -220,6 +220,43 @@ Capabilities mirror streaming playback caps:
 }
 ```
 
+`caps` fields:
+
+| Field                      | Type     | Notes                                                                                                   |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `codecs_video`             | string[] | Flat list of video codecs the device can decode.                                                        |
+| `codecs_audio`             | string[] | Flat list of audio codecs the device can decode.                                                        |
+| `audio_passthrough_codecs` | string[] | Codecs the connected sink accepts bit-exact.                                                            |
+| `containers`               | string[] | Containers the device can open.                                                                         |
+| `max_resolution`           | string   | Coarse device ceiling (`480p`…`2160p`). See the note under detailed evidence below.                     |
+| `hdr`                      | bool     | Whether the display can present HDR.                                                                    |
+| `client_features`          | string[] | Optional protocol-v3 feature tokens, e.g. `software_video_decode_v1`. Same vocabulary as playback start. |
+| `video_evidence`           | string   | Optional provenance of the video facts: `declared`, `platform_attested`, or `exact`.                    |
+| `video_decode`             | object[] | Optional per-decoder entries; same shape and bounds as the protocol-v3 `video_decode[]`.                |
+
+The last three fields are additive and optional. They carry the same meaning as
+on the v3 playback start request — see
+[docs/architecture/playback-protocol-v3.md](architecture/playback-protocol-v3.md)
+— and download creation accepts exactly the shapes playback accepts:
+
+- Flat lists alone, with or without `video_evidence`, are always valid. A
+  `declared` payload and a payload carrying only `client_features` both resolve
+  from the flat codec lists.
+- `video_decode` entries are only honoured at `video_evidence` of `exact` or
+  `platform_attested`, because no weaker tier can validate them. Sending
+  `video_decode` entries with `declared`, or with `video_evidence` omitted, is a
+  partial opt-in the server will not silently ignore: it returns `400`
+  `bad_request`. Malformed entries (empty `codec`, negative bounds, oversized
+  lists) are rejected with `400` at any tier.
+
+When a strict tier does supply entries, they decide whether a particular
+original file is safe to hand over as-is, and they supersede the coarse
+`max_resolution` ceiling — a `max_width: 3840` hardware entry preserves a 4K
+original even when `max_resolution` says `1080p`. If the file's stored probe
+metadata is too sparse to check against those bounds (missing bit depth,
+dimensions, frame rate, or bitrate), the server falls back to the flat codec
+lists rather than forcing a transcode of an original-quality download.
+
 Single-item response (`202 Accepted`):
 
 ```json
@@ -902,6 +939,40 @@ For Apple TV 4K or modern HDR-capable devices, the client may advertise `4k` and
 `hdr: true`; older phones/tablets should stay conservative. These caps affect
 only server-side compatibility decisions and bitrate transcode targets.
 
+A client with real decoder facts can send `video_evidence` and `video_decode`
+alongside the flat lists. Note what that changes: detailed entries supersede the
+coarse `max_resolution` ceiling, so a conservative `"max_resolution": "1080p"`
+no longer bounds anything once `video_decode` describes a decoder that reaches
+higher. If a hard 1080p cap is the intent, bound the entries themselves
+(`max_width: 1920`, `max_height: 1080`, and the matching frame-rate and bitrate
+limits) rather than relying on `max_resolution`.
+
+```json
+{
+  "caps": {
+    "client_features": ["software_video_decode_v1"],
+    "video_evidence": "platform_attested",
+    "codecs_video": ["h264", "hevc"],
+    "codecs_audio": ["aac", "ac3", "eac3"],
+    "audio_passthrough_codecs": ["ac3", "eac3"],
+    "containers": ["mp4", "mov", "m4v"],
+    "max_resolution": "1080p",
+    "hdr": false,
+    "video_decode": [
+      {
+        "codec": "hevc",
+        "bit_depths": [8, 10],
+        "max_width": 1920,
+        "max_height": 1080,
+        "max_frame_rate": 60,
+        "max_bitrate_kbps": 40000,
+        "hardware": true
+      }
+    ]
+  }
+}
+```
+
 ### 10.5 Download orchestration
 
 For a single movie or episode:
@@ -1182,9 +1253,11 @@ Errors use a flat envelope:
 | 429  | `download_limit_exceeded`  | Concurrent download cap hit.                                              |
 | 429  | `download_quota_exceeded`  | Period quota hit.                                                         |
 | 500  | `internal_error`           | Unexpected server error.                                                  |
-| 501  | `quality_unavailable`      | Requested quality cannot be produced right now.                           |
+| 501  | `quality_unavailable`      | Tone mapping is disabled, its selected mode is disallowed by policy, or enabled executor capabilities cannot support the requested quality. These configuration and policy failures use HTTP 501, distinct from capability-detection failures. |
 | 501  | `bulk_quality_unavailable` | Series/season batch requested a non-original quality.                     |
+| 503  | `capability_unavailable`   | Executor capability discovery failed temporarily; retry the same request. |
 | 501  | `format_unavailable`       | Legacy/internal non-original direct download or missing prepare pipeline. |
+| 503  | `capacity_unavailable`     | Compatible download-preparation executors are currently saturated.        |
 | 503  | `unavailable`              | Downloads/offline assets/series monitoring service missing.               |
 
 Access denials intentionally surface as `404` on manifest, artwork, subtitle, and

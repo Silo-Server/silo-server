@@ -101,9 +101,8 @@ export default function DetailHero({
       {topNav}
       {(backdropUrl || backdropPlaceholder) && (
         <div
-          className="absolute inset-0 h-full w-full"
+          className="hero-backdrop-artwork absolute inset-0 h-full w-full"
           style={{
-            filter: `brightness(var(--hero-backdrop-brightness, 0.4)) saturate(var(--hero-backdrop-saturate, 1.15))`,
             ...(backdropPlaceholder && !backdropLoaded
               ? {
                   backgroundImage: `url(${backdropPlaceholder})`,
@@ -118,28 +117,29 @@ export default function DetailHero({
               key={backdropUrl}
               src={backdropUrl}
               alt=""
-              className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 will-change-transform ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
-              style={{ animation: "var(--animate-ken-burns-a)" }}
+              decoding="async"
+              className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
               onLoad={onBackdropLoad}
             />
           )}
         </div>
       )}
 
-      {/* Left-to-right gradient */}
-      <div className="hero-gradient-left" />
-
-      {/* Ambient glow from artwork */}
-      <div className="ambient-glow" />
-
-      {/* Bottom-to-top gradient */}
-      <div className="hero-gradient" />
-      <div className="hero-vignette" />
+      {/* Keep the detail treatment on three contained paint surfaces while
+          preserving its original stacking: tint/left fade, ambient artwork
+          glow, then the bottom fades and vignette. Previously five full-hero
+          elements were independently invalidated during browser-chrome resize. */}
+      <div className="detail-hero-scrim detail-hero-scrim-under" />
+      <div className="ambient-glow detail-hero-ambient" />
+      <div className="detail-hero-scrim detail-hero-scrim-over" />
 
       <div
         className={`page-shell-wide relative flex flex-col justify-end pb-8 ${
           isCompact
-            ? "h-[35vh] min-h-[300px] pt-20 lg:h-[42vh]"
+            ? // min-height (not fixed height) below lg: bottom-justified content
+              // taller than the hero would otherwise overflow out the top, under
+              // the floating back button.
+              "min-h-[max(35vh,300px)] pt-20 lg:min-h-[42vh]"
             : "min-h-[60dvh] pt-28 lg:min-h-[72dvh]"
         }`}
       >
@@ -160,6 +160,7 @@ export default function DetailHero({
                       key={posterUrl}
                       src={posterUrl}
                       alt={title}
+                      decoding="async"
                       className={`w-full object-cover ${posterAspect} ${posterLoaded ? "opacity-100" : "opacity-0"}`}
                       onLoad={onPosterLoad}
                     />
@@ -189,7 +190,7 @@ export default function DetailHero({
 
             {/* Info column */}
             <div
-              className="max-w-3xl"
+              className="detail-hero-copy max-w-3xl"
               style={{ textShadow: "var(--hero-text-shadow, 0 1px 3px rgb(0 0 0 / 40%))" }}
             >
               {context && (
@@ -208,6 +209,7 @@ export default function DetailHero({
                   <img
                     src={logoUrl}
                     alt=""
+                    decoding="async"
                     className="mb-4 max-h-20 max-w-[420px] object-contain object-left lg:max-h-28 lg:max-w-[480px]"
                   />
                 </>
@@ -292,7 +294,7 @@ export default function DetailHero({
               )}
 
               {actions && (
-                <div className="mt-6" style={{ textShadow: "none" }}>
+                <div className="detail-action-bar mt-6" style={{ textShadow: "none" }}>
                   {actions}
                 </div>
               )}

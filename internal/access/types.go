@@ -5,7 +5,7 @@ type Scope struct {
 	UserID              int
 	ProfileID           string
 	AllowedLibraryIDs   []int
-	DisabledLibraryIDs  []int // user-disabled libraries (only set when AllowedLibraryIDs is nil)
+	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
 	LibrariesRestricted bool
 	MaxContentRating    string
 	MaxPlaybackQuality  string

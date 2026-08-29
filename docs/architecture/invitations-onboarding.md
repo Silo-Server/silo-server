@@ -46,6 +46,9 @@ dump yields no usable links.
   inherit/override policy resolver: the group supplies every field the
   account leaves unset, and a pre-bound library list is stored as an explicit
   account override. An invitation sets initial values; it is never a bypass.
+  Admin accounts are never grouped, so an `admin` invitation with an
+  `access_group_id` is rejected at send (`422`) rather than stored and then
+  silently dropped at accept.
 
 ## Lifecycle invariants
 

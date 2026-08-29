@@ -111,12 +111,17 @@ func (h *UserCollectionImportHandler) HandleImportMDBList(w http.ResponseWriter,
 		writeError(w, http.StatusBadRequest, "bad_request", "title and url are required")
 		return
 	}
+	canonicalURL, err := usercollections.CanonicalMDBListURL(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "url must be an MDBList list (https://mdblist.com/lists/...)")
+		return
+	}
 	if !validateOptionalLimit(req.Limit, w) {
 		return
 	}
 	cfg := usercollections.SourceConfig{
 		Mode:       usercollections.SourceModeMDBList,
-		URL:        usercollections.NormalizeMDBListURL(req.URL),
+		URL:        canonicalURL,
 		Limit:      req.Limit,
 		LibraryIDs: req.LibraryIDs,
 	}

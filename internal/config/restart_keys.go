@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // restartRequiredKeys lists server_settings keys whose values are captured at
 // process startup (listeners, connection pools, HTTP clients, worker pools)
@@ -30,12 +33,21 @@ var restartRequiredKeys = map[string]bool{
 	"ratelimit.enabled": true,
 	"ratelimit.backend": true,
 
-	// Playback transcode infrastructure. The playback/stream handlers read
-	// ffmpeg path and hwaccel live (new transcode sessions), but several
-	// startup-built consumers still freeze them (scanner ffprobe, chapter
-	// thumbnails, audiobook enricher) — keep restart-required until those
-	// convert. transcode_dir is also captured by dedicated transcode nodes for
-	// session and prepared-download storage. A configured download.artifact_dir is
+	// Playback transcode infrastructure. The native playback/stream handlers,
+	// the transcode nodes, and the download artifact managers read ffmpeg path
+	// and hwaccel live (new transcode sessions), and chapter-thumbnail
+	// extraction and the playback probe ensurer now do too.
+	//
+	// What still freezes them is the jellycompat playback handler: it captures
+	// FFmpegPath/HWAccel and the boot *config.Config (for hw_device) when the
+	// compat router is built, so a Jellyfin-client transcode keeps the boot
+	// values until restart. ffmpeg_path has three more startup-frozen consumers
+	// in cmd/silo/main.go — the intro-marker analyzer, the scanner's own ffprobe
+	// path, and the audiobook enricher. Keep these restart-required until those
+	// convert; converting them is what lets the badge go away.
+	//
+	// transcode_dir is also captured by dedicated transcode nodes for session
+	// and prepared-download storage. A configured download.artifact_dir is
 	// likewise captured by both API and transcode-node artifact managers. The
 	// chapter-thumbnail worker pool is sized at construction.
 	"playback.ffmpeg_path":               true,
@@ -55,12 +67,11 @@ var restartRequiredKeys = map[string]bool{
 	"matcher.enable_tv_series_root_queue":  true,
 	"matcher.enable_tv_series_group_queue": true,
 
-	// External API clients built once at startup.
+	// External API clients built once at startup. watchsync.trakt.client_id is
+	// deliberately absent: the collection adapter re-reads it from the settings
+	// repo before each upstream call (atomic setter on the shared client), and
+	// the watch-sync OAuth flows always read both credentials live.
 	"tmdb.api_key": true,
-	// The Trakt collection browser captures its public client ID when the
-	// router is built. Watch-sync flows read both credentials live, but a
-	// restart is still required for the collection adapter to converge.
-	"watchsync.trakt.client_id": true,
 
 	// Compat listeners and session stores.
 	"audiobookshelf_compat.enabled": true,
@@ -117,4 +128,29 @@ func RestartRequired(key string) bool {
 		}
 	}
 	return false
+}
+
+// RestartRequiredKeys returns the sorted list of exact server_settings keys
+// that require a restart. The admin UI reads this over
+// GET /admin/settings/restart-keys to render its restart badges, so it must
+// stay a copy: callers must not be able to mutate the registry.
+func RestartRequiredKeys() []string {
+	keys := make([]string, 0, len(restartRequiredKeys))
+	for key, required := range restartRequiredKeys {
+		if required {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// RestartRequiredPrefixes returns the sorted list of key prefixes whose whole
+// namespace requires a restart. Pair it with RestartRequiredKeys: a key needs a
+// restart when it is listed exactly or carries one of these prefixes.
+func RestartRequiredPrefixes() []string {
+	prefixes := make([]string, len(restartRequiredPrefixes))
+	copy(prefixes, restartRequiredPrefixes)
+	sort.Strings(prefixes)
+	return prefixes
 }

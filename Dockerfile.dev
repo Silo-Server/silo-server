@@ -14,16 +14,22 @@ RUN pnpm run build
 # Stage 2: Prepare Go build workspace
 FROM golang:1.26 AS build-base
 ENV CGO_ENABLED=1
-ENV GOPROXY=direct
+ENV GOPROXY=https://proxy.golang.org,direct
 ENV GOPRIVATE=github.com/Silo-Server/*
 ENV GONOSUMDB=github.com/Silo-Server/*
 RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
+# Apply the local SDK replacement before downloading modules. Copy its module
+# metadata first so SDK source edits do not invalidate the dependency layer.
+COPY --from=silo_plugin_sdk go.mod go.sum /tmp/silo-plugin-sdk/
+RUN test -f /tmp/silo-plugin-sdk/go.mod
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
+    go mod edit -replace=github.com/Silo-Server/silo-plugin-sdk=/tmp/silo-plugin-sdk && \
     go mod download
+COPY --from=silo_plugin_sdk pkg/ /tmp/silo-plugin-sdk/pkg/
 COPY web/embed.go web/embed.go
 COPY --from=frontend /app/web/dist web/dist
 COPY cmd/ cmd/
@@ -40,29 +46,42 @@ ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 ARG BUILD_NUMBER
 ARG BUILD_DATE
-COPY --from=silo_plugin_sdk . /tmp/silo-plugin-sdk
-RUN test -f /tmp/silo-plugin-sdk/go.mod
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    go mod edit -replace=github.com/Silo-Server/silo-plugin-sdk=/tmp/silo-plugin-sdk && \
-    go mod download && \
     go build \
     -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
 # Stage 4: Runtime
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 ARG TARGETARCH
+ARG INTEL_GMMLIB_VERSION=22.10.0
+ARG INTEL_IGC_VERSION=2.34.4
+ARG INTEL_IGC_BUILD=21428
+ARG INTEL_NEO_VERSION=26.18.38308.1
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian bookworm main" \
+    echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian trixie main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends jellyfin-ffmpeg7 git libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+# Keep the development image's tone-map runtime identical to the release image.
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+      runtime_dir="$(mktemp -d)" && \
+      cd "${runtime_dir}" && \
+      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/libigdgmm12_${INTEL_GMMLIB_VERSION}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-core-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-opencl-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/intel-opencl-icd_${INTEL_NEO_VERSION}-0_amd64.deb" && \
+      apt-get update && \
+      apt-get install -y --no-install-recommends ./*.deb && \
+      cd / && \
+      rm -rf "${runtime_dir}" /var/lib/apt/lists/*; \
+    fi
 RUN mkdir -p /tmp/silo-transcode /var/lib/silo/compat/jellyfin-web
 COPY --from=frontend /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm

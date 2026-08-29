@@ -1,13 +1,10 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
-import { useToggleFavorite } from "@/hooks/queries/favorites";
-import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
+import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useItemEpisodes, useSeasons } from "@/hooks/queries/episodes";
 import { useContinueWatching } from "@/hooks/queries/progress";
-import { useSetRating, useDeleteRating } from "@/hooks/queries/ratings";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -28,10 +25,9 @@ import TrailersSection from "./components/TrailersSection";
 import ExtrasSection from "./components/ExtrasSection";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
-import ActionBar from "./components/ActionBar";
+import MediaUserActionBar from "./components/MediaUserActionBar";
 import { SeasonCarouselSkeleton, RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { getSeasonDisplayTitle, resolveSeriesPrimaryAction } from "./itemDetailLayout";
-import { getWatchedActionLabel } from "./watchedState";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 export default function SeriesContent({ item }: { item: ItemDetail & { type: "series" } }) {
@@ -44,14 +40,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
 
-  const isFavorite = item.user_state?.is_favorite ?? false;
-  const inWatchlist = item.user_state?.in_watchlist ?? false;
-  const toggleFavoriteMutation = useToggleFavorite(item.content_id);
-  const toggleWatchlistMutation = useToggleWatchlist(item.content_id);
   const refreshMetadataMutation = useRefreshItemMetadata();
-  const watchedMutation = useWatchedStateMutation(item);
-  const setRatingMutation = useSetRating(item.content_id);
-  const deleteRatingMutation = useDeleteRating(item.content_id);
 
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
@@ -60,14 +49,6 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
   const { items: continueWatchingItems } = useContinueWatching();
-
-  const handleRatingChange = (rating: number | null) => {
-    if (rating === null) {
-      deleteRatingMutation.mutate();
-    } else {
-      setRatingMutation.mutate(rating);
-    }
-  };
 
   const title = item.title ?? "";
   const firstYear = item.first_air_date?.slice(0, 4);
@@ -160,18 +141,12 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           <HeroCrewLine crew={item.crew ?? []} genres={item.genres} jobLabel="Created by" />
         }
         actions={
-          <ActionBar
+          <MediaUserActionBar
+            item={item}
             contentId={item.content_id}
             playHref={resolvedPrimaryHref}
             playLabel={primaryAction.label}
             playLoading={primaryActionLoading}
-            watchedLabel={getWatchedActionLabel(item)}
-            onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
-            isUpdatingWatched={watchedMutation.isPending}
-            onToggleFavorite={() => toggleFavoriteMutation.mutate(isFavorite)}
-            isFavorite={isFavorite}
-            onToggleWatchlist={() => toggleWatchlistMutation.mutate(inWatchlist)}
-            inWatchlist={inWatchlist}
             onRefresh={
               canCurateMetadata
                 ? (mode) =>
@@ -188,13 +163,11 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
             onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
-            rating={item.user_rating ?? null}
-            onRatingChange={handleRatingChange}
           />
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {seasonsLoading ? (
           <SeasonCarouselSkeleton />
         ) : singleSeason ? (

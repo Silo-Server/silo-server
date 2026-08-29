@@ -186,6 +186,19 @@ func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
 	}
 }
 
+// TestTranscodeToneMapPoliciesDefaultDisabled verifies tone mapping remains opt-in.
+func TestTranscodeToneMapPoliciesDefaultDisabled(t *testing.T) {
+	effective := EffectiveAdminSettings(nil)
+	for _, key := range []string{
+		PlaybackTranscodeHardwareToneMapSettingKey,
+		PlaybackTranscodeSoftwareToneMapSettingKey,
+	} {
+		if got := effective[key]; got != "false" {
+			t.Fatalf("%s default = %q, want false", key, got)
+		}
+	}
+}
+
 func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	if cfg.S3.Public.URLAuth == "" {
 		cfg.S3.Public.URLAuth = "presigned"
@@ -209,6 +222,7 @@ func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	)
 }
 
+// TestNormalizeAdminSettingRejectsInvalidValues verifies invalid admin settings are rejected.
 func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		key   string
@@ -217,6 +231,8 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
 		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
+		{key: PlaybackTranscodeHardwareToneMapSettingKey, value: "maybe"},
+		{key: PlaybackTranscodeSoftwareToneMapSettingKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
 		{key: "recommendations.embeddings_cron", value: "not a cron"},
 		{key: "notifications.server_channels.batch_seconds", value: "119"},
@@ -225,6 +241,18 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "theme.catalog_url", value: "http://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json"},
 		{key: "theme.catalog_url", value: "https://example.com/catalog.json"},
 		{key: "redis.url", value: "not-a-url"},
+		{key: "scanner.max_concurrent_libraries", value: "0"},
+		{key: "scanner.max_concurrent_scoped", value: "-1"},
+		{key: "scanner.empty_trash_after_scan", value: "sometimes"},
+		{key: "scanner.file_removal_grace", value: "a while"},
+		{key: "matcher.enable_tv_series_root_queue", value: "yes please"},
+		{key: "matcher.enable_tv_series_group_queue", value: "yes please"},
+		{key: "policy.editor_enabled", value: "maybe"},
+		{key: "policy.eval_timeout_ms", value: "0"},
+		{key: "subtitle_ai.live_asr_chunk_seconds", value: "0"},
+		{key: "opslog.capture_level", value: "chatty"},
+		{key: "s3.metadata_presign_expiry", value: "0s"},
+		{key: "recommendations.embeddings_job_timeout", value: "soon"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
@@ -245,6 +273,16 @@ func TestNormalizeAdminSettingAcceptsApprovedThemeCatalogURL(t *testing.T) {
 	}
 	if got != "https://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json" {
 		t.Fatalf("normalized URL = %q", got)
+	}
+}
+
+func TestNormalizeAdminSettingAcceptsVideoToolbox(t *testing.T) {
+	got, err := NormalizeAdminSetting("playback.hw_accel", " VideoToolbox ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "videotoolbox" {
+		t.Fatalf("normalized hardware acceleration = %q, want videotoolbox", got)
 	}
 }
 
@@ -296,5 +334,61 @@ func TestNormalizeAdminSettingCanonicalizesRedisURL(t *testing.T) {
 	}
 	if got != "rediss://cache.example.invalid:6380/2" {
 		t.Fatalf("normalized Redis URL = %q", got)
+	}
+}
+
+// TestNormalizeAdminSettingKeepsPermissiveScannerGrace locks the loader's
+// documented behavior: a zero or negative grace means "remove missing files
+// immediately", so the admin API must not reject it.
+func TestNormalizeAdminSettingKeepsPermissiveScannerGrace(t *testing.T) {
+	for _, value := range []string{"0s", "-1h", "72h"} {
+		got, err := NormalizeAdminSetting("scanner.file_removal_grace", "  "+value+"  ")
+		if err != nil {
+			t.Fatalf("NormalizeAdminSetting(scanner.file_removal_grace, %q): %v", value, err)
+		}
+		if got != value {
+			t.Fatalf("normalized grace = %q, want %q", got, value)
+		}
+	}
+}
+
+// TestOpslogCaptureLevelAcceptsWarningAlias mirrors the startup reader in
+// cmd/silo, which treats "warning" as "warn".
+func TestOpslogCaptureLevelAcceptsWarningAlias(t *testing.T) {
+	got, err := NormalizeAdminSetting("opslog.capture_level", "WARNING")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "warning" {
+		t.Fatalf("normalized capture level = %q, want warning", got)
+	}
+}
+
+// TestHiddenTierDefaultsAreExposed guards the keys that have no admin UI: the
+// API must still report the value the server is actually running.
+func TestHiddenTierDefaultsAreExposed(t *testing.T) {
+	effective := EffectiveAdminSettings(nil)
+	want := map[string]string{
+		"recommendations.embedding_provider":     "ollama",
+		"recommendations.embeddings_job_timeout": "24h",
+		"policy.editor_enabled":                  "false",
+		"policy.eval_timeout_ms":                 "25",
+		"subtitle_ai.live_asr_chunk_seconds":     "30",
+		"scanner.max_concurrent_libraries":       "1",
+		"scanner.max_concurrent_scoped":          "2",
+		"scanner.file_removal_grace":             "24h",
+		"scanner.empty_trash_after_scan":         "true",
+		"matcher.enable_tv_series_root_queue":    "true",
+		"matcher.enable_tv_series_group_queue":   "false",
+		"opslog.capture_level":                   "info",
+		"s3.metadata_presign_expiry":             "4h",
+	}
+	for key, value := range want {
+		if got := effective[key]; got != value {
+			t.Errorf("effective[%q] = %q, want %q", key, got, value)
+		}
+		if _, err := NormalizeAdminSetting(key, value); err != nil {
+			t.Errorf("default for %q is rejected by NormalizeAdminSetting: %v", key, err)
+		}
 	}
 }

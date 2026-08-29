@@ -4,7 +4,7 @@ import { Check, Monitor } from "lucide-react";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
-import { useTheme } from "@/hooks/useTheme";
+import { isKeyboardFocus, useTheme } from "@/hooks/useTheme";
 import { formatDate, formatTime } from "@/lib/datetime";
 import type { DateFormatPreference, TimeFormatPreference } from "@/lib/datetime";
 import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
@@ -50,7 +50,12 @@ export default function AppearanceSettings() {
                 key={id}
                 type="button"
                 onClick={() => setTheme(id)}
-                onFocus={() => previewTheme(id)}
+                // Pointer focus already previews through onMouseEnter (behind
+                // the hover-intent delay); previewing on every focus would
+                // short-circuit it. Keyboard focus only.
+                onFocus={(event) => {
+                  if (isKeyboardFocus(event.currentTarget)) previewTheme(id);
+                }}
                 onBlur={resetPreviewTheme}
                 onMouseEnter={() => previewTheme(id)}
                 onMouseLeave={resetPreviewTheme}

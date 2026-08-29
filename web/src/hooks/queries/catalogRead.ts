@@ -142,6 +142,20 @@ export function usePrefetchCatalogSeason(libraryId?: number) {
   );
 }
 
+/** Warms an episode's detail query when the user shows intent to open it. */
+export function usePrefetchCatalogItemDetail(libraryId?: number) {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (itemId: string) => {
+      void queryClient.prefetchQuery({
+        queryKey: catalogKeys.itemDetail(itemId, libraryId),
+        queryFn: () => fetchCatalogItemDetail(itemId, libraryId),
+      });
+    },
+    [queryClient, libraryId],
+  );
+}
+
 export function useCatalogSeriesSeasons(seriesId: string | undefined, libraryId?: number) {
   return useQuery({
     queryKey: catalogKeys.seriesSeasons(seriesId!, libraryId),

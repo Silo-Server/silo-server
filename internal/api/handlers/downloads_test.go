@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
@@ -372,6 +373,184 @@ func TestHandleCreateDownloadThreadsQuality(t *testing.T) {
 	}
 }
 
+func TestHandleCreateDownloadPreservesBoundedSoftwareDecodeEvidence(t *testing.T) {
+	svc := &fakeDownloadService{created: &downloads.Download{
+		ID: "dl1", ContentID: "c1", Status: downloads.StatusQueued,
+		Format: downloads.FormatOriginal, Quality: downloads.QualityOriginal,
+		EffectiveQuality: downloads.QualityOriginal,
+	}}
+	h := NewDownloadHandler(svc)
+	body := []byte(`{
+		"content_id":"c1",
+		"quality":"original",
+		"caps":{
+			"client_features":["software_video_decode_v1"],
+			"video_evidence":"platform_attested",
+			"codecs_video":["av1"],
+			"codecs_audio":["aac"],
+			"containers":["mp4"],
+			"max_resolution":"2160p",
+			"video_decode":[{
+				"codec":"av1","bit_depths":[8,10],"max_width":1920,
+				"max_height":1080,"max_frame_rate":60,
+				"max_bitrate_kbps":40000,"hardware":false
+			}]
+		}
+	}`)
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+	}
+	caps := svc.gotCreateReq.Caps
+	if caps.VideoEvidence != playback.EvidencePlatformAttestedV3 ||
+		len(caps.ClientFeatures) != 1 || caps.ClientFeatures[0] != playback.FeatureSoftwareVideoDecodeV3 ||
+		len(caps.VideoDecode) != 1 || caps.VideoDecode[0].MaxWidth != 1920 ||
+		caps.VideoDecode[0].Hardware {
+		t.Fatalf("service received altered software evidence: %+v", caps)
+	}
+}
+
+func TestHandleCreateDownloadRejectsUnboundedDetailedDecoderInput(t *testing.T) {
+	svc := &fakeDownloadService{}
+	h := NewDownloadHandler(svc)
+	body := []byte(`{
+		"content_id":"c1",
+		"caps":{
+			"client_features":["software_video_decode_v1"],
+			"video_evidence":"platform_attested",
+			"codecs_video":["av1"],
+			"video_decode":[{"codec":"av1","max_width":-1,"hardware":false}]
+		}
+	}`)
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotCreateReq.ContentID != "" {
+		t.Fatal("invalid detailed decoder evidence reached the download service")
+	}
+}
+
+// Flat-list payloads are legal at every evidence tier on the v3 playback start
+// path, so download creation must accept the same shapes rather than 400 on
+// them. Only video_decode entries the tier cannot validate are refused.
+func TestHandleCreateDownloadAcceptsFlatCapabilityPayloads(t *testing.T) {
+	tests := []struct {
+		name string
+		caps string
+	}{
+		{
+			name: "declared evidence with flat lists",
+			caps: `{
+				"video_evidence":"declared",
+				"codecs_video":["h264","hevc"],
+				"codecs_audio":["aac"],
+				"containers":["mp4"],
+				"max_resolution":"1080p"
+			}`,
+		},
+		{
+			name: "feature token only",
+			caps: `{
+				"client_features":["software_video_decode_v1"],
+				"codecs_video":["av1"],
+				"codecs_audio":["aac"],
+				"containers":["mp4"]
+			}`,
+		},
+		{
+			name: "platform attested without entries",
+			caps: `{
+				"client_features":["software_video_decode_v1"],
+				"video_evidence":"platform_attested",
+				"codecs_video":["av1"]
+			}`,
+		},
+		{
+			name: "legacy flat payload",
+			caps: `{
+				"codecs_video":["h264"],
+				"codecs_audio":["aac"],
+				"containers":["mp4"],
+				"max_resolution":"1080p"
+			}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeDownloadService{created: &downloads.Download{
+				ID: "dl1", ContentID: "c1", Status: downloads.StatusQueued,
+				Format: downloads.FormatOriginal, Quality: downloads.QualityOriginal,
+				EffectiveQuality: downloads.QualityOriginal,
+			}}
+			h := NewDownloadHandler(svc)
+			body := []byte(`{"content_id":"c1","quality":"original","caps":` + tc.caps + `}`)
+			rec := httptest.NewRecorder()
+			h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if len(svc.gotCreateReq.Caps.CodecsVideo) == 0 {
+				t.Fatalf("service received no flat codec list: %+v", svc.gotCreateReq.Caps)
+			}
+		})
+	}
+}
+
+// A misspelled evidence tier on an otherwise flat payload must 400 exactly as
+// it does on the v3 playback start path. Accepting it would degrade the client
+// to flat resolution with no signal that its tier was never read.
+func TestHandleCreateDownloadRejectsUnknownVideoEvidenceOnFlatPayloads(t *testing.T) {
+	svc := &fakeDownloadService{}
+	h := NewDownloadHandler(svc)
+	body := []byte(`{
+		"content_id":"c1",
+		"caps":{
+			"video_evidence":"exat",
+			"codecs_video":["h264"],
+			"codecs_audio":["aac"],
+			"containers":["mp4"],
+			"max_resolution":"1080p"
+		}
+	}`)
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotCreateReq.ContentID != "" {
+		t.Fatal("an unrecognized video_evidence tier reached the download service")
+	}
+}
+
+func TestHandleCreateDownloadRejectsDetailedEntriesWithoutStrictEvidence(t *testing.T) {
+	svc := &fakeDownloadService{}
+	h := NewDownloadHandler(svc)
+	body := []byte(`{
+		"content_id":"c1",
+		"caps":{
+			"video_evidence":"declared",
+			"codecs_video":["av1"],
+			"video_decode":[{"codec":"av1","max_width":1920,"hardware":true}]
+		}
+	}`)
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotCreateReq.ContentID != "" {
+		t.Fatal("unvalidatable video_decode entries reached the download service")
+	}
+}
+
 func TestHandleCreateDownloadSeriesThreadsQuality(t *testing.T) {
 	svc := &fakeDownloadService{
 		series:   []*downloads.Download{{ID: "dl1", ContentID: "s1", Format: downloads.FormatOriginal, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Revision: 1}},
@@ -412,6 +591,7 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 		{"transcode disabled", downloads.ErrTranscodeDisabled, http.StatusForbidden},
 		{"invalid quality", downloads.ErrInvalidQuality, http.StatusBadRequest},
 		{"quality unavailable", downloads.ErrQualityUnavailable, http.StatusNotImplemented},
+		{"capability unavailable", downloads.ErrCapabilityUnavailable, http.StatusServiceUnavailable},
 		{"bulk quality unavailable", downloads.ErrBulkQualityUnavailable, http.StatusNotImplemented},
 		{"format unavailable", downloads.ErrFormatUnavailable, http.StatusNotImplemented},
 		{"profile required", downloads.ErrProfileRequired, http.StatusBadRequest},
@@ -429,6 +609,24 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleCreateDownloadCapacityUnavailableIsRetryable(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloadService{createErr: fmt.Errorf("tone-map placement: %w", downloads.ErrCapacityUnavailable)})
+	body, _ := json.Marshal(downloadRequest{ContentID: "c1"})
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+	var response errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Error != "capacity_unavailable" {
+		t.Fatalf("error = %q, want capacity_unavailable (body: %s)", response.Error, rec.Body.String())
 	}
 }
 
@@ -544,14 +742,16 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 	svc := &proxyDownloadService{
 		fakeDownloadService: &fakeDownloadService{},
 		managedTarget: &downloads.FileTarget{
-			DownloadID:       "dl-remote",
-			ArtifactID:       "artifact-row",
-			Path:             "/prepared/Movie Final.mp4",
-			MediaFileID:      42,
-			OriginNodeURL:    "http://transcode-b.internal:8096",
-			OriginNodeGroup:  "host-b",
-			OriginArtifactID: "artifact-remote",
-			ProxyEligible:    true,
+			DownloadID:                   "dl-remote",
+			ArtifactID:                   "artifact-row",
+			Path:                         "/prepared/Movie Final.mp4",
+			MediaFileID:                  42,
+			OriginNodeURL:                "http://transcode-b.internal:8096",
+			OriginNodeGroup:              "host-b",
+			OriginArtifactID:             "artifact-remote",
+			ExpectedArtifactSize:         123,
+			ExpectedExecutionFingerprint: "recipe-fingerprint",
+			ProxyEligible:                true,
 		},
 	}
 	groupA, groupB := "host-a", "host-b"
@@ -578,7 +778,9 @@ func TestManagedFileRedirectsNodeLocalArtifactThroughSameGroupProxy(t *testing.T
 		t.Fatal(err)
 	}
 	if claims.MediaPath != "" || claims.DownloadFilename != "Movie Final.mp4" || claims.TranscodeNode != "http://transcode-b.internal:8096" ||
-		claims.DownloadArtifactID != "artifact-remote" || claims.DownloadArtifactRowID != "artifact-row" {
+		claims.PlayMethod != streamtoken.PlayMethodToneMapDownload ||
+		claims.DownloadArtifactID != "artifact-remote" || claims.DownloadArtifactRowID != "artifact-row" ||
+		claims.DownloadArtifactSize != 123 || claims.DownloadExecutionFingerprint != "recipe-fingerprint" {
 		t.Fatalf("claims = %+v", claims)
 	}
 }
@@ -601,6 +803,31 @@ func TestManagedFileFallsBackWhenRemoteLocatorHasNoOriginURL(t *testing.T) {
 	h.HandleDownloadFileViaProxy(rec, req)
 	if rec.Code != http.StatusOK || rec.Body.String() != "served" {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestManagedToneMapFileFallsBackWhenLegacyProxyRejectsToken(t *testing.T) {
+	legacyProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer legacyProxy.Close()
+	svc := &proxyDownloadService{
+		fakeDownloadService: &fakeDownloadService{},
+		managedTarget: &downloads.FileTarget{
+			DownloadID: "dl-attested", ArtifactID: "artifact-row", Path: "/prepared/movie.mp4", MediaFileID: 42,
+			OriginNodeURL: "http://transcode.internal", OriginArtifactID: "artifact-remote",
+			ExpectedArtifactSize: 123, ExpectedExecutionFingerprint: "fingerprint", ProxyEligible: true,
+		},
+	}
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{URL: legacyProxy.URL, Enabled: true, Healthy: true}})
+	h := NewDownloadHandler(svc)
+	h.SetProxyDelivery(nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()), func() string { return "secret" })
+	req := withChiID(downloadTestRequest(http.MethodGet, "/downloads/dl-attested/file-proxy", nil, 7, "pA", "devA"), "dl-attested")
+	rec := httptest.NewRecorder()
+	h.HandleDownloadFileViaProxy(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "served" {
+		t.Fatalf("fallback response = %d %q, want central serve", rec.Code, rec.Body.String())
 	}
 }
 

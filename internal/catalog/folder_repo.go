@@ -1047,6 +1047,30 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 	return unreferenced, nil
 }
 
+// DistinctLibraryPaths returns every configured library folder path, once each
+// and in a stable order.
+//
+// media_folder_paths is the authoritative list of roots the server was told
+// about; a folder can have several. Host resource sampling uses this to decide
+// which mounts to report free space on, which is why it reads paths only and
+// deliberately does not care which library owns them.
+func (r *FolderRepository) DistinctLibraryPaths(ctx context.Context) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT path FROM media_folder_paths ORDER BY path`)
+	if err != nil {
+		return nil, fmt.Errorf("querying library paths: %w", err)
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scanning library path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
+}
+
 // UpdateLastScanned sets the last_scanned_at timestamp for the given folder.
 // LibraryRootsForContent returns the media folder root paths the given
 // content belongs to, resolved through media_item_libraries. The metadata

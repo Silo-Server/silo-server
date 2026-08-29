@@ -137,6 +137,23 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 		t.Errorf("file_size = %d, want preserved 123456", updated.FileSize)
 	}
 
+	// A failed repair may still discover a sidecar-only change. Persist that
+	// inventory through the narrow update without clearing the valid probe.
+	updated.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/new/root/Movie.en.srt", Language: "eng", Format: "srt"}}
+	if _, err := repo.UpdateIdentityAndExternalSubtitles(ctx, *updated); err != nil {
+		t.Fatalf("UpdateIdentityAndExternalSubtitles: %v", err)
+	}
+	withSidecar, err := repo.GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath after sidecar update: %v", err)
+	}
+	if len(withSidecar.ExternalSubtitles) != 1 || withSidecar.ExternalSubtitles[0].Path != "/new/root/Movie.en.srt" {
+		t.Fatalf("external subtitles = %#v, want updated sidecar", withSidecar.ExternalSubtitles)
+	}
+	if withSidecar.ProbeUpdatedAt == nil || !withSidecar.ProbeUpdatedAt.Equal(probedAt) || withSidecar.CodecVideo != "h264" {
+		t.Fatalf("probe metadata changed during sidecar update: source=%q updated=%v video=%q", withSidecar.ProbeSource, withSidecar.ProbeUpdatedAt, withSidecar.CodecVideo)
+	}
+
 	// Match suppression cleared like any other scan write, so the fresh
 	// identity re-enters the match backlog.
 	var suppressed bool

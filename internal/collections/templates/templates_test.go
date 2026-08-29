@@ -250,6 +250,18 @@ func TestRegisterValidatesTemplate(t *testing.T) {
 			tmpl: Template{ID: "x", Title: "x", Category: CategoryCustom, Source: SourceMDBList, MediaKind: MediaMixed, MDBList: &MDBListSpec{URL: "ftp://example.com/list.json"}},
 		},
 		{
+			name: "mdblist off-host URL",
+			tmpl: Template{ID: "x", Title: "x", Category: CategoryCustom, Source: SourceMDBList, MediaKind: MediaMixed, MDBList: &MDBListSpec{URL: "https://example.com/lists/x/y"}},
+		},
+		{
+			name: "mdblist userinfo URL",
+			tmpl: Template{ID: "x", Title: "x", Category: CategoryCustom, Source: SourceMDBList, MediaKind: MediaMixed, MDBList: &MDBListSpec{URL: "https://mdblist.com@127.0.0.1/lists/x/y"}},
+		},
+		{
+			name: "mdblist disallowed port",
+			tmpl: Template{ID: "x", Title: "x", Category: CategoryCustom, Source: SourceMDBList, MediaKind: MediaMixed, MDBList: &MDBListSpec{URL: "https://mdblist.com:8080/lists/x/y"}},
+		},
+		{
 			name: "tmdb_collection missing spec",
 			tmpl: Template{
 				ID: "x", Title: "x", Category: CategoryEditorial,

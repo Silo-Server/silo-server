@@ -124,39 +124,42 @@ func episodeCatalogBaseRelationForLibraries(
 		return episodeCatalogBaseRelation, nil, false
 	}
 
-	libraryConditions := []string{
-		"el.episode_id = e.content_id",
-	}
+	var libraryPredicates []string
 	args := make([]any, 0, len(allowedLibraryIDs)+len(disabledLibraryIDs))
 
 	if len(allowedLibraryIDs) > 0 {
-		libraryConditions = append(
-			libraryConditions,
-			fmt.Sprintf("el.media_folder_id = ANY($%d)", argIdx),
-		)
+		libraryPredicates = append(libraryPredicates, fmt.Sprintf(`EXISTS (
+		SELECT 1
+		FROM episode_libraries el_scope_in
+		WHERE el_scope_in.episode_id = e.content_id
+		  AND el_scope_in.media_folder_id = ANY($%d)
+	)`, argIdx))
 		args = append(args, allowedLibraryIDs)
 		argIdx++
+	} else if len(disabledLibraryIDs) > 0 {
+		libraryPredicates = append(libraryPredicates, episodeCatalogActiveLibraryExists)
 	}
 
 	if len(disabledLibraryIDs) > 0 {
-		libraryConditions = append(
-			libraryConditions,
-			fmt.Sprintf("NOT (el.media_folder_id = ANY($%d))", argIdx),
-		)
+		libraryPredicates = append(libraryPredicates, fmt.Sprintf(`NOT EXISTS (
+		SELECT 1
+		FROM episode_libraries el_scope_out
+		WHERE el_scope_out.episode_id = e.content_id
+		  AND el_scope_out.media_folder_id = ANY($%d)
+	)`, argIdx))
 		args = append(args, disabledLibraryIDs)
 		argIdx++
 	}
 
+	parentAccess := AccessFilter{DisabledLibraryIDs: disabledLibraryIDs}
+	if len(allowedLibraryIDs) > 0 {
+		parentAccess.AllowedLibraryIDs = allowedLibraryIDs
+	}
+	appendLibraryAccessConditions("e.series_id", parentAccess, &libraryPredicates, &args, &argIdx)
+
 	relation := fmt.Sprintf(
 		episodeCatalogSelectBody,
-		fmt.Sprintf(
-			`EXISTS (
-		SELECT 1
-		FROM episode_libraries el
-		WHERE %s
-	)`,
-			strings.Join(libraryConditions, "\n\t\t  AND "),
-		),
+		strings.Join(libraryPredicates, "\n\tAND "),
 	)
 	return relation, args, true
 }

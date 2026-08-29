@@ -115,11 +115,11 @@ func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 	if err := task.Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if runner.claimLimit != 2 {
-		t.Fatalf("claimLimit = %d, want one immediately-startable job per worker", runner.claimLimit)
+	if runner.claimLimit != cacheMetadataImagesClaimLimit {
+		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, cacheMetadataImagesClaimLimit)
 	}
-	if runner.concurrency != 2 {
-		t.Fatalf("concurrency = %d, want 2", runner.concurrency)
+	if runner.concurrency != cacheMetadataImagesWorkers {
+		t.Fatalf("concurrency = %d, want the shared worker count %d", runner.concurrency, cacheMetadataImagesWorkers)
 	}
 	if runner.maxRuntime != 10*time.Minute {
 		t.Fatalf("maxRuntime = %s, want 10m", runner.maxRuntime)
@@ -161,8 +161,8 @@ func TestBackfillMetadataImagesTaskReportsDiscovery(t *testing.T) {
 	if runner.maxRuntime != 0 {
 		t.Fatalf("maxRuntime = %s, want no deadline for manual backfill", runner.maxRuntime)
 	}
-	if runner.claimLimit != 2 {
-		t.Fatalf("claimLimit = %d, want one immediately-startable job per worker", runner.claimLimit)
+	if runner.claimLimit != cacheMetadataImagesClaimLimit {
+		t.Fatalf("claimLimit = %d, want the shared page size %d", runner.claimLimit, cacheMetadataImagesClaimLimit)
 	}
 	if len(runner.workerIDs) != 1 || !strings.Contains(runner.workerIDs[0], ":backfill:") {
 		t.Fatalf("backfill worker IDs = %#v, want one execution-scoped backfill owner", runner.workerIDs)
@@ -327,5 +327,71 @@ func TestBackfillMetadataImagesTaskProgressDoesNotFallWhenDiscoveryWidensTheRun(
 	}
 	if progress.percents[3] != 75 {
 		t.Fatalf("recovered report = %g, want 75", progress.percents[3])
+	}
+}
+
+func TestImageCacheWorkerCount(t *testing.T) {
+	const gib = int64(1) << 30
+	cases := []struct {
+		numCPU int
+		memory int64
+		want   int
+	}{
+		{numCPU: 0, memory: 0, want: 4}, // defensive floor; GOMAXPROCS never reports < 1
+		{numCPU: 1, memory: 0, want: 4}, // small household box: modest but no longer crippled
+		{numCPU: 4, memory: 0, want: 16},
+		{numCPU: 12, memory: 0, want: 48},
+		{numCPU: 16, memory: 0, want: 48}, // cap: more cores must not monopolize providers
+		{numCPU: 64, memory: 0, want: 48},
+		// A many-core container with a small memory limit is bounded by
+		// memory, never below the original pool of 2 — a sub-1GiB deployment
+		// already ran 2 workers before this change, so 2 is the floor, not 1.
+		{numCPU: 16, memory: 256 << 20, want: 2},
+		{numCPU: 16, memory: 512 << 20, want: 2},
+		{numCPU: 16, memory: 1 * gib, want: 2},
+		{numCPU: 16, memory: 2 * gib, want: 4},
+		{numCPU: 16, memory: 8 * gib, want: 16},
+		{numCPU: 16, memory: 64 * gib, want: 48},
+		// Plenty of memory but few cores: CPU stays the binding cap.
+		{numCPU: 2, memory: 64 * gib, want: 8},
+	}
+	for _, tc := range cases {
+		if got := imageCacheWorkerCount(tc.numCPU, tc.memory); got != tc.want {
+			t.Errorf("imageCacheWorkerCount(%d, %d) = %d, want %d", tc.numCPU, tc.memory, got, tc.want)
+		}
+	}
+	// A claimed page is stamped with one lease up front, so it must fully
+	// drain before the lease expires or another worker reclaims the tail.
+	// The job timeout cannot preempt the synchronous decode/encode segment,
+	// so the timeout-based drain must leave real headroom under the lease
+	// for that bounded overshoot — at least one extra timeout per job.
+	drain := time.Duration(cacheMetadataImagesClaimPerWorker) * metadata.ImageCacheJobTimeout
+	overshootBudget := time.Duration(cacheMetadataImagesClaimPerWorker) * metadata.ImageCacheJobTimeout / 2
+	if drain+overshootBudget > metadata.ImageCacheLeaseDuration {
+		t.Errorf("page drain %s plus overshoot budget %s must stay within the %s claim lease", drain, overshootBudget, metadata.ImageCacheLeaseDuration)
+	}
+	if cacheMetadataImagesClaimLimit != cacheMetadataImagesClaimPerWorker*cacheMetadataImagesWorkers {
+		t.Errorf("claim limit = %d, want %d per worker (%d)", cacheMetadataImagesClaimLimit, cacheMetadataImagesClaimPerWorker, cacheMetadataImagesClaimPerWorker*cacheMetadataImagesWorkers)
+	}
+}
+
+// Conflicting memory bounds resolve to the smallest positive one: GOMEMLIMIT
+// can be set looser than the cgroup limit and the cgroup limit can sit above
+// host memory, so no single source can be preferred outright.
+func TestTightestMemoryLimit(t *testing.T) {
+	const gib = int64(1) << 30
+	cases := []struct {
+		limits []int64
+		want   int64
+	}{
+		{limits: []int64{4 * gib, 2 * gib, 8 * gib}, want: 2 * gib}, // smallest wins
+		{limits: []int64{0, 2 * gib, 0}, want: 2 * gib},             // zeros mean "no bound", not zero bytes
+		{limits: []int64{0, 0, 0}, want: 0},                         // nothing detectable
+		{limits: []int64{6 * gib}, want: 6 * gib},
+	}
+	for _, tc := range cases {
+		if got := tightestMemoryLimit(tc.limits...); got != tc.want {
+			t.Errorf("tightestMemoryLimit(%v) = %d, want %d", tc.limits, got, tc.want)
+		}
 	}
 }

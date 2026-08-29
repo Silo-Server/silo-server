@@ -209,6 +209,98 @@ NVIDIA_GPU_COUNT=1
 
 Windows uses `;` instead of `:` between entries in `COMPOSE_FILE`.
 
+## Node metrics
+
+Every Silo process — the API host and each proxy or transcode node — samples its
+own CPU, memory, disk, network and GPU usage every five seconds. The numbers
+appear on the admin Nodes page, in each node's `/health` and `/status`
+responses, and as `streamapp_node_*` gauges on that process's `/metrics`
+endpoint. `/metrics` is unauthenticated on node listeners, matching the API
+listener; it exposes host resource counters, not media. Disk series are labeled
+by role — `mount="scratch"`, `mount="library-1"` — rather than by path, so an
+anonymous scrape cannot enumerate where your media lives. A node's `/health` is
+unauthenticated for the same reason and withholds paths on the same terms. The
+paths themselves are reported by the admin-authenticated
+`GET /api/v1/admin/system/resources` and by each node's bearer-authed `/status`.
+
+At most eight mounts are sampled per host — the transcode scratch directory
+first, then library roots in order. The cap bounds probing, not just reporting:
+each mount costs a `statfs` call per interval, and one on an unresponsive
+network mount cannot be interrupted. A deployment with more roots than that logs
+how many go unsampled rather than quietly reporting a subset.
+
+Sampling is current-sample only. Silo stores no history — point Prometheus at
+`/metrics` if you want trends or alerts.
+
+**Works out of the box.** System metrics and per-device GPU busyness need no
+extra packages, no privileges and no configuration. GPU usage comes from DRM
+fdinfo, which the kernel exposes for any process holding a `/dev/dri` device, so
+the standard VA-API overlay above is enough for Intel (i915, xe) and AMD
+(amdgpu). It measures Silo's own ffmpeg processes only: a GPU shared with
+something outside Silo will read as less busy than it is. Each device reports a
+`source` field saying which measurement it used.
+
+**NVIDIA needs the container toolkit.** The proprietary driver implements no
+fdinfo, so `nvidia-smi` is the only signal — and it is a whole-GPU one, so it
+also sees other tenants. It is already required for NVENC, so the NVIDIA overlay
+above gives you GPU utilization, encoder/decoder utilization and VRAM with no
+extra step. If the binary is missing or fails repeatedly, that device reports
+`source: unavailable` and nothing else degrades.
+
+**Whole-GPU Intel sampling is not implemented yet.** Reading Intel utilization
+across all tenants needs `intel_gpu_top`, which requires `CAP_PERFMON` (or root)
+plus a permissive `kernel.perf_event_paranoid` — privileges a plain `/dev/dri`
+passthrough container does not have and should not be given by default. Until
+that lands, Intel GPUs report the fdinfo baseline only, and `total_busy_pct` is
+absent rather than zero.
+
+**What the numbers mean inside a container.** `/proc/stat` and `/proc/meminfo`
+describe the *host*, not the container, so Silo corrects both against the
+container's cgroup. Memory reports the cgroup limit and working set (page cache
+excluded), which is what the kernel will OOM-kill against. CPU reports the
+cgroup's own consumption against its own quota, so a container limited to
+`cpus: 2` on a 64-core host reads 100% when it is pegged — not the 3% of the
+host machine that same work amounts to — and `cores` is the quota, not the
+host's core count. `/proc/net/dev` is
+already per-namespace, so network throughput is the container's own traffic.
+Disk figures come from `statfs` on the paths the container can see — the
+transcode scratch directory on every node, plus the configured library roots on
+the API host. A mount that stops responding reports its last good numbers marked
+`stale` and never delays a health response; a path a node cannot see at all is
+reported `unavailable` rather than as an empty disk.
+
+**LXC hosts running Docker nested inside them.** The cgroup correction above
+only works when the limit is visible on *this* container's own cgroup. On an
+LXC host, a Docker container nested inside the LXC sees the raw kernel's
+`/proc/stat`, `/proc/loadavg`, and `/proc/meminfo` — the physical machine's
+totals, not the LXC's — while its own cgroup shows no limit at all, because the
+LXC's cap lives on an ancestor cgroup outside the nested container's namespace.
+lxcfs, which every LXC container mounts for exactly these files, virtualizes
+them to the LXC's own limits, so bind-mounting that virtualized view into the
+Docker container fixes it:
+
+```yaml
+volumes:
+  - /proc/meminfo:/host/proc/meminfo:ro
+  - /proc/stat:/host/proc/stat:ro
+  - /proc/loadavg:/host/proc/loadavg:ro
+```
+
+No setting turns this on: the sampler uses each file under `/host/proc` when it
+is present and falls back to its own `/proc` when it is not, per file, so the
+mounts take effect on the next sample and removing one reverts it.
+
+These three mounts are only useful when the Docker host is itself an LXC/lxcfs
+container — a bare-metal or VM Docker host has nothing extra to gain from them,
+since its own `/proc` is already correct or already cgroup-corrected. Without
+them, a node running nested this way reports the bare-metal host's CPU, memory,
+and load totals instead of its own.
+
+One caveat: lxcfs only virtualizes `/proc/loadavg` when it runs with loadavg
+accounting enabled (its `-l` flag; on Proxmox, `lxcfs` defaults to off). With
+it off, cores and memory are container-scoped but `load1` remains the physical
+host's — visibly higher than the container's core count under host contention.
+
 ## Optional Meilisearch
 
 PostgreSQL full-text search needs no extra service. To offer Meilisearch as an
@@ -233,9 +325,15 @@ alternative provider:
 3. In **Admin > Settings > Search**, select Meilisearch, set the URL to
    `http://meilisearch:7700`, enter the same key as the API key, test the
    connection, and save.
-4. Restart Silo and rebuild the catalog search index from the same page.
+4. Restart Silo. Background search maintenance builds the catalog search index
+   automatically and retries failures every minute. The Search status panel
+   shows whether Meilisearch, keyword-only Meilisearch, or PostgreSQL is serving
+   requests while the build runs; the manual rebuild action remains available.
 
 Silo continues to use PostgreSQL full-text search until Meilisearch is selected.
+Settings that change the index format, including enabling meaning-based search,
+also trigger an automatic background rebuild after restart. A compatible older
+Meilisearch index keeps serving keyword results while its replacement is built.
 
 ## External PostgreSQL and Redis
 

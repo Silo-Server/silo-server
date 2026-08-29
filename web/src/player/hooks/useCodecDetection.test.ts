@@ -3,12 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   detectHDRFromMatchMedia,
   detectMaxResolutionFromScreen,
+  prewarmCodecDetection,
   probeHDR10PlaybackSupport,
   probeWebCapabilities,
+  resetCodecDetectionForTests,
   useCodecDetection,
 } from "./useCodecDetection";
 
 afterEach(() => {
+  resetCodecDetectionForTests();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -101,7 +104,9 @@ describe("probeWebCapabilities", () => {
   it("advertises native Dolby Vision Profile 8 from the dvh1 sample entry", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("high") }));
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
-      mime === 'video/mp4; codecs="dvh1.08.06"' ? "probably" : "",
+      mime === "application/vnd.apple.mpegurl" || mime === 'video/mp4; codecs="dvh1.08.06"'
+        ? "probably"
+        : "",
     );
 
     const capabilities = probeWebCapabilities();
@@ -115,6 +120,7 @@ describe("probeWebCapabilities", () => {
     });
     expect(capabilities.codecsVideo).not.toContain("hevc");
     expect(capabilities.progressiveCodecsVideo).toContain("hevc");
+    expect(capabilities.nativeHLS).toBe(true);
   });
 
   // The preserve remux tags its output dvh1; a browser that answers only for
@@ -217,6 +223,7 @@ describe("probeWebCapabilities", () => {
     });
 
     const { result, unmount } = renderHook(() => useCodecDetection());
+    expect(result.current.settled).toBe(false);
     expect(result.current.hdrDetails.hdr10).toBe(false);
     expect(result.current.codecsVideo).not.toContain("hevc");
     expect(result.current.progressiveCodecsVideo).not.toContain("hevc");
@@ -230,6 +237,26 @@ describe("probeWebCapabilities", () => {
     });
     expect(result.current.codecsVideo).not.toContain("hevc");
     expect(result.current.progressiveCodecsVideo).toContain("hevc");
+    expect(result.current.settled).toBe(true);
+    unmount();
+  });
+
+  it("reuses a capability probe warmed before playback mounts", async () => {
+    const decodingInfo = vi.fn().mockResolvedValue({
+      supported: true,
+      smooth: true,
+      powerEfficient: true,
+      keySystemAccess: null,
+    });
+    vi.stubGlobal("navigator", { mediaCapabilities: { decodingInfo } });
+
+    await prewarmCodecDetection();
+    const { result, unmount } = renderHook(() => useCodecDetection());
+    await act(async () => Promise.resolve());
+
+    expect(decodingInfo).toHaveBeenCalledTimes(1);
+    expect(result.current.settled).toBe(true);
+    expect(result.current.hdrDetails.hdr10).toBe(true);
     unmount();
   });
 
@@ -247,6 +274,8 @@ describe("probeWebCapabilities", () => {
     expect(capabilities.codecsAudio).toEqual(
       expect.arrayContaining(["mp3", "flac", "opus", "vorbis"]),
     );
+    expect(capabilities.progressiveCodecsAudio).toEqual(expect.arrayContaining(["flac", "opus"]));
+    expect(capabilities.progressiveCodecsAudio).not.toContain("vorbis");
     expect(capabilities.containers).toEqual(expect.arrayContaining(["mp4", "mp3", "flac", "ogg"]));
   });
 
@@ -262,5 +291,42 @@ describe("probeWebCapabilities", () => {
     expect(capabilities.containers).toContain("webm");
     expect(canPlayType).toHaveBeenCalledWith('video/webm; codecs="vp09.00.10.08"');
     expect(canPlayType).not.toHaveBeenCalledWith('video/webm; codecs="avc1.640028"');
+  });
+
+  it("does not advertise native MKV playback on Firefox", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0",
+    });
+    const supportedTypes = new Set([
+      'video/x-matroska; codecs="avc1.640028"',
+      'video/mp4; codecs="avc1.640028"',
+      'audio/mp4; codecs="mp4a.40.2"',
+      'audio/webm; codecs="vorbis"',
+    ]);
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      supportedTypes.has(mime) ? "probably" : "",
+    );
+
+    const capabilities = probeWebCapabilities();
+
+    expect(capabilities.containers).not.toContain("mkv");
+    expect(capabilities.codecsVideo).toContain("h264");
+    expect(capabilities.codecsAudio).toContain("aac");
+    expect(capabilities.codecsAudio).toContain("vorbis");
+    expect(capabilities.progressiveCodecsAudio).toContain("aac");
+    expect(capabilities.progressiveCodecsAudio).not.toContain("vorbis");
+  });
+
+  it("keeps advertising native MKV playback on other capable browsers", () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === 'video/x-matroska; codecs="avc1.640028"' ? "probably" : "",
+    );
+
+    expect(probeWebCapabilities().containers).toContain("mkv");
   });
 });

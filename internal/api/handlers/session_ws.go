@@ -166,18 +166,35 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			return playback.ErrInvalidRealtimePayload
 		}
 		h.touchSessionActivity(sessionID)
+		// Establish ownership before mutating anything: a result naming another
+		// session's command must be rejected without canceling that command's
+		// deadline or dropping its record. An unknown command_id is not an
+		// error — a duplicate or late result for an already-completed command
+		// is normal traffic.
+		record, ok := h.getRealtimeCommand(result.CommandID)
+		if ok && record.SessionID != sessionID {
+			return playback.ErrInvalidRealtimePayload
+		}
 		if h.CommandTracker != nil {
 			h.CommandTracker.Result(result.CommandID)
 		}
-		record, ok := h.getRealtimeCommand(result.CommandID)
 		if !ok {
 			return nil
 		}
 		h.forgetRealtimeCommand(result.CommandID)
-		if record.SessionID != sessionID {
-			return playback.ErrInvalidRealtimePayload
-		}
 		if result.Status != playback.RealtimeResultStatusCompleted {
+			// A rejected plan_invalidated leaves the client running a route the
+			// server has withdrawn, and the tracker's deadline was already
+			// canceled by the result. Fall back to the same session stop an
+			// unnegotiated client gets; its recovery replans against the
+			// persisted verdict.
+			if record.Name == playback.CommandPlanInvalidated {
+				slog.Warn("client rejected a plan invalidation; stopping the session",
+					"session", sessionID, "playback_session_id", sessionID, "error", result.Error)
+				if err := h.stopPlaybackSessionByID(context.Background(), sessionID, false); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+					slog.Error("failed to stop playback after a rejected plan invalidation", "session", sessionID, "playback_session_id", sessionID, "error", err)
+				}
+			}
 			return nil
 		}
 		switch record.Name {
@@ -186,6 +203,9 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 				slog.Error("failed to stop playback after realtime completion", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}
+		case playback.CommandPlanInvalidated:
+			// Completion means the client replanned itself; the session stays
+			// alive on its replacement plan and nothing else is required here.
 		}
 		return nil
 	default:

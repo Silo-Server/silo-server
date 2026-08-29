@@ -133,6 +133,7 @@ func (h *EbookReaderHandler) HandleReadFile(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 		return
 	}
+	attachTransfer(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), fileID)
 
 	if err := h.serveEbook(w, r, file); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {

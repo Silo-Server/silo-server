@@ -377,17 +377,21 @@ type SeriesPlaybackPreference struct {
 }
 
 // Collection kinds for CollectionSortPreference. Collection ids are unique
-// within a kind but not across the two id spaces, so the kind is part of the
-// preference's identity.
+// within a kind, so the kind is part of the preference's identity. Personal
+// list sources use PersonalSortPreferenceCollectionID because they have no
+// collection resource id of their own.
 const (
-	CollectionKindLibrary = "library"
-	CollectionKindUser    = "user"
+	CollectionKindLibrary   = "library"
+	CollectionKindUser      = "user"
+	CollectionKindWatchlist = "watchlist"
+	CollectionKindFavorites = "favorites"
+
+	PersonalSortPreferenceCollectionID = "personal"
 )
 
 // CollectionSortPreference records that a profile changed the sort order while
-// browsing a collection, overriding whatever default the collection's creator
-// configured. An empty SortField is a real choice — "show me this collection in
-// its own source order" — and is distinct from having no preference row at all.
+// browsing a collection or personal list. An empty SortField is a real choice
+// to use source order and is distinct from having no preference row at all.
 type CollectionSortPreference struct {
 	ProfileID      string `json:"profile_id"`
 	CollectionKind string `json:"collection_kind"`

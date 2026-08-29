@@ -317,7 +317,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Metadata.CacheImages = cacheImages
 
 	// Playback
-	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
+	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")
 	cfg.Playback.TranscodeDir = stringOr(m, playbackTranscodeDirSettingKey, DefaultTranscodeDir)
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")

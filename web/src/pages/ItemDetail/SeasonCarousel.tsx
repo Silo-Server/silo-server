@@ -1,9 +1,10 @@
-import { Link } from "react-router";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Season } from "@/api/types";
 import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { formatSeasonMeta, getSeasonDisplayTitle } from "./itemDetailLayout";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -37,7 +38,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
           </button>
         )}
 
-        <div ref={emblaRef} className="embla__viewport overflow-hidden pb-5">
+        <div ref={emblaRef} className="embla__viewport -mt-1 overflow-hidden pt-1 pb-5">
           <ul role="list" className="embla__container flex cursor-grab list-none gap-4">
             {sorted.map((season) => {
               const userData = season.user_data;
@@ -53,51 +54,67 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
 
               return (
                 <li key={season.content_id} className="embla__slide shrink-0">
-                  <Link
-                    to={`/item/${season.content_id}`}
-                    className="group/season block w-[160px] sm:w-[170px]"
+                  <div
+                    className="group/season w-[160px] sm:w-[170px]"
                     onMouseEnter={() => prefetchSeason(season.content_id)}
                     onFocus={() => prefetchSeason(season.content_id)}
                     onTouchStart={() => prefetchSeason(season.content_id)}
                   >
                     {/* Poster */}
-                    <div className="media-card-image relative aspect-[2/3] overflow-hidden rounded-xl">
-                      {season.poster_url ? (
-                        <img
-                          src={season.poster_url}
-                          alt={getSeasonDisplayTitle(season)}
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover/season:scale-105"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="text-muted-foreground bg-surface flex h-full items-center justify-center p-4 text-center text-sm font-medium">
-                          {getSeasonDisplayTitle(season)}
-                        </div>
-                      )}
-
-                      {/* Completed checkmark */}
-                      {isCompleted && (
-                        <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
-                          <Check className="size-3.5" strokeWidth={3} />
-                        </div>
-                      )}
-
-                      {/* Progress bar — thin line at the bottom of the poster */}
-                      {(isCompleted || hasProgress) && (
-                        <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/40">
-                          <div
-                            className="h-full transition-all duration-300"
-                            style={{
-                              width: isCompleted ? "100%" : `${progressPercent}%`,
-                              background: isCompleted ? "#4caf50" : "var(--primary)",
-                            }}
+                    <div className="group/media relative">
+                      <ViewTransitionLink
+                        to={`/item/${season.content_id}`}
+                        className="media-card-image relative block aspect-[2/3] overflow-hidden rounded-xl"
+                      >
+                        {season.poster_url ? (
+                          <img
+                            src={season.poster_url}
+                            alt={getSeasonDisplayTitle(season)}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover/season:scale-105"
+                            loading="lazy"
+                            decoding="async"
                           />
-                        </div>
-                      )}
+                        ) : (
+                          <div className="text-muted-foreground bg-surface flex h-full items-center justify-center p-4 text-center text-sm font-medium">
+                            {getSeasonDisplayTitle(season)}
+                          </div>
+                        )}
+
+                        {/* Completed checkmark */}
+                        {isCompleted && (
+                          <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                            <Check className="size-3.5" strokeWidth={3} />
+                          </div>
+                        )}
+
+                        {/* Progress bar — inset pill so a full bar doesn't read
+                            as a stray edge along the artwork */}
+                        {(isCompleted || hasProgress) && (
+                          <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
+                            <div
+                              className="h-full rounded-full transition-all duration-300"
+                              style={{
+                                width: isCompleted ? "100%" : `${progressPercent}%`,
+                                background: isCompleted ? "#4caf50" : "var(--primary)",
+                              }}
+                            />
+                          </div>
+                        )}
+                      </ViewTransitionLink>
+                      {season.play_content_id ? (
+                        <CardPlayOverlay
+                          contentId={season.play_content_id}
+                          title={getSeasonDisplayTitle(season)}
+                          type="episode"
+                        />
+                      ) : null}
                     </div>
 
                     {/* Info — always the same height */}
-                    <div className="px-0.5 pt-2.5">
+                    <ViewTransitionLink
+                      to={`/item/${season.content_id}`}
+                      className="block px-0.5 pt-2.5"
+                    >
                       <div className="truncate text-[13px] font-semibold">
                         {getSeasonDisplayTitle(season)}
                       </div>
@@ -106,8 +123,8 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
                           ? `${userData.watched_count} of ${season.episode_count} episodes`
                           : formatSeasonMeta(season)}
                       </div>
-                    </div>
-                  </Link>
+                    </ViewTransitionLink>
+                  </div>
                 </li>
               );
             })}

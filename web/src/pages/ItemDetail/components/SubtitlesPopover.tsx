@@ -5,7 +5,6 @@ import { Captions, Check, ChevronDown, Loader2 } from "lucide-react";
 import type { FileVersion } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDownloadedSubtitles } from "@/hooks/queries/subtitles";
 import type {
   PlayerSubtitleTrackSignature,
@@ -23,6 +22,7 @@ import {
   subtitleSelectionEquals,
   type PrePlaySubtitleCandidate,
 } from "./prePlaySelection";
+import DetailPopover from "./DetailPopover";
 
 interface SubtitlesPopoverProps {
   version: FileVersion | null;
@@ -266,8 +266,12 @@ export default function SubtitlesPopover({
         : (overrideCandidate?.selection ?? null);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <DetailPopover
+      open={open}
+      onOpenChange={setOpen}
+      positionKey={`${downloadedQuery.isLoading}:${candidates.all.length}`}
+      contentClassName="max-h-80 w-80 overflow-y-auto p-1.5"
+      trigger={
         <Button
           variant="glass"
           className="h-8 max-w-full min-w-0 shrink gap-1.5 rounded-full px-3 text-xs font-medium"
@@ -279,58 +283,55 @@ export default function SubtitlesPopover({
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
         </Button>
-      </PopoverTrigger>
-      <PopoverContent className="max-h-80 w-80 overflow-y-auto p-1.5">
-        <div className="space-y-2 py-1">
-          {isInteractive && (
-            <>
-              <SelectionRow
-                active={selectionMode === "auto" && !overrideCandidate}
-                title="Auto"
-                description={
-                  overrideCandidate
-                    ? "Reset to profile defaults"
-                    : (autoCandidate?.summary ?? "Off")
-                }
-                onSelect={onResetSelection}
-              />
-              <SelectionRow
-                active={selectionMode === "off"}
-                title="Off"
-                onSelect={onSelectSubtitleOff}
-              />
-            </>
-          )}
-          <SubtitleSection
-            title="Embedded"
-            rows={candidates.embedded}
-            activeSelection={activeListSelection}
-            onSelectSubtitle={onSelectSubtitle}
-          />
-          <SubtitleSection
-            title="External"
-            rows={candidates.external}
-            activeSelection={activeListSelection}
-            onSelectSubtitle={onSelectSubtitle}
-          />
-          {downloadedQuery.isLoading ? (
-            <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
-              <Loader2 className="size-3 animate-spin" />
-              Loading downloaded...
-            </div>
-          ) : (
-            <SubtitleSection
-              title="Downloaded"
-              rows={candidates.downloaded}
-              activeSelection={activeListSelection}
-              onSelectSubtitle={onSelectSubtitle}
+      }
+    >
+      <div className="space-y-2 py-1">
+        {isInteractive && (
+          <>
+            <SelectionRow
+              active={selectionMode === "auto" && !overrideCandidate}
+              title="Auto"
+              description={
+                overrideCandidate ? "Reset to profile defaults" : (autoCandidate?.summary ?? "Off")
+              }
+              onSelect={onResetSelection}
             />
-          )}
-          {candidates.all.length === 0 && !downloadedQuery.isLoading && (
-            <div className="text-muted-foreground px-3 py-2 text-sm">No subtitles available.</div>
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+            <SelectionRow
+              active={selectionMode === "off"}
+              title="Off"
+              onSelect={onSelectSubtitleOff}
+            />
+          </>
+        )}
+        <SubtitleSection
+          title="Embedded"
+          rows={candidates.embedded}
+          activeSelection={activeListSelection}
+          onSelectSubtitle={onSelectSubtitle}
+        />
+        <SubtitleSection
+          title="External"
+          rows={candidates.external}
+          activeSelection={activeListSelection}
+          onSelectSubtitle={onSelectSubtitle}
+        />
+        {downloadedQuery.isLoading ? (
+          <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
+            <Loader2 className="size-3 animate-spin" />
+            Loading downloaded...
+          </div>
+        ) : (
+          <SubtitleSection
+            title="Downloaded"
+            rows={candidates.downloaded}
+            activeSelection={activeListSelection}
+            onSelectSubtitle={onSelectSubtitle}
+          />
+        )}
+        {candidates.all.length === 0 && !downloadedQuery.isLoading && (
+          <div className="text-muted-foreground px-3 py-2 text-sm">No subtitles available.</div>
+        )}
+      </div>
+    </DetailPopover>
   );
 }

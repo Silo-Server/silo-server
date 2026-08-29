@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 var (
@@ -62,6 +65,20 @@ func (w *statusWriter) WriteHeader(status int) {
 		w.written = true
 	}
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if !w.written {
+		w.status, w.written = http.StatusOK, true
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) ReadFrom(src io.Reader) (int64, error) {
+	if !w.written {
+		w.status, w.written = http.StatusOK, true
+	}
+	return httpstream.ForwardReadFrom(w.ResponseWriter, w, src, 0, nil)
 }
 
 // Hijack implements http.Hijacker, required for WebSocket upgrades.

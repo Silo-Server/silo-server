@@ -102,6 +102,22 @@ func (t *TranscodeThrottler) CheckOnce() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// Never pause on output the current ffmpeg process did not produce. A
+	// manifest left behind by an earlier generation in the same output
+	// directory reports that generation's head, which after a restart at an
+	// earlier position looks like an enormous buffer. Pausing on it stops the
+	// new process before it writes its first segment, so the manifest never
+	// refreshes and the gap never shrinks: the stream deadlocks until the user
+	// seeks. Resume instead if a previous check already paused on stale output.
+	if progressPredatesGeneration(progress) {
+		if t.paused {
+			log.Printf("playback: throttler resuming ffmpeg (produced output predates current generation)")
+			t.sendResume()
+			t.paused = false
+		}
+		return
+	}
+
 	if gap >= t.thresholdSeconds && !t.paused {
 		log.Printf("playback: throttler pausing ffmpeg (gap=%ds, threshold=%ds)", gap, t.thresholdSeconds)
 		t.sendPause()
@@ -111,6 +127,19 @@ func (t *TranscodeThrottler) CheckOnce() {
 		t.sendResume()
 		t.paused = false
 	}
+}
+
+// progressPredatesGeneration reports whether the produced head was read from a
+// manifest written before the current ffmpeg process started, i.e. by an
+// earlier generation of this session or by a previous session that shared the
+// output directory. A session with no generation timestamp (never started a
+// process, as in tests) carries no staleness information and is treated as
+// current.
+func progressPredatesGeneration(progress SegmentProgress) bool {
+	if progress.GenerationStartedAt.IsZero() || !progress.HasManifest {
+		return false
+	}
+	return progress.ManifestModTime.Before(progress.GenerationStartedAt)
 }
 
 func (t *TranscodeThrottler) sendPause() {

@@ -15,7 +15,8 @@ export type PlaybackCommandName =
   | "server_shutting_down"
   | "play_media"
   | "set_audio_track"
-  | "set_subtitle_track";
+  | "set_subtitle_track"
+  | "plan_invalidated";
 
 export type PlaybackRealtimeAckStatus = "accepted";
 export type PlaybackRealtimeResultStatus = "completed" | "rejected";
@@ -39,6 +40,18 @@ export interface PlaybackRealtimeCommandEnvelope {
   };
   deadline_ms?: number;
   payload?: Record<string, unknown>;
+}
+
+/**
+ * Payload of the `plan_invalidated` command: the server decided, after the plan
+ * was already playing, that the route it names cannot serve this source.
+ *
+ * `plan_id` is the invalidated plan, not necessarily the one on screen — a
+ * client that has already replanned past it has nothing left to do.
+ */
+export interface PlaybackPlanInvalidatedPayload {
+  reason: string;
+  plan_id: string;
 }
 
 export interface PlaybackRealtimeHelloEnvelope {
@@ -206,8 +219,10 @@ export const ALL_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "play_media",
   "set_audio_track",
   "set_subtitle_track",
+  "plan_invalidated",
 ];
 
+/** The commands every realtime surface in this app executes. */
 export const SUPPORTED_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "pause",
   "unpause",
@@ -221,12 +236,39 @@ export const SUPPORTED_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
   "server_shutting_down",
 ];
 
+/**
+ * What the video player executes on top of the shared set. `plan_invalidated`
+ * needs a replan the audiobook surface has no route ladder for, so the hello is
+ * per-surface rather than one list both over-claim.
+ */
+export const VIDEO_PLAYBACK_COMMANDS: PlaybackCommandName[] = [
+  ...SUPPORTED_PLAYBACK_COMMANDS,
+  "plan_invalidated",
+];
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
 function isCommandName(value: unknown): value is PlaybackCommandName {
   return typeof value === "string" && ALL_PLAYBACK_COMMANDS.includes(value as PlaybackCommandName);
+}
+
+/**
+ * Reads a `plan_invalidated` payload, or null when it is not well formed.
+ *
+ * Both fields are required: without `plan_id` the client cannot tell whether
+ * the invalidated plan is still the one playing, and acting anyway would evict
+ * a route the server never complained about.
+ */
+export function readPlanInvalidatedPayload(
+  payload: Record<string, unknown> | undefined,
+): PlaybackPlanInvalidatedPayload | null {
+  if (!isRecord(payload)) return null;
+  const { reason, plan_id: planId } = payload;
+  if (typeof reason !== "string" || reason.trim() === "") return null;
+  if (typeof planId !== "string" || planId.trim() === "") return null;
+  return { reason, plan_id: planId };
 }
 
 function isChapterThumbnailReadyPayload(
@@ -486,7 +528,10 @@ export function parsePlaybackRealtimeCommand(data: string): PlaybackRealtimeComm
   return message?.type === "command" ? message : null;
 }
 
-export function buildPlaybackRealtimeHello(sessionId: string): PlaybackRealtimeHelloEnvelope {
+export function buildPlaybackRealtimeHello(
+  sessionId: string,
+  commands: PlaybackCommandName[] = SUPPORTED_PLAYBACK_COMMANDS,
+): PlaybackRealtimeHelloEnvelope {
   return {
     type: "hello",
     session_id: sessionId,
@@ -495,7 +540,7 @@ export function buildPlaybackRealtimeHello(sessionId: string): PlaybackRealtimeH
       version: "1",
     },
     capabilities: {
-      commands: [...SUPPORTED_PLAYBACK_COMMANDS],
+      commands: [...commands],
     },
   };
 }

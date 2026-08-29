@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
+  cancelItemDetailQueries: vi.fn(),
   invalidateMediaSurfaceQueries: vi.fn(),
-  isItemDetailQueryKey: vi.fn((_queryKey: unknown, _itemId: string) => true),
-  updateCatalogItemDetail: vi.fn(),
+  scheduleMediaSurfaceInvalidation: vi.fn(),
   toastError: vi.fn(),
   toastLoading: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
+  updateCatalogItemDetail: vi.fn(),
   useMutation: vi.fn(),
   useQueryClient: vi.fn(),
 }));
@@ -44,10 +46,11 @@ vi.mock("@/pages/ItemDetail/watchedState", async () => {
 });
 
 vi.mock("./mediaSurfaceRefresh", () => ({
+  cancelItemDetailQueries: (...args: unknown[]) => mocks.cancelItemDetailQueries(...args),
   invalidateMediaSurfaceQueries: (...args: unknown[]) =>
     mocks.invalidateMediaSurfaceQueries(...args),
-  isItemDetailQueryKey: (queryKey: unknown, itemId: string) =>
-    mocks.isItemDetailQueryKey(queryKey, itemId),
+  scheduleMediaSurfaceInvalidation: (...args: unknown[]) =>
+    mocks.scheduleMediaSurfaceInvalidation(...args),
   updateCatalogItemDetail: (...args: unknown[]) => mocks.updateCatalogItemDetail(...args),
 }));
 
@@ -71,13 +74,11 @@ import {
   useWatchedStateMutation,
 } from "./items";
 
-type WatchedMutationContext = { previous: Array<[readonly unknown[], unknown]> };
-
 type WatchedMutationOptions = {
   mutationFn: (nextPlayed: boolean) => Promise<unknown>;
-  onMutate?: (nextPlayed: boolean) => Promise<WatchedMutationContext>;
+  onMutate?: (nextPlayed: boolean) => Promise<unknown>;
+  onError?: (error: unknown, nextPlayed: boolean) => void;
   onSuccess?: (data: unknown, nextPlayed: boolean) => void;
-  onError?: (err: unknown, nextPlayed: boolean, context?: WatchedMutationContext) => void;
   onSettled?: () => Promise<unknown>;
 };
 
@@ -106,15 +107,16 @@ describe("item query helpers", () => {
   beforeEach(() => {
     mocks.api.mockReset();
     mocks.api.mockResolvedValue({});
+    mocks.cancelItemDetailQueries.mockReset();
+    mocks.cancelItemDetailQueries.mockResolvedValue(undefined);
     mocks.invalidateMediaSurfaceQueries.mockReset();
-    mocks.updateCatalogItemDetail.mockReset();
-    mocks.isItemDetailQueryKey.mockReset();
-    mocks.isItemDetailQueryKey.mockReturnValue(true);
+    mocks.scheduleMediaSurfaceInvalidation.mockReset();
     mocks.toastError.mockReset();
     mocks.toastLoading.mockReset();
     mocks.toastLoading.mockReturnValue("refresh-toast");
     mocks.toastSuccess.mockReset();
     mocks.toastWarning.mockReset();
+    mocks.updateCatalogItemDetail.mockReset();
     mocks.useMutation.mockReset();
     mocks.useMutation.mockImplementation((options: unknown) => ({
       ...(options as object),
@@ -253,21 +255,13 @@ describe("item query helpers", () => {
     });
   });
 
-  it("optimistically flips played state and rolls back when the request fails", async () => {
-    const setQueryData = vi.fn();
-    const previous: Array<[readonly unknown[], unknown]> = [[["items", "detail", "series-1"], {}]];
-    mocks.useQueryClient.mockReturnValue({
-      cancelQueries: vi.fn().mockResolvedValue(undefined),
-      getQueriesData: vi.fn(() => previous),
-      setQueryData,
-    });
-
+  it("optimistically flips played state and reverts only that field on failure", async () => {
     useWatchedStateMutation({ content_id: "series-1", type: "series" });
     const options = mocks.useMutation.mock.calls[
       mocks.useMutation.mock.calls.length - 1
     ]?.[0] as WatchedMutationOptions;
 
-    const context = await options.onMutate?.(true);
+    await options.onMutate?.(true);
     expect(mocks.updateCatalogItemDetail).toHaveBeenCalledWith(
       expect.anything(),
       "series-1",
@@ -288,8 +282,21 @@ describe("item query helpers", () => {
       user_state: { played: true, is_favorite: true, in_watchlist: false },
     });
 
-    options.onError?.(new Error("boom"), true, context);
-    expect(setQueryData).toHaveBeenCalledWith(previous[0]?.[0], previous[0]?.[1]);
+    // Reverting restores only this mutation's own field, so a concurrent
+    // favorite/watchlist toggle's optimistic state survives the failure.
+    options.onError?.(new Error("boom"), true);
+    const revert = mocks.updateCatalogItemDetail.mock.calls[1]?.[2] as (
+      detail: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    expect(
+      revert({
+        user_data: { played: true },
+        user_state: { played: true, is_favorite: true, in_watchlist: false },
+      }),
+    ).toMatchObject({
+      user_data: { played: false },
+      user_state: { played: false, is_favorite: true, in_watchlist: false },
+    });
     expect(mocks.toastError).toHaveBeenCalledWith("boom");
   });
 
@@ -305,10 +312,55 @@ describe("item query helpers", () => {
     options.onSuccess?.(undefined, false);
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Marked as unread");
 
-    await options.onSettled?.();
-    expect(mocks.invalidateMediaSurfaceQueries).toHaveBeenCalledWith(expect.anything(), {
+    options.onSettled?.();
+    // The item's own detail is deliberately not skipped: the server also zeroes
+    // the resume position, which the optimistic patch cannot reconstruct.
+    expect(mocks.scheduleMediaSurfaceInvalidation).toHaveBeenCalledWith(expect.anything(), {
       itemId: "ebook-1",
       watchedKeys: [],
+      skipSimilarItems: true,
+    });
+  });
+
+  it("updates watched state optimistically before refreshing derived surfaces", async () => {
+    const queryClient = { getQueriesData: vi.fn(() => []) };
+    mocks.useQueryClient.mockReturnValue(queryClient);
+
+    useWatchedStateMutation({ content_id: "movie-1", type: "movie" });
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as WatchedMutationOptions;
+
+    await options.onMutate?.(true);
+
+    expect(mocks.cancelItemDetailQueries).toHaveBeenCalledWith(queryClient, "movie-1");
+    expect(mocks.updateCatalogItemDetail).toHaveBeenCalledWith(
+      queryClient,
+      "movie-1",
+      expect.any(Function),
+    );
+    const updater = mocks.updateCatalogItemDetail.mock.calls[0]?.[2] as (
+      detail: ItemDetail,
+    ) => ItemDetail;
+    expect(
+      updater({ user_data: { played: false }, user_state: { played: false } } as ItemDetail),
+    ).toMatchObject({
+      user_data: { played: true },
+      user_state: { played: true },
+    });
+
+    options.onError?.(new Error("failed"), true);
+    const rollback = mocks.updateCatalogItemDetail.mock.calls[1]?.[2] as (
+      detail: ItemDetail,
+    ) => ItemDetail;
+    expect(
+      rollback({
+        user_data: { played: true },
+        user_state: { played: true, is_favorite: true, in_watchlist: true },
+      } as ItemDetail),
+    ).toMatchObject({
+      user_data: { played: false },
+      user_state: { played: false, is_favorite: true, in_watchlist: true },
     });
   });
 });

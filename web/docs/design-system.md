@@ -311,7 +311,7 @@ Implementation cues:
 - Use `.media-card-image` for consistent rounded corners and surface background placeholder.
 - Hover should slightly scale and brighten, not dramatically lift.
 - Continue-watching cards add a `.progress-bar` at the bottom edge.
-- Watched items show a `.watched-badge` checkmark overlay.
+- Movie and series cards expose watched state as an eye toggle beside the favorite action on hover and keyboard focus; compact posters use smaller matching controls. Continue Watching uses the eye alone at the bottom-left. Watched episodes keep the muted circle-check beside the episode number below the thumbnail.
 
 ### Media Detail Page
 

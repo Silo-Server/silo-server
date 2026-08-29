@@ -146,6 +146,24 @@ func (r *SkippedRootRepository) Delete(ctx context.Context, folderID int, rootPa
 	return nil
 }
 
+// DeleteMissingByFolder removes skipped roots for a folder that were not seen
+// during an authoritative full-library scan.
+func (r *SkippedRootRepository) DeleteMissingByFolder(ctx context.Context, folderID int, seenRoots []string) error {
+	if seenRoots == nil {
+		seenRoots = []string{}
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM skipped_media_roots
+		WHERE media_folder_id = $1
+		  AND NOT (root_path = ANY($2))
+	`, folderID, seenRoots)
+	if err != nil {
+		return fmt.Errorf("deleting missing skipped media roots by folder: %w", err)
+	}
+	return nil
+}
+
 // DeleteMissingInScope removes skipped roots under scopePath that were not seen.
 func (r *SkippedRootRepository) DeleteMissingInScope(ctx context.Context, folderID int, scopePath string, seenRoots []string) error {
 	if seenRoots == nil {

@@ -4,9 +4,12 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LibraryRecommended from "./LibraryRecommended";
+import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
+import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -54,8 +57,20 @@ vi.mock("@/components/HeroBanner", () => ({
 }));
 
 vi.mock("@/components/SectionRow", () => ({
-  default: ({ section }: { section: { title: string; section_type: string } }) => (
-    <div data-kind="section-row" data-section-type={section.section_type}>
+  default: ({
+    section,
+  }: {
+    section: {
+      title: string;
+      section_type: string;
+      items: Array<{ user_state?: { is_favorite: boolean } }>;
+    };
+  }) => (
+    <div
+      data-kind="section-row"
+      data-section-type={section.section_type}
+      data-favorite={section.items[0]?.user_state?.is_favorite ? "true" : "false"}
+    >
       {section.title}
     </div>
   ),
@@ -90,6 +105,7 @@ function makeSection(
     section_type: string;
     title: string;
     featured: boolean;
+    isFavorite: boolean;
   }> = {},
 ) {
   return {
@@ -116,6 +132,11 @@ function makeSection(
         backdrop_url: "",
         backdrop_thumbhash: "",
         logo_url: "",
+        user_state: {
+          played: false,
+          is_favorite: overrides.isFavorite ?? false,
+          in_watchlist: false,
+        },
       },
     ],
   };
@@ -179,6 +200,7 @@ describe("LibraryRecommended", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    return queryClient;
   }
 
   it("renders sections from the layout and item APIs", async () => {
@@ -197,6 +219,55 @@ describe("LibraryRecommended", () => {
 
     expect(invalidateQueries).not.toHaveBeenCalled();
     invalidateQueries.mockRestore();
+  });
+
+  it("reloads locally held library rows after consecutive media surface refreshes", async () => {
+    let isFavorite = false;
+    mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) =>
+      Promise.resolve({
+        section: makeSection({
+          id: sectionId,
+          title: sectionId === "cw" ? "Continue Watching" : "Recently Added",
+          section_type: sectionId === "cw" ? "continue_watching" : "recently_added",
+          isFavorite,
+        }),
+      }),
+    );
+    const queryClient = await render(<LibraryRecommended libraryId={42} />);
+
+    expect(
+      container
+        .querySelector('[data-section-type="recently_added"]')
+        ?.getAttribute("data-favorite"),
+    ).toBe("false");
+
+    isFavorite = true;
+    await act(async () => {
+      await invalidateMediaSurfaceQueries(queryClient);
+      bumpHomeRefreshSignal(queryClient);
+    });
+
+    await waitFor(() => {
+      expect(
+        container
+          .querySelector('[data-section-type="recently_added"]')
+          ?.getAttribute("data-favorite"),
+      ).toBe("true");
+    });
+
+    isFavorite = false;
+    await act(async () => {
+      await invalidateMediaSurfaceQueries(queryClient);
+      bumpHomeRefreshSignal(queryClient);
+    });
+
+    await waitFor(() => {
+      expect(
+        container
+          .querySelector('[data-section-type="recently_added"]')
+          ?.getAttribute("data-favorite"),
+      ).toBe("false");
+    });
   });
 
   it("renders hero banner for featured sections", async () => {

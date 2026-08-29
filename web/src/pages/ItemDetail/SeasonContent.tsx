@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useItemEpisodes } from "@/hooks/queries/episodes";
-import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
+import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -12,13 +12,13 @@ import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import PageBack from "@/components/PageBack";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
-import ActionBar from "./components/ActionBar";
+import WatchedActionBar from "./components/WatchedActionBar";
 import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import type { EpisodeNavigationState } from "./itemDetailLayout";
-import { getWatchedActionLabel } from "./watchedState";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 
 function seasonLabel(seasonNumber: number, title?: string) {
@@ -37,7 +37,6 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const [editOpen, setEditOpen] = useState(false);
-  const watchedMutation = useWatchedStateMutation(item);
   const refreshMetadataMutation = useRefreshItemMetadata();
 
   const {
@@ -73,12 +72,13 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
   if (episodesError) {
     return (
       <div className="px-4 py-6 sm:px-6 sm:py-10 lg:px-12">
-        <Link
+        <ViewTransitionLink
           to={seriesId ? `/item/${seriesId}` : "/"}
+          up
           className="text-muted-foreground hover:text-foreground text-sm"
         >
           &larr; Back to {seriesTitle}
-        </Link>
+        </ViewTransitionLink>
         <p className="text-muted-foreground mt-6 text-sm">
           {episodesError instanceof Error ? episodesError.message : "Season not found"}
         </p>
@@ -108,13 +108,11 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
         overviewTranslating={overviewTranslating}
         onTranslateOverview={onTranslateOverview}
         actions={
-          <ActionBar
+          <WatchedActionBar
+            item={item}
             contentId={item.content_id}
             playHref={firstEpisode ? `/watch/${firstEpisode.content_id}` : undefined}
             playLabel="Play First Episode"
-            watchedLabel={getWatchedActionLabel(item)}
-            onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
-            isUpdatingWatched={watchedMutation.isPending}
             onRefresh={
               canCurateMetadata
                 ? (mode) =>
@@ -133,7 +131,7 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
         }
       />
 
-      <div className="page-shell py-8 sm:py-10">
+      <div className="page-shell detail-supporting-content py-8 sm:py-10">
         <div className="mb-5 flex items-center justify-between gap-3">
           <h2 className="text-xl font-semibold tracking-tight">Episodes</h2>
           <span className="text-muted-foreground text-sm">

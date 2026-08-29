@@ -15,6 +15,7 @@ describe("SpeedMenu", () => {
     const onChange = vi.fn();
     render(<SpeedMenu rates={RATES} value={1} onChange={onChange} />);
     await userEvent.click(screen.getByRole("button", { name: /playback speed/i }));
+    expect(screen.getByRole("menu")).toHaveClass("z-30");
     expect(screen.getAllByRole("menuitem")).toHaveLength(RATES.length);
     await userEvent.click(screen.getByRole("menuitem", { name: "1.25×" }));
     expect(onChange).toHaveBeenCalledWith(1.25);

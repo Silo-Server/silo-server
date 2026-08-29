@@ -190,6 +190,7 @@ type LibraryRefreshExecutor struct {
 	folderRepo     libraryRefreshFolderRepo
 	resolver       libraryRefreshScopeResolver
 	ingester       libraryRefreshIngester
+	scanRuns       directScanRunRepository
 	refresher      libraryRefreshRefresher
 	eventBus       cache.EventBus
 	realtimeHub    *notifications.Hub
@@ -202,6 +203,7 @@ func NewLibraryRefreshExecutor(
 	folderRepo libraryRefreshFolderRepo,
 	resolver libraryRefreshScopeResolver,
 	ingester libraryRefreshIngester,
+	scanRuns directScanRunRepository,
 	refresher libraryRefreshRefresher,
 	eventBus cache.EventBus,
 	realtimeHub *notifications.Hub,
@@ -211,6 +213,7 @@ func NewLibraryRefreshExecutor(
 		folderRepo:     folderRepo,
 		resolver:       resolver,
 		ingester:       ingester,
+		scanRuns:       scanRuns,
 		refresher:      refresher,
 		eventBus:       eventBus,
 		realtimeHub:    realtimeHub,
@@ -376,7 +379,7 @@ func (e *LibraryRefreshExecutor) refreshItemsWithoutIDs(
 	result *LibraryRefreshResult,
 	advance func(message string),
 ) error {
-	fullPipelineAvailable := e.resolver != nil && e.ingester != nil
+	fullPipelineAvailable := e.resolver != nil && e.ingester != nil && e.scanRuns != nil
 	for i, contentID := range contentIDs {
 		if err := e.ensureLibraryEnabled(ctx, libraryID); err != nil {
 			return err
@@ -419,12 +422,26 @@ func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libra
 	if !folder.Enabled {
 		return fmt.Errorf("load folder %d: library is disabled", req.ScanFolderID)
 	}
-	if _, err := e.ingester.IngestSubtree(ctx, folder, req.ScanPath); err != nil {
+	scanCtx, scanRun, err := beginDirectSubtreeScan(ctx, e.scanRuns, req.ScanFolderID, req.ScanPath, libraryRefreshScanTrigger)
+	if err != nil {
+		return fmt.Errorf("ingest subtree: %w", err)
+	}
+	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
+	ingestResult, err := e.ingester.IngestSubtree(scanCtx, folder, req.ScanPath)
+	stopScanHeartbeat()
+	if err != nil {
+		return fmt.Errorf("ingest subtree: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))
+	}
+	if err := completeDirectScan(ctx, e.scanRuns, scanRun, ingestResult); err != nil {
 		return fmt.Errorf("ingest subtree: %w", err)
 	}
 	if err := e.refresher.RefreshItemForLibrary(ctx, req.RefreshContentID, req.ScanFolderID); err != nil {
 		return fmt.Errorf("refresh metadata: %w", err)
 	}
+	// Publish only after the metadata refresh: scan_complete advances the resolved
+	// list-cache generation, so emitting it earlier lets a rail rebuild from
+	// pre-refresh titles/posters and serve them for the whole cache TTL.
+	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publishCatalogItemChanged(ctx, libraryID, req.RefreshContentID)
 	return nil
 }

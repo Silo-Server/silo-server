@@ -12,6 +12,12 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
   useCatalogItemDetail: (...args: unknown[]) => mocks.useCatalogItemDetail(...args),
 }));
 
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`} aria-label={`Play ${title}`} />
+  ),
+}));
+
 describe("RecommendationGrid", () => {
   it("encodes item IDs in detail links", () => {
     mocks.useCatalogItemDetail.mockReturnValue({
@@ -63,5 +69,26 @@ describe("RecommendationGrid", () => {
 
     expect(markup).toContain("grid-cols-3 sm:grid-cols-5");
     expect(markup).not.toContain(">A Reader</p>");
+  });
+
+  it("keeps recommendation details and playback as independent links", () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: {
+        content_id: "series-1",
+        play_content_id: "episode-4",
+        title: "Running Show",
+        poster_url: "/poster.jpg",
+      },
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <RecommendationGrid items={[{ media_item_id: "series-1" }]} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain('href="/item/series-1"');
+    expect(markup).toContain('href="/watch/episode-4"');
+    expect(markup).toContain('aria-label="Play Running Show"');
   });
 });

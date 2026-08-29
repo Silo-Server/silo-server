@@ -19,14 +19,15 @@ const DefaultTTL = 7 * 24 * time.Hour
 
 // Account roles an invitation may grant.
 const (
-	roleUser  = "user"
-	roleAdmin = "admin"
+	roleUser  = models.RoleUser
+	roleAdmin = models.RoleAdmin
 )
 
 // Errors surfaced to the API layer.
 var (
 	ErrInvalidEmail   = errors.New("invalid email address")
 	ErrRoleNotAllowed = errors.New("inviter may not grant this role")
+	ErrAdminGrouped   = errors.New("admin accounts cannot belong to an access group")
 	ErrEmailTaken     = errors.New("an account with this email already exists")
 	ErrNoLinkBase     = errors.New("no external URL is configured for invitation links")
 )
@@ -153,6 +154,11 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 	}
 	if role == roleAdmin && inviter.Role != roleAdmin {
 		return nil, ErrRoleNotAllowed
+	}
+	// Admins are never grouped; refuse here so the pending invitation does not
+	// advertise a group that accept would silently drop.
+	if role == roleAdmin && input.AccessGroupID != nil {
+		return nil, ErrAdminGrouped
 	}
 
 	// Refuse addresses that already have an account. The address is also the

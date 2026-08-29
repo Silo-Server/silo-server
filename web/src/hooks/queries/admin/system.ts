@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import type { SystemResources } from "@/api/types";
 import { adminKeys } from "../keys";
+
+/**
+ * How often the API host's own sample is re-read. The sampler publishes every
+ * few seconds and the read costs nothing (it returns an already-published
+ * snapshot), so this is set by how live an operator expects a resource panel to
+ * feel, not by what the server can afford.
+ */
+const SYSTEM_RESOURCES_REFRESH_MS = 15_000;
 
 export interface BuildInfo {
   display: string;
@@ -43,6 +52,22 @@ export function useBuildInfo() {
     queryFn: () => api<BuildInfo>("/admin/system/build"),
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
+  });
+}
+
+/**
+ * The API host's own resource sample. `retry: false` because a server predating
+ * the endpoint 404s and there is nothing to retry into — the caller renders the
+ * same "not being sampled" state it uses for a non-Linux host.
+ */
+export function useSystemResources(enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.systemResources(),
+    queryFn: () => api<SystemResources>("/admin/system/resources"),
+    refetchInterval: SYSTEM_RESOURCES_REFRESH_MS,
+    staleTime: SYSTEM_RESOURCES_REFRESH_MS,
+    retry: false,
+    enabled,
   });
 }
 

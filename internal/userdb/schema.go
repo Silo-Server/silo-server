@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS collection_sort_preferences (
     sort_order TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, collection_kind, collection_id),
-    CHECK (collection_kind IN ('library', 'user')),
+    CHECK (collection_kind IN ('library', 'user', 'watchlist', 'favorites')),
     CHECK (sort_order IN ('', 'asc', 'desc'))
 );
 
@@ -562,7 +562,7 @@ CREATE INDEX user_setting_values_library_idx
 
 // collectionSortPreferencesSchema is kept as its own const (rather than only
 // inlined in Schema) so migrateToV19 can create the table on databases that
-// predate it. collection_kind separates the 'library' and 'user' id spaces.
+// predate it. collection_kind separates collection and personal-list sources.
 const collectionSortPreferencesSchema = `
 CREATE TABLE IF NOT EXISTS collection_sort_preferences (
     profile_id TEXT NOT NULL,
@@ -572,7 +572,7 @@ CREATE TABLE IF NOT EXISTS collection_sort_preferences (
     sort_order TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL,
     PRIMARY KEY (profile_id, collection_kind, collection_id),
-    CHECK (collection_kind IN ('library', 'user')),
+    CHECK (collection_kind IN ('library', 'user', 'watchlist', 'favorites')),
     CHECK (sort_order IN ('', 'asc', 'desc'))
 );`
 

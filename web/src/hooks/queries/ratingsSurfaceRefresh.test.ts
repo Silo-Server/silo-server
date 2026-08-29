@@ -1,6 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { ratingKeys, recKeys, sectionKeys } from "./keys";
+import { catalogKeys, ratingKeys, recKeys, sectionKeys } from "./keys";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 
 describe("invalidateRatingSurfaceQueries", () => {
@@ -19,7 +19,12 @@ describe("invalidateRatingSurfaceQueries", () => {
       signal_counts: {},
       updated_at: "2026-03-23T00:00:00.000Z",
     });
+    queryClient.setQueryData(recKeys.similar("item-1"), { items: [] });
     queryClient.setQueryData(sectionKeys.homeItems("for-you"), { section: { id: "for-you" } });
+    queryClient.setQueryData(catalogKeys.itemDetail("item-1"), {
+      content_id: "item-1",
+      user_rating: 4,
+    });
 
     await invalidateRatingSurfaceQueries(queryClient, "item-1");
 
@@ -27,6 +32,8 @@ describe("invalidateRatingSurfaceQueries", () => {
     expect(queryClient.getQueryState(recKeys.forYouMain())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(recKeys.forYouRows())?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(recKeys.tasteProfile())?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(recKeys.similar("item-1"))?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(sectionKeys.homeItems("for-you"))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(catalogKeys.itemDetail("item-1"))?.isInvalidated).toBe(false);
   });
 });

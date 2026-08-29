@@ -12,6 +12,7 @@ interface SharedItemGridProps {
   loading?: boolean;
   sortField?: string;
   libraryId?: number;
+  narrowPosterActions?: boolean;
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (item: BrowseItem) => void;
@@ -44,11 +45,12 @@ export default function ItemGrid(props: ItemGridProps) {
     loading,
     sortField,
     libraryId,
+    narrowPosterActions = false,
     selectionMode = false,
     selectedIds,
     onToggleSelect,
   } = props;
-  const { prefs: overlayPrefs } = useOverlayPrefs();
+  const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const gridGap = cardPresentation.poster_size === "large" ? 16 : 12;
   const gridClasses = cardGridClasses(cardPresentation.poster_size);
@@ -159,12 +161,14 @@ export default function ItemGrid(props: ItemGridProps) {
                   );
                 } else {
                   cells.push(
-                    <div key={item.content_id} role="listitem">
+                    <div key={`${item.content_id}-${globalIndex}`} role="listitem">
                       <ItemCard
                         item={item}
                         libraryId={libraryId}
                         sortField={sortField}
                         overlayPrefs={overlayPrefs}
+                        quickActionMode={quickActionMode}
+                        narrowPosterActions={narrowPosterActions}
                         selectionMode={selectionMode}
                         selected={selectedIds?.has(item.content_id) ?? false}
                         onToggleSelect={onToggleSelect}

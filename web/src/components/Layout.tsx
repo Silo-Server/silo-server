@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation } from "react-router";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu, Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -29,6 +29,7 @@ import {
   type SidebarItemNavigationRequest,
 } from "@/components/sidebarItemNavigation";
 import { useSidebarItemDetailsGate } from "@/hooks/useSidebarItemDetailsGate";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 
@@ -38,7 +39,7 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useViewTransitionNavigate();
   const queryClient = useQueryClient();
   const [mobileOpen, setMobileOpen] = useState(false);
   // Tracks whether the mobile header should slide off-screen on scroll.
@@ -55,6 +56,7 @@ export default function Layout({ children }: LayoutProps) {
   const isHomePath = location.pathname === "/";
   const isLibraryRoute = location.pathname.startsWith("/library/");
   const isItemRoute = location.pathname.startsWith("/item/");
+  const itemRouteLocation = `${location.pathname}${location.search}`;
   // Breakpoint changes naturally cause other layout renders; navigation only
   // needs the viewport value at the moment it is attempted.
   const hasDesktopSidebar = window.matchMedia("(min-width: 64rem)").matches;
@@ -102,7 +104,6 @@ export default function Layout({ children }: LayoutProps) {
       navigate(request.href, {
         replace: request.replace,
         state: request.state,
-        viewTransition: true,
       });
       return true;
     },
@@ -114,6 +115,15 @@ export default function Layout({ children }: LayoutProps) {
   // can never leave the item route on its lightweight shell indefinitely.
   useEffect(() => {
     if (!isItemRoute || !pendingLocationKey) return;
+
+    // The gate stages the collapse so the detail skeleton is not what animates
+    // into view. A prefetched detail has no skeleton to hide, so waiting for
+    // the sidebar would only delay a page that is already ready to paint.
+    if (hasCachedItemDetail(queryClient, itemRouteLocation)) {
+      revealItemDetails(pendingLocationKey);
+      return;
+    }
+
     const startedAt = Date.now();
     let timer: number;
     let cancelled = false;
@@ -140,7 +150,7 @@ export default function Layout({ children }: LayoutProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [isItemRoute, pendingLocationKey, revealItemDetails]);
+  }, [isItemRoute, itemRouteLocation, pendingLocationKey, queryClient, revealItemDetails]);
 
   const handleSidebarTransitionEnd = useCallback(
     (event: ReactTransitionEvent<HTMLDivElement>) => {
@@ -162,6 +172,12 @@ export default function Layout({ children }: LayoutProps) {
   // a frame late and it would trail the sidebar by ~23px at peak velocity.
   useLayoutEffect(() => {
     const root = document.documentElement;
+    // Marks that this shell is mounted, and with it the only element named
+    // `main-content`. app.css holds the root view-transition group still while
+    // it is set, so the frozen sidebar snapshot cannot cross-fade over the live
+    // collapse — and the routes rendered outside this shell keep the default
+    // root transition, which is the only thing they have to animate.
+    root.dataset.appShell = "true";
     if (targetDetailImmersion) {
       root.dataset.sidebarCollapsed = "true";
     } else {
@@ -173,6 +189,7 @@ export default function Layout({ children }: LayoutProps) {
       delete root.dataset.sidebarVisualCollapsed;
     }
     return () => {
+      delete root.dataset.appShell;
       delete root.dataset.sidebarCollapsed;
       delete root.dataset.sidebarVisualCollapsed;
     };
@@ -322,5 +339,19 @@ export default function Layout({ children }: LayoutProps) {
         </main>
       </div>
     </SidebarItemNavigationProvider>
+  );
+}
+
+/**
+ * Reports whether the detail for the item route currently being entered is
+ * already in the query cache — either prefetched by `beginItemNavigation` or
+ * left behind by an earlier visit.
+ */
+function hasCachedItemDetail(queryClient: QueryClient, itemRouteLocation: string): boolean {
+  const target = parseItemNavigationHref(itemRouteLocation, window.location.origin);
+  if (!target) return false;
+  return (
+    queryClient.getQueryData(catalogKeys.itemDetail(target.contentId, target.libraryId)) !==
+    undefined
   );
 }

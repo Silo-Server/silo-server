@@ -118,6 +118,35 @@ func TestGetCollectionPresetRetriesRateLimit(t *testing.T) {
 	}
 }
 
+// A saved credential change has to reach a client that was built at startup;
+// this is what lets watchsync.trakt.client_id stay out of the restart registry.
+func TestSetClientIDAppliesToLaterRequests(t *testing.T) {
+	var gotAPIKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey = r.Header.Get("trakt-api-key")
+		writeJSON(t, w, []map[string]any{})
+	}))
+	defer server.Close()
+
+	client := NewClient("", 1000)
+	client.SetBaseURL(server.URL)
+
+	if _, err := client.GetCollectionPreset(context.Background(), "popular", "movie", 1, ""); err == nil {
+		t.Fatal("expected an error while no client id is configured")
+	}
+
+	client.SetClientID("  rotated-client-id  ")
+	if got := client.ClientID(); got != "rotated-client-id" {
+		t.Fatalf("ClientID() = %q, want trimmed rotated-client-id", got)
+	}
+	if _, err := client.GetCollectionPreset(context.Background(), "popular", "movie", 1, ""); err != nil {
+		t.Fatalf("GetCollectionPreset after SetClientID: %v", err)
+	}
+	if gotAPIKey != "rotated-client-id" {
+		t.Fatalf("trakt-api-key = %q, want rotated-client-id", gotAPIKey)
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, v any) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

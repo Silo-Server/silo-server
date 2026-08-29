@@ -72,9 +72,9 @@ function isCollectionSource(source: CatalogSource): boolean {
 
 // Sources whose default ordering is the stored list order rather than a sort
 // field. The watchlist's stored order can mirror a watch provider's list
-// order (e.g. MDBList) via sort_index.
+// order (e.g. MDBList) via sort_index; favorites use their entry order.
 export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean {
-  return isCollectionSource(source) || source === "watchlist";
+  return isCollectionSource(source) || source === "watchlist" || source === "favorites";
 }
 
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
@@ -392,11 +392,11 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
       (state.source === "query" && effectiveLibraryID != null) ||
-      // Watchlist defaults to source order, so an explicit Date Added pick
+      // These sources default to source order, so an explicit Date Added pick
       // must be sent to distinguish it (the server maps it to list added-at).
-      state.source === "watchlist" ||
-      state.source === "library_collection" ||
-      state.source === "user_collection")
+      // Dropping it would round-trip back through parse as source order and
+      // save the wrong browse preference.
+      catalogSourceSupportsSourceOrder(state.source))
   ) {
     params.set("sort", state.query_definition.sort.field);
     if (state.query_definition.sort.order) {

@@ -2,6 +2,8 @@ package libraryingest
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +12,71 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
+
+type skippedRootMemoryRepo struct {
+	roots map[string]models.SkippedMediaRoot
+}
+
+func newSkippedRootMemoryRepo(roots ...models.SkippedMediaRoot) *skippedRootMemoryRepo {
+	repo := &skippedRootMemoryRepo{roots: make(map[string]models.SkippedMediaRoot, len(roots))}
+	for _, root := range roots {
+		repo.roots[skippedRootKey(root.MediaFolderID, root.RootPath)] = root
+	}
+	return repo
+}
+
+func skippedRootKey(folderID int, rootPath string) string {
+	return fmt.Sprintf("%d:%s", folderID, filepath.Clean(rootPath))
+}
+
+func (r *skippedRootMemoryRepo) Upsert(_ context.Context, root models.SkippedMediaRoot) error {
+	root.RootPath = filepath.Clean(root.RootPath)
+	r.roots[skippedRootKey(root.MediaFolderID, root.RootPath)] = root
+	return nil
+}
+
+func (r *skippedRootMemoryRepo) Delete(_ context.Context, folderID int, rootPath string) error {
+	delete(r.roots, skippedRootKey(folderID, rootPath))
+	return nil
+}
+
+func (r *skippedRootMemoryRepo) DeleteMissingByFolder(_ context.Context, folderID int, seenRoots []string) error {
+	seen := make(map[string]struct{}, len(seenRoots))
+	for _, rootPath := range seenRoots {
+		seen[filepath.Clean(rootPath)] = struct{}{}
+	}
+	for key, root := range r.roots {
+		if root.MediaFolderID != folderID {
+			continue
+		}
+		if _, ok := seen[filepath.Clean(root.RootPath)]; !ok {
+			delete(r.roots, key)
+		}
+	}
+	return nil
+}
+
+func (r *skippedRootMemoryRepo) DeleteMissingInScope(_ context.Context, folderID int, scopePath string, seenRoots []string) error {
+	scopePath = filepath.Clean(scopePath)
+	seen := make(map[string]struct{}, len(seenRoots))
+	for _, rootPath := range seenRoots {
+		seen[filepath.Clean(rootPath)] = struct{}{}
+	}
+	for key, root := range r.roots {
+		if root.MediaFolderID != folderID || !isSameOrDescendant(scopePath, root.RootPath) {
+			continue
+		}
+		if _, ok := seen[filepath.Clean(root.RootPath)]; !ok {
+			delete(r.roots, key)
+		}
+	}
+	return nil
+}
+
+func (r *skippedRootMemoryRepo) has(folderID int, rootPath string) bool {
+	_, ok := r.roots[skippedRootKey(folderID, rootPath)]
+	return ok
+}
 
 // settleControlledMatcher simulates a TV match drainer whose provider lookup is
 // still in flight when the settle window expires. The batch only returns once
@@ -215,5 +282,76 @@ func TestIngestFolderLetsActiveDrainerBatchFinishAfterSettleWindow(t *testing.T)
 	}
 	if matcher.processAllBeforeBatch.Load() {
 		t.Fatal("final scoped matcher ran before the active drainer batch completed")
+	}
+}
+
+func TestReconcileSkippedRootsFullLibraryPrunesRemovedRoot(t *testing.T) {
+	const folderID = 42
+	const removedRoot = "/old-library/Movie"
+	const currentRoot = "/new-library/Movie"
+
+	repo := newSkippedRootMemoryRepo(models.SkippedMediaRoot{
+		MediaFolderID: folderID,
+		RootPath:      removedRoot,
+		Reason:        scanner.RootObservationReasonMissingFolderIDs,
+	})
+	exec := &Executor{skippedRootRepo: repo}
+	scanResult := &scanner.ScanResult{RootObservations: []scanner.RootObservation{
+		{
+			RootPath:       currentRoot,
+			SampleFilePath: filepath.Join(currentRoot, "movie.mkv"),
+			FileCount:      1,
+			Reason:         scanner.RootObservationReasonMissingFolderIDs,
+		},
+	}}
+
+	err := exec.reconcileSkippedRoots(
+		context.Background(),
+		folderID,
+		"movies",
+		scopeModeLibrary,
+		"",
+		[]string{"/new-library"},
+		scanResult,
+	)
+	if err != nil {
+		t.Fatalf("reconcile skipped roots: %v", err)
+	}
+	if repo.has(folderID, removedRoot) {
+		t.Fatalf("removed library root %q remains after authoritative full-library reconcile", removedRoot)
+	}
+	if !repo.has(folderID, currentRoot) {
+		t.Fatalf("current skipped root %q was not retained", currentRoot)
+	}
+}
+
+func TestReconcileSkippedRootsSubtreeKeepsRootsOutsideScope(t *testing.T) {
+	const folderID = 42
+	const outsideRoot = "/other-library/Movie"
+	const staleScopedRoot = "/current-library/Old Movie"
+
+	repo := newSkippedRootMemoryRepo(
+		models.SkippedMediaRoot{MediaFolderID: folderID, RootPath: outsideRoot},
+		models.SkippedMediaRoot{MediaFolderID: folderID, RootPath: staleScopedRoot},
+	)
+	exec := &Executor{skippedRootRepo: repo}
+
+	err := exec.reconcileSkippedRoots(
+		context.Background(),
+		folderID,
+		"movies",
+		scopeModeSubtree,
+		"/current-library",
+		[]string{"/current-library"},
+		&scanner.ScanResult{},
+	)
+	if err != nil {
+		t.Fatalf("reconcile skipped roots: %v", err)
+	}
+	if repo.has(folderID, staleScopedRoot) {
+		t.Fatalf("stale scoped root %q remains after subtree reconcile", staleScopedRoot)
+	}
+	if !repo.has(folderID, outsideRoot) {
+		t.Fatalf("subtree reconcile removed out-of-scope root %q", outsideRoot)
 	}
 }

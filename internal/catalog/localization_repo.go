@@ -279,6 +279,60 @@ func (r *SeasonLocalizationRepository) Upsert(ctx context.Context, loc *models.S
 	return nil
 }
 
+// BulkUpsert writes provider season localizations in one atomic statement.
+// Overview provenance follows the same rules as Upsert.
+func (r *SeasonLocalizationRepository) BulkUpsert(ctx context.Context, localizations []*models.SeasonLocalization) error {
+	if len(localizations) == 0 {
+		return nil
+	}
+	seasonContentIDs := make([]string, len(localizations))
+	languages := make([]string, len(localizations))
+	titles := make([]string, len(localizations))
+	overviews := make([]string, len(localizations))
+	posterPaths := make([]string, len(localizations))
+	posterSourcePaths := make([]string, len(localizations))
+	posterThumbhashes := make([]string, len(localizations))
+	for i, loc := range localizations {
+		if loc == nil || loc.SeasonContentID == "" || loc.Language == "" {
+			return fmt.Errorf("invalid season localization at index %d", i)
+		}
+		seasonContentIDs[i] = loc.SeasonContentID
+		languages[i] = loc.Language
+		titles[i] = loc.Title
+		overviews[i] = loc.Overview
+		posterPaths[i] = loc.PosterPath
+		posterSourcePaths[i] = loc.PosterSourcePath
+		posterThumbhashes[i] = loc.PosterThumbhash
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO season_localizations (
+			season_content_id, language, title, overview, poster_path, poster_source_path, poster_thumbhash
+		)
+		SELECT * FROM unnest(
+			$1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]
+		)
+		ON CONFLICT (season_content_id, language) DO UPDATE SET
+			title = EXCLUDED.title,
+			overview = CASE
+				WHEN season_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN season_localizations.overview
+				ELSE EXCLUDED.overview END,
+			overview_source = CASE
+				WHEN season_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN season_localizations.overview_source
+				ELSE 'provider' END,
+			poster_path = EXCLUDED.poster_path,
+			poster_source_path = EXCLUDED.poster_source_path,
+			poster_thumbhash = EXCLUDED.poster_thumbhash,
+			updated_at = NOW()
+	`, seasonContentIDs, languages, titles, overviews, posterPaths, posterSourcePaths, posterThumbhashes)
+	if err != nil {
+		return fmt.Errorf("bulk upserting season localizations: %w", err)
+	}
+	return nil
+}
+
 // UpsertAIOverview writes an AI-translated season overview (see
 // MediaItemLocalizationRepository.UpsertAITranslation for the precedence).
 func (r *SeasonLocalizationRepository) UpsertAIOverview(ctx context.Context, seasonContentID, language, overview string, force bool) error {
@@ -399,6 +453,47 @@ func (r *EpisodeLocalizationRepository) Upsert(ctx context.Context, loc *models.
 	`, loc.EpisodeContentID, loc.Language, loc.Title, loc.Overview)
 	if err != nil {
 		return fmt.Errorf("upserting episode localization: %w", err)
+	}
+	return nil
+}
+
+// BulkUpsert writes provider episode localizations in one atomic statement.
+// Overview provenance follows the same rules as Upsert.
+func (r *EpisodeLocalizationRepository) BulkUpsert(ctx context.Context, localizations []*models.EpisodeLocalization) error {
+	if len(localizations) == 0 {
+		return nil
+	}
+	episodeContentIDs := make([]string, len(localizations))
+	languages := make([]string, len(localizations))
+	titles := make([]string, len(localizations))
+	overviews := make([]string, len(localizations))
+	for i, loc := range localizations {
+		if loc == nil || loc.EpisodeContentID == "" || loc.Language == "" {
+			return fmt.Errorf("invalid episode localization at index %d", i)
+		}
+		episodeContentIDs[i] = loc.EpisodeContentID
+		languages[i] = loc.Language
+		titles[i] = loc.Title
+		overviews[i] = loc.Overview
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO episode_localizations (episode_content_id, language, title, overview)
+		SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
+		ON CONFLICT (episode_content_id, language) DO UPDATE SET
+			title = EXCLUDED.title,
+			overview = CASE
+				WHEN episode_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN episode_localizations.overview
+				ELSE EXCLUDED.overview END,
+			overview_source = CASE
+				WHEN episode_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
+					THEN episode_localizations.overview_source
+				ELSE 'provider' END,
+			updated_at = NOW()
+	`, episodeContentIDs, languages, titles, overviews)
+	if err != nil {
+		return fmt.Errorf("bulk upserting episode localizations: %w", err)
 	}
 	return nil
 }

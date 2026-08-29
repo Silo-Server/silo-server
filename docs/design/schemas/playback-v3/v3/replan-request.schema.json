@@ -206,7 +206,7 @@
     },
     "capability_evidence": {
       "type": "string",
-      "description": "How the capability facts were produced. `exact` is a real platform probe with per-codec profiles/levels/bounds, `platform_attested` a decoder attestation without profile enumeration, `declared` a boolean support statement. Planner strictness follows the tier.",
+      "description": "How the capability facts were produced. `exact` is a real platform probe with per-codec profiles/levels/bounds, `platform_attested` a platform-backed decoder-stack attestation without profile enumeration, `declared` a boolean support statement. Planner strictness follows the tier; bounded software entries require the explicit software-video feature.",
       "enum": [
         "exact",
         "platform_attested",
@@ -399,7 +399,8 @@
           "minimum": 0
         },
         "hardware": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this entry uses a hardware decoder. At strict evidence tiers, false entries participate only when client_features includes software_video_decode_v1."
         }
       },
       "additionalProperties": true

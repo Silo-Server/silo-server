@@ -210,6 +210,44 @@ describe("AdminUserDetail access group picker", () => {
     expect(call?.id).toBe(7);
     expect(call?.body.access_group_id).toBe(5);
   });
+
+  it("clears the group when the account is promoted to admin", async () => {
+    const user = userEvent.setup();
+    mocks.user = { ...adminUser, access_group_id: 5 };
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "Admin" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.role).toBe("admin");
+    expect(call?.body.access_group_id).toBeNull();
+  });
+
+  it("keeps the picked group when the role is toggled to admin and back", async () => {
+    const user = userEvent.setup();
+    renderUserDetail();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("tab", { name: "Access" }));
+    await user.click(screen.getByRole("combobox", { name: "Group" }));
+    await user.click(await screen.findByRole("option", { name: "Guests" }));
+
+    await user.click(screen.getByRole("tab", { name: "Account" }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "Admin" }));
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    await user.click(await screen.findByRole("option", { name: "User" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.updateUserMutate).toHaveBeenCalled());
+    const call = mocks.updateUserMutate.mock.calls[0]?.[0] as UpdateUserMutationArg | undefined;
+    expect(call?.body.role).toBe("user");
+    expect(call?.body.access_group_id).toBe(5);
+  });
 });
 
 describe("AdminUserDetail user settings tab", () => {

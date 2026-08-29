@@ -10,7 +10,7 @@ import type {
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
-import { adminKeys, compatKeys, themeKeys } from "../keys";
+import { adminKeys, compatKeys, settingsKeys, themeKeys } from "../keys";
 import { toast } from "sonner";
 
 type ServerSettings = Record<string, string>;
@@ -20,9 +20,27 @@ interface SensitiveStatusResponse {
   managed_by_env?: string[];
 }
 
+/**
+ * server_settings keys surfaced by GET /settings/overlay-config, in the order
+ * the admin overlay page presents them. The page edits exactly these, and
+ * saving any of them must refresh every profile's cached overlay config.
+ */
+export const OVERLAY_CONFIG_SERVER_KEYS = [
+  "defaults.card_quick_actions_enabled",
+  "defaults.card_quick_actions",
+  "overlays.enabled",
+  "defaults.card_overlays",
+] as const;
+
+function affectsOverlayConfig(key: string) {
+  return (OVERLAY_CONFIG_SERVER_KEYS as readonly string[]).includes(key);
+}
+
 export interface CatalogSearchStatus {
   configured_provider: string;
   active_provider: string;
+  degraded: boolean;
+  degraded_reason?: string;
   meilisearch: {
     configured: boolean;
     healthy: boolean;
@@ -42,6 +60,7 @@ export interface CatalogSearchStatus {
     active_index_uid: string;
     schema_version: number;
     expected_schema_version: number;
+    rebuild_required: boolean;
     document_count: number;
     vector_document_count: number;
     pending_events: number;
@@ -81,6 +100,27 @@ export function useAdminServerSettings() {
     queryKey: adminKeys.serverSettings(),
     queryFn: () => api<ServerSettings>("/admin/settings/effective").then((d) => d ?? {}),
     staleTime: 30_000,
+  });
+}
+
+/** Shape of `GET /admin/settings/restart-keys`. */
+export interface RestartKeysResponse {
+  keys: string[];
+  prefixes: string[];
+}
+
+/**
+ * The compiled restart-required registry (`internal/config/restart_keys.go`).
+ * It only changes across deploys, so it is cached aggressively and never
+ * retried: an older server without the endpoint degrades to "nothing needs a
+ * restart" rather than to a broken settings page.
+ */
+export function useAdminRestartKeys() {
+  return useQuery({
+    queryKey: adminKeys.restartKeys(),
+    queryFn: () => api<RestartKeysResponse>("/admin/settings/restart-keys"),
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }
 
@@ -128,6 +168,11 @@ export function useUpdateServerSettings() {
           queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
         );
       }
+      if (keys.some(affectsOverlayConfig)) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
+        );
+      }
       await Promise.all(invalidations);
     },
     onError: (err) => {
@@ -172,6 +217,11 @@ export function useUpdateServerSetting() {
           queryClient.invalidateQueries({ queryKey: themeKeys.branding() }),
         );
       }
+      if (affectsOverlayConfig(variables.key)) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: settingsKeys.overlayConfig() }),
+        );
+      }
       await Promise.all(invalidations);
     },
     onError: (err) => {
@@ -198,11 +248,13 @@ export function useCheckAdminSettingsConnection() {
   });
 }
 
-export function useCatalogSearchStatus() {
+export function useCatalogSearchStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.catalogSearchStatus(),
     queryFn: () => api<CatalogSearchStatus>("/admin/catalog/search/status"),
+    enabled,
     staleTime: 15_000,
+    refetchInterval: (query) => (query.state.data?.index.rebuild_required ? 2_000 : false),
   });
 }
 

@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { useHasUnsavedChanges } from "./useUnsavedChanges";
 import { useSettingsForm } from "./useSettingsForm";
 
 const { mutateAsync } = vi.hoisted(() => ({ mutateAsync: vi.fn() }));
@@ -138,5 +139,112 @@ describe("useSettingsForm save()", () => {
       await result.current.save();
     });
     expect(result.current.restartRequired).toBe(true);
+  });
+});
+
+describe("useSettingsForm isClearStaged()", () => {
+  it("separates a staged clear from an untouched or replaced value", () => {
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    // An untouched empty key is not a clear: nothing would be written.
+    expect(result.current.isClearStaged("email.smtp_password")).toBe(false);
+
+    act(() => {
+      result.current.setValue("branding.server_name", "");
+    });
+    expect(result.current.isClearStaged("branding.server_name")).toBe(true);
+
+    act(() => {
+      result.current.setValue("branding.server_name", "Casa");
+    });
+    expect(result.current.isClearStaged("branding.server_name")).toBe(false);
+
+    act(() => {
+      result.current.resetValue("branding.server_name");
+    });
+    expect(result.current.isClearStaged("branding.server_name")).toBe(false);
+  });
+});
+
+describe("useSettingsForm unsaved-changes guard", () => {
+  function fireBeforeUnload(): Event {
+    // jsdom has no BeforeUnloadEvent, and its legacy `returnValue` is a
+    // boolean mirror of the canceled flag — `defaultPrevented` is the portable
+    // signal that the browser would prompt.
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event;
+  }
+
+  it("does not warn while the form is clean", () => {
+    renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    expect(fireBeforeUnload().defaultPrevented).toBe(false);
+  });
+
+  it("warns before the page unloads with staged edits", () => {
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => {
+      result.current.setValue("branding.server_name", "Casa");
+    });
+
+    expect(fireBeforeUnload().defaultPrevented).toBe(true);
+  });
+
+  it("stops warning once the edits are discarded", () => {
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => {
+      result.current.setValue("branding.server_name", "Casa");
+    });
+    act(() => {
+      result.current.discard();
+    });
+
+    expect(fireBeforeUnload().defaultPrevented).toBe(false);
+  });
+
+  it("stops warning after the hook unmounts", () => {
+    const { result, unmount } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => {
+      result.current.setValue("branding.server_name", "Casa");
+    });
+    unmount();
+
+    expect(fireBeforeUnload().defaultPrevented).toBe(false);
+  });
+
+  // What `UnsavedChangesGuard` reads to block in-app navigation. The hook keeps
+  // no router dependency of its own; it only reports.
+  it("publishes staged edits to the shared unsaved-changes registry", () => {
+    const registry = renderHook(() => useHasUnsavedChanges());
+    const form = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    expect(registry.result.current).toBe(false);
+
+    act(() => {
+      form.result.current.setValue("branding.server_name", "Casa");
+    });
+    expect(registry.result.current).toBe(true);
+
+    act(() => {
+      form.result.current.discard();
+    });
+    expect(registry.result.current).toBe(false);
+  });
+
+  it("withdraws its registry claim when the form unmounts", () => {
+    const registry = renderHook(() => useHasUnsavedChanges());
+    const form = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => {
+      form.result.current.setValue("branding.server_name", "Casa");
+    });
+    expect(registry.result.current).toBe(true);
+
+    form.unmount();
+    expect(registry.result.current).toBe(false);
   });
 });

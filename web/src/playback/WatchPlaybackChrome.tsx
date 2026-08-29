@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -11,7 +13,7 @@ import {
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pause, PictureInPicture2, Play, SkipBack, SkipForward, Tv, X } from "lucide-react";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import type { WatchDetail } from "@/api/types";
 import { getAccessToken, getOrCreateDeviceId, getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -31,14 +33,14 @@ import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCa
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { PlayerConfigProvider, WatchPage } from "@/player";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { PlayerConfigProvider, type PlayerConfig } from "@/player/context/PlayerConfigContext";
 import type {
   EpisodeRef,
   IntroSkipMode,
   PlaybackExitState,
-  PlayerConfig,
   PlayerPictureInPictureChange,
-} from "@/player";
+} from "@/player/types";
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
 import { PlayingNextScreen } from "@/player/components/PlayingNextScreen";
 import { formatTime } from "@/player/components/SeekBar";
@@ -56,6 +58,10 @@ import {
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
+
+const WatchPage = lazy(() =>
+  import("@/player/components/WatchPage").then((module) => ({ default: module.WatchPage })),
+);
 
 function normalizeWatchPlaybackRequest(
   input: WatchPlaybackStartInput | WatchRouteRequest,
@@ -144,8 +150,28 @@ function buildWatchLocationState(request: WatchRouteRequest) {
   };
 }
 
+function PlaybackPreparingScreen() {
+  return (
+    <div
+      className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="surface-panel-subtle animate-in fade-in flex min-w-[260px] flex-col items-center gap-4 rounded-[1.8rem] px-8 py-7 text-center duration-300">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-white">Preparing playback</p>
+          <p className="text-xs text-white/55">
+            Loading stream details, subtitles, and resume state.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
-  const navigate = useNavigate();
+  const navigate = useViewTransitionNavigate();
   const [state, dispatch] = useReducer(watchPlaybackReducer, undefined, createEmptyPlaybackState);
   const stateRef = useRef(state);
   const suppressNextPictureInPictureExitRef = useRef<string | null>(null);
@@ -208,7 +234,6 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
 
         navigate(buildWatchHref(request), {
           state: buildWatchLocationState(request),
-          viewTransition: true,
         });
       };
 
@@ -284,7 +309,6 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
     navigate(buildWatchHref(request), {
       replace: true,
       state: buildWatchLocationState(request),
-      viewTransition: true,
     });
   }, [navigate]);
 
@@ -390,7 +414,7 @@ export function WatchPlaybackHost() {
   } = controller;
   const queryClient = useQueryClient();
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigate = useViewTransitionNavigate();
   const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
@@ -501,7 +525,7 @@ export function WatchPlaybackHost() {
     const prefetchAndNavigate = async () => {
       if (request.returnHref) {
         clearPendingReturnNavigation(request.requestKey);
-        navigate(returnHref, { replace: true });
+        navigate(returnHref, { up: true, replace: true });
         return;
       }
 
@@ -516,7 +540,7 @@ export function WatchPlaybackHost() {
 
       if (!cancelled) {
         clearPendingReturnNavigation(request.requestKey);
-        navigate(fallbackItemHref, { replace: true });
+        navigate(fallbackItemHref, { up: true, replace: true });
       }
     };
 
@@ -581,9 +605,11 @@ export function WatchPlaybackHost() {
       if (activeRequest) {
         if (exitState?.destinationHref) {
           exitPlayback({ destinationHref: exitState.destinationHref });
+          // Leaving playback is backward motion, but `replace` still stands:
+          // the watch entry must not survive for Forward to walk back into.
           navigate(exitState.destinationHref, {
+            up: true,
             replace: true,
-            viewTransition: true,
           });
           return;
         }
@@ -591,8 +617,8 @@ export function WatchPlaybackHost() {
         if (activeRequest.roomId && activeRequest.roomToken) {
           exitPlayback();
           navigate(`/rooms/${activeRequest.roomId}?room_token=${activeRequest.roomToken}`, {
+            up: true,
             replace: true,
-            viewTransition: true,
             state: {
               suppressAutoStartSelection: {
                 contentId: activeRequest.contentId,
@@ -606,8 +632,8 @@ export function WatchPlaybackHost() {
 
         exitPlayback();
         navigate(buildPlaybackReturnHref(activeRequest), {
+          up: true,
           replace: true,
-          viewTransition: true,
         });
         return;
       }
@@ -631,8 +657,8 @@ export function WatchPlaybackHost() {
         minimizePlayback();
       });
       navigate(returnHref, {
+        up: true,
         replace: true,
-        viewTransition: true,
       });
     },
     [activeRequest, applyExitStateToCache, minimizePlayback, navigate, state.mode],
@@ -644,7 +670,6 @@ export function WatchPlaybackHost() {
       if (activeRequest.roomId && activeRequest.roomToken) {
         navigate(`/rooms/${activeRequest.roomId}?room_token=${activeRequest.roomToken}`, {
           replace: true,
-          viewTransition: true,
         });
         return;
       }
@@ -714,8 +739,8 @@ export function WatchPlaybackHost() {
       if (activeRequest?.roomId && activeRequest.roomToken) {
         stopPlayback();
         navigate(`/rooms/${activeRequest.roomId}?room_token=${activeRequest.roomToken}`, {
+          up: true,
           replace: true,
-          viewTransition: true,
         });
         return;
       }
@@ -749,7 +774,7 @@ export function WatchPlaybackHost() {
       if (!activeItem?.series_id) {
         if (activeRequest) {
           stopPlayback();
-          navigate(buildWatchItemHref(activeRequest));
+          navigate(buildWatchItemHref(activeRequest), { up: true });
         }
         return;
       }
@@ -774,7 +799,7 @@ export function WatchPlaybackHost() {
   const handlePostRollClose = useCallback(() => {
     if (activeRequest) {
       stopPlayback();
-      navigate(buildWatchItemHref(activeRequest));
+      navigate(buildWatchItemHref(activeRequest), { up: true });
     }
   }, [activeRequest, stopPlayback, navigate]);
 
@@ -833,19 +858,7 @@ export function WatchPlaybackHost() {
       return null;
     }
 
-    return (
-      <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
-        <div className="surface-panel-subtle animate-in fade-in flex min-w-[260px] flex-col items-center gap-4 rounded-[1.8rem] px-8 py-7 text-center duration-300">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-white">Preparing playback</p>
-            <p className="text-xs text-white/55">
-              Loading stream details, subtitles, and resume state.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PlaybackPreparingScreen />;
   }
 
   if (error && isForeground) {
@@ -937,25 +950,27 @@ export function WatchPlaybackHost() {
   return (
     <PlayerConfigProvider config={playerConfig}>
       {(isForeground || isPostRoll) && <WatchPlaybackTitle title={activeItem.title} />}
-      <WatchPage
-        {...watchPageProps}
-        maxBitrateKbps={maxBitrateKbps ?? null}
-        introSkipMode={introSkipMode}
-        autoSkipRecap={autoSkipRecap}
-        autoPlayNextPreview={autoPlayNextPreview}
-        canEditMarkers={canEditMarkers}
-        playbackRequestKey={requestKeyValue}
-        onNavigateEpisode={handleNavigateEpisode}
-        onEnded={handleEnded}
-        onExit={handleExit}
-        onMinimize={handleMinimize}
-        displayMode={playerDisplayMode}
-        autoEnterPictureInPicture={state.autoEnterPictureInPicture}
-        onPictureInPictureChange={handlePictureInPictureChange}
-        onPlaybackStateChange={handlePlaybackStateChange}
-        onPlaybackTransportReady={handlePlaybackTransportReady}
-        onReturnFromPostRoll={isPostRoll ? handleReturnFromPostRoll : undefined}
-      />
+      <Suspense fallback={isForeground || isPostRoll ? <PlaybackPreparingScreen /> : null}>
+        <WatchPage
+          {...watchPageProps}
+          maxBitrateKbps={maxBitrateKbps ?? null}
+          introSkipMode={introSkipMode}
+          autoSkipRecap={autoSkipRecap}
+          autoPlayNextPreview={autoPlayNextPreview}
+          canEditMarkers={canEditMarkers}
+          playbackRequestKey={requestKeyValue}
+          onNavigateEpisode={handleNavigateEpisode}
+          onEnded={handleEnded}
+          onExit={handleExit}
+          onMinimize={handleMinimize}
+          displayMode={playerDisplayMode}
+          autoEnterPictureInPicture={state.autoEnterPictureInPicture}
+          onPictureInPictureChange={handlePictureInPictureChange}
+          onPlaybackStateChange={handlePlaybackStateChange}
+          onPlaybackTransportReady={handlePlaybackTransportReady}
+          onReturnFromPostRoll={isPostRoll ? handleReturnFromPostRoll : undefined}
+        />
+      </Suspense>
       {isPostRoll && (
         <PlayingNextScreen
           seriesId={activeItem.series_id}

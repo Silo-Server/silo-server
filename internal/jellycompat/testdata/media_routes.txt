@@ -1,0 +1,240 @@
+# fixture 1
+GET /	non-media
+HEAD /	non-media
+GET /Artists	non-media
+GET /Branding/Configuration	non-media
+POST /ClientLog/Document	non-media
+GET /DisplayPreferences/{displayPreferencesId}	non-media
+POST /DisplayPreferences/{displayPreferencesId}	non-media
+GET /Episode/{id}/IntroTimestamps	non-media
+GET /Episode/{id}/Timestamps	non-media
+GET /Genres	non-media
+GET /Genres/{name}	non-media
+GET /Items	non-media
+GET /Items/Filters	non-media
+GET /Items/Filters2	non-media
+GET /Items/Latest	non-media
+GET /Items/Suggestions	non-media
+GET /Items/{id}	non-media
+GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
+HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images/{imageType}	non-media
+GET /Items/{id}/Images/{imageType}/{index}	non-media
+GET /Items/{id}/Intros	non-media
+GET /Items/{id}/LocalTrailers	non-media
+GET /Items/{id}/PlaybackInfo	non-media
+POST /Items/{id}/PlaybackInfo	non-media
+GET /Items/{id}/Similar	non-media
+GET /Items/{id}/SpecialFeatures	non-media
+GET /Items/{id}/ThemeMedia	non-media
+GET /Items/{id}/ThemeSongs	non-media
+GET /Library/VirtualFolders	non-media
+GET /MediaSegments/{id}	non-media
+GET /Movies/Recommendations	non-media
+GET /Movies/{id}/Similar	non-media
+GET /Persons	non-media
+GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+GET /QuickConnect/Enabled	non-media
+GET /Search/Hints	non-media
+GET /Sessions	non-media
+POST /Sessions/Capabilities	non-media
+POST /Sessions/Capabilities/Full	non-media
+POST /Sessions/Logout	non-media
+POST /Sessions/Playing	non-media
+POST /Sessions/Playing/Progress	non-media
+POST /Sessions/Playing/Stopped	non-media
+GET /Shows/NextUp	non-media
+GET /Shows/Upcoming	non-media
+GET /Shows/{id}/Episodes	non-media
+GET /Shows/{id}/Seasons	non-media
+GET /Shows/{id}/Similar	non-media
+GET /Studios	non-media
+GET /System/Endpoint	non-media
+GET /System/Info	non-media
+GET /System/Info/Public	non-media
+HEAD /System/Info/Public	non-media
+GET /System/Ping	non-media
+HEAD /System/Ping	non-media
+DELETE /UserFavoriteItems/{itemId}	non-media
+POST /UserFavoriteItems/{itemId}	non-media
+GET /UserImage	non-media
+HEAD /UserImage	non-media
+GET /UserItems/Resume	non-media
+GET /UserItems/{itemId}/UserData	non-media
+DELETE /UserPlayedItems/{itemId}	non-media
+POST /UserPlayedItems/{itemId}	non-media
+GET /UserViews	non-media
+GET /UserViews/GroupingOptions	non-media
+GET /Users	non-media
+POST /Users/AuthenticateByName	non-media
+GET /Users/Me	non-media
+GET /Users/Public	non-media
+GET /Users/{id}	non-media
+GET /Users/{id}/Images/Primary	non-media
+HEAD /Users/{id}/Images/Primary	non-media
+GET /Users/{id}/Items	non-media
+GET /Users/{id}/Items/Latest	non-media
+DELETE /Users/{userId}/FavoriteItems/{itemId}	non-media
+POST /Users/{userId}/FavoriteItems/{itemId}	non-media
+GET /Users/{userId}/Items/Resume	non-media
+GET /Users/{userId}/Items/{id}	non-media
+GET /Users/{userId}/Items/{id}/Intros	non-media
+GET /Users/{userId}/Items/{id}/LocalTrailers	non-media
+GET /Users/{userId}/Items/{id}/PlaybackInfo	non-media
+POST /Users/{userId}/Items/{id}/PlaybackInfo	non-media
+GET /Users/{userId}/Items/{id}/SpecialFeatures	non-media
+GET /Users/{userId}/Items/{id}/ThemeMedia	non-media
+GET /Users/{userId}/Items/{id}/ThemeSongs	non-media
+GET /Users/{userId}/Items/{itemId}/UserData	non-media
+POST /Users/{userId}/Items/{itemId}/UserData	non-media
+DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
+POST /Users/{userId}/PlayedItems/{itemId}	non-media
+GET /Users/{userId}/Views	non-media
+DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/stream	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
+GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /socket	non-media
+GET /web	non-media
+CONNECT /web/*	non-media
+DELETE /web/*	non-media
+GET /web/*	non-media
+HEAD /web/*	non-media
+OPTIONS /web/*	non-media
+PATCH /web/*	non-media
+POST /web/*	non-media
+PUT /web/*	non-media
+TRACE /web/*	non-media
+# fixture 2
+GET /	non-media
+HEAD /	non-media
+GET /Artists	non-media
+GET /Branding/Configuration	non-media
+POST /ClientLog/Document	non-media
+GET /DisplayPreferences/{displayPreferencesId}	non-media
+POST /DisplayPreferences/{displayPreferencesId}	non-media
+GET /Episode/{id}/IntroTimestamps	non-media
+GET /Episode/{id}/Timestamps	non-media
+GET /Genres	non-media
+GET /Genres/{name}	non-media
+GET /Items	non-media
+GET /Items/Filters	non-media
+GET /Items/Filters2	non-media
+GET /Items/Latest	non-media
+GET /Items/Suggestions	non-media
+GET /Items/{id}	non-media
+GET /Items/{id}/Download	media	transfer	viewer_egress	false	true
+HEAD /Items/{id}/Download	media	transfer	viewer_egress	false	true
+GET /Items/{id}/Images/{imageType}	non-media
+GET /Items/{id}/Images/{imageType}/{index}	non-media
+GET /Items/{id}/Intros	non-media
+GET /Items/{id}/LocalTrailers	non-media
+GET /Items/{id}/PlaybackInfo	non-media
+POST /Items/{id}/PlaybackInfo	non-media
+GET /Items/{id}/Similar	non-media
+GET /Items/{id}/SpecialFeatures	non-media
+GET /Items/{id}/ThemeMedia	non-media
+GET /Items/{id}/ThemeSongs	non-media
+GET /Library/VirtualFolders	non-media
+GET /MediaSegments/{id}	non-media
+GET /Movies/Recommendations	non-media
+GET /Movies/{id}/Similar	non-media
+GET /Persons	non-media
+GET /Playback/BitrateTest	media	transfer	viewer_egress	false	true
+GET /QuickConnect/Enabled	non-media
+GET /Search/Hints	non-media
+GET /Sessions	non-media
+POST /Sessions/Capabilities	non-media
+POST /Sessions/Capabilities/Full	non-media
+POST /Sessions/Logout	non-media
+POST /Sessions/Playing	non-media
+POST /Sessions/Playing/Progress	non-media
+POST /Sessions/Playing/Stopped	non-media
+GET /Shows/NextUp	non-media
+GET /Shows/Upcoming	non-media
+GET /Shows/{id}/Episodes	non-media
+GET /Shows/{id}/Seasons	non-media
+GET /Shows/{id}/Similar	non-media
+GET /Studios	non-media
+GET /System/Endpoint	non-media
+GET /System/Info	non-media
+GET /System/Info/Public	non-media
+HEAD /System/Info/Public	non-media
+GET /System/Ping	non-media
+HEAD /System/Ping	non-media
+DELETE /UserFavoriteItems/{itemId}	non-media
+POST /UserFavoriteItems/{itemId}	non-media
+GET /UserImage	non-media
+HEAD /UserImage	non-media
+GET /UserItems/Resume	non-media
+GET /UserItems/{itemId}/UserData	non-media
+DELETE /UserPlayedItems/{itemId}	non-media
+POST /UserPlayedItems/{itemId}	non-media
+GET /UserViews	non-media
+GET /UserViews/GroupingOptions	non-media
+GET /Users	non-media
+POST /Users/AuthenticateByName	non-media
+GET /Users/Me	non-media
+GET /Users/Public	non-media
+GET /Users/{id}	non-media
+GET /Users/{id}/Images/Primary	non-media
+HEAD /Users/{id}/Images/Primary	non-media
+GET /Users/{id}/Items	non-media
+GET /Users/{id}/Items/Latest	non-media
+DELETE /Users/{userId}/FavoriteItems/{itemId}	non-media
+POST /Users/{userId}/FavoriteItems/{itemId}	non-media
+GET /Users/{userId}/Items/Resume	non-media
+GET /Users/{userId}/Items/{id}	non-media
+GET /Users/{userId}/Items/{id}/Intros	non-media
+GET /Users/{userId}/Items/{id}/LocalTrailers	non-media
+GET /Users/{userId}/Items/{id}/PlaybackInfo	non-media
+POST /Users/{userId}/Items/{id}/PlaybackInfo	non-media
+GET /Users/{userId}/Items/{id}/SpecialFeatures	non-media
+GET /Users/{userId}/Items/{id}/ThemeMedia	non-media
+GET /Users/{userId}/Items/{id}/ThemeSongs	non-media
+GET /Users/{userId}/Items/{itemId}/UserData	non-media
+POST /Users/{userId}/Items/{itemId}/UserData	non-media
+DELETE /Users/{userId}/PlayedItems/{itemId}	non-media
+POST /Users/{userId}/PlayedItems/{itemId}	non-media
+GET /Users/{userId}/Views	non-media
+DELETE /Videos/ActiveEncodings	non-media
+GET /Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/stream	media	playback	viewer_egress	true	true
+GET /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/audio-v2/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/hls/{playlistId}/stream.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}	media	playback	viewer_egress	true	true
+GET /Videos/{id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /Videos/{id}/stream	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/stream	media	playback	viewer_egress	true	true
+GET /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
+HEAD /Videos/{id}/stream.{container}	media	playback	viewer_egress	true	true
+GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}	media	playback	viewer_egress	true	true
+GET /socket	non-media
+GET /web	non-media
+CONNECT /web/*	non-media
+DELETE /web/*	non-media
+GET /web/*	non-media
+HEAD /web/*	non-media
+OPTIONS /web/*	non-media
+PATCH /web/*	non-media
+POST /web/*	non-media
+PUT /web/*	non-media
+TRACE /web/*	non-media

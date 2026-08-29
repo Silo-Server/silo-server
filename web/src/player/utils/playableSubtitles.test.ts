@@ -75,6 +75,10 @@ describe("pendingServerSubtitleSelection", () => {
     expect(pendingServerSubtitleSelection("burn_in", 2, 2, true)).toBeUndefined();
   });
 
+  it("does not re-request a sidecar artifact selected by a burn-in plan", () => {
+    expect(pendingServerSubtitleSelection("burn_in", 0, 0, false)).toBeUndefined();
+  });
+
   it("preserves a sidecar selection while replacing burn-in", () => {
     expect(pendingServerSubtitleSelection("burn_in", 2, 0, false)).toBe(0);
   });

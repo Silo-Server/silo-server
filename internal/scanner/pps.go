@@ -10,10 +10,11 @@ import (
 
 // copySafetyScanSeconds bounds how much of the stream the multi-PPS scan
 // demuxes. Affected encoders emit every PPS variant within the opening GOPs
-// (all four in the reference file appear inside the first two seconds); a
-// generous window catches slower rotations while staying a stream-copy, so the
-// scan finishes in well under a second regardless of runtime.
-const copySafetyScanSeconds = 15
+// (all four in the reference file appear inside the first two seconds), so a
+// few seconds of headroom catches slower rotations. Kept short because the
+// window is bytes read off the media store: on remote storage the read, not
+// the demux, is what costs.
+const copySafetyScanSeconds = 5
 
 // DetectMultiplePPSH264 reports whether an H.264 stream redefines the same
 // pic_parameter_set_id in-band with more than one distinct content within the

@@ -142,6 +142,7 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 		OutputDir:              outputDir,
 		SessionID:              "copy-anchor-integration",
 		SourceVideoCodec:       "hevc",
+		VideoSampleEntry:       VideoSampleEntryHVC1,
 		SeekSeconds:            18.261,
 		StreamOriginSeconds:    anchor,
 		CopySeekAnchorResolved: true,
@@ -166,6 +167,17 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 	if !strings.Contains(string(manifest), "#EXT-X-MEDIA-SEQUENCE:5") {
 		t.Fatalf("copy HLS media sequence does not use resolved anchor:\n%s", manifest)
 	}
+	if !strings.Contains(string(manifest), `#EXT-X-MAP:URI="init.mp4"`) {
+		t.Fatalf("copy HLS manifest missing init map:\n%s", manifest)
+	}
+	initInfo, err := os.Stat(filepath.Join(outputDir, "init.mp4"))
+	if err != nil || initInfo.Size() == 0 {
+		t.Fatalf("copy HLS init segment: info=%v err=%v", initInfo, err)
+	}
+	segments, err := filepath.Glob(filepath.Join(outputDir, "seg_*.m4s"))
+	if err != nil || len(segments) == 0 {
+		t.Fatalf("copy HLS media segments = %v err=%v", segments, err)
+	}
 	firstFrame, err := exec.Command(ffprobePathFromFFmpeg(ffmpegPath),
 		"-v", "error",
 		"-select_streams", "v:0",
@@ -179,5 +191,21 @@ func TestResolveCopySeekAnchorMatchesRealLongGOPHEVC(t *testing.T) {
 	}
 	if !strings.Contains(string(firstFrame), "10.000000") {
 		t.Fatalf("copy HLS first frame = %q, want resolved 10-second keyframe", firstFrame)
+	}
+	tag, err := exec.Command(ffprobePathFromFFmpeg(ffmpegPath),
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_tag_string",
+		"-of", "default=nw=1:nk=1",
+		manifestPath,
+	).CombinedOutput()
+	tags := strings.Fields(string(tag))
+	if err != nil || len(tags) == 0 {
+		t.Fatalf("copy HLS sample entry = %q err=%v", tag, err)
+	}
+	for _, got := range tags {
+		if got != VideoSampleEntryHVC1 {
+			t.Fatalf("copy HLS sample entry = %q, want only %q", tag, VideoSampleEntryHVC1)
+		}
 	}
 }

@@ -10,13 +10,13 @@ import {
   MoreVertical,
   RefreshCw,
 } from "lucide-react";
-import { Link } from "react-router";
 import { toast } from "sonner";
 import type { FileVersion, ItemDetail, MangaChapter } from "@/api/types";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import PageBack from "@/components/PageBack";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -153,12 +153,13 @@ function MangaRow({
       id={`manga-chapter-${chapter.content_id}`}
       className="hover:bg-muted/40 flex items-center gap-3 px-4 py-2 transition-colors"
     >
-      <Link to={readerHref} className="flex min-w-0 flex-1 items-center gap-3">
+      <ViewTransitionLink to={readerHref} className="flex min-w-0 flex-1 items-center gap-3">
         {chapter.poster_url ? (
           <img
             src={chapter.poster_url}
             alt=""
             loading="lazy"
+            decoding="async"
             className="h-12 w-8 flex-shrink-0 rounded object-cover"
           />
         ) : (
@@ -189,7 +190,7 @@ function MangaRow({
             <span className="text-muted-foreground text-[11px] tabular-nums">{progressPct}%</span>
           </span>
         )}
-      </Link>
+      </ViewTransitionLink>
       <div className="flex flex-shrink-0 items-center gap-1">
         <Button
           type="button"
@@ -324,13 +325,15 @@ export default function MangaContent({
                 asChild
                 className="h-11 gap-2.5 rounded-full px-6 text-[15px] font-bold tracking-wide shadow-md"
               >
-                <Link to={chapterReaderHref(cta.chapter.content_id, item.content_id, libraryId)}>
+                <ViewTransitionLink
+                  to={chapterReaderHref(cta.chapter.content_id, item.content_id, libraryId)}
+                >
                   <BookOpen className="size-[18px]" />
                   {cta.verb}
                   <span className="text-primary-foreground/75 text-xs font-semibold">
                     {cta.label}
                   </span>
-                </Link>
+                </ViewTransitionLink>
               </Button>
             )}
             <DropdownMenu modal={false}>

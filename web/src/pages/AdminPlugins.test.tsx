@@ -1,3 +1,4 @@
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -132,6 +133,7 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
   useDeletePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
+  useTestPluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginAuthBinding: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginTaskBinding: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -461,5 +463,52 @@ describe("AdminPlugins", () => {
     expect(markup).toContain("Showing");
     expect(markup).toContain(">13</span>–<span");
     expect(markup).toContain("2 / 2");
+  });
+
+  // Effects never run under renderToStaticMarkup, so the ?configure deep link
+  // needs a real DOM render.
+  it("opens the configure dialog from a ?configure deep link", async () => {
+    const installation = makeInstallation(1, "TheIntroDB");
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [installation],
+      catalogSettings: undefined,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/admin/plugins?configure=${installation.plugin_id}`]}>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Configure bindings, credentials, and runtime settings."),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(installation.plugin_id)).toBeInTheDocument();
+  });
+
+  it("ignores a ?configure deep link for a plugin that is not installed", async () => {
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      installations: [makeInstallation(1, "TheIntroDB")],
+      catalogSettings: undefined,
+      isLoading: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/admin/plugins?configure=silo.not-installed"]}>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Configure bindings, credentials, and runtime settings."),
+      ).not.toBeInTheDocument(),
+    );
   });
 });

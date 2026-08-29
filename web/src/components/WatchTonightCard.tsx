@@ -126,9 +126,9 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
 
           {/* Progress bar */}
           {isInProgress && progressPercent > 0 && (
-            <div className="bg-background/40 absolute inset-x-0 bottom-0 h-[3px]">
+            <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
               <div
-                className="h-full transition-all duration-300"
+                className="h-full rounded-full transition-all duration-300"
                 style={{
                   width: `${Math.min(progressPercent, 100)}%`,
                   background: "var(--primary)",

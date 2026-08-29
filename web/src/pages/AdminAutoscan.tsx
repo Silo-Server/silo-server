@@ -16,29 +16,7 @@ import {
 import ConnectionsPanel from "@/pages/admin/autoscan/ConnectionsPanel";
 import ActivityPanel from "@/pages/admin/autoscan/ActivityPanel";
 import SourcesPanel from "@/pages/admin/autoscan/SourcesPanel";
-
-// ---------------------------------------------------------------------------
-// Tab routing helpers
-// ---------------------------------------------------------------------------
-
-const AUTOSCAN_TABS = ["sources", "activity"] as const;
-type AutoscanTab = (typeof AUTOSCAN_TABS)[number];
-
-/**
- * Connections and settings used to be peer tabs, which read as "set these up
- * first" — most operators never needed either. They now live in an Advanced
- * section on the Sources view, so their old deep links land on Sources with
- * that section already open rather than 404-ing into a missing tab.
- */
-const LEGACY_ADVANCED_TABS = new Set(["connections", "settings"]);
-
-function normalizeTab(value: string | null): AutoscanTab {
-  return AUTOSCAN_TABS.includes(value as AutoscanTab) ? (value as AutoscanTab) : "sources";
-}
-
-function isLegacyAdvancedTab(value: string | null): boolean {
-  return value !== null && LEGACY_ADVANCED_TABS.has(value);
-}
+import { isLegacyAdvancedTab, normalizeTab } from "@/pages/autoscanSearchParams";
 
 // ---------------------------------------------------------------------------
 // Settings tab
@@ -126,9 +104,19 @@ function SettingsTab() {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function AdminAutoscan() {
+interface AdminAutoscanProps {
+  /**
+   * Rendered inside the Libraries page rather than as its own route. The
+   * heading drops to an h2 and the Sources/Activity selection moves to `view`,
+   * because `tab` already names the Libraries tab that hosts this panel.
+   */
+  embedded?: boolean;
+}
+
+export default function AdminAutoscan({ embedded = false }: AdminAutoscanProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab");
+  const tabParam = embedded ? "view" : "tab";
+  const requestedTab = searchParams.get(tabParam);
   const activeTab = normalizeTab(requestedTab);
   const trigger = useTriggerAutoscan();
   const settings = useAutoscanSettings();
@@ -148,9 +136,9 @@ export default function AdminAutoscan() {
   function setActiveTab(value: string) {
     const next = new URLSearchParams(searchParams);
     if (value === "sources") {
-      next.delete("tab");
+      next.delete(tabParam);
     } else {
-      next.set("tab", value);
+      next.set(tabParam, value);
     }
     setSearchParams(next, { replace: true });
   }
@@ -160,9 +148,13 @@ export default function AdminAutoscan() {
       <div className="page-header">
         <div className="space-y-2">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
-              Autoscan
-            </h1>
+            {embedded ? (
+              <h2 className="text-xl font-semibold tracking-tight">Autoscan</h2>
+            ) : (
+              <h1 className="text-3xl font-semibold tracking-normal text-balance sm:text-4xl">
+                Autoscan
+              </h1>
+            )}
             {settings.data &&
               (enabled ? (
                 <Badge variant="secondary">Enabled</Badge>

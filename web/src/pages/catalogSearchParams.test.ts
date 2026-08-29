@@ -91,7 +91,7 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
-  it("defaults the watchlist to source order until a sort is chosen", () => {
+  it("defaults personal saved lists to source order until a sort is chosen", () => {
     expect(parseCatalogSearchParams(params("source=watchlist")).uses_source_order).toBe(true);
     expect(parseCatalogSearchParams(params("source=watchlist&sort=title")).uses_source_order).toBe(
       false,
@@ -100,8 +100,7 @@ describe("parseCatalogSearchParams", () => {
       parseCatalogSearchParams(params("source=watchlist&sort=added_at&order=desc"))
         .uses_source_order,
     ).toBe(false);
-    // Other personal sources keep their existing behavior.
-    expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(false);
+    expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(true);
     expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(false);
   });
 
@@ -226,31 +225,40 @@ describe("buildCatalogHref", () => {
     ).toBe("source=query&library_id=2&sort=added_at&order=desc");
   });
 
-  it("omits the sort for watchlist source order but keeps an explicit Date Added", () => {
-    const sourceOrdered = buildCatalogApiSearchParams({
-      source: "watchlist",
-      uses_source_order: true,
-      query_definition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "added_at", order: "desc" },
-      },
-    });
-    expect(sourceOrdered.toString()).toBe("source=watchlist");
+  it.each(["watchlist", "favorites"] as const)(
+    "omits the sort for %s source order but keeps an explicit Date Added",
+    (source) => {
+      const sourceOrdered = buildCatalogApiSearchParams({
+        source,
+        uses_source_order: true,
+        query_definition: {
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "added_at", order: "desc" },
+        },
+      });
+      expect(sourceOrdered.toString()).toBe(`source=${source}`);
 
-    const explicitAddedAt = buildCatalogApiSearchParams({
-      source: "watchlist",
-      uses_source_order: false,
-      query_definition: {
-        library_ids: [],
-        match: "all",
-        groups: [],
-        sort: { field: "added_at", order: "desc" },
-      },
-    });
-    expect(explicitAddedAt.toString()).toBe("source=watchlist&sort=added_at&order=desc");
-  });
+      const explicitAddedAt = buildCatalogApiSearchParams({
+        source,
+        uses_source_order: false,
+        query_definition: {
+          library_ids: [],
+          match: "all",
+          groups: [],
+          sort: { field: "added_at", order: "desc" },
+        },
+      });
+      expect(explicitAddedAt.toString()).toBe(`source=${source}&sort=added_at&order=desc`);
+
+      // The explicit pick must survive a URL round-trip, or the saved browse
+      // preference is written back as source order instead.
+      const reparsed = parseCatalogSearchParams(new URLSearchParams(explicitAddedAt.toString()));
+      expect(reparsed.uses_source_order).toBe(false);
+      expect(reparsed.query_definition.sort).toEqual({ field: "added_at", order: "desc" });
+    },
+  );
 
   it("does not leak a server-derived collection sort into an unrelated filter update", () => {
     const built = buildCatalogFilterSearchParams({

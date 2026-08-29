@@ -1,0 +1,52 @@
+# fixture 1
+POST /admin/force-reload	non-media
+POST /admin/reload-config	non-media
+POST /admin/reprobe-capabilities	non-media
+GET /api/v1/health	non-media
+GET /downloads/file/{token}	media	transfer	viewer_egress	false	true
+HEAD /downloads/file/{token}	media	transfer	viewer_egress	false	true
+GET /hw-capabilities	non-media
+GET /metrics	non-media
+GET /status	non-media
+GET /stream/direct/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true
+GET /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true
+GET /stream/remux/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/remux/{token}	media	playback	viewer_egress	true	true
+GET /stream/subtitles/{token}/{track}	media	playback	viewer_egress	true	true
+GET /stream/subtitles/{token}/{track}/fonts	media	playback	viewer_egress	true	true
+GET /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /stream/transcode/{token}/segment/{name}	media	playback	viewer_egress	true	true
+GET /stream/v3/{session_id}	media	playback	viewer_egress	true	true
+HEAD /stream/v3/{session_id}	media	playback	viewer_egress	true	true
+GET /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /stream/v3/{session_id}/segment/{name}	media	playback	viewer_egress	true	true
+# fixture 2
+POST /admin/force-reload	non-media
+POST /admin/reload-config	non-media
+POST /admin/reprobe-capabilities	non-media
+GET /api/v1/health	non-media
+GET /downloads/file/{token}	media	transfer	viewer_egress	false	true
+HEAD /downloads/file/{token}	media	transfer	viewer_egress	false	true
+GET /hw-capabilities	non-media
+GET /metrics	non-media
+GET /status	non-media
+GET /stream/direct/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/direct/{token}	media	playback	viewer_egress	true	true
+GET /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/remux/audio-v2/{token}	media	playback	viewer_egress	true	true
+GET /stream/remux/{token}	media	playback	viewer_egress	true	true
+HEAD /stream/remux/{token}	media	playback	viewer_egress	true	true
+GET /stream/subtitles/{token}/{track}	media	playback	viewer_egress	true	true
+GET /stream/subtitles/{token}/{track}/fonts	media	playback	viewer_egress	true	true
+GET /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /stream/transcode/{token}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /stream/transcode/{token}/segment/{name}	media	playback	viewer_egress	true	true
+GET /stream/v3/{session_id}	media	playback	viewer_egress	true	true
+HEAD /stream/v3/{session_id}	media	playback	viewer_egress	true	true
+GET /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
+HEAD /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
+GET /stream/v3/{session_id}/segment/{name}	media	playback	viewer_egress	true	true

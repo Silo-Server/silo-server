@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -11,6 +12,9 @@ import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { buildItemHref } from "@/lib/mediaNavigation";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
+import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -170,6 +174,8 @@ export default function ItemCard({
   libraryId,
   sortField,
   overlayPrefs,
+  quickActionMode = "none",
+  narrowPosterActions = false,
   selectionMode = false,
   selected = false,
   onToggleSelect,
@@ -178,26 +184,31 @@ export default function ItemCard({
   libraryId?: number;
   sortField?: string;
   overlayPrefs?: CardOverlayPrefs | null;
+  quickActionMode?: CardQuickActionMode;
+  narrowPosterActions?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
   const { loaded, onLoad } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
-  const itemHref = `/item/${encodeURIComponent(item.content_id)}${
-    libraryId ? `?libraryId=${libraryId}` : ""
-  }`;
+  const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const episodeLabels = buildEpisodeCardLabels(item);
   const displayTitle = episodeLabels ? episodeLabels.seriesTitle : item.title;
+  const headingHref =
+    item.type === "episode" && item.series_id
+      ? buildItemHref({ contentId: item.series_id, libraryId })
+      : itemHref;
   const mangaCountLabel = mangaCountChipLabel(item);
   const mangaStatus = mangaStatusChip(item);
   const { cardPresentation } = useUICustomization();
   const showCaption = cardPresentation.caption !== "artwork";
   const showMetadata = cardPresentation.caption === "title_metadata";
+  const cardRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="media-card group/card">
-      <div className="relative">
+    <div ref={cardRef} className="media-card media-card-longpress group/card">
+      <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
           aria-label={displayTitle}
@@ -273,6 +284,14 @@ export default function ItemCard({
             )}
           </div>
         </ViewTransitionLink>
+        {!selectionMode && item.play_content_id ? (
+          <CardPlayOverlay
+            contentId={item.play_content_id}
+            title={displayTitle}
+            type={item.type === "movie" ? "movie" : "episode"}
+            libraryId={libraryId}
+          />
+        ) : null}
         {selectionMode && onToggleSelect && (
           <button
             type="button"
@@ -304,22 +323,37 @@ export default function ItemCard({
           libraryId={libraryId}
           userState={item.user_state}
           variant="poster"
+          narrowPosterActions={narrowPosterActions}
+          quickActionMode={quickActionMode}
+          longPressRef={cardRef}
+          itemTitle={displayTitle}
         />
       </div>
       {showCaption ? (
-        <ViewTransitionLink to={itemHref} className="block px-1 pt-3">
-          <div className="truncate text-[14px] font-semibold tracking-tight">{displayTitle}</div>
+        <div className="px-1 pt-3">
+          <ViewTransitionLink
+            to={headingHref}
+            className="block truncate text-[14px] font-semibold tracking-tight hover:underline"
+          >
+            {displayTitle}
+          </ViewTransitionLink>
           {showMetadata && episodeLabels?.episodeTitle ? (
-            <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+            <ViewTransitionLink
+              to={itemHref}
+              className="text-muted-foreground mt-1 block truncate text-[12px] font-medium hover:underline"
+            >
               {episodeLabels.episodeTitle}
-            </div>
+            </ViewTransitionLink>
           ) : null}
           {showMetadata ? (
-            <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+            <ViewTransitionLink
+              to={itemHref}
+              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
+            >
               <SortMeta item={item} sortField={sortField} />
-            </div>
+            </ViewTransitionLink>
           ) : null}
-        </ViewTransitionLink>
+        </div>
       ) : null}
     </div>
   );

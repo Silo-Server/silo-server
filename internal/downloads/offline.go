@@ -176,6 +176,7 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, _ *h
 	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
 		return err
 	}
+	notifyServeAuthorized(ctx, FileTarget{DownloadID: dl.ID, MediaFileID: dl.MediaFileID})
 
 	kind, value, err := parseSubtitleRef(ref)
 	if err != nil {

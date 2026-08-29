@@ -100,6 +100,9 @@ func (h *Handler) handleFileStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mediaFile := files[fileIdx]
+	// §4.2b: a bare file stream has a user but no stable playback session, so it
+	// is a Transfer, never cap-relevant and never subject to per-session rules.
+	attachABSTransfer(r.Context(), a.UserID, a.ProfileID, mediaFile.ID)
 
 	// /download variant: hint the client to save rather than stream.
 	if strings.HasSuffix(r.URL.Path, "/download") {
@@ -191,6 +194,9 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mediaFile := files[idx-1]
+	// The session id IS the capability on this route, and it is also the
+	// canonical session key. Everything above this point is authorization.
+	attachABSSession(r.Context(), sid, sess.UserID, sess.ProfileID, mediaFile.ID, sess.StartedAt)
 
 	ext := strings.ToLower(filepath.Ext(mediaFile.FilePath))
 	if ct := audioContentType(ext); ct != "" {

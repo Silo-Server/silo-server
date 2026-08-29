@@ -1034,7 +1034,6 @@ export default function AdminPlugins() {
   const queryClient = useQueryClient();
   const checkPluginUpdates = useCheckPluginUpdates();
   const { data: pluginUpdateTask } = useTask(CHECK_PLUGIN_UPDATES_TASK_KEY);
-  const [configuring, setConfiguring] = useState<PluginInstallation | null>(null);
   const previousTaskState = useRef<string | null>(null);
 
   const installedIds = useMemo(
@@ -1117,6 +1116,17 @@ export default function AdminPlugins() {
     }
     setSearchParams(next, { replace: options.replace ?? true });
   }
+
+  // The configure dialog is URL state: ?configure=<plugin_id>. Provider tiles
+  // on the settings pages deep-link straight into a plugin's credential dialog
+  // this way, and closing the dialog (or browser back) just drops the param.
+  // An id that matches no installation renders nothing.
+  const configuring = useMemo(
+    () =>
+      installations.find((candidate) => candidate.plugin_id === searchParams.get("configure")) ??
+      null,
+    [installations, searchParams],
+  );
 
   useEffect(() => {
     const currentState = pluginUpdateTask?.state ?? null;
@@ -1237,7 +1247,10 @@ export default function AdminPlugins() {
                     key={installation.id}
                     installation={installation}
                     catalogEntry={catalogByPluginID.get(installation.plugin_id)}
-                    onConfigure={setConfiguring}
+                    onConfigure={(target) =>
+                      // Push (not replace) so browser back closes the dialog.
+                      updatePluginView({ configure: target.plugin_id }, { replace: false })
+                    }
                   />
                 ))}
               </div>
@@ -1326,7 +1339,10 @@ export default function AdminPlugins() {
 
       {/* Configure dialog */}
       {configuring && (
-        <ConfigureDialog installation={configuring} onClose={() => setConfiguring(null)} />
+        <ConfigureDialog
+          installation={configuring}
+          onClose={() => updatePluginView({ configure: undefined })}
+        />
       )}
     </div>
   );

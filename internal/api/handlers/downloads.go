@@ -99,23 +99,16 @@ const (
 
 // downloadRequest represents the JSON body for POST /downloads.
 type downloadRequest struct {
-	ContentID string        `json:"content_id"`
-	EpisodeID string        `json:"episode_id,omitempty"`
-	FileID    int           `json:"file_id,omitempty"`
-	Quality   string        `json:"quality,omitempty"`       // original (default) | 20mbps | 10mbps | 5mbps | 2mbps | 1mbps
-	Series    bool          `json:"series,omitempty"`        // if true, downloads all episodes
-	Season    *int          `json:"season_number,omitempty"` // with series=true, downloads only this season (0 = Specials)
-	Caps      *downloadCaps `json:"caps,omitempty"`          // device decode capability (original fallback / transcode target)
-}
-
-// downloadCaps mirrors playback.ClientCapabilities for the request body.
-type downloadCaps struct {
-	CodecsVideo            []string `json:"codecs_video,omitempty"`
-	CodecsAudio            []string `json:"codecs_audio,omitempty"`
-	AudioPassthroughCodecs []string `json:"audio_passthrough_codecs,omitempty"`
-	Containers             []string `json:"containers,omitempty"`
-	MaxResolution          string   `json:"max_resolution,omitempty"`
-	HDR                    bool     `json:"hdr,omitempty"`
+	ContentID string `json:"content_id"`
+	EpisodeID string `json:"episode_id,omitempty"`
+	FileID    int    `json:"file_id,omitempty"`
+	Quality   string `json:"quality,omitempty"`       // original (default) | 20mbps | 10mbps | 5mbps | 2mbps | 1mbps
+	Series    bool   `json:"series,omitempty"`        // if true, downloads all episodes
+	Season    *int   `json:"season_number,omitempty"` // with series=true, downloads only this season (0 = Specials)
+	// Caps is the device decode capability (original fallback / transcode
+	// target). The playback type is decoded directly: its JSON contract is the
+	// download `caps` contract, and a mirror struct here could only drift.
+	Caps *playback.ClientCapabilities `json:"caps,omitempty"`
 }
 
 // patchDownloadRequest is the JSON body for PATCH /downloads/{id}.
@@ -275,13 +268,10 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 		DevicePlatform: devicePlatform,
 	}
 	if req.Caps != nil {
-		createReq.Caps = playback.ClientCapabilities{
-			CodecsVideo:            req.Caps.CodecsVideo,
-			CodecsAudio:            req.Caps.CodecsAudio,
-			AudioPassthroughCodecs: req.Caps.AudioPassthroughCodecs,
-			Containers:             req.Caps.Containers,
-			MaxResolution:          req.Caps.MaxResolution,
-			HDR:                    req.Caps.HDR,
+		createReq.Caps = *req.Caps
+		if err := createReq.Caps.NormalizeAndValidateVideoDecode(); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
 		}
 	}
 
@@ -458,6 +448,9 @@ func (h *DownloadHandler) handleDownloadFile(w http.ResponseWriter, r *http.Requ
 
 	profileID, deviceID, _, _ := managedIdentity(r)
 	filter := requestAccessFilter(r)
+	serveCtx := downloads.WithServeAuthorized(r.Context(), func(target downloads.FileTarget) {
+		attachTransfer(r.Context(), userID, profileID, target.MediaFileID)
+	})
 	if delegate && deviceID != "" {
 		handled, err := h.redirectManagedDownload(r.Context(), w, r, userID, profileID, deviceID, id, filter)
 		if err != nil {
@@ -471,7 +464,7 @@ func (h *DownloadHandler) handleDownloadFile(w http.ResponseWriter, r *http.Requ
 	// Full media downloads outlive the server's absolute WriteTimeout; roll
 	// the write deadline with progress instead.
 	sw := httpstream.NewRollingDeadlineWriter(w)
-	if err := h.svc.ServeFile(r.Context(), sw, r, userID, profileID, deviceID, id, filter); err != nil {
+	if err := h.svc.ServeFile(serveCtx, sw, r, userID, profileID, deviceID, id, filter); err != nil {
 		if errors.Is(err, downloads.ErrResponseCommitted) {
 			return
 		}
@@ -534,7 +527,14 @@ func (h *DownloadHandler) handleDirectDownload(w http.ResponseWriter, r *http.Re
 			return
 		}
 	}
-	if err := h.svc.ServeDirect(r.Context(), w, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
+	serveCtx := downloads.WithServeAuthorized(r.Context(), func(target downloads.FileTarget) {
+		attachTransfer(r.Context(), userID, apimw.GetProfileID(r.Context()), target.MediaFileID)
+	})
+	// A multi-gigabyte original outlives the API server's absolute WriteTimeout,
+	// exactly as on /downloads/{id}/file above; roll the deadline with progress
+	// instead of truncating the body at 120 s.
+	sw := httpstream.NewRollingDeadlineWriter(w)
+	if err := h.svc.ServeDirect(serveCtx, sw, r, userID, fileID, r.URL.Query().Get("format"), filter); err != nil {
 		h.writeDownloadError(w, err)
 		return
 	}
@@ -549,7 +549,17 @@ func (h *DownloadHandler) redirectDirectDownload(ctx context.Context, w http.Res
 	if err != nil {
 		return false, err
 	}
-	return h.redirectToProxy(w, r, secret, target, userID, "")
+	// The profile has to travel with the redirect. Hardcoding "" here recorded
+	// the telemetry transfer, the proxy's own attach (from the token claim) and
+	// the node session against no profile at all, so proxy-served traffic went
+	// missing from per-profile attribution while the same file served locally
+	// was attributed correctly.
+	profileID := apimw.GetProfileID(ctx)
+	handled, err := h.redirectToProxy(w, r, secret, target, userID, profileID)
+	if handled {
+		attachTransfer(ctx, userID, profileID, target.MediaFileID)
+	}
+	return handled, err
 }
 
 func (h *DownloadHandler) redirectManagedDownload(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (bool, error) {
@@ -561,7 +571,11 @@ func (h *DownloadHandler) redirectManagedDownload(ctx context.Context, w http.Re
 	if err != nil {
 		return false, err
 	}
-	return h.redirectToProxy(w, r, secret, target, userID, profileID)
+	handled, err := h.redirectToProxy(w, r, secret, target, userID, profileID)
+	if handled {
+		attachTransfer(ctx, userID, profileID, target.MediaFileID)
+	}
+	return handled, err
 }
 
 func (h *DownloadHandler) proxyTarget() (downloadFileResolver, string, bool) {
@@ -604,23 +618,36 @@ func (h *DownloadHandler) redirectToProxy(w http.ResponseWriter, r *http.Request
 			downloadFilename = filepath.Base(target.Path)
 		}
 	}
+	playMethod := streamtoken.PlayMethodDownload
+	if target.ExpectedExecutionFingerprint != "" {
+		if target.ExpectedArtifactSize <= 0 {
+			releaseReservation()
+			return false, nil
+		}
+		playMethod = streamtoken.PlayMethodToneMapDownload
+	}
 	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:             sessionID,
-		MediaPath:             mediaPath,
-		PlayMethod:            streamtoken.PlayMethodDownload,
-		TranscodeNode:         target.OriginNodeURL,
-		DownloadArtifactID:    target.OriginArtifactID,
-		DownloadArtifactRowID: target.ArtifactID,
-		DownloadFilename:      downloadFilename,
-		UserID:                userID,
-		ProfileID:             profileID,
-		MediaFileID:           target.MediaFileID,
+		SessionID:                    sessionID,
+		MediaPath:                    mediaPath,
+		PlayMethod:                   playMethod,
+		TranscodeNode:                target.OriginNodeURL,
+		DownloadArtifactID:           target.OriginArtifactID,
+		DownloadArtifactRowID:        target.ArtifactID,
+		DownloadArtifactSize:         target.ExpectedArtifactSize,
+		DownloadExecutionFingerprint: target.ExpectedExecutionFingerprint,
+		DownloadFilename:             downloadFilename,
+		UserID:                       userID,
+		ProfileID:                    profileID,
+		MediaFileID:                  target.MediaFileID,
 	}, secret, proxyDownloadTokenTTL)
 	if err != nil {
 		releaseReservation()
 		return false, fmt.Errorf("sign proxy download token: %w", err)
 	}
-	location := strings.TrimRight(plan.ProxyNode.URL, "/") + "/downloads/file/" + url.PathEscape(token)
+	// The location is what the client downloads from, so it uses the proxy's
+	// client-facing URL; the cache key below stays on the canonical backend
+	// URL, which is the node's identity everywhere else.
+	location := strings.TrimRight(plan.ProxyNode.ClientURL(), "/") + "/downloads/file/" + url.PathEscape(token)
 	targetKey := target.Path
 	if target.OriginArtifactID != "" {
 		targetKey = target.OriginNodeURL + "\x00" + target.OriginArtifactID
@@ -779,7 +806,10 @@ func (h *DownloadHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ref := chi.URLParam(r, "ref")
-	if err := h.svc.ServeSubtitle(r.Context(), w, r, userID, profileID, deviceID, id, ref, requestAccessFilter(r)); err != nil {
+	serveCtx := downloads.WithServeAuthorized(r.Context(), func(target downloads.FileTarget) {
+		attachTransfer(r.Context(), userID, profileID, target.MediaFileID)
+	})
+	if err := h.svc.ServeSubtitle(serveCtx, w, r, userID, profileID, deviceID, id, ref, requestAccessFilter(r)); err != nil {
 		h.writeAssetError(w, "subtitle", id, err)
 		return
 	}
@@ -824,6 +854,10 @@ func (h *DownloadHandler) writeDownloadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 	case errors.Is(err, downloads.ErrBulkQualityUnavailable):
 		writeError(w, http.StatusNotImplemented, "bulk_quality_unavailable", "Bitrate quality is not available for bulk downloads yet")
+	case errors.Is(err, downloads.ErrCapacityUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "capacity_unavailable", "Download preparation capacity is currently unavailable")
+	case errors.Is(err, downloads.ErrCapabilityUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "capability_unavailable", "Download preparation capabilities are temporarily unavailable")
 	case errors.Is(err, downloads.ErrQualityUnavailable):
 		writeError(w, http.StatusNotImplemented, "quality_unavailable", "This download quality is not available")
 	case errors.Is(err, downloads.ErrFormatUnavailable):

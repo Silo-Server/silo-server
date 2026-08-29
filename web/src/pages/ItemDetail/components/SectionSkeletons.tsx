@@ -87,7 +87,7 @@ export function RecommendationGridSkeleton({ count = 6 }: { count?: number }) {
 /** Skeleton for the episode grid on a season page (landscape cards + text) */
 export function EpisodeGridSkeleton({ count = 10 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 gap-4 min-[460px]:grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       {Array.from({ length: count }, (_, i) => (
         <div key={i}>
           <Skeleton className="aspect-video w-full rounded-lg" />

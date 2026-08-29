@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlayerControls } from "./PlayerControls";
 
 function renderControls(markerEditAvailable: boolean) {
@@ -50,6 +50,8 @@ function renderControls(markerEditAvailable: boolean) {
 }
 
 describe("PlayerControls", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("hides marker editing when unavailable", () => {
     renderControls(false);
 
@@ -60,5 +62,27 @@ describe("PlayerControls", () => {
     renderControls(true);
 
     expect(screen.getByRole("button", { name: "Edit markers" })).toBeInTheDocument();
+  });
+
+  it("uses the mobile transport and hides hardware-volume controls on coarse pointers", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: true,
+        media: "(pointer: coarse)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+
+    renderControls(false);
+
+    expect(screen.getByRole("button", { name: "More player options" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play" })).toHaveClass("h-16", "w-16");
+    expect(screen.queryByRole("button", { name: /mute/i })).toBeNull();
   });
 });

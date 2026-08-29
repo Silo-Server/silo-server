@@ -29,12 +29,17 @@ const (
 	stallWindowEnv = "SILO_STREAM_WRITE_STALL_TIMEOUT"
 
 	// bumpStep rate-limits deadline updates so a busy stream issues one
-	// SetWriteDeadline per step rather than one per 32 KB chunk.
+	// SetWriteDeadline per step rather than one per 32 KB chunk. It applies to
+	// Write only: a ReadFrom slice is already bounded at readFromChunk, so
+	// bumping around one costs at most a syscall per 4 MiB and the throttle
+	// would only shorten the window a slice runs against.
 	bumpStep = 15 * time.Second
 
-	// readFromChunk bounds each ReadFrom slice so the deadline keeps rolling
-	// during zero-copy (sendfile) transfers of large files.
-	readFromChunk int64 = 64 << 20
+	// readFromChunk bounds each ReadFrom slice so the deadline keeps rolling.
+	// At the default 180s window, 4 MiB permits steady clients down to roughly
+	// 186 kbit/s without expiring mid-slice. That figure is only true because
+	// every slice starts against a freshly set deadline — see forceBump.
+	readFromChunk int64 = ReadFromChunkDefault
 )
 
 // StreamOutcome classifies how a streaming response ended.
@@ -96,10 +101,26 @@ func (s *RollingDeadlineWriter) bump() {
 	if s.disabled {
 		return
 	}
-	now := time.Now()
-	if !s.lastBump.IsZero() && now.Sub(s.lastBump) < s.step {
+	if !s.lastBump.IsZero() && time.Since(s.lastBump) < s.step {
 		return
 	}
+	s.forceBump()
+}
+
+// forceBump sets the deadline unconditionally, ignoring the step throttle.
+//
+// The throttle exists so a fast stream does not issue one SetWriteDeadline per
+// 32 KB Write. A ReadFrom slice is already bounded at readFromChunk, so the
+// throttle buys nothing there and costs correctness: a throttled slice starts
+// with as little as window-step remaining, which raises the sustained rate a
+// client must hold to survive from the documented 186 kbit/s to ~203 kbit/s and
+// reaps healthy slow clients. Every slice therefore gets a full window, which is
+// what the pre-CopyChunked loop did.
+func (s *RollingDeadlineWriter) forceBump() {
+	if s.disabled {
+		return
+	}
+	now := time.Now()
 	if err := s.rc.SetWriteDeadline(now.Add(s.window)); err != nil {
 		s.disabled = true
 		return
@@ -131,28 +152,17 @@ func (s *RollingDeadlineWriter) Write(p []byte) (int, error) {
 // (sendfile for *os.File bodies, as used by http.ServeContent) while still
 // rolling the deadline between bounded slices.
 func (s *RollingDeadlineWriter) ReadFrom(r io.Reader) (int64, error) {
-	rf, ok := s.w.(io.ReaderFrom)
-	if !ok {
-		// writerOnly hides this method so io.Copy doesn't recurse into it.
-		s.bump()
-		return io.Copy(writerOnly{s}, r)
+	if s.statusCode == 0 {
+		s.statusCode = http.StatusOK
 	}
-	var total int64
-	for {
-		s.bump()
-		if s.statusCode == 0 {
-			s.statusCode = http.StatusOK
-		}
-		n, err := rf.ReadFrom(io.LimitReader(r, readFromChunk))
-		total += n
+	// Before the FIRST slice as well as between slices: a handler that sets
+	// headers and then waits on readiness before its first write would otherwise
+	// run that slice against the window set at construction.
+	s.forceBump()
+	return ForwardReadFrom(s.w, s, r, readFromChunk, func(n int64, err error) {
+		s.forceBump()
 		s.recordWrite(n, err)
-		if err != nil {
-			return total, err
-		}
-		if n < readFromChunk {
-			return total, nil
-		}
-	}
+	})
 }
 
 func (s *RollingDeadlineWriter) Flush() {
@@ -174,10 +184,21 @@ func (s *RollingDeadlineWriter) BytesWritten() int64 {
 // Outcome classifies the first write failure, or a canceled request when no
 // write failure was surfaced by the transport.
 func (s *RollingDeadlineWriter) Outcome(ctx context.Context) StreamOutcome {
-	if isTimeoutError(s.firstWriteErr) {
+	var ctxErr error
+	if ctx != nil {
+		ctxErr = ctx.Err()
+	}
+	return ClassifyOutcome(s.firstWriteErr, ctxErr)
+}
+
+// ClassifyOutcome classifies a streaming response from its first write error
+// and request-context error. It is shared by every streaming writer so stalled
+// connections have one definition throughout the server.
+func ClassifyOutcome(firstWriteErr, ctxErr error) StreamOutcome {
+	if isTimeoutError(firstWriteErr) {
 		return OutcomeStalledReap
 	}
-	if s.firstWriteErr != nil || (ctx != nil && ctx.Err() != nil) {
+	if firstWriteErr != nil || ctxErr != nil {
 		return OutcomeClientGone
 	}
 	return OutcomeCompleted
@@ -203,5 +224,3 @@ func isTimeoutError(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
-
-type writerOnly struct{ io.Writer }

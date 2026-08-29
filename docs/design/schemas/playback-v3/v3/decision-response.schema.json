@@ -674,7 +674,12 @@
       "properties": {
         "label": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The rung identifier echoed verbatim as quality_preference on a quality_change replan. Published bitrate variants use compound labels such as 2160p-medium and 1080p-low."
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Optional human label for the rung, such as 4K Medium or 1080p Low. Clients should prefer it over label when present."
         },
         "height": {
           "type": "integer"

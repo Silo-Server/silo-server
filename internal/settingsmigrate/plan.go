@@ -896,7 +896,7 @@ func (p *Planner) addQuality(
 		res.Rejects = append(res.Rejects, Reject{
 			SourceTable: sourceTable, SourceKey: keyPreferredQuality,
 			Identity: identity, Value: value,
-			Reason: "not a quality the server ever resolved; NormalizeQualityV3 folded it to auto",
+			Reason: "not a recognized legacy quality value",
 		})
 		return
 	}

@@ -37,6 +37,15 @@ type User struct {
 
 // CreateUserInput contains the fields required to create a new user.
 //
+// Account roles. An admin account is never a member of an access group: group
+// ceilings (stream caps, library lists) must not apply to the server operator,
+// so the repository keeps admins ungrouped and the policy resolver ignores any
+// group an admin row still carries.
+const (
+	RoleAdmin = "admin"
+	RoleUser  = "user"
+)
+
 // Policy pointers: nil = inherit from the access group (stored as NULL);
 // non-nil = explicit override.
 type CreateUserInput struct {

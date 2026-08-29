@@ -62,32 +62,13 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	conditions := []string{"mi.content_id = ANY($1)"}
 	args := []any{normalized}
 	argIdx := 2
-
-	if libraryID != nil || access.AllowedLibraryIDs != nil || len(access.DisabledLibraryIDs) > 0 {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
-	if libraryID != nil {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = $%d", argIdx))
-		args = append(args, *libraryID)
-		argIdx++
-	}
-	if access.AllowedLibraryIDs != nil {
-		if len(access.AllowedLibraryIDs) == 0 {
-			return map[string]upstreamListItem{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, access.AllowedLibraryIDs)
-		argIdx++
-	}
-	if len(access.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, access.DisabledLibraryIDs)
-		argIdx++
+	if !applyCompatLibraryAccess(&access, libraryID, "mi.content_id", &conditions, &args, &argIdx) {
+		return map[string]upstreamListItem{}, nil
 	}
 	catalog.ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(
-		`SELECT DISTINCT ON (mi.content_id) %s FROM %s WHERE %s ORDER BY mi.content_id`,
+		`SELECT %s FROM %s WHERE %s`,
 		compatItemColumns("mi"), fromClause, strings.Join(conditions, " AND "),
 	)
 
@@ -165,6 +146,24 @@ func narrowAccessToLibrary(access *catalog.AccessFilter, libraryID int) bool {
 	return true
 }
 
+func applyCompatLibraryAccess(
+	access *catalog.AccessFilter,
+	libraryID *int,
+	keyColumn string,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	if libraryID != nil && !narrowAccessToLibrary(access, *libraryID) {
+		return false
+	}
+	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+		return false
+	}
+	catalog.ApplyLibraryAccessFilter(keyColumn, *access, conditions, args, argIdx)
+	return true
+}
+
 func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]compatEpisodeTarget, error) {
 	normalized := normalizeContentIDs(contentIDs)
 	if len(normalized) == 0 {
@@ -185,32 +184,13 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 	conditions := []string{"e.content_id = ANY($1)"}
 	args := []any{normalized}
 	argIdx := 2
-
-	if libraryID != nil || access.AllowedLibraryIDs != nil || len(access.DisabledLibraryIDs) > 0 {
-		fromClause += " JOIN media_item_libraries mil ON si.content_id = mil.content_id"
-	}
-	if libraryID != nil {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = $%d", argIdx))
-		args = append(args, *libraryID)
-		argIdx++
-	}
-	if access.AllowedLibraryIDs != nil {
-		if len(access.AllowedLibraryIDs) == 0 {
-			return map[string]compatEpisodeTarget{}, nil
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, access.AllowedLibraryIDs)
-		argIdx++
-	}
-	if len(access.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, access.DisabledLibraryIDs)
-		argIdx++
+	if !applyCompatLibraryAccess(&access, libraryID, "si.content_id", &conditions, &args, &argIdx) {
+		return map[string]compatEpisodeTarget{}, nil
 	}
 	catalog.ApplySectionAccessFilter("si", access, &conditions, &args, &argIdx)
 
 	query := fmt.Sprintf(`
-		SELECT DISTINCT ON (e.content_id)
+		SELECT
 			e.content_id,
 			e.title,
 			e.overview,
@@ -242,7 +222,6 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			)
 		FROM %s
 		WHERE %s
-		ORDER BY e.content_id
 	`, fromClause, strings.Join(conditions, " AND "))
 
 	rows, err := pool.Query(ctx, query, args...)

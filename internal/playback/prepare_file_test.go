@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 func TestBuildPrepareFileArgsEmitsFaststartMP4(t *testing.T) {
@@ -80,6 +81,12 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
 			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
 		},
+		{
+			name:      "videotoolbox keeps hardware encode with software decode",
+			hwAccel:   "videotoolbox",
+			want:      []string{"-c:v h264_videotoolbox", "-vf scale=-2:720"},
+			forbidden: []string{"-hwaccel videotoolbox"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -93,7 +100,10 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 				TargetCodecAudio:    "aac",
 				TargetResolution:    "720p",
 				HWAccel:             tt.hwAccel,
-				AudioTrackIndex:     -1,
+				// Fake VideoToolbox-capable ffmpeg so the encoder probe in
+				// resolveEffectiveTranscodeHWAccel succeeds on Linux CI too.
+				FFmpegPath:      videoToolboxTestFFmpeg(t),
+				AudioTrackIndex: -1,
 			}, "/artifacts/out.mp4")
 			joined := strings.Join(args, " ")
 			for _, want := range tt.want {
@@ -180,5 +190,165 @@ func TestPrepareFileResolvesOneDeviceAndReleasesAfterExit(t *testing.T) {
 	}
 	if count := hwDeviceActiveCount(devA); count != 0 {
 		t.Fatalf("active count after PrepareFile returned = %d, want 0", count)
+	}
+}
+
+// TestPrepareFileRemovesFailedPartialOutput verifies that a failed encode
+// publishes neither its temporary bytes nor a final artifact.
+func TestPrepareFileRemovesFailedPartialOutput(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	writtenPathMarker := filepath.Join(dir, "written-path.txt")
+	partialExistedMarker := filepath.Join(dir, "partial-existed")
+	scriptBody := "#!/bin/sh\n" +
+		"eval \"output=\\\"\\${$#}\\\"\"\n" +
+		"printf '%s\\n' \"$output\" > " + writtenPathMarker + "\n" +
+		"printf partial > \"$output\"\n" +
+		"test -f \"$output\" && touch " + partialExistedMarker + "\n" +
+		"exit 1\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0o755); err != nil {
+		t.Fatalf("write failing FFmpeg: %v", err)
+	}
+	outputPath := filepath.Join(dir, "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:        "/nonexistent/input.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		FFmpegPath:       script,
+		HWAccel:          HWAccelNone,
+	}, outputPath)
+	if err == nil {
+		t.Fatal("PrepareFile succeeded with a failing FFmpeg process")
+	}
+	writtenPath, readErr := os.ReadFile(writtenPathMarker)
+	if readErr != nil {
+		t.Fatalf("read fake FFmpeg output marker: %v", readErr)
+	}
+	if got, want := strings.TrimSpace(string(writtenPath)), outputPath+".part"; got != want {
+		t.Fatalf("fake FFmpeg wrote %q, want %q", got, want)
+	}
+	if _, statErr := os.Stat(partialExistedMarker); statErr != nil {
+		t.Fatalf("fake FFmpeg did not observe its partial output before cleanup: %v", statErr)
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("failed prepared output appeared at final path: %v", statErr)
+	}
+	if _, statErr := os.Stat(outputPath + ".part"); !os.IsNotExist(statErr) {
+		t.Fatalf("failed prepared output left a partial file: %v", statErr)
+	}
+}
+
+func TestPrepareFileRetriesVideoToolboxFailureInSoftware(t *testing.T) {
+	setupHWAccelTest(t)
+	dir := t.TempDir()
+	script := filepath.Join(dir, "ffmpeg")
+	logPath := filepath.Join(dir, "invocations.log")
+	// Answers capability probes and smoke encodes, fails real VideoToolbox
+	// encodes, and succeeds software encodes by writing the output file
+	// (ffmpeg's contract PrepareFile finalizes on).
+	fake := "#!/bin/sh\n" +
+		"printf '%s\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; echo ' V..... hevc_videotoolbox x'; exit 0 ;;\n" +
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
+		"  *videotoolbox*) exit 1 ;;\n" +
+		"  *) for last; do :; done; printf x > \"$last\"; exit 0 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(fake), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "artifact.mp4")
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:         "/media/movie.mkv",
+		SessionID:         "prepare-vt-retry",
+		FFmpegPath:        script,
+		SourceVideoCodec:  "h264",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		TargetResolution:  "720p",
+		TargetBitrateKbps: 2000,
+		HWAccel:           "videotoolbox",
+		AudioTrackIndex:   -1,
+	}, outputPath)
+	if err != nil {
+		t.Fatalf("PrepareFile() error = %v, want software retry to succeed", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("finalized artifact missing: %v", err)
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read invocation log: %v", err)
+	}
+	if !strings.Contains(string(log), "h264_videotoolbox -pix_fmt") {
+		t.Fatalf("first attempt should encode with VideoToolbox:\n%s", log)
+	}
+	if !strings.Contains(string(log), "libx264") {
+		t.Fatalf("retry should encode with libx264:\n%s", log)
+	}
+}
+
+func TestPrepareFileDoesNotDropHardwareToneMapGraphOnSoftwareRetry(t *testing.T) {
+	setupHWAccelTest(t)
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(inputPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := models.VideoTrack{
+		Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, FrameRate: "23.976",
+		ColorRange: "tv", ColorPrimaries: "bt2020", ColorTransfer: "smpte2084", ColorSpace: "bt2020nc",
+		BitDepth: 10, PixelFormat: "yuv420p10le",
+	}
+	revision := tonemap.RevisionForFile(&models.MediaFile{ID: 42, FileSize: info.Size(), VideoTracks: []models.VideoTrack{track}})
+
+	ffmpegPath := filepath.Join(dir, "ffmpeg")
+	logPath := filepath.Join(dir, "invocations.log")
+	ffmpegScript := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n" +
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; echo ' V..... hevc_videotoolbox x'; exit 0 ;;\n" +
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n" +
+		"  *) exit 1 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	liveJSON := `{"streams":[{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","level":153,"width":3840,"height":2160,"avg_frame_rate":"24000/1001","pix_fmt":"yuv420p10le","bits_per_raw_sample":"10","color_range":"tv","color_primaries":"bt2020","color_transfer":"smpte2084","color_space":"bt2020nc"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte("#!/bin/sh\nprintf '%s' '"+liveJSON+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "artifact.mp4")
+	err = PrepareFile(t.Context(), TranscodeOpts{
+		InputPath: inputPath, FFmpegPath: ffmpegPath,
+		SourceVideoCodec: "hevc", SourceVideoBitDepth: 10,
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "1080p", TargetBitrateKbps: 8000,
+		HWAccel:       transcodeHWVideoToolbox,
+		ToneMapPolicy: tonemap.PolicyHardwareThenSoftware, ToneMapMode: tonemap.ModeHardware,
+		ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, ToneMapSourceRevision: revision,
+		AudioTrackIndex: -1,
+	}, outputPath)
+	if err == nil {
+		t.Fatal("PrepareFile() succeeded after the hardware tone-map encode failed")
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(logData), "libx264") {
+		t.Fatalf("hardware tone-map failure retried without a valid software recipe:\n%s", logData)
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid tone-mapped artifact was published: %v", statErr)
 	}
 }

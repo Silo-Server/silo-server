@@ -46,6 +46,11 @@ type rateLimitConfigResponse struct {
 	// ActiveBackend is the backend the running limiter actually uses, which
 	// can differ from Backend until the server restarts.
 	ActiveBackend string `json:"active_backend,omitempty"`
+	// RedisAvailable reports whether the Redis backend can be selected at all,
+	// using the same rule the save path enforces. Sentinel and REDIS_URL
+	// deployments have no persisted redis.url row, so admins cannot derive
+	// this client-side.
+	RedisAvailable bool `json:"redis_available"`
 }
 
 type tierConfigResponse struct {
@@ -83,13 +88,17 @@ type authEndpointConfigRequest struct {
 
 // HandleGetConfig handles GET /admin/rate-limits/config.
 func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := ratelimit.LoadConfig(r.Context(), h.store)
+	// One read serves the rate values, the stored backend, and the
+	// Redis-availability bit, so no field of the response can straddle two
+	// snapshots of the settings table.
+	values, err := h.store.GetAll(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load rate limit config")
 		return
 	}
+	cfg := ratelimit.ConfigFromSettings(values)
 
-	backend, _ := h.store.Get(r.Context(), "ratelimit.backend")
+	backend := values["ratelimit.backend"]
 	if backend == "" {
 		backend = "memory"
 	}
@@ -104,6 +113,7 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
 		Active:             h.mw != nil,
+		RedisAvailable:     redisConfiguredSettings(values, h.redisBootstrapAvailable),
 	}
 	if h.mw != nil {
 		resp.ActiveBackend = h.mw.ActiveBackend()

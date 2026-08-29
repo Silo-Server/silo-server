@@ -1,7 +1,6 @@
 package database
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"math"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -468,20 +468,17 @@ func normalizePostgresTuneDBSize(raw string) (string, error) {
 }
 
 func detectTotalMemoryBytes() (int64, string, error) {
-	for _, path := range []string{
-		"/sys/fs/cgroup/memory.max",
-		"/sys/fs/cgroup/memory/memory.limit_in_bytes",
-	} {
-		if mem, err := readCgroupMemoryLimit(path); err == nil && mem > 0 {
+	for _, path := range nodemetrics.CgroupMemoryLimitPaths() {
+		if mem, err := nodemetrics.ReadCgroupMemoryLimit(path); err == nil && mem > 0 {
 			return mem, path, nil
 		}
 	}
 
-	if mem, err := readMeminfoTotalBytes("/host/proc/meminfo"); err == nil && mem > 0 {
+	if mem, err := nodemetrics.ReadMeminfoTotalBytes("/host/proc/meminfo"); err == nil && mem > 0 {
 		return mem, "/host/proc/meminfo", nil
 	}
 
-	mem, err := readMeminfoTotalBytes("/proc/meminfo")
+	mem, err := nodemetrics.ReadMeminfoTotalBytes("/proc/meminfo")
 	if err != nil {
 		return 0, "", err
 	}
@@ -491,61 +488,12 @@ func detectTotalMemoryBytes() (int64, string, error) {
 	return mem, "/proc/meminfo", nil
 }
 
-func readMeminfoTotalBytes(path string) (int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "MemTotal:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0, fmt.Errorf("malformed MemTotal line")
-		}
-		kb, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			return 0, err
-		}
-		return kb * sizeKB, nil
-	}
-	if err := scanner.Err(); err != nil {
-		return 0, err
-	}
-	return 0, fmt.Errorf("MemTotal not found")
-}
-
 func runningInContainer() bool {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		return true
 	}
 	raw, err := os.ReadFile("/proc/1/cgroup")
 	return err == nil && (strings.Contains(string(raw), "docker") || strings.Contains(string(raw), "kubepods"))
-}
-
-func readCgroupMemoryLimit(path string) (int64, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	value := strings.TrimSpace(string(raw))
-	if value == "" || value == "max" {
-		return 0, fmt.Errorf("no cgroup memory limit")
-	}
-	mem, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	// Docker may expose a huge sentinel when no concrete memory limit is set.
-	if mem <= 0 || mem > 1<<60 {
-		return 0, fmt.Errorf("no concrete cgroup memory limit")
-	}
-	return mem, nil
 }
 
 func parsePostgresTuneByteSize(raw string) (int64, error) {

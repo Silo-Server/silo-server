@@ -31,7 +31,14 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 	}, &mediaConditions, &args, &argIdx)
 
 	episodeConditions := []string{"mi.content_id = ANY($1)"}
-	appendEpisodeLibrarySearchAccess("mi.content_id", filter, &episodeConditions, &args, &argIdx)
+	appendEpisodeLibrarySearchAccess(
+		"mi.content_id",
+		episodeParentSeriesIDExpr("mi.content_id"),
+		filter,
+		&episodeConditions,
+		&args,
+		&argIdx,
+	)
 	applyAccessFilter("mi", AccessFilter{
 		MaxContentRating:   filter.MaxContentRating,
 		ExcludedMediaTypes: filter.ExcludedMediaTypes,
@@ -124,7 +131,7 @@ func (r *ItemRepository) buildMixedSearchSQLFromParsed(
 			`EXISTS (SELECT 1 FROM episode_libraries available_el WHERE available_el.episode_id = e.content_id)`,
 			searchMatchCondition(episodeSearchTitleVector, episodeSearchOverviewVector),
 		)
-		appendEpisodeLibrarySearchAccess("e.content_id", filter, &episodeConditions, &args, &argIdx)
+		appendEpisodeLibrarySearchAccess("e.content_id", "e.series_id", filter, &episodeConditions, &args, &argIdx)
 		if filter.MaxContentRating != "" {
 			allowedRatings := access.AllowedRatingsUpTo(filter.MaxContentRating)
 			if len(allowedRatings) == 0 {
@@ -378,6 +385,7 @@ func buildMixedSearchCandidateBranch(
 
 func appendEpisodeLibrarySearchAccess(
 	episodeIDExpr string,
+	seriesIDExpr string,
 	filter AccessFilter,
 	conditions *[]string,
 	args *[]any,
@@ -397,4 +405,7 @@ func appendEpisodeLibrarySearchAccess(
 		*args = append(*args, filter.DisabledLibraryIDs)
 		*argIdx++
 	}
+	// File membership is not enough: a series linked to a disabled library is
+	// hidden at detail/play, so search must hide those episodes too.
+	appendEpisodeParentLibraryAccess(seriesIDExpr, filter, conditions, args, argIdx)
 }

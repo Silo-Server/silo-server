@@ -68,7 +68,11 @@ type PluginImageResolver struct {
 	s3Presigner  s3ImagePresigner
 	s3PresignTTL time.Duration
 	urlCache     *cache.TTLCache[catalog.ResolvedImageURL]
-	group        singleflight.Group
+	// existsCache remembers which cached artwork rungs are actually in the
+	// bucket, so the ladder fallback costs at most one HEAD per key per window
+	// rather than one per request.
+	existsCache *cache.TTLCache[bool]
+	group       singleflight.Group
 }
 
 // NewPluginImageResolver creates a new resolver with no registered sources.
@@ -77,6 +81,7 @@ func NewPluginImageResolver() *PluginImageResolver {
 		sources:      make(map[string][]pluginImageResolverSourceEntry),
 		s3PresignTTL: 15 * time.Minute,
 		urlCache:     cache.NewTTLCache[catalog.ResolvedImageURL](),
+		existsCache:  cache.NewTTLCache[bool](),
 	}
 }
 
@@ -150,6 +155,9 @@ func (r *PluginImageResolver) SetS3Presigner(presigner s3ImagePresigner, ttl tim
 func (r *PluginImageResolver) Close() {
 	if r.urlCache != nil {
 		r.urlCache.Close()
+	}
+	if r.existsCache != nil {
+		r.existsCache.Close()
 	}
 }
 
@@ -316,14 +324,32 @@ func (r *PluginImageResolver) resolveS3Batch(
 	if presigner == nil {
 		return resolved
 	}
-	expiresAt := time.Now().Add(ttl)
+	// Only the cached-key path walks the ladder: plugin- and http-resolved
+	// images do not live in this bucket and choose their own variant.
+	checker, _ := presigner.(s3ImageExistenceChecker)
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+
+	// Walk the ladder for the whole batch before presigning any of it. Each walk
+	// can cost a HEAD or two against storage, and a browse page resolves a
+	// hundred images: done one after another that is seconds of latency in front
+	// of the JSON. Presigning itself is local signing work, so only this part is
+	// worth parallelizing.
+	ladderKeys := r.resolveLadderKeys(ctx, checker, presigner.Bucket(), entries)
+
 	for _, entry := range entries {
-		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), entry.originalPath, ttl)
+		resolvedKey := ladderKeys[entry.originalPath]
+		key := resolvedKey.key
+		fellBack := resolvedKey.fellBack
+		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), key, ttl)
 		if err != nil {
-			slog.ErrorContext(ctx, "s3 image resolution failed", "component", "metadata", "path", entry.originalPath, "error", err)
+			slog.ErrorContext(ctx, "s3 image resolution failed", "component", "metadata", "path", key, "error", err)
 			continue
 		}
 		expiry := expiresAt
+		if fellBack {
+			expiry = fallbackURLExpiry(expiry, now)
+		}
 		resolved[entry.originalPath] = catalog.ResolvedImageURL{URL: url, ExpiresAt: &expiry}
 	}
 	return resolved

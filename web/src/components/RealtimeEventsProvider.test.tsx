@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adminKeys, catalogKeys, libraryKeys, sectionKeys } from "@/hooks/queries/keys";
+import type { ItemDetail } from "@/api/types";
 import { invalidateCatalogState } from "./realtimeCatalogInvalidation";
 import { buildEventsUrl, RealtimeEventsProvider } from "./RealtimeEventsProvider";
 
@@ -64,6 +65,10 @@ class FakeWebSocket {
   emitClose() {
     this.readyState = FakeWebSocket.CLOSED;
     this.onclose?.();
+  }
+
+  emitMessage(message: unknown) {
+    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
   }
 }
 
@@ -239,5 +244,42 @@ describe("RealtimeEventsProvider", () => {
     });
 
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("preserves cached watched state when a favorite-only event arrives", () => {
+    const queryClient = new QueryClient();
+    const detailKey = catalogKeys.itemDetail("movie-1");
+    queryClient.setQueryData<ItemDetail>(detailKey, {
+      content_id: "movie-1",
+      type: "movie",
+      user_data: { played: true },
+    } as ItemDetail);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "user_state",
+        event: "favorite.updated",
+        data: {
+          profile_id: "profile-1",
+          content_id: "movie-1",
+          change: "favorite",
+          is_favorite: true,
+        },
+      });
+    });
+
+    expect(queryClient.getQueryData<ItemDetail>(detailKey)).toMatchObject({
+      user_data: { played: true },
+      user_state: { played: true, is_favorite: true },
+    });
   });
 });

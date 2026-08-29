@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 )
 
 func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
@@ -30,6 +31,7 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 		w.Header().Set("Content-Range", "bytes 1-3/5")
 		w.Header().Set("Content-Type", "video/mp4")
 		w.Header().Set("Content-Disposition", `attachment; filename="artifact-1.mp4"`)
+		downloadprepare.SetResultHeaders(w.Header(), downloadprepare.Result{FileSize: 5, ExecutionFingerprint: "recipe-fingerprint"})
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write([]byte("123"))
 	}))
@@ -41,9 +43,11 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	req.Header.Set("Range", "bytes=1-3")
 	rr := httptest.NewRecorder()
 	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
-		Path:             `/artifacts/Movie "Final".mp4`,
-		OriginNodeURL:    origin.URL,
-		OriginArtifactID: "artifact-1",
+		Path:                         `/artifacts/Movie "Final".mp4`,
+		OriginNodeURL:                origin.URL,
+		OriginArtifactID:             "artifact-1",
+		ExpectedArtifactSize:         5,
+		ExpectedExecutionFingerprint: "recipe-fingerprint",
 	}, 7)
 	if err != nil {
 		t.Fatal(err)

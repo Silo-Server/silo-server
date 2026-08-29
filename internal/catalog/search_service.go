@@ -158,27 +158,74 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 		},
 	}
 	if s != nil {
-		if _, ok := s.provider.(*MeilisearchSearchProvider); ok {
-			status.ActiveProvider = SearchProviderMeilisearch
-		}
+		_, meilisearchProviderActive := s.provider.(*MeilisearchSearchProvider)
 		if s.meili != nil {
 			status.Meilisearch = s.meili.Status()
 		}
+		stateAvailable := false
 		if s.state != nil {
 			state, err := s.state.GetState(ctx, SearchProviderMeilisearch)
 			if err == nil {
+				stateAvailable = true
 				status.Index.ActiveIndexUID = state.ActiveIndexUID
 				status.Index.SchemaVersion = state.SchemaVersion
 				status.Index.DocumentCount = state.DocumentCount
 				status.Index.LastRebuildAt = state.LastRebuildAt
 				status.Index.LastSyncAt = state.LastSyncAt
 				status.Index.LastProcessedEventID = state.LastProcessedEventID
+				if meilisearchProviderActive {
+					switch {
+					case state.ActiveIndexUID == "":
+						status.Degraded = true
+						status.DegradedReason = "Meilisearch index has not been built; using Postgres search"
+						status.Index.RebuildRequired = true
+					case catalogSearchMeilisearchIndexCompatibility(
+						state.SchemaVersion,
+						settings.Embedder,
+						settings.IndexTypes,
+						settings.SemanticEnabled,
+						settings.BinaryQuantized,
+					) == catalogSearchIndexCurrent:
+						status.ActiveProvider = SearchProviderMeilisearch
+					case catalogSearchMeilisearchIndexCompatibility(
+						state.SchemaVersion,
+						settings.Embedder,
+						settings.IndexTypes,
+						settings.SemanticEnabled,
+						settings.BinaryQuantized,
+					) == catalogSearchIndexKeywordOnly:
+						status.ActiveProvider = SearchProviderMeilisearch
+						status.Degraded = true
+						status.DegradedReason = "Search index rebuild required; using Meilisearch keyword search"
+						status.Index.RebuildRequired = true
+					case catalogSearchIndexHasNewerSchema(state):
+						status.Degraded = true
+						status.DegradedReason = "A newer server version owns the Meilisearch index; using Postgres search on this node"
+					default:
+						status.Degraded = true
+						status.DegradedReason = "Meilisearch index schema mismatch; using Postgres search"
+						status.Index.RebuildRequired = true
+					}
+				}
 			}
 			if pending, err := s.state.PendingCount(ctx, SearchProviderMeilisearch); err == nil {
 				status.Index.PendingEvents = pending
 			}
 			if deadLettered, err := s.state.DeadLetterCount(ctx, SearchProviderMeilisearch); err == nil {
 				status.Index.DeadLetteredEvents = deadLettered
+			}
+		}
+		if meilisearchProviderActive && !stateAvailable {
+			status.Degraded = true
+			status.DegradedReason = "Meilisearch index state is unavailable; using Postgres search"
+		}
+		if meilisearchProviderActive && !status.Meilisearch.Healthy {
+			status.ActiveProvider = SearchProviderPostgres
+			status.Degraded = true
+			if status.Meilisearch.CircuitReason != "" {
+				status.DegradedReason = "Meilisearch is unavailable; using Postgres search: " + status.Meilisearch.CircuitReason
+			} else {
+				status.DegradedReason = "Meilisearch is unavailable; using Postgres search"
 			}
 		}
 		if s.itemRepo != nil && s.itemRepo.pool != nil {
@@ -196,7 +243,14 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 		} else {
 			status.Semantic = CatalogSearchSemanticStatus{Ready: false, DisabledReason: "semantic search disabled"}
 		}
-		if s.meili != nil {
+		if status.Index.RebuildRequired {
+			status.Semantic.Ready = false
+			status.Semantic.DisabledReason = "search index rebuild required"
+			status.Semantic.Capability = CatalogSearchSemanticCapability{
+				OK:     false,
+				Reason: "search index rebuild required",
+			}
+		} else if s.meili != nil {
 			status.Semantic.Capability = s.meili.SemanticCapability(ctx)
 		}
 	}

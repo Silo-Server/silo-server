@@ -9,6 +9,10 @@
     "seek_reanchor_v1",
     "output_change_v1",
     "direct_stream_resume_v1",
+    "header_authenticated_media_v1",
+    "authorized_media_origins_v1",
+    "software_video_decode_v1",
+    "plan_invalidated_v1",
     "plan_source_duration_v1"
   ],
   "outcome": "playable",

@@ -126,6 +126,17 @@ export const FEATURE_NEUTRAL_PLAYBACK_V3_CONTRACT = "neutral_playback_v3_contrac
 /** Server accepts output-capability refreshes without treating the route as failed. */
 export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
 
+/**
+ * The client can be told mid-session that the plan it is playing is no longer
+ * valid, over the realtime `plan_invalidated` command.
+ *
+ * Advertising it is a promise: the client acks the command and replans off the
+ * named plan. A server that does not see the token, or has no realtime
+ * connection to the session, stops the session instead — so a client that sends
+ * this must actually implement the command.
+ */
+export const FEATURE_PLAN_INVALIDATED_V3 = "plan_invalidated_v1";
+
 /** The `original` rung label, which always preserves the source. */
 export const QUALITY_ORIGINAL_V3 = "original";
 
@@ -510,6 +521,7 @@ export interface DegradationWarningV3 {
  */
 export interface AvailableQualityV3 {
   label: string;
+  display_name?: string;
   height?: number;
   bitrate_kbps?: number;
   preserves_source: boolean;

@@ -386,7 +386,7 @@ export function SeekBar({
       >
         <div
           className={[
-            "relative h-[3px] w-full rounded-full bg-white/15 transition-[height] duration-200 ease-out group-hover/seek:h-[5px]",
+            "relative h-[3px] w-full rounded-full bg-white/15 transition-[height] duration-200 ease-out group-hover/seek:h-[5px] pointer-coarse:h-[5px]",
             editing ? "h-[5px]" : "",
           ].join(" ")}
         >
@@ -439,7 +439,7 @@ export function SeekBar({
           />
           {/* Thumb */}
           <div
-            className="absolute top-1/2 z-[3] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_4px_14px_rgb(0_0_0/0.45)] ring-1 ring-black/10 transition-all duration-200 group-hover/seek:opacity-100"
+            className="absolute top-1/2 z-[3] h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_4px_14px_rgb(0_0_0/0.45)] ring-1 ring-black/10 transition-all duration-200 group-hover/seek:opacity-100 pointer-coarse:opacity-100"
             style={{ left: `${playedPercent}%` }}
           />
           {/* Editable marker handles for the active region */}

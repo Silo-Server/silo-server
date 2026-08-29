@@ -25,6 +25,13 @@ func NormalizeMDBListURL(url string) string {
 	return collectionutil.NormalizeMDBListURL(url)
 }
 
+// CanonicalMDBListURL normalizes a list URL and rejects anything that is not
+// an MDBList list page. Sync fetches that URL, so callers must use this
+// before storing or requesting.
+func CanonicalMDBListURL(url string) (string, error) {
+	return collectionutil.CanonicalMDBListURL(url)
+}
+
 type SourceMode string
 
 const (

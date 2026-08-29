@@ -1,10 +1,23 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 import ItemCard from "@/components/ItemCard";
 
+const mocks = vi.hoisted(() => ({
+  mediaItemMenu: vi.fn(),
+}));
+
 vi.mock("@/components/MediaItemMenu", () => ({
-  default: () => null,
+  default: (props: unknown) => {
+    mocks.mediaItemMenu(props);
+    return null;
+  },
+}));
+
+vi.mock("@/components/CardPlayOverlay", () => ({
+  default: ({ contentId, title }: { contentId: string; title: string }) => (
+    <a href={`/watch/${contentId}`} aria-label={`Play ${title}`} />
+  ),
 }));
 
 vi.mock("@/lib/thumbhash", () => ({
@@ -35,6 +48,10 @@ const baseItem = {
   backdrop_thumbhash: "",
 };
 
+beforeEach(() => {
+  mocks.mediaItemMenu.mockReset();
+});
+
 describe("ItemCard SortMeta", () => {
   it("encodes item links while preserving library context", () => {
     const markup = renderCard({
@@ -48,6 +65,49 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain('href="/item/ebook%201%2Fisbn%3A978?libraryId=12"');
+  });
+
+  it("passes root watched state to the poster action menu", () => {
+    const userState = {
+      played: true,
+      is_favorite: true,
+      in_watchlist: false,
+    };
+
+    renderCard({
+      item: { ...baseItem, content_id: "movie-1", type: "movie", user_state: userState },
+    });
+
+    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentId: "movie-1",
+        mediaType: "movie",
+        userState,
+        variant: "poster",
+      }),
+    );
+  });
+
+  it("passes narrow poster actions through to the menu", () => {
+    renderCard({
+      item: { ...baseItem, content_id: "movie-1", type: "movie" },
+      narrowPosterActions: true,
+    });
+
+    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ narrowPosterActions: true }),
+    );
+  });
+
+  it("passes the resolved profile quick-action mode to the menu", () => {
+    renderCard({
+      item: { ...baseItem, content_id: "movie-1", type: "movie" },
+      quickActionMode: "favorites",
+    });
+
+    expect(mocks.mediaItemMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ quickActionMode: "favorites" }),
+    );
   });
 
   it("renders the series last air date when sorted by last_air_date", () => {
@@ -178,8 +238,10 @@ describe("ItemCard SortMeta", () => {
       item: {
         ...baseItem,
         content_id: "episode-1",
+        play_content_id: "episode-1",
         type: "episode",
         title: "Long, Long Time",
+        series_id: "series-1",
         series_title: "The Last of Us",
         season_number: 1,
         episode_number: 3,
@@ -187,6 +249,18 @@ describe("ItemCard SortMeta", () => {
     });
 
     expect(markup).toContain("S01E03");
+    expect(markup).toContain('href="/item/series-1"');
+    expect(markup).toContain('href="/item/episode-1"');
+    expect(markup).toContain('href="/watch/episode-1"');
+  });
+
+  it("hides direct play while selection mode is active", () => {
+    const markup = renderCard({
+      selectionMode: true,
+      item: { ...baseItem, play_content_id: "episode-1" },
+    });
+
+    expect(markup).not.toContain('href="/watch/episode-1"');
   });
 
   it("renders a volumes-only manga count chip", () => {

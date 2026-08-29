@@ -37,6 +37,8 @@ rewriting.
   synced library collections sourced from TMDB, Trakt, and MDBList.
 - [Local NFO Metadata](admin/nfo-local-metadata.md) - Supported NFO sidecar fields, how they merge
   with online providers, and the naming-supplies-structure contract.
+- [Monitoring Stream Nodes](admin/monitoring-nodes.md) - Reading the Nodes page columns, re-probing
+  a node's GPU after a driver change, scratch-disk admission, and scraping node metrics.
 
 ## Deployment
 

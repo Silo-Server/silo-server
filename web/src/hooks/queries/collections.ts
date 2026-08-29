@@ -1,5 +1,12 @@
+import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/api/client";
+import {
+  api,
+  apiWithProfileRequestContext,
+  isCapturedProfileAuthorityActive,
+  isProfileRequestContextCurrent,
+  type ProfileRequestContextSnapshot,
+} from "@/api/client";
 import type {
   Collection,
   CollectionCapabilitiesResponse,
@@ -377,37 +384,74 @@ export function useDeleteUserCollectionImage() {
   });
 }
 
+export interface SetCollectionSortPreferenceInput {
+  collection_kind: "library" | "user" | "watchlist" | "favorites";
+  collection_id?: string;
+  field: string;
+  order: NonNullable<CollectionSortConfig["order"]> | "";
+  /** Profile authority captured when the viewer picked this sort. */
+  profileAuth: ProfileRequestContextSnapshot;
+}
+
+// One serialized write chain per query client. A TanStack mutation would order
+// these just as well, but its variables — which carry the access and PIN tokens
+// on the profile snapshot — stay in the mutation cache after the write settles,
+// and the snapshot contract in api/client.ts forbids that. A private promise
+// chain keeps the ordering without ever putting credentials in cached state.
+const sortPreferenceWriteQueues = new WeakMap<object, { tail: Promise<unknown> }>();
+
+function sortPreferenceWriteQueue(queryClient: object) {
+  let queue = sortPreferenceWriteQueues.get(queryClient);
+  if (!queue) {
+    queue = { tail: Promise.resolve() };
+    sortPreferenceWriteQueues.set(queryClient, queue);
+  }
+  return queue;
+}
+
 /**
- * Persists the sort a viewer picked while browsing a collection, so the choice
- * survives leaving and re-entering it. Sending an empty field pins the viewer
- * to the collection's own source order — distinct from clearing the preference,
- * which returns them to whatever default the collection's creator configured.
+ * Persists the sort a viewer picked while browsing a collection, watchlist, or
+ * favorites. Sending an empty field pins the viewer to source order — distinct
+ * from clearing a collection preference, which restores its configured default.
+ *
+ * Writes are serialized so an earlier, slower request cannot land after a later
+ * choice and overwrite the preference the viewer actually selected last.
  *
  * Failures are deliberately silent: the sort is already applied to the current
  * view through the URL, and a toast for a preference that will be re-sent on
  * the next change would be noise.
+ *
+ * The write carries the profile authority captured when the viewer picked the
+ * sort. These preferences are profile-scoped and the writes are queued, so one
+ * that executed under whatever profile happened to be active on send could
+ * otherwise land on a household member who never chose it.
  */
 export function useSetCollectionSortPreference() {
   const queryClient = useQueryClient();
-  return useMutation({
-    // TanStack Query runs mutations sharing a scope serially. This prevents an
-    // earlier, slower request from completing after a later choice and
-    // overwriting the preference the viewer actually selected last.
-    scope: { id: "collection-sort-preference" },
-    mutationFn: (body: {
-      collection_kind: "library" | "user";
-      collection_id: string;
-      field: string;
-      order: NonNullable<CollectionSortConfig["order"]> | "";
-    }) =>
-      api("/collections/sort-preference", {
-        method: "PUT",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      // The next visit resolves through the server, so drop cached catalog
-      // pages that were built against the previous effective sort.
-      queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+  return useCallback(
+    ({ profileAuth, ...body }: SetCollectionSortPreferenceInput): Promise<void> => {
+      const queue = sortPreferenceWriteQueue(queryClient);
+      queue.tail = queue.tail
+        .catch(() => undefined)
+        .then(async () => {
+          if (!isProfileRequestContextCurrent(profileAuth)) return;
+          try {
+            await apiWithProfileRequestContext("/collections/sort-preference", profileAuth, {
+              method: "PUT",
+              body: JSON.stringify(body),
+            });
+          } catch {
+            return;
+          }
+          // The next visit resolves through the server, so drop cached catalog
+          // pages built against the previous effective sort. Skip it when the
+          // viewer has since switched profiles: those pages belong to someone
+          // else, and refetching them would cancel their in-flight first load.
+          if (!isCapturedProfileAuthorityActive(profileAuth)) return;
+          queryClient.invalidateQueries({ queryKey: catalogKeys.all });
+        });
+      return queue.tail as Promise<void>;
     },
-  });
+    [queryClient],
+  );
 }

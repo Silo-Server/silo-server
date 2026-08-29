@@ -67,12 +67,20 @@ func NoGroupPolicy() GroupPolicy {
 	}
 }
 
+// GroupApplies reports whether an access group contributes to the user's
+// effective policy. Admin accounts are never capped by a group: the repository
+// keeps them ungrouped, and a row that still carries a group (written before
+// that rule existed) is resolved as if it did not.
+func GroupApplies(user *models.User) bool {
+	return user != nil && user.AccessGroupID != nil && user.Role != models.RoleAdmin
+}
+
 // EffectivePolicyForUser loads a user's group policy and returns the resolved
-// policy. Nil providers are treated as "no group". An account with no group
-// resolves against NoGroupPolicy without querying the provider, which would
-// return nil for it anyway.
+// policy. Nil providers are treated as "no group". An account whose group does
+// not apply (see GroupApplies) resolves against NoGroupPolicy without querying
+// the provider.
 func EffectivePolicyForUser(ctx context.Context, user *models.User, provider GroupPolicyProvider) (EffectiveUserPolicy, error) {
-	if provider == nil || user == nil || user.AccessGroupID == nil {
+	if provider == nil || !GroupApplies(user) {
 		return ApplyGroupPolicy(user, nil), nil
 	}
 	group, err := provider.GetPolicyForUser(ctx, user.ID)

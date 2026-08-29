@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import {
   PolicyAccessFields,
   PolicyLimitFields,
+  effectiveAccessGroupID,
   policyInheritHints,
   policyStateFromUser,
   policyUpdateFields,
@@ -1056,6 +1057,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [policy, setPolicy] = useState(() => policyStateFromUser(user));
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
   const accessGroupSelectId = useId();
+  const roleSelectId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
@@ -1064,9 +1066,12 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   // instead of describing the group the account was last saved with. When that
   // group is not in the loaded list, fall back to the resolved policy the
   // server sent — but only while the saved group is still the selected one.
+  // An admin inherits from no group, so preview the no-group policy while the
+  // picked group is kept for toggling the role back.
+  const hintGroupID = effectiveAccessGroupID(role, accessGroupID);
   const inheritHints =
-    policyInheritHints(accessGroupID, accessGroups) ??
-    (accessGroupID === user.access_group_id ? user.effective_policy : undefined);
+    policyInheritHints(hintGroupID, accessGroups) ??
+    (hintGroupID === user.access_group_id ? user.effective_policy : undefined);
   const selectedGroupMissing =
     accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
@@ -1078,7 +1083,9 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       role,
       permissions,
       enabled,
-      access_group_id: accessGroupID,
+      // Admins are never grouped; derive it here so flipping the role back
+      // before saving keeps the picked group.
+      access_group_id: effectiveAccessGroupID(role, accessGroupID),
       max_profiles: maxProfiles,
       ...policyUpdateFields(policy),
     };
@@ -1126,9 +1133,9 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                 />
               </div>
               <div className="space-y-2">
-                <Label>Role</Label>
+                <Label htmlFor={roleSelectId}>Role</Label>
                 <Select value={role} onValueChange={setRole}>
-                  <SelectTrigger>
+                  <SelectTrigger id={roleSelectId}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1160,6 +1167,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                 onValueChange={(value) => {
                   setAccessGroupID(value === "none" ? null : Number(value));
                 }}
+                disabled={role === "admin"}
               >
                 <SelectTrigger id={accessGroupSelectId} className="w-full">
                   <SelectValue />

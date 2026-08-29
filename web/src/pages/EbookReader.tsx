@@ -42,7 +42,8 @@ import { Button } from "@/components/ui/button";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { hasRouterHistory } from "@/lib/backNavigation";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { hasEarlierEntry } from "@/lib/navigationHistory";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -196,7 +197,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
+  // Swapping the open file re-renders the reader in place, so it stays on the
+  // plain navigate; only leaving the reader is a page transition.
   const navigate = useNavigate();
+  const exitReader = useViewTransitionNavigate();
   const [searchParams] = useSearchParams();
   const requestedFileID = Number(searchParams.get("file_id") || "");
   const libraryIdParam = searchParams.get("libraryId");
@@ -617,11 +621,11 @@ export default function EbookReader() {
                   return;
                 }
                 event.preventDefault();
-                if (hasRouterHistory()) {
-                  navigate(-1);
-                } else {
-                  navigate(backHref, { replace: true });
+                if (hasEarlierEntry()) {
+                  exitReader(-1);
+                  return;
                 }
+                exitReader(backHref, { up: true, replace: true });
               }}
             >
               <ArrowLeft className="size-5" />

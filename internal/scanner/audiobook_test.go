@@ -77,9 +77,7 @@ func (f *fakeScannerCoverCacher) CacheAudiobookCover(_ context.Context, data []b
 func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf cover-bytes\n"), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
+	writeFakeTool(t, ffmpegPath, "#!/bin/sh\nprintf cover-bytes\n")
 
 	exec := &fakeAudiobookPosterExec{}
 	cacher := &fakeScannerCoverCacher{}
@@ -122,9 +120,7 @@ func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 func TestApplyAudiobookEmbeddedCoverPreservesExistingPoster(t *testing.T) {
 	dir := t.TempDir()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf cover-bytes\n"), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
+	writeFakeTool(t, ffmpegPath, "#!/bin/sh\nprintf cover-bytes\n")
 
 	reader := &fakeAudiobookPosterReader{posterPath: "local/audiobooks/content-1/poster/original.webp"}
 	exec := &fakeAudiobookPosterExec{}

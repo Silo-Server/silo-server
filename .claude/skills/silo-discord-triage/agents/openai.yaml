@@ -1,4 +1,0 @@
-interface:
-  display_name: "Silo Discord Triage"
-  short_description: "Fetch, triage, and reply to Silo Discord reports"
-  default_prompt: "Use $silo-discord-triage to fetch this Discord thread with the scoped bot token, triage it, and post an exact reply only after I approve the content."

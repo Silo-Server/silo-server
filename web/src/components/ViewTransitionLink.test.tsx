@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation, useNavigationType } from "react-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetNavigationHistory, resolveCommittedDirection } from "@/lib/navigationHistory";
 import SidebarItemNavigationProvider from "./SidebarItemNavigationProvider";
 import ViewTransitionLink from "./ViewTransitionLink";
 
@@ -8,6 +9,21 @@ function LocationOutput() {
   const location = useLocation();
   return <output aria-label="location">{location.pathname}</output>;
 }
+
+function NavigationTypeOutput() {
+  return <output aria-label="navigation type">{useNavigationType()}</output>;
+}
+
+/** Stands in for the browser having committed the entry at `idx`. */
+function commit(idx: number) {
+  window.history.replaceState({ idx }, "");
+}
+
+afterEach(() => {
+  resetNavigationHistory();
+  window.history.replaceState(null, "");
+  delete document.documentElement.dataset.navigationDirection;
+});
 
 describe("ViewTransitionLink sidebar navigation", () => {
   it("lets Layout intercept an item navigation with its state intact", () => {
@@ -135,5 +151,92 @@ describe("ViewTransitionLink sidebar navigation", () => {
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
 
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
+  });
+});
+
+describe("ViewTransitionLink direction", () => {
+  it("moves the page forward on an ordinary click", () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Movie" }));
+
+    expect(document.documentElement.dataset.navigationDirection).toBe("forward");
+  });
+
+  it("replaces rather than pushes a second entry for the current URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
+        <NavigationTypeOutput />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Movie" }));
+
+    expect(screen.getByRole("status", { name: "navigation type" })).toHaveTextContent("REPLACE");
+  });
+
+  it("still navigates an `up` link the history map never recorded", () => {
+    render(
+      <MemoryRouter initialEntries={["/item/season"]}>
+        <ViewTransitionLink to="/item/series" up>
+          Series
+        </ViewTransitionLink>
+        <LocationOutput />
+        <NavigationTypeOutput />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Series" }));
+
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/series");
+    expect(screen.getByRole("status", { name: "navigation type" })).toHaveTextContent("PUSH");
+    expect(document.documentElement.dataset.navigationDirection).toBe("back");
+  });
+
+  it("keeps an `up` link a real anchor so modified clicks are the browser's", () => {
+    commit(0);
+    resolveCommittedDirection();
+    commit(1);
+
+    render(
+      <MemoryRouter initialEntries={["/item/series", "/item/season"]} initialIndex={1}>
+        <ViewTransitionLink to="/item/series" up>
+          Series
+        </ViewTransitionLink>
+        <LocationOutput />
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole("link", { name: "Series" });
+    expect(link).toHaveAttribute("href", "/item/series");
+
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+    fireEvent(link, event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/season");
+  });
+
+  it("does not offer an `up` link to the sidebar item interception", () => {
+    const begin = vi.fn(() => true);
+    render(
+      <MemoryRouter initialEntries={["/item/season"]}>
+        <SidebarItemNavigationProvider begin={begin} itemDetailsReady>
+          <ViewTransitionLink to="/item/series" up>
+            Series
+          </ViewTransitionLink>
+        </SidebarItemNavigationProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Series" }));
+
+    // The interception exists to stage a descent into an item's heavy detail
+    // page; unwinding out of one is the opposite move.
+    expect(begin).not.toHaveBeenCalled();
   });
 });

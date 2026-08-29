@@ -315,9 +315,7 @@ case " $* " in
     ;;
 esac
 `
-	if err := os.WriteFile(ffprobePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake ffprobe: %v", err)
-	}
+	writeFakeTool(t, ffprobePath, script)
 
 	probe, err := ProbeFile(context.Background(), ffprobePath, "long.mp4")
 	if err != nil {
@@ -439,9 +437,7 @@ case " $* " in
     ;;
 esac
 `
-	if err := os.WriteFile(ffprobePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake ffprobe: %v", err)
-	}
+	writeFakeTool(t, ffprobePath, script)
 
 	probe, err := ProbeFile(context.Background(), ffprobePath, "broken.mkv")
 	if err != nil {
@@ -469,9 +465,7 @@ case " $* " in
     ;;
 esac
 `
-	if err := os.WriteFile(ffprobePath, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake ffprobe: %v", err)
-	}
+	writeFakeTool(t, ffprobePath, script)
 
 	probe, err := ProbeFile(context.Background(), ffprobePath, "broken.mkv")
 	if err != nil {

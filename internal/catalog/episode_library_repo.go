@@ -30,8 +30,13 @@ func (r *EpisodeLibraryRepository) ReconcileFolderMembership(ctx context.Context
 	var insertedSeriesIDs []string
 	if err := tx.QueryRow(ctx, `
 		WITH inserted AS (
-			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			INSERT INTO episode_libraries (
+				episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id
+			)
+			SELECT mf.episode_id,
+			       mf.media_folder_id,
+			       MIN(mf.created_at),
+			       (array_agg(mf.first_seen_scan_run_id ORDER BY mf.created_at ASC, mf.id ASC))[1]
 			FROM media_files mf
 			JOIN episodes e ON e.content_id = mf.episode_id
 			WHERE mf.media_folder_id = $1

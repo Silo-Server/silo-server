@@ -137,7 +137,14 @@ export function isProfileRequestContextCurrent(snapshot: ProfileRequestContextSn
   );
 }
 
-function isCapturedProfileAuthorityActive(snapshot: ProfileRequestContextSnapshot): boolean {
+/**
+ * Whether the captured profile is still the active one. Unlike
+ * isProfileRequestContextCurrent this does compare the profile id and PIN
+ * token, so callers deciding whether a completed write should touch
+ * profile-scoped caches can tell a household profile switch apart from a
+ * same-account token refresh.
+ */
+export function isCapturedProfileAuthorityActive(snapshot: ProfileRequestContextSnapshot): boolean {
   return (
     isProfileRequestContextCurrent(snapshot) &&
     getProfileId() === snapshot.profileId &&

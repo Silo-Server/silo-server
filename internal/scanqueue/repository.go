@@ -27,8 +27,14 @@ const (
 	StatusFailed    = "failed"
 	StatusCancelled = "cancelled"
 
+	TriggerAdminItemRefresh    = "admin_item_refresh"
+	TriggerAdminLibraryRefresh = "admin_library_refresh"
+
 	libraryClaimAdvisoryLockID int64 = 8_500_001
 )
+
+// Direct scan triggers execute synchronously in adminjob executors, outside scan queue workers.
+var directScanTriggers = []string{TriggerAdminItemRefresh, TriggerAdminLibraryRefresh}
 
 var ErrScanRunNotFound = errors.New("scan run not found")
 
@@ -204,6 +210,25 @@ func (r *Repository) GetActiveByScope(ctx context.Context, libraryID int, mode, 
 	))
 }
 
+// Start transitions a newly created direct scan run to running. Queue workers
+// normally perform this transition while claiming accepted work; synchronous
+// admin refreshes use it before invoking the same ingest pipeline directly.
+func (r *Repository) Start(ctx context.Context, id string) (*models.ScanRun, error) {
+	return scanRunRow(r.pool.QueryRow(ctx, `
+		UPDATE scan_runs
+		SET status = $2,
+			started_at = NOW(),
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $3
+		RETURNING `+scanRunColumns,
+		id,
+		StatusRunning,
+		StatusAccepted,
+	))
+}
+
 func (r *Repository) ListActive(ctx context.Context) ([]*models.ScanRun, error) {
 	return r.listActive(ctx, 0)
 }
@@ -253,13 +278,16 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 	}
 
 	var runningLibraries int
+	// Direct runs execute outside the queue, so they do not consume queue worker concurrency.
 	if err := tx.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM scan_runs
 		WHERE mode = $1
-		  AND status = $2`,
+		  AND status = $2
+		  AND trigger <> ALL($3)`,
 		ModeLibrary,
 		StatusRunning,
+		directScanTriggers,
 	).Scan(&runningLibraries); err != nil {
 		return nil, fmt.Errorf("count running library scan runs: %w", err)
 	}
@@ -269,9 +297,11 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 		SELECT COUNT(*)
 		FROM scan_runs
 		WHERE mode = ANY($1)
-		  AND status = $2`,
+		  AND status = $2
+		  AND trigger <> ALL($3)`,
 		[]string{ModeSubtree, ModeFile},
 		StatusRunning,
+		directScanTriggers,
 	).Scan(&runningScoped); err != nil {
 		return nil, fmt.Errorf("count running scoped scan runs: %w", err)
 	}
@@ -287,6 +317,7 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 			SELECT id
 			FROM scan_runs
 			WHERE status = $1
+			  AND trigger <> ALL($6)
 			  AND (
 				($2 AND mode = $3) OR
 				($4 AND mode = ANY($5))
@@ -299,6 +330,7 @@ func (r *Repository) ClaimNextAccepted(ctx context.Context, maxRunningLibraries,
 		ModeLibrary,
 		canClaimScoped,
 		[]string{ModeSubtree, ModeFile},
+		directScanTriggers,
 	).Scan(&id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, tx.Commit(ctx)
@@ -469,13 +501,38 @@ func (r *Repository) RequeueStaleRunning(ctx context.Context, before time.Time) 
 			error_message = '',
 			updated_at = NOW()
 		WHERE status = $1
-		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3`,
+		  AND COALESCE(heartbeat_at, started_at, requested_at) < $3
+		  AND trigger <> ALL($4)`,
 		StatusRunning,
 		StatusAccepted,
 		before,
+		directScanTriggers,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("requeue stale scan runs: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func (r *Repository) FailStaleDirect(ctx context.Context, before time.Time) (int, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE scan_runs
+		SET status = $2,
+			error_message = $3,
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE status = ANY($1)
+		  AND COALESCE(heartbeat_at, started_at, requested_at) < $4
+		  AND trigger = ANY($5)`,
+		[]string{StatusAccepted, StatusRunning},
+		StatusFailed,
+		"abandoned direct scan run",
+		before,
+		directScanTriggers,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("fail stale direct scan runs: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
 }

@@ -624,7 +624,8 @@ export default function AdminRecommendations() {
                     />
                   ))}
                   {section.title === EMBEDDING_SECTION_TITLE ? (
-                    <div className="py-3">
+                    // ConnectionCheckAction brings its own row padding.
+                    <div>
                       <ConnectionCheckAction
                         onClick={() => handleCheckConnection(serverSettings)}
                         result={connectionResult}

@@ -2,10 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
-import { useToggleFavorite } from "@/hooks/queries/favorites";
-import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
-import { useSetRating, useDeleteRating } from "@/hooks/queries/ratings";
+import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
@@ -29,7 +26,7 @@ import ExtrasSection from "./components/ExtrasSection";
 import QualityBadges from "./components/QualityBadges";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
-import ActionBar from "./components/ActionBar";
+import MediaUserActionBar from "./components/MediaUserActionBar";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
@@ -37,7 +34,6 @@ import { selectDefaultPlaybackVariantVersion } from "./components/versionRanking
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { resolveLeafPrimaryAction } from "./itemDetailLayout";
-import { getWatchedActionLabel } from "./watchedState";
 import {
   canCurateMetadata as canCurateMetadataForUser,
   canEditMarkers as canEditMarkersForUser,
@@ -60,14 +56,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
 
-  const isFavorite = item.user_state?.is_favorite ?? false;
-  const inWatchlist = item.user_state?.in_watchlist ?? false;
-  const toggleFavoriteMutation = useToggleFavorite(item.content_id);
-  const toggleWatchlistMutation = useToggleWatchlist(item.content_id);
   const refreshMetadataMutation = useRefreshItemMetadata();
-  const watchedMutation = useWatchedStateMutation(item);
-  const setRatingMutation = useSetRating(item.content_id);
-  const deleteRatingMutation = useDeleteRating(item.content_id);
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
@@ -136,23 +125,23 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
   }
-  const handleSelectVersion = (version: FileVersion) => {
+  const handleSelectVersion = useCallback((version: FileVersion) => {
     setManualSelectedFileId(version.file_id);
     setAudioSelectionMode("auto");
     setExplicitAudioTrackIndex(null);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
-  };
+  }, []);
 
-  const handleSelectAudioTrack = (trackIndex: number) => {
+  const handleSelectAudioTrack = useCallback((trackIndex: number) => {
     setAudioSelectionMode("explicit");
     setExplicitAudioTrackIndex(trackIndex);
-  };
+  }, []);
 
-  const handleResetAudioSelection = () => {
+  const handleResetAudioSelection = useCallback(() => {
     setAudioSelectionMode("auto");
     setExplicitAudioTrackIndex(null);
-  };
+  }, []);
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
@@ -190,14 +179,6 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
-
-  const handleRatingChange = (rating: number | null) => {
-    if (rating === null) {
-      deleteRatingMutation.mutate();
-    } else {
-      setRatingMutation.mutate(rating);
-    }
-  };
 
   const preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null =
     item.effective_subtitle_track_signature
@@ -257,7 +238,8 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
         onTranslateOverview={onTranslateOverview}
         crewLine={<HeroCrewLine crew={item.crew ?? []} genres={item.genres} />}
         actions={
-          <ActionBar
+          <MediaUserActionBar
+            item={item}
             contentId={item.content_id}
             playHref={item.versions.length > 0 ? `/watch/${item.content_id}` : undefined}
             playLabel={primaryAction.label}
@@ -281,13 +263,6 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             resumeHdr={
               item.user_data && "last_hdr" in item.user_data ? item.user_data.last_hdr : undefined
             }
-            watchedLabel={getWatchedActionLabel(item)}
-            onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
-            isUpdatingWatched={watchedMutation.isPending}
-            onToggleFavorite={() => toggleFavoriteMutation.mutate(isFavorite)}
-            isFavorite={isFavorite}
-            onToggleWatchlist={() => toggleWatchlistMutation.mutate(inWatchlist)}
-            inWatchlist={inWatchlist}
             onRefresh={
               canCurateMetadata
                 ? (mode) =>
@@ -322,8 +297,6 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             onSearchSubtitles={
               item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
             }
-            rating={item.user_rating ?? null}
-            onRatingChange={handleRatingChange}
             qualityPreference={qualityPreference}
             audioSelectionMode={audioSelectionMode}
             explicitAudioTrackIndex={explicitAudioTrackIndex}
@@ -343,7 +316,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && (
           <MediaLocations
             title="Media locations"

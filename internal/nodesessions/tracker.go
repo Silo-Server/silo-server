@@ -20,18 +20,21 @@ const (
 
 // SessionInfo represents an active streaming session stored in Redis.
 type SessionInfo struct {
-	SessionID   string `json:"session_id"`
-	NodeURL     string `json:"node_url"`
-	NodeName    string `json:"node_name"`
-	UserID      string `json:"user_id,omitempty"`
-	MediaItemID string `json:"media_item_id,omitempty"`
-	MediaTitle  string `json:"media_title,omitempty"`
-	Type        string `json:"type"` // "direct_play", "remux", "transcode", "download_prepare", "download"
-	CodecVideo  string `json:"codec_video,omitempty"`
-	CodecAudio  string `json:"codec_audio,omitempty"`
-	Resolution  string `json:"resolution,omitempty"`
-	HWAccel     string `json:"hw_accel,omitempty"`
-	StartedAt   string `json:"started_at"`
+	SessionID         string `json:"session_id"`
+	NodeURL           string `json:"node_url"`
+	NodeName          string `json:"node_name"`
+	UserID            string `json:"user_id,omitempty"`
+	MediaItemID       string `json:"media_item_id,omitempty"`
+	MediaTitle        string `json:"media_title,omitempty"`
+	Type              string `json:"type"` // "direct_play", "remux", "transcode", "download_prepare", "download"
+	CodecVideo        string `json:"codec_video,omitempty"`
+	CodecAudio        string `json:"codec_audio,omitempty"`
+	Resolution        string `json:"resolution,omitempty"`
+	HWAccel           string `json:"hw_accel,omitempty"`
+	ToneMapMode       string `json:"tone_map_mode,omitempty"`
+	StartedAt         string `json:"started_at"`
+	StartedAtUnixNano int64  `json:"started_at_unix_nano,omitempty"`
+	StartedAtSource   string `json:"started_at_source,omitempty"`
 
 	// AuthUserID / ProfileID / MediaFileID are the numeric ownership keys the
 	// node copies from the verified stream token. They enrich the live admin

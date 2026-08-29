@@ -9,11 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
-import {
-  useRedetectEpisodeIntro,
-  useRefreshItemMetadata,
-  useWatchedStateMutation,
-} from "@/hooks/queries/items";
+import { useRedetectEpisodeIntro, useRefreshItemMetadata } from "@/hooks/queries/items";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -26,7 +22,7 @@ import MetadataBadges from "./components/MetadataBadges";
 import QualityBadges from "./components/QualityBadges";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
-import ActionBar from "./components/ActionBar";
+import WatchedActionBar from "./components/WatchedActionBar";
 import DetailBreadcrumb from "./components/DetailBreadcrumb";
 import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
@@ -40,7 +36,6 @@ import {
   resolveEpisodeSiblingSeason,
   type EpisodeNavigationState,
 } from "./itemDetailLayout";
-import { getWatchedActionLabel } from "./watchedState";
 import {
   canCurateMetadata as canCurateMetadataForUser,
   canEditMarkers as canEditMarkersForUser,
@@ -132,23 +127,23 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     setExplicitSubtitleSelection(null);
   }
 
-  const handleSelectVersion = (version: FileVersion) => {
+  const handleSelectVersion = useCallback((version: FileVersion) => {
     setManualSelectedFileId(version.file_id);
     setAudioSelectionMode("auto");
     setExplicitAudioTrackIndex(null);
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
-  };
+  }, []);
 
-  const handleSelectAudioTrack = (trackIndex: number) => {
+  const handleSelectAudioTrack = useCallback((trackIndex: number) => {
     setAudioSelectionMode("explicit");
     setExplicitAudioTrackIndex(trackIndex);
-  };
+  }, []);
 
-  const handleResetAudioSelection = () => {
+  const handleResetAudioSelection = useCallback(() => {
     setAudioSelectionMode("auto");
     setExplicitAudioTrackIndex(null);
-  };
+  }, []);
 
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
@@ -205,7 +200,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           hearing_impaired: item.effective_subtitle_track_signature.hearing_impaired,
         }
       : null;
-  const watchedMutation = useWatchedStateMutation(item);
   const navigationState = location.state as EpisodeNavigationState | null;
   const primaryAction = resolveLeafPrimaryAction(item, "Play Episode");
   const restartHref =
@@ -319,7 +313,8 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         onTranslateOverview={onTranslateOverview}
         crewLine={<HeroCrewLine crew={item.crew ?? []} />}
         actions={
-          <ActionBar
+          <WatchedActionBar
+            item={item}
             contentId={item.content_id}
             playHref={
               item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
@@ -347,9 +342,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             }
             effectiveVersionResolution={item.effective_version_resolution}
             effectiveVersionHdr={item.effective_version_hdr}
-            watchedLabel={getWatchedActionLabel(item)}
-            onToggleWatched={() => watchedMutation.mutate(!(item.user_data?.played ?? false))}
-            isUpdatingWatched={watchedMutation.isPending}
             onRefresh={
               canCurateMetadata
                 ? (mode) =>
@@ -405,7 +397,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         }
       />
 
-      <div className="page-shell space-y-12 py-10 sm:space-y-14">
+      <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && (
           <MediaLocations
             title="Media locations"

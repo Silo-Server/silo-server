@@ -132,8 +132,7 @@ done until each of these has been handled or ruled out:
 - Follow-up work is done or filed for both `silo-apple` and `silo-android` — prefer
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
-- The relevant `docs/*-api.md` is updated, and `docs/feature-changelog.md` gets an entry if
-  the change is user-facing.
+- The relevant `docs/*-api.md` is updated when the contract changes.
 
 ## Building and verifying
 

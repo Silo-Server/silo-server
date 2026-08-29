@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -23,6 +24,7 @@ import (
 
 // NewRouter builds the Jellyfin-compatibility router.
 func NewRouter(deps Dependencies) chi.Router {
+	declareJellycompatMediaRoutes()
 	deps = withDefaults(deps)
 
 	r := chi.NewRouter()
@@ -42,7 +44,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		MaxAge:           86400,
 	}))
 	r.Use(normalizeCompatPathMiddleware)
-	r.Use(middleware.Compress(5, "application/json"))
+	r.Use(httpstream.CompressExcept(5, skipCompatMediaCompression, "application/json"))
 	if debugPath := os.Getenv("JELLYCOMPAT_DEBUG_LOG"); debugPath != "" {
 		rotator := &lumberjack.Logger{
 			Filename:   debugPath,
@@ -233,7 +235,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Sessions", HandleSessions)
 			r.Post("/Sessions/Capabilities", playbackHandler.HandleCapabilitiesFull)
 			r.Post("/Sessions/Capabilities/Full", playbackHandler.HandleCapabilitiesFull)
-			r.Get("/Playback/BitrateTest", playbackHandler.HandleBitrateTest)
+			r.Get("/Playback/BitrateTest", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Playback/BitrateTest", playbackHandler.HandleBitrateTest))
 			r.Get("/Items/{id}/PlaybackInfo", playbackHandler.HandlePlaybackInfo)
 			r.Post("/Items/{id}/PlaybackInfo", playbackHandler.HandlePlaybackInfo)
 			r.Get("/Users/{userId}/Items/{id}/PlaybackInfo", playbackHandler.HandlePlaybackInfo)
@@ -252,18 +254,25 @@ func NewRouter(deps Dependencies) chi.Router {
 	// (e.g. libmpv) that don't forward auth headers or query parameters.
 	r.Group(func(r chi.Router) {
 		r.Use(PlaybackSessionAuth(deps.SessionStore, deps.PlaybackStore, adminAPIKeyAuth))
-		r.Method(http.MethodHead, "/Items/{id}/Download", http.HandlerFunc(playbackHandler.HandleDownload))
-		r.Get("/Items/{id}/Download", playbackHandler.HandleDownload)
-		r.Method(http.MethodHead, "/Videos/{id}/stream", http.HandlerFunc(playbackHandler.HandleVideoStream))
-		r.Get("/Videos/{id}/stream", playbackHandler.HandleVideoStream)
-		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", http.HandlerFunc(playbackHandler.HandleVideoStream))
-		r.Get("/Videos/{id}/stream.{container}", playbackHandler.HandleVideoStream)
-		r.Get("/Videos/{id}/master.m3u8", playbackHandler.HandleMasterManifest)
-		r.Get("/Videos/{id}/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHLSManifest)
-		r.Get("/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHLSSegment)
-		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream)
+		r.Method(http.MethodHead, "/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Items/{id}/Download", playbackHandler.HandleDownload))
+		r.Get("/Items/{id}/Download", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Items/{id}/Download", playbackHandler.HandleDownload))
+		r.Method(http.MethodHead, "/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
+		r.Get("/Videos/{id}/stream", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/stream", playbackHandler.HandleVideoStream))
+		r.Method(http.MethodHead, "/Videos/{id}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/stream.{container}", playbackHandler.HandleVideoStream))
+		r.Get("/Videos/{id}/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/stream.{container}", playbackHandler.HandleVideoStream))
+		r.Method(http.MethodHead, "/Videos/{id}/audio-v2/stream", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/audio-v2/stream", playbackHandler.HandleAudioV2VideoStream))
+		r.Get("/Videos/{id}/audio-v2/stream", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/stream", playbackHandler.HandleAudioV2VideoStream))
+		r.Method(http.MethodHead, "/Videos/{id}/audio-v2/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodHead, "/Videos/{id}/audio-v2/stream.{container}", playbackHandler.HandleAudioV2VideoStream))
+		r.Get("/Videos/{id}/audio-v2/stream.{container}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/stream.{container}", playbackHandler.HandleAudioV2VideoStream))
+		r.Get("/Videos/{id}/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/master.m3u8", playbackHandler.HandleMasterManifest))
+		r.Get("/Videos/{id}/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hls/{playlistId}/stream.m3u8", playbackHandler.HandleHLSManifest))
+		r.Get("/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleHLSSegment))
+		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
+		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
+		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 		// Infuse probes external subtitles with an extra numeric path component before stream.{format}.
-		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream)
+		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 	})
 
 	r.Method(http.MethodHead, "/System/Info/Public", http.HandlerFunc(systemHandler.HandlePublicInfo))
@@ -271,6 +280,32 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Head("/", systemHandler.HandlePing)
 
 	return r
+}
+
+func skipCompatMediaCompression(r *http.Request) bool {
+	const (
+		videosSegment = "Videos"
+		hlsSegment    = "hls"
+		hlsManifest   = "stream.m3u8"
+	)
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	p := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	switch {
+	case len(p) == 3 && p[0] == videosSegment && p[1] != "" && (p[2] == "stream" || strings.HasPrefix(p[2], "stream.")):
+		return p[2] == "stream" || len(strings.TrimPrefix(p[2], "stream.")) > 0
+	case len(p) == 4 && p[0] == videosSegment && p[1] != "" && p[2] == compatAudioV2PathSegment && (p[3] == "stream" || strings.HasPrefix(p[3], "stream.")):
+		return p[3] == "stream" || len(strings.TrimPrefix(p[3], "stream.")) > 0
+	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == hlsSegment && p[3] != "" && p[4] != "":
+		return p[4] != hlsManifest && strings.Contains(p[4], ".")
+	case len(p) == 6 && p[0] == videosSegment && p[1] != "" && p[2] == compatAudioV2PathSegment && p[3] == hlsSegment && p[4] != "" && p[5] != "":
+		return p[5] != hlsManifest && strings.Contains(p[5], ".")
+	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
+		return true
+	default:
+		return false
+	}
 }
 
 func withDefaults(deps Dependencies) Dependencies {

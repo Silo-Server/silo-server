@@ -125,7 +125,7 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
 
   return (
     <div className="page-shell-wide relative space-y-6 py-4 sm:py-6">
-      <PageBack to={backTarget} preferHistory={false} />
+      <PageBack to={backTarget} up />
       <WizardHeader title={headerTitle} step={step} isEdit={isEdit} />
 
       {step === 1 ? (

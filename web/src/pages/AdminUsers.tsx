@@ -1,6 +1,6 @@
 import { useState, useId, useMemo } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
 import {
   useAdminUsers,
@@ -8,11 +8,13 @@ import {
   useUpdateUser,
   useDeleteUser,
 } from "@/hooks/queries/admin/users";
+import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import {
   PolicyAccessFields,
   PolicyLimitFields,
+  effectiveAccessGroupID,
   policyCreateFields,
   policyInheritHints,
   policyStateFromUser,
@@ -47,6 +49,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  ArrowRight,
   ChevronDown,
   ChevronUp,
   History,
@@ -73,8 +76,21 @@ const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
 type SortDirection = "asc" | "desc";
 
+// Tab ids are a URL contract: other pages deep-link here (General settings
+// points at ?tab=invite-codes), so reuse the trigger values verbatim.
+const ADMIN_USERS_TABS = ["users", "invitations", "invite-codes"] as const;
+type AdminUsersTab = (typeof ADMIN_USERS_TABS)[number];
+
+function normalizeAdminUsersTab(value: string | null): AdminUsersTab {
+  return ADMIN_USERS_TABS.includes(value as AdminUsersTab) ? (value as AdminUsersTab) : "users";
+}
+
 export default function AdminUsers() {
   const { data: users = [], isLoading } = useAdminUsers();
+  const { data: serverSettings } = useAdminServerSettings();
+  const signupsEnabled = serverSettings?.["signup.enabled"] === "true";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = normalizeAdminUsersTab(searchParams.get("tab"));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUser | null>(null);
@@ -115,6 +131,20 @@ export default function AdminUsers() {
     setConfirmDeleteUser(u);
   }
 
+  function setActiveTab(value: string) {
+    const nextTab = normalizeAdminUsersTab(value);
+    const next = new URLSearchParams(searchParams);
+
+    // The default tab stays the bare /admin/users URL.
+    if (nextTab === "users") {
+      next.delete("tab");
+    } else {
+      next.set("tab", nextTab);
+    }
+
+    setSearchParams(next, { replace: true });
+  }
+
   if (isLoading)
     return (
       <div className="space-y-3">
@@ -147,6 +177,24 @@ export default function AdminUsers() {
           <p className="page-subtitle text-sm sm:text-base">
             Manage access, defaults, and invite flow for the people using Silo.
           </p>
+          {serverSettings !== undefined && (
+            <Link
+              to="/admin/settings/general"
+              className="inline-flex w-fit items-center gap-1 hover:opacity-80"
+            >
+              <Badge
+                variant={signupsEnabled ? "outline" : "secondary"}
+                className={
+                  signupsEnabled
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+                    : undefined
+                }
+              >
+                {signupsEnabled ? "Public signups on" : "Public signups off"}
+                <ArrowRight className="h-3 w-3" aria-hidden="true" />
+              </Badge>
+            </Link>
+          )}
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -182,7 +230,7 @@ export default function AdminUsers() {
         </div>
       </div>
 
-      <Tabs defaultValue="users">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList variant="line" className="border-border w-full justify-start border-b">
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="invitations">Invitations</TabsTrigger>
@@ -543,8 +591,10 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   // new account lands on the default group — except an admin, which the server
   // deliberately leaves ungrouped (auth.Repository.CreateUser).
   const defaultGroupID = accessGroups.find((group) => group.is_default)?.id ?? null;
-  const inheritGroupID = user ? user.access_group_id : role === "admin" ? null : defaultGroupID;
-  const inheritHints = policyInheritHints(inheritGroupID, accessGroups) ?? user?.effective_policy;
+  const inheritGroupID = effectiveAccessGroupID(role, user ? user.access_group_id : defaultGroupID);
+  const inheritHints =
+    policyInheritHints(inheritGroupID, accessGroups) ??
+    (role === "admin" ? undefined : user?.effective_policy);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -558,6 +608,9 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
         max_profiles: maxProfiles,
         ...policyUpdateFields(policy),
       };
+      if (role === "admin") {
+        body.access_group_id = effectiveAccessGroupID(role, user.access_group_id);
+      }
       if (password) body.password = password;
       updateMutation.mutate({ id: user.id, body }, { onSuccess: onClose });
     } else {

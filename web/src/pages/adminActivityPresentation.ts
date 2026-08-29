@@ -199,8 +199,12 @@ export function formatTranscodeModeSummary(session: AdminSession): string | null
   if (videoDecision !== "transcode" && audioDecision !== "transcode") {
     return null;
   }
+  // Every other label in this function names the video encoder's HW/SW mode,
+  // which does not exist when only audio is re-encoded: "Audio SW" read as a
+  // client-side software capability instead of "the audio stream is being
+  // re-encoded". Name the work, not an acceleration mode.
   if (videoDecision !== "transcode") {
-    return "Audio SW";
+    return "Audio Transcode";
   }
 
   const hwAccel = session.transcode_hw_accel?.trim().toLowerCase();
@@ -209,6 +213,8 @@ export function formatTranscodeModeSummary(session: AdminSession): string | null
       return "HW QSV";
     case "vaapi":
       return "HW VAAPI";
+    case "videotoolbox":
+      return "HW VideoToolbox";
     case "none":
       return "SW";
     case "auto":
@@ -218,6 +224,30 @@ export function formatTranscodeModeSummary(session: AdminSession): string | null
       return "HW/SW unknown";
     default:
       return `HW ${hwAccel.toUpperCase()}`;
+  }
+}
+
+/** Labels for a confirmed HDR-to-SDR executor in compact and detailed views. */
+export interface ToneMapSummary {
+  badge: "HW Tone map" | "SW Tone map";
+  detail: "Hardware" | "Software";
+  mode: "hardware" | "software";
+}
+
+/** Format a confirmed HDR-to-SDR executor without guessing from legacy data. */
+export function formatToneMapSummary(session: AdminSession): ToneMapSummary | null {
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  if (videoDecision !== "transcode") {
+    return null;
+  }
+
+  switch (session.tone_map_mode?.trim().toLowerCase()) {
+    case "hardware":
+      return { badge: "HW Tone map", detail: "Hardware", mode: "hardware" };
+    case "software":
+      return { badge: "SW Tone map", detail: "Software", mode: "software" };
+    default:
+      return null;
   }
 }
 
@@ -349,6 +379,22 @@ export function formatAudioSummary(session: AdminSession): string {
   return [lead, format].filter(Boolean).join(" · ") || "Unknown source";
 }
 
+/**
+ * The audio a transcode actually delivers: the target codec, plus the target
+ * channel layout only when the server reported one. The source channel count is
+ * deliberately not a fallback — a TrueHD 7.1 source downmixed to AAC 5.1 read as
+ * "AAC 7.1" while it did. Servers that do not send `target_audio_channels` get
+ * the bare codec instead of an invented layout.
+ */
+function formatTargetAudio(session: AdminSession): string {
+  return [
+    formatCodec(session.target_audio_codec || "aac"),
+    formatChannelLayout(session.target_audio_channels),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export function formatDeliveredAudioSummary(session: AdminSession): string {
   const decision =
     session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method);
@@ -356,14 +402,7 @@ export function formatDeliveredAudioSummary(session: AdminSession): string {
     return formatAudioSummary(session);
   }
 
-  return (
-    [
-      formatCodec(session.target_audio_codec || "aac"),
-      formatChannelLayout(session.source_audio_channels),
-    ]
-      .filter(Boolean)
-      .join(" ") || "Audio transcode"
-  );
+  return formatTargetAudio(session) || "Audio Transcode";
 }
 
 export function formatAudioDetail(session: AdminSession): string {
@@ -371,13 +410,8 @@ export function formatAudioDetail(session: AdminSession): string {
     session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
   );
   if (decision === "transcode") {
-    const target = [
-      formatCodec(session.target_audio_codec || "aac"),
-      formatChannelLayout(session.source_audio_channels),
-    ]
-      .filter(Boolean)
-      .join(" ");
-    return target ? `→ ${target}` : "Audio transcode";
+    const target = formatTargetAudio(session);
+    return target ? `→ ${target}` : "Audio Transcode";
   }
   if (decision === "copy") {
     return "Audio stream copied";

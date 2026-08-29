@@ -50,9 +50,9 @@ func (s Snapshot) ThemeColor() string {
 }
 
 // RenderKey returns a stable identity covering every snapshot field the
-// Render* functions read, so callers can cache rendered output and re-render
-// only when the branding configuration actually changes. Keep in sync with
-// RenderIndexHTML and RenderManifest.
+// Render* functions read and every branding asset ref, so callers can cache
+// rendered output and re-render only when the branding configuration actually
+// changes. Keep in sync with RenderIndexHTML, RenderManifest, and assetSpecs.
 func (s Snapshot) RenderKey() string {
 	return strings.Join([]string{
 		s.ServerName,
@@ -63,6 +63,8 @@ func (s Snapshot) RenderKey() string {
 		s.assets[KindMark],
 		s.assets[KindFavicon],
 		s.assets[KindLoginBg],
+		s.assets[KindWordmarkLight],
+		s.assets[KindMarkLight],
 	}, "\x00")
 }
 

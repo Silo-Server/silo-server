@@ -73,8 +73,8 @@ func TestQueryExecutor_NamePrefix_UsesEpisodeSortKeyForEpisodeScope(t *testing.T
 	if strings.Contains(sql, "BTRIM(mi.sort_title)") {
 		t.Fatalf("episode prefix should not recompute sort_title expression; got %q", sql)
 	}
-	if len(args) < 2 || args[1] != "pilot%" {
-		t.Fatalf("expected episode library args followed by prefix arg; got %v", args)
+	if len(args) < 3 || args[2] != "pilot%" {
+		t.Fatalf("expected episode and series library args followed by prefix arg; got %v", args)
 	}
 }
 

@@ -70,7 +70,7 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, node.URL+"/chapter-thumbnails/extract", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodPost, nodepool.NodeEndpoint(node.URL, "/chapter-thumbnails/extract"), bytes.NewReader(body))
 	if err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: build request: %w", err)
 	}

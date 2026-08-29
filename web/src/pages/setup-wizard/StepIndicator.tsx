@@ -15,7 +15,7 @@ export function StepIndicator({ steps }: { steps: StepDef[] }) {
         {steps.map((step) => (
           <div
             key={step.id}
-            className={`h-1 flex-1 rounded-full transition-all duration-[--duration-slow] ${
+            className={`h-1 flex-1 rounded-full transition-all duration-(--duration-slow) ${
               step.complete
                 ? "bg-foreground/25"
                 : step.active

@@ -39,9 +39,7 @@ func NewService(
 	httpClient *http.Client,
 	logger *slog.Logger,
 ) *Service {
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
+	httpClient = collectionutil.MDBListHTTPClient(httpClient)
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -303,7 +301,10 @@ func limitCollectionItems(items []userstore.CollectionItemReplacement, limit *in
 }
 
 func (s *Service) fetchMDBListEntries(ctx context.Context, url string) ([]mdblistEntry, error) {
-	url = collectionutil.NormalizeMDBListURL(url)
+	url, err := collectionutil.CanonicalMDBListURL(url)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating mdblist request: %w", err)

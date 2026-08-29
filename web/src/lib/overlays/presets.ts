@@ -2,9 +2,9 @@ import type { OverlayPreset, PresetId } from "./types";
 
 // Presets are pure data — no runtime branching, no per-render computation.
 // badgeStyle() is called with the resolved accent color and returns the
-// inline style applied to the badge container. Tailwind classes own
-// typography and shape; inline styles own colors so dynamic accent values
-// don't fight Tailwind's purge step.
+// inline style applied to the badge container. CardOverlays overrides the
+// fixed Tailwind geometry with card-relative values; those classes remain as
+// the settings-picker rendering and as a fallback without container units.
 
 export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   minimal: {
@@ -18,9 +18,17 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
       color: accent ?? "rgba(255,255,255,0.85)",
       textShadow: "0 1px 2px rgba(0,0,0,0.85)",
     }),
+    fontSize: 9,
+    paddingInline: 4,
+    paddingBlock: 0,
+    borderRadius: 8,
+    borderRadiusVariable: "--radius-sm",
+    textShadow: { x: 0, y: 1, blur: 2, color: "rgba(0,0,0,0.85)" },
     iconSize: 10,
+    iconGap: 4,
     preferIcon: false,
     gapClass: "gap-0.5",
+    stackGap: 2,
     accentStrategy: "text",
   },
   classic: {
@@ -33,9 +41,16 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
       background: accent ? `color-mix(in srgb, ${accent} 28%, rgba(0,0,0,0.6))` : "rgba(0,0,0,0.6)",
       color: "white",
     }),
+    fontSize: 10,
+    paddingInline: 8,
+    paddingBlock: 2,
+    borderRadius: "full",
+    borderWidth: 1,
     iconSize: 11,
+    iconGap: 4,
     preferIcon: false,
     gapClass: "gap-1",
+    stackGap: 4,
     accentStrategy: "bg",
   },
   vibrant: {
@@ -48,9 +63,17 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
       background: accent ?? "rgba(220,220,220,0.95)",
       color: accent ? "white" : "black",
     }),
+    fontSize: 10,
+    paddingInline: 8,
+    paddingBlock: 2,
+    borderRadius: 10,
+    borderRadiusVariable: "--radius-md",
+    boxShadow: { x: 0, y: 1, blur: 2, spread: 0, color: "rgb(0 0 0 / 0.25)" },
     iconSize: 12,
+    iconGap: 4,
     preferIcon: true,
     gapClass: "gap-1",
+    stackGap: 4,
     accentStrategy: "bg",
   },
   pill: {
@@ -65,9 +88,16 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
         : "rgba(20,20,30,0.7)",
       color: "white",
     }),
+    fontSize: 10,
+    paddingInline: 10,
+    paddingBlock: 4,
+    borderRadius: "full",
+    borderWidth: 1,
     iconSize: 12,
+    iconGap: 4,
     preferIcon: true,
     gapClass: "gap-1",
+    stackGap: 4,
     accentStrategy: "bg",
   },
   square: {
@@ -79,11 +109,21 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     badgeStyle: (accent) => ({
       background: "rgba(0,0,0,0.8)",
       color: accent ?? "white",
-      borderLeft: accent ? `2px solid ${accent}` : undefined,
+      borderLeftColor: accent,
+      borderLeftStyle: accent ? "solid" : undefined,
+      borderLeftWidth: accent ? "2px" : undefined,
     }),
+    fontSize: 9,
+    paddingInline: 6,
+    paddingBlock: 2,
+    borderRadius: 8,
+    borderRadiusVariable: "--radius-sm",
+    borderLeftWidth: 2,
     iconSize: 10,
+    iconGap: 4,
     preferIcon: false,
     gapClass: "gap-0.5",
+    stackGap: 2,
     accentStrategy: "border",
   },
 };

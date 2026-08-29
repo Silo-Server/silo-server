@@ -224,8 +224,8 @@ To add a template:
    `templates.RegisterBundle(...)`) — a bundle can't reference a template that requires a profile.
 2. Run `go test ./internal/collections/templates/...` — the registry runs `validate(...)` on
    every template and bundle at registration time, so invalid presets, unknown media types,
-   non-HTTP MDBList URLs, or a bundle referencing an unknown or profile-required template panic
-   immediately and the tests catch them.
+   MDBList URLs outside the supported `mdblist.com` list path, or a bundle referencing an unknown
+   or profile-required template panic immediately and the tests catch them.
 3. Restart the server. The `/admin/collections/templates` and `/admin/collections/template-bundles`
    endpoints pick up new entries without a frontend rebuild — the gallery renders straight from
    the server-supplied catalog.
@@ -236,7 +236,7 @@ To add a template:
 | --- | --- | --- |
 | `tmdb` | `preset`, `media_type`; `time_window` for `trending` | Same shape the existing TMDB import endpoint accepts. `preset` must be one of `trending`, `popular`, `top_rated`, `now_playing`, `upcoming`, `airing_today`, `on_the_air`, each with its own allowed `media_type` values. |
 | `trakt` | `preset` (`trending`, `popular`, or `recommended`), `media_type` (`movie` or `tv`) | Set `requires_profile: true` if and only if `preset` is `recommended` — validation rejects either mismatch. |
-| `mdblist` | `url` (optional — empty means "ask the operator") | Empty URL renders an MDBList URL field in the drawer. A non-empty URL must be a valid `http`/`https` URL. |
+| `mdblist` | `url` (optional — empty means "ask the operator") | Empty URL renders an MDBList URL field in the drawer. A non-empty URL must use `http` or `https`, the `mdblist.com` or `www.mdblist.com` host, no explicit port other than 80 or 443, no userinfo, and a `/lists/` path. |
 | `tmdb_discover` | `media_type` (`movie` or `tv`), `sort_by` (one of TMDB's documented discover sort values) | Optional filters (genres, vote/runtime/date/certification bounds, original language) are validated for shape (non-negative counts, `YYYY-MM-DD` dates, 2-letter language codes, `gte <= lte`) but are otherwise passed straight to TMDB's `/discover` endpoint. |
 | `tmdb_collection` | `collection_id` (>= 0) | `0` is a permitted placeholder/sentinel for a generic "fill in your own franchise" template; sync fails loudly until an admin edits the resulting collection's source config with a real TMDB collection ID. |
 

@@ -1,4 +1,5 @@
 import {
+  FEATURE_PLAN_INVALIDATED_V3,
   FEATURE_PLAYBACK_PLAN_V3,
   PROTOCOL_V3,
   type ClientCodecCapabilitiesV3,
@@ -16,6 +17,34 @@ import {
 /** Contract bound on `position_seconds` and `start_position`. */
 const MAX_POSITION_SECONDS = 31_536_000;
 
+/**
+ * What every v3 surface in this app can do.
+ *
+ * Anything beyond it is named by the caller through `extraClientFeatures`,
+ * because a feature token is a promise the server holds the client to and then
+ * enforces destructively — a session that advertises the plan-invalidation
+ * command and then rejects it gets stopped. The video player and the audiobook
+ * player share these builders but do not execute the same realtime commands, so
+ * neither may inherit the other's promises.
+ */
+const BASE_CLIENT_FEATURES_V3 = [FEATURE_PLAYBACK_PLAN_V3];
+
+/**
+ * The features the video watch page adds: it executes the realtime
+ * `plan_invalidated` command (see `VideoPlayer`) and replans off the plan the
+ * server names.
+ */
+export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3];
+
+/**
+ * `client_features` is the contract's single advertisement location, and a
+ * replan that sends it replaces the negotiated list — so start and replan build
+ * it identically rather than letting a replan silently withdraw a promise.
+ */
+function clientFeaturesV3(extra: string[] | undefined): string[] {
+  return [...BASE_CLIENT_FEATURES_V3, ...(extra ?? [])];
+}
+
 function clampPosition(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds < 0) return 0;
   return Math.min(seconds, MAX_POSITION_SECONDS);
@@ -31,6 +60,8 @@ export interface ReplanOptions {
 }
 
 export interface StartRequestInput {
+  /** Features this surface implements beyond {@link BASE_CLIENT_FEATURES_V3}. */
+  extraClientFeatures?: string[];
   fileId: number;
   profileId: string;
   playbackAttemptId: string;
@@ -41,6 +72,7 @@ export interface StartRequestInput {
   /** Omitted means the server owns durable item progress. */
   progressPersistence?: ProgressPersistenceV3;
   explicitAudioTrackIndex?: number | null;
+  subtitleTrackIndex?: number | null;
   metered: boolean;
   bandwidthEstimateKbps?: number | null;
   bandwidthCapKbps?: number | null;
@@ -60,7 +92,7 @@ export interface StartRequestInput {
 export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
   return {
     protocol_version: PROTOCOL_V3,
-    client_features: [FEATURE_PLAYBACK_PLAN_V3],
+    client_features: clientFeaturesV3(input.extraClientFeatures),
     file_id: input.fileId,
     profile_id: input.profileId,
     playback_attempt_id: input.playbackAttemptId,
@@ -78,6 +110,9 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
     ...(input.explicitAudioTrackIndex != null && input.explicitAudioTrackIndex >= 0
       ? { audio_track_index: input.explicitAudioTrackIndex }
       : {}),
+    ...(input.subtitleTrackIndex != null && input.subtitleTrackIndex >= 0
+      ? { subtitle_track_index: input.subtitleTrackIndex }
+      : {}),
     ...(input.bandwidthEstimateKbps != null
       ? { bandwidth_estimate_kbps: input.bandwidthEstimateKbps }
       : {}),
@@ -86,6 +121,8 @@ export function buildStartRequestV3(input: StartRequestInput): StartRequestV3 {
 }
 
 export interface ReplanRequestInput extends ReplanOptions {
+  /** Features this surface implements beyond {@link BASE_CLIENT_FEATURES_V3}. */
+  extraClientFeatures?: string[];
   plan: PlanV3;
   playbackAttemptId: string;
   replanRequestId: string;
@@ -123,7 +160,7 @@ export function buildReplanRequestV3(input: ReplanRequestInput): ReplanRequestV3
 
   return {
     protocol_version: PROTOCOL_V3,
-    client_features: [FEATURE_PLAYBACK_PLAN_V3],
+    client_features: clientFeaturesV3(input.extraClientFeatures),
     operation: input.operation,
     playback_attempt_id: input.playbackAttemptId,
     replan_request_id: input.replanRequestId,

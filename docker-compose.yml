@@ -79,7 +79,17 @@ services:
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
+      # Only load-bearing when the Docker host is itself an LXC container, where
+      # these three files describe the physical machine and the LXC's own cap
+      # sits on a cgroup this container cannot see. lxcfs virtualizes them to the
+      # LXC's limits, so passing that view in is what makes CPU, load, and memory
+      # report this container's share instead of the whole machine's. Harmless
+      # everywhere else: on bare metal or a VM they are the same files Silo would
+      # read anyway. Each is used independently, so dropping one only reverts
+      # that reading. See docs/wiki/deployment/docker.md.
       - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,6 +115,12 @@ services:
   #     - "${PROXY_PORT:-8083}:8080"
   #   volumes:
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
+  #     # See the note on the integrated service above: a node reports its own
+  #     # CPU, load, and memory rather than the physical machine's only with
+  #     # these mounted, and the Nodes page reads exactly what the node reports.
+  #     - /proc/meminfo:/host/proc/meminfo:ro
+  #     - /proc/stat:/host/proc/stat:ro
+  #     - /proc/loadavg:/host/proc/loadavg:ro
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
@@ -134,6 +150,12 @@ services:
   #     - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
   #     - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
   #     - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
+  #     # See the note on the integrated service above: a node reports its own
+  #     # CPU, load, and memory rather than the physical machine's only with
+  #     # these mounted, and the Nodes page reads exactly what the node reports.
+  #     - /proc/meminfo:/host/proc/meminfo:ro
+  #     - /proc/stat:/host/proc/stat:ro
+  #     - /proc/loadavg:/host/proc/loadavg:ro
   #   depends_on:
   #     postgres:
   #       condition: service_healthy

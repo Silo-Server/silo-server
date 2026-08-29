@@ -255,6 +255,10 @@ func TestSendAdminRoleRequiresAdminInviter(t *testing.T) {
 	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, InvitedBy: 5}); !errors.Is(err, ErrRoleNotAllowed) {
 		t.Errorf("non-admin minting admin: err = %v, want ErrRoleNotAllowed", err)
 	}
+	groupID := int64(5)
+	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, AccessGroupID: &groupID, InvitedBy: 1}); !errors.Is(err, ErrAdminGrouped) {
+		t.Errorf("admin invite with group: err = %v, want ErrAdminGrouped", err)
+	}
 	if _, err := svc.Send(context.Background(), SendInput{Email: "m@example.com", Role: roleAdmin, InvitedBy: 1}); err != nil {
 		t.Errorf("admin minting admin: %v", err)
 	}

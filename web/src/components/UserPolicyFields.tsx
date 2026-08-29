@@ -122,6 +122,13 @@ export function policyInheritHints(
   };
 }
 
+// Admins are never grouped: the server clears access_group_id for the admin
+// role (auth.Repository.CreateUser/UpdateUser), so every form that shows or
+// submits a group for a user has to mirror that rule locally.
+export function effectiveAccessGroupID(role: string, accessGroupID: number | null): number | null {
+  return role === "admin" ? null : accessGroupID;
+}
+
 interface PolicyContext {
   state: UserPolicyState;
   onChange: (state: UserPolicyState) => void;

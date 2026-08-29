@@ -15,6 +15,27 @@ import (
 	"time"
 )
 
+func TestClassifyOutcome(t *testing.T) {
+	tests := []struct {
+		name          string
+		firstWriteErr error
+		contextErr    error
+		want          StreamOutcome
+	}{
+		{name: "completed", want: OutcomeCompleted},
+		{name: "stalled write", firstWriteErr: os.ErrDeadlineExceeded, want: OutcomeStalledReap},
+		{name: "write failure", firstWriteErr: io.ErrClosedPipe, want: OutcomeClientGone},
+		{name: "canceled context", contextErr: context.Canceled, want: OutcomeClientGone},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ClassifyOutcome(test.firstWriteErr, test.contextErr); got != test.want {
+				t.Fatalf("ClassifyOutcome() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // TestStreamSurvivesServerWriteTimeout is the regression test for the 120s
 // stream-truncation bug: a response that keeps making progress must outlive
 // the server's absolute WriteTimeout when wrapped.

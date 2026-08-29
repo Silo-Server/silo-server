@@ -221,6 +221,47 @@ func TestCollectionSortPreferenceEndpoints(t *testing.T) {
 		}
 	})
 
+	for _, kind := range []string{userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites} {
+		t.Run("saves personal source sort for "+kind, func(t *testing.T) {
+			rec := put(`{"collection_kind":"` + kind + `","collection_id":"ignored","field":"added_at"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			pref, err := store.GetCollectionSortPreference(context.Background(), profileID, kind, userstore.PersonalSortPreferenceCollectionID)
+			if err != nil || pref == nil || pref.SortField != "added_at" || pref.SortOrder != "desc" {
+				t.Fatalf("stored preference = %+v, err = %v", pref, err)
+			}
+
+			// collection_id is optional and any supplied value is ignored.
+			rec = put(`{"collection_kind":"` + kind + `","field":"title","order":"asc"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("omitted collection_id status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+
+			for _, field := range []string{"last_air_date", "runtime"} {
+				rec = put(`{"collection_kind":"` + kind + `","field":"` + field + `"}`)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s status = %d, body = %s", field, rec.Code, rec.Body.String())
+				}
+			}
+
+			for _, field := range []string{"progress", "relevance", "not_a_sort"} {
+				rec = put(`{"collection_kind":"` + kind + `","field":"` + field + `"}`)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("unsupported %s status = %d, want 400; body = %s", field, rec.Code, rec.Body.String())
+				}
+			}
+
+			req := authed(httptest.NewRequest(http.MethodDelete,
+				"/collections/sort-preference?collection_kind="+kind, nil), userID, profileID)
+			rec = httptest.NewRecorder()
+			handler.HandleClearCollectionSortPreference(rec, req)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("clear status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
 	t.Run("clearing removes the override", func(t *testing.T) {
 		req := authed(httptest.NewRequest(http.MethodDelete,
 			"/collections/sort-preference?collection_kind=library&collection_id="+collectionID, nil), userID, profileID)
@@ -237,6 +278,35 @@ func TestCollectionSortPreferenceEndpoints(t *testing.T) {
 			t.Fatalf("preference still present after clear: %+v", pref)
 		}
 	})
+}
+
+func TestNormalizePersonalSortPreferenceRequest(t *testing.T) {
+	for _, kind := range []string{userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites} {
+		if gotKind, gotID, ok := normalizeCollectionRef(kind, "ignored"); !ok || gotKind != kind || gotID != userstore.PersonalSortPreferenceCollectionID {
+			t.Fatalf("normalizeCollectionRef(%q) = %q/%q/%v", kind, gotKind, gotID, ok)
+		}
+		for _, valid := range []struct {
+			field, wantOrder string
+		}{
+			{field: "added_at", wantOrder: "desc"},
+			{field: "last_air_date", wantOrder: "desc"},
+			{field: "runtime", wantOrder: "desc"},
+		} {
+			if field, order, ok := normalizeSortPreference(kind, valid.field, ""); !ok || field != valid.field || order != valid.wantOrder {
+				t.Fatalf("normalizeSortPreference(%q, %s) = %q/%q/%v", kind, valid.field, field, order, ok)
+			}
+		}
+		for _, invalid := range []struct{ field, order string }{
+			{field: "progress"},
+			{field: "relevance"},
+			{field: "not_a_sort"},
+			{field: "title", order: "sideways"},
+		} {
+			if _, _, ok := normalizeSortPreference(kind, invalid.field, invalid.order); ok {
+				t.Fatalf("normalizeSortPreference(%q, %q, %q) accepted invalid sort", kind, invalid.field, invalid.order)
+			}
+		}
+	}
 }
 
 // TestNormalizeCollectionSortConfigForCreators covers the validation the

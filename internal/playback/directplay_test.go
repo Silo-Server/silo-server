@@ -20,12 +20,6 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-const (
-	directPlayDarwinGOOS  = "darwin"
-	directPlayLinuxGOOS   = "linux"
-	directPlayWindowsGOOS = "windows"
-)
-
 func TestServeDirectPlayHTTPContract(t *testing.T) {
 	const content = "0123456789abcdefghijklmnopqrstuvwxyz"
 	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
@@ -569,7 +563,7 @@ func (fileInfoWithoutSystem) Sys() any {
 
 func platformRequiresDirectPlayValidator() bool {
 	switch runtime.GOOS {
-	case directPlayDarwinGOOS, directPlayLinuxGOOS, directPlayWindowsGOOS:
+	case darwinGOOS, linuxGOOS, windowsGOOS:
 		return true
 	default:
 		return false

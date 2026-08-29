@@ -175,8 +175,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_original",
-        "plan_id": "plan:7b3b4cdf37a1a1084395bc810c9ac179",
-        "plan_attempt_key": "v3:5f2c9f8566a979cc",
+        "plan_id": "plan:a8beff7df33c6ca6776a093b840cdea3",
+        "plan_attempt_key": "v3:2cdebc939dc3cf22",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -218,7 +218,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "3",
             "validated_claims": [
               "audio_decode"
             ]
@@ -232,13 +232,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -459,13 +489,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -667,16 +727,261 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "h264_constrained_baseline_direct",
+      "category": "profile_compatibility",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-h264-constrained-baseline",
+        "quality_preference": "auto",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "progress_persistence": "client",
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "h264"
+          ],
+          "codecs_video_hardware": [
+            "h264"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "h264",
+              "profiles": [
+                "baseline"
+              ],
+              "levels": [
+                52
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 3840,
+              "max_height": 2160,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "h264",
+        "video_profile": "constrained baseline",
+        "video_level": 41,
+        "bit_depth": 8,
+        "width": 1920,
+        "height": 1080,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 8000,
+        "dynamic_range": "sdr",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "validated_original_playback",
+        "plan_id": "plan:ea7ae9cecded71f3a86ec20a152c8778",
+        "plan_attempt_key": "v3:706f66227a5cae0b",
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "subtitle": {
+          "mode": "off",
+          "inventory": []
+        },
+        "claims": {
+          "video": {
+            "hdr10": false,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision": false
+          },
+          "audio": {
+            "codec": "aac",
+            "passthrough": false,
+            "atmos_preserved": false,
+            "reason": "client_decode_supported"
+          },
+          "subtitles": {
+            "ass_styling_preserved": false,
+            "bitmap_overlay": false,
+            "bitmap_sidecar": false
+          }
+        },
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 1080,
+            "bitrate_kbps": 8000,
+            "preserves_source": true
           }
         ]
       }
@@ -875,13 +1180,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -1086,13 +1421,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -1298,13 +1663,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -1467,8 +1862,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:36db80a93b9d295f44c2c3be6a7cb0ce",
-        "plan_attempt_key": "v3:aad5ccea009fea2a",
+        "plan_id": "plan:c2695f5ba02dba71753615a263d2367e",
+        "plan_attempt_key": "v3:4b72643d8afc4436",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -1510,7 +1905,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "3",
             "validated_claims": [
               "audio_decode"
             ]
@@ -1524,13 +1919,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -1947,6 +2372,556 @@
         "claims": {
           "video": {
             "hdr10": true,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision": false
+          },
+          "audio": {
+            "codec": "aac",
+            "passthrough": false,
+            "atmos_preserved": false,
+            "reason": "client_decode_supported"
+          },
+          "subtitles": {
+            "ass_styling_preserved": false,
+            "bitmap_overlay": false,
+            "bitmap_sidecar": false
+          }
+        },
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 2160,
+            "bitrate_kbps": 60000,
+            "preserves_source": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "hdr10_to_sdr_tone_map",
+      "category": "hdr_dv_matrix",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-hdr10-tone-map",
+        "quality_preference": "1080p",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "progress_persistence": "client",
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main 10",
+        "video_level": 153,
+        "bit_depth": 10,
+        "color_range": "tv",
+        "width": 3840,
+        "height": 2160,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 60000,
+        "dynamic_range": "hdr10",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_transcode_hls",
+        "decision_reason": "quality_fixed_rung",
+        "plan_id": "plan:01ff67650a0ef2592ce739121de6d99a",
+        "plan_attempt_key": "v3:adc66f1d69acda72",
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "subtitle": {
+          "mode": "off",
+          "inventory": []
+        },
+        "claims": {
+          "video": {
+            "hdr10": false,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision": false
+          },
+          "audio": {
+            "codec": "aac",
+            "passthrough": false,
+            "atmos_preserved": false,
+            "reason": "server_audio_adaptation"
+          },
+          "subtitles": {
+            "ass_styling_preserved": false,
+            "bitmap_overlay": false,
+            "bitmap_sidecar": false
+          }
+        },
+        "transformations": [
+          {
+            "name": "video_to_h264",
+            "executor": "server",
+            "recipe_version": "2",
+            "validated_claims": [
+              "h264_decode"
+            ]
+          },
+          {
+            "name": "audio_to_aac",
+            "executor": "server",
+            "recipe_version": "3",
+            "validated_claims": [
+              "audio_decode"
+            ]
+          },
+          {
+            "name": "hdr_to_sdr_tonemap",
+            "executor": "server",
+            "recipe_version": "1",
+            "validated_claims": [
+              "hdr_metadata_removed",
+              "sdr_bt709_output"
+            ]
+          }
+        ],
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 2160,
+            "bitrate_kbps": 60000,
+            "preserves_source": true
+          },
+          {
+            "label": "2160p-high",
+            "display_name": "4K High",
+            "height": 2160,
+            "bitrate_kbps": 40000,
+            "preserves_source": false
+          },
+          {
+            "label": "2160p-medium",
+            "display_name": "4K Medium",
+            "height": 2160,
+            "bitrate_kbps": 20000,
+            "preserves_source": false
+          },
+          {
+            "label": "2160p-low",
+            "display_name": "4K Low",
+            "height": 2160,
+            "bitrate_kbps": 10000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-high",
+            "display_name": "1080p High",
+            "height": 1080,
+            "bitrate_kbps": 10000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "display_name": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "client_managed_hdr_selected_audio",
+      "category": "hdr_dv_matrix",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-client-managed-original",
+        "quality_preference": "original",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "progress_persistence": "client",
+        "audio_track_id": "file:42:audio:1",
+        "audio_track_index": 1,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "2160p",
+          "hdr": false,
+          "hdr_details": {
+            "hdr10": false,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision_profiles": []
+          },
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                153
+              ],
+              "bit_depths": [
+                10
+              ],
+              "max_width": 3840,
+              "max_height": 2160,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 80000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "hdr_details": {
+              "hdr10": false,
+              "hdr10_plus": false,
+              "hlg": false,
+              "dolby_vision_profiles": []
+            },
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "hdr_details": {
+                "hdr10": false,
+                "hdr10_plus": false,
+                "hlg": false,
+                "dolby_vision_profiles": []
+              },
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [
+                "client_managed_dynamic_range_v1",
+                "client_selected_audio_track_v1"
+              ],
+              "transformations": []
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main 10",
+        "video_level": 153,
+        "bit_depth": 10,
+        "color_range": "tv",
+        "width": 3840,
+        "height": 2160,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 60000,
+        "dynamic_range": "hdr10",
+        "hdr10_plus": false,
+        "dv_enhancement_layer": "none",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "original_http",
+        "decision_reason": "client_managed_dynamic_range",
+        "plan_id": "plan:880cfe7954be7aff16c5d89d2b2a09bd",
+        "plan_attempt_key": "v3:b020c19644d2bb36",
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:1",
+            "index": 1
+          }
+        },
+        "subtitle": {
+          "mode": "off",
+          "inventory": []
+        },
+        "claims": {
+          "video": {
+            "hdr10": false,
             "hdr10_plus": false,
             "hlg": false,
             "dolby_vision": false
@@ -2451,6 +3426,321 @@
       }
     },
     {
+      "name": "dolby_vision_7_id6_to_sdr_tone_map",
+      "category": "hdr_dv_matrix",
+      "request": {
+        "protocol_version": 3,
+        "client_features": [
+          "playback_plan_v3"
+        ],
+        "file_id": 42,
+        "profile_id": "profile-1",
+        "playback_attempt_id": "attempt-dv7-id6-tone-map",
+        "quality_preference": "1080p",
+        "subtitle_fidelity_preference": "compatible",
+        "start_position": 12.5,
+        "progress_persistence": "client",
+        "audio_track_id": "file:42:audio:0",
+        "audio_track_index": 0,
+        "metered": false,
+        "client_capabilities": {
+          "video_evidence": "exact",
+          "audio_evidence": "exact",
+          "codecs_video": [
+            "hevc"
+          ],
+          "codecs_video_hardware": [
+            "hevc"
+          ],
+          "codecs_audio": [
+            "aac"
+          ],
+          "containers": [
+            "mkv"
+          ],
+          "max_resolution": "1080p",
+          "hdr": false,
+          "video_decode": [
+            {
+              "codec": "hevc",
+              "profiles": [
+                "main 10"
+              ],
+              "levels": [
+                41
+              ],
+              "bit_depths": [
+                8
+              ],
+              "max_width": 1920,
+              "max_height": 1080,
+              "max_frame_rate": 60,
+              "max_bitrate_kbps": 20000,
+              "hardware": true
+            }
+          ]
+        },
+        "client_playback_context": {
+          "protocol_version": 3,
+          "form_factor": "tv",
+          "app_version": "3.0-test",
+          "device": {
+            "platform": "fixture"
+          },
+          "output": {
+            "output_context_id": "output-a"
+          },
+          "deliveries": {
+            "hls": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "hls"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "original_http": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mkv",
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            },
+            "progressive": {
+              "enabled": true,
+              "supported_on_device": true,
+              "containers": [
+                "mp4"
+              ],
+              "video_codecs": [
+                "hevc",
+                "h264"
+              ],
+              "audio_decode_codecs": [
+                "aac"
+              ],
+              "audio_passthrough_codecs": [],
+              "subtitles": {
+                "embedded_text": false,
+                "sidecar_text": false,
+                "ass_styling": false,
+                "embedded_bitmap": false,
+                "sidecar_bitmap": false,
+                "font_attachments": false
+              },
+              "features": [],
+              "auth_header_refresh": false,
+              "validated_claims": [],
+              "transformations": []
+            }
+          }
+        }
+      },
+      "source": {
+        "media_file_id": 42,
+        "duration_seconds": 7200,
+        "container": "mkv",
+        "video_codec": "hevc",
+        "video_profile": "main 10",
+        "video_level": 153,
+        "bit_depth": 10,
+        "color_range": "tv",
+        "width": 3840,
+        "height": 2160,
+        "frame_rate": 23.976023976023978,
+        "bitrate_kbps": 60000,
+        "dynamic_range": "dolby_vision",
+        "hdr10_plus": false,
+        "dolby_vision_profile": 7,
+        "dv_bl_compat_id": 6,
+        "dv_enhancement_layer": "unknown",
+        "audio_codec": "aac",
+        "audio_channels": 2,
+        "audio_layout": "stereo"
+      },
+      "expected": {
+        "outcome": "playable",
+        "delivery": "server_transcode_hls",
+        "decision_reason": "quality_fixed_rung",
+        "plan_id": "plan:5fb510747d6b4314346fc53132de7fe3",
+        "plan_attempt_key": "v3:00106a7fb5f5abfd",
+        "selected_tracks": {
+          "audio": {
+            "id": "file:42:audio:0",
+            "index": 0
+          }
+        },
+        "subtitle": {
+          "mode": "off",
+          "inventory": []
+        },
+        "claims": {
+          "video": {
+            "hdr10": false,
+            "hdr10_plus": false,
+            "hlg": false,
+            "dolby_vision": false
+          },
+          "audio": {
+            "codec": "aac",
+            "passthrough": false,
+            "atmos_preserved": false,
+            "reason": "server_audio_adaptation"
+          },
+          "subtitles": {
+            "ass_styling_preserved": false,
+            "bitmap_overlay": false,
+            "bitmap_sidecar": false
+          }
+        },
+        "transformations": [
+          {
+            "name": "video_to_h264",
+            "executor": "server",
+            "recipe_version": "2",
+            "validated_claims": [
+              "h264_decode"
+            ]
+          },
+          {
+            "name": "audio_to_aac",
+            "executor": "server",
+            "recipe_version": "3",
+            "validated_claims": [
+              "audio_decode"
+            ]
+          },
+          {
+            "name": "hdr_to_sdr_tonemap",
+            "executor": "server",
+            "recipe_version": "1",
+            "validated_claims": [
+              "hdr_metadata_removed",
+              "sdr_bt709_output"
+            ]
+          }
+        ],
+        "available_qualities": [
+          {
+            "label": "original",
+            "height": 2160,
+            "bitrate_kbps": 60000,
+            "preserves_source": true
+          },
+          {
+            "label": "2160p-high",
+            "display_name": "4K High",
+            "height": 2160,
+            "bitrate_kbps": 40000,
+            "preserves_source": false
+          },
+          {
+            "label": "2160p-medium",
+            "display_name": "4K Medium",
+            "height": 2160,
+            "bitrate_kbps": 20000,
+            "preserves_source": false
+          },
+          {
+            "label": "2160p-low",
+            "display_name": "4K Low",
+            "height": 2160,
+            "bitrate_kbps": 10000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-high",
+            "display_name": "1080p High",
+            "height": 1080,
+            "bitrate_kbps": 10000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
+            "height": 720,
+            "bitrate_kbps": 2000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
+            "label": "480p",
+            "display_name": "480p",
+            "height": 480,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          }
+        ]
+      }
+    },
+    {
       "name": "truehd_audio_conversion",
       "category": "audio_matrix",
       "request": {
@@ -2637,8 +3927,8 @@
         "outcome": "playable",
         "delivery": "server_remux_progressive",
         "decision_reason": "audio_adaptation",
-        "plan_id": "plan:cccf704a0487d09d54a95b51d095c474",
-        "plan_attempt_key": "v3:8a79df3157b88939",
+        "plan_id": "plan:acf3864ca5f5b39a7bcbf6133eea24f4",
+        "plan_attempt_key": "v3:be9bbd478b33b39e",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -2672,7 +3962,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "3",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3611,8 +4901,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "subtitle_burn_in_required",
-        "plan_id": "plan:67e9593ed921a129645e41427a081943",
-        "plan_attempt_key": "v3:4d2de636abf938b1",
+        "plan_id": "plan:ffc560da5dd89610e4e672299601c0f2",
+        "plan_attempt_key": "v3:2156e83ea26e40a0",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3673,7 +4963,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "1",
+            "recipe_version": "3",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3687,13 +4977,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -3895,13 +5215,43 @@
             "preserves_source": true
           },
           {
-            "label": "720p",
+            "label": "1080p-medium",
+            "display_name": "1080p Medium",
+            "height": 1080,
+            "bitrate_kbps": 6000,
+            "preserves_source": false
+          },
+          {
+            "label": "1080p-low",
+            "display_name": "1080p Low",
+            "height": 1080,
+            "bitrate_kbps": 3000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-high",
+            "display_name": "720p High",
+            "height": 720,
+            "bitrate_kbps": 4000,
+            "preserves_source": false
+          },
+          {
+            "label": "720p-medium",
+            "display_name": "720p Medium",
             "height": 720,
             "bitrate_kbps": 2000,
             "preserves_source": false
           },
           {
+            "label": "720p-low",
+            "display_name": "720p Low",
+            "height": 720,
+            "bitrate_kbps": 1500,
+            "preserves_source": false
+          },
+          {
             "label": "480p",
+            "display_name": "480p",
             "height": 480,
             "bitrate_kbps": 1500,
             "preserves_source": false
@@ -5408,6 +6758,10 @@
             "seek_reanchor_v1",
             "output_change_v1",
             "direct_stream_resume_v1",
+            "header_authenticated_media_v1",
+            "authorized_media_origins_v1",
+            "software_video_decode_v1",
+            "plan_invalidated_v1",
             "plan_source_duration_v1"
           ],
           "outcome": "adaptation_unavailable",

@@ -4,7 +4,13 @@ import { toast } from "sonner";
 import { api } from "@/api/client";
 import { adminKeys, themeKeys } from "../keys";
 
-export type BrandingAssetKind = "wordmark" | "mark" | "favicon" | "login_bg";
+export type BrandingAssetKind =
+  | "wordmark"
+  | "mark"
+  | "wordmark_light"
+  | "mark_light"
+  | "favicon"
+  | "login_bg";
 
 interface BrandingAssetUploadResponse {
   kind: string;

@@ -76,6 +76,22 @@ func testCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) use
 		t.Fatalf("UpdatedAt = %q, want RFC3339 timestamp: %v", pref.UpdatedAt, err)
 	}
 
+	for _, kind := range []string{userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites} {
+		if err := store.SetCollectionSortPreference(ctx, userstore.CollectionSortPreference{
+			ProfileID:      profileID,
+			CollectionKind: kind,
+			CollectionID:   userstore.PersonalSortPreferenceCollectionID,
+			SortField:      "added_at",
+			SortOrder:      "desc",
+		}); err != nil {
+			t.Fatalf("SetCollectionSortPreference(%s): %v", kind, err)
+		}
+		personalPref, err := store.GetCollectionSortPreference(ctx, profileID, kind, userstore.PersonalSortPreferenceCollectionID)
+		if err != nil || personalPref == nil || personalPref.SortField != "added_at" {
+			t.Fatalf("GetCollectionSortPreference(%s) = %+v, err = %v", kind, personalPref, err)
+		}
+	}
+
 	for _, invalid := range []userstore.CollectionSortPreference{
 		{
 			ProfileID:      profileID,
@@ -160,6 +176,15 @@ func testCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) use
 	}
 	if pref != nil {
 		t.Fatalf("stale preference survived profile recreation: %+v", pref)
+	}
+	for _, kind := range []string{userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites} {
+		pref, err = store.GetCollectionSortPreference(ctx, profileID, kind, userstore.PersonalSortPreferenceCollectionID)
+		if err != nil {
+			t.Fatalf("GetCollectionSortPreference(%s after profile recreation): %v", kind, err)
+		}
+		if pref != nil {
+			t.Fatalf("%s preference survived profile recreation: %+v", kind, pref)
+		}
 	}
 }
 

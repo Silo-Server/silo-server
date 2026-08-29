@@ -42,6 +42,7 @@ type FolderRepository interface {
 type SkippedRootRepository interface {
 	Upsert(ctx context.Context, root models.SkippedMediaRoot) error
 	Delete(ctx context.Context, folderID int, rootPath string) error
+	DeleteMissingByFolder(ctx context.Context, folderID int, seenRoots []string) error
 	DeleteMissingInScope(ctx context.Context, folderID int, scopePath string, seenRoots []string) error
 }
 
@@ -535,6 +536,7 @@ func (e *Executor) reconcileSkippedRoots(
 	for _, scope := range matchScopes {
 		seenRootsByScope[scope] = []string{}
 	}
+	seenSkippedRoots := make([]string, 0, len(observations))
 
 	for _, observation := range observations {
 		if observation.HasFolderIDs {
@@ -551,6 +553,7 @@ func (e *Executor) reconcileSkippedRoots(
 			}); err != nil {
 				return fmt.Errorf("upsert skipped root %q: %w", observation.RootPath, err)
 			}
+			seenSkippedRoots = append(seenSkippedRoots, observation.RootPath)
 		}
 
 		for _, scope := range matchScopes {
@@ -558,6 +561,13 @@ func (e *Executor) reconcileSkippedRoots(
 				seenRootsByScope[scope] = append(seenRootsByScope[scope], observation.RootPath)
 			}
 		}
+	}
+
+	if mode == scopeModeLibrary {
+		if err := e.skippedRootRepo.DeleteMissingByFolder(ctx, folderID, seenSkippedRoots); err != nil {
+			return fmt.Errorf("delete stale skipped roots for folder %d: %w", folderID, err)
+		}
+		return nil
 	}
 
 	for _, scope := range matchScopes {

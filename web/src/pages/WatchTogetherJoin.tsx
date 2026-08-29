@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { ApiClientError } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import {
   createWatchTogetherRoom,
   joinWatchTogetherRoom,
@@ -43,7 +44,7 @@ const selectionModeOptions = [
 
 export default function WatchTogetherJoin() {
   useDocumentTitle("Watch Party");
-  const navigate = useNavigate();
+  const navigate = useViewTransitionNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token")?.trim() ?? "";
   const [code, setCode] = useState("");
@@ -91,7 +92,6 @@ export default function WatchTogetherJoin() {
         }
         navigate(`/rooms/${response.room.room_id}?room_token=${response.room_access_token}`, {
           replace: true,
-          viewTransition: true,
         });
       } catch (joinError) {
         setError(describeJoinError(joinError));
@@ -112,7 +112,6 @@ export default function WatchTogetherJoin() {
       }
       navigate(`/rooms/${response.room.room_id}?room_token=${response.room_access_token}`, {
         replace: true,
-        viewTransition: true,
       });
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : "Failed to create room.");

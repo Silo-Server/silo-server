@@ -245,6 +245,93 @@ func TestHandleUpdateUserRejectsScopedAPIKeyEscalation(t *testing.T) {
 	}
 }
 
+// Promoting passes the role through untouched; the repository owns clearing
+// the group so every caller (invitations, provisioning) gets the same rule.
+func TestHandleUpdateUserPromoteLeavesGroupToRepository(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler("user")
+	groupID := int64(5)
+	repo.user.AccessGroupID = &groupID
+
+	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"admin"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "admin" {
+		t.Fatalf("update = %+v, want role admin", repo.updated)
+	}
+	if repo.updated.AccessGroupID.Set {
+		t.Fatalf("AccessGroupID = %+v, want untouched (repository clears it)", repo.updated.AccessGroupID)
+	}
+}
+
+// A group named alongside the admin role is rejected the same way whether the
+// account is being promoted, is already an admin, or echoes its current role.
+func TestHandleUpdateUserRejectsGroupingAnAdmin(t *testing.T) {
+	tests := []struct {
+		name string
+		role string
+		body string
+	}{
+		{name: "existing admin, group only", role: "admin", body: `{"access_group_id":5}`},
+		{name: "existing admin echoing role", role: "admin", body: `{"role":"admin","access_group_id":5}`},
+		{name: "promote with group", role: "user", body: `{"role":"admin","access_group_id":5}`},
+		{name: "promote with unknown group", role: "user", body: `{"role":"admin","access_group_id":99999}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, repo := newScopedKeyAdminHandler(tt.role)
+
+			rec := updateUserRequestFor(t, h, jwtAdminClaims(), tt.body)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422 (body %s)", rec.Code, rec.Body.String())
+			}
+			if code := decodeErrorCode(t, rec); code != "unprocessable_entity" {
+				t.Fatalf("error code = %q, want unprocessable_entity", code)
+			}
+			if repo.updated != nil {
+				t.Fatal("grouped-admin assignment must not be written")
+			}
+		})
+	}
+}
+
+// Demoting passes through as well; the repository lands the ex-admin on the
+// default group unless the request names one.
+func TestHandleUpdateUserDemoteLeavesGroupToRepository(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler("admin")
+
+	rec := updateUserRequestFor(t, h, jwtAdminClaims(), `{"role":"user"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	if repo.updated == nil || repo.updated.Role == nil || *repo.updated.Role != "user" {
+		t.Fatalf("update = %+v, want role user", repo.updated)
+	}
+	if repo.updated.AccessGroupID.Set {
+		t.Fatalf("AccessGroupID = %+v, want untouched (repository assigns the default group)", repo.updated.AccessGroupID)
+	}
+}
+
+func TestHandleCreateUserRejectsGroupedAdmin(t *testing.T) {
+	h, repo := newScopedKeyAdminHandler("user")
+	body := `{"username":"mallory","email":"m@example.com","password":"hunter2","role":"admin","access_group_id":5}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/users", strings.NewReader(body))
+	req = req.WithContext(apimw.SetClaims(req.Context(), jwtAdminClaims()))
+	rec := httptest.NewRecorder()
+
+	h.HandleCreateUser(rec, req)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (body %s)", rec.Code, rec.Body.String())
+	}
+	if code := decodeErrorCode(t, rec); code != "unprocessable_entity" {
+		t.Fatalf("error code = %q, want unprocessable_entity", code)
+	}
+	if repo.created != nil {
+		t.Fatal("grouped admin must not be created")
+	}
+}
+
 // The scoped-key guard loads the target account before validating, so a
 // missing account has to surface as 404 rather than an escalation decision.
 func TestHandleUpdateUserScopedAPIKeyMissingTarget(t *testing.T) {

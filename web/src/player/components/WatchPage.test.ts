@@ -10,6 +10,7 @@ import { WatchPage } from "./WatchPage";
 
 const playbackSessionMock = vi.hoisted(() => vi.fn());
 const videoPlayerMock = vi.hoisted(() => vi.fn());
+const toastErrorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../hooks/usePlaybackSession", () => ({
   usePlaybackSession: playbackSessionMock,
@@ -36,6 +37,9 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 }));
 vi.mock("../hooks/useWatchTogetherRoomConnection", () => ({
   useWatchTogetherRoomConnection: () => ({ room: null }),
+}));
+vi.mock("sonner", () => ({
+  toast: { error: toastErrorMock },
 }));
 
 const version: PlayerFileVersion = {
@@ -82,11 +86,14 @@ function playbackSession(
     replanning: false,
     errorTitle: null,
     error: null,
+    initialSubtitleErrorTitle: null,
+    initialSubtitleError: null,
     switchVersion: vi.fn(),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
     recoverFromFailure: vi.fn(),
+    invalidatePlan: vi.fn().mockResolvedValue(true),
     reanchorSeek: vi.fn(),
     refreshSubtitles: vi.fn(),
     applySubtitleTrack: vi.fn(),
@@ -99,6 +106,7 @@ function playbackSession(
 beforeEach(() => {
   playbackSessionMock.mockReset();
   videoPlayerMock.mockReset();
+  toastErrorMock.mockReset();
 });
 
 describe("derivePersistedSubtitleMode", () => {
@@ -140,6 +148,35 @@ describe("WatchPage playback errors", () => {
     expect(screen.getByText("Failed to start playback")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
     expect(screen.queryByText("Mounted video player")).not.toBeInTheDocument();
+  });
+
+  it("keeps a refused initial bitmap subtitle off without treating it as a playback error", () => {
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        initialSubtitleErrorTitle: "That subtitle track can't be used",
+        initialSubtitleError: "Enable HDR transcoding to use this subtitle.",
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        subtitleMode: "always",
+        showForcedSubtitles: true,
+      }),
+    );
+
+    const props = videoPlayerMock.mock.calls[0]?.[0] as {
+      subtitleMode?: string;
+      showForcedSubtitles?: boolean;
+      replanError?: string | null;
+    };
+    expect(props.subtitleMode).toBe("off");
+    expect(props.showForcedSubtitles).toBe(false);
+    expect(props.replanError).toBeNull();
+    expect(toastErrorMock).toHaveBeenCalledWith("That subtitle track can't be used", {
+      description: "Enable HDR transcoding to use this subtitle.",
+    });
   });
 });
 

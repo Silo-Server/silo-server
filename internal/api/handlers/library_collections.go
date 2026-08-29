@@ -2656,7 +2656,10 @@ func (h *LibraryCollectionHandler) createMDBListCollection(
 		syncSchedule = &s
 	}
 
-	normalizedURL := usercollections.NormalizeMDBListURL(req.URL)
+	normalizedURL, err := usercollections.CanonicalMDBListURL(req.URL)
+	if err != nil {
+		return nil, requestValidationError{err: err}
+	}
 	sourceConfig, err := buildMDBListSourceConfig(normalizedURL, req.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("building MDBList source config: %w", err)
@@ -2682,7 +2685,7 @@ func (h *LibraryCollectionHandler) createMDBListCollection(
 		SortOrder:          req.SortOrder,
 		PosterURL:          req.PosterURL,
 		PosterFromTemplate: req.PosterFromTemplate,
-		SourceURL:          req.URL,
+		SourceURL:          normalizedURL,
 		SourceConfig:       sourceConfig,
 		ManagementMode:     managementMode,
 		ManagementSource:   managementSource,

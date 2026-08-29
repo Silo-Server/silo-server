@@ -63,6 +63,44 @@ func (h *PlaybackHandler) abortPlaybackSessionByID(ctx context.Context, sessionI
 	return h.abortPlaybackSession(ctx, session)
 }
 
+// CopySafetyPlaybackControl adapts the playback handler to the session control
+// playback.CopySafetyNotifier needs: the notifier owns the decision to withdraw
+// a plan, the handler owns realtime command bookkeeping and session teardown.
+type CopySafetyPlaybackControl struct {
+	playback *PlaybackHandler
+}
+
+// NewCopySafetyPlaybackControl returns the adapter, or nil without a handler.
+func NewCopySafetyPlaybackControl(handler *PlaybackHandler) *CopySafetyPlaybackControl {
+	if handler == nil {
+		return nil
+	}
+	return &CopySafetyPlaybackControl{playback: handler}
+}
+
+func (c *CopySafetyPlaybackControl) RememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
+	if c == nil {
+		return
+	}
+	c.playback.rememberRealtimeCommand(commandID, sessionID, name)
+}
+
+func (c *CopySafetyPlaybackControl) ForgetRealtimeCommand(commandID string) {
+	if c == nil {
+		return
+	}
+	c.playback.forgetRealtimeCommand(commandID)
+}
+
+// StopSession ends the session as a system teardown, not a user stop: the
+// recipe card is kept so the client's recovery can rebuild from it.
+func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID string) error {
+	if c == nil {
+		return playback.ErrSessionNotFound
+	}
+	return c.playback.stopPlaybackSessionByID(ctx, sessionID, false)
+}
+
 func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
 	if h == nil || commandID == "" || sessionID == "" {
 		return
@@ -122,6 +160,9 @@ func (h *PlaybackHandler) setRealtimeConnectionState(sessionID string, connected
 		}
 		slog.Warn("failed to update realtime connection state", "session", sessionID, "connected", connected, "error", err)
 		return false
+	}
+	if h.StreamTelemetry != nil {
+		h.StreamTelemetry.SetRealtimeConnection(sessionID, connected)
 	}
 	return true
 }

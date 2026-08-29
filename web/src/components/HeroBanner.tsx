@@ -37,6 +37,18 @@ interface HeroBannerProps {
   libraryId?: number;
 }
 
+/**
+ * Alternating slow pan/zoom for consecutive hero slides.
+ *
+ * These must be written out literally. Tailwind only keeps a theme variable
+ * whose name it can find in the scanned source, and assembling the name from a
+ * template literal hid both from it — so the real values were tree-shaken out
+ * of the bundle and `var(--animate-ken-burns-a)` resolved to nothing at
+ * runtime. app.css still overrides both to `none` under
+ * `prefers-reduced-motion`, which is what keeps this accessible.
+ */
+const KEN_BURNS_ANIMATIONS = ["var(--animate-ken-burns-a)", "var(--animate-ken-burns-b)"] as const;
+
 function heroPlayLabel(item: SectionItem, activeAudiobookPlaying?: boolean | null): string {
   if (item.type === "ebook") {
     return "Read";
@@ -185,9 +197,9 @@ export default function HeroBanner({
               <img
                 src={slide.backdrop_url}
                 alt=""
-                className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-[--duration-slow] will-change-transform ${loaded[i] ? "opacity-100" : "opacity-0"}`}
+                className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-(--duration-slow) will-change-transform ${loaded[i] ? "opacity-100" : "opacity-0"}`}
                 style={{
-                  animation: `var(--animate-ken-burns-${i % 2 === 0 ? "a" : "b"})`,
+                  animation: KEN_BURNS_ANIMATIONS[i % KEN_BURNS_ANIMATIONS.length],
                   filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))`,
                 }}
                 onLoad={() => setLoaded((prev) => ({ ...prev, [i]: true }))}
@@ -241,7 +253,7 @@ export default function HeroBanner({
               <Link
                 to={playHref}
                 onClick={handlePlayClick}
-                className="pill pill-primary transition-colors duration-[--duration-fast]"
+                className="pill pill-primary transition-colors duration-(--duration-fast)"
               >
                 {current.type === "ebook" ? (
                   <BookOpen className="h-4 w-4" />
@@ -254,7 +266,7 @@ export default function HeroBanner({
               </Link>
               <ViewTransitionLink
                 to={buildItemHref({ contentId: current.content_id, libraryId })}
-                className="pill pill-glass transition-colors duration-[--duration-fast]"
+                className="pill pill-glass transition-colors duration-(--duration-fast)"
               >
                 <Info className="h-4 w-4" />
                 More Info
@@ -279,7 +291,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-[--duration-fast] hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label="Previous slide"
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -287,7 +299,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-[--duration-fast] hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label="Next slide"
           >
             <ChevronRight className="size-4 sm:size-5" />

@@ -112,6 +112,11 @@ type collectionCapabilitiesResponse struct {
 	CollectionDefaultSort     bool                           `json:"collection_default_sort"`
 	CollectionSortPreferences bool                           `json:"collection_sort_preferences"`
 	EffectiveCollectionSort   bool                           `json:"effective_collection_sort"`
+	// SortPreferenceKinds are the collection_kind values this server accepts on
+	// the sort-preference endpoints. CollectionSortPreferences alone cannot
+	// distinguish a server that also stores the personal-list kinds
+	// ('watchlist', 'favorites') from one that rejects them.
+	SortPreferenceKinds []string `json:"sort_preference_kinds"`
 }
 
 type collectionDisplayFilterPresets struct {
@@ -240,6 +245,7 @@ func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Re
 		CollectionDefaultSort:     true,
 		CollectionSortPreferences: true,
 		EffectiveCollectionSort:   true,
+		SortPreferenceKinds:       sortPreferenceKinds,
 	})
 }
 
@@ -442,9 +448,9 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 				writeError(w, http.StatusBadRequest, "bad_request", "source_url can only be edited for MDBList collections")
 				return
 			}
-			normalized := usercollections.NormalizeMDBListURL(*req.SourceURL)
-			if normalized == "" {
-				writeError(w, http.StatusBadRequest, "bad_request", "source_url is required")
+			normalized, err := usercollections.CanonicalMDBListURL(*req.SourceURL)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "source_url must be an MDBList list (https://mdblist.com/lists/...)")
 				return
 			}
 			cfg.URL = normalized

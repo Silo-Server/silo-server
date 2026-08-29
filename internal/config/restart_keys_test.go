@@ -58,3 +58,36 @@ func TestRestartRequired(t *testing.T) {
 		}
 	}
 }
+
+// The exported accessors feed the admin API, so they must agree with
+// RestartRequired, stay sorted, and hand out copies rather than the registry.
+func TestRestartRequiredAccessors(t *testing.T) {
+	keys := RestartRequiredKeys()
+	if len(keys) != len(restartRequiredKeys) {
+		t.Fatalf("RestartRequiredKeys() returned %d keys, want %d", len(keys), len(restartRequiredKeys))
+	}
+	for i, key := range keys {
+		if i > 0 && keys[i-1] >= key {
+			t.Fatalf("RestartRequiredKeys() is not sorted at %d: %v", i, keys)
+		}
+		if !RestartRequired(key) {
+			t.Errorf("RestartRequiredKeys() reported %q, which RestartRequired rejects", key)
+		}
+	}
+
+	prefixes := RestartRequiredPrefixes()
+	if len(prefixes) != len(restartRequiredPrefixes) {
+		t.Fatalf("RestartRequiredPrefixes() returned %d prefixes, want %d", len(prefixes), len(restartRequiredPrefixes))
+	}
+	for _, prefix := range prefixes {
+		if !RestartRequired(prefix + "anything") {
+			t.Errorf("RestartRequiredPrefixes() reported %q, which RestartRequired rejects", prefix)
+		}
+	}
+
+	// Mutating a returned slice must not corrupt the registry.
+	prefixes[0] = "mutated."
+	if RestartRequiredPrefixes()[0] == "mutated." {
+		t.Error("RestartRequiredPrefixes() exposes the package-level slice")
+	}
+}

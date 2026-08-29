@@ -3,8 +3,10 @@ package playback
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // SourceDurationSecondsV3 reports a media file's runtime, or nil when it is
@@ -87,7 +89,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 	}
 	if source.DynamicRange == "" {
 		if file.HDR {
-			source.DynamicRange = "hdr_unknown"
+			source.DynamicRange = DynamicRangeHDRUnknownV3
 		} else {
 			source.DynamicRange = DynamicRangeSDRV3
 		}
@@ -110,6 +112,8 @@ func normalizeColorRangeV3(value string) string {
 // transcode.
 const EvidenceInsufficientForDirectV3 = "evidence_insufficient_for_direct"
 
+const h264BaselineProfileV3 = "baseline"
+
 // videoEligibleV3 reports whether the source's video stream is validated for
 // a copy/direct route under the request's video evidence tier. The second
 // result reports that the route was blocked by insufficient evidence for the
@@ -128,15 +132,17 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 		// planner); there is no stricter validation to run.
 		return flatClaims, false
 	case EvidenceExactV3, EvidencePlatformAttestedV3:
-		skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3
+		softwareDecodeOptIn := HasFeatureV3(request.ClientFeatures, FeatureSoftwareVideoDecodeV3)
 		matchedCodec := false
 		for _, capability := range request.Capabilities.VideoDecode {
-			if !strings.EqualFold(capability.Codec, source.VideoCodec) || !capability.Hardware {
+			if !strings.EqualFold(capability.Codec, source.VideoCodec) ||
+				(!capability.Hardware && !softwareDecodeOptIn) {
 				continue
 			}
 			matchedCodec = true
+			skipProfileLevel := request.Capabilities.VideoEvidence == EvidencePlatformAttestedV3 && capability.Hardware
 			if !skipProfileLevel {
-				if len(capability.Profiles) > 0 && (source.VideoProfile == "" || !containsFoldV3(capability.Profiles, source.VideoProfile)) {
+				if len(capability.Profiles) > 0 && !videoProfileSupportedV3(source.VideoCodec, source.VideoProfile, capability.Profiles) {
 					continue
 				}
 				if len(capability.Levels) > 0 && (source.VideoLevel <= 0 || !containsAtLeastV3(capability.Levels, source.VideoLevel)) {
@@ -158,6 +164,46 @@ func videoEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, b
 	default:
 		return false, false
 	}
+}
+
+// videoProfileSupportedV3 compares a source profile with the profiles an exact
+// decoder capability reports. Most codecs retain strict case-insensitive
+// equality. H.264 additionally treats Constrained Baseline as a restricted
+// subset of Baseline, so a Baseline decoder validates a Constrained Baseline
+// source; the reverse direction intentionally remains unsupported.
+func videoProfileSupportedV3(codec string, sourceProfile string, decoderProfiles []string) bool {
+	if strings.TrimSpace(sourceProfile) == "" {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(codec), "h264") {
+		return containsFoldV3(decoderProfiles, sourceProfile)
+	}
+
+	source := canonicalH264ProfileV3(sourceProfile)
+	if source == "" {
+		return false
+	}
+	for _, decoderProfile := range decoderProfiles {
+		decoder := canonicalH264ProfileV3(decoderProfile)
+		if decoder == source || source == "constrainedbaseline" && decoder == h264BaselineProfileV3 {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalH264ProfileV3 removes presentation-only separators while retaining
+// the profile identity. It is deliberately local to H.264 exact-evidence
+// comparison; source descriptors keep the original normalized probe value.
+func canonicalH264ProfileV3(profile string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case unicode.IsSpace(r), r == '-', r == '_', r == '.', r == ':':
+			return -1
+		default:
+			return unicode.ToLower(r)
+		}
+	}, profile)
 }
 
 // routeVideoMetadataCompleteV3 covers the fields every validated route needs.
@@ -186,7 +232,7 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 	case "hdr10":
 		claims.HDR10 = hdr != nil && hdr.HDR10
 		return claims.HDR10, claims
-	case "hdr_unknown":
+	case DynamicRangeHDRUnknownV3:
 		// Legacy rows only recorded a file-level HDR flag without per-track
 		// range metadata. HDR10 is by far the most common static-HDR range, so
 		// an HDR10-capable output treats the source as HDR10 instead of
@@ -215,6 +261,29 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 	default:
 		return false, claims
 	}
+}
+
+// clientManagesOriginalDynamicRangeV3 is intentionally delivery-scoped. It
+// says the original-file executor can inspect the source and choose its own
+// display presentation after delivery; it does not make the same HDR source
+// safe for a server-produced progressive or HLS stream.
+func clientManagesOriginalDynamicRangeV3(source SourceDescriptorV3, request StartRequestV3) bool {
+	if source.DynamicRange == "" || source.DynamicRange == DynamicRangeSDRV3 {
+		return false
+	}
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	return ok && delivery.Enabled && delivery.SupportedOnDevice &&
+		containsFoldV3(delivery.ValidatedClaims, ClaimClientManagedDynamicRangeV3)
+}
+
+// clientSelectsOriginalAudioTrackV3 is delivery-scoped because original HTTP
+// carries every source stream unchanged. A client that makes this claim maps
+// selected_tracks.audio.index onto its probed source inventory; clients that
+// do not keep the historical server-remux requirement for non-default audio.
+func clientSelectsOriginalAudioTrackV3(request StartRequestV3) bool {
+	delivery, ok := request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	return ok && delivery.Enabled && delivery.SupportedOnDevice &&
+		containsFoldV3(delivery.ValidatedClaims, ClaimClientSelectedAudioTrackV3)
 }
 
 func clientSupportsHDR10V3(request StartRequestV3) bool {
@@ -261,24 +330,9 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 	return false, false, claim
 }
 
+// normalizeDynamicRangeV3 returns the protocol dynamic-range label for a track.
 func normalizeDynamicRangeV3(track models.VideoTrack) string {
-	if track.DVProfile > 0 || strings.Contains(strings.ToLower(track.VideoRangeType), "dovi") || strings.Contains(strings.ToLower(track.DolbyVision), "dolby") {
-		return DynamicRangeDolbyVisionV3
-	}
-	if track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+") {
-		return DynamicRangeHDR10PlusV3
-	}
-	joined := strings.ToLower(strings.Join([]string{track.VideoRange, track.VideoRangeType, track.ColorTransfer}, " "))
-	if strings.Contains(joined, "hlg") || strings.Contains(joined, "arib-std-b67") {
-		return DynamicRangeHLGV3
-	}
-	if strings.Contains(joined, "hdr") || strings.Contains(joined, "smpte2084") || strings.Contains(joined, "pq") {
-		return DynamicRangeHDR10V3
-	}
-	if joined == "  " || strings.TrimSpace(joined) == "" {
-		return ""
-	}
-	return DynamicRangeSDRV3
+	return tonemap.DynamicRangeForVideoTrack(track)
 }
 
 func parseFrameRateV3(value string) float64 {

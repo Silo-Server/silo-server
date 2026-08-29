@@ -438,6 +438,7 @@ type ItemRefreshExecutor struct {
 	seasonRepo      itemRefreshSeasonRepo
 	episodeRepo     itemRefreshEpisodeRepo
 	ingester        ItemRefreshIngester
+	scanRuns        directScanRunRepository
 	refresher       interface {
 		RefreshItem(ctx context.Context, contentID string) error
 		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
@@ -457,6 +458,7 @@ func NewItemRefreshExecutor(
 	seasonRepo itemRefreshSeasonRepo,
 	episodeRepo itemRefreshEpisodeRepo,
 	ingester ItemRefreshIngester,
+	scanRuns directScanRunRepository,
 	refresher interface {
 		RefreshItem(ctx context.Context, contentID string) error
 		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
@@ -474,6 +476,7 @@ func NewItemRefreshExecutor(
 		seasonRepo:      seasonRepo,
 		episodeRepo:     episodeRepo,
 		ingester:        ingester,
+		scanRuns:        scanRuns,
 		refresher:       refresher,
 		eventBus:        eventBus,
 		realtimeHub:     realtimeHub,
@@ -485,7 +488,7 @@ func (e *ItemRefreshExecutor) SetArtworkCacher(cacher ItemRefreshArtworkCacher) 
 }
 
 func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshRequest, progress func(current, total int, message string)) (*ItemRefreshResult, error) {
-	if e.folderRepo == nil || e.ingester == nil || e.refresher == nil {
+	if e.folderRepo == nil || e.ingester == nil || e.scanRuns == nil || e.refresher == nil {
 		return nil, fmt.Errorf("resolve scan scope: item refresh executor is not fully configured")
 	}
 	req.Mode = normalizeItemRefreshMode(req.Mode)
@@ -517,8 +520,17 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if progress != nil {
 		progress(1, progressTotal, "Scanning scope")
 	}
-	ingestResult, err := e.ingester.IngestSubtree(ctx, folder, req.ScanPath)
+	scanCtx, scanRun, err := beginDirectSubtreeScan(ctx, e.scanRuns, req.ScanFolderID, req.ScanPath, itemRefreshScanTrigger)
 	if err != nil {
+		return nil, fmt.Errorf("scan scope: %w", err)
+	}
+	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
+	ingestResult, err := e.ingester.IngestSubtree(scanCtx, folder, req.ScanPath)
+	stopScanHeartbeat()
+	if err != nil {
+		return nil, fmt.Errorf("scan scope: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))
+	}
+	if err := completeDirectScan(ctx, e.scanRuns, scanRun, ingestResult); err != nil {
 		return nil, fmt.Errorf("scan scope: %w", err)
 	}
 	scanResult := ingestResult.ScanResult
@@ -579,6 +591,9 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		}
 	}
 
+	// Publish only after the metadata refresh: scan_complete advances the resolved
+	// list-cache generation, so emitting it earlier lets a rail rebuild from
+	// pre-refresh titles/posters and serve them for the whole cache TTL.
 	e.publish(cache.EventScanComplete, strconv.Itoa(req.ScanFolderID))
 	e.publish(cache.EventMetadataUpdated, refreshContentID)
 	if e.realtimeHub != nil {

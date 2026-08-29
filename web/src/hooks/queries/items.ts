@@ -21,8 +21,9 @@ import {
   getWatchedToastMessage,
 } from "@/pages/ItemDetail/watchedState";
 import {
+  cancelItemDetailQueries,
   invalidateMediaSurfaceQueries,
-  isItemDetailQueryKey,
+  scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
@@ -302,41 +303,43 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
         keepalive: true,
       }),
     onMutate: async (nextPlayed: boolean) => {
-      // Cancel and snapshot over the same predicate: an in-flight detail query
-      // on either key shape would otherwise land after the optimistic write
-      // and revert the button.
-      const itemDetailQueries = {
-        predicate: (query: { queryKey: unknown }) =>
-          isItemDetailQueryKey(query.queryKey, item.content_id),
-      };
-      await queryClient.cancelQueries(itemDetailQueries);
-      const previous = queryClient.getQueriesData(itemDetailQueries);
+      await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
-        ...(detail.user_data ? { user_data: { ...detail.user_data, played: nextPlayed } } : {}),
+        user_data: { ...detail.user_data, played: nextPlayed },
         user_state: {
           played: nextPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
-      return { previous };
     },
-    onError: (err, _nextPlayed, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+    // Revert only this mutation's own field. Restoring a whole snapshot would
+    // discard a concurrent favorite/watchlist toggle's optimistic state.
+    onError: (err, nextPlayed) => {
+      updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
+        ...detail,
+        user_data: { ...detail.user_data, played: !nextPlayed },
+        user_state: {
+          played: !nextPlayed,
+          is_favorite: detail.user_state?.is_favorite ?? false,
+          in_watchlist: detail.user_state?.in_watchlist ?? false,
+        },
+      }));
       toast.error(err instanceof Error ? err.message : "Failed to update watched state");
     },
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
     },
-    onSettled: async () => {
-      await invalidateMediaSurfaceQueries(queryClient, {
+    onSettled: () => {
+      // The detail query has to be refreshed: marking watched also zeroes
+      // `position_seconds` and moves season/series counts server-side, and the
+      // optimistic patch above only carries `played`.
+      scheduleMediaSurfaceInvalidation(queryClient, {
         itemId: item.content_id,
         watchedKeys: getCachedWatchedInvalidationKeys(queryClient, item),
+        skipSimilarItems: true,
       });
-      bumpHomeRefreshSignal(queryClient);
     },
   });
 }

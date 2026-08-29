@@ -51,6 +51,7 @@ describe("ContinueWatchingCard restart eligibility", () => {
               backdrop_thumbhash: "",
               logo_url: "",
             }}
+            quickActionMode="both"
           />
         </MemoryRouter>
       </QueryClientProvider>,

@@ -10,6 +10,9 @@ import type {
   SubtitleMode,
   WatchPageProps,
 } from "@/player";
+import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLanguage";
+import { isBitmapCodec } from "@/player/utils/subtitleCodecs";
+import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 
 export interface WatchRouteRequest {
   contentId: string;
@@ -171,6 +174,86 @@ function currentProfileQualityFallback(profile?: Profile | null): string | null 
   return profile?.quality_preference || null;
 }
 
+function buildInitialSubtitleTrackIndexes({
+  item,
+  audioTrackIndex,
+  subtitleMode,
+  preferredSubtitleLanguage,
+  preferredSubtitleTrackSignature,
+  profileLanguage,
+  showForcedSubtitles,
+}: {
+  item: WatchDetail;
+  audioTrackIndex?: number;
+  subtitleMode: SubtitleMode;
+  preferredSubtitleLanguage: string | null;
+  preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null;
+  profileLanguage: string | null;
+  showForcedSubtitles: boolean;
+}): {
+  start: Record<number, number>;
+  bitmap: Record<number, number>;
+} {
+  const start: Record<number, number> = {};
+  const bitmap: Record<number, number> = {};
+  // Downloaded tracks are session inventory, not part of watch detail, so the
+  // client cannot know their combined ordinal before the server creates one.
+  if (preferredSubtitleTrackSignature?.source === "downloaded") {
+    return { start, bitmap };
+  }
+
+  for (const version of item.versions) {
+    // Playback v3 assigns dense combined ordinals with sidecars first and
+    // embedded tracks second. Catalog stream indexes are not those ordinals.
+    const orderedTracks = [
+      ...(version.subtitle_tracks ?? []).filter((track) => track.external),
+      ...(version.subtitle_tracks ?? []).filter((track) => !track.external),
+    ];
+    const tracks: PlayerSubtitleInfo[] = orderedTracks.map((track, index) => ({
+      index,
+      language: track.language?.trim() || "unknown",
+      codec: track.codec,
+      label:
+        track.title?.trim() ||
+        track.embedded_title?.trim() ||
+        track.file_name?.trim() ||
+        track.language?.trim() ||
+        `Subtitle ${index + 1}`,
+      source: track.external ? "external" : "embedded",
+      forced: track.forced,
+      hearing_impaired: track.hearing_impaired,
+      url: "",
+    }));
+    const selectedAudioTrackIndex =
+      audioTrackIndex ??
+      version.effective_audio_track_index ??
+      (version.audio_tracks?.length ? 0 : null);
+    const selectedSubtitleTrackIndex = resolveSubtitleAutoSelect({
+      mode: subtitleMode,
+      tracks,
+      preferredLanguage: preferredSubtitleLanguage,
+      preferredTrackSignature: preferredSubtitleTrackSignature,
+      audioLanguage: resolveVersionAudioLanguage(version, selectedAudioTrackIndex),
+      profileLanguage,
+      showForcedSubtitles,
+    });
+    if (selectedSubtitleTrackIndex === null) {
+      continue;
+    }
+    const selectedTrack = tracks.find((track) => track.index === selectedSubtitleTrackIndex);
+    start[version.file_id] = selectedSubtitleTrackIndex;
+    // Bitmap tracks (PGS/DVD/DVB) have to be burned in on the web player. Keep
+    // their ordinals separately so a refused start can be retried without the
+    // subtitle. Successful starts stay a single request, and the server owns
+    // remapping the selection when it adapts to another file version.
+    if (selectedTrack && isBitmapCodec(selectedTrack.codec)) {
+      bitmap[version.file_id] = selectedSubtitleTrackIndex;
+    }
+  }
+
+  return { start, bitmap };
+}
+
 export function buildWatchPageProps({
   request,
   item,
@@ -255,6 +338,15 @@ export function buildWatchPageProps({
       : request.prePlaySubtitleMode === "off"
         ? null
         : preferredSubtitleTrackSignature;
+  const initialSubtitleTrackIndexes = buildInitialSubtitleTrackIndexes({
+    item,
+    audioTrackIndex: request.audioTrackIndex,
+    subtitleMode,
+    preferredSubtitleLanguage,
+    preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
+    profileLanguage,
+    showForcedSubtitles,
+  });
 
   const intro: PlayerTimeRange | null = item.intro ?? null;
   const credits: PlayerTimeRange | null = item.credits ?? null;
@@ -308,6 +400,8 @@ export function buildWatchPageProps({
     forceInitialPosition: request.restart,
     qualityPreference,
     explicitAudioTrackIndex: request.audioTrackIndex ?? null,
+    initialSubtitleTrackIndexByFileId: initialSubtitleTrackIndexes.start,
+    initialBitmapSubtitleTrackIndexByFileId: initialSubtitleTrackIndexes.bitmap,
     preferredSubtitleLanguage,
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
     subtitleMode,

@@ -12,6 +12,7 @@ export type {
   OverlayItemConfig,
   OverlayPosition,
   OverlayPreset,
+  OverlayShadow,
   OverlayId,
   PresetId,
 } from "./types";

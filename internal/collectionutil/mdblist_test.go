@@ -2,6 +2,7 @@ package collectionutil
 
 import (
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 )
@@ -100,4 +101,79 @@ func TestFetchMDBListWithFallback(t *testing.T) {
 			t.Fatalf("got %#v, %v; want nil, nil", got, err)
 		}
 	})
+}
+
+func TestValidateMDBListURL(t *testing.T) {
+	t.Parallel()
+
+	allowed := []string{
+		"https://mdblist.com/lists/example-user/watchlist",
+		"https://mdblist.com/lists/example-user/watchlist/json",
+		"https://www.mdblist.com/lists/example-user/watchlist/json",
+		"http://mdblist.com/lists/example-user/watchlist/json",
+		"https://mdblist.com./lists/example-user/watchlist/json",
+		"https://mdblist.com:443/lists/example-user/watchlist/json",
+	}
+	for _, raw := range allowed {
+		if err := ValidateMDBListURL(raw); err != nil {
+			t.Errorf("ValidateMDBListURL(%q) = %v, want nil", raw, err)
+		}
+	}
+
+	blocked := []string{
+		"",
+		"http://127.0.0.1:8096/",
+		"http://127.0.0.1:8096/json",
+		"http://127.0.0.1/lists/x/y/json",
+		"http://localhost/lists/x/y/json",
+		"http://[::1]/lists/x/y/json",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://10.0.0.1/lists/x/y/json",
+		"http://192.168.1.1/lists/x/y/json",
+		"http://172.16.0.1/lists/x/y/json",
+		"https://mdblist.com.evil.example/lists/x/y/json",
+		"https://evil.example/lists/x/y/json",
+		"https://mdblist.com/",
+		"https://mdblist.com/json",
+		"https://mdblist.com/admin/json",
+		"https://api.mdblist.com/lists/x/y/json",
+		"https://mdblist.com:8080/lists/x/y/json",
+		"https://mdblist.com@127.0.0.1/lists/x/y/json",
+		"file:///etc/passwd",
+		"ftp://mdblist.com/lists/x/y/json",
+	}
+	for _, raw := range blocked {
+		if err := ValidateMDBListURL(raw); !errors.Is(err, ErrMDBListURL) {
+			t.Errorf("ValidateMDBListURL(%q) = %v, want ErrMDBListURL", raw, err)
+		}
+	}
+}
+
+func TestCanonicalMDBListURLRejectsPrivateHosts(t *testing.T) {
+	t.Parallel()
+
+	if _, err := CanonicalMDBListURL("http://127.0.0.1:8096/"); !errors.Is(err, ErrMDBListURL) {
+		t.Fatalf("CanonicalMDBListURL(loopback) = %v, want ErrMDBListURL", err)
+	}
+
+	got, err := CanonicalMDBListURL("https://mdblist.com/lists/example-user/watchlist")
+	if err != nil {
+		t.Fatalf("CanonicalMDBListURL(valid) = %v", err)
+	}
+	if got != "https://mdblist.com/lists/example-user/watchlist/json" {
+		t.Fatalf("CanonicalMDBListURL = %q", got)
+	}
+}
+
+func TestMDBListHTTPClientRejectsPrivateRedirect(t *testing.T) {
+	t.Parallel()
+
+	client := MDBListHTTPClient(nil)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:8096/json", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if err := client.CheckRedirect(req, []*http.Request{req}); !errors.Is(err, ErrMDBListURL) {
+		t.Fatalf("CheckRedirect = %v, want ErrMDBListURL", err)
+	}
 }

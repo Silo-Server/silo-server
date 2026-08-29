@@ -1,0 +1,34 @@
+# fixture 1
+POST /admin/force-reload	non-media
+POST /admin/reload-config	non-media
+POST /admin/reprobe-capabilities	non-media
+GET /api/v1/health	non-media
+POST /chapter-thumbnails/extract	non-media
+DELETE /downloads/artifacts/{artifact_id}	non-media
+GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
+HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
+POST /downloads/prepare	non-media
+GET /hw-capabilities	non-media
+GET /metrics	non-media
+GET /status	non-media
+POST /transcode/start	non-media
+DELETE /transcode/{session_id}	non-media
+GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
+GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true
+# fixture 2
+POST /admin/force-reload	non-media
+POST /admin/reload-config	non-media
+POST /admin/reprobe-capabilities	non-media
+GET /api/v1/health	non-media
+POST /chapter-thumbnails/extract	non-media
+DELETE /downloads/artifacts/{artifact_id}	non-media
+GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
+HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
+POST /downloads/prepare	non-media
+GET /hw-capabilities	non-media
+GET /metrics	non-media
+GET /status	non-media
+POST /transcode/start	non-media
+DELETE /transcode/{session_id}	non-media
+GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
+GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { memo, useCallback } from "react";
 import { Star } from "lucide-react";
 
 interface StarRatingProps {
@@ -9,19 +9,7 @@ interface StarRatingProps {
 
 const STAR_COUNT = 5;
 
-export default function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
-  const [hoverValue, setHoverValue] = useState<number | null>(null);
-
-  const displayValue = hoverValue ?? value;
-
-  function handleMouseEnter(star: number) {
-    setHoverValue(star);
-  }
-
-  function handleMouseLeave() {
-    setHoverValue(null);
-  }
-
+function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
   function handleClick(star: number) {
     if (star === value) {
       onChange(null);
@@ -42,6 +30,9 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
       }
       if (newValue !== null) {
         onChange(newValue);
+        e.currentTarget
+          .querySelector<HTMLButtonElement>(`[data-rating="${newValue}"]`)
+          ?.focus({ preventScroll: true });
       }
     },
     [value, onChange],
@@ -53,13 +44,12 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
     <div
       role="radiogroup"
       aria-label="Rating"
-      className="glass-subtle flex items-center gap-0.5 rounded-full px-2.5 py-2"
-      onMouseLeave={handleMouseLeave}
+      className="star-rating flex items-center gap-0.5 rounded-full px-2.5 py-2"
       onKeyDown={handleKeyDown}
     >
       {Array.from({ length: STAR_COUNT }, (_, i) => {
         const star = i + 1;
-        const filled = displayValue !== null && star <= displayValue;
+        const filled = value !== null && star <= value;
         return (
           <button
             key={star}
@@ -68,14 +58,17 @@ export default function StarRating({ value, onChange, size = 20 }: StarRatingPro
             aria-label={`${star} star${star !== 1 ? "s" : ""}`}
             aria-checked={value === star}
             tabIndex={star === tabbableStar ? 0 : -1}
-            className={`cursor-pointer border-none bg-transparent p-0.5 leading-none transition-all duration-150 hover:scale-110 ${filled ? "text-yellow-400" : "text-muted-foreground/50"}`}
-            onMouseEnter={() => handleMouseEnter(star)}
+            data-filled={filled}
+            data-rating={star}
+            className="star-rating-star focus-visible:ring-ring cursor-pointer rounded-sm border-none bg-transparent p-0.5 leading-none outline-none focus-visible:ring-2"
             onClick={() => handleClick(star)}
           >
-            <Star size={size} fill={filled ? "currentColor" : "none"} strokeWidth={1.5} />
+            <Star size={size} fill="none" strokeWidth={1.5} />
           </button>
         );
       })}
     </div>
   );
 }
+
+export default memo(StarRating);

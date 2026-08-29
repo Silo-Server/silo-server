@@ -14,6 +14,18 @@ import type {
 import { sectionKeys } from "./keys";
 import { invalidateAdminCollectionQueries } from "./collectionSurfaceRefresh";
 
+/**
+ * Home section data outlives the default client-wide gcTime on purpose.
+ *
+ * The layout query loses its observer the moment home unmounts, and the section
+ * items are fetched observer-less through `queryClient.fetchQuery`, so the
+ * 10 minute default evicts everything home needs mid-session and the next visit
+ * repaints the whole skeleton grid. Keeping the entries for an hour makes a
+ * return render from cache; invalidation still drives real refreshes.
+ */
+export const HOME_SECTION_STALE_TIME = 10 * 60 * 1000;
+export const HOME_SECTION_GC_TIME = 60 * 60 * 1000;
+
 interface RawSectionOverride {
   ID?: string;
   SectionID?: string;
@@ -78,7 +90,8 @@ export function useHomeLayout() {
   return useQuery({
     queryKey: sectionKeys.homeLayout(),
     queryFn: () => api<HomeLayoutResponse>("/home/layout"),
-    staleTime: 5 * 60 * 1000,
+    staleTime: HOME_SECTION_STALE_TIME,
+    gcTime: HOME_SECTION_GC_TIME,
   });
 }
 

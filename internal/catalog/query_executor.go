@@ -507,6 +507,16 @@ func buildLibraryScopeJoin(
 		argIdx++
 	}
 
+	if isEpisodeCatalogScope(mediaScope) {
+		parentAccess := AccessFilter{DisabledLibraryIDs: disabledLibraryIDs}
+		if len(allowedLibraryIDs) > 0 {
+			parentAccess.AllowedLibraryIDs = allowedLibraryIDs
+		}
+		var parentClauses []string
+		appendEpisodeParentLibraryAccessByEpisodeID(itemContentExpr, parentAccess, &parentClauses, &args, &argIdx)
+		clauses = append(clauses, parentClauses...)
+	}
+
 	return strings.Join(clauses, " AND "), args, true
 }
 
