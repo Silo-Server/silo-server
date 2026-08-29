@@ -1473,7 +1473,7 @@ func TestIsAudioToAACStereoDownmixV3RequiresExactRecipeShape(t *testing.T) {
 }
 
 func TestAppendAudioArgsBoostsOnlyEncodedSurroundToStereo(t *testing.T) {
-	const wantFilter = "aresample=out_chlayout=stereo,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+	const wantFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	tests := []struct {
 		name           string
 		codec          string

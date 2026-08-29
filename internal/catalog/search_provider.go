@@ -357,6 +357,8 @@ func normalizeCatalogSearchItemTypes(itemTypes []string) []string {
 type CatalogSearchRuntimeStatus struct {
 	ConfiguredProvider string                        `json:"configured_provider"`
 	ActiveProvider     string                        `json:"active_provider"`
+	Degraded           bool                          `json:"degraded"`
+	DegradedReason     string                        `json:"degraded_reason,omitempty"`
 	Meilisearch        CatalogSearchMeiliStatus      `json:"meilisearch"`
 	Index              CatalogSearchIndexStateStatus `json:"index"`
 	Tasks              []CatalogSearchTaskLink       `json:"tasks"`
@@ -419,6 +421,7 @@ type CatalogSearchIndexStateStatus struct {
 	ActiveIndexUID        string `json:"active_index_uid"`
 	SchemaVersion         int    `json:"schema_version"`
 	ExpectedSchemaVersion int    `json:"expected_schema_version"`
+	RebuildRequired       bool   `json:"rebuild_required"`
 	DocumentCount         int    `json:"document_count"`
 	VectorDocumentCount   int    `json:"vector_document_count"`
 	PendingEvents         int    `json:"pending_events"`
@@ -462,8 +465,10 @@ func catalogSearchMeilisearchEmbedderSettings(embedder string, binaryQuantized b
 // attachDocumentVectors omits _vectors entirely when semantic is off; toggling it
 // on must therefore make the existing (vector-less) index look stale so it is
 // rebuilt rather than serving silently degraded hybrid ranking. A mismatch forces
-// a rebuild (SyncOutbox skips, the provider falls back to keyword) and surfaces as
-// an ExpectedSchemaVersion divergence in the admin status.
+// a rebuild (SyncOutbox skips) and surfaces as an ExpectedSchemaVersion divergence
+// in the admin status. An index whose hash proves that only semantic/vector
+// settings changed remains safe for keyword-only Meilisearch queries while the
+// replacement is built; all other mismatches fall back to Postgres.
 func catalogSearchMeilisearchSchemaVersion(embedder string, itemTypes []string, semanticEnabled, binaryQuantized bool) int {
 	embedder, err := NormalizeCatalogSearchEmbedderName(embedder)
 	if err != nil {
@@ -488,4 +493,42 @@ func catalogSearchMeilisearchSchemaVersion(embedder string, itemTypes []string, 
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(identity))
 	return SearchMeilisearchSchemaVersion*1_000_000 + int(h.Sum32()%1_000_000)
+}
+
+type catalogSearchIndexCompatibility uint8
+
+const (
+	catalogSearchIndexIncompatible catalogSearchIndexCompatibility = iota
+	catalogSearchIndexKeywordOnly
+	catalogSearchIndexCurrent
+)
+
+// catalogSearchMeilisearchIndexCompatibility classifies an active index using
+// only schema identities Silo itself can have published. If the active hash
+// matches the same embedder, vector dimensions, and media scope with a different
+// semantic/binary setting, its document fields and filters are still valid for
+// keyword search. Unknown hashes are not trusted because they may represent a
+// different indexed media scope or document shape.
+func catalogSearchMeilisearchIndexCompatibility(
+	activeVersion int,
+	embedder string,
+	itemTypes []string,
+	semanticEnabled bool,
+	binaryQuantized bool,
+) catalogSearchIndexCompatibility {
+	expected := catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, semanticEnabled, binaryQuantized)
+	if activeVersion == expected {
+		return catalogSearchIndexCurrent
+	}
+	compatibleVersions := [...]int{
+		catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, false, false),
+		catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, true, false),
+		catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, true, true),
+	}
+	for _, version := range compatibleVersions {
+		if activeVersion == version {
+			return catalogSearchIndexKeywordOnly
+		}
+	}
+	return catalogSearchIndexIncompatible
 }

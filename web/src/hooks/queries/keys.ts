@@ -376,6 +376,18 @@ export const adminKeys = {
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
+  dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
+  // Dashboard insight endpoints are keyed by their window so a 1h tile and a
+  // 24h chart cache separately; the matching `*Root` key is the prefix the
+  // dashboard's Refresh invalidates, which covers every window at once.
+  dashboardTimeseriesRoot: () => ["admin", "dashboard", "timeseries"] as const,
+  dashboardTimeseries: (hours: number) => ["admin", "dashboard", "timeseries", hours] as const,
+  playbackActivityRoot: () => ["admin", "dashboard", "playback-activity"] as const,
+  playbackActivity: (hours: number) => ["admin", "dashboard", "playback-activity", hours] as const,
+  topActivityRoot: () => ["admin", "dashboard", "top-activity"] as const,
+  topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
+  downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
+  downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
   restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
@@ -398,6 +410,7 @@ export const adminKeys = {
   }) => ["admin", "playbackHistory", params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
+  operationalLogsRoot: () => ["admin", "logs", "app"] as const,
   operationalLogs: (params: Record<string, unknown>) => ["admin", "logs", "app", params] as const,
   auditLogs: (params: Record<string, unknown>) => ["admin", "logs", "audit", params] as const,
   diagnosticStatus: () => ["diagnostics", "status"] as const,
@@ -464,6 +477,7 @@ export const adminKeys = {
   autoscanSources: () => ["admin", "autoscan", "sources"] as const,
   autoscanScanSourcePlugins: () => ["admin", "autoscan", "scan-source-plugins"] as const,
   autoscanStatus: () => ["admin", "autoscan", "status"] as const,
+  autoscanScansRoot: () => ["admin", "autoscan", "scans"] as const,
   autoscanScans: (params?: Record<string, unknown>) =>
     ["admin", "autoscan", "scans", params ?? {}] as const,
   autoscanEvents: (params?: Record<string, unknown>) =>

@@ -39,6 +39,7 @@ function makeForm(values: Record<string, string>, dirty: string[] = []) {
   return {
     isLoading: false,
     getValue: (key: string) => values[key] ?? "",
+    getPersistedValue: (key: string) => values[key] ?? "",
     setValue: vi.fn(),
     resetValue: vi.fn(),
     isDirty: (key: string) => dirtySet.has(key),
@@ -239,5 +240,28 @@ describe("LibraryMetadataSettings", () => {
 
     expect(rendered).toContain("Takes effect after a server restart");
     expect(text(rendered)).not.toContain("Changes apply after a restart");
+  });
+
+  it("warns that enabling meaning-based search rebuilds the index after restart", () => {
+    const values: Record<string, string> = {
+      "catalog.search.provider": "meilisearch",
+      "catalog.search.meilisearch.semantic_enabled": "true",
+    };
+    const form = makeForm(values, ["catalog.search.meilisearch.semantic_enabled"]);
+    form.getPersistedValue = (key: string) =>
+      key === "catalog.search.meilisearch.semantic_enabled" ? "false" : (values[key] ?? "");
+    useSettingsFormMock.mockReturnValue(form);
+
+    const rendered = text(
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <LibraryMetadataSettings />
+        </MemoryRouter>,
+      ),
+    );
+
+    expect(rendered).toContain("Enabling this changes the index format");
+    expect(rendered).toContain("rebuilds the index automatically");
+    expect(rendered).toContain("Keyword search stays available");
   });
 });

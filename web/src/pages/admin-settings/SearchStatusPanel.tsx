@@ -44,9 +44,22 @@ export function SearchStatusPanel() {
 
   return (
     <div className="divide-border divide-y">
+      {status.degraded && (
+        <div className="py-3">
+          <SettingFieldStatus tone="warn">
+            {status.degraded_reason ?? "Search is running in a degraded mode."}
+          </SettingFieldStatus>
+        </div>
+      )}
       <StatusRow
         label="Answering searches"
-        value={status.active_provider === "meilisearch" ? "Meilisearch" : "Postgres full-text"}
+        value={
+          status.active_provider === "meilisearch"
+            ? status.index.rebuild_required
+              ? "Meilisearch (keyword only)"
+              : "Meilisearch"
+            : "Postgres full-text"
+        }
         badge={status.configured_provider}
       />
       <StatusRow
@@ -57,7 +70,11 @@ export function SearchStatusPanel() {
       <StatusRow
         label="Active index"
         value={status.index.active_index_uid || "Not built"}
-        badge={`schema ${status.index.schema_version}/${status.index.expected_schema_version}`}
+        badge={
+          status.index.rebuild_required
+            ? "rebuild required"
+            : `schema ${status.index.schema_version}/${status.index.expected_schema_version}`
+        }
       />
       <StatusRow label="Documents" value={String(status.index.document_count)} />
       <StatusRow label="Indexed types" value={formatIndexedTypes(status.meilisearch.index_types)} />
@@ -144,7 +161,7 @@ function SearchTaskLinks() {
         <Link to="/admin/tasks/rebuild_catalog_search_index">Rebuild index</Link>
       </Button>
       <Button asChild size="sm" variant="ghost">
-        <Link to="/admin/tasks/sync_catalog_search_index">Sync history</Link>
+        <Link to="/admin/tasks/sync_catalog_search_index">Automatic maintenance</Link>
       </Button>
     </div>
   );

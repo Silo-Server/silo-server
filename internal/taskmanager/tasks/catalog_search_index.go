@@ -25,7 +25,7 @@ func NewSyncCatalogSearchIndexTask(worker CatalogSearchIndexWorker) *SyncCatalog
 func (t *SyncCatalogSearchIndexTask) Key() string  { return "sync_catalog_search_index" }
 func (t *SyncCatalogSearchIndexTask) Name() string { return "Sync Catalog Search Index" }
 func (t *SyncCatalogSearchIndexTask) Description() string {
-	return "Drains catalog search outbox events into the configured Meilisearch index."
+	return "Builds or upgrades the Meilisearch catalog index when needed, then syncs pending catalog changes."
 }
 func (t *SyncCatalogSearchIndexTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategoryLibrary
@@ -52,7 +52,11 @@ func (t *SyncCatalogSearchIndexTask) Execute(ctx context.Context, progress taskm
 	}
 	stats, err := t.worker.SyncOutbox(ctx, progress)
 	if err != nil {
-		progress.Report(100, fmt.Sprintf("Catalog search sync failed after %d events", stats.Events))
+		if stats.RebuildAttempted {
+			progress.Report(100, fmt.Sprintf("Catalog search rebuild failed after %d documents", stats.DocumentCount))
+		} else {
+			progress.Report(100, fmt.Sprintf("Catalog search sync failed after %d events", stats.Events))
+		}
 		return err
 	}
 	return nil

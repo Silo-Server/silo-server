@@ -6,6 +6,7 @@ import { adminKeys } from "../keys";
 export interface AdminLogQuery {
   cursor?: string;
   limit?: number;
+  /** One level, or a comma-separated list of them (e.g. `"error,warn"`). */
   level?: string;
   component?: string;
   node_id?: string;

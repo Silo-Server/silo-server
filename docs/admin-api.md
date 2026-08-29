@@ -76,6 +76,21 @@ Some settings are only read at startup. Two routes carry that contract:
 | `restart_mark_count` | int | Increments on every restart-required save. Because the boolean latches, this counter is the only signal that a **new** requirement arrived — the admin UI re-arms its dismissed restart banner on it. |
 | `restart_requested`, `restart_requested_at` | bool, RFC3339 string | An in-app restart was requested, and when. |
 
+## Catalog search status
+
+`GET /api/v1/admin/catalog/search/status` reports the configured search
+provider, the provider currently answering requests, Meilisearch health, index
+state, semantic readiness, and links to the search maintenance tasks.
+
+`active_provider` describes the route requests actually take; it is not merely
+the configured provider. `degraded` and the optional `degraded_reason` explain
+temporary fallback or keyword-only operation. `index.rebuild_required` is true
+when the active index does not match the current settings. Background search
+maintenance runs at startup and every minute: it rebuilds a missing or stale
+index, then resumes incremental event sync. When the prior index is known to
+have the same document and media scope, Meilisearch continues serving keyword
+search while the replacement is built; otherwise searches use PostgreSQL.
+
 ## `GET /api/v1/admin/nodes`
 
 Lists every registered stream node — proxy and transcode alike — with its
@@ -690,3 +705,501 @@ Each entry in `sources`:
 A single report samples three independently updated stores, so one-sided
 differences are normal and are not on their own evidence of a defect. Repeated
 agreement over time is what the legacy-retirement project is gated on.
+
+## `/api/v1/admin/dashboard/layout`
+
+The admin dashboard is a widget grid each admin arranges for themselves. The
+arrangement is stored per **account** (`users.id`), not per household profile,
+so the same admin sees the same dashboard in every browser they log in from.
+
+The server stores the document verbatim and validates only that the body is at
+most 16 KiB and that `layout` is a JSON object. Widget ids, column spans and row
+heights are the admin web client's vocabulary: it already sanitizes what it
+loads — dropping widgets it does not know, clamping each axis to that widget's
+range, and filling in the default height for an entry saved before row heights
+existed — so a second copy of that schema on the server would only be another
+place to update whenever a widget is added. That also means a layout written by
+a newer build degrades gracefully on an older one instead of being rejected.
+
+Writes are last-write-wins. The layout is one admin's own blob, so a race
+between two of their tabs can cost only the older arrangement; `updated_at` is
+returned so a compare-and-set could be layered on later without a contract
+change.
+
+The web client keeps a copy in `localStorage` for instant paint and offline use,
+adopts the server document when it arrives, and — the first time it finds no
+server document but does have a local one — uploads that local layout once.
+
+### `GET /api/v1/admin/dashboard/layout`
+
+`200 OK`. Both fields are `null` when this admin has never saved a layout; that
+is the normal first-load answer, not an error.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `layout` | object \| null | The stored document, exactly as it was written. |
+| `updated_at` | RFC3339 string \| null | When it was last written. |
+
+```json
+{
+  "layout": {
+    "version": 1,
+    "entries": [{ "id": "libraries", "span": 7, "rows": 4 }]
+  },
+  "updated_at": "2026-08-26T10:00:00Z"
+}
+```
+
+### `PUT /api/v1/admin/dashboard/layout`
+
+Body: `{"layout": {…}}`. Responds `204 No Content` on success, and
+`400 bad_request` when the body is not valid JSON, when `layout` is absent or
+`null`, when `layout` is not a JSON object, or when the body exceeds 16 KiB.
+
+### `DELETE /api/v1/admin/dashboard/layout`
+
+Resets this admin to the default arrangement. `204 No Content`, and idempotent:
+deleting a layout that is not there succeeds.
+
+## `GET /api/v1/admin/dashboard/capabilities`
+
+Feature detection for the admin dashboard surface. Per the v1 rules a new
+feature is detected rather than inferred from a server version, and every field
+here is additive: a server that has this endpoint answers `true` for all of
+them, and a server that predates the dashboard answers `404`. That is how a
+client tells "this deployment is older than my build" from "the request failed".
+
+| Field | Meaning |
+|---|---|
+| `server_layouts` | `GET`/`PUT`/`DELETE /admin/dashboard/layout` store the widget arrangement per admin account. |
+| `timeseries` | `GET /admin/stats/timeseries` serves sampled concurrent-stream and egress history. |
+| `playback_activity` | `GET /admin/stats/playback-activity` serves the rolling playback activity aggregate. |
+| `top_activity` | `GET /admin/stats/top-activity` serves the leaderboards. |
+| `health` | `GET /admin/server/status` carries the additive `health` object. |
+| `log_level_list` | `GET /admin/logs/app` accepts a multi-level filter. |
+| `watch_providers` | `GET /admin/stats` carries the per-provider `watch_providers` array. |
+| `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
+
+```json
+{
+  "server_layouts": true,
+  "timeseries": true,
+  "playback_activity": true,
+  "top_activity": true,
+  "health": true,
+  "log_level_list": true,
+  "watch_providers": true,
+  "downloads_stats": true
+}
+```
+
+## `GET /api/v1/admin/stats`
+
+Library, user, and playback totals for the dashboard, plus one entry per watch
+provider. Cached in-process for 15s and bypassed with `?refresh=1`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `total_items`, `total_files`, `total_users` | int | Catalog and account totals. |
+| `total_movies`, `total_movie_files`, `total_shows`, `total_show_files` | int | Per-kind catalog totals. |
+| `active_streams` | int | Playback sessions currently synced as live. |
+| `total_storage_bytes` | int | Sum of every scanned media file's size. |
+| `watch_providers` | object[] | One entry per watch provider, ordered by `provider`. Always an array, never null. |
+
+`watch_providers` covers the union of the providers registered in the watchsync
+registry — built-in and plugin-contributed alike, so a provider installed by a
+plugin appears as soon as it registers, with zeros — and any provider that has
+rows in the watch-provider tables. The second half of that union keeps history
+visible after a provider's plugin is uninstalled; such an entry carries
+`"registered": false` and falls back to its key as the display name.
+
+Each entry:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `provider` | string | Provider key (`trakt`, `simkl`, `mdblist`, a plugin's key). |
+| `display_name` | string | Human name from the registry, or the key when the provider is not registered. |
+| `registered` | bool | False when the provider only exists in stored rows. |
+| `scrobbling` | bool | The provider declares the scrobble-playback capability. |
+| `exporting` | bool | The provider declares the export-watched capability. |
+| `connected_profiles` | int | Profiles with a connection to this provider. |
+| `enabled_profiles` | int | Connected profiles with at least one sync direction enabled. |
+| `export_enabled_profiles`, `scrobble_enabled_profiles` | int | Connected profiles with that toggle on. |
+| `last_sync_completed_at` | string | RFC3339 timestamp of the newest completed sync run. Omitted when there is none. |
+| `sync_runs_24h`, `sync_errors_24h` | int | Sync runs started in the last 24h, and how many of those failed. |
+| `imported_watched_24h`, `imported_progress_24h`, `exported_watched_24h` | int | Rows moved by those runs. |
+| `pending_exports`, `failed_exports` | int | Queued history exports by status, all-time. |
+| `open_scrobbles` | int | Scrobble sessions started but not yet stopped. |
+| `scrobbles_24h` | int | Scrobble sessions touched in the last 24h. |
+
+```json
+{
+  "total_items": 4821,
+  "total_files": 5310,
+  "total_users": 6,
+  "total_movies": 1980,
+  "total_shows": 212,
+  "active_streams": 3,
+  "total_storage_bytes": 91234567890,
+  "watch_providers": [
+    {
+      "provider": "mdblist",
+      "display_name": "MDBList",
+      "registered": true,
+      "scrobbling": false,
+      "exporting": false,
+      "connected_profiles": 0,
+      "enabled_profiles": 0,
+      "export_enabled_profiles": 0,
+      "scrobble_enabled_profiles": 0,
+      "sync_runs_24h": 0,
+      "sync_errors_24h": 0,
+      "imported_watched_24h": 0,
+      "imported_progress_24h": 0,
+      "exported_watched_24h": 0,
+      "pending_exports": 0,
+      "failed_exports": 0,
+      "open_scrobbles": 0,
+      "scrobbles_24h": 0
+    },
+    {
+      "provider": "trakt",
+      "display_name": "Trakt",
+      "registered": true,
+      "scrobbling": true,
+      "exporting": true,
+      "connected_profiles": 2,
+      "enabled_profiles": 2,
+      "export_enabled_profiles": 2,
+      "scrobble_enabled_profiles": 1,
+      "last_sync_completed_at": "2026-03-01T12:00:00Z",
+      "sync_runs_24h": 5,
+      "sync_errors_24h": 0,
+      "imported_watched_24h": 30,
+      "imported_progress_24h": 4,
+      "exported_watched_24h": 12,
+      "pending_exports": 0,
+      "failed_exports": 0,
+      "open_scrobbles": 1,
+      "scrobbles_24h": 9
+    }
+  ]
+}
+```
+
+`watch_providers` replaced the Trakt-hardcoded `watch_provider_activity` object,
+which was removed pre-lock; see the removals table in
+[architecture/v1-scope.md](architecture/v1-scope.md).
+
+## `GET /api/v1/admin/stats/timeseries`
+
+Sampled history for the concurrent-streams and egress charts. Cached in-process
+for 30s, dropped early on playback or admin activity, and bypassed with
+`?refresh=1`.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `hours` | int | Window length. Default 24, clamped to 1..744 (31 days, the retention window). A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read. |
+
+Neither series can be reconstructed after the fact — live sessions leave no
+per-minute trace once they end, and node egress is a rolling average that each
+health check overwrites — so a sampler (`internal/dashmetrics`) writes them as
+they happen, once a minute, into `dashboard_metric_samples`. Samples older than
+31 days are deleted.
+
+Reads bucket those minutes down so a response stays under ~750 points at any
+window. `resolution_seconds` reports the bucket that was used — read it rather
+than assuming the sampler's minute:
+
+| Requested window | `resolution_seconds` |
+|---|---|
+| ≤ 2 hours | 60 |
+| ≤ 48 hours | 300 |
+| ≤ 336 hours (14 days) | 1800 |
+| wider | 7200 |
+
+A bucket wider than a minute reports the **peak** minute of each column, never
+an average: these charts are read to answer "how bad did it get", and a mean
+would erase exactly that. Stream counts and egress are maxed independently, so
+a bucket's columns may come from different minutes within it.
+
+Each minute holds up to two kinds of row. The `shared` row is the cluster-wide
+snapshot: stream counts by play method, plus the egress reported by enabled,
+healthy stream nodes. Every replica tries to write it and the first one to land
+wins, so the values for a minute come from whichever replica got there first —
+they differ only by sub-second timing. A `proc:<node_id>` row per API process
+carries the viewer egress that process served, measured from stream telemetry;
+without it a deployment with no stream nodes would chart zero egress forever.
+Relay traffic is excluded, so bytes a proxy node passes through the API node are
+not counted twice.
+
+Stream counts in a point therefore come from the shared row, while `egress_kbps`
+sums every source for a minute before the peak minute of the bucket is taken.
+Precision is mixed by design: node egress is a 30-second rolling average and
+process egress is an exact byte delta.
+
+`egress_kbps` keeps its pre-split meaning — the total viewer egress across
+every source — so a chart drawn from it alone stays truthful.
+`download_egress_kbps` is the additive file-transfer subset of that total:
+offline and direct downloads, ebook reads, and ABS file fetches, measured as
+the actual bytes each API process wrote (including partial range-request
+bodies). Node egress cannot be split and counts entirely outside the subset.
+The sampler keeps the subset ≤ the total per minute, and each field takes its
+own per-bucket peak, so neither can exceed the total and their difference is
+never negative. But past the two-hour display resolution the two maxima are
+preserved independently and may come from different minutes: subtracting them
+does not yield any minute's playback rate. Chart the total and the download
+subset as separate series rather than deriving a playback series. Samples
+written before the split report `0` — read that as "not measured yet", not
+"no downloads".
+
+A bucket with no sample in it is absent from `points` rather than zero — a gap
+(a restart, a stopped server) and an idle bucket are different facts. Stream
+telemetry being disabled means no `proc:` rows, not an error.
+`oldest_sample_at` is `null` until the first sample exists, which is how a
+fresh install renders "collecting data" instead of an empty chart.
+
+```json
+{
+  "resolution_seconds": 300,
+  "from": "2026-08-25T12:00:00Z",
+  "to": "2026-08-26T12:00:00Z",
+  "oldest_sample_at": "2026-08-24T09:31:00Z",
+  "points": [
+    {
+      "t": "2026-08-26T11:55:00Z",
+      "streams": 3,
+      "direct": 1,
+      "remux": 0,
+      "transcode": 2,
+      "egress_kbps": 48211,
+      "download_egress_kbps": 6100
+    }
+  ]
+}
+```
+
+## `GET /api/v1/admin/stats/playback-activity`
+
+Bucketed playback starts split by play method, plus reliability scalars, for the
+admin dashboard. Answers are cached in-process for 60s and dropped early when
+the shared event bus reports playback or admin activity; `?refresh=1` drops the
+cache before reading.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `hours` | int | Window length. Default 24, clamped to 1..744. A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read. |
+
+Buckets are hourly up to a 48-hour window and daily beyond it; `bucket_seconds`
+is `3600` or `86400` accordingly. A bucket's `hour` field is its start instant
+at either width — it keeps that name because it is the same fact, and
+`bucket_seconds` already says how wide the bucket is.
+
+Sessions come from `playback_history_admin` (which only gains a row when a
+session finalizes) unioned with the live sessions table, so the current hour is
+not under-counted. A live session cannot already be in history, so nothing is
+counted twice. Live sessions with no recorded start — reconstructed after a
+restart — are dated by their last update instead.
+
+`from` and `to` are the queried window on the database clock — the clock the
+bucket filter ran against. Clients should anchor their zero-fill grid on `to`
+rather than their own clock: a browser a minute behind the server around a
+boundary would otherwise discard the newest bucket.
+
+`buckets` contains only buckets that saw a session; the client zero-fills the
+window on the `bucket_seconds` grid so a quiet server draws empty columns rather
+than a shorter chart. Everything in `reliability` is computed over the whole
+requested window. `completion_rate` is
+`completed_sessions / finalized_sessions`: live sessions are excluded from both
+sides, because a session that is still playing has not failed to complete.
+
+`profiles_active_24h` is a fixed rolling-24h figure that ignores `hours` — it
+answers "who watched today" whatever window the chart beside it is showing. It
+counts distinct (account, profile) pairs in
+`user_watch_history` over a rolling 24 hours, excluding history that was
+imported or synced from a watch provider (`import`, `trakt`, `simkl`,
+`mdblist`), so it means "watched on this server". Marked-watched (`manual`)
+rows are counted: they are on-server actions.
+
+**Not reported:** time-to-first-frame and failed-start counts. Nothing records
+a playback *start* event today, so both would have to be inferred from log
+parsing. They need start-event capture in playback first, and are deliberately
+absent rather than approximated.
+
+```json
+{
+  "hours": 24,
+  "bucket_seconds": 3600,
+  "from": "2026-08-25T10:41:03Z",
+  "to": "2026-08-26T10:41:03Z",
+  "buckets": [{ "hour": "2026-08-26T10:00:00Z", "direct": 4, "remux": 1, "transcode": 2 }],
+  "reliability": {
+    "sessions_started": 42,
+    "transcode_starts": 11,
+    "finalized_sessions": 38,
+    "completed_sessions": 27,
+    "completion_rate": 0.7105,
+    "unique_profiles": 9
+  },
+  "profiles_active_24h": 9
+}
+```
+
+## `GET /api/v1/admin/stats/top-activity`
+
+Most-watched titles and most-active profiles over a multi-day window. Cached
+for 5 minutes — a seven-day ranking barely moves within minutes — with the same
+`?refresh=1` escape hatch.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `days` | int | Window length. Default 7, clamped to 1..30. |
+| `limit` | int | Rows per list. Default 10, clamped to 1..25. |
+| `refresh` | bool | Bypass the cache for this read. |
+
+`plays` on both lists counts `user_watch_history` rows with the same source
+exclusions as `profiles_active_24h` above, so marking something watched counts
+as a play. Episodes are rolled up to their series, so a season binge reads as
+one show and a title's `media_item_id` is a series content id for TV.
+
+`total_seconds` is **watched time**, summed from finalized playback sessions
+(`playback_history_admin.watched_seconds`) that *ended* inside the same window
+— the same stop instant `watched_at` records, so plays and watch time see the
+same sessions — not the runtime of what was played. Watch history records the media's full duration,
+so summing that would report three hours for a movie someone abandoned after a
+minute. An entry that was only ever marked watched has no sessions and reports
+`0`. Because `watched_seconds` records a session's final absolute position, a
+resumed session would claim the already-watched stretch again, so each
+session's contribution is capped at its wall-clock length; the figure is an
+estimate until playback records true elapsed viewing time.
+
+Profile display names live in the per-user stores rather than in watch history,
+so they are read back from that profile's most recent `playback_history_admin`
+row; a profile that has only ever marked things watched falls back to its
+profile id. Ties are broken on a stable key (`media_item_id`, or
+`user_id`/`profile_id`) so equal rows keep their order between refreshes. No
+poster URLs are returned — the bar-list widgets do not need them, and it keeps
+the query cheap.
+
+Both lists are `[]` on a server with no history, never `null`.
+
+```json
+{
+  "days": 7,
+  "limit": 10,
+  "titles": [
+    {
+      "media_item_id": "…",
+      "title": "…",
+      "media_type": "series",
+      "plays": 18,
+      "total_seconds": 54120
+    }
+  ],
+  "profiles": [
+    {
+      "user_id": 3,
+      "username": "quick",
+      "profile_id": "p1",
+      "profile_name": "Quick",
+      "plays": 12,
+      "total_seconds": 40100
+    }
+  ]
+}
+```
+
+## `GET /api/v1/admin/stats/downloads`
+
+Offline-download aggregate for the dashboard's downloads widget. Cached
+in-process for 60s, dropped early on admin activity from the shared event bus,
+and bypassed with `?refresh=1`.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `limit` | int | Rows in `top_users`. Default 10, clamped to 1..25. A non-numeric value is `400 bad_request`. |
+| `refresh` | bool | Bypass the cache for this read. |
+
+The aggregate reads the `downloads` table, which carries two lifecycles: a
+**managed device entry** (a device keeps the item offline; `device_id` set) and
+a **one-shot web download** (`device_id` null, pruned over time). "Active"
+means a managed entry whose status is `queued`, `preparing`, `ready`,
+`downloading`, or `completed` — anything that has not ended in failure,
+cancellation, or revocation. The headline numbers and `top_users` count active
+managed entries only; the 24-hour counters cover both lifecycles, so one-shot
+web downloads show up there.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `users_with_downloads` | int | Distinct accounts (login accounts, not household profiles) with at least one active managed download. |
+| `active_downloads` | int | Active managed entries. A series batch contributes one entry per episode. |
+| `total_bytes` | int | Sum of `file_size` over completed managed entries — bytes sitting on devices as far as the server can know without devices reporting back. |
+| `downloads_started_24h` | int | Rows created in the last 24 hours, both lifecycles. |
+| `downloads_completed_24h` | int | Rows that reached `completed` in the last 24 hours, both lifecycles. |
+| `limit` | int | The clamped `top_users` size the response was built with. |
+| `top_users` | object[] | Accounts ranked by active managed downloads; `[]` when nobody downloads, never `null`. |
+
+Each `top_users` entry: `user_id`, `username`, `downloads` (active managed
+entries), and `total_bytes` (completed managed entries only, like the headline).
+
+A deployment with the downloads feature disabled answers all zeros rather than
+an error — the table exists on every deployment.
+
+```json
+{
+  "users_with_downloads": 2,
+  "active_downloads": 14,
+  "total_bytes": 52613349376,
+  "downloads_started_24h": 3,
+  "downloads_completed_24h": 2,
+  "limit": 10,
+  "top_users": [
+    { "user_id": 3, "username": "quick", "downloads": 11, "total_bytes": 41234567890 },
+    { "user_id": 5, "username": "kid", "downloads": 3, "total_bytes": 11378781486 }
+  ]
+}
+```
+
+## `GET /api/v1/admin/server/status` — `health`
+
+The status route carries an additive `health` object for the dashboard health
+strip. Every field the route already returned is unchanged; only `health` is
+new, and the example below is trimmed to the fields it discusses:
+
+```json
+{
+  "started_at": "2026-08-26T09:00:00Z",
+  "restart_required": false,
+  "health": {
+    "postgres": { "configured": true, "ok": true, "latency_ms": 1.42 },
+    "redis": { "configured": true, "ok": true, "latency_ms": 0.31 },
+    "errors_24h": 4,
+    "warnings_24h": 12
+  }
+}
+```
+
+Each component reports `configured` first: `false` means this deployment runs
+without that service — a supported single-node shape for Redis — and `ok` and
+`latency_ms` are then absent, so "not present" and "present but broken" do not
+look the same on the strip. Latency is the round trip of one ping, in
+milliseconds with two decimals, bounded by a 2s timeout: a wedged dependency is
+reported as `ok: false` rather than holding the route open.
+
+`errors_24h` / `warnings_24h` count `operational_logs` rows at those levels over
+a rolling 24 hours, cached for 30s. A server with operational logging disabled
+reports zeros and logs a warning; this route never fails over a secondary
+number.
+
+Version, uptime and node health are not repeated here. The client composes them
+from `GET /admin/system/build`, `started_at` above, and `GET /admin/nodes`.
+
+## `GET /api/v1/admin/logs/app` — `level`
+
+`level` accepts a comma-separated list, so one request can ask for several
+levels at once (`?level=error,warn`). Values are trimmed, lowercased and
+de-duplicated; a single value behaves exactly as before. The same parsing
+applies to the log-stream WebSocket, so a stream filtered on two levels
+delivers both.

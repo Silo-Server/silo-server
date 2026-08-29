@@ -40,6 +40,10 @@ PUT /api/v1/admin/collections/{id}/items/order	non-media
 DELETE /api/v1/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v1/admin/collections/{id}/items/{item_id}	non-media
 POST /api/v1/admin/collections/{id}/sync	non-media
+GET /api/v1/admin/dashboard/capabilities	non-media
+DELETE /api/v1/admin/dashboard/layout	non-media
+GET /api/v1/admin/dashboard/layout	non-media
+PUT /api/v1/admin/dashboard/layout	non-media
 GET /api/v1/admin/devices	non-media
 GET /api/v1/admin/devices/{user_id}/{device_id}	non-media
 GET /api/v1/admin/diagnostics/reports/	non-media
@@ -150,6 +154,10 @@ GET /api/v1/admin/settings/sensitive-status	non-media
 GET /api/v1/admin/settings/{key}	non-media
 PUT /api/v1/admin/settings/{key}	non-media
 GET /api/v1/admin/stats	non-media
+GET /api/v1/admin/stats/downloads	non-media
+GET /api/v1/admin/stats/playback-activity	non-media
+GET /api/v1/admin/stats/timeseries	non-media
+GET /api/v1/admin/stats/top-activity	non-media
 GET /api/v1/admin/stream-telemetry/parity	non-media
 GET /api/v1/admin/subtitle-providers/	non-media
 PUT /api/v1/admin/subtitle-providers/{provider}/	non-media

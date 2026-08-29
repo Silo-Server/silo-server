@@ -1372,13 +1372,17 @@ func IsAudioToAACStereoDownmixV3(sourceChannels int, targetCodecAudio string, ta
 		(targetAudioChannels == 0 || targetAudioChannels == 2)
 }
 
-const stereoDownmixBoostFilterV3 = "aresample=out_chlayout=stereo,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+const stereoDownmixBoostFilterV3 = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 
 // appendStereoDownmixBoostArgs applies the playback downmix policy only after
 // the source is explicitly rematrixed to stereo. The order matters: limiting
 // the source channels before FFmpeg sums them would still allow the final
 // stereo signal to clip. The limiter's input gain is +6.0206 dB; its -2 dBFS
 // sample ceiling leaves headroom for lossy-codec and inter-sample overshoot.
+// async=1 enables FFmpeg's timestamp-matching fill/trim behavior while
+// retaining the source clock and first packet timestamp. On the affected
+// inputs, the resulting fixed-duration AAC packets no longer carry the small
+// PTS gaps that Firefox renders as audible zero-fill crackle.
 func appendStereoDownmixBoostArgs(args []string, sourceChannels, outputChannels int) []string {
 	if sourceChannels <= 2 || outputChannels != 2 {
 		return args

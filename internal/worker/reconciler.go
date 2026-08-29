@@ -230,6 +230,12 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
+	// The two publishes serve different consumers and are not alternatives:
+	// the events hub pushes "sessions.replaced" to connected admin clients,
+	// while the cache bus invalidates the playback-derived admin aggregates
+	// (stats, activity, leaderboards, timeseries) across nodes. Gating the bus
+	// behind the hub's absence left those caches TTL-only in the normal
+	// configuration, where both are wired.
 	if changed && r.EventsHub != nil {
 		if err := r.EventsHub.PublishJSON(
 			ctx,
@@ -240,7 +246,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 		); err != nil {
 			log.Printf("reconciler: failed to publish session event for node %s: %v", reportingNode, err)
 		}
-	} else if changed && r.EventBus != nil {
+	}
+	if changed && r.EventBus != nil {
 		if err := r.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{
 			Type:    cache.EventPlaybackSessionsChanged,
 			Payload: reportingNode,

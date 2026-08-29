@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,7 +47,7 @@ func TestBuildRemuxArgsHonorsPlannedAACOutput(t *testing.T) {
 }
 
 func TestBuildRemuxArgsBoostsOnlySurroundToStereoAAC(t *testing.T) {
-	const wantFilter = "aresample=out_chlayout=stereo,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+	const wantFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	tests := []struct {
 		name           string
 		transcodeAudio bool
@@ -72,6 +74,39 @@ func TestBuildRemuxArgsBoostsOnlySurroundToStereoAAC(t *testing.T) {
 				t.Fatalf("downmix boost present=%t, want %t; args=%s", gotBoost, tt.wantBoost, strings.Join(args, " "))
 			}
 		})
+	}
+}
+
+func TestBuildRemuxArgsNormalizesAACAcrossSeekAnchors(t *testing.T) {
+	const wantFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+	anchors := []struct {
+		name string
+		seek float64
+	}{
+		{name: "initial start", seek: 0},
+		{name: "rewind reanchor", seek: 600},
+		{name: "saved resume", seek: 2201.111},
+		{name: "forward reanchor", seek: 2800},
+	}
+
+	for _, anchor := range anchors {
+		t.Run(anchor.name, func(t *testing.T) {
+			args := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", anchor.seek, true, 0, 0, false, false, 6, 2, 192)
+			if !argsContainPair(args, "-af", wantFilter) {
+				t.Fatalf("AAC timestamp normalization missing at seek %.3f: %s", anchor.seek, strings.Join(args, " "))
+			}
+			if strings.Contains(strings.Join(args, " "), "first_pts") {
+				t.Fatalf("seek %.3f reset the source clock instead of preserving its anchor: %s", anchor.seek, strings.Join(args, " "))
+			}
+			if anchor.seek > 0 && (!argsContainPair(args, "-ss", strconv.FormatFloat(anchor.seek, 'f', 3, 64)) || !slices.Contains(args, "-noaccurate_seek")) {
+				t.Fatalf("seek %.3f lost the copy-video reanchor recipe: %s", anchor.seek, strings.Join(args, " "))
+			}
+		})
+	}
+
+	codecCopy := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", 600, false, 0, 0, false, false, 6, 2, 192)
+	if slices.Contains(codecCopy, "-af") {
+		t.Fatalf("codec-copy remux unexpectedly received an audio filter: %s", strings.Join(codecCopy, " "))
 	}
 }
 

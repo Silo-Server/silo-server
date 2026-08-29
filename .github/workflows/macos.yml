@@ -1,10 +1,8 @@
 name: Native macOS Server
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  # Temporarily manual-only while GitHub's macOS runners cannot reliably
+  # create the VideoToolbox hardware compression session exercised below.
   workflow_dispatch:
 
 concurrency:

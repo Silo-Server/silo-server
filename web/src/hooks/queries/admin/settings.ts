@@ -39,6 +39,8 @@ function affectsOverlayConfig(key: string) {
 export interface CatalogSearchStatus {
   configured_provider: string;
   active_provider: string;
+  degraded: boolean;
+  degraded_reason?: string;
   meilisearch: {
     configured: boolean;
     healthy: boolean;
@@ -58,6 +60,7 @@ export interface CatalogSearchStatus {
     active_index_uid: string;
     schema_version: number;
     expected_schema_version: number;
+    rebuild_required: boolean;
     document_count: number;
     vector_document_count: number;
     pending_events: number;
@@ -251,6 +254,7 @@ export function useCatalogSearchStatus(enabled = true) {
     queryFn: () => api<CatalogSearchStatus>("/admin/catalog/search/status"),
     enabled,
     staleTime: 15_000,
+    refetchInterval: (query) => (query.state.data?.index.rebuild_required ? 2_000 : false),
   });
 }
 

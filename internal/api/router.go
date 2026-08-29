@@ -136,6 +136,9 @@ type Dependencies struct {
 	Recommender               recommendations.Recommender // nil when disabled
 	RecWorker                 *recommendations.Worker     // nil when disabled
 	CatalogSearchVectorizer   catalog.CatalogSearchQueryVectorizer
+	// CatalogSearchSettings is the process-lifetime startup snapshot shared by
+	// every native/jellycompat provider and the index maintenance worker.
+	CatalogSearchSettings     *catalog.CatalogSearchSettings
 	RatingsRepo               *catalog.RatingsRepo
 	PersonRepo                *catalog.PersonRepository
 	PersonRefreshQueue        handlers.PersonRefreshQueue
@@ -166,11 +169,15 @@ type Dependencies struct {
 	MarkerContributionStore   *markers.ContributionStore
 	MarkerContributionService *markers.ContributionService
 	WatchProviderService      handlers.WatchProviderService
-	WatchCompletionObserver   watchstate.CompletionObserver
-	PluginService             *plugins.Service
-	PluginHTTPProxy           *plugins.HTTPProxy
-	PluginUserConfig          *plugins.UserConfigStore
-	AuthProviders             []auth.RegisteredProvider
+	// WatchProviderRegistry is the watchsync registry, used by the admin stats
+	// to list every provider — built-in or plugin-contributed — even when none
+	// of them has any activity yet.
+	WatchProviderRegistry   handlers.WatchProviderLister
+	WatchCompletionObserver watchstate.CompletionObserver
+	PluginService           *plugins.Service
+	PluginHTTPProxy         *plugins.HTTPProxy
+	PluginUserConfig        *plugins.UserConfigStore
+	AuthProviders           []auth.RegisteredProvider
 	// PublicURL is the externally-reachable origin (scheme + host) for this
 	// silo instance. Used to build redirect_uri values handed to OAuth
 	// IdPs. Empty disables the /oauth/{install_id}/{init,callback} routes.
@@ -200,6 +207,13 @@ type Dependencies struct {
 	// (search/top). May be nil; the handlers report "not configured" in
 	// that case rather than failing.
 	MDBListClient *mdblist.Client
+
+	// Admin dashboard aggregates, cached like AdminStatsProvider. Each is
+	// optional: without one, the matching route queries Postgres per request.
+	AdminPlaybackActivityProvider handlers.AdminPlaybackActivitySource
+	AdminTopActivityProvider      handlers.AdminTopActivitySource
+	AdminTimeseriesProvider       handlers.AdminTimeseriesSource
+	AdminDownloadsStatsProvider   handlers.AdminDownloadsStatsSource
 
 	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
 	// it is mounted at the root router level (not under /api/v1/) so that ABS
@@ -603,13 +617,22 @@ func NewRouter(deps Dependencies) chi.Router {
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		searchIndexEvents := catalog.NewSearchIndexEventRepository(deps.DB)
-		catalogSearchService = catalog.NewCatalogSearchService(
-			context.Background(),
-			settingsRepo,
-			itemRepo,
-			searchIndexEvents,
-			deps.CatalogSearchVectorizer,
-		)
+		if deps.CatalogSearchSettings != nil {
+			catalogSearchService = catalog.NewCatalogSearchServiceFromSettings(
+				*deps.CatalogSearchSettings,
+				itemRepo,
+				searchIndexEvents,
+				deps.CatalogSearchVectorizer,
+			)
+		} else {
+			catalogSearchService = catalog.NewCatalogSearchService(
+				context.Background(),
+				settingsRepo,
+				itemRepo,
+				searchIndexEvents,
+				deps.CatalogSearchVectorizer,
+			)
+		}
 		if catalogSearchService != nil {
 			catalogSearchService.StartCoverageRefresh(deps.AppContext)
 		}
@@ -1179,6 +1202,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.EventsHub = deps.EventsHub
 		adminHandler.ImpersonationService = authService
 		adminHandler.StatsSource = deps.AdminStatsProvider
+		adminHandler.WatchProviders = deps.WatchProviderRegistry
+		adminHandler.PlaybackActivitySource = deps.AdminPlaybackActivityProvider
+		adminHandler.TopActivitySource = deps.AdminTopActivityProvider
+		adminHandler.TimeseriesSource = deps.AdminTimeseriesProvider
+		adminHandler.DownloadsStatsSource = deps.AdminDownloadsStatsProvider
+		adminHandler.RedisClient = deps.RedisClient
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.AccessGroups = accessGroupStore
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
@@ -2932,7 +2961,28 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
+							// Dashboard aggregates. Both are cached reads over the
+							// same catalog/playback tables /stats uses, split out
+							// because their windows and refresh rates differ.
+							r.Get("/stats/playback-activity", adminHandler.HandleGetPlaybackActivity)
+							r.Get("/stats/top-activity", adminHandler.HandleGetTopActivity)
+							// Offline-download aggregate for the dashboard's
+							// downloads widget. Reads the downloads table, which
+							// exists whether or not the feature is enabled, so a
+							// download-less deployment answers zeros.
+							r.Get("/stats/downloads", adminHandler.HandleGetDownloadsStats)
+							// Minute-resolution samples written by the dashboard
+							// metrics sampler (internal/dashmetrics); the only
+							// history for concurrent streams and egress.
+							r.Get("/stats/timeseries", adminHandler.HandleGetTimeseries)
 							r.Get("/server/status", adminHandler.HandleGetServerStatus)
+							// Per-admin-account dashboard arrangement. The server
+							// stores it as an opaque JSON object; the web client
+							// owns widget-id and span validation.
+							r.Get("/dashboard/capabilities", adminHandler.HandleGetDashboardCapabilities)
+							r.Get("/dashboard/layout", adminHandler.HandleGetDashboardLayout)
+							r.Put("/dashboard/layout", adminHandler.HandlePutDashboardLayout)
+							r.Delete("/dashboard/layout", adminHandler.HandleDeleteDashboardLayout)
 							r.Get("/catalog/search/status", adminHandler.HandleGetCatalogSearchStatus)
 							if policyHandler != nil {
 								r.Route("/policy", func(r chi.Router) {

@@ -236,11 +236,12 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
   const searchStatusResolved = input.search != null;
   const meiliConfigured = input.search?.meilisearch.configured ?? false;
   const meiliHealthy = input.search?.meilisearch.healthy ?? false;
+  const searchDegraded = input.search?.degraded ?? false;
   const searchState: OverviewState =
     activeSearch === "meilisearch"
       ? !searchStatusResolved
         ? "info"
-        : meiliHealthy
+        : meiliHealthy && !searchDegraded
           ? "ok"
           : "warn"
       : meiliConfigured
@@ -304,9 +305,11 @@ function buildTiles(input: SettingsOverviewInput): OverviewTile[] {
         activeSearch === "meilisearch"
           ? !searchStatusResolved
             ? "Checking connection"
-            : meiliHealthy
-              ? "Meilisearch connected"
-              : "Meilisearch not reachable"
+            : searchDegraded
+              ? (input.search?.degraded_reason ?? "Search is running in a degraded mode")
+              : meiliHealthy
+                ? "Meilisearch connected"
+                : "Meilisearch not reachable"
           : meiliConfigured
             ? "Meilisearch configured but not active"
             : "Meilisearch not connected",

@@ -157,22 +157,40 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.
 // The image is scaled to max 100x100 before hashing.
+//
+// The downscale happens in libvips before the Go-side decode, not after:
+// decoding a full provider original in Go materializes the whole raster on
+// the heap — well over a hundred MiB for a large poster — per concurrent
+// caller, while vips shrinks it to thumbhashSourceDimension with
+// shrink-on-load and hands Go a raster of a few KiB. The pure-Go decode of
+// the raw bytes remains as the fallback for anything vips cannot parse.
+//
+// Changing this pipeline changes the emitted hash bytes for a given image.
+// Stored thumbhashes remain valid placeholders, and the one site that
+// compares hashes for equality (ebook scan cover change detection) stores
+// the freshly computed hash whenever it re-caches, so a pipeline change
+// costs one re-cache per scan-covered ebook and then converges.
 func Thumbhash(data []byte) (string, error) {
-	img, _, err := image.Decode(bytes.NewReader(data))
+	img, err := decodeThumbhashSource(data)
 	if err != nil {
-		normalized, normalizeErr := normalizeThumbhashSource(data)
-		if normalizeErr != nil {
-			return "", fmt.Errorf("imageutil: decode for thumbhash: %w", err)
-		}
-		img, _, err = image.Decode(bytes.NewReader(normalized))
-		if err != nil {
-			return "", fmt.Errorf("imageutil: decode normalized thumbhash source: %w", err)
-		}
+		return "", err
 	}
-
-	scaled := scaleImage(img, 100)
+	scaled := scaleImage(img, thumbhashSourceDimension)
 	hashBytes := thumbhash.EncodeImage(scaled)
 	return base64.StdEncoding.EncodeToString(hashBytes), nil
+}
+
+func decodeThumbhashSource(data []byte) (image.Image, error) {
+	if normalized, err := normalizeThumbhashSource(data); err == nil {
+		if img, _, err := image.Decode(bytes.NewReader(normalized)); err == nil {
+			return img, nil
+		}
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
+	}
+	return img, nil
 }
 
 func normalizeThumbhashSource(data []byte) ([]byte, error) {

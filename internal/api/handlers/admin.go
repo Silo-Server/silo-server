@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -116,13 +117,22 @@ type ImpersonationService interface {
 // AdminHandler handles admin-only HTTP endpoints for user management,
 // session listing, unmatched files, and system stats.
 type AdminHandler struct {
-	userRepo                     UserRepository
-	pool                         *pgxpool.Pool
-	SessionsLoader               *PlaybackSessionsLoader
-	storeProv                    userstore.UserStoreProvider
-	accountProvisioner           *auth.AccountProvisioner
-	DetailSvc                    *catalog.DetailService
-	StatsSource                  AdminStatsSource
+	userRepo           UserRepository
+	pool               *pgxpool.Pool
+	SessionsLoader     *PlaybackSessionsLoader
+	storeProv          userstore.UserStoreProvider
+	accountProvisioner *auth.AccountProvisioner
+	DetailSvc          *catalog.DetailService
+	StatsSource        AdminStatsSource
+	// WatchProviders lists the registered watch providers for the uncached
+	// stats path. Nil on a deployment without the watchsync registry, which
+	// degrades to "only providers with stored activity".
+	WatchProviders               WatchProviderLister
+	PlaybackActivitySource       AdminPlaybackActivitySource
+	TopActivitySource            AdminTopActivitySource
+	TimeseriesSource             AdminTimeseriesSource
+	DownloadsStatsSource         AdminDownloadsStatsSource
+	RedisClient                  *redis.Client // health reporting only; nil means this deployment runs without Redis
 	Config                       *config.Config
 	EventBus                     cache.EventBus
 	EventsHub                    *evt.Hub
@@ -140,6 +150,12 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// logLevelCounts caches the 24h error/warning tallies served on
+	// /admin/server/status. The dashboard polls that route every 15s, and the
+	// counts are only ever read as a rough signal, so re-counting per request
+	// would be pure waste. Nil when the handler was built without the
+	// constructor (tests): the counts are then simply uncached.
+	logLevelCounts *cache.TTLCache[adminLogLevelCounts]
 	// PublicStorageConfigured reports whether the public object-storage client
 	// is active in this process — the same condition that gates branding asset
 	// uploads (branding.Service.HasStorage) and the metadata image cacher, both
@@ -161,6 +177,7 @@ func NewAdminHandler(
 		pool:               pool,
 		storeProv:          storeProv,
 		accountProvisioner: auth.NewAccountProvisioner(userRepo, storeProv),
+		logLevelCounts:     cache.NewTTLCache[adminLogLevelCounts](),
 	}
 }
 
@@ -1348,7 +1365,7 @@ func (h *AdminHandler) HandleGetStats(w http.ResponseWriter, r *http.Request) {
 		}
 		resp = stats
 	} else if h.pool != nil {
-		stats, err := queryAdminStats(r.Context(), h.pool)
+		stats, err := queryAdminStats(r.Context(), h.pool, h.WatchProviders)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get stats")
 			return

@@ -78,9 +78,9 @@ func TestProbeTransformationRegistryV3AdvertisesVideoToH264RecipeVersion2(t *tes
 	t.Fatal("video_to_h264 was not advertised")
 }
 
-func TestProbeTransformationRegistryV3RequiresVersion2AudioFilterGraph(t *testing.T) {
+func TestProbeTransformationRegistryV3RequiresVersion3AudioFilterGraph(t *testing.T) {
 	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
-	// Model an older FFmpeg that lists both filters but rejects one of the v2
+	// Model an older FFmpeg that lists both filters but rejects one of the v3
 	// graph options (notably out_chlayout or alimiter latency compensation).
 	script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\ncase \" $* \" in\n*\" -f lavfi \"*) exit 1 ;;\nesac\n"
 	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
@@ -92,7 +92,7 @@ func TestProbeTransformationRegistryV3RequiresVersion2AudioFilterGraph(t *testin
 		t.Fatalf("unsupported graph should be a cacheable capability result: %v", err)
 	}
 	if registry.Available(TransformationAudioToAACV3) {
-		t.Fatal("audio_to_aac advertised when the exact version 2 graph was rejected")
+		t.Fatal("audio_to_aac advertised when the exact version 3 graph was rejected")
 	}
 
 	script = "#!/bin/sh\ncase \"$2\" in\n-bsfs) : ;;\n-encoders) echo ' A....D aac AAC' ;;\n-filters) echo ' ... aresample A->A'; echo ' T.C alimiter A->A' ;;\nesac\n"
@@ -108,5 +108,5 @@ func TestProbeTransformationRegistryV3RequiresVersion2AudioFilterGraph(t *testin
 			return
 		}
 	}
-	t.Fatal("audio_to_aac was not advertised with the complete version 2 toolchain")
+	t.Fatal("audio_to_aac was not advertised with the complete version 3 toolchain")
 }

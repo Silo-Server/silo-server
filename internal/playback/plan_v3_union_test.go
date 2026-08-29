@@ -12,7 +12,7 @@ func staticHLSRegistryV3(registry *TransformationRegistryV3) func() *Transformat
 
 func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: "audio_to_aac", RecipeVersion: "2"},
+		{Name: "audio_to_aac", RecipeVersion: TransformationAudioToAACRecipeVersionV3},
 		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: true},
 	})
@@ -20,7 +20,7 @@ func TestTransformationRegistryWithAdvertised(t *testing.T) {
 		t.Fatal("empty advertisement must return the receiver unchanged")
 	}
 	widened := registry.WithAdvertised([]TransformationV3{
-		{Name: "Audio_To_AAC", Executor: "server", RecipeVersion: "2"},
+		{Name: "Audio_To_AAC", Executor: "server", RecipeVersion: TransformationAudioToAACRecipeVersionV3},
 		{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
 		{Name: "made_up_transform", Executor: "server", RecipeVersion: "1"},
 	})
@@ -39,7 +39,7 @@ func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	if registry.Available("audio_to_aac") {
 		t.Fatal("widening must not mutate the receiver")
 	}
-	clientOnly := registry.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "client", RecipeVersion: "2"}})
+	clientOnly := registry.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "client", RecipeVersion: TransformationAudioToAACRecipeVersionV3}})
 	if clientOnly.Available("audio_to_aac") {
 		t.Fatal("client-executor advertisements must not widen server availability")
 	}
@@ -58,7 +58,7 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	local := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "video_to_h264", RecipeVersion: "2"},
-		{Name: "audio_to_aac", RecipeVersion: "2"},
+		{Name: "audio_to_aac", RecipeVersion: TransformationAudioToAACRecipeVersionV3},
 	})
 	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 
@@ -69,7 +69,7 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 
 	union := local.WithAdvertised([]TransformationV3{
 		{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
-		{Name: "audio_to_aac", Executor: "server", RecipeVersion: "2"},
+		{Name: "audio_to_aac", Executor: "server", RecipeVersion: TransformationAudioToAACRecipeVersionV3},
 	})
 	withNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if withNodes.Plan == nil || withNodes.Plan.Delivery != DeliveryTranscodeHLSV3 {
@@ -87,7 +87,7 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 	req := validStartRequestV3()
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "2"}})
+	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: TransformationAudioToAACRecipeVersionV3}})
 	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
 
 	withoutNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local})
@@ -95,7 +95,7 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 		t.Fatalf("without nodes = %s", ExplainPlannerResultV3(withoutNodes))
 	}
 
-	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "2"}})
+	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: TransformationAudioToAACRecipeVersionV3}})
 	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if offloaded.Plan == nil || offloaded.Plan.Delivery != DeliveryRemuxHLSV3 || !offloaded.TranscodeAudio || offloaded.TargetAudioCodec != "aac" {
 		t.Fatalf("with nodes = %s", ExplainPlannerResultV3(offloaded))
@@ -103,7 +103,7 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 
 	// With the toolchain available locally the progressive remux keeps
 	// priority — offloadability must never demote a local-capable route.
-	localCapable := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "2", Available: true}})
+	localCapable := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true}})
 	preserved := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: localCapable, HLSRegistry: staticHLSRegistryV3(localCapable)})
 	if preserved.Plan == nil || preserved.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("local capable = %s", ExplainPlannerResultV3(preserved))
@@ -145,8 +145,8 @@ func TestPlanPlaybackV3NodeToolchainDoesNotMaskTerminalForProgressiveOnlyClient(
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
 	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
 
-	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "2"}})
-	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "2"}})
+	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: TransformationAudioToAACRecipeVersionV3}})
+	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: TransformationAudioToAACRecipeVersionV3}})
 	result := PlanPlaybackV3(PlannerInputV3{
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},

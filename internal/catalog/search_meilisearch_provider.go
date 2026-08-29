@@ -189,16 +189,54 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	if strings.TrimSpace(state.ActiveIndexUID) == "" {
 		return p.fallbackSearch(ctx, req, "meilisearch index has not been built")
 	}
-	if state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(p.config.Embedder, p.config.IndexTypes, p.config.SemanticEnabled, p.config.BinaryQuantized) {
+	compatibility := catalogSearchMeilisearchIndexCompatibility(
+		state.SchemaVersion,
+		p.config.Embedder,
+		p.config.IndexTypes,
+		p.config.SemanticEnabled,
+		p.config.BinaryQuantized,
+	)
+	if compatibility == catalogSearchIndexIncompatible {
 		return p.fallbackSearch(ctx, req, "meilisearch index schema mismatch")
 	}
 
-	result, err := p.searchMeilisearch(ctx, req, state.ActiveIndexUID)
+	keywordOnly := compatibility == catalogSearchIndexKeywordOnly
+	result, err := p.searchMeilisearch(ctx, req, state.ActiveIndexUID, keywordOnly)
 	if err != nil {
 		// The cached state may point at an index a rebuild just swapped away
-		// and deleted; drop it so the next request refetches instead of
-		// failing for the rest of the TTL.
+		// and deleted. Refetch and retry Meilisearch once so every API node's
+		// first post-swap request does not pay the much slower Postgres fallback.
 		p.invalidateIndexState()
+		if isMeilisearchIndexNotFound(err) {
+			refreshedState, refreshedPending, stateErr := p.indexState(ctx)
+			if stateErr == nil && refreshedState.ActiveIndexUID != "" && refreshedState.ActiveIndexUID != state.ActiveIndexUID {
+				refreshedCompatibility := catalogSearchMeilisearchIndexCompatibility(
+					refreshedState.SchemaVersion,
+					p.config.Embedder,
+					p.config.IndexTypes,
+					p.config.SemanticEnabled,
+					p.config.BinaryQuantized,
+				)
+				if refreshedCompatibility != catalogSearchIndexIncompatible {
+					result, retryErr := p.searchMeilisearch(
+						ctx,
+						req,
+						refreshedState.ActiveIndexUID,
+						refreshedCompatibility == catalogSearchIndexKeywordOnly,
+					)
+					if retryErr == nil {
+						result.IndexPendingEvents = refreshedPending
+						if result.FallbackReason != "" {
+							p.markFallback(result.FallbackReason)
+						} else {
+							p.clearFallback()
+						}
+						return result, nil
+					}
+					err = retryErr
+				}
+			}
+		}
 		if p.shouldTripCircuit(err) {
 			p.tripCircuit(err)
 		}
@@ -211,6 +249,12 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	}
 	result.IndexPendingEvents = pending
 	return result, nil
+}
+
+func isMeilisearchIndexNotFound(err error) bool {
+	httpErr, ok := errors.AsType[*meilisearchHTTPError](err)
+	return ok &&
+		(httpErr.StatusCode == http.StatusNotFound || strings.EqualFold(strings.TrimSpace(httpErr.Code), "index_not_found"))
 }
 
 func (p *MeilisearchSearchProvider) indexCoversRequest(itemTypes []string) bool {
@@ -269,7 +313,7 @@ func (p *MeilisearchSearchProvider) invalidateIndexState() {
 	p.stateMu.Unlock()
 }
 
-func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req CatalogSearchRequest, indexUID string) (*CatalogSearchResult, error) {
+func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req CatalogSearchRequest, indexUID string, keywordOnly bool) (*CatalogSearchResult, error) {
 	target := req.Offset + req.Limit + 1
 	if target <= 0 {
 		target = 1
@@ -284,7 +328,14 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	scanned := 0
 	estimatedTotalHits := 0
 	exhausted := false
-	baseSearchReq, semanticFallback := p.buildMeilisearchSearchRequest(ctx, req)
+	var baseSearchReq meilisearchSearchRequest
+	var semanticFallback string
+	if keywordOnly {
+		baseSearchReq = p.buildMeilisearchKeywordSearchRequest(req)
+		semanticFallback = "search index rebuild required; using Meilisearch keyword search"
+	} else {
+		baseSearchReq, semanticFallback = p.buildMeilisearchSearchRequest(ctx, req)
+	}
 	useFederation := baseSearchReq.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes)
 	if useFederation && p.isFederationUnsupported() {
 		semanticFallback = "meilisearch federation unsupported; using keyword search"
@@ -416,13 +467,7 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 			AttributesToRetrieve: []string{"content_id"},
 		}, ""
 	}
-	searchReq := meilisearchSearchRequest{
-		Query:                strings.TrimSpace(req.Query),
-		Filter:               meilisearchSearchFilter(req.ItemTypes, req.Access),
-		AttributesToRetrieve: []string{"content_id"},
-		AttributesToSearchOn: p.attributesToSearchOnForRequest(req),
-		MatchingStrategy:     p.matchingStrategyForRequest(req),
-	}
+	searchReq := p.buildMeilisearchKeywordSearchRequest(req)
 	if !p.shouldUseSemanticSearch(req) {
 		return searchReq, ""
 	}
@@ -447,6 +492,16 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 		SemanticRatio: p.config.SemanticRatio,
 	}
 	return searchReq, ""
+}
+
+func (p *MeilisearchSearchProvider) buildMeilisearchKeywordSearchRequest(req CatalogSearchRequest) meilisearchSearchRequest {
+	return meilisearchSearchRequest{
+		Query:                strings.TrimSpace(req.Query),
+		Filter:               meilisearchSearchFilter(req.ItemTypes, req.Access),
+		AttributesToRetrieve: []string{"content_id"},
+		AttributesToSearchOn: p.attributesToSearchOnForRequest(req),
+		MatchingStrategy:     p.matchingStrategyForRequest(req),
+	}
 }
 
 func (p *MeilisearchSearchProvider) shouldUseSemanticSearch(req CatalogSearchRequest) bool {

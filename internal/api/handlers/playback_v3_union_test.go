@@ -124,7 +124,7 @@ func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
 		}
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
 			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
-			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "2"},
+			{Name: "audio_to_aac", Executor: "server", RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
 		}})
 	}))
 	defer remote.Close()
@@ -133,7 +133,7 @@ func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
 	handler.JWTSecret = "test-secret"
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "video_to_h264", RecipeVersion: "2"},
-		{Name: "audio_to_aac", RecipeVersion: "2"},
+		{Name: "audio_to_aac", RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
 		{Name: "server_dv7_to_hdr10", RecipeVersion: "1"},
 	}))
 	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}

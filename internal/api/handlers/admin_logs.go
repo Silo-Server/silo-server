@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +59,10 @@ func (h *AdminLogsHandler) HandleListAuditLogs(w http.ResponseWriter, r *http.Re
 
 func parseOperationalLogOptionsFromRequest(r *http.Request) (opslog.ListOptions, error) {
 	opts := opslog.ListOptions{
-		Level:             strings.TrimSpace(r.URL.Query().Get("level")),
+		// `level` accepts a comma-separated list so a single request can ask
+		// for, say, errors and warnings together — what the dashboard's
+		// recent-errors widget needs.
+		Levels:            opslog.NormalizeLevels(strings.Split(r.URL.Query().Get("level"), ",")),
 		Component:         strings.TrimSpace(r.URL.Query().Get("component")),
 		NodeID:            strings.TrimSpace(r.URL.Query().Get("node_id")),
 		RequestID:         strings.TrimSpace(r.URL.Query().Get("request_id")),
@@ -150,6 +154,32 @@ func parseOptionalIntQuery(r *http.Request, key string) (*int, error) {
 		return nil, invalidQueryError(key)
 	}
 	return &value, nil
+}
+
+// parseClampedIntQuery reads an optional integer query parameter and clamps it
+// into [minValue, maxValue]. An absent or empty parameter yields the clamped
+// fallback; a non-numeric one is a bad request rather than a silent default,
+// so a client typo surfaces instead of quietly returning the wrong window.
+func parseClampedIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(key))
+	if raw == "" {
+		return clampQueryInt(fallback, minValue, maxValue), nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, invalidQueryError(key)
+	}
+	return clampQueryInt(value, minValue, maxValue), nil
+}
+
+func clampQueryInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func invalidQueryError(key string) error {
@@ -428,7 +458,11 @@ func matchesOperationalLog(opts opslog.ListOptions, entry opslog.EntryRow) bool 
 	if opts.To != nil && entry.Timestamp.After(*opts.To) {
 		return false
 	}
-	if opts.Level != "" && entry.Level != strings.ToLower(opts.Level) {
+	if levels := opslog.NormalizeLevels(opts.Levels); len(levels) > 0 {
+		if !slices.Contains(levels, strings.ToLower(entry.Level)) {
+			return false
+		}
+	} else if opts.Level != "" && entry.Level != strings.ToLower(opts.Level) {
 		return false
 	}
 	if opts.Component != "" && entry.Component != opts.Component {

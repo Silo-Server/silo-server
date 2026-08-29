@@ -457,7 +457,7 @@ func TestImageCacheProcessorRetriesTargetAfterConcurrentWorkerFinishes(t *testin
 
 func TestImageCacheProcessorStopsWaitingOnStuckBackgroundWorker(t *testing.T) {
 	// A worker that claimed the job and died holds its lease for
-	// imageCacheLeaseDuration. The interactive refresh must not block that
+	// ImageCacheLeaseDuration. The interactive refresh must not block that
 	// long: it gives up and reports the artwork as still pending.
 	jobs := &targetImageCacheJobs{alwaysRunning: true}
 	processor := NewImageCacheProcessorWithTargets(

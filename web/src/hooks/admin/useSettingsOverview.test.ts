@@ -238,6 +238,24 @@ describe("buildSettingsOverview health tiles", () => {
     expect(pending.action).toBeUndefined();
   });
 
+  it("warns while Meilisearch serves a compatible stale index", () => {
+    const search = tile(
+      {
+        search: {
+          active_provider: "meilisearch",
+          degraded: true,
+          degraded_reason: "Search index rebuild required; using Meilisearch keyword search",
+          meilisearch: { configured: true, healthy: true },
+        } as SettingsOverviewInput["search"],
+      },
+      "search",
+    );
+
+    expect(search.state).toBe("warn");
+    expect(search.detail).toBe("Search index rebuild required; using Meilisearch keyword search");
+    expect(search.action).toEqual({ label: "Fix", page: "library" });
+  });
+
   it("only calls email ready when it is on with a host and a sender address", () => {
     expect(tile({ settings: { "email.enabled": "true" } }, "email").stateText).toBe("Not set up");
     // The server refuses to enable email without a from-address, but legacy

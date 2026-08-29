@@ -138,6 +138,35 @@ func parseMeminfoLine(line string) (string, int64, bool) {
 	return strings.TrimSpace(key), value, true
 }
 
+// EffectiveMemoryLimitBytes returns the tightest cgroup memory limit in force
+// on this process, or 0 when none is set.
+//
+// The root-level limit files alone are only right inside a cgroup-namespaced
+// container. A systemd unit with MemoryMax=, or a leaf inheriting a tighter
+// limit from a slice or pod ancestor, publishes its limit at this process's
+// own cgroup or somewhere above it while the root file reads "max" — so this
+// walks the process's own cgroup, every ancestor, and the mount root, and
+// takes the tightest concrete limit found, mirroring what the sampler reports
+// (the kernel OOM-kills against the tightest level).
+func EffectiveMemoryLimitBytes() int64 {
+	return effectiveMemoryLimitBytes("/proc", cgroupMemoryUsagePaths)
+}
+
+func effectiveMemoryLimitBytes(procDir string, layouts []cgroupUsagePath) int64 {
+	relative := cgroupRelativePaths(procDir)
+	tightest := int64(0)
+	for _, level := range withCgroupSelfUsagePaths(relative, layouts) {
+		limit, err := ReadCgroupMemoryLimit(level.limit)
+		if err != nil || limit <= 0 {
+			continue
+		}
+		if tightest == 0 || limit < tightest {
+			tightest = limit
+		}
+	}
+	return tightest
+}
+
 // ReadCgroupMemoryLimit reads a cgroup memory-limit file and returns the limit
 // in bytes, or an error when the cgroup imposes none.
 //

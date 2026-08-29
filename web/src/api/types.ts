@@ -2464,14 +2464,25 @@ export interface AdminStats {
   total_show_files?: number;
   active_streams: number;
   total_storage_bytes: number;
-  watch_provider_activity: WatchProviderActivity;
+  /**
+   * One entry per watch provider, ordered by `provider`. Covers every provider
+   * registered on the server — including ones a plugin contributes at runtime,
+   * which appear with zeros — plus any provider that still has stored activity
+   * after its plugin was removed (`registered: false`).
+   */
+  watch_providers: WatchProviderStats[];
 }
 
-export interface WatchProviderActivity {
-  trakt_connected_profiles: number;
-  trakt_enabled_profiles: number;
-  trakt_export_enabled: number;
-  trakt_scrobble_enabled: number;
+export interface WatchProviderStats {
+  provider: string;
+  display_name: string;
+  registered: boolean;
+  scrobbling: boolean;
+  exporting: boolean;
+  connected_profiles: number;
+  enabled_profiles: number;
+  export_enabled_profiles: number;
+  scrobble_enabled_profiles: number;
   last_sync_completed_at?: string;
   sync_runs_24h: number;
   sync_errors_24h: number;
@@ -4617,6 +4628,47 @@ export interface AdminSettingsUpdateResponse {
   restart_required_keys?: string[];
 }
 
+// Admin dashboard layout (per admin account, server-persisted).
+//
+// The server stores the document verbatim and validates only its size and that
+// it is a JSON object: widget ids, column spans and row heights are the web
+// client's vocabulary. `layout` is therefore typed as `unknown` on the read
+// side so callers must sanitize it before use — a layout written by a newer or
+// older build can name widgets this one does not have, or omit `rows`, which
+// predates two-axis resizing.
+export interface AdminDashboardLayoutEntry {
+  id: string;
+  span: number;
+  rows: number;
+}
+
+export interface AdminDashboardLayoutDocument {
+  version: number;
+  entries: AdminDashboardLayoutEntry[];
+}
+
+export interface AdminDashboardLayoutResponse {
+  layout: unknown;
+  updated_at: string | null;
+}
+
+// One backing service on the admin health strip. `configured: false` means the
+// deployment runs without it — a supported single-node shape for Redis — and
+// `ok` is then absent rather than false, so "not present" and "present but
+// broken" stay distinguishable.
+export interface AdminHealthComponent {
+  configured: boolean;
+  ok?: boolean;
+  latency_ms?: number;
+}
+
+export interface AdminServerHealth {
+  postgres: AdminHealthComponent;
+  redis: AdminHealthComponent;
+  errors_24h: number;
+  warnings_24h: number;
+}
+
 export interface AdminServerStatus {
   started_at: string;
   restart_required: boolean;
@@ -4632,6 +4684,120 @@ export interface AdminServerStatus {
   restart_mark_count?: number;
   restart_requested: boolean;
   restart_requested_at?: string;
+  /** Absent on servers predating the dashboard health summary. */
+  health?: AdminServerHealth;
+}
+
+// GET /admin/stats/playback-activity. `buckets` carries only hours that saw a
+// session, so the client zero-fills the window before charting it.
+export interface AdminPlaybackActivityBucket {
+  hour: string;
+  direct: number;
+  remux: number;
+  transcode: number;
+}
+
+// Time-to-first-frame and failed-start counts are deliberately absent: nothing
+// records playback start events yet. See docs/admin-api.md.
+export interface AdminPlaybackReliability {
+  sessions_started: number;
+  transcode_starts: number;
+  finalized_sessions: number;
+  completed_sessions: number;
+  completion_rate: number;
+  unique_profiles: number;
+}
+
+// `bucket_seconds` is 3600 up to a two-day window and 86400 beyond it; the
+// client zero-fills the window on that grid. `hour` on a bucket is its start
+// instant at either width.
+export interface AdminPlaybackActivity {
+  hours: number;
+  bucket_seconds: number;
+  // The window on the server's clock; the chart anchors its bucket grid on
+  // `to` so client clock skew cannot misplace the boundary buckets. Optional
+  // because responses predating the fields lack them.
+  from?: string;
+  to?: string;
+  buckets: AdminPlaybackActivityBucket[];
+  reliability: AdminPlaybackReliability;
+  profiles_active_24h: number;
+}
+
+// GET /admin/stats/top-activity. Episodes are rolled up to their series, so a
+// title's media_item_id is a series content id for TV.
+export interface AdminTopTitle {
+  media_item_id: string;
+  title: string;
+  media_type: string;
+  plays: number;
+  total_seconds: number;
+}
+
+export interface AdminTopProfile {
+  user_id: number;
+  username: string;
+  profile_id: string;
+  profile_name: string;
+  plays: number;
+  total_seconds: number;
+}
+
+export interface AdminTopActivity {
+  days: number;
+  limit: number;
+  titles: AdminTopTitle[];
+  profiles: AdminTopProfile[];
+}
+
+// GET /admin/stats/timeseries. One point per sampled minute; minutes the
+// sampler missed are absent rather than zero, so charts draw them as gaps.
+export interface AdminTimeseriesPoint {
+  t: string;
+  streams: number;
+  direct: number;
+  remux: number;
+  transcode: number;
+  egress_kbps: number;
+  // File-transfer subset of `egress_kbps` (offline/direct downloads, ebook and
+  // ABS file fetches, API-served only). Always <= egress_kbps; playback egress
+  // is the difference. Optional because responses predating the split lack it,
+  // and 0 on samples written before the split — "not measured", not "no
+  // downloads".
+  download_egress_kbps?: number;
+}
+
+// `oldest_sample_at` is null until the sampler has written anything, which is
+// what the "collecting data" chart state keys off. `resolution_seconds` is the
+// bucket the server aggregated into, which widens with the requested window —
+// read it rather than assuming the sampler's minute.
+export interface AdminTimeseries {
+  resolution_seconds: number;
+  from: string;
+  to: string;
+  oldest_sample_at: string | null;
+  points: AdminTimeseriesPoint[];
+}
+
+// GET /admin/stats/downloads. Headline numbers and top_users count active
+// managed device entries (media somebody keeps offline); the 24h counters also
+// include one-shot web downloads. All zeros with an empty top_users on a
+// deployment where nobody downloads — the widget's empty state, not an error.
+export interface AdminDownloadsUser {
+  user_id: number;
+  username: string;
+  downloads: number;
+  total_bytes: number;
+}
+
+export interface AdminDownloadsStats {
+  users_with_downloads: number;
+  active_downloads: number;
+  total_bytes: number;
+  downloads_started_24h: number;
+  downloads_completed_24h: number;
+  limit: number;
+  top_users: AdminDownloadsUser[];
 }
 
 // IP visibility

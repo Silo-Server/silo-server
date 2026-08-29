@@ -325,9 +325,15 @@ alternative provider:
 3. In **Admin > Settings > Search**, select Meilisearch, set the URL to
    `http://meilisearch:7700`, enter the same key as the API key, test the
    connection, and save.
-4. Restart Silo and rebuild the catalog search index from the same page.
+4. Restart Silo. Background search maintenance builds the catalog search index
+   automatically and retries failures every minute. The Search status panel
+   shows whether Meilisearch, keyword-only Meilisearch, or PostgreSQL is serving
+   requests while the build runs; the manual rebuild action remains available.
 
 Silo continues to use PostgreSQL full-text search until Meilisearch is selected.
+Settings that change the index format, including enabling meaning-based search,
+also trigger an automatic background rebuild after restart. A compatible older
+Meilisearch index keeps serving keyword results while its replacement is built.
 
 ## External PostgreSQL and Redis
 

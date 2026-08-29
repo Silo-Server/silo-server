@@ -9,14 +9,17 @@ import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBranding } from "@/hooks/useBranding";
-import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
+import {
+  useCatalogSearchStatus,
+  useCheckAdminSettingsConnection,
+} from "@/hooks/queries/admin/settings";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
-import { SettingField } from "./SettingField";
+import { SettingField, SettingFieldStatus } from "./SettingField";
 
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
@@ -69,11 +72,16 @@ export default function LibraryMetadataSettings() {
 
   const provider = form.getValue("catalog.search.provider") || "postgres";
   const meiliEnabled = provider === "meilisearch";
+  const { data: searchStatus } = useCatalogSearchStatus(meiliEnabled);
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
   // Staged Meilisearch edits stay reachable after switching the provider back,
   // so the save bar can never count a change the admin cannot see.
   const showMeili = meiliEnabled || anyDirty(MEILI_KEYS);
+  const enablingSemanticSearch =
+    form.isDirty("catalog.search.meilisearch.semantic_enabled") &&
+    form.getPersistedValue("catalog.search.meilisearch.semantic_enabled") !== "true" &&
+    form.getValue("catalog.search.meilisearch.semantic_enabled") === "true";
 
   async function handleCheckConnection() {
     try {
@@ -330,6 +338,15 @@ export default function LibraryMetadataSettings() {
                     form.setValue("catalog.search.meilisearch.semantic_enabled", value)
                   }
                   description="Also matches items whose description means something similar."
+                  status={
+                    enablingSemanticSearch ? (
+                      <SettingFieldStatus tone="warn">
+                        Enabling this changes the index format. After you save and restart, Silo
+                        rebuilds the index automatically. Keyword search stays available while it
+                        rebuilds.
+                      </SettingFieldStatus>
+                    ) : undefined
+                  }
                   disabled={!meiliEnabled}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.semantic_enabled")}
                 />
@@ -346,6 +363,30 @@ export default function LibraryMetadataSettings() {
                 />
               </AdvancedSection>
             </>
+          )}
+
+          {meiliEnabled && searchStatus?.degraded && (
+            <div className="py-3.5">
+              <SettingFieldStatus tone="warn">
+                <span>
+                  {searchStatus.degraded_reason ?? "Search is running in a degraded mode."}
+                  {searchStatus.index.rebuild_required && (
+                    <>
+                      {" "}
+                      Automatic search maintenance rebuilds the index in the background and retries
+                      if needed.{" "}
+                      <Link
+                        className="font-medium underline underline-offset-2"
+                        to="/admin/tasks/sync_catalog_search_index"
+                      >
+                        Open maintenance task
+                      </Link>
+                      .
+                    </>
+                  )}
+                </span>
+              </SettingFieldStatus>
+            </div>
           )}
 
           <AdvancedSection id="library.search.status" title="Search status">
