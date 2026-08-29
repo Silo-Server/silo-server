@@ -61,6 +61,9 @@ func convertItemMeta(in map[string]SectionItemMeta) map[string]recipes.SectionIt
 			SeriesTitle:       v.SeriesTitle,
 			SeasonNumber:      v.SeasonNumber,
 			EpisodeNumber:     v.EpisodeNumber,
+			PosterOwner:       convertArtworkOwner(v.PosterOwner),
+			BackdropOwner:     convertArtworkOwner(v.BackdropOwner),
+			LogoOwner:         convertArtworkOwner(v.LogoOwner),
 			Badges:            v.Badges,
 			PositionSeconds:   v.PositionSeconds,
 			DurationSeconds:   v.DurationSeconds,
@@ -70,6 +73,10 @@ func convertItemMeta(in map[string]SectionItemMeta) map[string]recipes.SectionIt
 		}
 	}
 	return out
+}
+
+func convertArtworkOwner(owner SectionArtworkOwner) recipes.SectionArtworkOwner {
+	return recipes.SectionArtworkOwner{Kind: string(owner.Kind), ContentID: owner.ContentID}
 }
 
 // AccessFilterFromContext is a convenience for tests/callers that need to build a context.

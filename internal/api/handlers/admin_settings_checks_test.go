@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
@@ -1816,5 +1817,42 @@ func TestAdminGetSettingReportsRestartRequired(t *testing.T) {
 				t.Fatalf("restart_required present = %v, want %v; body=%s", seen, tc.wantRestartSeen, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestValidateProspectiveArtworkBackendGuardsThePin pins the durable
+// prerequisite: an explicit backend that contradicts artwork.store_pin would
+// make artworkstore.Open fail fatally at the next boot, with no UI left to
+// revert it, so the save must be refused. Auto and the pinned backend pass,
+// and an absent or unreadable pin never blocks a save.
+func TestValidateProspectiveArtworkBackendGuardsThePin(t *testing.T) {
+	localPin := `{"version":1,"backend":"local","generation":"gen-1"}`
+	cases := []struct {
+		name    string
+		pin     string
+		backend string
+		changed bool
+		wantErr bool
+	}{
+		{name: "conflicting explicit backend refused", pin: localPin, backend: "s3", changed: true, wantErr: true},
+		{name: "pinned backend accepted", pin: localPin, backend: "local", changed: true},
+		{name: "auto accepted", pin: localPin, backend: "auto", changed: true},
+		{name: "no pin accepts any backend", backend: "s3", changed: true},
+		{name: "unreadable pin never wedges saves", pin: "{corrupt", backend: "s3", changed: true},
+		{name: "untouched key is not validated", pin: localPin, backend: "s3"},
+	}
+	for _, tc := range cases {
+		prospective := map[string]string{
+			config.ArtworkStorageBackendKey: tc.backend,
+			artworkstore.StorePinSettingKey: tc.pin,
+		}
+		changed := map[string]string{}
+		if tc.changed {
+			changed[config.ArtworkStorageBackendKey] = tc.backend
+		}
+		err := validateProspectiveArtworkBackend(prospective, changed)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: validateProspectiveArtworkBackend = %v, wantErr %v", tc.name, err, tc.wantErr)
+		}
 	}
 }

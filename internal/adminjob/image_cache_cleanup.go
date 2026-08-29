@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 const JobTypeImageCacheCleanup = "image_cache_cleanup"
@@ -16,10 +17,11 @@ type ImageCacheCleanupRequest struct {
 }
 
 type ImageCacheCleanupResult struct {
-	LibraryID        int    `json:"library_id"`
-	LibraryName      string `json:"library_name"`
-	DeletedPrefixes  int    `json:"deleted_prefixes"`
-	DeletedS3Objects int    `json:"deleted_s3_objects"`
+	LibraryID        int                             `json:"library_id"`
+	LibraryName      string                          `json:"library_name"`
+	DeletedPrefixes  int                             `json:"deleted_prefixes"`
+	DeletedS3Objects int                             `json:"deleted_s3_objects"`
+	GCStats          metadata.ArtworkRevisionGCStats `json:"gc_stats"`
 }
 
 type imageCacheCleanupExecutor interface {
@@ -27,14 +29,18 @@ type imageCacheCleanupExecutor interface {
 }
 
 type ImageCacheCleanupExecutor struct {
-	s3 S3PrefixDeleter
+	gc interface {
+		Run(ctx context.Context) (metadata.ArtworkRevisionGCStats, error)
+	}
 }
 
-func NewImageCacheCleanupExecutor(s3 S3PrefixDeleter) *ImageCacheCleanupExecutor {
-	if s3 == nil {
+func NewImageCacheCleanupExecutor(gc interface {
+	Run(ctx context.Context) (metadata.ArtworkRevisionGCStats, error)
+}) *ImageCacheCleanupExecutor {
+	if gc == nil {
 		return nil
 	}
-	return &ImageCacheCleanupExecutor{s3: s3}
+	return &ImageCacheCleanupExecutor{gc: gc}
 }
 
 func (e *ImageCacheCleanupExecutor) Execute(
@@ -42,45 +48,25 @@ func (e *ImageCacheCleanupExecutor) Execute(
 	req ImageCacheCleanupRequest,
 	progress func(current, total int, message string),
 ) (*ImageCacheCleanupResult, error) {
-	if e == nil || e.s3 == nil {
+	if e == nil || e.gc == nil {
 		return nil, fmt.Errorf("image cache cleanup executor is not configured")
 	}
-	if len(req.Prefixes) == 0 {
-		return &ImageCacheCleanupResult{
-			LibraryID:        req.LibraryID,
-			LibraryName:      req.LibraryName,
-			DeletedPrefixes:  0,
-			DeletedS3Objects: 0,
-		}, nil
-	}
-
-	total := len(req.Prefixes)
-	deletedPrefixes := 0
-	deletedObjects := 0
-	bucket := e.s3.Bucket()
-
-	for index, prefix := range req.Prefixes {
-		if progress != nil {
-			progress(index, total, fmt.Sprintf("Cleaning cached images %d/%d", index+1, total))
-		}
-		n, err := e.s3.DeletePrefix(ctx, bucket, prefix)
-		if err != nil {
-			slog.WarnContext(ctx, "image cache cleanup: s3 delete failed", "component", "adminjob", "prefix", prefix, "error", err)
-			continue
-		}
-		deletedPrefixes++
-		deletedObjects += n
-	}
-
 	if progress != nil {
-		progress(total, total, "Cached image cleanup completed")
+		progress(0, 1, "Running reference-aware artwork cleanup")
 	}
-
+	stats, err := e.gc.Run(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reference-aware artwork cleanup: %w", err)
+	}
+	if progress != nil {
+		progress(1, 1, "Reference-aware artwork cleanup completed")
+	}
 	return &ImageCacheCleanupResult{
 		LibraryID:        req.LibraryID,
 		LibraryName:      req.LibraryName,
-		DeletedPrefixes:  deletedPrefixes,
-		DeletedS3Objects: deletedObjects,
+		DeletedPrefixes:  0,
+		DeletedS3Objects: 0,
+		GCStats:          stats,
 	}, nil
 }
 

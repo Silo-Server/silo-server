@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -301,10 +302,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			RatingIMDB:        ratingIMDB,
 			RatingTMDB:        ratingTMDB,
 			Overview:          overview,
-			PosterURL:         compatPresignImage(h.detailSvc, ctx, stillPath, "still", compatCardImageSize),
-			BackdropURL:       compatPresignImage(h.detailSvc, ctx, seriesBackdrop, "backdrop", compatCardImageSize),
-			LogoURL:           compatPresignImage(h.detailSvc, ctx, seriesLogoPath, "logo", compatCardImageSize),
-			StillURL:          compatPresignImage(h.detailSvc, ctx, stillPath, "still", compatCardImageSize),
+			PosterURL:         compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{contentID}, Slot: compatArtworkStill}, stillPath, compatArtworkStill, compatCardImageSize),
+			BackdropURL:       compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{seriesID}, Slot: compatArtworkBackdrop}, seriesBackdrop, compatArtworkBackdrop, compatCardImageSize),
+			LogoURL:           compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemLogos, Keys: []string{seriesID}, Slot: compatArtworkLogo}, seriesLogoPath, compatArtworkLogo, compatCardImageSize),
+			StillURL:          compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{contentID}, Slot: compatArtworkStill}, stillPath, compatArtworkStill, compatCardImageSize),
 			PosterPath:        stillPath,
 			BackdropPath:      seriesBackdrop,
 			BackdropThumbhash: seriesBackdropTH,
@@ -327,10 +328,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			Item: listItem,
 			SeriesImages: seriesImageSet{
 				ContentID:         seriesID,
-				PosterURL:         compatPresignImage(h.detailSvc, ctx, seriesPosterPath, "poster", compatCardImageSize),
+				PosterURL:         compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{seriesID}, Slot: compatArtworkPoster}, seriesPosterPath, compatArtworkPoster, compatCardImageSize),
 				PosterPath:        seriesPosterPath,
 				PosterThumbhash:   seriesPosterTH,
-				BackdropURL:       compatPresignImage(h.detailSvc, ctx, seriesBackdrop, "backdrop", compatCardImageSize),
+				BackdropURL:       compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{seriesID}, Slot: compatArtworkBackdrop}, seriesBackdrop, compatArtworkBackdrop, compatCardImageSize),
 				BackdropPath:      seriesBackdrop,
 				BackdropThumbhash: seriesBackdropTH,
 				UpdatedAt:         seriesUpdatedAt,
@@ -427,10 +428,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			RatingIMDB:        episode.RatingIMDB,
 			RatingTMDB:        episode.RatingTMDB,
 			Overview:          episode.Overview,
-			PosterURL:         compatPresignImage(h.detailSvc, ctx, episode.StillPath, "still", compatCardImageSize),
-			BackdropURL:       compatPresignImage(h.detailSvc, ctx, series.BackdropPath, "backdrop", compatCardImageSize),
-			LogoURL:           compatPresignImage(h.detailSvc, ctx, series.LogoPath, "logo", compatCardImageSize),
-			StillURL:          compatPresignImage(h.detailSvc, ctx, episode.StillPath, "still", compatCardImageSize),
+			PosterURL:         compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{episode.ContentID}, Slot: "still"}, episode.StillPath, "still", compatCardImageSize),
+			BackdropURL:       compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{series.ContentID}, Slot: compatArtworkBackdrop}, series.BackdropPath, compatArtworkBackdrop, compatCardImageSize),
+			LogoURL:           compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemLogos, Keys: []string{series.ContentID}, Slot: compatArtworkLogo}, series.LogoPath, compatArtworkLogo, compatCardImageSize),
+			StillURL:          compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{episode.ContentID}, Slot: "still"}, episode.StillPath, "still", compatCardImageSize),
 			PosterPath:        episode.StillPath,
 			BackdropPath:      series.BackdropPath,
 			BackdropThumbhash: series.BackdropThumbhash,
@@ -452,10 +453,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			Item: listItem,
 			SeriesImages: seriesImageSet{
 				ContentID:         series.ContentID,
-				PosterURL:         compatPresignImage(h.detailSvc, ctx, series.PosterPath, "poster", compatCardImageSize),
+				PosterURL:         compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{series.ContentID}, Slot: compatArtworkPoster}, series.PosterPath, compatArtworkPoster, compatCardImageSize),
 				PosterPath:        series.PosterPath,
 				PosterThumbhash:   series.PosterThumbhash,
-				BackdropURL:       compatPresignImage(h.detailSvc, ctx, series.BackdropPath, "backdrop", compatCardImageSize),
+				BackdropURL:       compatPresignTargetImage(h.detailSvc, ctx, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{series.ContentID}, Slot: "backdrop"}, series.BackdropPath, "backdrop", compatCardImageSize),
 				BackdropPath:      series.BackdropPath,
 				BackdropThumbhash: series.BackdropThumbhash,
 				UpdatedAt:         series.UpdatedAt,

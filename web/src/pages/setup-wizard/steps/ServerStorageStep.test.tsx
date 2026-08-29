@@ -74,6 +74,9 @@ function mockStep({
   values = {},
 }: MockStepOptions = {}) {
   const formValues = { ...defaultValues, ...values };
+  const setValue = vi.fn((key: string, value: string) => {
+    formValues[key] = value;
+  });
 
   useWizardContextMock.mockReturnValue({ markDone });
   useQueryMock.mockReturnValue({ data: null });
@@ -91,9 +94,7 @@ function mockStep({
   useSettingsFormMock.mockReturnValue({
     isLoading: false,
     getValue: (key: string) => formValues[key] ?? "",
-    setValue: vi.fn((key: string, value: string) => {
-      formValues[key] = value;
-    }),
+    setValue,
     dirtyCount,
     dirtyKeys,
     save,
@@ -104,7 +105,7 @@ function mockStep({
     buildConnectionCheckRequest: vi.fn(),
   });
 
-  return { installMutateAsync, markDone, save };
+  return { installMutateAsync, markDone, save, setValue };
 }
 
 describe("ServerStorageStep", () => {
@@ -198,5 +199,22 @@ describe("ServerStorageStep", () => {
     expect(installMutateAsync).toHaveBeenCalledWith({});
     await waitFor(() => expect(installMutateAsync).toHaveBeenCalled());
     expect(markDone).not.toHaveBeenCalled();
+  });
+
+  it("prefers canonical artwork materialization and writes both settings", async () => {
+    const { setValue } = mockStep({
+      values: {
+        "artwork.remote_materialization": "passthrough",
+        "metadata.cache_images": "true",
+      },
+    });
+
+    render(<ServerStorageStep />);
+    const toggle = screen.getByRole("switch", { name: "Cache remote artwork" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await userEvent.click(toggle);
+    expect(setValue).toHaveBeenNthCalledWith(1, "artwork.remote_materialization", "selected");
+    expect(setValue).toHaveBeenNthCalledWith(2, "metadata.cache_images", "true");
   });
 });

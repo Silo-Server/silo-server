@@ -49,6 +49,8 @@ type adminJobResponse struct {
 	Status            string          `json:"status"`
 	CreatedByUserID   int             `json:"created_by_user_id"`
 	RequestPayload    json.RawMessage `json:"request_payload"`
+	DryRun            bool            `json:"dry_run"`
+	Checkpoint        json.RawMessage `json:"checkpoint,omitempty"`
 	ResultPayload     json.RawMessage `json:"result_payload"`
 	Message           string          `json:"message"`
 	ErrorMessage      string          `json:"error_message,omitempty"`
@@ -237,6 +239,8 @@ func adminJobToResponse(r *http.Request, job *models.AdminJob, store AdminJobArt
 		Status:            job.Status,
 		CreatedByUserID:   job.CreatedByUserID,
 		RequestPayload:    ensureJSONPayload(job.RequestPayload),
+		DryRun:            job.DryRun,
+		Checkpoint:        ensureJSONPayload(job.Checkpoint),
 		ResultPayload:     ensureJSONPayload(job.ResultPayload),
 		Message:           job.Message,
 		ErrorMessage:      job.ErrorMessage,

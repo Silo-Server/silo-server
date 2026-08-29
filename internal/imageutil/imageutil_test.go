@@ -2,10 +2,13 @@ package imageutil
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -88,4 +91,52 @@ func BenchmarkThumbhashLargeJPEG(b *testing.B) {
 			b.Fatalf("Thumbhash: %v", err)
 		}
 	}
+}
+func TestCheckSourceDimensions(t *testing.T) {
+	cases := []struct {
+		name          string
+		width, height int
+		wantErr       bool
+	}{
+		{"poster", 2000, 3000, false},
+		{"8k backdrop", 7680, 4320, false},
+		{"zero width", 0, 100, true},
+		{"negative height", 100, -1, true},
+		{"decompression bomb", 40000, 40000, true},
+		{"overflow-sized", 1 << 30, 1 << 30, true},
+	}
+	for _, tc := range cases {
+		err := checkSourceDimensions(tc.width, tc.height)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: checkSourceDimensions(%d, %d) = %v, wantErr %v", tc.name, tc.width, tc.height, err, tc.wantErr)
+		}
+	}
+}
+
+// TestThumbhashRejectsOversizedHeaderBeforeDecoding feeds a syntactically valid
+// PNG header declaring 40000x40000 pixels with no pixel data behind it. The
+// dimension check must fire on the header alone — reaching the full decode
+// would attempt a multi-gigabyte allocation.
+func TestThumbhashRejectsOversizedHeaderBeforeDecoding(t *testing.T) {
+	if _, err := Thumbhash(forgedHugePNG()); err == nil || !strings.Contains(err.Error(), "pixel limit") {
+		t.Fatalf("Thumbhash on a 1.6-gigapixel header = %v, want the pixel-limit error", err)
+	}
+}
+
+// forgedHugePNG builds the PNG signature plus an IHDR chunk claiming
+// 40000x40000 8-bit RGBA. image.DecodeConfig parses exactly this much.
+func forgedHugePNG() []byte {
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:], 40000) // width
+	binary.BigEndian.PutUint32(ihdr[4:], 40000) // height
+	ihdr[8] = 8                                 // bit depth
+	ihdr[9] = 6                                 // color type RGBA
+	// compression, filter, interlace = 0
+
+	chunk := append([]byte("IHDR"), ihdr...)
+	out := []byte("\x89PNG\r\n\x1a\n")
+	out = binary.BigEndian.AppendUint32(out, uint32(len(ihdr)))
+	out = append(out, chunk...)
+	out = binary.BigEndian.AppendUint32(out, crc32.ChecksumIEEE(chunk))
+	return out
 }

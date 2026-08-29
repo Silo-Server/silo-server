@@ -12,6 +12,8 @@ type AdminJob struct {
 	Status            string          `json:"status"`
 	CreatedByUserID   int             `json:"created_by_user_id"`
 	RequestPayload    json.RawMessage `json:"request_payload"`
+	DryRun            bool            `json:"dry_run"`
+	Checkpoint        json.RawMessage `json:"checkpoint,omitempty"`
 	ResultPayload     json.RawMessage `json:"result_payload"`
 	Message           string          `json:"message"`
 	ErrorMessage      string          `json:"error_message,omitempty"`

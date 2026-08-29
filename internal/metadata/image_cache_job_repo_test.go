@@ -2,9 +2,12 @@ package metadata
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestImageCacheRetryDelayCaps(t *testing.T) {
@@ -79,15 +82,17 @@ func TestClassifyImageCacheFailureParksExhaustedTransientErrorRecoverably(t *tes
 }
 
 func TestClassifyImageCacheFailureTombstonesExhaustedStableFailure(t *testing.T) {
-	got := classifyImageCacheFailure(
-		imageCacheMaxAttempts-1,
+	for _, errText := range []string{
 		"imagecache: download https://example.invalid/missing.jpg: unexpected status 404",
-	)
-	if got.status != ImageCacheStatusFailed {
-		t.Fatalf("status = %q, want %q", got.status, ImageCacheStatusFailed)
-	}
-	if got.retryDelay != imageCachePermanentPark {
-		t.Fatalf("retry delay = %s, want the permanent park %s", got.retryDelay, imageCachePermanentPark)
+		"local image is not a regular file allowed for artwork: /media/movie/poster.jpg",
+	} {
+		got := classifyImageCacheFailure(imageCacheMaxAttempts-1, errText)
+		if got.status != ImageCacheStatusFailed {
+			t.Fatalf("status for %q = %q, want %q", errText, got.status, ImageCacheStatusFailed)
+		}
+		if got.retryDelay != imageCachePermanentPark {
+			t.Fatalf("retry delay for %q = %s, want the permanent park %s", errText, got.retryDelay, imageCachePermanentPark)
+		}
 	}
 }
 
@@ -164,4 +169,115 @@ func TestExpandedImageCacheMigrationDefinesTargetMatrixAndLanguageUniqueKey(t *t
 			t.Fatalf("migration missing %q", want)
 		}
 	}
+}
+
+func TestNaturalArtworkRepairTargetMigrationKeysSeriesChildrenByNumbers(t *testing.T) {
+	body, err := os.ReadFile("../../migrations/sql/20260826045932_natural_artwork_repair_targets.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	sql := string(body)
+	for _, want := range []string{
+		"SET target_content_id = series_id",
+		"UNIQUE NULLS NOT DISTINCT",
+		"target_language,\n            season_number,\n            episode_number",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("natural-target migration missing %q", want)
+		}
+	}
+}
+
+func TestCurrentTargetSourceQueriesUseSeriesNaturalKeys(t *testing.T) {
+	season, episode := 2, 7
+	tests := []struct {
+		name     string
+		job      *models.MetadataImageCacheJob
+		wantSQL  []string
+		wantArgs []any
+	}{
+		{
+			name: "season",
+			job: &models.MetadataImageCacheJob{
+				TargetType: ImageCacheTargetSeason, TargetContentID: "series-1", SeasonNumber: &season,
+			},
+			wantSQL:  []string{"FROM seasons", "series_id = $1", "season_number = $2"},
+			wantArgs: []any{"series-1", 2},
+		},
+		{
+			name: "season localization",
+			job: &models.MetadataImageCacheJob{
+				TargetType: ImageCacheTargetSeasonLocalization, TargetContentID: "series-1", TargetLanguage: "fr", SeasonNumber: &season,
+			},
+			wantSQL:  []string{"FROM season_localizations", "JOIN seasons", "s.series_id = $1", "s.season_number = $2", "loc.language = $3"},
+			wantArgs: []any{"series-1", 2, "fr"},
+		},
+		{
+			name: "episode",
+			job: &models.MetadataImageCacheJob{
+				TargetType: ImageCacheTargetEpisode, TargetContentID: "series-1", SeasonNumber: &season, EpisodeNumber: &episode,
+			},
+			wantSQL:  []string{"FROM episodes", "series_id = $1", "season_number = $2", "episode_number = $3"},
+			wantArgs: []any{"series-1", 2, 7},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query, args, ok := currentTargetSourceQuery(tt.job)
+			if !ok {
+				t.Fatal("currentTargetSourceQuery rejected a valid natural target")
+			}
+			for _, want := range tt.wantSQL {
+				if !strings.Contains(query, want) {
+					t.Fatalf("query missing %q:\n%s", want, query)
+				}
+			}
+			if !reflect.DeepEqual(args, tt.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", args, tt.wantArgs)
+			}
+		})
+	}
+}
+
+// The ladder sweep enqueues jobs the processor then looks up by natural key
+// (series id plus season/episode number). Emitting a child row's own content id
+// would queue jobs no lookup can ever match, so they fail "repair target not
+// found" every cooldown and the ladder version is never recorded.
+func TestLadderBackfillCandidatesUseSeriesNaturalKeys(t *testing.T) {
+	rows := collapseSQLWhitespace(ladderCandidateRowsSQL())
+	for _, want := range []string{
+		"'season'::text, s.series_id AS target_content_id,",
+		"'season_localization'::text, s.series_id, loc.language,",
+		"'episode'::text, e.series_id, ''::text, e.series_id,",
+		"s.season_number, NULL::integer AS episode_number,",
+		"e.season_number, e.episode_number,",
+	} {
+		if !strings.Contains(rows, want) {
+			t.Fatalf("ladder candidate rows missing %q:\n%s", want, rows)
+		}
+	}
+	for _, unwanted := range []string{
+		"'season'::text, s.content_id",
+		"'season_localization'::text, s.content_id",
+		"'episode'::text, e.content_id",
+	} {
+		if strings.Contains(rows, unwanted) {
+			t.Fatalf("ladder candidate rows still target a child content id: %q", unwanted)
+		}
+	}
+
+	query := collapseSQLWhitespace(ladderBackfillCandidateQuerySQL())
+	for _, want := range []string{
+		"j.season_number IS NOT DISTINCT FROM ac.season_number",
+		"j.episode_number IS NOT DISTINCT FROM ac.episode_number",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("ladder dedup join missing %q:\n%s", want, query)
+		}
+	}
+}
+
+func collapseSQLWhitespace(sql string) string {
+	return strings.Join(strings.Fields(sql), " ")
 }

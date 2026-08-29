@@ -1,0 +1,141 @@
+{
+  "note": "Pinned artwork/v1 revisions for the fixture images in testdata/fixtures. Regenerate with: go test ./internal/imagecache -run TestPortableFormatGolden -update",
+  "recipe_version": "silo-artwork-recipe-v1",
+  "encoder": "bimg 1.1.9 / libvips 8.18.5",
+  "entries": [
+    {
+      "fixture": "poster.png",
+      "image_type": "poster",
+      "source_digest": "595d588c9004ac3101a88f384f24ce68555e7409a7183203d95653f31aa41979",
+      "revision": "7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784",
+      "original_key": "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/original.webp",
+      "object_keys": [
+        "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/manifest.json",
+        "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/original.webp",
+        "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/w780.webp",
+        "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/w500.webp",
+        "artwork/v1/objects/poster/7e/7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784/w300.webp"
+      ],
+      "manifest": {
+        "format_version": 1,
+        "image_type": "poster",
+        "media_type": "image/webp",
+        "recipe_version": "silo-artwork-recipe-v1",
+        "revision": "7e75b3ef655fb10736243e75038cbec9181d06e6a4777909692c150282331784",
+        "variants": [
+          {
+            "digest": "1dbb8f99c7c61a5e67847ee2eadd2b9832cb3359007732aafe4b48138e53baa3",
+            "filename": "original.webp",
+            "name": "original",
+            "size_bytes": 476
+          },
+          {
+            "digest": "1dbb8f99c7c61a5e67847ee2eadd2b9832cb3359007732aafe4b48138e53baa3",
+            "filename": "w300.webp",
+            "name": "w300",
+            "size_bytes": 476
+          },
+          {
+            "digest": "1dbb8f99c7c61a5e67847ee2eadd2b9832cb3359007732aafe4b48138e53baa3",
+            "filename": "w500.webp",
+            "name": "w500",
+            "size_bytes": 476
+          },
+          {
+            "digest": "1dbb8f99c7c61a5e67847ee2eadd2b9832cb3359007732aafe4b48138e53baa3",
+            "filename": "w780.webp",
+            "name": "w780",
+            "size_bytes": 476
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "backdrop.png",
+      "image_type": "backdrop",
+      "source_digest": "5670b21890e5fa7034255543fb468797f33f703bd4e6224146509cacf8d0b47f",
+      "revision": "205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58",
+      "original_key": "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/original.webp",
+      "object_keys": [
+        "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/manifest.json",
+        "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/original.webp",
+        "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/w1920.webp",
+        "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/w1280.webp",
+        "artwork/v1/objects/backdrop/20/205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58/w300.webp"
+      ],
+      "manifest": {
+        "format_version": 1,
+        "image_type": "backdrop",
+        "media_type": "image/webp",
+        "recipe_version": "silo-artwork-recipe-v1",
+        "revision": "205f88a2b90a2b0d804875bd7fdc87fd3b1f10e0984d67f5b58ae74626120e58",
+        "variants": [
+          {
+            "digest": "18aa65f71ecc97e26f67264c0cc923ea07924a86707f41473b2a783115f53954",
+            "filename": "original.webp",
+            "name": "original",
+            "size_bytes": 638
+          },
+          {
+            "digest": "18aa65f71ecc97e26f67264c0cc923ea07924a86707f41473b2a783115f53954",
+            "filename": "w1280.webp",
+            "name": "w1280",
+            "size_bytes": 638
+          },
+          {
+            "digest": "18aa65f71ecc97e26f67264c0cc923ea07924a86707f41473b2a783115f53954",
+            "filename": "w1920.webp",
+            "name": "w1920",
+            "size_bytes": 638
+          },
+          {
+            "digest": "18aa65f71ecc97e26f67264c0cc923ea07924a86707f41473b2a783115f53954",
+            "filename": "w300.webp",
+            "name": "w300",
+            "size_bytes": 638
+          }
+        ]
+      }
+    },
+    {
+      "fixture": "logo.png",
+      "image_type": "logo",
+      "source_digest": "ead4ff6fa3083872c71bf7f478acd10114dc7ef0cbad9d0cfc5272e90aad30bb",
+      "revision": "6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a",
+      "original_key": "artwork/v1/objects/logo/6e/6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a/original.webp",
+      "object_keys": [
+        "artwork/v1/objects/logo/6e/6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a/manifest.json",
+        "artwork/v1/objects/logo/6e/6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a/original.webp",
+        "artwork/v1/objects/logo/6e/6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a/w1280.webp",
+        "artwork/v1/objects/logo/6e/6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a/w500.webp"
+      ],
+      "manifest": {
+        "format_version": 1,
+        "image_type": "logo",
+        "media_type": "image/webp",
+        "recipe_version": "silo-artwork-recipe-v1",
+        "revision": "6e7eae37d33770d2b5aecbe28efabab0c14365bfaba7033f5911f518957ef76a",
+        "variants": [
+          {
+            "digest": "2e9593a45bbfcc4782a27845bed193e43e53a97dadd0acfb00bf1d70e4bcd4dd",
+            "filename": "original.webp",
+            "name": "original",
+            "size_bytes": 248
+          },
+          {
+            "digest": "2e9593a45bbfcc4782a27845bed193e43e53a97dadd0acfb00bf1d70e4bcd4dd",
+            "filename": "w1280.webp",
+            "name": "w1280",
+            "size_bytes": 248
+          },
+          {
+            "digest": "2e9593a45bbfcc4782a27845bed193e43e53a97dadd0acfb00bf1d70e4bcd4dd",
+            "filename": "w500.webp",
+            "name": "w500",
+            "size_bytes": 248
+          }
+        ]
+      }
+    }
+  ]
+}

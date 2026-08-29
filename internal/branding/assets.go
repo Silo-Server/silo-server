@@ -11,8 +11,13 @@ import (
 type assetSpec struct {
 	kind       AssetKind
 	settingKey string // server_settings key holding the current content ref
-	s3Prefix   string // S3 key prefix; object key is "<prefix>/<ref>"
-	maxBytes   int64
+	// storePrefix is the artwork-store key prefix; the object key is
+	// "<prefix>/<ref>". Branding keeps this layout rather than moving into the
+	// artwork/v1 upload namespace: the refs are already immutable and
+	// content-addressed, and every installation with custom branding has one
+	// recorded in settings.
+	storePrefix string
+	maxBytes    int64
 	// process validates the declared content type and returns the bytes to
 	// store, the content type to serve them with, and the file extension used
 	// in the content ref.
@@ -23,46 +28,46 @@ type assetSpec struct {
 // the only change needed to support a new uploadable asset.
 var assetSpecs = map[AssetKind]assetSpec{
 	KindWordmark: {
-		kind:       KindWordmark,
-		settingKey: "branding.wordmark_ref",
-		s3Prefix:   "branding/wordmark",
-		maxBytes:   8 << 20,
-		process:    processWebP(imageutil.GenerateVariants, 640),
+		kind:        KindWordmark,
+		settingKey:  "branding.wordmark_ref",
+		storePrefix: "branding/wordmark",
+		maxBytes:    8 << 20,
+		process:     processWebP(imageutil.GenerateVariants, 640),
 	},
 	KindWordmarkLight: {
-		kind:       KindWordmarkLight,
-		settingKey: "branding.wordmark_light_ref",
-		s3Prefix:   "branding/wordmark-light",
-		maxBytes:   8 << 20,
-		process:    processWebP(imageutil.GenerateVariants, 640),
+		kind:        KindWordmarkLight,
+		settingKey:  "branding.wordmark_light_ref",
+		storePrefix: "branding/wordmark-light",
+		maxBytes:    8 << 20,
+		process:     processWebP(imageutil.GenerateVariants, 640),
 	},
 	KindMark: {
-		kind:       KindMark,
-		settingKey: "branding.mark_ref",
-		s3Prefix:   "branding/mark",
-		maxBytes:   8 << 20,
-		process:    processWebP(imageutil.GenerateSquareVariants, 512),
+		kind:        KindMark,
+		settingKey:  "branding.mark_ref",
+		storePrefix: "branding/mark",
+		maxBytes:    8 << 20,
+		process:     processWebP(imageutil.GenerateSquareVariants, 512),
 	},
 	KindMarkLight: {
-		kind:       KindMarkLight,
-		settingKey: "branding.mark_light_ref",
-		s3Prefix:   "branding/mark-light",
-		maxBytes:   8 << 20,
-		process:    processWebP(imageutil.GenerateSquareVariants, 512),
+		kind:        KindMarkLight,
+		settingKey:  "branding.mark_light_ref",
+		storePrefix: "branding/mark-light",
+		maxBytes:    8 << 20,
+		process:     processWebP(imageutil.GenerateSquareVariants, 512),
 	},
 	KindFavicon: {
-		kind:       KindFavicon,
-		settingKey: "branding.favicon_ref",
-		s3Prefix:   "branding/favicon",
-		maxBytes:   1 << 20,
-		process:    processFaviconPassthrough,
+		kind:        KindFavicon,
+		settingKey:  "branding.favicon_ref",
+		storePrefix: "branding/favicon",
+		maxBytes:    1 << 20,
+		process:     processFaviconPassthrough,
 	},
 	KindLoginBg: {
-		kind:       KindLoginBg,
-		settingKey: "branding.login_bg_ref",
-		s3Prefix:   "branding/login-bg",
-		maxBytes:   12 << 20,
-		process:    processWebP(imageutil.GenerateVariants, 2560),
+		kind:        KindLoginBg,
+		settingKey:  "branding.login_bg_ref",
+		storePrefix: "branding/login-bg",
+		maxBytes:    12 << 20,
+		process:     processWebP(imageutil.GenerateVariants, 2560),
 	},
 }
 

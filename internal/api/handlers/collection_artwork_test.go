@@ -6,71 +6,66 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
 
-	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
 )
 
-type collectionArtworkS3Recorder struct {
-	server *httptest.Server
-	mu     sync.Mutex
-	puts   []string
+// memoryArtworkStore is an in-memory artworkupload.Store recording every write.
+type memoryArtworkStore struct {
+	mu      sync.Mutex
+	objects map[string][]byte
 }
 
-func newCollectionArtworkS3Recorder(t *testing.T) *collectionArtworkS3Recorder {
-	t.Helper()
-
-	recorder := &collectionArtworkS3Recorder{}
-	recorder.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		_ = r.Body.Close()
-		if r.Method == http.MethodPut {
-			recorder.mu.Lock()
-			recorder.puts = append(recorder.puts, r.URL.Path)
-			recorder.mu.Unlock()
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(recorder.server.Close)
-	return recorder
+func newMemoryArtworkStore() *memoryArtworkStore {
+	return &memoryArtworkStore{objects: make(map[string][]byte)}
 }
 
-func (r *collectionArtworkS3Recorder) client() *s3client.Client {
-	return s3client.NewClient(s3client.BucketConfig{
-		Endpoint:  r.server.URL,
-		Region:    "us-east-1",
-		Bucket:    "public-assets",
-		AccessKey: "test",
-		SecretKey: "test",
-		PathStyle: true,
-	})
+func (s *memoryArtworkStore) WriteImmutable(_ context.Context, key string, data []byte, _ artworkstore.ObjectMetadata) error {
+	if err := artworkstore.ValidateKey(key); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[key] = append([]byte(nil), data...)
+	return nil
 }
 
-func (r *collectionArtworkS3Recorder) putPaths() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]string, len(r.puts))
-	copy(out, r.puts)
-	return out
+func (s *memoryArtworkStore) Matches(_ context.Context, key string, data []byte) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.objects[key]
+	return ok && bytes.Equal(stored, data), nil
 }
 
-func TestStoreBundledCollectionPosterIfS3Configured_NoS3KeepsPath(t *testing.T) {
+func (s *memoryArtworkStore) keys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := make([]string, 0, len(s.objects))
+	for key := range s.objects {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestStoreBundledCollectionPoster_NoStorageKeepsPath(t *testing.T) {
 	path := "/images/collection-templates/template.jpg"
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
+	gotPath, gotThumbhash, stored, err := storeBundledCollectionPoster(
 		context.Background(),
 		nil,
 		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
 		path,
+		true,
 	)
 	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
+		t.Fatalf("storeBundledCollectionPoster: %v", err)
 	}
 	if stored {
 		t.Fatal("stored = true, want false")
@@ -83,20 +78,19 @@ func TestStoreBundledCollectionPosterIfS3Configured_NoS3KeepsPath(t *testing.T) 
 	}
 }
 
-func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
+func TestStoreBundledCollectionPoster_IgnoresNonTemplatePath(t *testing.T) {
+	store := newMemoryArtworkStore()
 	path := "collection-images/existing/poster/original.webp"
 
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
+	gotPath, gotThumbhash, stored, err := storeBundledCollectionPoster(
 		context.Background(),
-		recorder.client(),
+		artworkupload.NewMaterializer(store),
 		fstest.MapFS{},
-		"collection-1",
-		adminCollectionImagePrefix,
 		path,
+		true,
 	)
 	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
+		t.Fatalf("storeBundledCollectionPoster: %v", err)
 	}
 	if stored {
 		t.Fatal("stored = true, want false")
@@ -107,53 +101,118 @@ func TestStoreBundledCollectionPosterIfS3Configured_IgnoresNonTemplatePath(t *te
 	if gotThumbhash != "" {
 		t.Fatalf("thumbhash = %q, want empty", gotThumbhash)
 	}
-	if puts := recorder.putPaths(); len(puts) != 0 {
-		t.Fatalf("PUT paths = %#v, want none", puts)
+	if keys := store.keys(); len(keys) != 0 {
+		t.Fatalf("stored keys = %#v, want none", keys)
 	}
 }
 
-func TestStoreBundledCollectionPosterIfS3Configured_UploadsTemplatePoster(t *testing.T) {
-	recorder := newCollectionArtworkS3Recorder(t)
+func TestStoreBundledCollectionPoster_MaterializesTemplatePoster(t *testing.T) {
+	store := newMemoryArtworkStore()
 	frontendFS := fstest.MapFS{
 		"images/collection-templates/template.jpg": {
 			Data: testCollectionPosterJPEG(t),
 		},
 	}
 
-	gotPath, gotThumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
+	gotPath, gotThumbhash, stored, err := storeBundledCollectionPoster(
 		context.Background(),
-		recorder.client(),
+		artworkupload.NewMaterializer(store),
 		frontendFS,
-		"collection-1",
-		adminCollectionImagePrefix,
 		"/images/collection-templates/template.jpg",
+		true,
 	)
 	if err != nil {
-		t.Fatalf("storeBundledCollectionPosterIfS3Configured: %v", err)
+		t.Fatalf("storeBundledCollectionPoster: %v", err)
 	}
 	if !stored {
 		t.Fatal("stored = false, want true")
-	}
-	if gotPath != "collection-images/collection-1/poster/original.webp" {
-		t.Fatalf("path = %q", gotPath)
 	}
 	if gotThumbhash == "" {
 		t.Fatal("thumbhash is empty")
 	}
 
-	want := map[string]bool{
-		"/public-assets/collection-images/collection-1/poster/original.webp": true,
-		"/public-assets/collection-images/collection-1/poster/w500.webp":     true,
-		"/public-assets/collection-images/collection-1/poster/w300.webp":     true,
+	// The stored path must be the portable original-variant key for the
+	// collection-poster upload type, and nothing about the collection's
+	// identity may appear in it.
+	info, ok := artworkkey.ParsePortableKey(gotPath)
+	if !ok {
+		t.Fatalf("stored path %q is not a portable artwork key", gotPath)
 	}
-	puts := recorder.putPaths()
-	if len(puts) != len(want) {
-		t.Fatalf("PUT paths = %#v", puts)
+	if info.ImageType != artworkkey.ImageTypeCollectionPoster {
+		t.Fatalf("image type = %q, want %q", info.ImageType, artworkkey.ImageTypeCollectionPoster)
 	}
-	for _, path := range puts {
-		if !want[path] {
-			t.Fatalf("unexpected PUT path %q in %#v", path, puts)
+	if info.Variant != artworkkey.OriginalVariant {
+		t.Fatalf("variant = %q, want %q", info.Variant, artworkkey.OriginalVariant)
+	}
+
+	// The revision must be complete: every ladder entry plus the manifest.
+	want := map[string]bool{}
+	for _, name := range artworkkey.VariantNames(artworkkey.ImageTypeCollectionPoster) {
+		want[info.Directory+"/"+name+info.Ext] = true
+	}
+	want[info.Directory+"/"+artworkkey.ManifestName] = true
+	keys := store.keys()
+	if len(keys) != len(want) {
+		t.Fatalf("stored keys = %#v, want %d objects", keys, len(want))
+	}
+	for _, key := range keys {
+		if !want[key] {
+			t.Fatalf("unexpected stored key %q in %#v", key, keys)
 		}
+	}
+
+	// Card-sized delivery has to land on a variant that was actually written.
+	card := cardThumbnailPath(gotPath)
+	if card == gotPath || !strings.HasSuffix(card, "/w300"+info.Ext) {
+		t.Fatalf("card variant path = %q", card)
+	}
+	if !want[card] {
+		t.Fatalf("card variant %q was not stored", card)
+	}
+}
+
+// TestMaterializeCollectionImage_BackdropLadder pins the backdrop ladder: the
+// collector expands a trigger-queued revision through it, so a mismatch here
+// leaves orphans behind.
+func TestMaterializeCollectionImage_BackdropLadder(t *testing.T) {
+	store := newMemoryArtworkStore()
+	storedPath, _, err := materializeCollectionImage(
+		context.Background(),
+		artworkupload.NewMaterializer(store),
+		artworkkey.ImageTypeBackdrop,
+		testCollectionPosterJPEG(t),
+		true,
+	)
+	if err != nil {
+		t.Fatalf("materializeCollectionImage: %v", err)
+	}
+	info, ok := artworkkey.ParsePortableKey(storedPath)
+	if !ok || info.ImageType != artworkkey.ImageTypeCollectionBackdrop {
+		t.Fatalf("stored path = %q, want a collection-backdrop key", storedPath)
+	}
+	got := store.keys()
+	want := append(artworkkey.ObjectKeys(storedPath, info.ImageType), []string{}...)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("stored keys = %#v, expanded keys = %#v", got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("stored keys = %#v, expanded keys = %#v", got, want)
+		}
+	}
+}
+
+func TestMaterializeCollectionImage_RejectsUnknownSlot(t *testing.T) {
+	_, _, err := materializeCollectionImage(
+		context.Background(),
+		artworkupload.NewMaterializer(newMemoryArtworkStore()),
+		"logo",
+		testCollectionPosterJPEG(t),
+		true,
+	)
+	if err == nil {
+		t.Fatal("expected an error for an unsupported collection artwork slot")
 	}
 }
 

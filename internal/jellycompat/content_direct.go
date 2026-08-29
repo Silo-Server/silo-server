@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -18,10 +20,25 @@ import (
 // AccessFilterResolver resolves catalog access constraints for a compat user.
 type AccessFilterResolver func(ctx context.Context, userID int, profileID string) catalog.AccessFilter
 
-// LibraryPosterPresigner generates presigned URLs for library poster S3 keys.
-type LibraryPosterPresigner interface {
-	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
-	Bucket() string
+// ArtworkURLResolver mints a fetchable URL for a stored artwork key — library
+// posters and collection artwork, which are addressed by key rather than
+// resolved through DetailService. It is backend-neutral: the canonical artwork
+// store decides whether that is an object-store URL the client fetches directly
+// or a short-lived signed URL served by Silo. *artworkurl.Resolver implements
+// it.
+type ArtworkURLResolver interface {
+	ResolveArtworkURL(ctx context.Context, key string) (artworkstore.ResolvedURL, error)
+}
+
+type artworkTargetURLResolver interface {
+	ResolveTargetURL(ctx context.Context, target artworkurl.Target, variant string) (artworkstore.ResolvedURL, error)
+}
+
+func resolveCompatArtworkTarget(ctx context.Context, resolver ArtworkURLResolver, target artworkurl.Target, path, variant string) (artworkstore.ResolvedURL, error) {
+	if targetResolver, ok := resolver.(artworkTargetURLResolver); ok {
+		return targetResolver.ResolveTargetURL(ctx, target.WithReference(path), variant)
+	}
+	return resolver.ResolveArtworkURL(ctx, path)
 }
 
 // browseSource is the subset of *catalog.BrowseRepository that
@@ -200,17 +217,16 @@ type episodeListSource interface {
 
 // directContentService implements ContentService by calling catalog repos directly.
 type directContentService struct {
-	browseRepo      browseSource
-	itemRepo        itemAccessSource
-	searchProvider  catalog.CatalogSearchProvider
-	seasonRepo      seasonListSource
-	episodeRepo     episodeListSource
-	detailSvc       *catalog.DetailService
-	folderRepo      folderListSource
-	storeProvider   userstore.UserStoreProvider
-	accessFilter    AccessFilterResolver
-	posterPresigner LibraryPosterPresigner
-	presignTTL      time.Duration
+	browseRepo     browseSource
+	itemRepo       itemAccessSource
+	searchProvider catalog.CatalogSearchProvider
+	seasonRepo     seasonListSource
+	episodeRepo    episodeListSource
+	detailSvc      *catalog.DetailService
+	folderRepo     folderListSource
+	storeProvider  userstore.UserStoreProvider
+	accessFilter   AccessFilterResolver
+	artworkURLs    ArtworkURLResolver
 }
 
 func newDirectContentService(
@@ -297,13 +313,11 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 			Type:       f.Type,
 			PosterPath: f.PosterPath,
 		}
-		if f.PosterPath != "" && s.posterPresigner != nil {
-			ttl := s.presignTTL
-			if ttl <= 0 {
-				ttl = 4 * time.Hour
-			}
-			if u, err := s.posterPresigner.PresignGetURL(ctx, s.posterPresigner.Bucket(), f.PosterPath, ttl); err == nil {
-				lib.PosterURL = u
+		if f.PosterPath != "" && s.artworkURLs != nil {
+			if resolved, err := resolveCompatArtworkTarget(ctx, s.artworkURLs, artworkurl.Target{
+				Surface: artworkurl.SurfaceLibraryPosters, Keys: []string{fmt.Sprint(f.ID)}, Slot: "library-poster",
+			}, f.PosterPath, "w300"); err == nil {
+				lib.PosterURL = resolved.URL
 			}
 		}
 		libraries = append(libraries, lib)
@@ -1236,9 +1250,16 @@ func (s *directContentService) presignSeasons(ctx context.Context, seasons []ups
 	if s.detailSvc == nil || len(seasons) == 0 {
 		return
 	}
-	posterURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(seasons, func(se upstreamSeason) string { return se.PosterURL }), "poster", compatCardImageSize)
+	targets := make([]artworkurl.Target, 0, len(seasons))
+	for _, season := range seasons {
+		if season.PosterURL != "" {
+			targets = append(targets, artworkurl.Target{Surface: artworkurl.SurfaceSeasonPosters, Keys: []string{season.ContentID}, Slot: compatArtworkPoster}.WithReference(season.PosterURL))
+		}
+	}
+	posterURLs := s.detailSvc.PresignArtworkTargetsWithExpiry(ctx, targets, catalog.ArtworkVariantForSize("poster", compatCardImageSize))
 	for i := range seasons {
-		seasons[i].PosterURL = resolvedListImageURL(posterURLs, seasons[i].PosterURL)
+		target := artworkurl.Target{Surface: artworkurl.SurfaceSeasonPosters, Keys: []string{seasons[i].ContentID}, Slot: compatArtworkPoster}
+		seasons[i].PosterURL = posterURLs[target.CacheKey()].URL
 	}
 }
 
@@ -1249,9 +1270,16 @@ func (s *directContentService) presignEpisodes(ctx context.Context, episodes []u
 	if s.detailSvc == nil || len(episodes) == 0 {
 		return
 	}
-	stillURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(episodes, func(ep upstreamEpisode) string { return ep.StillURL }), "still", compatCardImageSize)
+	targets := make([]artworkurl.Target, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode.StillURL != "" {
+			targets = append(targets, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{episode.ContentID}, Slot: compatArtworkStill}.WithReference(episode.StillURL))
+		}
+	}
+	stillURLs := s.detailSvc.PresignArtworkTargetsWithExpiry(ctx, targets, catalog.ArtworkVariantForSize("still", compatCardImageSize))
 	for i := range episodes {
-		episodes[i].StillURL = resolvedListImageURL(stillURLs, episodes[i].StillURL)
+		target := artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{episodes[i].ContentID}, Slot: compatArtworkStill}
+		episodes[i].StillURL = stillURLs[target.CacheKey()].URL
 	}
 }
 

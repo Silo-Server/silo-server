@@ -38,6 +38,9 @@ func TestIsCachedImagePathExcludesLocalSources(t *testing.T) {
 	if !isCachedImagePath("tmdb/movies/550/poster/original.webp") {
 		t.Fatal("remote cached key must remain a cached image path")
 	}
+	if !isCachedImagePath("library-artwork://opaque_unsigned_identity") {
+		t.Fatal("direct-library identity must remain a Silo-owned cached reference")
+	}
 }
 
 func TestPreserveCachedArtworkRoutesLocalSource(t *testing.T) {

@@ -72,6 +72,21 @@ class FakeWebSocket {
   }
 }
 
+function emitJobEvent(
+  socket: FakeWebSocket | undefined,
+  event: string,
+  job: { id: string; job_type: string; status: string },
+) {
+  socket?.onmessage?.({
+    data: JSON.stringify({
+      type: "event",
+      channel: "jobs",
+      event,
+      data: { ...job, requested_at: "2026-08-25T12:00:00Z" },
+    }),
+  } as MessageEvent);
+}
+
 describe("buildEventsUrl", () => {
   it("includes auth token and websocket scheme", () => {
     expect(
@@ -188,6 +203,60 @@ describe("RealtimeEventsProvider", () => {
     cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("invalidates artwork storage when an artwork job reaches a terminal state", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    queryClient.setQueryData(adminKeys.artworkStorage(), { backend: "local" });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    const socket = FakeWebSocket.instances[0];
+    expect(socket).toBeDefined();
+
+    act(() => {
+      emitJobEvent(socket, "job.progress", {
+        id: "job-1",
+        job_type: "artwork_storage_purge",
+        status: "running",
+      });
+    });
+    await act(async () => {});
+
+    expect(queryClient.getQueryState(adminKeys.artworkStorage())?.isInvalidated).toBe(false);
+
+    act(() => {
+      emitJobEvent(socket, "job.completed", {
+        id: "job-2",
+        job_type: "catalog_import",
+        status: "completed",
+      });
+    });
+    await act(async () => {});
+
+    expect(queryClient.getQueryState(adminKeys.artworkStorage())?.isInvalidated).toBe(false);
+
+    act(() => {
+      emitJobEvent(socket, "job.completed", {
+        id: "job-1",
+        job_type: "artwork_storage_purge",
+        status: "completed",
+      });
+    });
+    await act(async () => {});
+
+    expect(queryClient.getQueryState(adminKeys.artworkStorage())?.isInvalidated).toBe(true);
   });
 
   it("ignores stale close events from intentionally closed sockets", () => {

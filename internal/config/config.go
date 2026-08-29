@@ -344,6 +344,21 @@ type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
 }
 
+// ArtworkConfig holds canonical artwork store settings. The backend and local
+// root are captured when the store is opened at startup; the URL lifetime and
+// the materialization policy are read live.
+type ArtworkConfig struct {
+	// StorageBackend is auto, local, or s3. See the artwork store pin: auto
+	// only resolves freely until the first materialization.
+	StorageBackend string `yaml:"-"`
+	// LocalPath is the filesystem store root used by the local backend.
+	LocalPath string `yaml:"-"`
+	// RemoteMaterialization is selected or passthrough.
+	RemoteMaterialization string `yaml:"-"`
+	// URLTTL bounds how long a minted artwork read URL stays valid.
+	URLTTL time.Duration `yaml:"-"`
+}
+
 // ClientIPConfig holds client IP resolution settings.
 type ClientIPConfig struct {
 	// TrustedProxies is the comma-separated CIDR list of reverse proxies
@@ -360,6 +375,7 @@ type Config struct {
 	Scanner              ScannerConfig              `yaml:"-"`
 	Matcher              MatcherConfig              `yaml:"matcher"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Artwork              ArtworkConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`

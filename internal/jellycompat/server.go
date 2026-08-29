@@ -87,9 +87,14 @@ type Dependencies struct {
 	// Person repository
 	PersonRepo *catalog.PersonRepository
 
-	// Library poster presigning
-	PosterPresigner LibraryPosterPresigner
-	PresignTTL      time.Duration
+	// ArtworkURLs mints URLs for stored artwork keys (library posters,
+	// collection artwork) on whichever backend holds them. Optional; without
+	// it those surfaces report no artwork.
+	ArtworkURLs ArtworkURLResolver
+	// ArtworkDelivery serves signed native artwork URLs in process, which is
+	// how locally stored artwork reaches a compat client on this listener.
+	// Optional; without it such URLs cannot be served here at all.
+	ArtworkDelivery ArtworkDelivery
 
 	// Playback
 	SessionMgr SessionManagerInterface

@@ -49,10 +49,12 @@ func (e *ActiveJobConflictError) Unwrap() error {
 }
 
 type CreateJobInput struct {
-	JobType         string
-	CreatedByUserID int
-	RequestPayload  any
-	Message         string
+	JobType          string
+	CreatedByUserID  int
+	RequestPayload   any
+	DryRun           bool
+	Message          string
+	ResumeCheckpoint bool
 }
 
 type CompleteJobInput struct {
@@ -83,11 +85,18 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
+// querier is the subset of pgxpool.Pool and pgx.Tx the repository's statements
+// need, so a statement can run either on its own or inside a transaction.
+type querier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const adminJobColumns = `id, job_type, status, created_by_user_id, request_payload,
+const adminJobColumns = `id, job_type, status, created_by_user_id, request_payload, dry_run, checkpoint,
 	result_payload, message, error_message, progress_current, progress_total,
 	artifact_bucket, artifact_key, artifact_size_bytes,
 	public_url, requested_at, started_at, completed_at, heartbeat_at, expires_at,
@@ -101,6 +110,8 @@ func scanAdminJob(row pgx.Row) (*models.AdminJob, error) {
 		&job.Status,
 		&job.CreatedByUserID,
 		&job.RequestPayload,
+		&job.DryRun,
+		&job.Checkpoint,
 		&job.ResultPayload,
 		&job.Message,
 		&job.ErrorMessage,
@@ -143,6 +154,30 @@ func scanAdminJobs(rows pgx.Rows) ([]*models.AdminJob, error) {
 }
 
 func (r *Repository) Create(ctx context.Context, input CreateJobInput) (*models.AdminJob, error) {
+	job, err := insertJob(ctx, r.pool, input)
+	if err == nil {
+		return job, nil
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		var activeJob *models.AdminJob
+		var lookupErr error
+		if input.JobType == JobTypeArtworkStorageRefresh || input.JobType == JobTypeArtworkPurge || input.JobType == JobTypeArtworkStorageImport {
+			activeJob, lookupErr = r.GetActiveArtworkStorageJob(ctx)
+		} else {
+			activeJob, lookupErr = r.GetActiveByType(ctx, input.JobType)
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, ErrJobNotFound) {
+			return nil, lookupErr
+		}
+		return nil, &ActiveJobConflictError{Job: activeJob}
+	}
+
+	return nil, fmt.Errorf("creating admin job: %w", err)
+}
+
+func insertJob(ctx context.Context, q querier, input CreateJobInput) (*models.AdminJob, error) {
 	payload, err := marshalPayload(input.RequestPayload)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling admin job request payload: %w", err)
@@ -152,32 +187,67 @@ func (r *Repository) Create(ctx context.Context, input CreateJobInput) (*models.
 	if err != nil {
 		return nil, fmt.Errorf("generate job id: %w", err)
 	}
-	job, err := scanAdminJob(r.pool.QueryRow(ctx, `
+	return scanAdminJob(q.QueryRow(ctx, `
+		WITH latest_matching_job AS (
+			SELECT status, error_message, checkpoint
+			FROM admin_jobs
+			WHERE job_type = $2
+			  AND (
+				$2 <> $8
+				OR (
+					request_payload->'scope' IS NOT DISTINCT FROM $5::jsonb->'scope'
+					AND request_payload->>'mode' IS NOT DISTINCT FROM $5::jsonb->>'mode'
+					AND dry_run = $6
+				)
+			  )
+			ORDER BY requested_at DESC
+			LIMIT 1
+		), resumable_checkpoint AS (
+			SELECT checkpoint
+			FROM latest_matching_job
+			WHERE $12
+			  AND $2 IN ($8, $10, $11)
+			  AND checkpoint <> '{}'::jsonb
+			  AND (checkpoint->>'finished') IS DISTINCT FROM 'true'
+			  AND (
+				(status = $9 AND (
+					error_message LIKE 'timed out after %'
+					OR error_message LIKE '%context deadline exceeded%'
+					OR error_message LIKE '%context canceled%'
+				))
+				OR status = $13
+			  )
+		)
 		INSERT INTO admin_jobs (
-			id, job_type, status, created_by_user_id, request_payload, message
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			id, job_type, status, created_by_user_id, request_payload, dry_run, message, checkpoint
+		) VALUES ($1, $2, $3, $4, $5, $6, $7,
+			COALESCE((SELECT checkpoint FROM resumable_checkpoint), '{}'::jsonb))
 		RETURNING `+adminJobColumns,
 		id,
 		input.JobType,
 		StatusQueued,
 		input.CreatedByUserID,
 		payload,
+		input.DryRun,
 		input.Message,
+		JobTypeArtworkPurge,
+		StatusFailed,
+		JobTypeArtworkStorageRefresh,
+		JobTypeArtworkStorageImport,
+		input.ResumeCheckpoint,
+		StatusCancelled,
 	))
-	if err == nil {
-		return job, nil
-	}
+}
 
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		activeJob, lookupErr := r.GetActiveByType(ctx, input.JobType)
-		if lookupErr != nil && !errors.Is(lookupErr, ErrJobNotFound) {
-			return nil, lookupErr
-		}
-		return nil, &ActiveJobConflictError{Job: activeJob}
-	}
-
-	return nil, fmt.Errorf("creating admin job: %w", err)
+func (r *Repository) GetActiveArtworkStorageJob(ctx context.Context) (*models.AdminJob, error) {
+	return scanAdminJob(r.pool.QueryRow(ctx, `
+		SELECT `+adminJobColumns+`
+		FROM admin_jobs
+		WHERE job_type IN ($1, $2, $3) AND status IN ($4, $5)
+		ORDER BY requested_at ASC
+		LIMIT 1`,
+		JobTypeArtworkStorageRefresh, JobTypeArtworkPurge, JobTypeArtworkStorageImport, StatusQueued, StatusRunning,
+	))
 }
 
 func (r *Repository) CreateLibraryRefresh(
@@ -366,6 +436,30 @@ func (r *Repository) UpdateProgress(ctx context.Context, id string, current, tot
 	return nil
 }
 
+// UpdateCheckpoint durably records resumable, job-private state. It also
+// refreshes the heartbeat so a worker is not requeued while persisting a large
+// operation's boundary. Checkpoints are intentionally generic JSON: the job
+// executor owns their versioned schema.
+func (r *Repository) UpdateCheckpoint(ctx context.Context, id string, checkpoint any) error {
+	payload, err := marshalPayload(checkpoint)
+	if err != nil {
+		return fmt.Errorf("marshaling admin job checkpoint: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE admin_jobs
+		SET checkpoint = $2,
+			heartbeat_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND status = $3`, id, payload, StatusRunning)
+	if err != nil {
+		return fmt.Errorf("updating admin job checkpoint: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotFound
+	}
+	return nil
+}
+
 func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE admin_jobs
@@ -384,12 +478,52 @@ func (r *Repository) TouchHeartbeat(ctx context.Context, id string) error {
 }
 
 func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobInput) error {
+	return completeJob(ctx, r.pool, id, input)
+}
+
+// CompleteWithFollowUp marks a job complete and enqueues its follow-up job in a
+// single transaction, so a completed job's result payload can never claim work
+// that was never queued (or lose the follow-up to a crash between the two
+// writes). The completion is written first inside the transaction on purpose:
+// the single-active-artwork-job uniqueness constraint rejects the follow-up
+// while the completing job still counts as active.
+//
+// Either both writes land or neither does — a caller that wants the job
+// completed regardless must fall back to Complete with a payload that says the
+// follow-up was not queued.
+func (r *Repository) CompleteWithFollowUp(ctx context.Context, id string, input CompleteJobInput, followUp CreateJobInput) (*models.AdminJob, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("beginning admin job completion transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := completeJob(ctx, tx, id, input); err != nil {
+		return nil, err
+	}
+
+	job, err := insertJob(ctx, tx, followUp)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, &ActiveJobConflictError{}
+		}
+		return nil, fmt.Errorf("creating follow-up admin job: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing admin job completion: %w", err)
+	}
+	return job, nil
+}
+
+func completeJob(ctx context.Context, q querier, id string, input CompleteJobInput) error {
 	resultPayload, err := marshalPayload(input.ResultPayload)
 	if err != nil {
 		return fmt.Errorf("marshaling admin job result payload: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := q.Exec(ctx, `
 		UPDATE admin_jobs
 		SET status = $2,
 			result_payload = $3,

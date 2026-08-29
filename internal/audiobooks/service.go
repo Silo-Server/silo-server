@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abssocket"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -179,6 +180,18 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 				return ""
 			}
 			return deps.Detail.PresignImageURL(ctx, path, "poster", variant)
+		},
+		TargetCoverResolver: func(ctx context.Context, targetKind, targetID, path, variant string) string {
+			if deps.Detail == nil {
+				return ""
+			}
+			target := artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{targetID}, Slot: "poster"}
+			imageType := "poster"
+			if targetKind == "person" {
+				target = artworkurl.Target{Surface: artworkurl.SurfacePersonPhotos, Keys: []string{targetID}, Slot: "profile"}
+				imageType = "profile"
+			}
+			return deps.Detail.PresignArtworkTargetImageURL(ctx, target, path, imageType, variant)
 		},
 	})
 	// Keep the audiobook author materialized view fresh in the background so the

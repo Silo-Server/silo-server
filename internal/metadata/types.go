@@ -364,23 +364,31 @@ const (
 // SeasonNumber / EpisodeNumber fields scope the S3 key so siblings do not
 // collide. Both pointers are nil for item-level images.
 type CacheImageRequest struct {
-	SourceURL     string
-	ProviderID    string
-	ContentType   string // "movies" or "series"
-	ContentID     string
-	ImageType     ImageType
-	SeasonNumber  *int
-	EpisodeNumber *int
-	Language      string
-	// KeyDiscriminator, when set, is inserted into the S3 key between the
-	// content ID and the image type (e.g. the 8-hex content hash of a local
-	// sidecar file) so re-cached art rotates to a fresh key.
+	SourceURL       string
+	SourceReference string // stable provider/plugin path before URL resolution
+	ProviderID      string
+	ContentType     string // "movies" or "series"
+	ContentID       string
+	ImageType       ImageType
+	SeasonNumber    *int
+	EpisodeNumber   *int
+	Language        string
+	// KeyDiscriminator carries the 8-hex content hash of a local sidecar
+	// file. It no longer affects the object key: materialized artwork is
+	// content-addressed, so changed sidecar bytes already produce a different
+	// immutable key. It remains the caller's record of which sidecar revision
+	// it read.
 	KeyDiscriminator string
+	// GeneratorVersion and InputObjectRevisions form the stable adoption
+	// identity for deterministic generated artwork. Both are required; callers
+	// that cannot provide them deliberately omit the adoption index.
+	GeneratorVersion     string
+	InputObjectRevisions []string
 }
 
 // CacheImageResult is returned by ImageCacher on success.
 type CacheImageResult struct {
-	BasePath     string // image-type prefix retained for legacy callers
+	BasePath     string // prefix holding every object of this revision
 	OriginalPath string // exact immutable original-variant object key
 	Revision     string // content revision shared by all generated variants
 	Thumbhash    string // base64-encoded

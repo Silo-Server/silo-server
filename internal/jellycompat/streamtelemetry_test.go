@@ -37,6 +37,37 @@ func compatTelemetryRegistry(t testing.TB, families ...streamtelemetry.Family) *
 	return registry
 }
 
+func settledTelemetrySweep(t testing.TB, registry *streamtelemetry.Registry) streamtelemetry.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := registry.Sweep()
+		settled := true
+		for _, session := range snapshot.Sessions {
+			if session.OpenObservations != 0 {
+				settled = false
+			}
+			for _, route := range session.Routes {
+				if route.Open != 0 {
+					settled = false
+				}
+			}
+		}
+		for _, transfer := range snapshot.Transfers {
+			if transfer.OpenObservations != 0 {
+				settled = false
+			}
+		}
+		if settled {
+			return snapshot
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stream telemetry did not settle within 5s: sessions=%+v transfers=%+v", snapshot.Sessions, snapshot.Transfers)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 type compatTelemetryFixture struct {
 	server   *httptest.Server
 	client   *http.Client
@@ -156,7 +187,7 @@ func TestMountedCompatRouterAttributesDirectStream(t *testing.T) {
 	}
 
 	// Sweep, not Snapshot: BytesAccepted is lastSweptBytes.
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	if len(snapshot.Sessions) != 1 {
 		t.Fatalf("sessions = %+v", snapshot.Sessions)
 	}
@@ -214,7 +245,7 @@ func TestMountedCompatRouterDownloadIsATransfer(t *testing.T) {
 	if got.status != http.StatusOK || got.body != fixture.body {
 		t.Fatalf("GET = %d %q", got.status, got.body)
 	}
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	// §4.2b: a download has a user but no stable playback session.
 	if len(snapshot.Sessions) != 0 {
 		t.Fatalf("download created a logical session: %+v", snapshot.Sessions)
@@ -240,7 +271,7 @@ func TestMountedCompatRouterBitrateTestIsACapExemptTransfer(t *testing.T) {
 	if got.status != http.StatusOK || len(got.body) != 1024*1024 {
 		t.Fatalf("bitrate probe = %d, %d bytes", got.status, len(got.body))
 	}
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	if len(snapshot.Sessions) != 0 || len(snapshot.Transfers) != 1 {
 		t.Fatalf("bitrate probe activity = %+v %+v", snapshot.Sessions, snapshot.Transfers)
 	}
@@ -310,7 +341,7 @@ func TestMountedCompatRouterHEADCountsZeroBytes(t *testing.T) {
 	if got.status != http.StatusOK || got.body != "" {
 		t.Fatalf("HEAD = %d %q", got.status, got.body)
 	}
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	if len(snapshot.Sessions) != 1 {
 		t.Fatalf("sessions = %+v", snapshot.Sessions)
 	}

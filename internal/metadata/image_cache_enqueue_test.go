@@ -21,6 +21,31 @@ func (r *recordingImageCacheJobEnqueuer) EnqueueBatch(_ context.Context, inputs 
 	return len(inputs), nil
 }
 
+func TestPersonRefreshPhotoEnqueueReadsLiveMaterializationPolicy(t *testing.T) {
+	const providerID = "tmdb"
+	service := &PersonRefreshService{}
+	enqueuer := &recordingImageCacheJobEnqueuer{}
+	service.SetImageCacheJobEnqueuer(enqueuer)
+	person := models.Person{ID: 42, PhotoSourcePath: "tmdb://people/42.jpg"}
+
+	service.enqueuePersonPhoto(t.Context(), person, map[string]string{providerID: "42"}, providerID)
+	if len(enqueuer.inputs) != 0 {
+		t.Fatalf("disabled policy enqueued %d person photos, want 0", len(enqueuer.inputs))
+	}
+
+	service.SetAutoCacheImages(true)
+	service.enqueuePersonPhoto(t.Context(), person, map[string]string{providerID: "42"}, providerID)
+	if len(enqueuer.inputs) != 1 {
+		t.Fatalf("selected policy enqueued %d person photos, want 1", len(enqueuer.inputs))
+	}
+
+	service.SetAutoCacheImages(false)
+	service.enqueuePersonPhoto(t.Context(), person, map[string]string{providerID: "42"}, providerID)
+	if len(enqueuer.inputs) != 1 {
+		t.Fatalf("reloaded passthrough policy enqueued %d person photos, want total 1", len(enqueuer.inputs))
+	}
+}
+
 func TestPreserveCachedArtworkKeepsCachedPathWhenSourceMatches(t *testing.T) {
 	path, thumb, source := preserveCachedArtwork(
 		"tvdb://banners/episodes/1.jpg",
@@ -91,11 +116,11 @@ func TestPersistSeasonsAndEpisodesPersistsSourceBeforeEnqueue(t *testing.T) {
 	if len(enqueuer.inputs) != 2 {
 		t.Fatalf("queued jobs = %d, want 2", len(enqueuer.inputs))
 	}
-	if enqueuer.inputs[0].TargetContentID != season.ContentID {
-		t.Fatalf("season job target = %q, want %q", enqueuer.inputs[0].TargetContentID, season.ContentID)
+	if enqueuer.inputs[0].TargetContentID != seriesID || enqueuer.inputs[0].SeasonNumber == nil || *enqueuer.inputs[0].SeasonNumber != 1 {
+		t.Fatalf("season job target = (%q, %v), want (%q, 1)", enqueuer.inputs[0].TargetContentID, enqueuer.inputs[0].SeasonNumber, seriesID)
 	}
-	if enqueuer.inputs[1].TargetContentID != episode.ContentID {
-		t.Fatalf("episode job target = %q, want %q", enqueuer.inputs[1].TargetContentID, episode.ContentID)
+	if enqueuer.inputs[1].TargetContentID != seriesID || enqueuer.inputs[1].SeasonNumber == nil || *enqueuer.inputs[1].SeasonNumber != 1 || enqueuer.inputs[1].EpisodeNumber == nil || *enqueuer.inputs[1].EpisodeNumber != 1 {
+		t.Fatalf("episode job target = (%q, %v, %v), want (%q, 1, 1)", enqueuer.inputs[1].TargetContentID, enqueuer.inputs[1].SeasonNumber, enqueuer.inputs[1].EpisodeNumber, seriesID)
 	}
 }
 

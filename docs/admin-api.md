@@ -634,6 +634,108 @@ endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
 paths themselves appear only here, behind admin auth.
 
+## Settings updates
+
+`PUT /api/v1/admin/settings` accepts setting changes under the `values`
+envelope. For example, configuring artwork materialization uses:
+
+```json
+{
+  "values": {
+    "artwork.remote_materialization": "selected"
+  }
+}
+```
+
+The response also returns the normalized settings under `values`, alongside
+`restart_required` and any `restart_required_keys`.
+
+## Artwork storage
+
+`GET /api/v1/admin/artwork/storage` returns the latest indexed artwork-storage
+snapshot. It never enumerates the filesystem or object store on the request
+path. `snapshot_at` identifies the completed refresh represented by the
+response; `complete: false` means `known_bytes` is exact for inventoried
+revisions but is not yet a complete store total. `inventory_drift` reports
+known missing revisions, missing objects, and orphans; `failure_count` reports
+refresh errors separately. `coverage_limited` and `coverage_limit_reason`
+identify installations whose user artwork is intentionally outside the
+PostgreSQL-backed inventory. That limitation does not force `complete` false
+or cause the startup backfill to repeat: `snapshot_at: null` alone means the
+initial refresh has never completed.
+
+`total` contains unique physical, pending-GC, protected, and reclaimable bytes, and
+unique object/revision counts. Each `libraries` entry contains
+`referenced_bytes`, `exclusive_bytes`, `shared_bytes`, `reclaimable_bytes`,
+protected/reconstructible totals, counts, and source-class totals. Shared bytes
+are attribution, not additive usage: do not sum library rows to calculate the
+server total. Artwork outside a media-folder ownership graph is reported in
+`server_scoped` instead.
+
+`backend`, `store_health`, `store_health_changed_at`, and optional
+`resolved_path` report the effective store. Health is `healthy`, `degraded`,
+`unavailable`, `empty_rebuilding`, or `wrong_mount`. `total` additionally
+reports `missing_bytes`, `repair_pending_bytes`, and
+`missing_revision_count`, `repairing_revision_count`, and
+`protected_loss_count`. A protected loss remains selected and renders a
+placeholder until an administrator restores or replaces it; a transport outage
+does not increment missing counts.
+For a pinned local store, an absent root is `unavailable`; absent, invalid, or
+mismatched identity markers on a present root are `wrong_mount`. Neither state
+recreates the root or rotates the generation automatically. A persistent
+`store_root_missing` artwork-storage alert remains active until the store is
+healthy again.
+`free_space_bytes` is present only for a backend with meaningful bounded local
+capacity. Adoption-index objects are included in the unique physical/object
+totals. `seed` reports verified copied-store revisions, including expired bytes
+that have become reclaimable and `retained_unverifiable_bytes` / `_revisions`
+for unarmed user-artwork seeds whose SQLite references cannot be inspected by
+the PostgreSQL collector. `unsupported_topology_warnings` names deployment
+requirements the server cannot prove from inside the process; local storage,
+for example, requires one API node or an identically mounted shared POSIX root.
+
+`POST /api/v1/admin/artwork/storage/refresh` returns `202 Accepted` with an
+admin job. The job walks live catalog references asynchronously, resumes from
+its job-row checkpoint after interruption, validates manifests and stored
+objects, and publishes a new snapshot.
+
+`POST /api/v1/admin/artwork/storage/import` returns `202 Accepted` with a
+resumable admin job. It walks `artwork/v1/objects`, imports only revisions with
+a valid completeness manifest and matching object digests, and registers
+otherwise-unreferenced revisions as seeds with a fixed 30-day adoption grace.
+Incomplete directories are skipped. The active
+artwork refresh, import, and purge jobs are mutually exclusive.
+
+`POST /api/v1/admin/artwork/rebuild` is the explicit recovery action for an
+empty local artwork root. It creates the root when missing, verifies that a
+present replacement root contains no artwork objects, writes fresh format and
+store-generation markers, atomically replaces the durable and live generation
+pin, persists `empty_rebuilding`, and returns the new storage-accounting state
+with `200 OK`. The recovery coordinator then repopulates reconstructible
+artwork through the ordinary durable repair queue. A non-empty replacement
+root returns `409 store_not_empty`. S3 returns `422 unsupported_backend`; its
+existing marker and authoritative-empty recovery behavior is unchanged.
+
+`POST /api/v1/admin/artwork/purge` accepts:
+
+```json
+{
+  "scope": { "library_id": 42 },
+  "mode": "safe_materialized",
+  "dry_run": true
+}
+```
+
+Use `{"scope":{"server":true}}` for server scope. `mode` is `edge_only` or
+`safe_materialized`. The route returns `202 Accepted`; progress, checkpoint,
+and the final result are exposed through the ordinary admin-job API. A dry run
+uses one consistent catalog snapshot and reports predicted transitions,
+queued revisions, reclaimable/pending bytes, shared revisions retained, and
+protected revisions without changing the catalog or storage. A real safe purge
+commits reconstructible catalog fallbacks before reference-aware garbage
+collection can delete objects. Uploads and sources without a verified fallback
+remain protected.
+
 ## `GET /api/v1/admin/stream-telemetry/parity`
 
 Returns the merged stream-telemetry view beside the two legacy live-session

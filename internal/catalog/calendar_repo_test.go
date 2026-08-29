@@ -52,6 +52,32 @@ func TestBuildListEventsQuery_UsesCTEsForFinalesAndSeasonPremieres(t *testing.T)
 	}
 }
 
+// The season branch COALESCEs the season poster down to the series poster, so
+// the row itself has to say which one it picked: the handler mints a season
+// artwork capability only when the season's own poster was selected.
+func TestBuildListEventsQuery_ReportsWhetherSeasonPosterWasSelected(t *testing.T) {
+	t.Parallel()
+
+	repo := &CalendarRepository{}
+	query, _ := repo.buildListEventsQuery(CalendarFilter{
+		Start: time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
+	})
+
+	expectedFragments := []string{
+		"poster_path, poster_thumbhash, poster_is_season,",
+		"(NULLIF(s.poster_path, '') IS NOT NULL) AS poster_is_season",
+		"fs.poster_path, fs.poster_thumbhash, fs.poster_is_season,",
+		"mi.poster_path, mi.poster_thumbhash, FALSE AS poster_is_season,",
+		"fe.poster_path, fe.poster_thumbhash, FALSE AS poster_is_season,",
+	}
+	for _, fragment := range expectedFragments {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("expected query to contain %q, got:\n%s", fragment, query)
+		}
+	}
+}
+
 func TestBuildListEventsQuery_UsesNotExistsForDisabledLibraries(t *testing.T) {
 	t.Parallel()
 

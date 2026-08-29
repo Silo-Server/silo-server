@@ -12,8 +12,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/api"
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -21,6 +27,72 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
+
+type missingABSArtworkStore struct{}
+
+func (missingABSArtworkStore) Open(context.Context, string) (*artworkstore.Object, error) {
+	return nil, artworkstore.ErrNotFound
+}
+
+type redirectingABSHandler struct {
+	location string
+}
+
+func (h redirectingABSHandler) Mount(r chi.Router) {
+	r.Get("/api/items/{id}/cover", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, h.location, http.StatusFound)
+	})
+}
+
+func TestABSCompatRouterServesArtworkRedirectTarget(t *testing.T) {
+	signer, err := artworkurl.NewSigner("abs-artwork-test-secret", nil)
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), "postgres://silo:silo@127.0.0.1:1/silo?connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create lazy test pool: %v", err)
+	}
+	defer pool.Close()
+	redirectTarget := artworkurl.RoutePrefix + "invalid-capability/original"
+	deps := &api.Dependencies{
+		DB:               pool,
+		ABSHandler:       redirectingABSHandler{location: redirectTarget},
+		ArtworkURLSigner: signer,
+		ArtworkDelivery:  handlers.NewArtworkHandler(missingABSArtworkStore{}, signer),
+	}
+	router := buildABSCompatRouter(deps, nil)
+
+	cover := httptest.NewRecorder()
+	router.ServeHTTP(cover, httptest.NewRequest(http.MethodGet, "/api/items/book-1/cover", nil))
+	if cover.Code != http.StatusFound || cover.Header().Get("Location") != redirectTarget {
+		t.Fatalf("cover redirect = status %d location %q", cover.Code, cover.Header().Get("Location"))
+	}
+
+	artwork := httptest.NewRecorder()
+	router.ServeHTTP(artwork, httptest.NewRequest(http.MethodGet, cover.Header().Get("Location"), nil))
+	if artwork.Code != http.StatusNotFound || !strings.HasPrefix(artwork.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("redirect target = status %d content-type %q body %q", artwork.Code, artwork.Header().Get("Content-Type"), artwork.Body.String())
+	}
+
+	registered := map[string]bool{}
+	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		registered[method+" "+route] = true
+		return nil
+	}); err != nil {
+		t.Fatalf("walking ABS routes: %v", err)
+	}
+	for _, want := range []string{
+		"GET /api/v1/artwork/{capability}/{variant}",
+		"HEAD /api/v1/artwork/{capability}/{variant}",
+		"GET /api/v1/artwork-library/{identity}",
+		"HEAD /api/v1/artwork-library/{identity}",
+	} {
+		if !registered[want] {
+			t.Fatalf("route %q is not registered on ABS mux", want)
+		}
+	}
+}
 
 func TestConfigureS3Clients_SetsCORSOnPublicAssetsBucket(t *testing.T) {
 	publicServer := newS3BucketRecorder(t)

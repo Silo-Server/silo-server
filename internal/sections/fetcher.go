@@ -38,6 +38,9 @@ type SectionItemMeta struct {
 	SeriesTitle       string
 	SeasonNumber      *int
 	EpisodeNumber     *int
+	PosterOwner       SectionArtworkOwner
+	BackdropOwner     SectionArtworkOwner
+	LogoOwner         SectionArtworkOwner
 	Badges            []string
 	PositionSeconds   *float64
 	DurationSeconds   *float64
@@ -45,6 +48,24 @@ type SectionItemMeta struct {
 	ItemSource        string    // "in_progress" or "next_up"
 	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
 }
+
+// SectionArtworkOwner identifies the catalog row that owns substituted
+// artwork on an episode-shaped section item. The API layer translates the
+// kind into an artwork delivery surface without coupling sections to
+// artworkurl.
+type SectionArtworkOwner struct {
+	Kind      SectionArtworkOwnerKind
+	ContentID string
+}
+
+// SectionArtworkOwnerKind is the catalog entity kind for section artwork.
+type SectionArtworkOwnerKind string
+
+const (
+	SectionArtworkOwnerSeries  SectionArtworkOwnerKind = "series"
+	SectionArtworkOwnerSeason  SectionArtworkOwnerKind = "season"
+	SectionArtworkOwnerEpisode SectionArtworkOwnerKind = "episode"
+)
 
 const recentSeasonPremiereBadgeWindowDays = 14
 const editorialCandidateCacheTTL = 24 * time.Hour
@@ -297,16 +318,22 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		if title != "" {
 			resolved.Title = title
 		}
+		itemMeta, metaErr := f.fetchEpisodeCatalogItemMeta(ctx, items, libraryID, libraryIDs, filter)
+		if metaErr != nil {
+			return SectionWithItems{}, metaErr
+		}
 		result = SectionWithItems{
 			ResolvedSection: resolved,
 			Items:           items,
 			TotalCount:      total,
+			ItemMeta:        itemMeta,
 		}
 		return result, nil
 	}
 
 	var items []*models.MediaItem
 	var total int
+	var itemMeta map[string]SectionItemMeta
 	if f.isCacheableSectionType(resolved) {
 		// User-agnostic rows share one process-global entry per access scope.
 		// getOrRefresh returns a defensive slice copy, so reordering or
@@ -316,13 +343,20 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		// buildSectionsResponse.
 		key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
-			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+			loadedItems, loadedTotal, _, loadErr := f.fetchSectionWithMeta(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+			return loadedItems, loadedTotal, loadErr
 		})
 	} else {
-		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+		items, total, itemMeta, err = f.fetchSectionWithMeta(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 	}
 	if err != nil {
 		return SectionWithItems{}, err
+	}
+	if itemMeta == nil {
+		itemMeta, err = f.fetchEpisodeCatalogItemMeta(ctx, items, libraryID, libraryIDs, filter)
+		if err != nil {
+			return SectionWithItems{}, err
+		}
 	}
 
 	// Apply seasonal title override when the active theme has a custom name.
@@ -339,6 +373,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		ResolvedSection: resolved,
 		Items:           items,
 		TotalCount:      total,
+		ItemMeta:        itemMeta,
 	}
 	return result, nil
 }
@@ -1089,6 +1124,53 @@ func (f *Fetcher) FetchEpisodesByContentIDs(ctx context.Context, contentIDs []st
 	return f.fetchEpisodeTargetsByContentIDs(ctx, contentIDs, nil, nil, filter)
 }
 
+// fetchEpisodeCatalogItemMeta carries artwork ownership out of the catalog
+// episode scope without changing QueryExecutor or its other callers. Generic
+// catalog-shaped episode cards keep their backdrop on the parent series.
+// Native recently-added TV episode events retain a PlayContentID and were
+// hydrated with episode-still precedence before entering the shared cache, so
+// cache-hit metadata must use the same policy as the cached image paths.
+func (f *Fetcher) fetchEpisodeCatalogItemMeta(ctx context.Context, items []*models.MediaItem, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (map[string]SectionItemMeta, error) {
+	seriesBackdropIDs, episodeStillIDs := episodeCatalogArtworkIDs(items)
+	if len(seriesBackdropIDs) == 0 && len(episodeStillIDs) == 0 {
+		return nil, nil
+	}
+
+	meta := make(map[string]SectionItemMeta, len(seriesBackdropIDs)+len(episodeStillIDs))
+	groups := []struct {
+		contentIDs []string
+		policy     episodeBackdropPolicy
+	}{
+		{contentIDs: seriesBackdropIDs, policy: episodeBackdropSeriesOnly},
+		{contentIDs: episodeStillIDs, policy: episodeBackdropPrefersStill},
+	}
+	for _, group := range groups {
+		if len(group.contentIDs) == 0 {
+			continue
+		}
+		_, groupMeta, err := f.fetchEpisodeTargetsByContentIDsWithBackdropPolicy(ctx, group.contentIDs, libraryID, libraryIDs, filter, group.policy)
+		if err != nil {
+			return nil, fmt.Errorf("fetching episode section artwork owners: %w", err)
+		}
+		maps.Copy(meta, groupMeta)
+	}
+	return meta, nil
+}
+
+func episodeCatalogArtworkIDs(items []*models.MediaItem) (seriesBackdropIDs, episodeStillIDs []string) {
+	for _, item := range items {
+		if item == nil || item.Type != "episode" || item.ContentID == "" {
+			continue
+		}
+		if item.PlayContentID != "" {
+			episodeStillIDs = append(episodeStillIDs, item.ContentID)
+			continue
+		}
+		seriesBackdropIDs = append(seriesBackdropIDs, item.ContentID)
+	}
+	return seriesBackdropIDs, episodeStillIDs
+}
+
 // ListOverlaySummaries batches file lookups for section cards and derives the
 // compact overlay summary per content ID.
 func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string, filter catalog.AccessFilter) (map[string]*models.OverlaySummary, error) {
@@ -1271,35 +1353,44 @@ func (f *Fetcher) userAgnosticSectionFetcher(t SectionType) userAgnosticSectionF
 }
 
 func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	items, total, _, err := f.fetchSectionWithMeta(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+	return items, total, err
+}
+
+func (f *Fetcher) fetchSectionWithMeta(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, map[string]SectionItemMeta, error) {
 	if fetch := f.userAgnosticSectionFetcher(s.SectionType); fetch != nil {
-		return fetch(ctx, s, libraryID, libraryIDs, filter)
+		return withoutSectionItemMeta(fetch(ctx, s, libraryID, libraryIDs, filter))
 	}
 	switch s.SectionType {
 	case SectionGenre, SectionCustomFilter:
 		return f.fetchFiltered(ctx, s, libraryID, libraryIDs, filter)
 	case SectionRandom:
-		return f.fetchRandom(ctx, s, libraryID, libraryIDs, filter)
+		return withoutSectionItemMeta(f.fetchRandom(ctx, s, libraryID, libraryIDs, filter))
 	case SectionCollection:
-		return f.fetchCollection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchCollection(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	case SectionRecommendedForYou, SectionBecauseYouWatched, SectionSimilarUsersLiked, SectionTasteMatch:
-		return f.fetchRecommendationSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchRecommendationSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	case SectionHiddenGems:
-		return f.fetchHiddenGems(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchHiddenGems(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	case SectionForgottenFavorites:
-		return f.fetchForgottenFavorites(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchForgottenFavorites(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	case SectionEditorialSpotlight:
-		return f.fetchEditorialSpotlight(ctx, s, libraryID, libraryIDs, filter)
+		return withoutSectionItemMeta(f.fetchEditorialSpotlight(ctx, s, libraryID, libraryIDs, filter))
 	case SectionGenreRoulette:
-		return f.fetchGenreRoulette(ctx, s, libraryID, libraryIDs, filter)
+		return withoutSectionItemMeta(f.fetchGenreRoulette(ctx, s, libraryID, libraryIDs, filter))
 	case SectionReturningShows:
-		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	case SectionProfileActivityFeed:
-		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
+		return withoutSectionItemMeta(f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter))
 	case SectionWatchlist, SectionFavorites:
-		return f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
+		return withoutSectionItemMeta(f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter))
 	default:
-		return nil, 0, fmt.Errorf("unsupported section type: %s", s.SectionType)
+		return nil, 0, nil, fmt.Errorf("unsupported section type: %s", s.SectionType)
 	}
+}
+
+func withoutSectionItemMeta(items []*models.MediaItem, total int, err error) ([]*models.MediaItem, int, map[string]SectionItemMeta, error) {
+	return items, total, nil, err
 }
 
 func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
@@ -1448,7 +1539,8 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 				Config:      cfgBytes,
 				Position:    s.Position,
 			}
-			return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
+			items, total, _, err := f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
+			return items, total, err
 		}
 
 		qd = applySectionLibraryScopeToQuery(qd.Normalize(), libraryID, libraryIDs)
@@ -2577,10 +2669,10 @@ func (f *Fetcher) fetchRecentlyReleased(ctx context.Context, s ResolvedSection, 
 	return items, len(items), err
 }
 
-func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, map[string]SectionItemMeta, error) {
 	def, err := ParseQueryDefinition(s.Config)
 	if err != nil {
-		return nil, 0, fmt.Errorf("parsing query definition: %w", err)
+		return nil, 0, nil, fmt.Errorf("parsing query definition: %w", err)
 	}
 
 	def = applySectionLibraryScopeToQuery(def, libraryID, libraryIDs)
@@ -2593,7 +2685,11 @@ func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryI
 	executor := &catalog.QueryExecutor{Pool: f.pool}
 	items, _, hasMore, err := executor.PreviewPage(ctx, def, filter, s.ItemLimit, 0, false)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
+	}
+	itemMeta, err := f.fetchEpisodeCatalogItemMeta(ctx, items, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, 0, nil, err
 	}
 
 	total := len(items)
@@ -2601,7 +2697,7 @@ func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryI
 		total = s.ItemLimit + 1
 	}
 
-	return items, total, nil
+	return items, total, itemMeta, nil
 }
 
 func applySectionLibraryScopeToQuery(def catalog.QueryDefinition, libraryID *int, libraryIDs []int) catalog.QueryDefinition {
@@ -2749,6 +2845,44 @@ func (f *Fetcher) fetchItemsByContentIDsFiltered(ctx context.Context, contentIDs
 }
 
 func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
+	return f.fetchEpisodeTargetsByContentIDsWithBackdropPolicy(ctx, contentIDs, libraryID, libraryIDs, filter, episodeBackdropPrefersStill)
+}
+
+type episodeBackdropPolicy int
+
+const (
+	episodeBackdropPrefersStill episodeBackdropPolicy = iota
+	episodeBackdropSeriesOnly
+)
+
+type episodeArtworkCandidate struct {
+	path      string
+	thumbhash string
+	owner     SectionArtworkOwner
+}
+
+func chooseEpisodeArtwork(candidates ...episodeArtworkCandidate) (string, string, SectionArtworkOwner) {
+	var path string
+	var owner SectionArtworkOwner
+	for _, candidate := range candidates {
+		if candidate.path != "" {
+			path = candidate.path
+			owner = candidate.owner
+			break
+		}
+	}
+
+	var thumbhash string
+	for _, candidate := range candidates {
+		if candidate.thumbhash != "" {
+			thumbhash = candidate.thumbhash
+			break
+		}
+	}
+	return path, thumbhash, owner
+}
+
+func (f *Fetcher) fetchEpisodeTargetsByContentIDsWithBackdropPolicy(ctx context.Context, contentIDs []string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, backdropPolicy episodeBackdropPolicy) ([]*models.MediaItem, map[string]SectionItemMeta, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, map[string]SectionItemMeta{}, nil
 	}
@@ -2780,17 +2914,22 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			e.overview,
 			e.runtime,
 			e.rating_imdb,
-			COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
-			COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
+			COALESCE(s.content_id, ''),
+			COALESCE(s.poster_path, ''),
+			COALESCE(s.poster_thumbhash, ''),
+			COALESCE(si.poster_path, ''),
+			COALESCE(si.poster_thumbhash, ''),
+			COALESCE(e.still_path, ''),
+			COALESCE(e.still_thumbhash, ''),
 			e.season_number,
 			e.episode_number,
 			e.air_date,
 			si.title,
 			si.genres,
 			si.content_rating,
-			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
-			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
-			si.logo_path,
+			COALESCE(si.backdrop_path, ''),
+			COALESCE(si.backdrop_thumbhash, ''),
+			COALESCE(si.logo_path, ''),
 			si.status
 		FROM %s
 		WHERE %s
@@ -2806,12 +2945,22 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	itemMeta := map[string]SectionItemMeta{}
 	for rows.Next() {
 		var (
-			item          models.MediaItem
-			seriesID      string
-			seasonNumber  int
-			episodeNumber int
-			seriesTitle   string
-			airDate       *time.Time
+			item                    models.MediaItem
+			seriesID                string
+			seasonContentID         string
+			seasonPosterPath        string
+			seasonPosterThumbhash   string
+			seriesPosterPath        string
+			seriesPosterThumbhash   string
+			episodeStillPath        string
+			episodeStillThumbhash   string
+			seasonNumber            int
+			episodeNumber           int
+			seriesTitle             string
+			seriesBackdropPath      string
+			seriesBackdropThumbhash string
+			seriesLogoPath          string
+			airDate                 *time.Time
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2821,28 +2970,60 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.Overview,
 			&item.Runtime,
 			&item.RatingIMDB,
-			&item.PosterPath,
-			&item.PosterThumbhash,
+			&seasonContentID,
+			&seasonPosterPath,
+			&seasonPosterThumbhash,
+			&seriesPosterPath,
+			&seriesPosterThumbhash,
+			&episodeStillPath,
+			&episodeStillThumbhash,
 			&seasonNumber,
 			&episodeNumber,
 			&airDate,
 			&seriesTitle,
 			&item.Genres,
 			&item.ContentRating,
-			&item.BackdropPath,
-			&item.BackdropThumbhash,
-			&item.LogoPath,
+			&seriesBackdropPath,
+			&seriesBackdropThumbhash,
+			&seriesLogoPath,
 			&item.Status,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
+
+		seriesOwner := SectionArtworkOwner{Kind: SectionArtworkOwnerSeries, ContentID: seriesID}
+		seasonOwner := SectionArtworkOwner{Kind: SectionArtworkOwnerSeason, ContentID: seasonContentID}
+		episodeOwner := SectionArtworkOwner{Kind: SectionArtworkOwnerEpisode, ContentID: item.ContentID}
+		posterPath, posterThumbhash, posterOwner := chooseEpisodeArtwork(
+			episodeArtworkCandidate{path: seasonPosterPath, thumbhash: seasonPosterThumbhash, owner: seasonOwner},
+			episodeArtworkCandidate{path: seriesPosterPath, thumbhash: seriesPosterThumbhash, owner: seriesOwner},
+			episodeArtworkCandidate{path: episodeStillPath, thumbhash: episodeStillThumbhash, owner: episodeOwner},
+		)
+		item.PosterPath = posterPath
+		item.PosterThumbhash = posterThumbhash
+		backdropCandidates := []episodeArtworkCandidate{{path: seriesBackdropPath, thumbhash: seriesBackdropThumbhash, owner: seriesOwner}}
+		if backdropPolicy == episodeBackdropPrefersStill {
+			backdropCandidates = append([]episodeArtworkCandidate{{path: episodeStillPath, thumbhash: episodeStillThumbhash, owner: episodeOwner}}, backdropCandidates...)
+		}
+		backdropPath, backdropThumbhash, backdropOwner := chooseEpisodeArtwork(backdropCandidates...)
+		item.BackdropPath = backdropPath
+		item.BackdropThumbhash = backdropThumbhash
+		item.LogoPath = seriesLogoPath
+		logoOwner := SectionArtworkOwner{}
+		if seriesLogoPath != "" {
+			logoOwner = seriesOwner
+		}
+
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
 			SeriesID:      &seriesID,
 			SeriesTitle:   seriesTitle,
 			SeasonNumber:  &seasonNumber,
 			EpisodeNumber: &episodeNumber,
+			PosterOwner:   posterOwner,
+			BackdropOwner: backdropOwner,
+			LogoOwner:     logoOwner,
 			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
 		}
 	}

@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -13,12 +14,22 @@ type ArtworkRevisionGCRunner interface {
 	Run(ctx context.Context) (metadata.ArtworkRevisionGCStats, error)
 }
 
-type CleanupArtworkRevisionsTask struct {
-	runner ArtworkRevisionGCRunner
+// ArtworkTempFileSweeper removes abandoned temporary files from a filesystem
+// artwork store. Crash debris under the store root is invisible to the catalog
+// but occupies bytes forever unless something sweeps it; this task is that
+// something. Satisfied by *artworkstore.FilesystemStore; nil on S3 installs,
+// which have no temp files to sweep.
+type ArtworkTempFileSweeper interface {
+	CleanTempFiles(ctx context.Context, olderThan time.Duration) (int, error)
 }
 
-func NewCleanupArtworkRevisionsTask(runner ArtworkRevisionGCRunner) *CleanupArtworkRevisionsTask {
-	return &CleanupArtworkRevisionsTask{runner: runner}
+type CleanupArtworkRevisionsTask struct {
+	runner  ArtworkRevisionGCRunner
+	sweeper ArtworkTempFileSweeper
+}
+
+func NewCleanupArtworkRevisionsTask(runner ArtworkRevisionGCRunner, sweeper ArtworkTempFileSweeper) *CleanupArtworkRevisionsTask {
+	return &CleanupArtworkRevisionsTask{runner: runner, sweeper: sweeper}
 }
 
 func (t *CleanupArtworkRevisionsTask) Key() string  { return "cleanup_artwork_revisions" }
@@ -48,9 +59,21 @@ func (t *CleanupArtworkRevisionsTask) Execute(ctx context.Context, progress task
 	if err != nil {
 		return fmt.Errorf("cleaning artwork revisions: %w", err)
 	}
+	tempSummary := ""
+	if t.sweeper != nil {
+		progress.Report(95, "Sweeping abandoned temporary artwork files")
+		removed, sweepErr := t.sweeper.CleanTempFiles(ctx, 0)
+		if sweepErr != nil {
+			// Revision GC succeeded; debris that survives one sweep is retried
+			// on the next run, so report rather than fail.
+			slog.WarnContext(ctx, "artwork temp-file sweep reported errors",
+				"component", "tasks", "removed", removed, "error", sweepErr)
+		}
+		tempSummary = fmt.Sprintf(", swept %d temp files", removed)
+	}
 	progress.Report(100, fmt.Sprintf(
-		"Processed %d revisions: deleted %d, retained %d referenced, scheduled %d retries",
-		stats.Claimed, stats.Deleted, stats.Referenced, stats.Retried,
+		"Processed %d revisions: deleted %d, retained %d referenced, scheduled %d retries%s",
+		stats.Claimed, stats.Deleted, stats.Referenced, stats.Retried, tempSummary,
 	))
 	return nil
 }

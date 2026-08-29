@@ -3486,6 +3486,81 @@ export interface AdminJobsResponse {
   jobs: AdminJob[];
 }
 
+export interface ArtworkStorageTotal {
+  physical_bytes: number;
+  pending_gc_bytes: number;
+  missing_bytes: number;
+  repair_pending_bytes: number;
+  protected_bytes: number;
+  reclaimable_bytes: number;
+  object_count: number;
+  revision_count: number;
+  missing_revision_count: number;
+  repairing_revision_count: number;
+  protected_loss_count: number;
+}
+
+export interface ArtworkLibraryAccounting {
+  library_id: number;
+  referenced_bytes: number;
+  exclusive_bytes: number;
+  shared_bytes: number;
+  reclaimable_bytes: number;
+  protected_bytes: number;
+  object_count: number;
+  revision_count: number;
+  missing_bytes: number;
+  repair_pending_bytes: number;
+  protected_loss_bytes: number;
+  missing_revisions: number;
+  repairing_revisions: number;
+  protected_losses: number;
+}
+
+export interface ArtworkStorageAccounting {
+  snapshot_at?: string;
+  backend: "local" | "s3" | string;
+  resolved_path?: string;
+  store_health:
+    | "healthy"
+    | "degraded"
+    | "unavailable"
+    | "empty_rebuilding"
+    | "wrong_mount"
+    | string;
+  store_health_changed_at?: string;
+  free_space_bytes?: number;
+  unsupported_topology_warnings?: string[];
+  complete: boolean;
+  known_bytes: number;
+  total: ArtworkStorageTotal;
+  libraries: ArtworkLibraryAccounting[];
+  coverage_limited: boolean;
+  coverage_limit_reason?: string;
+  failure_count: number;
+  untracked_user_artwork: boolean;
+  adoption_index_bytes: number;
+  adoption_index_objects: number;
+  branding_bytes: number;
+  branding_objects: number;
+  legacy_upload_bytes: number;
+  legacy_upload_objects: number;
+  seed: {
+    bytes: number;
+    expired_bytes: number;
+    revisions: number;
+    retained_unverifiable_bytes: number;
+    retained_unverifiable_revisions: number;
+    last_import_at?: string;
+  };
+}
+
+export interface ArtworkPurgeRequest {
+  scope: { server?: boolean; library_id?: number };
+  mode: "edge_only" | "safe_materialized";
+  dry_run: boolean;
+}
+
 // Library Provider Chain
 export interface LibraryProviderChainEntry {
   plugin_installation_id: number;

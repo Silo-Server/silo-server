@@ -24,8 +24,15 @@ type CalendarEvent struct {
 	AirTimezone     *string
 	PosterPath      string
 	PosterThumbhash string
-	IsPremiere      bool
-	IsFinale        bool
+	// PosterIsSeason reports that PosterPath came from the season row itself
+	// rather than the parent series. Only a season_premiere event can set it,
+	// and only when that season carries its own poster — the season branch
+	// falls back to the series poster otherwise. Callers minting artwork
+	// capabilities must name the season surface in that case, because
+	// delivery reloads the current selection from the owning catalog row.
+	PosterIsSeason bool
+	IsPremiere     bool
+	IsFinale       bool
 }
 
 // CalendarFilter holds the parameters for a calendar query.
@@ -76,7 +83,7 @@ func (r *CalendarRepository) ListEvents(ctx context.Context, f CalendarFilter) (
 		if err := rows.Scan(
 			&ev.ContentID, &ev.Type, &ev.Title, &episodeTitle, &seriesID,
 			&seasonNum, &episodeNum, &ev.AirDate, &ev.AirTime, &ev.AirTimezone,
-			&ev.PosterPath, &ev.PosterThumbhash,
+			&ev.PosterPath, &ev.PosterThumbhash, &ev.PosterIsSeason,
 			&ev.IsPremiere, &ev.IsFinale,
 		); err != nil {
 			return nil, fmt.Errorf("scanning calendar row: %w", err)
@@ -141,7 +148,7 @@ func (r *CalendarRepository) buildListEventsQuery(f CalendarFilter) (string, []a
      )
 SELECT content_id, type, title, episode_title, series_id,
        season_number, episode_number, air_date, air_time, air_timezone,
-       poster_path, poster_thumbhash,
+       poster_path, poster_thumbhash, poster_is_season,
        is_premiere, is_finale
 FROM (
 %s UNION ALL %s UNION ALL %s
@@ -165,7 +172,7 @@ func (r *CalendarRepository) buildMovieBranch(startArg, endArg, restrictArg int,
        mi.title, NULL::text AS episode_title, NULL::text AS series_id,
        NULL::int AS season_number, NULL::int AS episode_number,
        mi.release_date AS air_date, NULL::text AS air_time, NULL::text AS air_timezone,
-       mi.poster_path, mi.poster_thumbhash,
+       mi.poster_path, mi.poster_thumbhash, FALSE AS poster_is_season,
        FALSE AS is_premiere, FALSE AS is_finale
 FROM media_items mi
 WHERE %s`, strings.Join(conditions, " AND "))
@@ -194,7 +201,7 @@ func (r *CalendarRepository) buildEpisodeBranch() string {
        fe.title, fe.episode_title, fe.series_id,
        fe.season_number, fe.episode_number,
        fe.air_date, fe.air_time, fe.air_timezone,
-       fe.poster_path, fe.poster_thumbhash,
+       fe.poster_path, fe.poster_thumbhash, FALSE AS poster_is_season,
        (fe.episode_number = 1) AS is_premiere,
        (fe.episode_number = sf.max_episode_number) AS is_finale
 FROM filtered_episodes fe
@@ -213,7 +220,8 @@ func (r *CalendarRepository) buildFilteredSeasonsCTE(startArg, endArg, restrictA
 	return fmt.Sprintf(`SELECT s.content_id, s.series_id, s.season_number,
        s.title AS episode_title, s.air_date, mi.title AS title, mi.air_time, mi.air_timezone,
        COALESCE(NULLIF(s.poster_path, ''), mi.poster_path) AS poster_path,
-       COALESCE(NULLIF(s.poster_thumbhash, ''), mi.poster_thumbhash) AS poster_thumbhash
+       COALESCE(NULLIF(s.poster_thumbhash, ''), mi.poster_thumbhash) AS poster_thumbhash,
+       (NULLIF(s.poster_path, '') IS NOT NULL) AS poster_is_season
 FROM seasons s
 JOIN media_items mi ON mi.content_id = s.series_id
 WHERE %s`, strings.Join(conditions, " AND "))
@@ -224,7 +232,7 @@ func (r *CalendarRepository) buildSeasonBranch() string {
        fs.title, fs.episode_title, fs.series_id,
        fs.season_number, NULL::int AS episode_number,
        fs.air_date, fs.air_time, fs.air_timezone,
-       fs.poster_path, fs.poster_thumbhash,
+       fs.poster_path, fs.poster_thumbhash, fs.poster_is_season,
        TRUE AS is_premiere, FALSE AS is_finale
 FROM filtered_seasons fs
 LEFT JOIN episode_one_with_air_date e1

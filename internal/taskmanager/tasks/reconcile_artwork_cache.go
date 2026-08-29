@@ -22,8 +22,12 @@ import (
 var ErrArtworkReconcileManualRunRequired = errors.New("artwork storage changed; manual reconcile required")
 
 // ArtworkStorageIdentityKey is the server_settings key holding the storage
-// identity fingerprint of the public S3 bucket the artwork cache was last
-// reconciled against. Machine-managed; not an admin-editable setting.
+// identity fingerprint of the artwork store the cache was last reconciled
+// against. Machine-managed; not an admin-editable setting.
+//
+// The key name predates non-bucket artwork storage and is deliberately not
+// renamed: the row is durable state on every existing installation, and
+// renaming it would make every upgraded server look like it had moved storage.
 const (
 	ArtworkStorageIdentityKey = "s3.public_storage_identity"
 	// ArtworkStorageReconcileCheckpointKey holds a machine-managed verify
@@ -47,6 +51,15 @@ const (
 func ArtworkStorageIdentity(endpoint, bucket, keyPrefix string) string {
 	insensitive := func(v string) string { return strings.ToLower(strings.TrimSpace(v)) }
 	return insensitive(endpoint) + "|" + insensitive(bucket) + "|" + s3client.NormalizeKeyPrefix(keyPrefix)
+}
+
+// LocalArtworkStorageIdentity builds the fingerprint of a filesystem artwork
+// store from its store-marker generation. The configured path is deliberately
+// not part of it: remounting the same store somewhere else is not a storage
+// move, while pointing the same path at a different (or freshly emptied)
+// directory is — and that is exactly what the generation changes on.
+func LocalArtworkStorageIdentity(generation string) string {
+	return "local|" + strings.TrimSpace(generation)
 }
 
 // ArtworkReconcileSettingsStore is the server-settings surface the task needs.

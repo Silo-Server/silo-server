@@ -380,16 +380,17 @@ func (r *SeasonRepository) UpdateMetadata(ctx context.Context, contentID string,
 	return nil
 }
 
-func (r *SeasonRepository) UpdateArtworkIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
+func (r *SeasonRepository) UpdateArtworkIfSourceMatches(ctx context.Context, seriesID string, seasonNumber int, sourcePath, cachedPath, thumbhash string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE seasons
-		SET poster_path = $3,
-			poster_source_path = $2,
-			poster_thumbhash = $4,
+		SET poster_path = $4,
+			poster_source_path = $3,
+			poster_thumbhash = $5,
 			updated_at = NOW()
-		WHERE content_id = $1
-		  AND poster_source_path = $2
-	`, contentID, sourcePath, cachedPath, thumbhash)
+		WHERE series_id = $1
+		  AND season_number = $2
+		  AND poster_source_path = $3
+	`, seriesID, seasonNumber, sourcePath, cachedPath, thumbhash)
 	if err != nil {
 		return false, fmt.Errorf("updating season cached artwork: %w", err)
 	}

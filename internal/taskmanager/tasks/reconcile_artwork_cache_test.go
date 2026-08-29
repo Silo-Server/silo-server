@@ -175,7 +175,7 @@ func TestReconcileArtworkCacheExecuteResumesMatchingCheckpoint(t *testing.T) {
 	checkpoint := metadata.ArtworkReconcileCheckpoint{
 		Version:       1,
 		Totals:        make([]int, 14),
-		SurfaceIndex:  9,
+		SurfaceName:   "person photos",
 		SurfaceCursor: []string{"128111764822294558"},
 		SurfaceDone:   500,
 		Done:          21500,
@@ -211,7 +211,7 @@ func TestReconcileArtworkCacheExecuteResumesMatchingCheckpoint(t *testing.T) {
 	if err := resumeTask.Execute(context.Background(), &fakeProgress{}); err != nil {
 		t.Fatalf("resumed Execute: %v", err)
 	}
-	if resumed.received == nil || resumed.received.SurfaceIndex != checkpoint.SurfaceIndex ||
+	if resumed.received == nil || resumed.received.SurfaceName != checkpoint.SurfaceName ||
 		len(resumed.received.SurfaceCursor) != 1 || resumed.received.SurfaceCursor[0] != checkpoint.SurfaceCursor[0] {
 		t.Fatalf("resumed checkpoint = %#v, want %#v", resumed.received, checkpoint)
 	}
@@ -228,10 +228,10 @@ func TestReconcileArtworkCacheExecuteResumesMatchingCheckpoint(t *testing.T) {
 
 func TestReconcileArtworkCacheCheckpointIsScopedToStorageMove(t *testing.T) {
 	checkpoint := metadata.ArtworkReconcileCheckpoint{
-		Version:      1,
-		Totals:       make([]int, 14),
-		SurfaceIndex: 3,
-		Stats:        metadata.ArtworkReconcileStats{Mode: "verify"},
+		Version:     1,
+		Totals:      make([]int, 14),
+		SurfaceName: "localized item posters",
+		Stats:       metadata.ArtworkReconcileStats{Mode: "verify"},
 	}
 	envelope, err := json.Marshal(artworkReconcileCheckpointEnvelope{
 		BaselineIdentity: "older",
@@ -280,10 +280,10 @@ func TestReconcileArtworkCacheIgnoresMalformedCheckpoint(t *testing.T) {
 
 func TestReconcileArtworkCacheManualRunIgnoresSameIdentityCheckpoint(t *testing.T) {
 	checkpoint := metadata.ArtworkReconcileCheckpoint{
-		Version:      1,
-		Totals:       make([]int, 14),
-		SurfaceIndex: 3,
-		Stats:        metadata.ArtworkReconcileStats{Mode: metadata.ArtworkReconcileModeVerify},
+		Version:     1,
+		Totals:      make([]int, 14),
+		SurfaceName: "localized item posters",
+		Stats:       metadata.ArtworkReconcileStats{Mode: metadata.ArtworkReconcileModeVerify},
 	}
 	envelope, err := json.Marshal(artworkReconcileCheckpointEnvelope{
 		BaselineIdentity: "current",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -25,9 +28,20 @@ type CollectionHandler struct {
 	storeProvider      userstore.UserStoreProvider
 	LibraryCollections collectionPreferenceLibraryReader
 	Executor           *catalog.QueryExecutor
-	S3GP               *s3client.Client
-	HTTPClient         *http.Client
-	PresignTTL         time.Duration
+	// S3GP is retained only to sweep the mutable per-collection objects
+	// written before collection artwork became content-addressed.
+	S3GP *s3client.Client
+	// ArtworkUploads materializes uploaded posters into the artwork store.
+	ArtworkUploads *artworkupload.Materializer
+	// TrackArtworkRevisions registers uploaded poster revisions with artwork
+	// garbage collection. Set only when the user store keeps personal
+	// collection rows in catalog tables (the Postgres backend); rows in
+	// per-user SQLite files are invisible to the collector's reference union,
+	// so tracking there would delete live posters after the grace period.
+	TrackArtworkRevisions bool
+	// ArtworkURLs resolves a stored poster key to a URL a client can load.
+	ArtworkURLs ArtworkURLResolver
+	HTTPClient  *http.Client
 }
 
 // NewCollectionHandler creates a new CollectionHandler.
@@ -985,7 +999,7 @@ func (h *CollectionHandler) HandleDeleteCollectionImage(w http.ResponseWriter, r
 		return
 	}
 
-	if err := removeCollectionImageVariants(r.Context(), h.S3GP, userCollectionImagePrefix, collectionID, imageType); err != nil {
+	if err := removeLegacyCollectionImageVariants(r.Context(), h.S3GP, userCollectionImagePrefix, collectionID, imageType); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete images")
 		return
 	}
@@ -1054,13 +1068,10 @@ func (h *CollectionHandler) processCollectionPoster(
 		fileData = downloaded
 	}
 
-	if h.S3GP == nil {
-		return fmt.Errorf("poster upload requires configured object storage")
+	if !h.ArtworkUploads.Available() {
+		return fmt.Errorf("poster upload requires configured artwork storage")
 	}
-	if err := removeCollectionImageVariants(r.Context(), h.S3GP, userCollectionImagePrefix, collectionID, "poster"); err != nil {
-		return fmt.Errorf("clearing previous poster: %w", err)
-	}
-	s3Path, thumbhash, err := uploadCollectionImageVariants(r.Context(), h.S3GP, userCollectionImagePrefix, collectionID, "poster", fileData)
+	storedPath, thumbhash, err := materializeCollectionImage(r.Context(), h.ArtworkUploads, artworkkey.ImageTypePoster, fileData, h.TrackArtworkRevisions)
 	if err != nil {
 		return fmt.Errorf("poster: %w", err)
 	}
@@ -1068,7 +1079,7 @@ func (h *CollectionHandler) processCollectionPoster(
 	if err := store.UpdateCollection(r.Context(), userstore.UpdateCollectionInput{
 		ID:               collectionID,
 		RequestProfileID: requestProfileID,
-		PosterURL:        &s3Path,
+		PosterURL:        &storedPath,
 		PosterThumbhash:  &thumbhash,
 	}); err != nil {
 		if strings.Contains(err.Error(), "creator") {
@@ -1076,34 +1087,17 @@ func (h *CollectionHandler) processCollectionPoster(
 		}
 		return fmt.Errorf("persisting poster: %w", err)
 	}
+	if err := removeLegacyCollectionImageVariants(r.Context(), h.S3GP, userCollectionImagePrefix, collectionID, "poster"); err != nil {
+		slog.WarnContext(r.Context(), "failed to clean up legacy personal collection poster", "component", "api",
+			"collection_id", collectionID, "error", err)
+	}
 	return nil
 }
 
-// presignUserCollectionPoster returns a presigned URL for the card-sized
-// variant of the stored poster, mirroring the admin pipeline. Empty paths
-// return "".
-func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
-	}
-	if h.S3GP == nil {
-		return ""
-	}
-	ttl := h.PresignTTL
-	if ttl <= 0 {
-		ttl = 4 * time.Hour
-	}
-	url, err := h.S3GP.PresignGetURL(ctx, h.S3GP.Bucket(), cardThumbnailPath(path), ttl)
-	if err != nil {
-		return ""
-	}
-	return url
+// userCollectionPosterURL resolves the card-sized variant of a stored user
+// collection poster, mirroring the admin pipeline. Empty paths return "".
+func (h *CollectionHandler) userCollectionPosterURL(ctx context.Context, userID int, collectionID, path string) string {
+	return resolveTargetStoredImageURL(ctx, h.ArtworkURLs, userCollectionPosterTarget(userID, collectionID), path, "w300")
 }
 
 // toCollectionResponse mirrors the package-level helper but presigns artwork
@@ -1112,6 +1106,6 @@ func (h *CollectionHandler) presignUserCollectionPoster(ctx context.Context, pat
 // presign capability.
 func (h *CollectionHandler) toCollectionResponse(r *http.Request, c userstore.Collection) collectionResponse {
 	resp := toCollectionResponse(c)
-	resp.PosterURL = h.presignUserCollectionPoster(r.Context(), c.PosterURL)
+	resp.PosterURL = h.userCollectionPosterURL(r.Context(), apimw.GetUserID(r.Context()), c.ID, c.PosterURL)
 	return resp
 }

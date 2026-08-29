@@ -113,10 +113,11 @@ type Service struct {
 	settings      SettingsReader
 
 	// Offline-manifest dependencies (Phase 2); nil until SetOfflineDeps wires them.
-	manifest       *ManifestBuilder
-	subtitleSource SubtitleSource
-	artworkSource  ManifestSource
-	httpClient     *http.Client
+	manifest        *ManifestBuilder
+	subtitleSource  SubtitleSource
+	artworkSource   ManifestSource
+	artworkDelivery http.Handler
+	httpClient      *http.Client
 
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
 	artifacts *ArtifactManager
@@ -149,6 +150,12 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		client = http.DefaultClient
 	}
 	s.httpClient = client
+}
+
+// SetArtworkDelivery wires the in-process handler for root-relative artwork
+// capability URLs returned by the catalog detail service.
+func (s *Service) SetArtworkDelivery(handler http.Handler) {
+	s.artworkDelivery = handler
 }
 
 // SetArtifactManager wires the prepare-to-file pipeline. When unset, remux/

@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -1309,8 +1310,8 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 		}
 	}
 	userStates := h.listSectionItemUserStates(r, allItems)
-	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems, requestImageSize(r))
 	episodeMeta := h.listSectionEpisodeItemMeta(r.Context(), withItems, requestAccessFilter(r))
+	imageURLs := h.resolveSectionItemImageURLs(r.Context(), withItems, episodeMeta, requestImageSize(r))
 	mangaChapterMeta := h.listSectionMangaChapterItemMeta(r.Context(), allItems)
 	for _, s := range withItems {
 		items := make([]sectionItemResponse, 0, len(s.Items))
@@ -1414,7 +1415,7 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 				continue
 			}
 			if section.ItemMeta != nil {
-				if _, ok := section.ItemMeta[item.ContentID]; ok {
+				if meta, ok := section.ItemMeta[item.ContentID]; ok && sectionEpisodeArtworkMetaComplete(item, meta) {
 					continue
 				}
 			}
@@ -1437,63 +1438,146 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 	return meta
 }
 
-func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
+func sectionEpisodeArtworkMetaComplete(item *models.MediaItem, meta sections.SectionItemMeta) bool {
+	return (item.PosterPath == "" || meta.PosterOwner.ContentID != "") &&
+		(item.BackdropPath == "" || meta.BackdropOwner.ContentID != "") &&
+		(item.LogoPath == "" || meta.LogoOwner.ContentID != "")
+}
+
+func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, episodeMeta map[string]sections.SectionItemMeta, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
 	result := make(map[sectionItemImageKey]sectionItemImageURLs)
 	if h.DetailSvc == nil {
 		return result
 	}
 
 	type pendingImages struct {
-		key          sectionItemImageKey
-		posterPath   string
-		backdropPath string
-		logoPath     string
+		key             sectionItemImageKey
+		posterTarget    artworkurl.Target
+		backdropTarget  artworkurl.Target
+		logoTarget      artworkurl.Target
+		posterVariant   string
+		backdropVariant string
+		logoVariant     string
 	}
 
 	pending := make([]pendingImages, 0)
-	paths := make([]string, 0)
-	seenPaths := make(map[string]struct{})
-	addPath := func(path string) {
-		if path == "" || path == "-" {
-			return
-		}
-		if _, ok := seenPaths[path]; ok {
-			return
-		}
-		seenPaths[path] = struct{}{}
-		paths = append(paths, path)
-	}
+	requests := make([]artworkurl.TargetRequest, 0)
 
 	for _, section := range withItems {
 		for _, item := range section.Items {
 			if item == nil {
 				continue
 			}
+			var (
+				meta    sections.SectionItemMeta
+				hasMeta bool
+			)
+			if section.ItemMeta != nil {
+				meta, hasMeta = section.ItemMeta[item.ContentID]
+			}
+			fallbackMeta, hasFallbackMeta := episodeMeta[item.ContentID]
+			if !hasMeta {
+				meta = fallbackMeta
+			} else if hasFallbackMeta {
+				if meta.PosterOwner.ContentID == "" {
+					meta.PosterOwner = fallbackMeta.PosterOwner
+				}
+				if meta.BackdropOwner.ContentID == "" {
+					meta.BackdropOwner = fallbackMeta.BackdropOwner
+				}
+				if meta.LogoOwner.ContentID == "" {
+					meta.LogoOwner = fallbackMeta.LogoOwner
+				}
+			}
+			poster := sectionArtworkTarget(item.ContentID, item.PosterPath, artworkImagePoster, meta.PosterOwner)
+			backdrop := sectionArtworkTarget(item.ContentID, item.BackdropPath, artworkImageBackdrop, meta.BackdropOwner)
+			logo := sectionArtworkTarget(item.ContentID, item.LogoPath, artworkImageLogo, meta.LogoOwner)
+			posterVariant := artworkkey.VariantW500
+			// Continue Watching / Next Up rows render as wide cards; every
+			// other section keeps the featured-style hero backdrop, the same
+			// split the legacy path pipeline made in sectionBackdropPath.
+			backdropVariant := artworkkey.VariantW1920
+			if section.SectionType == sections.SectionContinueWatching || section.SectionType == sections.SectionNextUp {
+				backdropVariant = artworkkey.VariantW1280
+			}
+			logoVariant := artworkkey.OriginalVariant
+			if size != imagesize.Unset {
+				posterVariant = imagesize.Variant(artworkkey.ImageTypePoster, size)
+				backdropVariant = imagesize.Variant(imageTypeForBackdropPath(item.BackdropPath), size)
+				logoVariant = imagesize.Variant(artworkkey.ImageTypeLogo, size)
+			}
+			// An episode-owned backdrop is minted against the still ladder,
+			// which has no w1280/w1920 rungs; signing one of those would fail
+			// validation and drop the URL entirely, so clamp to the widest
+			// still rung instead.
+			if backdrop.Slot == artworkImageStill {
+				switch backdropVariant {
+				case artworkkey.VariantW1920, artworkkey.VariantW1280:
+					backdropVariant = artworkkey.VariantW780
+				}
+			}
 			images := pendingImages{
 				key: sectionItemImageKey{
 					sectionID: section.ID,
 					contentID: item.ContentID,
 				},
-				posterPath:   sizedPosterPath(item.PosterPath, size),
-				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
-				logoPath:     sizedImagePath(item.LogoPath, artworkkey.ImageLogo, size, item.LogoPath),
+				posterTarget:    poster,
+				backdropTarget:  backdrop,
+				logoTarget:      logo,
+				posterVariant:   posterVariant,
+				backdropVariant: backdropVariant,
+				logoVariant:     logoVariant,
 			}
 			pending = append(pending, images)
-			addPath(images.posterPath)
-			addPath(images.backdropPath)
-			addPath(images.logoPath)
+			requests = append(requests,
+				artworkurl.TargetRequest{Target: backdrop, Variant: images.backdropVariant},
+				artworkurl.TargetRequest{Target: poster, Variant: images.posterVariant},
+				artworkurl.TargetRequest{Target: logo, Variant: images.logoVariant},
+			)
 		}
 	}
 
-	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", size))
+	resolved := h.DetailSvc.PresignArtworkTargetRequestsWithExpiry(ctx, requests)
 	for _, images := range pending {
 		result[images.key] = sectionItemImageURLs{
-			posterURL:   resolved[images.posterPath].URL,
-			backdropURL: resolved[images.backdropPath].URL,
-			logoURL:     resolved[images.logoPath].URL,
+			posterURL:   resolved[(artworkurl.TargetRequest{Target: images.posterTarget, Variant: images.posterVariant}).CacheKey()].URL,
+			backdropURL: resolved[(artworkurl.TargetRequest{Target: images.backdropTarget, Variant: images.backdropVariant}).CacheKey()].URL,
+			logoURL:     resolved[(artworkurl.TargetRequest{Target: images.logoTarget, Variant: images.logoVariant}).CacheKey()].URL,
 		}
 	}
 	return result
+}
+
+func sectionArtworkTarget(itemID string, reference string, imageType string, owner sections.SectionArtworkOwner) artworkurl.Target {
+	surface := artworkurl.SurfaceItemPosters
+	switch imageType {
+	case artworkImageBackdrop:
+		surface = artworkurl.SurfaceItemBackdrops
+	case artworkImageLogo:
+		surface = artworkurl.SurfaceItemLogos
+	}
+
+	key := itemID
+	slot := imageType
+	if owner.ContentID != "" {
+		switch owner.Kind {
+		case sections.SectionArtworkOwnerSeries:
+			key = owner.ContentID
+		case sections.SectionArtworkOwnerSeason:
+			if imageType == artworkImagePoster {
+				surface = artworkurl.SurfaceSeasonPosters
+				key = owner.ContentID
+			}
+		case sections.SectionArtworkOwnerEpisode:
+			if imageType == artworkImagePoster || imageType == artworkImageBackdrop {
+				surface = artworkurl.SurfaceEpisodeStills
+				key = owner.ContentID
+				slot = artworkImageStill
+			}
+		}
+	}
+
+	return artworkurl.Target{Surface: surface, Keys: []string{key}, Slot: slot}.WithReference(reference)
 }
 
 func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType, item *models.MediaItem, meta *sections.SectionItemMeta, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, imageURLs sectionItemImageURLs, resolvedPlayContentID string) sectionItemResponse {
@@ -1552,14 +1636,6 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	return resp
 }
 
-// sizedSectionBackdropPath applies the request's image size to a section
-// backdrop. An explicit size wins over the per-section default, including the
-// Continue Watching / Next Up special case below: a client that asked for one
-// size gets that size in every row.
-func sizedSectionBackdropPath(sectionType sections.SectionType, path string, size imagesize.Size) string {
-	return sizedImagePath(path, imageTypeForBackdropPath(path), size, sectionBackdropPath(sectionType, path))
-}
-
 // sectionBackdropPath keeps featured-style backdrops for most sections, but
 // uses the cached w1280 backdrop for Continue Watching / Next Up rows.
 func sectionBackdropPath(sectionType sections.SectionType, path string) string {
@@ -1567,6 +1643,10 @@ func sectionBackdropPath(sectionType sections.SectionType, path string) string {
 		return catalog.BackdropVariantPath(path, "w1280")
 	}
 	return featuredBackdropPath(path)
+}
+
+func sizedSectionBackdropPath(sectionType sections.SectionType, path string, size imagesize.Size) string {
+	return sizedImagePath(path, imageTypeForBackdropPath(path), size, sectionBackdropPath(sectionType, path))
 }
 
 func (h *SectionHandler) listSectionItemUserStates(r *http.Request, items []*models.MediaItem) map[string]*itemUserStateResponse {

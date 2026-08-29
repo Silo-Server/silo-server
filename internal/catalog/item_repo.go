@@ -890,6 +890,9 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 	if err := r.searchIndexEvents.EnqueueDelete(ctx, tx, contentID); err != nil {
 		return nil, fmt.Errorf("enqueueing catalog search delete: %w", err)
 	}
+	if err := queueLegacyArtworkPrefixes(ctx, tx, imageDirs); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit delete tx: %w", err)
 	}

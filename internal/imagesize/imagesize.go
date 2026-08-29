@@ -115,7 +115,7 @@ const (
 // mediumVariant is the pre-image_size default for an image type.
 func mediumVariant(imageType string) string {
 	// poster, still, logo, profile, and anything unrecognized share the default.
-	if strings.EqualFold(strings.TrimSpace(imageType), artworkkey.ImageBackdrop) {
+	if strings.EqualFold(strings.TrimSpace(imageType), artworkkey.ImageTypeBackdrop) {
 		return widthVariant(mediumBackdropWidth)
 	}
 	return widthVariant(mediumDefaultWidth)

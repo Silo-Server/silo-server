@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -69,5 +70,34 @@ func TestHandleImagesCapability(t *testing.T) {
 	}
 	if got.Widths["logo"].Large != 1280 {
 		t.Errorf("logo large width = %d, want 1280", got.Widths["logo"].Large)
+	}
+}
+
+func TestImageAndArtworkCapabilitiesAdvertiseTheSameLadder(t *testing.T) {
+	imagesRec := httptest.NewRecorder()
+	HandleImagesCapability(imagesRec, httptest.NewRequest(http.MethodGet, "/api/v1/images/capability", nil))
+	var images imagesCapabilityResponse
+	if err := json.Unmarshal(imagesRec.Body.Bytes(), &images); err != nil {
+		t.Fatal(err)
+	}
+
+	artworkRec := httptest.NewRecorder()
+	NewArtworkCapabilityHandler("local", nil).HandleCapability(artworkRec, httptest.NewRequest(http.MethodGet, "/api/v1/artwork/capability", nil))
+	var artwork artworkCapabilityResponse
+	if err := json.Unmarshal(artworkRec.Body.Bytes(), &artwork); err != nil {
+		t.Fatal(err)
+	}
+
+	for imageType, widths := range images.Widths {
+		advertised := make(map[string]bool, len(artwork.Variants[imageType]))
+		for _, variant := range artwork.Variants[imageType] {
+			advertised[variant] = true
+		}
+		for name, width := range map[string]int{"small": widths.Small, "medium": widths.Medium, "large": widths.Large} {
+			variant := "w" + strconv.Itoa(width)
+			if !advertised[variant] {
+				t.Errorf("images capability %s %s=%s is absent from artwork variants %v", imageType, name, variant, artwork.Variants[imageType])
+			}
+		}
 	}
 }

@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkmetrics"
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
@@ -39,6 +41,7 @@ const (
 	imageCacheCleanupTimeout   = 2 * time.Hour
 	libraryRefreshTimeout      = 6 * time.Hour
 	templateBundleApplyTimeout = 2 * time.Hour
+	artworkStorageTimeout      = 6 * time.Hour
 	jobTimeoutLong             = 2 * time.Hour // catalog_export, catalog_import
 )
 
@@ -51,6 +54,8 @@ type Runner struct {
 	libraryDelete       deleteLibraryExecutor
 	imageCacheCleanup   imageCacheCleanupExecutor
 	templateBundleApply templateBundleApplyExecutor
+	artworkStorage      *metadata.ArtworkStorageService
+	artworkPurge        artworkPurgeExecutor
 	realtimeHub         *notifications.Hub
 	pollInterval        time.Duration
 	cleanupInterval     time.Duration
@@ -60,6 +65,14 @@ type Runner struct {
 	cancelRegistry      *CancelRegistry
 	stop                chan struct{}
 	stopOnce            sync.Once
+}
+
+func (r *Runner) SetArtworkStorageExecutors(storage *metadata.ArtworkStorageService, purge artworkPurgeExecutor) {
+	if r == nil {
+		return
+	}
+	r.artworkStorage = storage
+	r.artworkPurge = purge
 }
 
 type itemRefreshExecutor interface {
@@ -150,6 +163,9 @@ func (r *Runner) runNext() {
 		JobTypeLibraryRefresh,
 		JobTypeDeleteLibrary,
 		JobTypeTemplateBundleApply,
+		JobTypeArtworkStorageRefresh,
+		JobTypeArtworkPurge,
+		JobTypeArtworkStorageImport,
 	})
 	cancel()
 	if err != nil {
@@ -185,9 +201,166 @@ func (r *Runner) runNext() {
 		r.executeTemplateBundleApply(job)
 	case JobTypeImageCacheCleanup:
 		r.executeImageCacheCleanup(job)
+	case JobTypeArtworkStorageRefresh:
+		r.executeArtworkStorageRefresh(job)
+	case JobTypeArtworkPurge:
+		r.executeArtworkPurge(job)
+	case JobTypeArtworkStorageImport:
+		r.executeArtworkStorageImport(job)
 	default:
 		r.failJob(job.ID, 0, 0, "Admin job failed", "unsupported admin job type")
 	}
+}
+
+func (r *Runner) executeArtworkStorageImport(job *models.AdminJob) {
+	if r.artworkStorage == nil {
+		r.failJob(job.ID, 0, 0, "Artwork store import failed", "artwork storage executor is not configured")
+		return
+	}
+	checkpoint, err := decodeArtworkInventoryCheckpoint(job.Checkpoint)
+	if err != nil {
+		r.failJob(job.ID, 0, 0, "Artwork store import failed", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), artworkStorageTimeout)
+	defer cancel()
+	heartbeatStop := make(chan struct{})
+	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
+	defer close(heartbeatStop)
+	progress := func(current, total int, message string) {
+		if err := r.repo.UpdateProgress(ctx, job.ID, current, total, message); err == nil {
+			r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+		}
+	}
+	result, err := r.artworkStorage.ImportPortable(ctx, checkpoint, func(next metadata.ArtworkInventoryCheckpoint) error {
+		return r.repo.UpdateCheckpoint(ctx, job.ID, next)
+	}, progress)
+	if err != nil {
+		r.failJob(job.ID, 0, 0, "Artwork store import failed", artworkStorageErrorMessage(ctx, err))
+		return
+	}
+	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+		ResultPayload: result, Message: "Portable artwork store imported",
+		ProgressCurrent: int(result.ImportedSeeds + result.AdoptedLive + result.RetainedUnverifiable),
+		ProgressTotal:   int(result.ImportedSeeds + result.AdoptedLive + result.RetainedUnverifiable), ExpiresAt: time.Now().UTC().Add(r.retention),
+	}); err != nil {
+		slog.Warn("admin jobs: failed to complete artwork store import", "job_id", job.ID, "error", err)
+		return
+	}
+	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+}
+
+func (r *Runner) executeArtworkStorageRefresh(job *models.AdminJob) {
+	if r.artworkStorage == nil {
+		r.failJob(job.ID, 0, 0, "Artwork storage refresh failed", "artwork storage executor is not configured")
+		return
+	}
+	checkpoint, err := decodeArtworkInventoryCheckpoint(job.Checkpoint)
+	if err != nil {
+		r.failJob(job.ID, 0, 0, "Artwork storage refresh failed", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), artworkStorageTimeout)
+	defer cancel()
+	heartbeatStop := make(chan struct{})
+	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
+	defer close(heartbeatStop)
+	progress := func(current, total int, message string) {
+		if err := r.repo.UpdateProgress(ctx, job.ID, current, total, message); err == nil {
+			r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+		}
+	}
+	result, err := r.artworkStorage.Refresh(ctx, checkpoint, func(next metadata.ArtworkInventoryCheckpoint) error {
+		return r.repo.UpdateCheckpoint(ctx, job.ID, next)
+	}, progress)
+	if err != nil {
+		r.failJob(job.ID, 0, 0, "Artwork storage refresh failed", artworkStorageErrorMessage(ctx, err))
+		return
+	}
+	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
+		ResultPayload: result, Message: "Artwork storage accounting refreshed",
+		ProgressCurrent: int(result.KnownRevisions), ProgressTotal: int(result.KnownRevisions),
+		ExpiresAt: time.Now().UTC().Add(r.retention),
+	}); err != nil {
+		slog.Warn("admin jobs: failed to complete artwork storage refresh", "job_id", job.ID, "error", err)
+		return
+	}
+	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+}
+
+func (r *Runner) executeArtworkPurge(job *models.AdminJob) {
+	if r.artworkPurge == nil {
+		r.failJob(job.ID, 0, 0, "Artwork purge failed", "artwork purge executor is not configured")
+		return
+	}
+	req, err := decodeArtworkPurgeRequest(job.RequestPayload)
+	if err != nil {
+		artworkmetrics.Purge(req.DryRun, "failed", 0, 0)
+		r.failJob(job.ID, 0, 0, "Artwork purge failed", err.Error())
+		return
+	}
+	req.DryRun = job.DryRun
+	checkpoint, err := decodeArtworkPurgeCheckpoint(job.Checkpoint)
+	if err != nil {
+		artworkmetrics.Purge(req.DryRun, "failed", 0, 0)
+		r.failJob(job.ID, 0, 0, "Artwork purge failed", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), artworkStorageTimeout)
+	defer cancel()
+	heartbeatStop := make(chan struct{})
+	go r.heartbeatLoop(ctx, job.ID, heartbeatStop)
+	defer close(heartbeatStop)
+	progress := func(current, total int, message string) {
+		if err := r.repo.UpdateProgress(ctx, job.ID, current, total, message); err == nil {
+			r.publishJobByID(ctx, notifications.TypeJobProgress, job.ID)
+		}
+	}
+	result, err := r.artworkPurge.Execute(ctx, req, checkpoint, func(next ArtworkPurgeCheckpoint) error {
+		return r.repo.UpdateCheckpoint(ctx, job.ID, next)
+	}, progress)
+	if err != nil {
+		artworkmetrics.Purge(req.DryRun, "failed", 0, 0)
+		r.failJob(job.ID, 0, 0, "Artwork purge failed", artworkStorageErrorMessage(ctx, err))
+		return
+	}
+	artworkmetrics.Purge(req.DryRun, "completed", result.PendingBytes, result.ReclaimableBytes)
+	completion := func(refreshQueued bool) CompleteJobInput {
+		result.AccountingRefreshQueued = refreshQueued
+		return CompleteJobInput{
+			ResultPayload: result, Message: "Artwork purge completed",
+			ProgressCurrent: 1, ProgressTotal: 1, ExpiresAt: time.Now().UTC().Add(r.retention),
+		}
+	}
+	// The completion and the follow-up refresh go in together, so a completed
+	// purge never reports a refresh that no row backs. If the pair cannot be
+	// written, complete the purge alone and say the refresh was not queued.
+	if !req.DryRun && req.Mode == ArtworkPurgeModeSafeMaterialized {
+		_, err := r.repo.CompleteWithFollowUp(ctx, job.ID, completion(true), CreateJobInput{
+			JobType: JobTypeArtworkStorageRefresh, CreatedByUserID: job.CreatedByUserID,
+			RequestPayload: map[string]any{}, Message: "Queued post-purge artwork storage refresh",
+		})
+		if err == nil {
+			r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+			return
+		}
+		slog.Warn("admin jobs: failed to queue post-purge artwork refresh", "job_id", job.ID, "error", err)
+	}
+	if err := r.repo.Complete(ctx, job.ID, completion(false)); err != nil {
+		slog.Warn("admin jobs: failed to complete artwork purge", "job_id", job.ID, "error", err)
+		return
+	}
+	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
+}
+
+func artworkStorageErrorMessage(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("timed out after %s: %v", artworkStorageTimeout, err)
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return fmt.Sprintf("context canceled: %v", err)
+	}
+	return err.Error()
 }
 
 func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
@@ -227,11 +400,6 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		return
 	}
 
-	if cleanupJob := r.queueImageCacheCleanup(context.Background(), job.CreatedByUserID, result); cleanupJob != nil {
-		result.ImageCleanupQueued = true
-		result.ImageCleanupJobID = cleanupJob.ID
-	}
-
 	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Library deletion completed",
@@ -243,34 +411,6 @@ func (r *Runner) executeDeleteLibrary(job *models.AdminJob) {
 		return
 	}
 	r.publishJobByID(ctx, notifications.TypeJobCompleted, job.ID)
-}
-
-func (r *Runner) queueImageCacheCleanup(ctx context.Context, createdByUserID int, result *DeleteLibraryResult) *models.AdminJob {
-	if r == nil || r.repo == nil || r.imageCacheCleanup == nil || result == nil || len(result.orphanedImageDirs) == 0 {
-		return nil
-	}
-
-	cleanupJob, err := r.repo.Create(ctx, CreateJobInput{
-		JobType:         JobTypeImageCacheCleanup,
-		CreatedByUserID: createdByUserID,
-		RequestPayload: ImageCacheCleanupRequest{
-			LibraryID:   result.LibraryID,
-			LibraryName: result.LibraryName,
-			Prefixes:    append([]string(nil), result.orphanedImageDirs...),
-		},
-		Message: "Queued cached image cleanup",
-	})
-	if err != nil {
-		slog.WarnContext(ctx, "admin jobs: failed to queue image cache cleanup", "component", "adminjob",
-			"library_id", result.LibraryID,
-			"library_name", result.LibraryName,
-			"error", err,
-		)
-		return nil
-	}
-
-	r.publishJob(ctx, notifications.TypeJobCreated, cleanupJob)
-	return cleanupJob
 }
 
 func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
@@ -306,15 +446,15 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		if ctx.Err() != nil {
 			msg = fmt.Sprintf("timed out after %s: %s", imageCacheCleanupTimeout, msg)
 		}
-		r.failJob(job.ID, 0, len(req.Prefixes), "Image cache cleanup failed", msg)
+		r.failJob(job.ID, 0, 1, "Image cache cleanup failed", msg)
 		return
 	}
 
 	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
 		Message:         "Cached image cleanup completed",
-		ProgressCurrent: len(req.Prefixes),
-		ProgressTotal:   len(req.Prefixes),
+		ProgressCurrent: 1,
+		ProgressTotal:   1,
 		ExpiresAt:       time.Now().UTC().Add(r.retention),
 	}); err != nil {
 		slog.Warn("admin jobs: failed to mark image cache cleanup complete", "job_id", job.ID, "error", err)

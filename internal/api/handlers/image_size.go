@@ -104,5 +104,5 @@ func imageTypeForBackdropPath(path string) string {
 	if imageType := catalog.ImageTypeFromCachedPath(path); imageType != "" {
 		return imageType
 	}
-	return artworkkey.ImageBackdrop
+	return artworkkey.ImageTypeBackdrop
 }

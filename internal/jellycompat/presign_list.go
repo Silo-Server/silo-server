@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -24,16 +25,66 @@ func presignCompatListItems(ctx context.Context, detailSvc *catalog.DetailServic
 		return
 	}
 
-	posterURLs := detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(items, func(item upstreamListItem) string { return item.PosterURL }), "poster", compatCardImageSize)
-	backdropURLs := detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(items, func(item upstreamListItem) string { return item.BackdropURL }), "backdrop", compatCardImageSize)
-	logoURLs := detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(items, func(item upstreamListItem) string { return item.LogoURL }), "logo", compatCardImageSize)
-	stillURLs := detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(items, func(item upstreamListItem) string { return item.StillURL }), "still", compatCardImageSize)
+	presignCompatTargetSlot(ctx, detailSvc, items, "poster", func(item *upstreamListItem) *string { return &item.PosterURL })
+	presignCompatTargetSlot(ctx, detailSvc, items, "backdrop", func(item *upstreamListItem) *string { return &item.BackdropURL })
+	presignCompatTargetSlot(ctx, detailSvc, items, "logo", func(item *upstreamListItem) *string { return &item.LogoURL })
+	presignCompatTargetSlot(ctx, detailSvc, items, "still", func(item *upstreamListItem) *string { return &item.StillURL })
+}
 
+func presignCompatTargetSlot(
+	ctx context.Context,
+	detailSvc *catalog.DetailService,
+	items []upstreamListItem,
+	slot string,
+	field func(*upstreamListItem) *string,
+) {
+	targets := make([]artworkurl.Target, 0, len(items))
+	byIndex := make([]artworkurl.Target, len(items))
 	for i := range items {
-		items[i].PosterURL = resolvedListImageURL(posterURLs, items[i].PosterURL)
-		items[i].BackdropURL = resolvedListImageURL(backdropURLs, items[i].BackdropURL)
-		items[i].LogoURL = resolvedListImageURL(logoURLs, items[i].LogoURL)
-		items[i].StillURL = resolvedListImageURL(stillURLs, items[i].StillURL)
+		reference := *field(&items[i])
+		if reference == "" {
+			continue
+		}
+		target := compatListArtworkTarget(items[i], slot).WithReference(reference)
+		targets = append(targets, target)
+		byIndex[i] = target
+	}
+	resolved := detailSvc.PresignArtworkTargetsWithExpiry(ctx, targets, catalog.ArtworkVariantForSize(slot, compatCardImageSize))
+	for i := range items {
+		target := byIndex[i]
+		if target.Surface == "" {
+			*field(&items[i]) = ""
+			continue
+		}
+		*field(&items[i]) = resolved[target.CacheKey()].URL
+	}
+}
+
+func compatListArtworkTarget(item upstreamListItem, slot string) artworkurl.Target {
+	target := artworkurl.Target{Slot: slot, Keys: []string{item.ContentID}}
+	switch {
+	case item.Type == compatItemEpisode && (slot == compatArtworkPoster || slot == compatArtworkStill):
+		target.Surface = artworkurl.SurfaceEpisodeStills
+		target.Slot = compatArtworkStill
+	case item.Type == compatItemEpisode && item.SeriesID != "":
+		target.Surface = itemSurfaceForSlot(slot)
+		target.Keys[0] = item.SeriesID
+	case item.Type == compatItemSeason && slot == compatArtworkPoster:
+		target.Surface = artworkurl.SurfaceSeasonPosters
+	default:
+		target.Surface = itemSurfaceForSlot(slot)
+	}
+	return target
+}
+
+func itemSurfaceForSlot(slot string) string {
+	switch slot {
+	case compatArtworkBackdrop:
+		return artworkurl.SurfaceItemBackdrops
+	case compatArtworkLogo:
+		return artworkurl.SurfaceItemLogos
+	default:
+		return artworkurl.SurfaceItemPosters
 	}
 }
 

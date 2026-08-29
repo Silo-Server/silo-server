@@ -13,6 +13,9 @@ const JOB_TYPE_LABELS: Record<string, string> = {
   catalog_import: "Catalog Import",
   item_refresh: "Item Refresh",
   library_refresh: "Library Refresh",
+  artwork_storage_refresh: "Artwork Storage Refresh",
+  artwork_storage_import: "Artwork Store Import",
+  artwork_storage_purge: "Free Artwork Storage",
 };
 
 function jobTypeLabel(jobType: string) {

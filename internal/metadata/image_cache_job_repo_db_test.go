@@ -48,21 +48,22 @@ func parkFailedImageCacheJob(t *testing.T, pool *pgxpool.Pool, contentID string,
 	}
 }
 
-func readImageCacheJobState(t *testing.T, pool *pgxpool.Pool, contentID string) (string, int) {
+func readImageCacheJobState(t *testing.T, pool *pgxpool.Pool, contentID string) (string, int, time.Time) {
 	t.Helper()
 	var status string
 	var attempts int
+	var nextAttempt time.Time
 	if err := pool.QueryRow(context.Background(), `
-		SELECT status, attempt_count
+		SELECT status, attempt_count, next_attempt_at
 		FROM metadata_image_cache_jobs
 		WHERE target_type = 'item'
 		  AND target_content_id = $1
 		  AND image_type = 'poster'
 		  AND target_language = ''
-	`, contentID).Scan(&status, &attempts); err != nil {
+	`, contentID).Scan(&status, &attempts, &nextAttempt); err != nil {
 		t.Fatalf("read job state: %v", err)
 	}
-	return status, attempts
+	return status, attempts, nextAttempt
 }
 
 // TestImageCacheFailedJobReadmission covers the re-admission gate shared by the
@@ -108,7 +109,7 @@ func TestImageCacheFailedJobReadmission(t *testing.T) {
 			t.Fatalf("re-enqueue job: %v", err)
 		}
 
-		status, attempts := readImageCacheJobState(t, pool, contentID)
+		status, attempts, _ := readImageCacheJobState(t, pool, contentID)
 		if status != ImageCacheStatusQueued {
 			t.Fatalf("status = %q, want %q: an attempt-exhausted job must be recoverable", status, ImageCacheStatusQueued)
 		}
@@ -131,7 +132,7 @@ func TestImageCacheFailedJobReadmission(t *testing.T) {
 			t.Fatalf("re-enqueue job: %v", err)
 		}
 
-		status, attempts := readImageCacheJobState(t, pool, contentID)
+		status, attempts, _ := readImageCacheJobState(t, pool, contentID)
 		if status != ImageCacheStatusFailed {
 			t.Fatalf("status = %q, want %q: a tombstoned job must not be retried", status, ImageCacheStatusFailed)
 		}
@@ -154,7 +155,7 @@ func TestImageCacheFailedJobReadmission(t *testing.T) {
 			t.Fatalf("re-enqueue job with new source: %v", err)
 		}
 
-		status, attempts := readImageCacheJobState(t, pool, contentID)
+		status, attempts, _ := readImageCacheJobState(t, pool, contentID)
 		if status != ImageCacheStatusQueued {
 			t.Fatalf("status = %q, want %q: a new source must clear the tombstone", status, ImageCacheStatusQueued)
 		}
@@ -162,4 +163,55 @@ func TestImageCacheFailedJobReadmission(t *testing.T) {
 			t.Fatalf("attempt_count = %d, want 0", attempts)
 		}
 	})
+}
+
+func TestImageCacheRepairEnqueueReadmitsFailedJobAfterCooldown(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := context.Background()
+	repo := NewImageCacheJobRepository(pool)
+	contentID := fmt.Sprintf("image-cache-repair-readmit-%d", time.Now().UnixNano())
+	input := EnqueueImageCacheJobInput{
+		TargetType:      ImageCacheTargetItem,
+		TargetContentID: contentID,
+		SourcePath:      "https://image.tmdb.org/t/p/original/repair.jpg",
+		ImageType:       ImageCacheImagePoster,
+		ContentType:     "movie",
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID)
+	})
+	if err := repo.Enqueue(ctx, input); err != nil {
+		t.Fatalf("enqueue job: %v", err)
+	}
+	parkFailedImageCacheJob(t, pool, contentID, imageCachePermanentPark)
+
+	before := time.Now()
+	if _, err := repo.EnqueueRepair(ctx, input); err != nil {
+		t.Fatalf("enqueue repair: %v", err)
+	}
+	status, attempts, nextAttempt := readImageCacheJobState(t, pool, contentID)
+	if status != ImageCacheStatusQueued {
+		t.Fatalf("status = %q, want %q", status, ImageCacheStatusQueued)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempt_count = %d, want 0 for a fresh repair retry budget", attempts)
+	}
+	if earliest := before.Add(imageCacheFailedCooldown - time.Minute); nextAttempt.Before(earliest) {
+		t.Fatalf("next_attempt_at = %v, want no earlier than %v", nextAttempt, earliest)
+	}
+	if latest := time.Now().Add(imageCacheFailedCooldown + time.Minute); nextAttempt.After(latest) {
+		t.Fatalf("next_attempt_at = %v, want no later than %v", nextAttempt, latest)
+	}
+
+	parkFailedImageCacheJob(t, pool, contentID, imageCachePermanentPark)
+	if err := repo.Enqueue(ctx, input); err != nil {
+		t.Fatalf("ordinary enqueue: %v", err)
+	}
+	status, attempts, nextAttempt = readImageCacheJobState(t, pool, contentID)
+	if status != ImageCacheStatusFailed || attempts != imageCacheMaxAttempts {
+		t.Fatalf("ordinary enqueue state = (%q, %d), want (%q, %d)", status, attempts, ImageCacheStatusFailed, imageCacheMaxAttempts)
+	}
+	if nextAttempt.Before(time.Now().Add(imageCachePermanentPark - time.Hour)) {
+		t.Fatalf("ordinary enqueue shortened permanent park to %v", nextAttempt)
+	}
 }

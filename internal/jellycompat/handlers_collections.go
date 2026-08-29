@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -192,7 +194,7 @@ func (h *ItemsHandler) loadVisibleCollection(ctx context.Context, session *Sessi
 func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.LibraryCollection) baseItemDTO {
 	routeID := h.codec.EncodeStringID(EncodedIDCollection, c.ID)
 	imgTags := map[string]string{}
-	if posterURL := h.presignCollectionPoster(ctx, c.PosterURL); posterURL != "" {
+	if posterURL := h.presignCollectionPoster(ctx, c.ID, c.PosterURL, "collection-poster"); posterURL != "" {
 		if h.images != nil {
 			h.images.RememberSized(routeID, "Primary", posterURL, compatCardImageSize)
 		}
@@ -227,7 +229,7 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 			ItemID: routeID,
 		},
 	}
-	if backdropURL := h.presignCollectionPoster(ctx, c.BackdropURL); backdropURL != "" {
+	if backdropURL := h.presignCollectionPoster(ctx, c.ID, c.BackdropURL, "collection-backdrop"); backdropURL != "" {
 		if h.images != nil {
 			h.images.RememberSized(routeID, "Backdrop", backdropURL, compatCardImageSize)
 		}
@@ -240,11 +242,10 @@ func (h *ItemsHandler) boxSetFromCollection(ctx context.Context, c *models.Libra
 }
 
 // presignCollectionPoster resolves a collection artwork reference to a
-// fetchable URL. Collection posters are stored as S3 keys in the
-// general-purpose bucket (same bucket as library posters); absolute and
-// app-relative references pass through untouched (matching the main API's
-// presignGPURL semantics).
-func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, path string) string {
+// fetchable URL. Collection posters are stored as artwork keys (the same
+// storage library posters use); absolute and app-relative references pass
+// through untouched (matching the main API's presignGPURL semantics).
+func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, collectionID, path, slot string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return ""
@@ -252,18 +253,21 @@ func (h *ItemsHandler) presignCollectionPoster(ctx context.Context, path string)
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
 		return path
 	}
-	if h.posterPresigner == nil {
+	if h.artworkURLs == nil {
 		return ""
 	}
-	ttl := h.presignTTL
-	if ttl <= 0 {
-		ttl = 4 * time.Hour
+	surface, variant := artworkurl.SurfaceCollectionPosters, artworkkey.VariantW300
+	if slot == "collection-backdrop" {
+		// Backdrops render full-screen; their ladder carries w1280 for that.
+		surface, variant = artworkurl.SurfaceCollectionBackdrops, artworkkey.VariantW1280
 	}
-	url, err := h.posterPresigner.PresignGetURL(ctx, h.posterPresigner.Bucket(), path, ttl)
+	resolved, err := resolveCompatArtworkTarget(ctx, h.artworkURLs, artworkurl.Target{
+		Surface: surface, Keys: []string{collectionID}, Slot: slot,
+	}, path, variant)
 	if err != nil {
 		return ""
 	}
-	return url
+	return resolved.URL
 }
 
 // boxSetsByIDs maps the given collection IDs to BoxSet DTOs, skipping any the

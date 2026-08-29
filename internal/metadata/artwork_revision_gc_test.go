@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -25,9 +26,31 @@ type blockingArtworkRevisionDeleter struct {
 	deleted [][]string
 }
 
-func (d *blockingArtworkRevisionDeleter) Bucket() string { return "artwork" }
+type recordingLegacyPrefixDeleter struct {
+	prefixes []string
+}
 
-func (d *blockingArtworkRevisionDeleter) DeleteObjects(ctx context.Context, _ string, keys []string) (int, error) {
+func (d *recordingLegacyPrefixDeleter) ListPage(context.Context, string, string, int) ([]artworkstore.ObjectInfo, string, bool, error) {
+	return nil, "", true, nil
+}
+
+func (d *recordingLegacyPrefixDeleter) DeleteObjects(context.Context, []string) (int, error) {
+	return 0, nil
+}
+
+func (d *recordingLegacyPrefixDeleter) DeletePrefixMaintenance(_ context.Context, prefix string) (int, error) {
+	d.prefixes = append(d.prefixes, prefix)
+	return 1, nil
+}
+
+func (d *blockingArtworkRevisionDeleter) ListPage(context.Context, string, string, int) ([]artworkstore.ObjectInfo, string, bool, error) {
+	return nil, "", true, nil
+}
+func (d *blockingArtworkRevisionDeleter) DeletePrefixMaintenance(context.Context, string) (int, error) {
+	return 0, nil
+}
+
+func (d *blockingArtworkRevisionDeleter) DeleteObjects(ctx context.Context, keys []string) (int, error) {
 	d.once.Do(func() { close(d.started) })
 	if d.release != nil {
 		select {
@@ -92,6 +115,62 @@ func TestProcessArtworkRevisionGCBatchContinuesAfterRetryFailure(t *testing.T) {
 	if stats != want {
 		t.Fatalf("stats = %+v, want %+v", stats, want)
 	}
+}
+
+func TestArtworkRevisionGCLegacyPrefixEscapesLikeMetacharacters(t *testing.T) {
+	pool := artworkRevisionGCTestPool(t)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	prefix := fmt.Sprintf("legacy/%%_folder-%d/", suffix)
+	unrelatedPath := fmt.Sprintf("legacy/abcXfolder-%d/original.webp", suffix)
+	realPath := prefix + "original.webp"
+	deleter := &recordingLegacyPrefixDeleter{}
+	collector := NewArtworkRevisionGarbageCollector(pool, deleter)
+
+	seed := func(t *testing.T, contentID, path string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres, poster_path)
+			VALUES ($1, 'movie', 'Legacy Prefix GC', 'matched', '{}'::text[], $2)`, contentID, path); err != nil {
+			t.Fatalf("seed artwork reference: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO artwork_legacy_prefix_gc_candidates (prefix, not_before)
+			VALUES ($1, NOW() - interval '1 hour')`, prefix); err != nil {
+			t.Fatalf("seed legacy prefix: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM artwork_legacy_prefix_gc_candidates WHERE prefix = $1`, prefix)
+		})
+	}
+
+	t.Run("wildcards do not match an unrelated reference", func(t *testing.T) {
+		contentID := fmt.Sprintf("gc-prefix-unrelated-%d", suffix)
+		seed(t, contentID, unrelatedPath)
+		completed, err := collector.sweepLegacyPrefixes(ctx, 1)
+		if err != nil {
+			t.Fatalf("sweep legacy prefixes: %v", err)
+		}
+		if completed != 1 || len(deleter.prefixes) != 1 || deleter.prefixes[0] != prefix {
+			t.Fatalf("completed/deleted = %d/%v, want 1/%q", completed, deleter.prefixes, prefix)
+		}
+	})
+
+	t.Run("literal prefix still protects a real reference", func(t *testing.T) {
+		contentID := fmt.Sprintf("gc-prefix-real-%d", suffix)
+		seed(t, contentID, realPath)
+		completed, err := collector.sweepLegacyPrefixes(ctx, 1)
+		if err != nil {
+			t.Fatalf("sweep legacy prefixes: %v", err)
+		}
+		if completed != 0 {
+			t.Fatalf("completed = %d, want 0 for a referenced prefix", completed)
+		}
+		if len(deleter.prefixes) != 1 {
+			t.Fatalf("deleted prefixes = %v, want no additional deletion", deleter.prefixes)
+		}
+	})
 }
 
 func TestArtworkRevisionGCSerializesDeletionWithRetracking(t *testing.T) {
@@ -471,13 +550,13 @@ func TestArtworkRevisionGCHealsBrokenReferenceAfterObjectDeletion(t *testing.T) 
 	if posterPath == originalPath {
 		t.Fatalf("poster_path still references deleted revision %q", posterPath)
 	}
-	var remaining int
+	var tombstoned bool
 	if err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath).Scan(&remaining); err != nil {
-		t.Fatalf("count candidates: %v", err)
+		SELECT tombstoned_at IS NOT NULL FROM artwork_revision_gc_candidates WHERE original_path = $1`, originalPath).Scan(&tombstoned); err != nil {
+		t.Fatalf("load candidate tombstone: %v", err)
 	}
-	if remaining != 0 {
-		t.Fatalf("candidate rows remaining = %d, want 0 after successful heal", remaining)
+	if !tombstoned {
+		t.Fatal("candidate was not tombstoned after successful heal")
 	}
 }
 
@@ -488,6 +567,7 @@ func TestArtworkRevisionGCDormantSweep(t *testing.T) {
 	referencedContentID := fmt.Sprintf("gc-dormant-ref-%d", suffix)
 	referencedPath := fmt.Sprintf("tmdb/movies/%d/poster/original.ref.webp", suffix)
 	orphanPath := fmt.Sprintf("tmdb/movies/%d/poster/original.orphan.webp", suffix)
+	retainedPath := fmt.Sprintf("artwork/v1/objects/avatar/%d/original.retained.webp", suffix)
 
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, status, genres, poster_path)
@@ -502,17 +582,24 @@ func TestArtworkRevisionGCDormantSweep(t *testing.T) {
 			t.Fatalf("seed dormant candidate: %v", err)
 		}
 	}
-	// Age both rows past the recheck interval; a reference that vanished
-	// through an untriggered surface looks exactly like the orphan row.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO artwork_revision_gc_candidates (
+			original_path, image_type, object_keys, source_class,
+			seed_imported_at, seed_expires_at, not_before, next_attempt_at
+		) VALUES ($1, 'avatar', '{}', 'seed', NOW(), NULL, NOW() - interval '2 days', NULL)`, retainedPath); err != nil {
+		t.Fatalf("seed retained untracked candidate: %v", err)
+	}
+	// Age all rows past the recheck interval; a reference that vanished through
+	// an untriggered surface looks exactly like the orphan row.
 	if _, err := pool.Exec(ctx, `
 		UPDATE artwork_revision_gc_candidates
 		SET updated_at = NOW() - interval '2 days'
-		WHERE original_path = ANY($1)`, []string{referencedPath, orphanPath}); err != nil {
+		WHERE original_path = ANY($1)`, []string{referencedPath, orphanPath, retainedPath}); err != nil {
 		t.Fatalf("age dormant candidates: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, referencedContentID)
-		_, _ = pool.Exec(ctx, `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, []string{referencedPath, orphanPath})
+		_, _ = pool.Exec(ctx, `DELETE FROM artwork_revision_gc_candidates WHERE original_path = ANY($1)`, []string{referencedPath, orphanPath, retainedPath})
 	})
 
 	deleter := &blockingArtworkRevisionDeleter{started: make(chan struct{})}
@@ -528,7 +615,7 @@ func TestArtworkRevisionGCDormantSweep(t *testing.T) {
 		t.Fatalf("requeued = %d, want at least the orphan row", requeued)
 	}
 
-	var orphanNext, referencedNext *time.Time
+	var orphanNext, referencedNext, retainedNext *time.Time
 	if err := pool.QueryRow(ctx, `
 		SELECT next_attempt_at FROM artwork_revision_gc_candidates WHERE original_path = $1`, orphanPath).Scan(&orphanNext); err != nil {
 		t.Fatalf("load orphan candidate: %v", err)
@@ -537,10 +624,17 @@ func TestArtworkRevisionGCDormantSweep(t *testing.T) {
 		SELECT next_attempt_at FROM artwork_revision_gc_candidates WHERE original_path = $1`, referencedPath).Scan(&referencedNext); err != nil {
 		t.Fatalf("load referenced candidate: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `
+		SELECT next_attempt_at FROM artwork_revision_gc_candidates WHERE original_path = $1`, retainedPath).Scan(&retainedNext); err != nil {
+		t.Fatalf("load retained untracked candidate: %v", err)
+	}
 	if orphanNext == nil {
 		t.Fatal("orphan dormant row was not re-armed by the sweep")
 	}
 	if referencedNext != nil {
 		t.Fatalf("referenced dormant row was re-armed: %v", *referencedNext)
+	}
+	if retainedNext != nil {
+		t.Fatalf("retained untracked row was re-armed: %v", *retainedNext)
 	}
 }

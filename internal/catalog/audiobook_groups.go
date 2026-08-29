@@ -64,7 +64,8 @@ type AudiobookGroup struct {
 	FinishedCount        int
 	// PosterPaths holds up to four raw poster paths for cover stacks; the
 	// API layer presigns them.
-	PosterPaths []string
+	PosterPaths      []string
+	PosterContentIDs []string
 }
 
 type audiobookGroupsSQLPlan struct {
@@ -132,17 +133,19 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 	for rows.Next() {
 		var g AudiobookGroup
 		var posterPaths []string
+		var posterContentIDs []string
 		if plan.IncludeTotal {
-			if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths, &total); err != nil {
+			if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths, &posterContentIDs, &total); err != nil {
 				return AudiobookGroupsResult{}, fmt.Errorf("scanning audiobook group: %w", err)
 			}
-		} else if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths); err != nil {
+		} else if err := rows.Scan(&g.Name, &g.ItemCount, &g.TotalDurationSeconds, &g.InProgressCount, &g.FinishedCount, &posterPaths, &posterContentIDs); err != nil {
 			return AudiobookGroupsResult{}, fmt.Errorf("scanning audiobook group: %w", err)
 		}
 		if posterPaths == nil {
 			posterPaths = []string{}
 		}
 		g.PosterPaths = posterPaths
+		g.PosterContentIDs = posterContentIDs
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
@@ -318,7 +321,8 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 			pg.total_duration_seconds,
 			pg.in_progress_count,
 			pg.finished_count,
-			COALESCE(posters.poster_paths, '{}'::text[]) AS poster_paths%s
+			COALESCE(posters.poster_paths, '{}'::text[]) AS poster_paths,
+			COALESCE(posters.poster_content_ids, '{}'::text[]) AS poster_content_ids%s
 		FROM paged_groups pg
 		LEFT JOIN LATERAL (
 			SELECT ARRAY(
@@ -329,13 +333,22 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 				  AND NULLIF(b.poster_path, '') IS NOT NULL
 				ORDER BY %s
 				LIMIT 4
-			) AS poster_paths
+			) AS poster_paths,
+			ARRAY(
+				SELECT b.content_id
+				FROM books b
+				%s
+				WHERE %s = pg.group_key
+				  AND NULLIF(b.poster_path, '') IS NOT NULL
+				ORDER BY %s
+				LIMIT 4
+			) AS poster_content_ids
 		) posters ON TRUE
 		ORDER BY %s`,
 		strings.Join(conditions, " AND "),
 		groupExpr, nameExpr, joinClause, userArg, profileArg, groupWhereClause, groupExpr,
 		totalSelect, orderClause, argIdx, argIdx+1,
-		totalColumn, joinClause, groupExpr, posterOrder, orderClause,
+		totalColumn, joinClause, groupExpr, posterOrder, joinClause, groupExpr, posterOrder, orderClause,
 	)
 	args = append(args, fetchLimit, offset)
 

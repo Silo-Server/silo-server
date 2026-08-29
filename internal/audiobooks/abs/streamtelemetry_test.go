@@ -66,6 +66,37 @@ func telemetryRegistry(t testing.TB, families ...streamtelemetry.Family) *stream
 	return registry
 }
 
+func settledTelemetrySweep(t testing.TB, registry *streamtelemetry.Registry) streamtelemetry.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot := registry.Sweep()
+		settled := true
+		for _, session := range snapshot.Sessions {
+			if session.OpenObservations != 0 {
+				settled = false
+			}
+			for _, route := range session.Routes {
+				if route.Open != 0 {
+					settled = false
+				}
+			}
+		}
+		for _, transfer := range snapshot.Transfers {
+			if transfer.OpenObservations != 0 {
+				settled = false
+			}
+		}
+		if settled {
+			return snapshot
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stream telemetry did not settle within 5s: sessions=%+v transfers=%+v", snapshot.Sessions, snapshot.Transfers)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // absTelemetryServer mounts the real ABS router — access log, compression and
 // all — behind a real socket. Handler-level tests bypass the middleware under
 // test, which is how this project once shipped a feature that was a no-op for
@@ -145,7 +176,7 @@ func TestMountedABSRouterAttributesPublicTrack(t *testing.T) {
 
 	// Byte totals come from Sweep, not Snapshot: SessionView.BytesAccepted is
 	// lastSweptBytes and only the sweep folds live observations into it.
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	if len(snapshot.Sessions) != 1 {
 		t.Fatalf("sessions = %+v", snapshot.Sessions)
 	}
@@ -191,7 +222,7 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 		if got.status != http.StatusOK || len(got.body) != 0 {
 			t.Fatalf("HEAD = %d, %d bytes", got.status, len(got.body))
 		}
-		snapshot := registry.Sweep()
+		snapshot := settledTelemetrySweep(t, registry)
 		if len(snapshot.Sessions) != 1 {
 			t.Fatalf("sessions = %+v", snapshot.Sessions)
 		}
@@ -218,7 +249,8 @@ func TestMountedABSRouterPublicTrackEdgeCases(t *testing.T) {
 		if !bytes.Equal(got.body, large[1000:3000]) {
 			t.Fatalf("range body mismatch: %d bytes", len(got.body))
 		}
-		if snapshot := registry.Sweep(); len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
+		snapshot := settledTelemetrySweep(t, registry)
+		if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].BytesAccepted != 2000 {
 			t.Fatalf("range accounting = %+v", snapshot.Sessions)
 		}
 	})
@@ -314,7 +346,7 @@ func TestMountedABSRouterFeedFileResolvesOwner(t *testing.T) {
 	if got.status != http.StatusOK || !bytes.Equal(got.body, body) {
 		t.Fatalf("GET = %d, %d bytes", got.status, len(got.body))
 	}
-	snapshot := registry.Sweep()
+	snapshot := settledTelemetrySweep(t, registry)
 	if len(snapshot.Sessions) != 0 {
 		t.Fatalf("feed file created a logical session: %+v", snapshot.Sessions)
 	}

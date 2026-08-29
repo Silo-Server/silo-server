@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -63,6 +64,20 @@ type discoverFetcher interface {
 
 type discoverPresigner interface {
 	PresignURL(ctx context.Context, path string, variant string) string
+}
+
+type discoverTargetPresigner interface {
+	PresignArtworkTargetImageURL(ctx context.Context, target artworkurl.Target, path, imageType, size string) string
+}
+
+func presignDiscoverTarget(ctx context.Context, resolver discoverPresigner, target artworkurl.Target, path, imageType, size, legacyVariant string) string {
+	if resolver == nil {
+		return ""
+	}
+	if targetResolver, ok := resolver.(discoverTargetPresigner); ok {
+		return targetResolver.PresignArtworkTargetImageURL(ctx, target, path, imageType, size)
+	}
+	return resolver.PresignURL(ctx, path, legacyVariant)
 }
 
 // NewRecommendationsHandler creates a new RecommendationsHandler.
@@ -711,9 +726,9 @@ func (h *RecommendationsHandler) buildSectionItems(
 			item.Keywords = []string{}
 		}
 		if h.DetailSvc != nil {
-			item.PosterURL = h.DetailSvc.PresignURL(ctx, featuredPosterPath(mi.PosterPath), "featured")
-			item.BackdropURL = h.DetailSvc.PresignURL(ctx, featuredBackdropPath(mi.BackdropPath), "featured")
-			item.LogoURL = h.DetailSvc.PresignURL(ctx, mi.LogoPath, "featured")
+			item.PosterURL = presignDiscoverTarget(ctx, h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{mi.ContentID}, Slot: artworkImagePoster}, mi.PosterPath, artworkImagePoster, "", "featured")
+			item.BackdropURL = presignDiscoverTarget(ctx, h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{mi.ContentID}, Slot: artworkImageBackdrop}, mi.BackdropPath, artworkImageBackdrop, "", "featured")
+			item.LogoURL = presignDiscoverTarget(ctx, h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemLogos, Keys: []string{mi.ContentID}, Slot: artworkImageLogo}, mi.LogoPath, artworkImageLogo, "", "featured")
 		}
 		if enrichment.overlays != nil {
 			item.OverlaySummary = enrichment.overlays[mi.ContentID]

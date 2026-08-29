@@ -31,7 +31,7 @@ type serverChannelWorker struct {
 	nudge    chan struct{}
 	// posterURL picks the artwork URL Discord embeds may carry. Wired by
 	// NewSystem after construction; nil renders embeds without images.
-	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
+	posterURL func(ctx context.Context, posterPath, posterSourcePath, targetID string) string
 	// requesterDiscordID resolves a request's requester to their linked
 	// Discord user id for @mentions (System.requesterDiscordID, which owns
 	// the admin-setting gate). Wired by NewSystem after construction; nil or
@@ -211,8 +211,12 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	groups := GroupContentEvents(fresh, metas)
 	if ch.Type == WebhookTypeDiscord && w.posterURL != nil {
 		for i := range groups {
+			targetID := groups[i].SeriesID
+			if targetID == "" {
+				targetID = groups[i].ItemID
+			}
 			groups[i].Meta.PosterURL = w.posterURL(ctx,
-				groups[i].Meta.PosterPath, groups[i].Meta.PosterSourcePath)
+				groups[i].Meta.PosterPath, groups[i].Meta.PosterSourcePath, targetID)
 		}
 	}
 

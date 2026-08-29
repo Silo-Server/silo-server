@@ -130,6 +130,16 @@ cache-style data. Transcode output is local and transient. If
 `/var/lib/silo/userdb` and must be included in the deployment's persistence and
 backup design.
 
+Unless a public S3 bucket is configured, materialized artwork is written to the
+canonical local artwork store at `/var/lib/silo/artwork` (`artwork.local_path`).
+The default Compose file mounts it from `${SILO_DATA_ROOT}/artwork`. It holds
+every poster, backdrop, and cover the server produced, so it belongs in the
+deployment's persistence design; a lost store means re-downloading the whole
+library's artwork. Changing `artwork.local_path` requires a restart, and once
+artwork has been materialized the effective backend is pinned — pointing a node
+at a different store, or configuring S3 afterwards, fails startup rather than
+silently switching storage.
+
 The default Compose file does not persist that SQLite path. Before enabling the
 SQLite backend, add this volume to the `silo` service in a deployment override:
 

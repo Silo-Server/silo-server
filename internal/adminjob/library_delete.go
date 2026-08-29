@@ -26,14 +26,6 @@ type DeleteLibraryResult struct {
 	ImageCleanupQueued   bool   `json:"image_cleanup_queued"`
 	ImageCleanupJobID    string `json:"image_cleanup_job_id,omitempty"`
 	ImageCleanupDirs     int    `json:"image_cleanup_dirs"`
-
-	orphanedImageDirs []string
-}
-
-// S3PrefixDeleter can delete all objects under a prefix.
-type S3PrefixDeleter interface {
-	DeletePrefix(ctx context.Context, bucket, prefix string) (int, error)
-	Bucket() string
 }
 
 type deleteLibraryExecutor interface {
@@ -120,8 +112,7 @@ func (e *LibraryDeleteExecutor) Execute(
 		DeletedItemLinks:     stats.MediaItemLinks,
 		DeletedOrphanedItems: stats.OrphanedItems,
 		DeletedS3Objects:     0,
-		ImageCleanupDirs:     len(stats.OrphanedImageDirs),
-		orphanedImageDirs:    append([]string(nil), stats.OrphanedImageDirs...),
+		ImageCleanupDirs:     0,
 	}, nil
 }
 

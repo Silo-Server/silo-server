@@ -12,9 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -597,13 +598,11 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 	// Index by content ID for order-preserving lookup.
 	byID := make(map[string]*itemListResponse, len(mediaItems))
 	filter := requestAccessFilter(r)
-	// Parsed once for the whole list; the calling handler has already rejected
-	// an unrecognized value. Unset keeps the per-slot defaults below, which are
-	// deliberately asymmetric (a featured poster beside a card backdrop); an
-	// explicit size applies to every image in the response instead.
 	size := requestImageSize(r)
-	posterHint := requestVariantHint("featured", size)
-	cardHint := requestVariantHint("card", size)
+	posterSize, cardSize := string(imagesize.Medium), string(imagesize.Small)
+	if size != imagesize.Unset {
+		posterSize, cardSize = string(size), string(size)
+	}
 	accessibleItems := make([]*models.MediaItem, 0, len(mediaItems))
 	for _, mi := range mediaItems {
 		if err := h.itemRepo.EnsureAccessible(r.Context(), mi.ContentID, filter); err != nil {
@@ -639,8 +638,8 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 			BackdropThumbhash: mi.BackdropThumbhash,
 			UserState:         userStates[mi.ContentID],
 		}
-		resp.PosterURL = h.presignURL(r, sizedPosterPath(mi.PosterPath, size), posterHint)
-		resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		resp.PosterURL = h.targetURL(r, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{mi.ContentID}, Slot: artworkImagePoster}, mi.PosterPath, artworkImagePoster, posterSize)
+		resp.BackdropURL = h.targetURL(r, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{mi.ContentID}, Slot: artworkImageBackdrop}, mi.BackdropPath, artworkImageBackdrop, cardSize)
 		byID[mi.ContentID] = &resp
 	}
 
@@ -681,14 +680,14 @@ func resolveItemsByIDs(h *PersonalDataHandler, r *http.Request, ids []string) ([
 					}
 					// Use episode still as backdrop, fall back to parent series images.
 					if ep.StillPath != "" {
-						resp.BackdropURL = h.presignURL(r, sizedCardPath(ep.StillPath, artworkkey.ImageStill, size), cardHint)
+						resp.BackdropURL = h.targetURL(r, artworkurl.Target{Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{ep.ContentID}, Slot: artworkImageStill}, ep.StillPath, artworkImageStill, cardSize)
 						resp.BackdropThumbhash = ep.StillThumbhash
 					} else if parent != nil {
-						resp.BackdropURL = h.presignURL(r, sizedCardBackdropPath(parent.BackdropPath, size), cardHint)
+						resp.BackdropURL = h.targetURL(r, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{parent.ContentID}, Slot: artworkImageBackdrop}, parent.BackdropPath, artworkImageBackdrop, cardSize)
 						resp.BackdropThumbhash = parent.BackdropThumbhash
 					}
 					if parent != nil {
-						resp.PosterURL = h.presignURL(r, sizedPosterPath(parent.PosterPath, size), posterHint)
+						resp.PosterURL = h.targetURL(r, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{parent.ContentID}, Slot: artworkImagePoster}, parent.PosterPath, artworkImagePoster, posterSize)
 						resp.PosterThumbhash = parent.PosterThumbhash
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
@@ -859,6 +858,13 @@ func (h *PersonalDataHandler) presignURL(r *http.Request, path string, variant s
 		return h.detailSvc.PresignURL(r.Context(), path, variant)
 	}
 	return ""
+}
+
+func (h *PersonalDataHandler) targetURL(r *http.Request, target artworkurl.Target, path, imageType, size string) string {
+	if h.detailSvc == nil {
+		return ""
+	}
+	return h.detailSvc.PresignArtworkTargetImageURL(r.Context(), target, path, imageType, size)
 }
 
 // parsePagination extracts limit and offset from query parameters with defaults.

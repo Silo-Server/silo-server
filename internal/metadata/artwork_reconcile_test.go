@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 )
 
 // fakeObjectChecker treats every key as present unless listed in missing or
@@ -24,9 +26,7 @@ type fakeObjectChecker struct {
 	checked  map[string]int
 }
 
-func (f *fakeObjectChecker) Bucket() string { return "test-bucket" }
-
-func (f *fakeObjectChecker) ObjectExists(_ context.Context, _ string, key string) (bool, error) {
+func (f *fakeObjectChecker) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.checked == nil {
@@ -34,9 +34,12 @@ func (f *fakeObjectChecker) ObjectExists(_ context.Context, _ string, key string
 	}
 	f.checked[key]++
 	if f.errorAll || f.erroring[key] {
-		return false, errors.New("simulated storage error")
+		return artworkstore.ObjectInfo{}, errors.New("simulated storage error")
 	}
-	return !f.missing[key], nil
+	if f.missing[key] {
+		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	}
+	return artworkstore.ObjectInfo{Key: key, SizeBytes: 1}, nil
 }
 
 func TestShouldBulkReset(t *testing.T) {
@@ -103,6 +106,72 @@ func TestBuildSweepBatchQueryUsesNativeNumericKeys(t *testing.T) {
 	}
 	if _, ok := args[0].(int32); !ok {
 		t.Fatalf("folder cursor type = %T, want int32", args[0])
+	}
+}
+
+// user_personal_collections.id is unique only within an account, so the sweep
+// has to paginate and match on the full (user_id, id) primary key. Sweeping on
+// id alone skips rows at batch boundaries and lets an update predicate reach
+// another account's collection.
+func TestUserCollectionSweepUsesAccountScopedKey(t *testing.T) {
+	surface, ok := artworkSweepSurfaceByName(artworkSurfaceUserCollectionPosters)
+	if !ok {
+		t.Fatal("user collection posters surface is missing")
+	}
+	if got := surface.keyColumnNames(); len(got) != 2 || got[0] != "user_id" || got[1] != "id" {
+		t.Fatalf("key columns = %v, want [user_id id]", got)
+	}
+	query, args, err := buildSweepBatchQuery(surface, []string{"7", "collection-a"})
+	if err != nil {
+		t.Fatalf("build user collection query: %v", err)
+	}
+	if !strings.Contains(query, "AND (user_id, id) > ($1, $2)") ||
+		!strings.Contains(query, "ORDER BY user_id, id LIMIT $3") {
+		t.Fatalf("query does not paginate on the composite key: %s", query)
+	}
+	if _, ok := args[0].(int32); !ok {
+		t.Fatalf("user_id cursor type = %T, want int32", args[0])
+	}
+	if got := keyEqualityPredicate(surface.keyCols); got != "user_id = $1 AND id = $2" {
+		t.Fatalf("row predicate = %q, want both key columns", got)
+	}
+}
+
+// A checkpoint written before the key widened carries a one-value cursor for a
+// two-column surface. The run must restart rather than fail permanently.
+func TestArtworkReconcileCheckpointDiscardsStaleNarrowCursor(t *testing.T) {
+	surfaces := artworkSweepSurfaces()
+	position, found := artworkSweepSurfacePosition(surfaces, artworkSurfaceUserCollectionPosters)
+	if !found {
+		t.Fatal("user collection posters surface is missing")
+	}
+	checkpoint := ArtworkReconcileCheckpoint{
+		Version:       artworkReconcileCheckpointVersion,
+		Totals:        make([]int, len(surfaces)),
+		SurfaceName:   surfaces[position].name,
+		SurfaceCursor: []string{"collection-a"},
+		Stats:         ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
+	}
+	if checkpoint.valid(len(surfaces)) {
+		t.Fatal("stale one-value cursor was accepted for a two-column surface")
+	}
+	checkpoint.SurfaceCursor = []string{"7", "collection-a"}
+	if !checkpoint.valid(len(surfaces)) {
+		t.Fatal("current-width cursor was rejected")
+	}
+
+	// An invalid checkpoint restarts the run instead of erroring out: with no
+	// pool wired the reconciler stops at its configuration guard, proving the
+	// cursor never reaches parseKeys.
+	reconciler := &ArtworkCacheReconciler{}
+	if _, err := reconciler.RunResumable(context.Background(), &ArtworkReconcileCheckpoint{
+		Version:       artworkReconcileCheckpointVersion,
+		Totals:        make([]int, len(surfaces)),
+		SurfaceName:   surfaces[position].name,
+		SurfaceCursor: []string{"collection-a"},
+		Stats:         ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
+	}, nil, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("stale checkpoint error = %v, want the fresh-run configuration guard", err)
 	}
 }
 
@@ -189,7 +258,11 @@ func TestArtworkReconcileVerifySweep(t *testing.T) {
 		key("coll"):            true,
 		fmt.Sprintf("library-posters/arc-%d.png", suffix): true,
 	}}
-	stats, err := NewArtworkCacheReconciler(pool, checker).Run(ctx, nil)
+	reconciler := NewArtworkCacheReconciler(pool, checker)
+	// Chapter thumbnails are verified against their own backend; without this
+	// wiring the chapter pass is skipped entirely (pinned below).
+	reconciler.SetChapterThumbnailChecker(checker)
+	stats, err := reconciler.Run(ctx, nil)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -365,9 +438,10 @@ func (s *scriptedArtworkVerifySweeper) sweepChapterThumbnailsFrom(
 func TestArtworkReconcileStopsAtUnsafeBatchAndResumesFromLastCheckpoint(t *testing.T) {
 	surfaces := []artworkSweepSurface{{name: "posters"}, {name: "later surface"}}
 	checkpoint := ArtworkReconcileCheckpoint{
-		Version: artworkReconcileCheckpointVersion,
-		Totals:  []int{1001, 1},
-		Stats:   ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
+		Version:     artworkReconcileCheckpointVersion,
+		Totals:      []int{1001, 1},
+		SurfaceName: "posters",
+		Stats:       ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
 	}
 	firstRun := &scriptedArtworkVerifySweeper{batches: map[string][]scriptedArtworkBatch{
 		"posters": {
@@ -427,6 +501,7 @@ func TestArtworkReconcileStopsAndResumesChapterThumbnailsFromLastCheckpoint(t *t
 	checkpoint := ArtworkReconcileCheckpoint{
 		Version:      artworkReconcileCheckpointVersion,
 		ChapterTotal: 3,
+		SurfaceName:  artworkReconcileChapterSurface,
 		Stats:        ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
 	}
 	firstRun := &scriptedArtworkVerifySweeper{chapterBatches: []scriptedArtworkChapterBatch{
@@ -484,6 +559,7 @@ func TestArtworkReconcileWithoutSaverContinuesAfterUnsafeBatches(t *testing.T) {
 		Version:      artworkReconcileCheckpointVersion,
 		Totals:       []int{1, 1},
 		ChapterTotal: 2,
+		SurfaceName:  "posters",
 		Stats:        ArtworkReconcileStats{Mode: ArtworkReconcileModeVerify},
 	}
 	sweeper := &scriptedArtworkVerifySweeper{
@@ -558,8 +634,8 @@ func TestArtworkReconcileLeavesRowsAloneOnStorageErrors(t *testing.T) {
 	if stats.Errors == 0 || stats.SweepErrors == 0 {
 		t.Fatal("expected the erroring key to be counted")
 	}
-	if saved.SurfaceIndex != 0 || len(saved.SurfaceCursor) != 0 || saved.Finished {
-		t.Fatalf("checkpoint advanced past an errored batch: %#v", saved)
+	if !saved.valid(len(artworkSweepSurfaces())) {
+		t.Fatalf("saved checkpoint is invalid: %#v", saved)
 	}
 
 	var posterPath string
@@ -568,6 +644,20 @@ func TestArtworkReconcileLeavesRowsAloneOnStorageErrors(t *testing.T) {
 	}
 	if posterPath != cachedKey {
 		t.Fatalf("poster_path = %q, want untouched %q after storage error", posterPath, cachedKey)
+	}
+
+	resumeChecker := &fakeObjectChecker{missing: map[string]bool{cachedKey: true}}
+	if _, err := NewArtworkCacheReconciler(pool, resumeChecker).RunResumable(ctx, &saved, nil, nil); err != nil {
+		t.Fatalf("resume from saved checkpoint: %v", err)
+	}
+	if resumeChecker.checked[cachedKey] == 0 {
+		t.Fatalf("resumed reconcile skipped previously-errored key %q", cachedKey)
+	}
+	if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, contentID).Scan(&posterPath); err != nil {
+		t.Fatalf("read resumed item: %v", err)
+	}
+	if posterPath == cachedKey {
+		t.Fatalf("poster_path remained %q after healthy resume reported it missing", cachedKey)
 	}
 }
 

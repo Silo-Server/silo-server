@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -370,10 +372,12 @@ func TestBuildSectionsResponseKeepsExistingEpisodeMeta(t *testing.T) {
 }
 
 type countingSectionImageResolver struct {
-	batchCalls  int
-	singleCalls int
-	variant     string
-	paths       []string
+	batchCalls       int
+	targetBatchCalls int
+	singleCalls      int
+	variant          string
+	paths            []string
+	requests         []artworkurl.TargetRequest
 }
 
 func (r *countingSectionImageResolver) ResolveImageURL(_ context.Context, path string, variant string) string {
@@ -404,6 +408,151 @@ func (r *countingSectionImageResolver) ResolveImageURLsWithExpiry(_ context.Cont
 		resolved[path] = catalog.ResolvedImageURL{URL: "resolved:" + path}
 	}
 	return resolved
+}
+
+func (r *countingSectionImageResolver) ResolveArtworkTargetsWithExpiry(_ context.Context, targets []artworkurl.Target, variant string) map[string]catalog.ResolvedImageURL {
+	requests := make([]artworkurl.TargetRequest, 0, len(targets))
+	for _, target := range targets {
+		requests = append(requests, artworkurl.TargetRequest{Target: target, Variant: variant})
+	}
+	return r.ResolveArtworkTargetRequestsWithExpiry(context.Background(), requests)
+}
+
+func (r *countingSectionImageResolver) ResolveArtworkTargetRequestsWithExpiry(_ context.Context, requests []artworkurl.TargetRequest) map[string]catalog.ResolvedImageURL {
+	r.targetBatchCalls++
+	r.requests = append(r.requests, requests...)
+	resolved := make(map[string]catalog.ResolvedImageURL, len(requests))
+	seen := make(map[string]struct{})
+	for _, request := range requests {
+		path := artworkkey.Variant(request.Target.Reference, request.Variant)
+		resolved[request.CacheKey()] = catalog.ResolvedImageURL{URL: "resolved:" + path}
+		if _, ok := seen[path]; !ok {
+			seen[path] = struct{}{}
+			r.paths = append(r.paths, path)
+		}
+	}
+	return resolved
+}
+
+func TestBuildSectionsResponseMintsSeriesPosterTargetForEpisode(t *testing.T) {
+	assertEpisodeSectionArtworkTarget(t, episodeSectionArtworkTargetCase{
+		posterPath:  "series/poster/original.jpg",
+		posterOwner: sections.SectionArtworkOwner{Kind: sections.SectionArtworkOwnerSeries, ContentID: "series-1"},
+		wantSurface: artworkurl.SurfaceItemPosters,
+		wantKey:     "series-1",
+		wantSlot:    artworkImagePoster,
+	})
+}
+
+func TestBuildSectionsResponseMintsSeasonPosterTargetForEpisode(t *testing.T) {
+	assertEpisodeSectionArtworkTarget(t, episodeSectionArtworkTargetCase{
+		posterPath:  "season/poster/original.jpg",
+		posterOwner: sections.SectionArtworkOwner{Kind: sections.SectionArtworkOwnerSeason, ContentID: "season-1"},
+		wantSurface: artworkurl.SurfaceSeasonPosters,
+		wantKey:     "season-1",
+		wantSlot:    artworkImagePoster,
+	})
+}
+
+func TestBuildSectionsResponseMintsEpisodeStillPosterTargetForEpisode(t *testing.T) {
+	assertEpisodeSectionArtworkTarget(t, episodeSectionArtworkTargetCase{
+		posterPath:  "episode/still/original.jpg",
+		posterOwner: sections.SectionArtworkOwner{Kind: sections.SectionArtworkOwnerEpisode, ContentID: "episode-1"},
+		wantSurface: artworkurl.SurfaceEpisodeStills,
+		wantKey:     "episode-1",
+		wantSlot:    artworkImageStill,
+	})
+}
+
+func TestBuildSectionsResponseMintsEpisodeStillBackdropTargetForEpisode(t *testing.T) {
+	// The wide default is w1280, but the still ladder tops out at w780;
+	// minting w1280 against the still slot would fail signing and drop the
+	// URL, so the handler must clamp to the widest still rung.
+	assertEpisodeSectionArtworkTarget(t, episodeSectionArtworkTargetCase{
+		backdropPath:  "episode/still/original.jpg",
+		backdropOwner: sections.SectionArtworkOwner{Kind: sections.SectionArtworkOwnerEpisode, ContentID: "episode-1"},
+		wantSurface:   artworkurl.SurfaceEpisodeStills,
+		wantKey:       "episode-1",
+		wantSlot:      artworkImageStill,
+		wantVariant:   artworkkey.VariantW780,
+	})
+}
+
+func TestBuildSectionsResponseMintsSeriesLogoTargetForEpisode(t *testing.T) {
+	assertEpisodeSectionArtworkTarget(t, episodeSectionArtworkTargetCase{
+		logoPath:    "series/logo/original.png",
+		logoOwner:   sections.SectionArtworkOwner{Kind: sections.SectionArtworkOwnerSeries, ContentID: "series-1"},
+		wantSurface: artworkurl.SurfaceItemLogos,
+		wantKey:     "series-1",
+		wantSlot:    artworkImageLogo,
+	})
+}
+
+type episodeSectionArtworkTargetCase struct {
+	posterPath    string
+	backdropPath  string
+	logoPath      string
+	posterOwner   sections.SectionArtworkOwner
+	backdropOwner sections.SectionArtworkOwner
+	logoOwner     sections.SectionArtworkOwner
+	wantSurface   string
+	wantKey       string
+	wantSlot      string
+	wantVariant   string
+}
+
+func assertEpisodeSectionArtworkTarget(t *testing.T, tc episodeSectionArtworkTargetCase) {
+	t.Helper()
+	resolver := &countingSectionImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	h := &SectionHandler{DetailSvc: detailSvc}
+
+	item := &models.MediaItem{
+		ContentID:    "episode-1",
+		Type:         "episode",
+		PosterPath:   tc.posterPath,
+		BackdropPath: tc.backdropPath,
+		LogoPath:     tc.logoPath,
+	}
+	h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "episodes", SectionType: sections.SectionCustomFilter},
+		Items:           []*models.MediaItem{item},
+		ItemMeta: map[string]sections.SectionItemMeta{
+			item.ContentID: {
+				PosterOwner:   tc.posterOwner,
+				BackdropOwner: tc.backdropOwner,
+				LogoOwner:     tc.logoOwner,
+			},
+		},
+	}}, nil)
+
+	reference := tc.posterPath
+	if reference == "" {
+		reference = tc.backdropPath
+	}
+	if reference == "" {
+		reference = tc.logoPath
+	}
+	for _, request := range resolver.requests {
+		if request.Target.Reference != reference {
+			continue
+		}
+		if request.Target.Surface != tc.wantSurface {
+			t.Fatalf("surface = %q, want %q", request.Target.Surface, tc.wantSurface)
+		}
+		if len(request.Target.Keys) != 1 || request.Target.Keys[0] != tc.wantKey {
+			t.Fatalf("keys = %v, want [%q]", request.Target.Keys, tc.wantKey)
+		}
+		if request.Target.Slot != tc.wantSlot {
+			t.Fatalf("slot = %q, want %q", request.Target.Slot, tc.wantSlot)
+		}
+		if tc.wantVariant != "" && request.Variant != tc.wantVariant {
+			t.Fatalf("variant = %q, want %q", request.Variant, tc.wantVariant)
+		}
+		return
+	}
+	t.Fatalf("no artwork target found for reference %q in %+v", reference, resolver.requests)
 }
 
 func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
@@ -444,14 +593,14 @@ func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
 	resp := h.buildSectionsResponse(req, withItems, nil)
 
-	if resolver.batchCalls != 1 {
-		t.Fatalf("batch calls = %d, want 1", resolver.batchCalls)
+	if resolver.targetBatchCalls != 1 {
+		t.Fatalf("target batch calls = %d, want 1", resolver.targetBatchCalls)
+	}
+	if resolver.batchCalls != 0 {
+		t.Fatalf("path-only batch calls = %d, want 0", resolver.batchCalls)
 	}
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single calls = %d, want 0", resolver.singleCalls)
-	}
-	if resolver.variant != "featured" {
-		t.Fatalf("variant = %q, want featured", resolver.variant)
 	}
 	sort.Strings(resolver.paths)
 	wantPaths := []string{"/backdrop/w1280.jpg", "/logo/original.png", "/poster/w500.jpg"}

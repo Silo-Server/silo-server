@@ -10,21 +10,64 @@ import (
 	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/h2non/bimg"
 	"go.n16f.net/thumbhash"
 )
 
+// ValidateImage performs the same bounded dimension validation used before
+// encoding and returns a safe image media type for resilient source delivery.
+func ValidateImage(data []byte) (string, error) {
+	if len(data) == 0 {
+		return "", fmt.Errorf("imageutil: empty image")
+	}
+	size, err := bimg.NewImage(data).Size()
+	if err != nil {
+		return "", fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	if err := checkSourceDimensions(size.Width, size.Height); err != nil {
+		return "", err
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(http.DetectContentType(data)))
+	if !strings.HasPrefix(mediaType, "image/") || mediaType == "image/svg+xml" {
+		return "", fmt.Errorf("imageutil: unsupported image media type %q", mediaType)
+	}
+	return mediaType, nil
+}
+
 const (
 	webpQuality              = 90
 	thumbhashSourceDimension = 100
+
+	// maxSourcePixels bounds the decoded size of any source image before the
+	// pipeline fully decodes it. Byte limits on uploads do not bound pixels: a
+	// ~1 MB PNG can declare tens of thousands of pixels per side and cost
+	// gigabytes of RAM and minutes of CPU to decode (a decompression bomb).
+	// 80 MP comfortably exceeds 8K artwork (~33 MP) and current consumer
+	// camera sensors while capping a single decode at a few hundred MB.
+	maxSourcePixels = 80_000_000
 )
 
-// MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant. Provider artwork wider than this is downscaled on ingest, so a
-// client asking for the original size never receives more pixels than this.
+// MaxCachedOriginalDimension caps the longest edge of the stored original.
+// It is exported so the image-size capability reports the encoder's live
+// contract instead of duplicating the number.
 const MaxCachedOriginalDimension = 1920
+
+// checkSourceDimensions rejects images whose header-declared dimensions are
+// invalid or would decode to more than maxSourcePixels. Dimensions come from a
+// cheap header read, so the check runs before any full decode.
+func checkSourceDimensions(width, height int) error {
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("imageutil: invalid image dimensions %dx%d", width, height)
+	}
+	if int64(width)*int64(height) > maxSourcePixels {
+		return fmt.Errorf("imageutil: image dimensions %dx%d exceed the %d-pixel limit", width, height, maxSourcePixels)
+	}
+	return nil
+}
 
 // Variant holds a named image variant (e.g. "original", "w500").
 type Variant struct {
@@ -50,6 +93,9 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	size, err := img.Size()
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	if err := checkSourceDimensions(size.Width, size.Height); err != nil {
+		return nil, err
 	}
 
 	variants := make([]Variant, 0, len(widths)+1)
@@ -100,6 +146,9 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 	size, err := img.Size()
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	if err := checkSourceDimensions(size.Width, size.Height); err != nil {
+		return nil, err
 	}
 
 	squareSize := size.Width
@@ -186,6 +235,14 @@ func decodeThumbhashSource(data []byte) (image.Image, error) {
 			return img, nil
 		}
 	}
+	// The pure-Go fallback materializes the full raster, so bound the
+	// header-declared dimensions first; vips never saw or already rejected
+	// these bytes, and its shrink-on-load protection does not apply here.
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		if err := checkSourceDimensions(cfg.Width, cfg.Height); err != nil {
+			return nil, err
+		}
+	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: decode for thumbhash: %w", err)
@@ -198,6 +255,9 @@ func normalizeThumbhashSource(data []byte) ([]byte, error) {
 	size, err := img.Size()
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	if err := checkSourceDimensions(size.Width, size.Height); err != nil {
+		return nil, err
 	}
 	opts := bimg.Options{
 		Type:          bimg.PNG,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -36,6 +37,7 @@ type playbackSessionRow struct {
 	SeasonNumber         *int      `json:"season_number,omitempty"`
 	EpisodeNumber        *int      `json:"episode_number,omitempty"`
 	PosterURL            string    `json:"poster_url,omitempty"`
+	ArtworkOwnerID       string    `json:"-"`
 	PlayMethod           string    `json:"play_method"`
 	ReportingNode        string    `json:"reporting_node"`
 	NodeDisplayName      string    `json:"node_display_name,omitempty"`
@@ -203,6 +205,7 @@ func (l *PlaybackSessionsLoader) Load(
 			e.season_number,
 			e.episode_number,
 			COALESCE(CASE WHEN e.series_id IS NOT NULL THEN series_mi.poster_path ELSE mi.poster_path END, ''),
+			COALESCE(e.series_id, mf.content_id, ''),
 			s.play_method,
 			s.reporting_node,
 			COALESCE(remote_node.name, ''),
@@ -274,7 +277,7 @@ func (l *PlaybackSessionsLoader) Load(
 		if err := rows.Scan(
 			&s.SessionID, &s.UserID, &s.Username, &s.ProfileID, &s.MediaFileID, &s.RequestedMediaFileID, &s.ContentID,
 			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
-			&posterPath,
+			&posterPath, &s.ArtworkOwnerID,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.StartedAt, &s.UpdatedAt,
 			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
 			&s.ClientBuild, &s.ClientChannel,
@@ -287,7 +290,7 @@ func (l *PlaybackSessionsLoader) Load(
 		); err != nil {
 			return nil, fmt.Errorf("scanning playback session: %w", err)
 		}
-		s.PosterURL = l.presignPosterURL(r, posterPath)
+		s.PosterURL = l.presignPosterURL(r, s.ArtworkOwnerID, posterPath)
 		s.StreamBitrateKbps = streamBitrateKbps
 		s.TargetAudioChannels = targetAudioChannels
 		s.TargetBitrateKbps = targetBitrateKbps
@@ -312,9 +315,11 @@ func (l *PlaybackSessionsLoader) Load(
 	return sessions, nil
 }
 
-func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, path string) string {
-	if l != nil && l.DetailSvc != nil {
-		return l.DetailSvc.PresignURL(r.Context(), cardThumbnailPath(path), "card")
+func (l *PlaybackSessionsLoader) presignPosterURL(r *http.Request, ownerID, path string) string {
+	if l != nil && l.DetailSvc != nil && ownerID != "" {
+		return l.DetailSvc.PresignArtworkTargetImageURL(r.Context(), artworkurl.Target{
+			Surface: artworkurl.SurfaceItemPosters, Keys: []string{ownerID}, Slot: artworkImagePoster,
+		}, path, "poster", "small")
 	}
 	return ""
 }

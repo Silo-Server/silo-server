@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 // ErrNotFound is returned when the requested S3 object does not exist.
@@ -79,6 +80,11 @@ type ObjectInfo struct {
 	Key          string
 	SizeBytes    int64
 	LastModified *time.Time
+	// ContentType and ETag are populated by StatObject. The listing paths
+	// leave them empty: ListObjectsV2 does not report a content type, and
+	// callers that list are inventorying keys, not serving bytes.
+	ContentType string
+	ETag        string
 }
 
 // NewClient creates a new S3 Client from the given BucketConfig.
@@ -198,6 +204,34 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte)
 	}
 
 	return nil
+}
+
+// PutObjectIfAbsent creates key only when it does not already exist. Artwork
+// store sentinels use this to make first-start initialization converge across
+// API nodes without one node overwriting another node's random copy UUID.
+func (c *Client) PutObjectIfAbsent(ctx context.Context, bucket, key string, data []byte) (bool, error) {
+	body := newBytesReadSeeker(data)
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(c.prefixedKey(key)),
+		Body:        body,
+		IfNoneMatch: aws.String("*"),
+		Metadata: map[string]string{
+			"silo-sha256": objectSHA256(data),
+		},
+	}
+	if ct := contentTypeFromKey(key); ct != "" {
+		input.ContentType = aws.String(ct)
+	}
+	_, err := c.s3Client.PutObject(ctx, input)
+	if err == nil {
+		return true, nil
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) && (apiErr.ErrorCode() == "PreconditionFailed" || apiErr.ErrorCode() == "ConditionalRequestConflict") {
+		return false, nil
+	}
+	return false, fmt.Errorf("s3 conditional PutObject %s/%s: %w", bucket, key, err)
 }
 
 // PutObjectStream uploads a streaming body to the given key. When contentType is
@@ -431,6 +465,37 @@ func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, er
 	return true, nil
 }
 
+// StatObject returns object metadata without transferring the body. Returns
+// ErrNotFound when the object does not exist.
+func (c *Client) StatObject(ctx context.Context, bucket, key string) (ObjectInfo, error) {
+	objectKey := c.prefixedKey(key)
+	out, err := c.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		if isNotFoundErr(err) {
+			return ObjectInfo{}, ErrNotFound
+		}
+		return ObjectInfo{}, fmt.Errorf("s3 HeadObject %s/%s: %w", bucket, key, err)
+	}
+
+	info := ObjectInfo{Key: key, ETag: aws.ToString(out.ETag), ContentType: aws.ToString(out.ContentType)}
+	if out.ContentLength != nil {
+		info.SizeBytes = *out.ContentLength
+	}
+	info.LastModified = out.LastModified
+	return info, nil
+}
+
+// ReadURLExpires reports whether the URLs PresignGetURL produces stop working
+// after their requested lifetime. Unsigned public-endpoint URLs do not: they
+// are permanent as long as the object exists, so callers must not cache them
+// with an artificial expiry or advertise one to clients.
+func (c *Client) ReadURLExpires() bool {
+	return c.publicEndpoint == "" || c.urlAuth != URLAuthPublic
+}
+
 // ObjectMatches checks that an immutable object exists with the expected
 // length and application-recorded SHA-256. Objects written before checksums
 // were recorded return false and are safely rewritten by the caller.
@@ -553,7 +618,7 @@ func (c *Client) ListObjects(ctx context.Context, bucket, prefix string) ([]stri
 // ListObjectInfos lists objects with the given prefix and returns summary metadata.
 func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error) {
 	var objects []ObjectInfo
-	prefixedPrefix := c.prefixedKey(prefix)
+	prefixedPrefix := c.listPrefix(prefix)
 
 	paginator := s3.NewListObjectsV2Paginator(c.s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
@@ -586,6 +651,38 @@ func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]
 	}
 
 	return objects, nil
+}
+
+func (c *Client) ListObjectInfosPage(ctx context.Context, bucket, prefix, cursor string, limit int) ([]ObjectInfo, string, bool, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+	input := &s3.ListObjectsV2Input{Bucket: aws.String(bucket), Prefix: aws.String(c.listPrefix(prefix)), MaxKeys: aws.Int32(int32(limit))}
+	if cursor != "" {
+		input.StartAfter = aws.String(c.prefixedKey(cursor))
+	}
+	page, err := c.s3Client.ListObjectsV2(ctx, input)
+	if err != nil {
+		return nil, cursor, false, fmt.Errorf("s3 ListObjectsV2 %s prefix=%s: %w", bucket, prefix, err)
+	}
+	objects := make([]ObjectInfo, 0, len(page.Contents))
+	next := cursor
+	for _, obj := range page.Contents {
+		if obj.Key == nil {
+			continue
+		}
+		logical, ok := c.stripKeyPrefix(*obj.Key)
+		if !ok {
+			continue
+		}
+		var size int64
+		if obj.Size != nil {
+			size = *obj.Size
+		}
+		objects = append(objects, ObjectInfo{Key: logical, SizeBytes: size, LastModified: obj.LastModified})
+		next = logical
+	}
+	return objects, next, !aws.ToBool(page.IsTruncated), nil
 }
 
 // isNotFoundErr checks whether an error indicates that the object was not found.
@@ -643,6 +740,22 @@ func (c *Client) prefixedKey(key string) string {
 		return c.keyPrefix
 	}
 	return c.keyPrefix + "/" + trimmed
+}
+
+// listPrefix returns the S3 Prefix that scopes a listing to this client's key
+// space. It differs from prefixedKey in exactly one case: an empty logical
+// prefix, where prefixedKey returns the bare key prefix with no separator. As a
+// listing Prefix that also matches sibling keys that merely start with it — key
+// prefix "assets" would list "assets-old/..." too. Those foreign keys are then
+// dropped by stripKeyPrefix, so a truncated page can come back with zero
+// objects and an unchanged cursor, which paging callers read as a listing that
+// refuses to advance. Anchoring on the trailing slash keeps the listing inside
+// the client's own tree.
+func (c *Client) listPrefix(prefix string) string {
+	if c.keyPrefix != "" && strings.TrimLeft(prefix, "/") == "" {
+		return c.keyPrefix + "/"
+	}
+	return c.prefixedKey(prefix)
 }
 
 func (c *Client) stripKeyPrefix(key string) (string, bool) {

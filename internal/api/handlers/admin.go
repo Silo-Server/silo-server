@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -378,15 +379,6 @@ type unmatchedFileRow struct {
 }
 
 // --- Helper ---
-
-// presignPosterURL generates a presigned poster URL for admin sessions.
-// Returns empty string if no detail service is configured or the path is empty.
-func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
-	if h.DetailSvc != nil {
-		return h.DetailSvc.PresignURL(r.Context(), cardThumbnailPath(path), "card")
-	}
-	return ""
-}
 
 // toAdminUserResponse converts a User model to an admin API response. group
 // is the user's access-group policy (nil when ungrouped or unknown).
@@ -1608,6 +1600,11 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 // server_settings store but is not part of the administrator settings API.
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
+	// The artwork store pin records what the catalog's live artwork keys were
+	// materialized against. Administrators choose artwork.storage_backend;
+	// editing the pin would let a node reinterpret those keys against
+	// different storage, which is the exact failure it exists to prevent.
+	artworkstore.StorePinSettingKey: true,
 }
 
 func redactAdminSettings(values map[string]string) {
@@ -2298,6 +2295,7 @@ const (
 // errCodeStorageUnavailable is the API error code for a setting that needs
 // object storage this deployment has not configured.
 const errCodeStorageUnavailable = "storage_unavailable"
+const errCodeInvalidSettings = "invalid_settings"
 
 // errPublicStorageUnavailable is returned when a write would leave
 // metadata.cache_images enabled with no public bucket anywhere: the image cacher
@@ -2381,6 +2379,33 @@ func (h *AdminHandler) validateProspectiveImageCaching(effective, changed map[st
 		return nil
 	}
 	return errPublicStorageUnavailable
+}
+
+// validateProspectiveArtworkBackend refuses a backend selection the pinned
+// artwork store will fatally reject at the next boot. The pin is
+// machine-managed state, so enum normalization alone cannot catch this: an
+// explicit backend that contradicts artwork.store_pin makes artworkstore.Open
+// return its always-fatal PinMismatchError, the process exits, and the
+// settings UI needed to revert the value becomes unreachable.
+func validateProspectiveArtworkBackend(prospective, changed map[string]string) error {
+	if _, ok := changed[config.ArtworkStorageBackendKey]; !ok {
+		return nil
+	}
+	pin, err := artworkstore.DecodePin(prospective[artworkstore.StorePinSettingKey])
+	if err != nil || pin.IsZero() {
+		// An unreadable pin is Open's problem to report; the save must not
+		// wedge settings edits behind it.
+		return nil //nolint:nilerr // deliberate: never block saves on pin decode failures
+	}
+	backend := strings.TrimSpace(prospective[config.ArtworkStorageBackendKey])
+	switch backend {
+	case "", config.ArtworkBackendAuto, pin.Backend:
+		return nil
+	}
+	return fmt.Errorf(
+		"artwork.storage_backend=%s conflicts with this install's pinned %s artwork store; "+
+			"in-place backend switches are unsupported — keep %s (or auto), or migrate the store by byte-for-byte copy first",
+		backend, pin.Backend, pin.Backend)
 }
 
 func (h *AdminHandler) normalizeBatchSetting(
@@ -2672,10 +2697,18 @@ func (h *AdminHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Reque
 				validationCode = errCodeStorageUnavailable
 				return nil, err
 			}
+			// Checked against the raw prospective map, not the filtered
+			// snapshot: the store pin is machine-managed and hidden from the
+			// admin settings surface.
+			if err := validateProspectiveArtworkBackend(prospective, normalized); err != nil {
+				validationErr = err
+				validationCode = errCodeInvalidSettings
+				return nil, err
+			}
 			validationSnapshot := adminSettingsValidationSnapshot(activeProspective, normalized)
 			if err := validateProspectiveAdminSettings(validationSnapshot, h.RedisBootstrapAvailable); err != nil {
 				validationErr = err
-				validationCode = "invalid_settings"
+				validationCode = errCodeInvalidSettings
 				return nil, err
 			}
 			writes := make(map[string]string, len(normalized))
@@ -3018,13 +3051,20 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 			// establish or clear one write at a time. Per-key validation above
 			// remains strict; the durable prerequisites are the exception — a
 			// single-key write may not break them.
+			if key == config.ArtworkStorageBackendKey {
+				if err := validateProspectiveArtworkBackend(prospective, map[string]string{key: req.Value}); err != nil {
+					validationErr = err
+					validationCode = errCodeInvalidSettings
+					return nil, err
+				}
+			}
 			if key == "redis.url" {
 				if err := config.ValidateRedisRateLimitTransport(
 					h.activeAdminSettings(prospective),
 					h.RedisBootstrapAvailable,
 				); err != nil {
 					validationErr = err
-					validationCode = "invalid_settings"
+					validationCode = errCodeInvalidSettings
 					return nil, err
 				}
 			}

@@ -402,20 +402,22 @@ func (r *SeasonLocalizationRepository) GetBySeasonIDs(ctx context.Context, seaso
 	return result, nil
 }
 
-func (r *SeasonLocalizationRepository) UpdateArtworkIfSourceMatches(ctx context.Context, seasonContentID, language, sourcePath, cachedPath, thumbhash string) (bool, error) {
+func (r *SeasonLocalizationRepository) UpdateArtworkIfSourceMatches(ctx context.Context, seriesID string, seasonNumber int, language, sourcePath, cachedPath, thumbhash string) (bool, error) {
 	if r == nil || r.pool == nil {
 		return false, nil
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE season_localizations
-		SET poster_path = $4,
-			poster_source_path = $3,
-			poster_thumbhash = NULLIF($5, ''),
+		SET poster_path = $5,
+			poster_source_path = $4,
+			poster_thumbhash = NULLIF($6, ''),
 			updated_at = NOW()
-		WHERE season_content_id = $1
-		  AND language = $2
-		  AND poster_source_path = $3
-	`, seasonContentID, language, sourcePath, cachedPath, thumbhash)
+		WHERE season_content_id = (
+			SELECT content_id FROM seasons WHERE series_id = $1 AND season_number = $2
+		)
+		  AND language = $3
+		  AND poster_source_path = $4
+	`, seriesID, seasonNumber, language, sourcePath, cachedPath, thumbhash)
 	if err != nil {
 		return false, fmt.Errorf("updating localized season cached artwork: %w", err)
 	}

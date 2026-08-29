@@ -197,10 +197,29 @@ func (r *ImageCacheJobRepository) Enqueue(ctx context.Context, in EnqueueImageCa
 }
 
 func (r *ImageCacheJobRepository) EnqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error) {
-	return r.enqueueBatch(ctx, inputs, false)
+	return r.enqueueBatch(ctx, inputs, false, 0)
 }
 
-func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
+// EnqueueRepair re-admits a completed target after authoritative storage loss.
+// Failed targets receive the normal failed-job cooldown before another attempt;
+// the existing unique target key provides cluster-wide durable deduplication
+// for request bursts.
+func (r *ImageCacheJobRepository) EnqueueRepair(ctx context.Context, in EnqueueImageCacheJobInput) (int, error) {
+	return r.enqueueBatch(ctx, []EnqueueImageCacheJobInput{in}, true, imageCacheFailedCooldown)
+}
+
+// EnqueueRepairBatch is the bulk-recovery counterpart to EnqueueRepair. It
+// retains the same cluster-wide unique target key and re-admits completed jobs
+// without creating a parallel repair queue. Re-admitted failed targets are due
+// immediately: a rebuild's completion is gated on outstanding repair jobs, and
+// parking them behind the request-burst cooldown would hold the store in
+// empty_rebuilding for the whole cooldown; one prompt attempt either recovers
+// the target or returns it to 'failed', which does not gate completion.
+func (r *ImageCacheJobRepository) EnqueueRepairBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error) {
+	return r.enqueueBatch(ctx, inputs, true, 0)
+}
+
+func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, repair bool, repairCooldown time.Duration) (int, error) {
 	if r == nil || r.pool == nil {
 		return 0, nil
 	}
@@ -222,7 +241,7 @@ func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []Enq
 		if end > len(valid) {
 			end = len(valid)
 		}
-		affected, err := r.enqueueBatchChunk(ctx, valid[start:end], requeueSucceeded)
+		affected, err := r.enqueueBatchChunk(ctx, valid[start:end], repair, repairCooldown)
 		if err != nil {
 			return total, err
 		}
@@ -233,8 +252,9 @@ func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []Enq
 
 func normalizeImageCacheJobInput(in EnqueueImageCacheJobInput) (EnqueueImageCacheJobInput, bool) {
 	in.SourcePath = strings.TrimSpace(in.SourcePath)
+	in.TargetContentID = strings.TrimSpace(in.TargetContentID)
 	in.TargetLanguage = strings.TrimSpace(in.TargetLanguage)
-	if !isCacheableImageSourcePath(in.SourcePath) {
+	if !isCacheableImageSourcePath(in.SourcePath) || !validImageCacheJobTarget(in) {
 		return EnqueueImageCacheJobInput{}, false
 	}
 	if in.ContentType == "" {
@@ -249,35 +269,58 @@ func normalizeImageCacheJobInput(in EnqueueImageCacheJobInput) (EnqueueImageCach
 	return in, true
 }
 
-func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
+func validImageCacheJobTarget(in EnqueueImageCacheJobInput) bool {
+	if in.TargetContentID == "" {
+		return false
+	}
+	switch in.TargetType {
+	case ImageCacheTargetSeason:
+		return in.ImageType == ImageCacheImagePoster && in.TargetLanguage == "" && in.SeasonNumber != nil && in.EpisodeNumber == nil
+	case ImageCacheTargetSeasonLocalization:
+		return in.ImageType == ImageCacheImagePoster && in.TargetLanguage != "" && in.SeasonNumber != nil && in.EpisodeNumber == nil
+	case ImageCacheTargetEpisode:
+		return in.ImageType == ImageCacheImageStill && in.TargetLanguage == "" && in.SeasonNumber != nil && in.EpisodeNumber != nil
+	case ImageCacheTargetItem:
+		return in.TargetLanguage == "" && in.SeasonNumber == nil && in.EpisodeNumber == nil
+	case ImageCacheTargetItemLocalization:
+		return in.TargetLanguage != "" && in.SeasonNumber == nil && in.EpisodeNumber == nil
+	case ImageCacheTargetPerson:
+		return in.ImageType == ImageCacheImageProfile && in.TargetLanguage == "" && in.SeasonNumber == nil && in.EpisodeNumber == nil
+	default:
+		return false
+	}
+}
+
+func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput, repair bool, repairCooldown time.Duration) (int, error) {
 	var sql strings.Builder
-	args := make([]any, 0, len(inputs)*11+1)
+	args := make([]any, 0, len(inputs)*12+2)
 	sql.WriteString(`
 		INSERT INTO metadata_image_cache_jobs (
 			target_type, target_content_id, target_language, series_id, source_path,
 			provider_id, provider_content_id, content_type, image_type,
 			season_number, episode_number, status, attempt_count,
 			next_attempt_at, locked_at, locked_by, last_error,
-			created_at, updated_at, completed_at
+			created_at, updated_at, completed_at, repair_requested
 		) VALUES `)
 	for i, in := range inputs {
 		if i > 0 {
 			sql.WriteString(", ")
 		}
 		base := len(args)
-		fmt.Fprintf(&sql, `($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, 'queued', 0, NOW(), NULL, '', '', NOW(), NOW(), NULL)`,
+		fmt.Fprintf(&sql, `($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, 'queued', 0, NOW(), NULL, '', '', NOW(), NOW(), NULL, $%d)`,
 			base+1, base+2, base+3, base+4, base+5,
-			base+6, base+7, base+8, base+9, base+10, base+11)
+			base+6, base+7, base+8, base+9, base+10, base+11, base+12)
 		args = append(args,
 			in.TargetType, in.TargetContentID, strings.TrimSpace(in.TargetLanguage), in.SeriesID, in.SourcePath,
 			in.ProviderID, in.ProviderContentID, in.ContentType, in.ImageType,
-			in.SeasonNumber, in.EpisodeNumber,
+			in.SeasonNumber, in.EpisodeNumber, repair,
 		)
 	}
-	requeueSucceededArg := len(args) + 1
-	args = append(args, requeueSucceeded)
+	repairArg := len(args) + 1
+	repairCooldownArg := len(args) + 2
+	args = append(args, repair, intervalLiteral(repairCooldown))
 	fmt.Fprintf(&sql, `
-	ON CONFLICT (target_type, target_content_id, image_type, target_language) DO UPDATE SET
+	ON CONFLICT (target_type, target_content_id, image_type, target_language, season_number, episode_number) DO UPDATE SET
 		series_id = EXCLUDED.series_id,
 			source_path = EXCLUDED.source_path,
 			provider_id = EXCLUDED.provider_id,
@@ -285,8 +328,12 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			content_type = EXCLUDED.content_type,
 			season_number = EXCLUDED.season_number,
 			episode_number = EXCLUDED.episode_number,
+			repair_requested = metadata_image_cache_jobs.repair_requested OR EXCLUDED.repair_requested,
 			status = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN 'queued'
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
 					THEN 'queued'
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
@@ -301,6 +348,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			attempt_count = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 0
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
+					THEN 0
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN 0
@@ -312,6 +362,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			next_attempt_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NOW()
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
+					THEN NOW() + $%d::interval
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NOW()
@@ -322,6 +375,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			locked_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN NULL
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
 					THEN NULL
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
@@ -334,6 +390,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			locked_by = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
+					THEN ''
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
@@ -345,6 +404,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			last_error = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
+					THEN ''
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
@@ -355,6 +417,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			END,
 			completed_at = CASE
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
+					THEN NULL
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'failed'
 					THEN NULL
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
@@ -373,16 +438,24 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 		   )
 		   OR (
 			   $%d::boolean
-			   AND metadata_image_cache_jobs.status = 'succeeded'
+			   AND metadata_image_cache_jobs.status IN ('succeeded', 'failed')
 		   )`,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg,
-		requeueSucceededArg)
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairCooldownArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg,
+		repairArg)
 
 	tag, err := r.pool.Exec(ctx, sql.String(), args...)
 	if err != nil {
@@ -393,11 +466,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 
 // imageCacheTargetScope matches every job an interactive refresh of one
 // content ID is responsible for: the target's own rows plus the rows of its
-// children. Season, episode, and localization jobs are enqueued under their
-// own content ID with series_id pointing at the series, so a series-level
-// refresh only reaches them through series_id. Item and item_localization
-// rows carry series_id = the item's own content ID, so a movie or a
-// season/episode target still matches on target_content_id alone. Person
+// children. Season, season-localization, and episode jobs use the owning
+// series content ID plus their natural numeric keys. Item and
+// item-localization rows carry series_id = the item's own content ID. Person
 // jobs have an empty series_id and stay out of scope.
 func imageCacheTargetScope(param string) string {
 	return "(target_content_id = " + param + " OR series_id = " + param + ")"
@@ -452,7 +523,22 @@ func (r *ImageCacheJobRepository) ClaimDue(ctx context.Context, workerID string,
 	if err := r.recoverExpiredRunning(ctx, ""); err != nil {
 		return nil, err
 	}
-	return r.claimDue(ctx, workerID, "", limit)
+	return r.claimDue(ctx, workerID, "", limit, false)
+}
+
+// ClaimDueRepairs claims only repair-requested jobs. An installation running
+// artwork.remote_materialization=passthrough has ordinary materialization
+// switched off, but an empty-store rebuild still enqueues repair jobs and waits
+// for them to drain — so repair work has to remain claimable while everything
+// else stays off.
+func (r *ImageCacheJobRepository) ClaimDueRepairs(ctx context.Context, workerID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+	if r == nil || r.pool == nil || limit <= 0 {
+		return nil, nil
+	}
+	if err := r.recoverExpiredRunning(ctx, ""); err != nil {
+		return nil, err
+	}
+	return r.claimDue(ctx, workerID, "", limit, true)
 }
 
 func (r *ImageCacheJobRepository) retryTargetNow(ctx context.Context, targetContentID string) error {
@@ -495,7 +581,7 @@ func (r *ImageCacheJobRepository) claimDueForTarget(ctx context.Context, workerI
 	if targetContentID == "" {
 		return nil, nil
 	}
-	return r.claimDue(ctx, workerID, targetContentID, limit)
+	return r.claimDue(ctx, workerID, targetContentID, limit, false)
 }
 
 func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targetContentID string) (bool, error) {
@@ -520,7 +606,7 @@ func (r *ImageCacheJobRepository) targetHasRunningJobs(ctx context.Context, targ
 	return running, nil
 }
 
-func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, limit int) ([]*models.MetadataImageCacheJob, error) {
+func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, targetContentID string, limit int, repairOnly bool) ([]*models.MetadataImageCacheJob, error) {
 	if r == nil || r.pool == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -531,6 +617,9 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 			WHERE status = 'queued'
 			  AND next_attempt_at <= NOW()
 	`
+	if repairOnly {
+		query += " AND repair_requested"
+	}
 	args := []any{limit, workerID}
 	if targetContentID != "" {
 		query += " AND " + imageCacheTargetScope("$3")
@@ -553,7 +642,7 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 			j.source_path, j.provider_id, j.provider_content_id,
 			j.content_type, j.image_type, j.season_number, j.episode_number,
 			j.status, j.attempt_count, j.next_attempt_at, j.locked_at,
-			j.locked_by, j.last_error, j.created_at, j.updated_at, j.completed_at
+			j.locked_by, j.last_error, j.created_at, j.updated_at, j.completed_at, j.repair_requested
 	`
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -569,7 +658,7 @@ func (r *ImageCacheJobRepository) claimDue(ctx context.Context, workerID, target
 			&job.SourcePath, &job.ProviderID, &job.ProviderContentID,
 			&job.ContentType, &job.ImageType, &job.SeasonNumber, &job.EpisodeNumber,
 			&job.Status, &job.AttemptCount, &job.NextAttemptAt, &job.LockedAt,
-			&job.LockedBy, &job.LastError, &job.CreatedAt, &job.UpdatedAt, &job.CompletedAt,
+			&job.LockedBy, &job.LastError, &job.CreatedAt, &job.UpdatedAt, &job.CompletedAt, &job.RepairRequested,
 		); err != nil {
 			return nil, fmt.Errorf("scanning metadata image cache job: %w", err)
 		}
@@ -594,6 +683,7 @@ func (r *ImageCacheJobRepository) MarkSucceeded(ctx context.Context, id int64, l
 			locked_at = NULL,
 			locked_by = '',
 			last_error = '',
+			repair_requested = FALSE,
 			updated_at = NOW()
 		WHERE id = $1
 		  AND status = 'running'
@@ -619,6 +709,7 @@ func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, atte
 			locked_at = NULL,
 			locked_by = '',
 			last_error = left($5, 2000),
+			repair_requested = CASE WHEN $2 = 'queued' THEN repair_requested ELSE FALSE END,
 			updated_at = NOW()
 		WHERE id = $1
 		  AND status = 'running'
@@ -656,25 +747,24 @@ func (r *ImageCacheJobRepository) RequeueClaimed(ctx context.Context, ids []int6
 
 // CurrentTargetSourcePath reports the source path currently stored on the
 // job's target row so the processor can confirm it still owns the artwork
-// before uploading to the deterministic storage key. Returns ("", nil) when
-// the row no longer exists or the target type is unknown.
-func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error) {
+// before uploading to the deterministic storage key. found is false when the
+// row no longer exists or the target tuple is invalid.
+func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, job *models.MetadataImageCacheJob) (current string, found bool, err error) {
 	if r == nil || r.pool == nil || job == nil {
-		return "", nil
+		return "", false, nil
 	}
 	query, args, ok := currentTargetSourceQuery(job)
 	if !ok {
-		return "", nil
+		return "", false, nil
 	}
-	var current string
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
+	err = r.pool.QueryRow(ctx, query, args...).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+		return "", false, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("reading current target source path: %w", err)
+		return "", false, fmt.Errorf("reading current target source path: %w", err)
 	}
-	return current, nil
+	return current, true, nil
 }
 
 // CurrentTargetCachedPath reports the cached image path currently stored on
@@ -719,14 +809,26 @@ func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any,
 		return fmt.Sprintf("SELECT %s FROM media_item_localizations WHERE content_id = $1 AND language = $2", col),
 			[]any{job.TargetContentID, job.TargetLanguage}, true
 	case ImageCacheTargetSeason:
-		return "SELECT poster_source_path FROM seasons WHERE content_id = $1",
-			[]any{job.TargetContentID}, true
+		if job.SeasonNumber == nil {
+			return "", nil, false
+		}
+		return "SELECT poster_source_path FROM seasons WHERE series_id = $1 AND season_number = $2",
+			[]any{job.TargetContentID, *job.SeasonNumber}, true
 	case ImageCacheTargetSeasonLocalization:
-		return "SELECT poster_source_path FROM season_localizations WHERE season_content_id = $1 AND language = $2",
-			[]any{job.TargetContentID, job.TargetLanguage}, true
+		if job.SeasonNumber == nil || job.TargetLanguage == "" {
+			return "", nil, false
+		}
+		return `SELECT loc.poster_source_path FROM season_localizations loc
+			JOIN seasons s ON s.content_id = loc.season_content_id
+			WHERE s.series_id = $1 AND s.season_number = $2 AND loc.language = $3`,
+			[]any{job.TargetContentID, *job.SeasonNumber, job.TargetLanguage}, true
 	case ImageCacheTargetEpisode:
-		return "SELECT still_source_path FROM episodes WHERE content_id = $1",
-			[]any{job.TargetContentID}, true
+		if job.SeasonNumber == nil || job.EpisodeNumber == nil {
+			return "", nil, false
+		}
+		return `SELECT still_source_path FROM episodes
+			WHERE series_id = $1 AND season_number = $2 AND episode_number = $3`,
+			[]any{job.TargetContentID, *job.SeasonNumber, *job.EpisodeNumber}, true
 	case ImageCacheTargetPerson:
 		return "SELECT photo_source_path FROM people WHERE id = $1::bigint",
 			[]any{job.TargetContentID}, true
@@ -900,7 +1002,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			SELECT
 				'poster'::text,
 				'season'::text,
-				s.content_id AS target_content_id,
+				s.series_id AS target_content_id,
 				''::text AS target_language,
 				s.series_id,
 				s.poster_source_path AS source_path,
@@ -919,7 +1021,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			SELECT
 				'poster'::text,
 				'season_localization'::text,
-				s.content_id,
+				s.series_id,
 				loc.language,
 				s.series_id,
 				loc.poster_source_path,
@@ -939,7 +1041,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			SELECT
 				'still'::text,
 				'episode'::text,
-				e.content_id,
+				e.series_id,
 				''::text,
 				e.series_id,
 				e.still_source_path,
@@ -981,6 +1083,8 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			 AND j.target_content_id = ac.target_content_id
 			 AND j.image_type = ac.image_type
 			 AND j.target_language = ac.target_language
+			 AND j.season_number IS NOT DISTINCT FROM ac.season_number
+			 AND j.episode_number IS NOT DISTINCT FROM ac.episode_number
 			WHERE j.id IS NULL
 			   OR j.source_path IS DISTINCT FROM ac.source_path
 			   OR j.status = 'succeeded'
@@ -1033,7 +1137,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterating existing provider artwork: %w", err)
 	}
-	return r.enqueueBatch(ctx, inputs, true)
+	return r.enqueueBatch(ctx, inputs, true, imageCacheFailedCooldown)
 }
 
 // ladderRecachableSchemesSQL lists the source schemes the ladder backfill
@@ -1180,7 +1284,7 @@ func ladderCandidateRowsSQL() string {
 			SELECT
 				'poster'::text,
 				'season'::text,
-				s.content_id AS target_content_id,
+				s.series_id AS target_content_id,
 				''::text AS target_language,
 				s.series_id,
 				s.poster_source_path AS source_path,
@@ -1201,7 +1305,7 @@ func ladderCandidateRowsSQL() string {
 			SELECT
 				'poster'::text,
 				'season_localization'::text,
-				s.content_id,
+				s.series_id,
 				loc.language,
 				s.series_id,
 				loc.poster_source_path,
@@ -1223,7 +1327,7 @@ func ladderCandidateRowsSQL() string {
 			SELECT
 				'still'::text,
 				'episode'::text,
-				e.content_id,
+				e.series_id,
 				''::text,
 				e.series_id,
 				e.still_source_path,
@@ -1259,34 +1363,7 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 	if r == nil || r.pool == nil || limit <= 0 {
 		return 0, nil
 	}
-	query := `
-		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
-		),
-		candidates AS (
-			SELECT ac.*
-			FROM all_candidates ac
-			LEFT JOIN metadata_image_cache_jobs j
-			  ON j.target_type = ac.target_type
-			 AND j.target_content_id = ac.target_content_id
-			 AND j.image_type = ac.image_type
-			 AND j.target_language = ac.target_language
-			WHERE j.id IS NULL
-			   OR j.source_path IS DISTINCT FROM ac.source_path
-			   OR j.status = 'succeeded'
-			   OR (
-				   j.status = 'failed'
-				   AND j.next_attempt_at <= NOW()
-			   )
-			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
-			LIMIT $1
-		)
-		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
-		       content_type, season_number, episode_number,
-		       COALESCE(tmdb_id, '') AS tmdb_id,
-		       COALESCE(tvdb_id, '') AS tvdb_id,
-		       COALESCE(imdb_id, '') AS imdb_id
-		FROM candidates
-	`
+	query := ladderBackfillCandidateQuerySQL()
 
 	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
@@ -1323,7 +1400,45 @@ func (r *ImageCacheJobRepository) EnqueueLadderBackfill(ctx context.Context, lim
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterating artwork ladder backfill candidates: %w", err)
 	}
-	return r.enqueueBatch(ctx, inputs, true)
+	return r.enqueueBatch(ctx, inputs, true, imageCacheFailedCooldown)
+}
+
+// ladderBackfillCandidateQuerySQL is the batch query behind EnqueueLadderBackfill.
+// The dedup join matches the queue's natural key — season and episode numbers
+// included — because series children are addressed by series id plus those
+// numbers, so joining on the id alone would collapse every season of a series
+// onto one another.
+func ladderBackfillCandidateQuerySQL() string {
+	return `
+		WITH all_candidates AS (` + ladderCandidateRowsSQL() + `
+		),
+		candidates AS (
+			SELECT ac.*
+			FROM all_candidates ac
+			LEFT JOIN metadata_image_cache_jobs j
+			  ON j.target_type = ac.target_type
+			 AND j.target_content_id = ac.target_content_id
+			 AND j.image_type = ac.image_type
+			 AND j.target_language = ac.target_language
+			 AND j.season_number IS NOT DISTINCT FROM ac.season_number
+			 AND j.episode_number IS NOT DISTINCT FROM ac.episode_number
+			WHERE j.id IS NULL
+			   OR j.source_path IS DISTINCT FROM ac.source_path
+			   OR j.status = 'succeeded'
+			   OR (
+				   j.status = 'failed'
+				   AND j.next_attempt_at <= NOW()
+			   )
+			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
+			LIMIT $1
+		)
+		SELECT image_type, target_type, target_content_id, target_language, series_id, source_path,
+		       content_type, season_number, episode_number,
+		       COALESCE(tmdb_id, '') AS tmdb_id,
+		       COALESCE(tvdb_id, '') AS tvdb_id,
+		       COALESCE(imdb_id, '') AS imdb_id
+		FROM candidates
+	`
 }
 
 // HasLadderBackfillRemaining reports whether any cached artwork still lacks the

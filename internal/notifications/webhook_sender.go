@@ -74,7 +74,7 @@ type webhookSender struct {
 	// posterURL picks the artwork URL Discord embeds may carry (admin poster
 	// mode + provider-CDN/presign resolution). Wired by NewSystem after
 	// construction; nil renders embeds without images.
-	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
+	posterURL func(ctx context.Context, posterPath, posterSourcePath, targetID string) string
 	logger    *slog.Logger
 }
 
@@ -139,7 +139,11 @@ func (s *webhookSender) send(ctx context.Context, hook *Webhook, row DeliveryRow
 		return webhookSendResult{Message: "webhook URL could not be decrypted"}
 	}
 	if hook.Type == WebhookTypeDiscord && s.posterURL != nil {
-		row.PosterURL = s.posterURL(ctx, row.PosterPath, row.PosterSourcePath)
+		targetID := ""
+		if row.SeriesID != nil {
+			targetID = *row.SeriesID
+		}
+		row.PosterURL = s.posterURL(ctx, row.PosterPath, row.PosterSourcePath, targetID)
 	}
 	body, headers, err := s.buildPayload(hook, row, test)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -45,6 +46,14 @@ type ImageURLResolver interface {
 	ResolveImageURLs(ctx context.Context, paths []string, variant string) map[string]string
 }
 
+// ImageDetailService owns publishing and target-aware delivery for manually
+// selected artwork.
+type ImageDetailService interface {
+	PublishArtworkSelection(ctx context.Context, selection catalog.ArtworkSelection) error
+	QueueArtworkRevisionGC(ctx context.Context, originalPath, imageType string, notBefore time.Time) error
+	PresignArtworkTargetImageURL(ctx context.Context, target artworkurl.Target, path, imageType, size string) string
+}
+
 // AdminImageHandler handles endpoints for browsing and selecting item images.
 type AdminImageHandler struct {
 	items         ImageItemLookup
@@ -53,7 +62,7 @@ type AdminImageHandler struct {
 	folders       MatchFolderLookup
 	imageSvc      ImageService
 	imageResolver ImageURLResolver
-	detailSvc     *catalog.DetailService
+	detailSvc     ImageDetailService
 	EventsHub     *evt.Hub
 }
 
@@ -65,7 +74,7 @@ func NewAdminImageHandler(
 	folders MatchFolderLookup,
 	imageSvc ImageService,
 	imageResolver ImageURLResolver,
-	detailSvc *catalog.DetailService,
+	detailSvc ImageDetailService,
 ) *AdminImageHandler {
 	return &AdminImageHandler{
 		items:         items,
@@ -395,10 +404,10 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		publishEventMetadataUpdate(r.Context(), h.EventsHub, 0, resolved.parentItem.ContentID)
 	}
 
-	imageURL := ""
-	if h.imageResolver != nil {
-		imageURL = h.imageResolver.ResolveImageURL(r.Context(), result.StoredPath, "original")
-	}
+	imageTypeName := metadata.ImageTypeToString(imageType)
+	imageURL := h.detailSvc.PresignArtworkTargetImageURL(
+		r.Context(), appliedArtworkTarget(resolved, imageTypeName), result.StoredPath, imageTypeName, "",
+	)
 
 	writeJSON(w, http.StatusOK, applyItemImageResponse{
 		ContentID:  contentID,
@@ -407,6 +416,41 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		ImageURL:   imageURL,
 		Revision:   result.Revision,
 	})
+}
+
+func appliedArtworkTarget(resolved *resolvedItem, imageType string) artworkurl.Target {
+	target := artworkurl.Target{Slot: imageType}
+	switch resolved.contentType {
+	case "season":
+		if resolved.season != nil {
+			target.Surface = artworkurl.SurfaceSeasonPosters
+			target.Keys = []string{resolved.season.ContentID}
+			break
+		}
+		setAppliedParentItemTarget(&target, resolved.parentItem, imageType)
+	case "episode":
+		if resolved.episode != nil {
+			target.Surface = artworkurl.SurfaceEpisodeStills
+			target.Keys = []string{resolved.episode.ContentID}
+			break
+		}
+		setAppliedParentItemTarget(&target, resolved.parentItem, imageType)
+	default:
+		setAppliedParentItemTarget(&target, resolved.parentItem, imageType)
+	}
+	return target
+}
+
+func setAppliedParentItemTarget(target *artworkurl.Target, parentItem *models.MediaItem, imageType string) {
+	target.Keys = []string{parentItem.ContentID}
+	switch imageType {
+	case artworkImageBackdrop:
+		target.Surface = artworkurl.SurfaceItemBackdrops
+	case artworkImageLogo:
+		target.Surface = artworkurl.SurfaceItemLogos
+	default:
+		target.Surface = artworkurl.SurfaceItemPosters
+	}
 }
 
 // resolveImageFolderID finds the primary library folder for a content ID.

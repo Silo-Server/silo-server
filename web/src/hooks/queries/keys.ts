@@ -362,6 +362,7 @@ export const adminKeys = {
   librarySkippedRoots: () => ["admin", "libraries", "skippedRoots"] as const,
   staleMediaIDs: () => ["admin", "libraries", "staleMediaIDs"] as const,
   jobs: (jobType?: string) => ["admin", "jobs", jobType] as const,
+  artworkStorage: () => ["admin", "artwork-storage"] as const,
   catalogImportSources: () => ["admin", "catalog", "importSources"] as const,
   localImportSources: () => ["admin", "catalog", "localImportSources"] as const,
   collections: (libraryId?: number) => ["admin", "collections", libraryId] as const,

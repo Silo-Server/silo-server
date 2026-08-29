@@ -1,16 +1,18 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
 // fakeSettings is an in-memory branding.SettingsStore.
@@ -22,17 +24,30 @@ func (f fakeSettings) Set(_ context.Context, key, value string) error    { f[key
 // fakeAssetStore is an in-memory branding.AssetStore.
 type fakeAssetStore struct{ data map[string][]byte }
 
-func (f *fakeAssetStore) PutObject(_ context.Context, _, key string, data []byte) error {
+func (f *fakeAssetStore) WriteImmutable(_ context.Context, key string, data []byte, _ artworkstore.ObjectMetadata) error {
 	f.data[key] = data
 	return nil
 }
-func (f *fakeAssetStore) GetObject(_ context.Context, _, key string) ([]byte, error) {
-	if d, ok := f.data[key]; ok {
-		return d, nil
+
+func (f *fakeAssetStore) Open(_ context.Context, key string) (*artworkstore.Object, error) {
+	info, err := f.Stat(context.Background(), key)
+	if err != nil {
+		return nil, err
 	}
-	return nil, s3client.ErrNotFound
+	return &artworkstore.Object{Info: info, Body: io.NopCloser(bytes.NewReader(f.data[key]))}, nil
 }
-func (f *fakeAssetStore) Bucket() string { return "test" }
+
+func (f *fakeAssetStore) Stat(_ context.Context, key string) (artworkstore.ObjectInfo, error) {
+	data, ok := f.data[key]
+	if !ok {
+		return artworkstore.ObjectInfo{}, artworkstore.ErrNotFound
+	}
+	return artworkstore.ObjectInfo{
+		Key:       key,
+		SizeBytes: int64(len(data)),
+		MediaType: artworkstore.MediaTypeForKey(key),
+	}, nil
+}
 
 func withBranding(t *testing.T, settings fakeSettings) {
 	t.Helper()

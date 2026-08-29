@@ -158,6 +158,19 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaultForNonpositiveCanonicalAIConcur
 	}
 }
 
+// keysWhoseRowPresenceIsItselfMeaningful lists settings where storing the
+// documented default is deliberately *not* equivalent to storing nothing, so
+// the alignment invariant below cannot apply to them.
+//
+// metadata.cache_images is the only one: an explicitly stored false is an
+// administrator's decision not to fetch remote artwork and maps
+// artwork.remote_materialization to passthrough, while an absent row is merely
+// the old shipped default and adopts the new one. Silently converting the
+// former into remote caching is exactly what the artwork upgrade must not do.
+var keysWhoseRowPresenceIsItselfMeaningful = map[string]bool{
+	"metadata.cache_images": true,
+}
+
 func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 	baseline, err := LoadFromDB(nil)
 	if err != nil {
@@ -166,6 +179,9 @@ func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 	normalizeEffectiveRuntimeDefaults(baseline)
 
 	for key, value := range adminSettingDefaults {
+		if keysWhoseRowPresenceIsItselfMeaningful[key] {
+			continue
+		}
 		t.Run(key, func(t *testing.T) {
 			withExplicitDefault, err := LoadFromDB(map[string]string{key: value})
 			if err != nil {

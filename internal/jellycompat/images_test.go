@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -62,6 +64,15 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}
 	if cached, ok := h.images.LookupSized(routeID, "Primary", "", compatRequestImageSize(req, "Primary")); !ok || cached == "" {
 		t.Fatal("signed-tag image URL was not cached after resolution")
+	}
+}
+
+func TestImageURLForItemRetainsHTTPFallbackWithoutDetailService(t *testing.T) {
+	h := &ImagesHandler{}
+	const poster = "https://cdn.example.test/poster.jpg"
+	resolved := h.imageURLForItem(context.Background(), itemTargetSet("movie-1", poster, "", ""), "Primary", compatCardImageSize)
+	if resolved.URL != poster {
+		t.Fatalf("resolved URL = %q, want %q", resolved.URL, poster)
 	}
 }
 
@@ -302,11 +313,11 @@ func TestHandleItemImageAcceptsLibraryPosterTagWithoutSessionOrCache(t *testing.
 		"",
 	)
 	h := &ImagesHandler{
-		codec:        codec,
-		images:       NewImageCache(time.Hour, time.Now),
-		folderRepo:   fakeImageFolderRepo{folder: &models.MediaFolder{ID: libraryID, PosterPath: posterPath}},
-		posterSigner: fakeLibraryPosterPresigner{url: upstream.URL},
-		imageTags:    newImageTagSigner(secret),
+		codec:       codec,
+		images:      NewImageCache(time.Hour, time.Now),
+		folderRepo:  fakeImageFolderRepo{folder: &models.MediaFolder{ID: libraryID, PosterPath: posterPath}},
+		artworkURLs: fakeArtworkURLResolver{url: upstream.URL},
+		imageTags:   newImageTagSigner(secret),
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?fillHeight=267&fillWidth=474&quality=96&tag="+tag, nil)
@@ -402,6 +413,63 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 	}
 	if called {
 		t.Fatal("served cached image before validating the signed tag")
+	}
+}
+
+// fakeArtworkDelivery stands in for the native artwork route handler.
+type fakeArtworkDelivery struct {
+	served string
+}
+
+func (d *fakeArtworkDelivery) ServeArtworkURL(w http.ResponseWriter, _ *http.Request, artworkURL string) bool {
+	if !strings.HasPrefix(artworkURL, "/api/v1/artwork/") {
+		return false
+	}
+	d.served = artworkURL
+	w.Header().Set("Content-Type", "image/webp")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("artwork bytes"))
+	return true
+}
+
+// Locally stored artwork resolves to a root-relative signed URL. The compat
+// listener cannot redirect a client to it and must not mistake it for a bundled
+// frontend asset, so those bytes are served in process.
+func TestServeImageURLServesSignedArtworkInProcess(t *testing.T) {
+	delivery := &fakeArtworkDelivery{}
+	h := &ImagesHandler{artwork: delivery}
+	req := httptest.NewRequest(http.MethodGet, "/Items/1/Images/Primary", nil)
+	rec := httptest.NewRecorder()
+
+	const signed = "/api/v1/artwork/YXJ0d29yaw?expires=99999999999&signature=abc"
+	h.serveImageURL(rec, req, signed)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
+	}
+	if delivery.served != signed {
+		t.Fatalf("delivered %q, want %q", delivery.served, signed)
+	}
+	if got := rec.Header().Get("Location"); got != "" {
+		t.Fatalf("Location = %q, want the bytes served rather than a redirect", got)
+	}
+}
+
+// Bundled app-relative references still belong to the embedded frontend assets,
+// not to artwork delivery.
+func TestServeImageURLLeavesBundledAssetsToTheFrontend(t *testing.T) {
+	delivery := &fakeArtworkDelivery{}
+	h := &ImagesHandler{artwork: delivery}
+	req := httptest.NewRequest(http.MethodGet, "/Items/1/Images/Primary", nil)
+	rec := httptest.NewRecorder()
+
+	h.serveImageURL(rec, req, "/images/collection-templates/example.jpg")
+
+	if delivery.served != "" {
+		t.Fatalf("artwork delivery claimed %q", delivery.served)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 without an embedded frontend", rec.Code)
 	}
 }
 
@@ -648,16 +716,12 @@ func (r fakeImageFolderRepo) GetByID(_ context.Context, id int) (*models.MediaFo
 	return nil, catalog.ErrFolderNotFound
 }
 
-type fakeLibraryPosterPresigner struct {
+type fakeArtworkURLResolver struct {
 	url string
 }
 
-func (p fakeLibraryPosterPresigner) PresignGetURL(context.Context, string, string, time.Duration) (string, error) {
-	return p.url, nil
-}
-
-func (p fakeLibraryPosterPresigner) Bucket() string {
-	return "test-bucket"
+func (p fakeArtworkURLResolver) ResolveArtworkURL(context.Context, string) (artworkstore.ResolvedURL, error) {
+	return artworkstore.ResolvedURL{URL: p.url}, nil
 }
 
 func withImageRouteParams(r *http.Request, routeID, imageType string) *http.Request {

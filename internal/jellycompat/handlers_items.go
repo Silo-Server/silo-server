@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -47,13 +48,12 @@ type ItemsHandler struct {
 	subtitleRepo subtitles.Repository
 	recommender  recommendations.Recommender
 	// collections is optional; when set, library collections are exposed as
-	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
+	// Jellyfin BoxSets. artworkURLs resolves their stored artwork keys.
 	collections collectionSource
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
-	queryExecutor   smartCollectionQueryExecutor
-	posterPresigner LibraryPosterPresigner
-	presignTTL      time.Duration
+	queryExecutor smartCollectionQueryExecutor
+	artworkURLs   ArtworkURLResolver
 	// FileResolver is optional; when set, /MediaSegments returns real intro/
 	// credits/recap/preview segments for any file that has them.
 	FileResolver FilePathResolver
@@ -454,7 +454,9 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 
 	var photoURL string
 	if h.detailSvc != nil && person.PhotoPath != "" {
-		photoURL = compatPresignImage(h.detailSvc, r.Context(), person.PhotoPath, "poster", compatCardImageSize)
+		photoURL = compatPresignTargetImage(h.detailSvc, r.Context(), artworkurl.Target{
+			Surface: artworkurl.SurfacePersonPhotos, Keys: []string{strconv.FormatInt(personID, 10)}, Slot: compatArtworkProfile,
+		}, person.PhotoPath, "profile", compatCardImageSize)
 	}
 
 	if photoURL != "" {

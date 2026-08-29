@@ -24,6 +24,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
 	"github.com/Silo-Server/silo-server/internal/branding"
@@ -100,18 +103,53 @@ type Dependencies struct {
 	DB                           *pgxpool.Pool
 	SecretCipher                 *secret.Cipher // at-rest credential cipher (required when DB is set)
 	FrontendFS                   fs.FS
-	S3Public                     *s3client.Client              // public assets bucket client (may be nil)
-	S3Private                    *s3client.Client              // private internal bucket client (may be nil)
-	S3UserDB                     *s3client.Client              // user-db bucket client (may be nil)
-	BrandingService              *branding.Service             // white-label branding (nil when DB unavailable)
-	FolderRepo                   *catalog.FolderRepository     // media folder repository (may be nil)
-	FileRepo                     *scanner.FileRepository       // media file repository (may be nil)
-	Scanner                      *scanner.Scanner              // scanner instance (may be nil)
-	LibraryIngester              *libraryingest.Executor       // shared library ingest executor (may be nil)
-	ProbeEnsurer                 handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
-	UserStoreProvider            userstore.UserStoreProvider   // user store provider (may be nil)
-	SessionMgr                   *playback.SessionManager      // playback session manager (may be nil)
-	StreamTelemetry              *streamtelemetry.Registry     // local observation-only stream telemetry (may be nil)
+	S3Public                     *s3client.Client // public assets bucket client (may be nil)
+	S3Private                    *s3client.Client // private internal bucket client (may be nil)
+	S3UserDB                     *s3client.Client // user-db bucket client (may be nil)
+	// ArtworkStore is the opened, probed, and pin-verified canonical artwork
+	// store. Nil on nodes that do not own artwork storage. Callers address it
+	// by logical key only; whether it is a bucket or a directory is private
+	// to the handle.
+	ArtworkStore *artworkstore.Handle
+	// ArtworkURLSigner mints and verifies the short-lived signed URLs the
+	// native artwork route serves stored artwork through. Nil when the cluster
+	// authentication secret is unavailable, which leaves the route
+	// unregistered rather than serving artwork nobody can address.
+	ArtworkURLSigner *artworkurl.Signer
+	// ArtworkURLs resolves a logical artwork key to a fetchable URL on
+	// whichever backend holds it. Nil on nodes without artwork storage.
+	ArtworkURLs *artworkurl.Resolver
+	// ArtworkDelivery is shared by native and jellycompat routes so source
+	// singleflight, emergency-cache, and repair-signal budgets are process-wide.
+	ArtworkDelivery *handlers.ArtworkHandler
+	// ArtworkSourceResolver resolves retained plugin references for resilient
+	// request-time fallback. It is the same resolver durable materialization
+	// uses, so SSRF and provider routing behavior cannot drift.
+	ArtworkSourceResolver interface {
+		ResolveImageURL(ctx context.Context, path string, variant string) string
+	}
+	// ArtworkUploads materializes administrator- and user-supplied images —
+	// library posters, collection artwork, profile avatars — into the artwork
+	// store. Nil on nodes without artwork storage, which is what makes those
+	// upload endpoints report 503 instead of failing mid-write.
+	ArtworkUploads    *artworkupload.Materializer
+	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
+	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	Scanner           *scanner.Scanner              // scanner instance (may be nil)
+	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
+	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
+	UserStoreProvider userstore.UserStoreProvider   // user store provider (may be nil)
+	// UserArtworkTracked reports whether user-owned artwork references —
+	// profile avatars, personal collection posters — land in catalog tables
+	// the artwork revision GC's reference union can see. True only for the
+	// Postgres user store; the SQLite backend keeps those rows in per-user
+	// database files the collector cannot query, so tracking such an upload
+	// would schedule a live image for deletion (an untracked upload merely
+	// leaks its displaced predecessors).
+	UserArtworkTracked bool
+	SessionMgr         *playback.SessionManager  // playback session manager (may be nil)
+	StreamTelemetry    *streamtelemetry.Registry // local observation-only stream telemetry (may be nil)
 	// StreamTelemetryViewCache serves the merged global view with bounded
 	// staleness so the admin parity endpoint never rebuilds it per request.
 	StreamTelemetryViewCache *streamtelemetry.ViewCache
@@ -263,16 +301,31 @@ func (deps Dependencies) invalidateNodeCapabilities(playbackHandler *handlers.Pl
 func NewRouter(deps Dependencies) chi.Router {
 	declareNativeMediaRoutes()
 	r := chi.NewRouter()
+	if deps.ArtworkDelivery == nil && deps.ArtworkStore != nil && deps.ArtworkURLSigner != nil && deps.DB != nil {
+		// Main constructs this once and also gives it to jellycompat. Keep the
+		// router constructor complete for embedded/test callers while still
+		// creating exactly one handler for every Dependencies value.
+		coordinator := metadata.NewArtworkDeliveryCoordinator(deps.DB, metadata.NewDirectLibraryArtworkResolver(deps.DB), deps.UserStoreProvider)
+		coordinator.SetStoreHealth(deps.ArtworkStore)
+		deps.ArtworkDelivery = handlers.NewArtworkHandler(deps.ArtworkStore.Store, deps.ArtworkURLSigner)
+		if deps.S3Public != nil {
+			var chapterStore handlers.ArtworkObjectStore
+			if deps.ArtworkStore.Backend == artworkstore.BackendS3 {
+				chapterStore = deps.ArtworkStore.Store
+			} else if store, err := artworkstore.NewS3Store(deps.S3Public); err != nil {
+				slog.Warn("chapter thumbnail delivery unavailable", "error", err)
+			} else {
+				chapterStore = store
+			}
+			deps.ArtworkDelivery.SetChapterThumbnailStore(chapterStore)
+		}
+		deps.ArtworkDelivery.SetResilientDependencies(coordinator, deps.ArtworkSourceResolver, deps.ArtworkStore.ReportFailure)
+	}
 
 	useBaseMiddleware(r, deps)
 
 	// Build the readiness handler with optional S3 check.
-	var s3Checker handlers.S3HealthChecker
-	if deps.S3Public != nil {
-		s3Checker = deps.S3Public
-	} else if deps.S3Private != nil {
-		s3Checker = deps.S3Private
-	}
+	s3Checker := readinessS3Checker(deps)
 
 	// PG pinger: use the pool if available.
 	var pgPinger handlers.PGPinger
@@ -281,6 +334,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 
 	readyHandler := handlers.NewReadyHandler(pgPinger, s3Checker)
+	if deps.ArtworkStore != nil {
+		readyHandler.SetArtworkStorage(deps.ArtworkStore)
+	}
 
 	// Resolves whether a declared profile belongs to the user and is the
 	// household primary profile. Nil (no user store) disables the
@@ -548,10 +604,15 @@ func NewRouter(deps Dependencies) chi.Router {
 			libraryHandler.JobRepo = adminjob.NewRepository(deps.DB)
 		}
 
-		// Library poster uploads are writable client-facing assets, so they
-		// belong in the public assets bucket.
+		// S3Meta only backs chapter-thumbnail capability reporting and the
+		// cleanup of legacy per-library poster objects; posters themselves are
+		// written to and read from the canonical artwork store.
 		if deps.S3Public != nil {
 			libraryHandler.S3Meta = deps.S3Public
+		}
+		libraryHandler.ArtworkUploads = deps.ArtworkUploads
+		if deps.ArtworkURLs != nil {
+			libraryHandler.ArtworkURLs = deps.ArtworkURLs
 		}
 
 		// Wire provider chain repos for per-library provider priority management.
@@ -862,6 +923,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		profileHandler.EventsHub = deps.EventsHub
 		profileHandler.ProfileTokens = profileTokenService
 		profileHandler.AvatarStore = deps.S3Private
+		profileHandler.ArtworkUploads = deps.ArtworkUploads
+		profileHandler.TrackArtworkRevisions = deps.UserArtworkTracked
+		if deps.ArtworkURLs != nil {
+			profileHandler.ArtworkURLs = deps.ArtworkURLs
+		}
 		profileHandler.SessionsReader = playbackSessionsLoader
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
@@ -890,7 +956,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.S3Public != nil {
 			collectionHandler.S3GP = deps.S3Public
-			collectionHandler.PresignTTL = 4 * time.Hour
+		}
+		collectionHandler.ArtworkUploads = deps.ArtworkUploads
+		collectionHandler.TrackArtworkRevisions = deps.UserArtworkTracked
+		if deps.ArtworkURLs != nil {
+			collectionHandler.ArtworkURLs = deps.ArtworkURLs
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		settingsHandler.EventsHub = deps.EventsHub
@@ -1194,6 +1264,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var accessGroupHandler *handlers.AccessGroupHandler
 	var catalogSeedHandler *handlers.CatalogSeedHandler
 	var adminJobsHandler *handlers.AdminJobsHandler
+	var adminArtworkStorageHandler *handlers.AdminArtworkStorageHandler
 	if userRepo != nil {
 		adminHandler = handlers.NewAdminHandler(userRepo, deps.DB, deps.UserStoreProvider)
 		adminHandler.SessionsLoader = playbackSessionsLoader
@@ -1248,6 +1319,14 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
 		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry
 		adminJobsHandler.RealtimeHub = deps.RealtimeHub
+		if deps.ArtworkStore != nil {
+			artworkStorageService := metadata.NewArtworkStorageService(
+				deps.DB, deps.ArtworkStore.Store, deps.ArtworkStore.Backend, deps.ArtworkStore.GenerationID,
+				!deps.UserArtworkTracked,
+			)
+			artworkStorageService.SetRebuilder(deps.ArtworkStore)
+			adminArtworkStorageHandler = handlers.NewAdminArtworkStorageHandler(artworkStorageService, jobRepo)
+		}
 		if adminHandler != nil && deps.FolderRepo != nil && deps.FileRepo != nil && itemRepo != nil && episodeRepo != nil {
 			adminHandler.JobRepo = jobRepo
 			adminHandler.ItemRefreshResolver = adminjob.NewItemRefreshResolver(
@@ -1639,10 +1718,16 @@ func NewRouter(deps Dependencies) chi.Router {
 			libraryCollectionRepo,
 			libraryCollectionService,
 			itemRepo,
-			4*time.Hour,
 			nil,
 			deps.S3Public,
+			deps.ArtworkUploads,
 		)
+		if deps.ArtworkURLs != nil {
+			libraryCollectionHandler.ArtworkURLs = deps.ArtworkURLs
+		}
+		if deps.ArtworkStore != nil {
+			libraryCollectionHandler.ArtworkObjects = deps.ArtworkStore.Store
+		}
 		libraryCollectionHandler.FrontendFS = deps.FrontendFS
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
@@ -1773,6 +1858,12 @@ func NewRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+			if deps.ArtworkDelivery != nil {
+				artworkDelivery := chi.NewRouter()
+				artworkDelivery.Get("/api/v1/artwork/{"+handlers.ArtworkCapabilityParam+"}/{"+handlers.ArtworkVariantParam+"}", deps.ArtworkDelivery.ServeHTTP)
+				artworkDelivery.Head("/api/v1/artwork/{"+handlers.ArtworkCapabilityParam+"}/{"+handlers.ArtworkVariantParam+"}", deps.ArtworkDelivery.ServeHTTP)
+				downloadSvc.SetArtworkDelivery(artworkDelivery)
+			}
 		}
 		if deps.ArtifactManager != nil {
 			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.
@@ -1841,6 +1932,29 @@ func NewRouter(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", healthHandler.ServeHTTP)
 		r.Get("/ready", readyHandler.ServeHTTP)
+
+		// Artwork delivery. Public because a browser <img> element cannot
+		// attach a bearer header: the signature in the URL is the capability,
+		// minted only while building an authenticated catalog response.
+		//
+		if deps.ArtworkStore != nil && deps.ArtworkURLs != nil && deps.ArtworkDelivery != nil {
+			if artworkHandler := deps.ArtworkDelivery; artworkHandler != nil {
+				r.Get("/artwork/{"+handlers.ArtworkCapabilityParam+"}/{"+handlers.ArtworkVariantParam+"}", artworkHandler.ServeHTTP)
+				r.Head("/artwork/{"+handlers.ArtworkCapabilityParam+"}/{"+handlers.ArtworkVariantParam+"}", artworkHandler.ServeHTTP)
+			}
+		}
+		// Direct-library fallbacks always traverse Silo. The opaque signed
+		// identity is revalidated against the catalog and library roots on every
+		// request.
+		if deps.DB != nil && deps.ArtworkURLSigner != nil {
+			directLibraryHandler := handlers.NewDirectLibraryArtworkHandler(
+				metadata.NewDirectLibraryArtworkResolver(deps.DB), deps.ArtworkURLSigner,
+			)
+			if directLibraryHandler != nil {
+				r.Get("/artwork-library/{"+handlers.DirectLibraryArtworkParam+"}", directLibraryHandler.ServeHTTP)
+				r.Head("/artwork-library/{"+handlers.DirectLibraryArtworkParam+"}", directLibraryHandler.ServeHTTP)
+			}
+		}
 
 		// Branding handler is shared between the public read/serve endpoints
 		// (registered with the theme endpoints below) and the admin
@@ -2396,15 +2510,22 @@ func NewRouter(deps Dependencies) chi.Router {
 				if collectionHandler != nil {
 					var userImportHandler *handlers.UserCollectionImportHandler
 					if deps.UserCollectionSync != nil {
+						// Pass a nil interface rather than a typed-nil pointer
+						// when artwork URLs are unavailable.
+						var artworkURLs handlers.ArtworkURLResolver
+						if deps.ArtworkURLs != nil {
+							artworkURLs = deps.ArtworkURLs
+						}
 						userImportHandler = handlers.NewUserCollectionImportHandler(
 							deps.UserStoreProvider,
 							deps.UserCollectionSync,
 							deps.UserCollectionScheduler,
 							nil,
 							deps.MDBListClient,
-							deps.S3Public,
+							deps.ArtworkUploads,
+							deps.UserArtworkTracked,
+							artworkURLs,
 							deps.FrontendFS,
-							4*time.Hour,
 						)
 					}
 					r.Route("/collections", func(r chi.Router) {
@@ -2796,6 +2917,23 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/stream/{session_id}/subtitles/{track}/fonts", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts))
 				}
 
+				// Artwork storage and delivery capability. Lets a client or
+				// administrator observe how artwork is stored and fetched
+				// without sniffing a URL shape; it exposes no location.
+				if deps.ArtworkStore != nil {
+					artworkCapabilityHandler := handlers.NewArtworkCapabilityHandler(
+						deps.ArtworkStore.Backend,
+						func() string { return deps.CurrentConfig().Artwork.RemoteMaterialization },
+					)
+					artworkCapabilityHandler.SetResilientStatus(
+						func() string {
+							state, _ := deps.ArtworkStore.Health()
+							return string(state)
+						},
+					)
+					r.Get("/artwork/capability", artworkCapabilityHandler.HandleCapability)
+				}
+
 				// Download routes.
 				if policyHandler != nil {
 					r.Get("/policy/capability", policyHandler.HandleCapability)
@@ -3110,6 +3248,16 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Route("/jobs", func(r chi.Router) {
 									r.Get("/", adminJobsHandler.HandleList)
 									r.Post("/{id}/cancel", adminJobsHandler.HandleCancel)
+								})
+							}
+
+							if adminArtworkStorageHandler != nil {
+								r.Route("/artwork", func(r chi.Router) {
+									r.Get("/storage", adminArtworkStorageHandler.HandleStorage)
+									r.Post("/rebuild", adminArtworkStorageHandler.HandleRebuild)
+									r.Post("/storage/refresh", adminArtworkStorageHandler.HandleRefresh)
+									r.Post("/storage/import", adminArtworkStorageHandler.HandleImport)
+									r.Post("/purge", adminArtworkStorageHandler.HandlePurge)
 								})
 							}
 
@@ -3450,6 +3598,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	})
 
 	return r
+}
+
+func readinessS3Checker(deps Dependencies) handlers.S3HealthChecker {
+	canonicalArtworkUsesPublicS3 := deps.ArtworkStore != nil && deps.ArtworkStore.Backend == artworkstore.BackendS3
+	if deps.S3Public != nil && !canonicalArtworkUsesPublicS3 {
+		return deps.S3Public
+	}
+	if deps.S3Private != nil {
+		return deps.S3Private
+	}
+	return nil
 }
 
 // useBaseMiddleware mounts the middleware chain every native request passes

@@ -3,11 +3,15 @@ package imagecache
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -18,6 +22,8 @@ import (
 
 	"github.com/h2non/bimg"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
@@ -57,86 +63,58 @@ func makeTestPNG(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
-// mockS3 records all PutObject calls for test assertions.
-type mockS3 struct {
+// mockStore records every write for test assertions.
+type mockStore struct {
 	mu                    sync.Mutex
-	calls                 []putCall
-	bucket                string
-	putErr                error // if non-nil, returned for every PutObject call
+	calls                 []writeCall
+	writeErr              error // if non-nil, returned for every write
 	failuresBeforeSuccess int
 	existing              map[string]bool
-	existsErr             error
-	existsCalls           []string
+	matchErr              error
+	matchCalls            []string
 }
 
-type putCall struct {
-	bucket string
-	key    string
-	size   int
-	data   []byte
+type writeCall struct {
+	key       string
+	mediaType string
+	data      []byte
 }
 
-type trackedRevision struct {
-	originalPath string
-	imageType    string
-	objectKeys   []string
-}
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
-type recordingRevisionTracker struct {
-	mu    sync.Mutex
-	calls []trackedRevision
-	err   error
-}
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
-func (t *recordingRevisionTracker) TrackArtworkRevision(_ context.Context, originalPath, imageType string, objectKeys []string) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.calls = append(t.calls, trackedRevision{
-		originalPath: originalPath,
-		imageType:    imageType,
-		objectKeys:   append([]string(nil), objectKeys...),
-	})
-	return t.err
-}
+type fixedImageResolver struct{ url string }
 
-func (t *recordingRevisionTracker) recorded() []trackedRevision {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	result := make([]trackedRevision, len(t.calls))
-	copy(result, t.calls)
-	return result
-}
+func (r fixedImageResolver) ResolveImageURL(context.Context, string, string) string { return r.url }
 
-func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) error {
+func (m *mockStore) WriteImmutable(_ context.Context, key string, data []byte, meta artworkstore.ObjectMetadata) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failuresBeforeSuccess > 0 {
 		m.failuresBeforeSuccess--
-		return errors.New("temporary s3 failure")
+		return errors.New("temporary storage failure")
 	}
-	if m.putErr != nil {
-		return m.putErr
+	if m.writeErr != nil {
+		return m.writeErr
 	}
-	copied := append([]byte(nil), data...)
-	m.calls = append(m.calls, putCall{bucket: bucket, key: key, size: len(data), data: copied})
+	m.calls = append(m.calls, writeCall{key: key, mediaType: meta.MediaType, data: bytes.Clone(data)})
 	return nil
 }
 
-func (m *mockS3) Bucket() string { return m.bucket }
-
-// ObjectMatches treats keys registered via setExisting as content matches;
-// real content verification is exercised against the s3client implementation.
-func (m *mockS3) ObjectMatches(_ context.Context, _ string, key string, _ []byte) (bool, error) {
+// Matches treats keys registered via setExisting as content matches; real
+// content verification is exercised against the store implementations.
+func (m *mockStore) Matches(_ context.Context, key string, _ []byte) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.existsCalls = append(m.existsCalls, key)
-	if m.existsErr != nil {
-		return false, m.existsErr
+	m.matchCalls = append(m.matchCalls, key)
+	if m.matchErr != nil {
+		return false, m.matchErr
 	}
 	return m.existing[key], nil
 }
 
-func (m *mockS3) keys() []string {
+func (m *mockStore) keys() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	keys := make([]string, len(m.calls))
@@ -146,7 +124,7 @@ func (m *mockS3) keys() []string {
 	return keys
 }
 
-func (m *mockS3) objectData(key string) []byte {
+func (m *mockStore) objectData(key string) []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, c := range m.calls {
@@ -157,105 +135,24 @@ func (m *mockS3) objectData(key string) []byte {
 	return nil
 }
 
-func (m *mockS3) checkedKeys() []string {
+func (m *mockStore) mediaType(key string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	keys := make([]string, len(m.existsCalls))
-	copy(keys, m.existsCalls)
-	return keys
+	for _, c := range m.calls {
+		if c.key == key {
+			return c.mediaType
+		}
+	}
+	return ""
 }
 
-func (m *mockS3) resetCalls() {
+func (m *mockStore) checkedKeys() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls = nil
-	m.existsCalls = nil
+	return slices.Clone(m.matchCalls)
 }
 
-func TestCacheBytesTracksPendingThenExactRevision(t *testing.T) {
-	s3 := &mockS3{bucket: "artwork"}
-	tracker := &recordingRevisionTracker{}
-	cacher := newWithHTTPClient(s3, nil)
-	cacher.SetArtworkRevisionTracker(tracker)
-
-	result, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
-		ProviderID:  testTMDBProviderID,
-		ContentType: testMoviesContentType,
-		ContentID:   "335984",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err != nil {
-		t.Fatalf("CacheBytes: %v", err)
-	}
-
-	calls := tracker.recorded()
-	if len(calls) != 2 {
-		t.Fatalf("tracker calls = %d, want pending and complete manifests", len(calls))
-	}
-	if calls[0].originalPath != result.OriginalPath {
-		t.Fatalf("tracked original = %q, want %q", calls[0].originalPath, result.OriginalPath)
-	}
-	if calls[0].imageType != "poster" {
-		t.Fatalf("tracked image type = %q, want poster", calls[0].imageType)
-	}
-	if len(calls[0].objectKeys) != 0 {
-		t.Fatalf("pending keys = %v, want none before uploads complete", calls[0].objectKeys)
-	}
-	wantKeys := make([]string, 0, len(result.VariantPaths))
-	for _, key := range result.VariantPaths {
-		wantKeys = append(wantKeys, key)
-	}
-	sort.Strings(wantKeys)
-	if !slices.Equal(calls[1].objectKeys, wantKeys) {
-		t.Fatalf("completed keys = %v, want %v", calls[1].objectKeys, wantKeys)
-	}
-}
-
-func TestCacheBytesUploadFailureLeavesManifestPending(t *testing.T) {
-	s3 := &mockS3{bucket: "artwork", putErr: errors.New("storage unavailable")}
-	tracker := &recordingRevisionTracker{}
-	cacher := newWithHTTPClient(s3, nil)
-	cacher.SetArtworkRevisionTracker(tracker)
-
-	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
-		ProviderID:  testTMDBProviderID,
-		ContentType: testMoviesContentType,
-		ContentID:   "335984",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err == nil || !strings.Contains(err.Error(), "storage unavailable") {
-		t.Fatalf("CacheBytes error = %v, want upload failure", err)
-	}
-	calls := tracker.recorded()
-	if len(calls) != 1 {
-		t.Fatalf("tracker calls = %d, want only the pending manifest", len(calls))
-	}
-	if len(calls[0].objectKeys) != 0 {
-		t.Fatalf("tracked keys = %v, want no completion proof after upload failure", calls[0].objectKeys)
-	}
-}
-
-func TestCacheBytesDoesNotUploadWhenRevisionTrackingFails(t *testing.T) {
-	s3 := &mockS3{bucket: "artwork"}
-	tracker := &recordingRevisionTracker{err: errors.New("registry unavailable")}
-	cacher := newWithHTTPClient(s3, nil)
-	cacher.SetArtworkRevisionTracker(tracker)
-
-	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
-		ProviderID:  testTMDBProviderID,
-		ContentType: testMoviesContentType,
-		ContentID:   "335984",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err == nil || !strings.Contains(err.Error(), "track artwork revision") {
-		t.Fatalf("CacheBytes error = %v, want tracking failure", err)
-	}
-	if got := len(s3.keys()); got != 0 {
-		t.Fatalf("uploaded objects = %d, want 0", got)
-	}
-}
-
-func (m *mockS3) setExisting(keys ...string) {
+func (m *mockStore) setExisting(keys ...string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.existing == nil {
@@ -266,26 +163,68 @@ func (m *mockS3) setExisting(keys ...string) {
 	}
 }
 
-func containsKey(keys []string, suffix string) bool {
-	for _, k := range keys {
-		if len(k) >= len(suffix) && k[len(k)-len(suffix):] == suffix {
-			return true
-		}
-		// Also handle exact match
-		if k == suffix {
-			return true
-		}
+func (m *mockStore) resetCalls() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = nil
+	m.matchCalls = nil
+}
+
+// read adapts the store to artworkkey.ManifestObjectReader so tests can
+// validate a stored revision the same way an adopting server would.
+func (m *mockStore) read(_ context.Context, key string) (io.ReadCloser, error) {
+	data := m.objectData(key)
+	if data == nil {
+		return nil, fmt.Errorf("no object at %q", key)
 	}
-	return false
+	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+type trackedRevision struct {
+	originalPath string
+	imageType    string
+	objectKeys   []string
+}
+
+type recordingRevisionTracker struct {
+	mu           sync.Mutex
+	calls        []trackedRevision
+	recordedPath string
+	sourceClass  string
+	objects      []artworkstore.ObjectInfo
+	recordCalls  int
+	err          error
+}
+
+func (t *recordingRevisionTracker) TrackArtworkRevision(_ context.Context, originalPath, imageType string, objectKeys []string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, trackedRevision{
+		originalPath: originalPath,
+		imageType:    imageType,
+		objectKeys:   slices.Clone(objectKeys),
+	})
+	return t.err
+}
+
+func (t *recordingRevisionTracker) RecordArtworkRevision(_ context.Context, originalPath, sourceClass string, objects []artworkstore.ObjectInfo) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recordCalls++
+	t.recordedPath = originalPath
+	t.sourceClass = sourceClass
+	t.objects = append([]artworkstore.ObjectInfo(nil), objects...)
+	return t.err
+}
+
+func (t *recordingRevisionTracker) recorded() []trackedRevision {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return slices.Clone(t.calls)
 }
 
 func hasKey(keys []string, key string) bool {
-	for _, k := range keys {
-		if k == key {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(keys, key)
 }
 
 // startImageServer starts an httptest server that serves JPEG data.
@@ -304,12 +243,175 @@ func startImageServer(t *testing.T, data []byte, statusCode int) *httptest.Serve
 	return srv
 }
 
-func TestCache_Poster(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
+// requirePortableKey asserts that key is a portable logical key for imageType
+// and returns its parsed form.
+func requirePortableKey(t *testing.T, key, imageType string) artworkkey.PortableKeyInfo {
+	t.Helper()
+	info, ok := artworkkey.ParsePortableKey(key)
+	if !ok {
+		t.Fatalf("key %q is not a portable artwork key", key)
+	}
+	if info.ImageType != imageType {
+		t.Fatalf("key %q image type = %q, want %q", key, info.ImageType, imageType)
+	}
+	return info
+}
 
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheBytesTracksExactRevisionBeforeUpload(t *testing.T) {
+	store := &mockStore{}
+	tracker := &recordingRevisionTracker{}
+	cacher := newWithHTTPClient(store, nil)
+	cacher.SetArtworkRevisionTracker(tracker)
+
+	result, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		SourceURL:   "https://images.example/poster.jpg",
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "335984",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		t.Fatalf("CacheBytes: %v", err)
+	}
+
+	calls := tracker.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("tracker calls = %d, want 1", len(calls))
+	}
+	if calls[0].originalPath != result.OriginalPath {
+		t.Fatalf("tracked original = %q, want %q", calls[0].originalPath, result.OriginalPath)
+	}
+	if calls[0].imageType != "poster" {
+		t.Fatalf("tracked image type = %q, want poster", calls[0].imageType)
+	}
+	// The manifest is registered with the images: an interrupted write must
+	// leave a reclaimable object set, not an orphan completeness marker.
+	wantKeys := make([]string, 0, len(result.VariantPaths)+1)
+	for _, key := range result.VariantPaths {
+		wantKeys = append(wantKeys, key)
+	}
+	wantKeys = append(wantKeys, result.ManifestPath)
+	sort.Strings(wantKeys)
+	if !slices.Equal(calls[0].objectKeys, wantKeys) {
+		t.Fatalf("tracked keys = %v, want %v", calls[0].objectKeys, wantKeys)
+	}
+	for _, key := range calls[0].objectKeys {
+		if err := artworkstore.ValidateKey(key); err != nil {
+			t.Fatalf("tracked key %q is not a valid store key: %v", key, err)
+		}
+		if strings.Contains(key, "://") {
+			t.Fatalf("tracked key %q carries a scheme; revision tracking rejects those", key)
+		}
+	}
+	if tracker.recordCalls != 1 || tracker.recordedPath != result.OriginalPath || tracker.sourceClass != "provider" {
+		t.Fatalf("inventory completion = calls:%d path:%q source:%q", tracker.recordCalls, tracker.recordedPath, tracker.sourceClass)
+	}
+	if len(tracker.objects) != len(calls[0].objectKeys) {
+		t.Fatalf("inventory objects = %d, want %d", len(tracker.objects), len(calls[0].objectKeys))
+	}
+	for _, object := range tracker.objects {
+		stored := store.objectData(object.Key)
+		if object.SizeBytes != int64(len(stored)) {
+			t.Fatalf("inventory size for %s = %d, stored %d", object.Key, object.SizeBytes, len(stored))
+		}
+		if object.MediaType == "" {
+			t.Fatalf("inventory content type for %s is empty", object.Key)
+		}
+	}
+}
+
+func TestCacheAdoptsPluginReferenceBeforeResolvingOrDownloading(t *testing.T) {
+	store, err := artworkstore.NewFilesystemStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := makeTestJPEG(t)
+	firstClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+	})}
+	req := CacheRequest{
+		SourceURL: "tmdb://poster/opaque-42", ProviderID: testTMDBProviderID,
+		ContentType: testMoviesContentType, ContentID: "42", ImageType: metadata.ImagePoster,
+		ImageResolver: fixedImageResolver{url: "https://images.example/poster.jpg"},
+	}
+	first, err := newWithHTTPClient(store, firstClient).Cache(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("download must not run on adoption hit")
+	})}
+	second, err := newWithHTTPClient(store, secondClient).Cache(context.Background(), req)
+	if err != nil {
+		t.Fatalf("adopt cache: %v", err)
+	}
+	if second.OriginalPath != first.OriginalPath || second.ExistingVariants == 0 || second.UploadedVariants != 0 {
+		t.Fatalf("adopted result = %#v; first = %#v", second, first)
+	}
+}
+
+func TestCacheImageAdoptsResolvedPluginReference(t *testing.T) {
+	store, err := artworkstore.NewFilesystemStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := makeTestJPEG(t)
+	firstClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(data)), Header: make(http.Header)}, nil
+	})}
+	req := metadata.CacheImageRequest{
+		SourceURL:       "https://images.example/poster.jpg",
+		SourceReference: "tmdb://poster/opaque-42",
+		ProviderID:      testTMDBProviderID,
+		ContentType:     testMoviesContentType,
+		ContentID:       "42",
+		ImageType:       metadata.ImagePoster,
+	}
+	fingerprint := stablePluginSourceFingerprint(req.SourceReference)
+	if fingerprint == "" {
+		t.Fatal("stable plugin source fingerprint is empty")
+	}
+	first, err := newWithHTTPClient(store, firstClient).CacheImage(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secondClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("download must not run on adoption hit")
+	})}
+	second, err := newWithHTTPClient(store, secondClient).CacheImage(context.Background(), req)
+	if err != nil {
+		t.Fatalf("adopt resolved plugin reference: %v", err)
+	}
+	if second.OriginalPath != first.OriginalPath || second.ExistingVariants == 0 || second.UploadedVariants != 0 {
+		t.Fatalf("adopted result = %#v; first = %#v", second, first)
+	}
+}
+
+func TestCacheBytesDoesNotUploadWhenRevisionTrackingFails(t *testing.T) {
+	store := &mockStore{}
+	tracker := &recordingRevisionTracker{err: errors.New("registry unavailable")}
+	cacher := newWithHTTPClient(store, nil)
+	cacher.SetArtworkRevisionTracker(tracker)
+
+	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "335984",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err == nil || !strings.Contains(err.Error(), "track artwork revision") {
+		t.Fatalf("CacheBytes error = %v, want tracking failure", err)
+	}
+	if got := len(store.keys()); got != 0 {
+		t.Fatalf("wrote %d objects, want 0", got)
+	}
+}
+
+func TestCachePosterWritesPortableRevisionWithManifestLast(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -321,35 +423,120 @@ func TestCache_Poster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cache poster: %v", err)
 	}
-
-	wantBase := "tmdb/movies/550/poster"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
 	if result.Thumbhash == "" {
 		t.Error("Thumbhash is empty")
 	}
 
-	keys := s3.keys()
-	// Expect 4 variants: original, w780, w500, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
+	info := requirePortableKey(t, result.OriginalPath, "poster")
+	if info.Revision != result.Revision {
+		t.Errorf("original key revision = %q, want %q", info.Revision, result.Revision)
+	}
+	if result.BasePath != info.Directory {
+		t.Errorf("BasePath = %q, want revision directory %q", result.BasePath, info.Directory)
+	}
+	wantDir := fmt.Sprintf("artwork/v1/objects/poster/%s/%s", result.Revision[:2], result.Revision)
+	if info.Directory != wantDir {
+		t.Errorf("revision directory = %q, want %q", info.Directory, wantDir)
+	}
+	if result.ManifestPath != wantDir+"/manifest.json" {
+		t.Errorf("ManifestPath = %q, want %q", result.ManifestPath, wantDir+"/manifest.json")
+	}
+
+	keys := store.keys()
+	// Four variants plus the manifest.
+	if len(keys) != 5 {
+		t.Fatalf("wrote %d objects, want 5: %v", len(keys), keys)
 	}
 	for _, variant := range []string{"original", "w780", "w500", "w300"} {
 		want := result.VariantPaths[variant]
+		if want != wantDir+"/"+variant+".webp" {
+			t.Errorf("%s key = %q, want %q", variant, want, wantDir+"/"+variant+".webp")
+		}
 		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
+			t.Errorf("missing object %q in %v", want, keys)
+		}
+		if got := store.mediaType(want); got != "image/webp" {
+			t.Errorf("%s media type = %q, want image/webp", variant, got)
+		}
+	}
+	// The completeness marker is only meaningful if it lands after every
+	// object it vouches for.
+	if last := keys[len(keys)-1]; last != result.ManifestPath {
+		t.Fatalf("last write = %q, want the manifest %q", last, result.ManifestPath)
+	}
+	if got := store.mediaType(result.ManifestPath); got != "application/json" {
+		t.Errorf("manifest media type = %q, want application/json", got)
+	}
+}
+
+func TestCacheWritesValidatableManifest(t *testing.T) {
+	store := &mockStore{}
+	c := newWithHTTPClient(store, nil)
+
+	result, err := c.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "550",
+		ImageType:   metadata.ImageBackdrop,
+	})
+	if err != nil {
+		t.Fatalf("CacheBytes: %v", err)
+	}
+
+	manifest, err := artworkkey.ParseManifest(store.objectData(result.ManifestPath))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if manifest.Revision != result.Revision {
+		t.Errorf("manifest revision = %q, want %q", manifest.Revision, result.Revision)
+	}
+	if manifest.ImageType != "backdrop" || manifest.MediaType != "image/webp" {
+		t.Errorf("manifest = %+v, want backdrop/image/webp", manifest)
+	}
+	if manifest.RecipeVersion != artworkkey.PortableRecipeVersion {
+		t.Errorf("manifest recipe = %q, want %q", manifest.RecipeVersion, artworkkey.PortableRecipeVersion)
+	}
+	if len(manifest.Variants) != len(result.VariantPaths) {
+		t.Errorf("manifest lists %d variants, want %d", len(manifest.Variants), len(result.VariantPaths))
+	}
+	// The written objects must re-derive the revision the manifest claims —
+	// this is exactly the check an adopting server runs against a copied tree.
+	if err := artworkkey.ValidateManifestObjects(context.Background(), manifest, store.read); err != nil {
+		t.Fatalf("ValidateManifestObjects: %v", err)
+	}
+	// The manifest is a closed vocabulary: nothing identifying, locating, or
+	// secret may ride along in an extra field.
+	raw := store.objectData(result.ManifestPath)
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("unmarshal manifest: %v", err)
+	}
+	wantFields := []string{"format_version", "image_type", "media_type", "recipe_version", "revision", "variants"}
+	gotFields := slices.Sorted(maps.Keys(document))
+	if !slices.Equal(gotFields, wantFields) {
+		t.Fatalf("manifest fields = %v, want %v", gotFields, wantFields)
+	}
+	var variants []map[string]json.RawMessage
+	if err := json.Unmarshal(document["variants"], &variants); err != nil {
+		t.Fatalf("unmarshal manifest variants: %v", err)
+	}
+	wantVariantFields := []string{"digest", "filename", "name", "size_bytes"}
+	for _, variant := range variants {
+		if got := slices.Sorted(maps.Keys(variant)); !slices.Equal(got, wantVariantFields) {
+			t.Fatalf("manifest variant fields = %v, want %v", got, wantVariantFields)
+		}
+	}
+	for _, forbidden := range []string{"tmdb", "http", "://", "bucket"} {
+		if bytes.Contains(raw, []byte(forbidden)) {
+			t.Errorf("manifest %s contains %q", raw, forbidden)
 		}
 	}
 }
 
-func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	wantBase := "tmdb/movies/550/poster"
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheSkipsWritingVariantsThatAlreadyExist(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	req := CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -362,162 +549,201 @@ func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prime immutable variants: %v", err)
 	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"], first.VariantPaths["w300"])
-	s3.resetCalls()
+	store.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"], first.VariantPaths["w300"])
+	store.resetCalls()
+
 	result, err := c.Cache(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Cache poster with existing variants: %v", err)
 	}
-	if result.BasePath != wantBase {
-		t.Fatalf("BasePath = %q, want %q", result.BasePath, wantBase)
+	if result.OriginalPath != first.OriginalPath {
+		t.Fatalf("re-cached original = %q, want the same immutable key %q", result.OriginalPath, first.OriginalPath)
 	}
-	if got := s3.keys(); len(got) != 0 {
-		t.Fatalf("uploaded keys = %v, want none when variants already exist", got)
+	// Only the manifest is rewritten: re-materializing is how an incomplete
+	// revision (variants stored, manifest lost) heals itself.
+	if got := store.keys(); len(got) != 1 || got[0] != result.ManifestPath {
+		t.Fatalf("wrote %v, want only the manifest %q", got, result.ManifestPath)
 	}
 	if result.UploadedVariants != 0 || result.ExistingVariants != 4 {
-		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 4", result.UploadedVariants, result.ExistingVariants)
+		t.Fatalf("write stats = uploaded %d existing %d, want uploaded 0 existing 4", result.UploadedVariants, result.ExistingVariants)
 	}
 	for _, key := range []string{result.VariantPaths["original"], result.VariantPaths["w780"], result.VariantPaths["w500"], result.VariantPaths["w300"]} {
-		if !hasKey(s3.checkedKeys(), key) {
-			t.Fatalf("ObjectExists was not checked for %q; checked %v", key, s3.checkedKeys())
+		if !hasKey(store.checkedKeys(), key) {
+			t.Fatalf("content match was not checked for %q; checked %v", key, store.checkedKeys())
 		}
 	}
 }
 
+func TestCacheWritesOnlyMissingVariants(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
+
+	req := CacheRequest{
+		SourceURL:   srv.URL + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	}
+	first, err := c.Cache(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prime immutable variants: %v", err)
+	}
+	store.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
+	store.resetCalls()
+
+	result, err := c.Cache(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Cache poster with partial existing variants: %v", err)
+	}
+	want := []string{result.VariantPaths["w300"], result.ManifestPath}
+	if got := store.keys(); !slices.Equal(got, want) {
+		t.Fatalf("wrote %v, want %v", got, want)
+	}
+	if result.UploadedVariants != 1 || result.ExistingVariants != 3 {
+		t.Fatalf("write stats = uploaded %d existing %d, want uploaded 1 existing 3", result.UploadedVariants, result.ExistingVariants)
+	}
+}
+
 func TestCacheDifferentContentCreatesDifferentImmutableRevision(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	png := makeTestPNG(t, 400, 600)
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, http.DefaultClient)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, http.DefaultClient)
 	req := CacheRequest{ProviderID: testTMDBProviderID, ContentType: testMoviesContentType, ContentID: "550", ImageType: metadata.ImagePoster}
-	first, err := c.CacheBytes(context.Background(), jpeg, req)
+
+	first, err := c.CacheBytes(context.Background(), makeTestJPEG(t), req)
 	if err != nil {
 		t.Fatalf("cache first poster: %v", err)
 	}
-	second, err := c.CacheBytes(context.Background(), png, req)
+	second, err := c.CacheBytes(context.Background(), makeTestPNG(t, 400, 600), req)
 	if err != nil {
 		t.Fatalf("cache replacement poster: %v", err)
 	}
 	if first.Revision == second.Revision || first.OriginalPath == second.OriginalPath {
 		t.Fatalf("different content reused revision: first=%q second=%q", first.OriginalPath, second.OriginalPath)
 	}
-	if got := s3.keys(); len(got) != 8 {
-		t.Fatalf("uploaded keys = %v, want both immutable four-variant revisions", got)
+	if got := store.keys(); len(got) != 10 {
+		t.Fatalf("wrote %v, want both immutable revisions in full (4 variants + manifest each)", got)
 	}
 }
 
-func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
+// Identity fields no longer decide storage: the same encoded bytes are the
+// same object no matter which item, season, language, or sidecar produced
+// them, and are stored and counted once.
+func TestCacheConvergesOnBytesNotIdentity(t *testing.T) {
+	data := makeTestJPEG(t)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, nil)
 
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	req := CacheRequest{
-		SourceURL:   srv.URL + "/poster.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "movies",
-		ContentID:   "550",
-		ImageType:   metadata.ImagePoster,
+	season, episode := 2, 5
+	requests := []CacheRequest{
+		{ProviderID: "tmdb", ContentType: "movies", ContentID: "550", ImageType: metadata.ImagePoster},
+		{ProviderID: "metadb", ContentType: "series", ContentID: "1396", ImageType: metadata.ImagePoster},
+		{ProviderID: "tmdb", ContentType: "series", ContentID: "1396", ImageType: metadata.ImagePoster, SeasonNumber: &season, EpisodeNumber: &episode},
+		{ProviderID: "tmdb", ContentType: "series", ContentID: "1396", ImageType: metadata.ImagePoster, Language: "fr-CA"},
+		{ProviderID: "local", ContentType: "movies", ContentID: "movie-1", ImageType: metadata.ImagePoster, KeyDiscriminator: "deadbeef"},
 	}
-	first, err := c.Cache(context.Background(), req)
-	if err != nil {
-		t.Fatalf("prime immutable variants: %v", err)
-	}
-	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w780"], first.VariantPaths["w500"])
-	s3.resetCalls()
-	result, err := c.Cache(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Cache poster with partial existing variants: %v", err)
-	}
-	if got := s3.keys(); len(got) != 1 || got[0] != result.VariantPaths["w300"] {
-		t.Fatalf("uploaded keys = %v, want only missing w300 variant", got)
-	}
-	if result.UploadedVariants != 1 || result.ExistingVariants != 3 {
-		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 1 existing 3", result.UploadedVariants, result.ExistingVariants)
-	}
-}
-
-func TestCache_Backdrop(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/backdrop.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "movies",
-		ContentID:   "550",
-		ImageType:   metadata.ImageBackdrop,
-	})
-	if err != nil {
-		t.Fatalf("Cache backdrop: %v", err)
-	}
-
-	wantBase := "tmdb/movies/550/backdrop"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-
-	keys := s3.keys()
-	// Expect 4 variants: original, w1920, w1280, w300
-	if len(keys) != 4 {
-		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
-	}
-	for _, variant := range []string{"original", "w1920", "w1280", "w300"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
+	var want string
+	for i, req := range requests {
+		result, err := c.CacheBytes(context.Background(), data, req)
+		if err != nil {
+			t.Fatalf("CacheBytes %d: %v", i, err)
+		}
+		if i == 0 {
+			want = result.OriginalPath
+			continue
+		}
+		if result.OriginalPath != want {
+			t.Fatalf("request %d stored at %q, want the content-addressed key %q", i, result.OriginalPath, want)
 		}
 	}
-	// Must not have w500
-	if _, ok := result.VariantPaths["w500"]; ok {
-		t.Error("backdrop should not have w500 variant")
-	}
 }
 
-func TestCache_Logo(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
+// The same bytes under a different image type are a different recipe and must
+// not share a revision: the ladders differ, and the type is part of the digest.
+func TestCacheImageTypeParticipatesInRevision(t *testing.T) {
+	data := makeTestJPEG(t)
+	c := newWithHTTPClient(&mockStore{}, nil)
+	req := CacheRequest{ProviderID: "tmdb", ContentType: "movies", ContentID: "550"}
 
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/logo.png",
-		ProviderID:  "tmdb",
-		ContentType: "series",
-		ContentID:   "1396",
-		ImageType:   metadata.ImageLogo,
-	})
+	req.ImageType = metadata.ImagePoster
+	poster, err := c.CacheBytes(context.Background(), data, req)
 	if err != nil {
-		t.Fatalf("Cache logo: %v", err)
+		t.Fatalf("cache poster: %v", err)
 	}
+	req.ImageType = metadata.ImageBackdrop
+	backdrop, err := c.CacheBytes(context.Background(), data, req)
+	if err != nil {
+		t.Fatalf("cache backdrop: %v", err)
+	}
+	if poster.Revision == backdrop.Revision {
+		t.Fatalf("poster and backdrop share revision %q", poster.Revision)
+	}
+	requirePortableKey(t, poster.OriginalPath, "poster")
+	requirePortableKey(t, backdrop.OriginalPath, "backdrop")
+}
 
-	wantBase := "tmdb/series/1396/logo"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
+func TestCacheVariantLadders(t *testing.T) {
+	tests := []struct {
+		name      string
+		imageType metadata.ImageType
+		typeName  string
+		want      []string
+		forbidden []string
+	}{
+		{"poster", metadata.ImagePoster, "poster", []string{"original", "w780", "w500", "w300"}, []string{"w1280"}},
+		{"backdrop", metadata.ImageBackdrop, "backdrop", []string{"original", "w1920", "w1280", "w300"}, []string{"w500"}},
+		{"logo", metadata.ImageLogo, "logo", []string{"original", "w1280", "w500"}, []string{"w300"}},
+		{"profile", metadata.ImageProfile, "profile", []string{"original", "w500", "w300"}, []string{"w1920"}},
 	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+			store := &mockStore{}
+			c := newWithHTTPClient(store, srv.Client())
 
-	keys := s3.keys()
-	// Expect 3 variants: original, w1280, w500 — NO w300
-	if len(keys) != 3 {
-		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
-	}
-	for _, variant := range []string{"original", "w1280", "w500"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
-		}
-	}
-	if _, ok := result.VariantPaths["w300"]; ok {
-		t.Error("logo should not have w300 variant")
+			result, err := c.Cache(context.Background(), CacheRequest{
+				SourceURL:   srv.URL + "/art.jpg",
+				ProviderID:  "tmdb",
+				ContentType: "movies",
+				ContentID:   "550",
+				ImageType:   tc.imageType,
+			})
+			if err != nil {
+				t.Fatalf("Cache: %v", err)
+			}
+			info := requirePortableKey(t, result.OriginalPath, tc.typeName)
+			if len(result.VariantPaths) != len(tc.want) {
+				t.Fatalf("variants = %v, want %v", result.VariantPaths, tc.want)
+			}
+			keys := store.keys()
+			for _, variant := range tc.want {
+				key := result.VariantPaths[variant]
+				if key != info.Directory+"/"+variant+".webp" {
+					t.Errorf("%s key = %q", variant, key)
+				}
+				if !hasKey(keys, key) {
+					t.Errorf("missing object %q in %v", key, keys)
+				}
+			}
+			for _, variant := range tc.forbidden {
+				if _, ok := result.VariantPaths[variant]; ok {
+					t.Errorf("%s should not have a %s variant", tc.typeName, variant)
+				}
+			}
+			// GC expansion from the stored key alone must cover exactly what
+			// was written, manifest included.
+			expanded := artworkkey.ObjectKeys(result.OriginalPath, tc.typeName)
+			sort.Strings(expanded)
+			sort.Strings(keys)
+			if !slices.Equal(expanded, keys) {
+				t.Fatalf("ObjectKeys = %v, want the written set %v", expanded, keys)
+			}
+		})
 	}
 }
 
-func TestCache_ConvertsSVGLogo(t *testing.T) {
+func TestCacheConvertsSVGLogo(t *testing.T) {
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400"><rect width="1200" height="400" fill="#111"/><text x="80" y="255" fill="#fff" font-family="Arial" font-size="180">SILO</text></svg>`)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
@@ -525,8 +751,8 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/logo.svg",
@@ -541,15 +767,17 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	if result.Thumbhash == "" {
 		t.Fatal("Thumbhash is empty")
 	}
-	for _, variant := range []string{"original", "w1280", "w500"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(s3.keys(), want) {
-			t.Errorf("missing S3 key %q in %v", want, s3.keys())
+	if result.Ext != ".webp" {
+		t.Fatalf("Ext = %q, want .webp", result.Ext)
+	}
+	for _, variant := range []string{"original", "w500"} {
+		if !hasKey(store.keys(), result.VariantPaths[variant]) {
+			t.Errorf("missing object %q in %v", result.VariantPaths[variant], store.keys())
 		}
 	}
 }
 
-func TestCache_CapsLargeOriginalVariant(t *testing.T) {
+func TestCacheCapsLargeOriginalVariant(t *testing.T) {
 	pngData := makeTestPNG(t, 2600, 900)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
@@ -557,8 +785,8 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/logo.png",
@@ -570,9 +798,9 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cache large logo: %v", err)
 	}
-	original := s3.objectData(result.OriginalPath)
+	original := store.objectData(result.OriginalPath)
 	if len(original) == 0 {
-		t.Fatal("missing original.webp upload")
+		t.Fatal("missing original.webp write")
 	}
 	size, err := bimg.NewImage(original).Size()
 	if err != nil {
@@ -586,69 +814,10 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	}
 }
 
-func TestCache_LocalizedPosterUsesLanguageScopedPath(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/poster-fr.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "series",
-		ContentID:   "1396",
-		ImageType:   metadata.ImagePoster,
-		Language:    "fr-CA",
-	})
-	if err != nil {
-		t.Fatalf("Cache localized poster: %v", err)
-	}
-
-	wantBase := "tmdb/series/1396/localizations/fr-ca/poster"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	if !hasKey(s3.keys(), result.OriginalPath) {
-		t.Errorf("missing localized original in %v", s3.keys())
-	}
-}
-
-func TestCache_ProfileUsesProfileImagePath(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/person.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "people",
-		ContentID:   "287",
-		ImageType:   metadata.ImageProfile,
-	})
-	if err != nil {
-		t.Fatalf("Cache profile: %v", err)
-	}
-
-	wantBase := "tmdb/people/287/profile"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	for _, variant := range []string{"original", "w500", "w300"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(s3.keys(), want) {
-			t.Errorf("missing S3 key %q in %v", want, s3.keys())
-		}
-	}
-}
-
-func TestCache_DownloadError(t *testing.T) {
+func TestCacheDownloadError(t *testing.T) {
 	srv := startImageServer(t, nil, http.StatusNotFound)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/missing.jpg",
@@ -662,15 +831,10 @@ func TestCache_DownloadError(t *testing.T) {
 	}
 }
 
-func TestCache_S3UploadError(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{
-		bucket: "media",
-		putErr: errors.New("s3: connection refused"),
-	}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheStoreWriteError(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{writeErr: errors.New("storage: connection refused")}
+	c := newWithHTTPClient(store, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -680,16 +844,14 @@ func TestCache_S3UploadError(t *testing.T) {
 		ImageType:   metadata.ImagePoster,
 	})
 	if err == nil {
-		t.Fatal("expected error for S3 upload failure, got nil")
+		t.Fatal("expected error for storage write failure, got nil")
 	}
 }
 
-func TestCache_RejectsEmptyContentID(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheRejectsEmptyContentID(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
@@ -701,158 +863,14 @@ func TestCache_RejectsEmptyContentID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for empty content ID, got nil")
 	}
-	if len(s3.keys()) != 0 {
-		t.Fatalf("expected no uploads for empty content ID, got %v", s3.keys())
+	if len(store.keys()) != 0 {
+		t.Fatalf("expected no writes for empty content ID, got %v", store.keys())
 	}
 }
 
-func TestCache_SeasonPoster_NestsUnderSeries(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	season := 2
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:    srv.URL + "/season2.jpg",
-		ProviderID:   "tmdb",
-		ContentType:  "series",
-		ContentID:    "1396",
-		ImageType:    metadata.ImagePoster,
-		SeasonNumber: &season,
-	})
-	if err != nil {
-		t.Fatalf("Cache season poster: %v", err)
-	}
-
-	wantBase := "tmdb/series/1396/seasons/2/poster"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	for _, variant := range []string{"original", "w500", "w300"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(s3.keys(), want) {
-			t.Errorf("missing S3 key %q in %v", want, s3.keys())
-		}
-	}
-}
-
-func TestCache_EpisodeStill_NestsUnderSeasonAndEpisode(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	season, episode := 2, 5
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:     srv.URL + "/s02e05.jpg",
-		ProviderID:    "tmdb",
-		ContentType:   "series",
-		ContentID:     "1396",
-		ImageType:     metadata.ImageStill,
-		SeasonNumber:  &season,
-		EpisodeNumber: &episode,
-	})
-	if err != nil {
-		t.Fatalf("Cache episode still: %v", err)
-	}
-
-	wantBase := "tmdb/series/1396/seasons/2/episodes/5/still"
-	if result.BasePath != wantBase {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
-	}
-	for _, variant := range []string{"original", "w500", "w300"} {
-		want := result.VariantPaths[variant]
-		if !hasKey(s3.keys(), want) {
-			t.Errorf("missing S3 key %q in %v", want, s3.keys())
-		}
-	}
-}
-
-func TestCache_SeasonsDoNotCollide(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	originalPaths := make(map[int]string)
-	for _, season := range []int{1, 2, 3} {
-		s := season
-		result, err := c.Cache(context.Background(), CacheRequest{
-			SourceURL:    srv.URL + "/season.jpg",
-			ProviderID:   "tmdb",
-			ContentType:  "series",
-			ContentID:    "1396",
-			ImageType:    metadata.ImagePoster,
-			SeasonNumber: &s,
-		})
-		if err != nil {
-			t.Fatalf("Cache season %d: %v", season, err)
-		}
-		originalPaths[season] = result.OriginalPath
-	}
-
-	keys := s3.keys()
-	for _, season := range []int{1, 2, 3} {
-		want := originalPaths[season]
-		if !hasKey(keys, want) {
-			t.Errorf("missing S3 key %q in %v", want, keys)
-		}
-	}
-}
-
-func TestCache_SeasonZero_Specials(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
-
-	// Season 0 is the conventional "specials" season — must produce a
-	// distinct key, not be confused with a missing season dimension.
-	specials := 0
-	result, err := c.Cache(context.Background(), CacheRequest{
-		SourceURL:    srv.URL + "/specials.jpg",
-		ProviderID:   "tmdb",
-		ContentType:  "series",
-		ContentID:    "1396",
-		ImageType:    metadata.ImagePoster,
-		SeasonNumber: &specials,
-	})
-	if err != nil {
-		t.Fatalf("Cache specials poster: %v", err)
-	}
-	if result.BasePath != "tmdb/series/1396/seasons/0/poster" {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, "tmdb/series/1396/seasons/0/poster")
-	}
-
-	// Cache an item-level series poster (no season dimension) and confirm
-	// it lands under a distinct key from the specials poster.
-	c2 := newWithHTTPClient(&mockS3{bucket: "media"}, srv.Client())
-	itemResult, err := c2.Cache(context.Background(), CacheRequest{
-		SourceURL:   srv.URL + "/series-poster.jpg",
-		ProviderID:  "tmdb",
-		ContentType: "series",
-		ContentID:   "1396",
-		ImageType:   metadata.ImagePoster,
-	})
-	if err != nil {
-		t.Fatalf("Cache item poster: %v", err)
-	}
-	if itemResult.BasePath == result.BasePath {
-		t.Errorf("specials and item-level posters share a base path %q", result.BasePath)
-	}
-	if itemResult.BasePath != "tmdb/series/1396/poster" {
-		t.Errorf("item BasePath = %q, want %q", itemResult.BasePath, "tmdb/series/1396/poster")
-	}
-}
-
-func TestCache_RejectsEpisodeWithoutSeason(t *testing.T) {
-	s3 := &mockS3{bucket: "media"}
-	c := New(s3)
+func TestCacheRejectsEpisodeWithoutSeason(t *testing.T) {
+	store := &mockStore{}
+	c := New(store)
 
 	episode := 5
 	_, err := c.Cache(context.Background(), CacheRequest{
@@ -866,17 +884,15 @@ func TestCache_RejectsEpisodeWithoutSeason(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for EpisodeNumber without SeasonNumber, got nil")
 	}
-	if len(s3.keys()) != 0 {
-		t.Fatalf("expected no uploads for invalid request, got %v", s3.keys())
+	if len(store.keys()) != 0 {
+		t.Fatalf("expected no writes for invalid request, got %v", store.keys())
 	}
 }
 
-func TestCache_ResolvesPluginURL(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media"}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheResolvesPluginURL(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{}
+	c := newWithHTTPClient(store, srv.Client())
 
 	resolver := stubResolver{httpURL: srv.URL + "/from-resolver.jpg"}
 	result, err := c.Cache(context.Background(), CacheRequest{
@@ -890,17 +906,13 @@ func TestCache_ResolvesPluginURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cache plugin URL: %v", err)
 	}
-	if result.BasePath != "tmdb/movies/550/poster" {
-		t.Errorf("BasePath = %q, want %q", result.BasePath, "tmdb/movies/550/poster")
-	}
+	requirePortableKey(t, result.OriginalPath, "poster")
 }
 
-func TestCacheRetriesTransientPutObjectFailure(t *testing.T) {
-	jpeg := makeTestJPEG(t)
-	srv := startImageServer(t, jpeg, http.StatusOK)
-
-	s3 := &mockS3{bucket: "media", failuresBeforeSuccess: 1}
-	c := newWithHTTPClient(s3, srv.Client())
+func TestCacheRetriesTransientWriteFailure(t *testing.T) {
+	srv := startImageServer(t, makeTestJPEG(t), http.StatusOK)
+	store := &mockStore{failuresBeforeSuccess: 1}
+	c := newWithHTTPClient(store, srv.Client())
 
 	_, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:     srv.URL + "/still.jpg",
@@ -914,9 +926,52 @@ func TestCacheRetriesTransientPutObjectFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cache() error = %v", err)
 	}
-	if len(s3.keys()) == 0 {
-		t.Fatal("expected uploads after retry")
+	if len(store.keys()) == 0 {
+		t.Fatal("expected writes after retry")
 	}
+}
+
+// A content mismatch on a content-addressed key cannot be fixed by trying
+// again, and burning backoff on it delays the real failure.
+func TestCacheDoesNotRetryContentMismatch(t *testing.T) {
+	store := &countingStore{err: artworkstore.ErrContentMismatch}
+	c := newWithHTTPClient(store, nil)
+
+	_, err := c.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImageLogo,
+	})
+	if !errors.Is(err, artworkstore.ErrContentMismatch) {
+		t.Fatalf("CacheBytes error = %v, want ErrContentMismatch", err)
+	}
+	// The logo ladder is three variants written concurrently; each may attempt
+	// exactly once.
+	if got := store.attempts(); got > 3 {
+		t.Fatalf("write attempts = %d, want at most one per variant", got)
+	}
+}
+
+type countingStore struct {
+	mu    sync.Mutex
+	count int
+	err   error
+}
+
+func (s *countingStore) WriteImmutable(_ context.Context, _ string, _ []byte, _ artworkstore.ObjectMetadata) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.count++
+	return s.err
+}
+
+func (s *countingStore) Matches(context.Context, string, []byte) (bool, error) { return false, nil }
+
+func (s *countingStore) attempts() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count
 }
 
 func intPointer(v int) *int {
@@ -930,6 +985,3 @@ type stubResolver struct {
 func (s stubResolver) ResolveImageURL(_ context.Context, _ string, _ string) string {
 	return s.httpURL
 }
-
-// Ensure the containsKey helper is used at least once (avoids unused warning).
-var _ = containsKey

@@ -28,7 +28,7 @@ type discordChannel struct {
 	client     *discord.Client
 	// posterURL picks the artwork URL DM embeds may carry. Wired by
 	// NewSystem after construction; nil renders embeds without images.
-	posterURL func(ctx context.Context, posterPath, posterSourcePath string) string
+	posterURL func(ctx context.Context, posterPath, posterSourcePath, targetID string) string
 }
 
 // The assertion also keeps staticcheck's unused-analysis aware that the
@@ -133,7 +133,11 @@ func (c *discordChannel) send(ctx context.Context, tx pgx.Tx, userID int, _ stri
 
 	if c.posterURL != nil {
 		for i := range rows {
-			rows[i].PosterURL = c.posterURL(ctx, rows[i].PosterPath, rows[i].PosterSourcePath)
+			targetID := ""
+			if rows[i].SeriesID != nil {
+				targetID = *rows[i].SeriesID
+			}
+			rows[i].PosterURL = c.posterURL(ctx, rows[i].PosterPath, rows[i].PosterSourcePath, targetID)
 		}
 	}
 	payload, err := BuildDiscordDMPayload(rows)

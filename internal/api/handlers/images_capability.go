@@ -13,11 +13,11 @@ import (
 // Cast and crew headshots ("profile") are served through the same ladder, so
 // they are advertised too.
 var imageTypesWithWidths = []string{
-	artworkkey.ImagePoster,
-	artworkkey.ImageBackdrop,
-	artworkkey.ImageStill,
-	artworkkey.ImageLogo,
-	artworkkey.ImageProfile,
+	artworkkey.ImageTypePoster,
+	artworkkey.ImageTypeBackdrop,
+	artworkkey.ImageTypeStill,
+	artworkkey.ImageTypeLogo,
+	artworkkey.ImageTypeProfile,
 }
 
 // imageSizeWidths reports the pixel width behind each named size for one image

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -28,8 +29,23 @@ type ProfileHandler struct {
 		GetByID(ctx context.Context, id int) (*models.User, error)
 	}
 	ProfileTokens *access.ProfileTokenService
-	AvatarStore   profileAvatarStore
-	AvatarTTL     time.Duration
+	// AvatarStore is the legacy per-profile avatar bucket, kept so avatars
+	// uploaded before profile avatars became content-addressed keep resolving
+	// and keep being cleaned up.
+	AvatarStore profileAvatarStore
+	AvatarTTL   time.Duration
+	// ArtworkUploads materializes uploaded avatars into the canonical artwork
+	// store. Nil means avatar upload is unavailable.
+	ArtworkUploads *artworkupload.Materializer
+	// TrackArtworkRevisions registers uploaded avatar revisions with artwork
+	// garbage collection. Set only when the user store keeps profile rows in
+	// catalog tables (the Postgres backend): the collector's reference union
+	// cannot see rows in per-user SQLite files, so tracking there would delete
+	// live avatars once the grace period expires. Untracked uploads leak their
+	// displaced predecessors instead, which is the safe direction.
+	TrackArtworkRevisions bool
+	// ArtworkURLs resolves a stored avatar key to a URL a client can load.
+	ArtworkURLs ArtworkURLResolver
 	// DeviceLibraryPurger removes a deleted profile's device rows (and, via
 	// cascade, its managed downloads and subscriptions). Profiles may live
 	// outside Postgres, so no FK cascade covers these shared tables.
@@ -226,8 +242,8 @@ func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Reque
 	}
 
 	resp := profileListResponse{
-		Profiles:            h.toProfileResponses(r.Context(), store, profiles),
-		AvatarUploadEnabled: h.AvatarStore != nil,
+		Profiles:            h.toProfileResponses(r.Context(), store, userID, profiles),
+		AvatarUploadEnabled: h.ArtworkUploads.Available(),
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -414,7 +430,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		created = *p
 	}
 
-	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), store, created))
+	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), store, userID, created))
 }
 
 // HandleUpdateProfile handles PUT /profiles/{id}.
@@ -577,7 +593,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *profile))
+	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, userID, *profile))
 }
 
 // HandleDeleteProfile handles DELETE /profiles/{id}.
@@ -724,16 +740,16 @@ func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request)
 // its own. Callers serializing several profiles must use toProfileResponses
 // instead so the whole list costs one store read.
 func (h *ProfileHandler) toProfileResponse(
-	ctx context.Context, store userstore.UserStore, p userstore.Profile,
+	ctx context.Context, store userstore.UserStore, userID int, p userstore.Profile,
 ) profileResponse {
 	prefs := resolveProfilePreferences(ctx, store, []string{p.ID})
-	return h.profileResponseWith(ctx, p, prefs[p.ID])
+	return h.profileResponseWith(ctx, userID, p, prefs[p.ID])
 }
 
 // toProfileResponses serializes a whole household, resolving every profile's
 // preference block in one store read rather than one per profile.
 func (h *ProfileHandler) toProfileResponses(
-	ctx context.Context, store userstore.UserStore, profiles []userstore.Profile,
+	ctx context.Context, store userstore.UserStore, userID int, profiles []userstore.Profile,
 ) []profileResponse {
 	ids := make([]string, 0, len(profiles))
 	for _, p := range profiles {
@@ -743,7 +759,7 @@ func (h *ProfileHandler) toProfileResponses(
 
 	out := make([]profileResponse, 0, len(profiles))
 	for _, p := range profiles {
-		out = append(out, h.profileResponseWith(ctx, p, prefs[p.ID]))
+		out = append(out, h.profileResponseWith(ctx, userID, p, prefs[p.ID]))
 	}
 	return out
 }
@@ -755,9 +771,9 @@ func (h *ProfileHandler) toProfileResponses(
 // canonical now, and the legacy columns behind them are written but no longer
 // read (see profiles_settings_sync.go). Everything else is still column-backed.
 func (h *ProfileHandler) profileResponseWith(
-	ctx context.Context, p userstore.Profile, prefs profilePreferences,
+	ctx context.Context, userID int, p userstore.Profile, prefs profilePreferences,
 ) profileResponse {
-	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar)
+	avatarSource, avatarURL := resolveProfileAvatarTarget(ctx, h.ArtworkURLs, h.AvatarStore, h.AvatarTTL, userID, p.ID, p.Avatar)
 	return profileResponse{
 		ID:                         p.ID,
 		Name:                       p.Name,

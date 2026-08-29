@@ -59,9 +59,19 @@ const PRIVATE_S3_KEYS = [
   "s3.private_secret_key",
 ];
 
-const META_KEYS = ["metadata.cache_images"];
+const REMOTE_MATERIALIZATION_KEY = "artwork.remote_materialization";
+const LEGACY_CACHE_IMAGES_KEY = "metadata.cache_images";
+const META_KEYS = [REMOTE_MATERIALIZATION_KEY, LEGACY_CACHE_IMAGES_KEY];
 
-const ALL_KEYS = [...SERVER_KEYS, ...PUBLIC_S3_KEYS, ...PRIVATE_S3_KEYS, ...META_KEYS];
+const ARTWORK_KEYS = ["artwork.storage_backend", "artwork.local_path"];
+
+const ALL_KEYS = [
+  ...SERVER_KEYS,
+  ...PUBLIC_S3_KEYS,
+  ...PRIVATE_S3_KEYS,
+  ...META_KEYS,
+  ...ARTWORK_KEYS,
+];
 
 async function fetchSettingValue(key: string): Promise<string | null> {
   try {
@@ -268,6 +278,11 @@ export function ServerStorageStep() {
   }
 
   const publicURLAuth = form.getValue("s3.public_url_auth") || "presigned";
+  const materialization = form.getValue(REMOTE_MATERIALIZATION_KEY);
+  const cacheImagesEnabled =
+    materialization !== ""
+      ? materialization === "selected"
+      : form.getValue(LEGACY_CACHE_IMAGES_KEY) === "true";
   const jellyfinEnabledValue = form.getValue("jellyfin_compat.enabled");
   const jellyfinStatus = jellyfinStatusQuery.data;
   const jellyfinAPIEnabled =
@@ -547,8 +562,43 @@ export function ServerStorageStep() {
         </div>
       </Section>
 
+      <Section
+        label="Artwork storage"
+        description="Automatic mode uses your public S3 bucket when one is configured; otherwise it uses local disk."
+      >
+        <div className="flex items-start gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+          <div>
+            <p className="text-sm font-medium">Automatic backend ready</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Local fallback path:{" "}
+              {form.getValue("artwork.local_path") || "Silo application data/artwork"}
+            </p>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="setup-artwork-backend" className="text-xs">
+            Artwork backend
+          </Label>
+          <select
+            id="setup-artwork-backend"
+            className="border-border bg-background h-9 w-full rounded-md border px-3 text-sm"
+            value={form.getValue("artwork.storage_backend") || "auto"}
+            onChange={(event) => form.setValue("artwork.storage_backend", event.target.value)}
+          >
+            <option value="auto">Automatic (Recommended)</option>
+            <option value="local">Local storage</option>
+            <option value="s3">Shared S3 storage</option>
+          </select>
+          <p className="text-muted-foreground text-xs">
+            Uses your public S3 bucket when one is configured; otherwise local disk. Artwork is
+            served through Silo with verified fallbacks and background repair.
+          </p>
+        </div>
+      </Section>
+
       <StorageBlock
-        title="Public Assets Storage (S3)"
+        title="Advanced: Public Assets Storage (S3)"
         expanded={publicExpanded}
         onToggle={() => setPublicExpanded((value) => !value)}
       >
@@ -679,17 +729,21 @@ export function ServerStorageStep() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.1em] uppercase">
-              Store Artwork In Your Bucket
+              Artwork caching
             </p>
             <p className="text-muted-foreground/70 mt-0.5 text-xs">
-              Copies posters and backdrops from metadata providers into your public S3 bucket
-              instead of proxying external URLs.
+              Copy provider artwork into the canonical artwork store. Clients always load artwork
+              from Silo either way; with this off, each cold request fetches it from the provider.
             </p>
           </div>
           <Switch
             id="setup-cache-images"
-            checked={form.getValue("metadata.cache_images") === "true"}
-            onCheckedChange={(v) => form.setValue("metadata.cache_images", v ? "true" : "false")}
+            aria-label="Cache remote artwork"
+            checked={cacheImagesEnabled}
+            onCheckedChange={(enabled) => {
+              form.setValue(REMOTE_MATERIALIZATION_KEY, enabled ? "selected" : "passthrough");
+              form.setValue(LEGACY_CACHE_IMAGES_KEY, enabled ? "true" : "false");
+            }}
             className="ml-4 shrink-0"
           />
         </div>

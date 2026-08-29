@@ -427,7 +427,8 @@ func TestPersistSeasonsAndEpisodes_NonCanonicalRefreshPreservesBaseAndLocalizati
 	if localizedJob == nil {
 		t.Fatalf("localized season image job missing from %#v", enqueuer.inputs)
 	}
-	if localizedJob.TargetContentID != season.ContentID || localizedJob.TargetLanguage != "fr" ||
+	if localizedJob.TargetContentID != seriesID || localizedJob.TargetLanguage != "fr" ||
+		localizedJob.SeasonNumber == nil || *localizedJob.SeasonNumber != season.SeasonNumber ||
 		localizedJob.SourcePath != "tmdb://new-fr-season.jpg" {
 		t.Fatalf("localized season image job = %#v", localizedJob)
 	}

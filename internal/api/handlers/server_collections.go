@@ -92,7 +92,7 @@ func (h *LibraryCollectionHandler) HandleListServerCollections(w http.ResponseWr
 			colls = append(colls, libraryTabCollection{
 				ID:              c.ID,
 				Title:           c.Title,
-				PosterURL:       h.presignGPURL(r, c.PosterURL),
+				PosterURL:       h.collectionArtworkURL(r, c.ID, c.PosterURL, "collection-poster"),
 				PosterThumbhash: c.PosterThumbhash,
 				ItemCount:       c.ItemCount,
 				Featured:        c.Featured,

@@ -91,8 +91,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		sf.StoreProvider = deps.UserStoreProvider
 		itemsHandler.sectionsFetcher = sf
 	}
-	itemsHandler.posterPresigner = deps.PosterPresigner
-	itemsHandler.presignTTL = deps.PresignTTL
+	itemsHandler.artworkURLs = deps.ArtworkURLs
 	autoscanHandler := NewAutoscanHandler(deps.FolderRepo, deps.ScanQueue, deps.IDCodec, itemsHandler)
 	adminAPIKeyAuth := NewAdminAPIKeyAuthenticator(deps.APIKeyValidator, deps.APIKeyUserLoader, deps.UserStoreProvider, deps.Now)
 	autoscanVirtualFoldersRegistered := false
@@ -129,8 +128,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.S3Client = deps.S3Client
 		playbackHandler.S3Bucket = deps.S3Bucket
 	}
-	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
+	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.ArtworkURLs, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
+	imagesHandler.artwork = deps.ArtworkDelivery
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
@@ -383,10 +383,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.AccessFilterFn,
 			deps.CatalogSearchProvider,
 		)
-		if deps.PosterPresigner != nil {
-			svc.posterPresigner = deps.PosterPresigner
-			svc.presignTTL = deps.PresignTTL
-		}
+		svc.artworkURLs = deps.ArtworkURLs
 		deps.ContentService = svc
 	}
 

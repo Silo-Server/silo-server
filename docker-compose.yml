@@ -77,6 +77,10 @@ services:
       - ${MEDIA_ROOT:?Set MEDIA_ROOT in .env to the host media path}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
       - ${SILO_DATA_ROOT:-/opt/silo}/plugins:/var/lib/silo/plugins
       - ${SILO_DATA_ROOT:-/opt/silo}/compat:/var/lib/silo/compat
+      # Canonical artwork store (artwork.local_path). Persist it: without S3
+      # this holds every poster, backdrop, and cover the server materialized,
+      # and losing it means re-downloading the whole library's artwork.
+      - ${SILO_DATA_ROOT:-/opt/silo}/artwork:/var/lib/silo/artwork
       - ${SILO_DATA_ROOT:-/opt/silo}/transcode:/tmp/silo-transcode
       - ${SILO_DATA_ROOT:-/opt/silo}/catalog-seeds:/catalog-seeds:ro
       # Only load-bearing when the Docker host is itself an LXC container, where

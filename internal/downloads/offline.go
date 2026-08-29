@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 
@@ -135,17 +136,27 @@ func (s *Service) ServeArtwork(ctx context.Context, w http.ResponseWriter, r *ht
 }
 
 func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, url string) error {
-	client := s.httpClient
-	if client == nil {
-		client = http.DefaultClient
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("building artwork request: %w", err)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetching artwork: %w", err)
+	var resp *http.Response
+	if strings.HasPrefix(url, "/") {
+		if s.artworkDelivery == nil {
+			return fmt.Errorf("fetching root-relative artwork: %w", ErrManifestUnavailable)
+		}
+		recorder := httptest.NewRecorder()
+		s.artworkDelivery.ServeHTTP(recorder, req)
+		resp = recorder.Result()
+	} else {
+		client := s.httpClient
+		if client == nil {
+			client = http.DefaultClient
+		}
+		resp, err = client.Do(req)
+		if err != nil {
+			return fmt.Errorf("fetching artwork: %w", err)
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

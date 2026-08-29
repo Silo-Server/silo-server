@@ -286,6 +286,11 @@ type Dependencies struct {
 	// the ABS client can fetch. Optional; when nil, /api/items/{id}/cover
 	// 404s rather than redirecting to an unreachable relative path.
 	CoverResolver func(ctx context.Context, path, variant string) string
+	// TargetCoverResolver is the resilient-delivery form. targetKind is
+	// "item" or "person" and targetID is the stable catalog key. Production
+	// wires this resolver; CoverResolver remains only for compatibility tests
+	// and embedders that have not adopted target capabilities yet.
+	TargetCoverResolver func(ctx context.Context, targetKind, targetID, path, variant string) string
 }
 
 // Handler wires the /abs/api/* and canonical ABS-client paths.

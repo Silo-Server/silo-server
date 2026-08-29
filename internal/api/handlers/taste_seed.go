@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -211,7 +212,9 @@ func (h *RecommendationsHandler) tasteSeedSectionItem(ctx context.Context, mi *m
 		item.Keywords = []string{}
 	}
 	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(ctx, cardThumbnailPath(mi.PosterPath), "card")
+		item.PosterURL = presignDiscoverTarget(ctx, h.DetailSvc, artworkurl.Target{
+			Surface: artworkurl.SurfaceItemPosters, Keys: []string{mi.ContentID}, Slot: artworkImagePoster,
+		}, mi.PosterPath, "poster", "small", "card")
 	}
 	if stateMap != nil {
 		item.UserState = stateMap[mi.ContentID]

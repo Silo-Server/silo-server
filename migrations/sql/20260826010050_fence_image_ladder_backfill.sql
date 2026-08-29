@@ -13,7 +13,8 @@ DECLARE
     old_row jsonb;
     arg_index integer := 0;
     path_column text;
-    image_type text;
+    -- Named to avoid PL/pgSQL ambiguity with manifest.image_type below.
+    slot_image_type text;
     rung_pattern text;
     cached_path text;
     previous_path text;
@@ -57,7 +58,7 @@ BEGIN
     arg_index := 0;
     WHILE arg_index < TG_NARGS LOOP
         path_column := TG_ARGV[arg_index];
-        image_type := TG_ARGV[arg_index + 1];
+        slot_image_type := TG_ARGV[arg_index + 1];
         rung_pattern := TG_ARGV[arg_index + 2];
         cached_path := new_row ->> path_column;
         previous_path := CASE WHEN old_row IS NULL THEN NULL ELSE old_row ->> path_column END;
@@ -69,7 +70,7 @@ BEGIN
                SELECT 1
                FROM public.artwork_revision_gc_candidates manifest
                WHERE manifest.original_path = cached_path
-                 AND manifest.image_type = image_type
+                 AND manifest.image_type = slot_image_type
                  AND EXISTS (
                      SELECT 1
                      FROM unnest(manifest.object_keys) object_key

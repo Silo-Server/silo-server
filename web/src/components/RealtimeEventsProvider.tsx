@@ -69,6 +69,15 @@ const CATALOG_ITEM_CHANGED_EVENTS = new Set([
   "library.item_added",
   "metadata.updated",
 ]);
+const TERMINAL_JOB_EVENTS = new Set(["job.completed", "job.failed", "job.cancelled"]);
+// These jobs rewrite the artwork accounting snapshot (or the purge result the
+// admin surface reads back), so the storage query is stale the moment one of
+// them settles.
+const ARTWORK_STORAGE_JOB_TYPES = new Set([
+  "artwork_storage_refresh",
+  "artwork_storage_import",
+  "artwork_storage_purge",
+]);
 const DASHBOARD_QUERY_KEYS = [
   adminKeys.stats(),
   adminKeys.sessions(),
@@ -308,6 +317,10 @@ function handleJobSideEffects(
 
   if (eventName === "job.completed" && job.job_type === "delete_library") {
     invalidateCatalogState(queryClient, { allowDashboardRefetch });
+  }
+
+  if (TERMINAL_JOB_EVENTS.has(eventName) && ARTWORK_STORAGE_JOB_TYPES.has(job.job_type)) {
+    void queryClient.invalidateQueries({ queryKey: adminKeys.artworkStorage() });
   }
 }
 

@@ -6,11 +6,6 @@ import LibraryMetadataSettings from "./LibraryMetadataSettings";
 
 const useSettingsFormMock = vi.fn();
 const useRestartKeysMock = vi.fn(() => new Set<string>());
-const storageAvailableMock = vi.fn(() => true);
-
-vi.mock("@/hooks/useBranding", () => ({
-  useBranding: () => ({ storageAvailable: storageAvailableMock() }),
-}));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -71,7 +66,7 @@ function text(markup: string): string {
 
 // The toggle is a Radix switch, so reach it through the label association
 // SettingField sets up rather than by scanning the markup for "disabled".
-function toggleDisabled(markup: string, label: string): boolean {
+function toggleControl(markup: string, label: string): Element {
   const container = document.createElement("div");
   container.innerHTML = markup;
   const labelEl = Array.from(container.querySelectorAll("label")).find(
@@ -80,14 +75,21 @@ function toggleDisabled(markup: string, label: string): boolean {
   if (!labelEl?.htmlFor) throw new Error(`no label found for ${label}`);
   const control = container.querySelector(`[id="${labelEl.htmlFor}"]`);
   if (!control) throw new Error(`no control found for ${label}`);
-  return control.hasAttribute("disabled");
+  return control;
+}
+
+function toggleDisabled(markup: string, label: string): boolean {
+  return toggleControl(markup, label).hasAttribute("disabled");
+}
+
+function toggleChecked(markup: string, label: string): boolean {
+  return toggleControl(markup, label).getAttribute("aria-checked") === "true";
 }
 
 describe("LibraryMetadataSettings", () => {
   beforeEach(() => {
     localStorage.clear();
     useRestartKeysMock.mockReturnValue(new Set<string>());
-    storageAvailableMock.mockReturnValue(true);
   });
 
   it("renders every field group heading", () => {
@@ -102,7 +104,7 @@ describe("LibraryMetadataSettings", () => {
     const rendered = text(render({ "catalog.search.provider": "postgres" }));
 
     expect(rendered).toContain("Library & Metadata");
-    expect(rendered).toContain("Store artwork in your bucket");
+    expect(rendered).toContain("Cache remote artwork");
     expect(rendered).toContain("Find intros and credits");
     expect(rendered).toContain("Search engine");
   });
@@ -137,6 +139,7 @@ describe("LibraryMetadataSettings", () => {
     const keys: string[] = calls[calls.length - 1]?.[0]?.keys ?? [];
     expect(keys).toEqual(
       expect.arrayContaining([
+        "artwork.remote_materialization",
         "metadata.cache_images",
         "scanner.workers",
         "matcher.workers",
@@ -185,42 +188,26 @@ describe("LibraryMetadataSettings", () => {
     expect(text(render({ "catalog.search.provider": "meilisearch" }))).toContain("Meilisearch URL");
   });
 
-  it("leaves artwork storage editable and unannotated while public storage is active", () => {
-    const rendered = render({ "s3.public_bucket": "silo-public" });
+  it("prefers the canonical materialization mode over the legacy setting", () => {
+    const rendered = render({
+      "artwork.remote_materialization": "passthrough",
+      "metadata.cache_images": "true",
+    });
 
-    expect(text(rendered)).toContain("Store artwork in your bucket");
-    expect(text(rendered)).not.toContain("Restart the server for artwork storage to start");
-    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+    expect(toggleChecked(rendered, "Cache remote artwork")).toBe(false);
   });
 
-  it("keeps artwork storage settable when the bucket is saved but not active yet", () => {
-    storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({ "s3.public_bucket": "silo-public" });
-
-    expect(text(rendered)).toContain("Restart the server for artwork storage to start");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
-  });
-
-  it("disables artwork storage and links to Storage & Database when no bucket is configured", () => {
-    storageAvailableMock.mockReturnValue(false);
-
-    const rendered = render({});
-
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(text(rendered)).toContain("Storage & Database");
-    expect(rendered).toContain("/admin/settings/infrastructure");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(true);
-  });
-
-  it("still allows switching artwork storage off when the bucket went away", () => {
-    storageAvailableMock.mockReturnValue(false);
-
+  it("falls back to the legacy cache_images row when the canonical key is unset", () => {
     const rendered = render({ "metadata.cache_images": "true" });
 
-    expect(text(rendered)).toContain("Artwork storage needs a public S3 bucket");
-    expect(toggleDisabled(rendered, "Store artwork in your bucket")).toBe(false);
+    expect(toggleChecked(rendered, "Cache remote artwork")).toBe(true);
+  });
+
+  it("keeps the artwork toggle available without any S3 bucket", () => {
+    const rendered = render({});
+
+    expect(text(rendered)).not.toContain("Artwork storage needs a public S3 bucket");
+    expect(toggleDisabled(rendered, "Cache remote artwork")).toBe(false);
   });
 
   it("says it once for a group where every field needs a restart", () => {

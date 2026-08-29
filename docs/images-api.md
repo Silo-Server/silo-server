@@ -1,9 +1,10 @@
 # Images API
 
-Silo caches artwork at a fixed ladder of widths and returns a presigned URL for
-one of them. By default the server picks the width from context — card rows get
-narrow images, hero areas get wide ones. A client that knows better can ask for a
-specific size instead.
+Silo caches artwork at a fixed ladder of widths and returns an opaque artwork
+URL for one of them. By default the server picks the width from context — card
+rows get narrow images, hero areas get wide ones. A client that knows better can
+ask for a specific size instead. The requested rung is bound to the resilient
+target capability.
 
 Commands and paths in this document are relative to the repository root.
 
@@ -96,19 +97,19 @@ GET /api/v1/images/capability
 A `404` here means the server predates `image_size`. Keep using the server's
 defaults rather than sending a parameter it will ignore.
 
-## Fallback while artwork is being regenerated
+## Older artwork and newly-added ladder rungs
 
 The wide rungs (780px posters and stills, 1280px logos) were added after this
 ladder shipped, so artwork cached by an earlier version has no object at those
-keys. A one-shot background pass regenerates it, and until that pass reaches a
-given image the server serves the next narrower rung it does have, ending at the
-original.
+keys. The server reads a portable revision's manifest and serves the nearest
+smaller rung it lists, ending at the original. Legacy revisions have no
+manifest, so their existence answers are cached for one day when present and 15
+minutes when absent while the same walk-down is applied.
 
-The practical consequence for a client is that shortly after a server upgrade,
-`image_size=large` may return an image narrower than the table above. It is never
-a broken URL, and no client action is required: the correct width appears once
-the pass completes. URLs served from a fallback carry a shortened expiry so the
-real rung is picked up promptly rather than a day later.
+The practical consequence is that `image_size=large` may return an image
+narrower than the table above until that source is materialized again for an
+ordinary reason. It is never a broken URL, is not reported as storage damage,
+and does not trigger repair or a special ladder backfill.
 
 ## Jellyfin compatibility
 

@@ -295,6 +295,15 @@ func (h *Handler) handleItemCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := item.PosterPath
+	if h.deps.TargetCoverResolver != nil {
+		resolved := h.deps.TargetCoverResolver(r.Context(), "item", contentID, target, "card")
+		if resolved == "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.Redirect(w, r, resolved, http.StatusFound)
+		return
+	}
 	// Raw silo paths (e.g. "local/audiobooks/.../original.webp") need to
 	// be resolved into a real URL via the CoverResolver before redirect;
 	// otherwise the client follows a relative path that doesn't exist on
@@ -324,6 +333,15 @@ func (h *Handler) handleAuthorImage(w http.ResponseWriter, r *http.Request) {
 	author, err := h.deps.MediaStore.GetAuthorByID(r.Context(), id, emptyAccessFilter())
 	if err != nil || author.PosterPath == "" {
 		http.Error(w, "author image not found", http.StatusNotFound)
+		return
+	}
+	if h.deps.TargetCoverResolver != nil {
+		url := h.deps.TargetCoverResolver(r.Context(), "person", author.ID, author.PosterPath, "")
+		if url == "" {
+			http.Error(w, "image resolution failed", http.StatusNotFound)
+			return
+		}
+		http.Redirect(w, r, url, http.StatusFound)
 		return
 	}
 	if h.deps.CoverResolver == nil {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -252,30 +253,14 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 		return []calendarDayResponse{}
 	}
 
-	posterURLs := map[string]string{}
-	if detailSvc != nil {
-		posterPaths := make([]string, 0, len(events))
-		seenPosterPaths := make(map[string]struct{}, len(events))
-		for _, ev := range events {
-			if ev.PosterPath == "" {
-				continue
-			}
-			if _, ok := seenPosterPaths[ev.PosterPath]; ok {
-				continue
-			}
-			seenPosterPaths[ev.PosterPath] = struct{}{}
-			posterPaths = append(posterPaths, ev.PosterPath)
-		}
-		posterURLs = detailSvc.PresignImageURLs(r.Context(), posterPaths, "poster", "small")
-	}
-
 	type preparedCalendarEvent struct {
-		event       catalog.CalendarEvent
-		localDate   string
-		sourceDate  string
-		localTime   time.Time
-		hasTime     bool
-		airAtString *string
+		event        catalog.CalendarEvent
+		posterTarget artworkurl.Target
+		localDate    string
+		sourceDate   string
+		localTime    time.Time
+		hasTime      bool
+		airAtString  *string
 	}
 
 	startDate := start.Format("2006-01-02")
@@ -294,16 +279,35 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			airAtString = &formatted
 		}
 		prepared = append(prepared, preparedCalendarEvent{
-			event:       ev,
-			localDate:   localDate,
-			sourceDate:  ev.AirDate.Format("2006-01-02"),
-			localTime:   localTime,
-			hasTime:     hasTime,
-			airAtString: airAtString,
+			event:        ev,
+			posterTarget: calendarPosterTarget(ev),
+			localDate:    localDate,
+			sourceDate:   ev.AirDate.Format("2006-01-02"),
+			localTime:    localTime,
+			hasTime:      hasTime,
+			airAtString:  airAtString,
 		})
 	}
 	if len(prepared) == 0 {
 		return []calendarDayResponse{}
+	}
+
+	// Keyed by Target.CacheKey, never by poster path: two events can select the
+	// same stored revision from different owners (a season and its series), and
+	// path-keying would collapse them onto whichever capability was signed last.
+	posterURLs := map[string]string{}
+	if detailSvc != nil {
+		targets := make([]artworkurl.Target, 0, len(prepared))
+		for _, item := range prepared {
+			if item.event.PosterPath == "" {
+				continue
+			}
+			targets = append(targets, item.posterTarget)
+		}
+		resolved := detailSvc.PresignArtworkTargetsWithExpiry(r.Context(), targets, catalog.ArtworkVariantForSize("poster", "small"))
+		for _, target := range targets {
+			posterURLs[target.CacheKey()] = resolved[target.CacheKey()].URL
+		}
 	}
 
 	// Order each local day by the wall-clock time the viewer actually sees,
@@ -358,7 +362,7 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 			AirAt:           item.airAtString,
 			AirTimezone:     ev.AirTimezone,
 			LocalAirDate:    item.localDate,
-			PosterURL:       posterURLs[ev.PosterPath],
+			PosterURL:       posterURLs[item.posterTarget.CacheKey()],
 			PosterThumbhash: ev.PosterThumbhash,
 			Watched:         watched[ev.ContentID],
 			Badges:          badges,
@@ -370,6 +374,28 @@ func groupEventsByDate(events []catalog.CalendarEvent, r *http.Request, detailSv
 	}
 
 	return days
+}
+
+// calendarPosterTarget mints the artwork capability for one event's card
+// poster. A season premiere carries the season's own poster whenever that
+// season has one, so its capability must name the season surface — keyed by
+// seasons.content_id — instead of the parent series. Signing the series there
+// would make delivery reload the series row and serve a poster that no longer
+// matches the season thumbhash the response ships alongside it. Every other
+// event keeps the series (or movie) item-poster surface, matching the row the
+// repo actually read the poster from.
+func calendarPosterTarget(ev catalog.CalendarEvent) artworkurl.Target {
+	surface := artworkurl.SurfaceItemPosters
+	contentID := ev.ContentID
+	switch {
+	case ev.PosterIsSeason:
+		surface = artworkurl.SurfaceSeasonPosters
+	case ev.SeriesID != nil && *ev.SeriesID != "":
+		contentID = *ev.SeriesID
+	}
+	return artworkurl.Target{
+		Surface: surface, Keys: []string{contentID}, Slot: artworkImagePoster,
+	}.WithReference(ev.PosterPath)
 }
 
 func buildBadges(ev catalog.CalendarEvent) []string {

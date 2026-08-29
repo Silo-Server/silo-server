@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -244,6 +246,218 @@ func TestHandleGetCalendar_GroupsEventsAndBatchResolvesCardPosters(t *testing.T)
 		if item.PosterURL != "https://cdn.example/poster-card.jpg" {
 			t.Fatalf("item %d poster_url = %q, want resolved card URL", i, item.PosterURL)
 		}
+	}
+}
+
+// recordingCalendarArtworkResolver is target-aware, so the calendar handler
+// signs real capabilities through it and each resolved URL names the surface
+// and keys the handler chose for that event.
+type recordingCalendarArtworkResolver struct {
+	batchCalls int
+	targets    []artworkurl.Target
+	variant    string
+}
+
+func (*recordingCalendarArtworkResolver) ResolveImageURL(context.Context, string, string) string {
+	return ""
+}
+
+func (*recordingCalendarArtworkResolver) ResolveImageURLs(context.Context, []string, string) map[string]string {
+	return nil
+}
+
+func (r *recordingCalendarArtworkResolver) ResolveArtworkTargetsWithExpiry(
+	_ context.Context,
+	targets []artworkurl.Target,
+	variant string,
+) map[string]catalog.ResolvedImageURL {
+	r.batchCalls++
+	r.variant = variant
+	r.targets = append(r.targets, targets...)
+	resolved := make(map[string]catalog.ResolvedImageURL, len(targets))
+	for _, target := range targets {
+		resolved[target.CacheKey()] = catalog.ResolvedImageURL{
+			URL: "resolved:" + target.Surface + ":" + strings.Join(target.Keys, ","),
+		}
+	}
+	return resolved
+}
+
+func (r *recordingCalendarArtworkResolver) ResolveArtworkTargetRequestsWithExpiry(
+	ctx context.Context,
+	requests []artworkurl.TargetRequest,
+) map[string]catalog.ResolvedImageURL {
+	targets := make([]artworkurl.Target, 0, len(requests))
+	variant := ""
+	for _, request := range requests {
+		targets = append(targets, request.Target)
+		variant = request.Variant
+	}
+	resolved := r.ResolveArtworkTargetsWithExpiry(ctx, targets, variant)
+	result := make(map[string]catalog.ResolvedImageURL, len(requests))
+	for _, request := range requests {
+		result[request.CacheKey()] = resolved[request.Target.CacheKey()]
+	}
+	return result
+}
+
+func calendarItemsByContentID(t *testing.T, rec *httptest.ResponseRecorder) map[string]calendarEventResponse {
+	t.Helper()
+	var resp calendarResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	items := map[string]calendarEventResponse{}
+	for _, day := range resp.Events {
+		for _, item := range day.Items {
+			items[item.ContentID] = item
+		}
+	}
+	return items
+}
+
+// A season premiere whose season carries its own poster must be signed against
+// the season surface (keyed by seasons.content_id). Signing the parent series
+// there would make delivery reload the series row and serve a poster that
+// contradicts the season thumbhash shipped in the same response.
+func TestHandleGetCalendar_MintsSeasonPosterTargetWhenSeasonPosterSelected(t *testing.T) {
+	t.Parallel()
+
+	airDate := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
+	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
+		{
+			ContentID:      "season-1",
+			Type:           "season_premiere",
+			Title:          "Show One",
+			SeriesID:       ptrString("series-1"),
+			SeasonNumber:   ptrInt(2),
+			AirDate:        airDate,
+			PosterPath:     "images/season-1/original.jpg",
+			PosterIsSeason: true,
+			IsPremiere:     true,
+		},
+		{
+			ContentID:    "season-2",
+			Type:         "season_premiere",
+			Title:        "Show Two",
+			SeriesID:     ptrString("series-2"),
+			SeasonNumber: ptrInt(3),
+			AirDate:      airDate,
+			// No season poster: the repo COALESCEd down to the series poster.
+			PosterPath: "images/series-2/original.jpg",
+			IsPremiere: true,
+		},
+		{
+			ContentID:     "episode-1",
+			Type:          "episode",
+			Title:         "Show Three",
+			SeriesID:      ptrString("series-3"),
+			SeasonNumber:  ptrInt(1),
+			EpisodeNumber: ptrInt(4),
+			AirDate:       airDate,
+			PosterPath:    "images/series-3/original.jpg",
+		},
+	}}
+	resolver := &recordingCalendarArtworkResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+
+	handler := &CalendarHandler{repo: repo, detailSvc: detailSvc}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if resolver.batchCalls != 1 {
+		t.Fatalf("artwork batch calls = %d, want 1", resolver.batchCalls)
+	}
+
+	surfaces := map[string]string{}
+	for _, target := range resolver.targets {
+		surfaces[target.Surface+":"+strings.Join(target.Keys, ",")] = target.Slot
+	}
+	for _, want := range []string{
+		artworkurl.SurfaceSeasonPosters + ":season-1",
+		artworkurl.SurfaceItemPosters + ":series-2",
+		artworkurl.SurfaceItemPosters + ":series-3",
+	} {
+		slot, ok := surfaces[want]
+		if !ok {
+			t.Fatalf("missing artwork target %q, got %v", want, surfaces)
+		}
+		if slot != artworkImagePoster {
+			t.Fatalf("target %q slot = %q, want %q", want, slot, artworkImagePoster)
+		}
+	}
+
+	items := calendarItemsByContentID(t, rec)
+	for contentID, wantURL := range map[string]string{
+		"season-1":  "resolved:" + artworkurl.SurfaceSeasonPosters + ":season-1",
+		"season-2":  "resolved:" + artworkurl.SurfaceItemPosters + ":series-2",
+		"episode-1": "resolved:" + artworkurl.SurfaceItemPosters + ":series-3",
+	} {
+		if got := items[contentID].PosterURL; got != wantURL {
+			t.Fatalf("%s poster_url = %q, want %q", contentID, got, wantURL)
+		}
+	}
+}
+
+// Two owners can select the same stored revision. Indexing the resolved batch
+// by poster path collapsed them onto whichever capability was signed last, so
+// the response has to look each event's URL up by its own target cache key.
+func TestHandleGetCalendar_KeysResolvedPostersByTargetNotPath(t *testing.T) {
+	t.Parallel()
+
+	airDate := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
+	sharedPoster := "images/shared/original.jpg"
+	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
+		{
+			ContentID:      "season-1",
+			Type:           "season_premiere",
+			Title:          "Show One",
+			SeriesID:       ptrString("series-1"),
+			SeasonNumber:   ptrInt(2),
+			AirDate:        airDate,
+			PosterPath:     sharedPoster,
+			PosterIsSeason: true,
+			IsPremiere:     true,
+		},
+		{
+			ContentID:     "episode-1",
+			Type:          "episode",
+			Title:         "Show Two",
+			SeriesID:      ptrString("series-2"),
+			SeasonNumber:  ptrInt(1),
+			EpisodeNumber: ptrInt(1),
+			AirDate:       airDate,
+			PosterPath:    sharedPoster,
+		},
+	}}
+	resolver := &recordingCalendarArtworkResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+
+	handler := &CalendarHandler{repo: repo, detailSvc: detailSvc}
+	req := httptest.NewRequest(http.MethodGet, "/calendar?start=2026-04-06&end=2026-04-12", nil)
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetCalendar(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	items := calendarItemsByContentID(t, rec)
+	seasonURL := "resolved:" + artworkurl.SurfaceSeasonPosters + ":season-1"
+	seriesURL := "resolved:" + artworkurl.SurfaceItemPosters + ":series-2"
+	if got := items["season-1"].PosterURL; got != seasonURL {
+		t.Fatalf("season-1 poster_url = %q, want %q", got, seasonURL)
+	}
+	if got := items["episode-1"].PosterURL; got != seriesURL {
+		t.Fatalf("episode-1 poster_url = %q, want %q", got, seriesURL)
 	}
 }
 

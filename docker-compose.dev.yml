@@ -122,6 +122,8 @@ services:
       - silo-dev-go-mod:/go/pkg/mod
       - silo-dev-plugins:/var/lib/silo/plugins
       - silo-dev-compat:/var/lib/silo/compat
+      # Canonical artwork store (artwork.local_path).
+      - silo-dev-artwork:/var/lib/silo/artwork
       - silo-dev-transcode:/tmp/silo-transcode
       - ${MEDIA_ROOT:-/tmp/silo-dev-media}:${MEDIA_CONTAINER_ROOT:-/mnt/media}:ro
     depends_on:
@@ -168,6 +170,7 @@ services:
 
 volumes:
   silo-dev-air-tmp:
+  silo-dev-artwork:
   silo-dev-compat:
   silo-dev-go-build:
   silo-dev-go-mod:

@@ -22,6 +22,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -61,13 +64,21 @@ type LibraryHandler struct {
 	ObservedLocationRepo  *scanner.ObservedLocationRepository
 	SectionRepo           *sections.Repository
 	StoreProvider         userstore.UserStoreProvider
-	S3Meta                LibraryImageStore
-	PresignTTL            time.Duration
-	appCtx                context.Context
-	EventBus              cache.EventBus
-	EventsHub             *evt.Hub
-	ScanRegistry          *evt.ScanRegistry
-	ScanQueue             libraryScanQueuer
+	// S3Meta is retained for chapter-thumbnail capability reporting and for
+	// deleting the mutable per-library poster objects written before poster
+	// uploads became content-addressed. Poster reads and writes go through the
+	// artwork store.
+	S3Meta LibraryImageStore
+	// ArtworkUploads materializes uploaded posters into the canonical artwork
+	// store. Nil means poster upload is unavailable.
+	ArtworkUploads *artworkupload.Materializer
+	// ArtworkURLs resolves a stored poster key to a URL a client can load.
+	ArtworkURLs  ArtworkURLResolver
+	appCtx       context.Context
+	EventBus     cache.EventBus
+	EventsHub    *evt.Hub
+	ScanRegistry *evt.ScanRegistry
+	ScanQueue    libraryScanQueuer
 }
 
 // LibraryImageStore provides S3 operations for library poster images.
@@ -389,20 +400,13 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 }
 
 // toLibraryResponseWithPoster converts a MediaFolder model to a libraryResponse
-// and presigns the poster URL if a poster path is set.
+// and resolves the poster URL if a poster path is set.
 func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *models.MediaFolder) libraryResponse {
 	resp := toLibraryResponse(f)
 	resp.ChapterThumbnailsSupported = h.S3Meta != nil
-	if f.PosterPath != "" && h.S3Meta != nil {
-		ttl := h.PresignTTL
-		if ttl <= 0 {
-			ttl = 4 * time.Hour
-		}
-		url, err := h.S3Meta.PresignGetURL(ctx, h.S3Meta.Bucket(), f.PosterPath, ttl)
-		if err == nil {
-			resp.PosterURL = url
-		}
-	}
+	resp.PosterURL = resolveTargetStoredImageURL(ctx, h.ArtworkURLs, artworkurl.Target{
+		Surface: artworkurl.SurfaceLibraryPosters, Keys: []string{strconv.Itoa(f.ID)}, Slot: artworkImageLibraryPoster,
+	}, f.PosterPath, "original")
 	return resp
 }
 
@@ -469,15 +473,9 @@ func (h *LibraryHandler) HandleListUserLibraries(w http.ResponseWriter, r *http.
 			Name:      f.Name,
 			Type:      f.Type,
 			SortOrder: f.SortOrder,
-		}
-		if f.PosterPath != "" && h.S3Meta != nil {
-			ttl := h.PresignTTL
-			if ttl <= 0 {
-				ttl = 4 * time.Hour
-			}
-			if url, err := h.S3Meta.PresignGetURL(r.Context(), h.S3Meta.Bucket(), f.PosterPath, ttl); err == nil {
-				entry.PosterURL = url
-			}
+			PosterURL: resolveTargetStoredImageURL(r.Context(), h.ArtworkURLs, artworkurl.Target{
+				Surface: artworkurl.SurfaceLibraryPosters, Keys: []string{strconv.Itoa(f.ID)}, Slot: "library-poster",
+			}, f.PosterPath, "original"),
 		}
 		resp = append(resp, entry)
 	}
@@ -1917,7 +1915,7 @@ func (h *LibraryHandler) HandleConfirmEmptyRootCleanup(w http.ResponseWriter, r 
 // HandleUploadPoster handles PUT /libraries/{id}/poster.
 // Accepts a multipart form upload with a single "poster" file field.
 func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Request) {
-	if h.S3Meta == nil {
+	if !h.ArtworkUploads.Available() {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
 		return
 	}
@@ -1952,9 +1950,7 @@ func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Reque
 	defer file.Close()
 
 	// Validate content type.
-	ct := header.Header.Get("Content-Type")
-	ext := posterExtension(ct)
-	if ext == "" {
+	if posterExtension(header.Header.Get("Content-Type")) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported image type; use JPEG, PNG, or WebP")
 		return
 	}
@@ -1969,35 +1965,65 @@ func (h *LibraryHandler) HandleUploadPoster(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Delete old poster if it exists and has a different key.
-	s3Key := fmt.Sprintf("library-posters/%d%s", id, ext)
-	if folder.PosterPath != "" && folder.PosterPath != s3Key {
-		_ = h.S3Meta.DeleteObject(r.Context(), h.S3Meta.Bucket(), folder.PosterPath)
-	}
-
-	if err := h.S3Meta.PutObject(r.Context(), h.S3Meta.Bucket(), s3Key, data); err != nil {
-		slog.ErrorContext(r.Context(), "uploading library poster", "component", "api", "library_id", id, "error", err)
+	// Store the poster as an immutable content-addressed revision, registered
+	// for collection before the first byte is written. The row is repointed
+	// afterwards, so a failure here leaves the previous poster in place.
+	stored, err := h.ArtworkUploads.Materialize(r.Context(), artworkupload.Request{
+		ImageType: artworkkey.ImageTypeLibraryPoster,
+		Data:      data,
+		Track:     true,
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, artworkupload.ErrInvalidImage):
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid image file")
+		return
+	case errors.Is(err, artworkupload.ErrStorageUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
+		return
+	default:
+		slog.ErrorContext(r.Context(), "storing library poster", "component", "api", "library_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to upload poster")
 		return
 	}
 
-	if err := h.folderRepo.SetPosterPath(r.Context(), id, s3Key); err != nil {
+	previousPath := folder.PosterPath
+	if err := h.folderRepo.SetPosterPath(r.Context(), id, stored.OriginalKey); err != nil {
 		slog.ErrorContext(r.Context(), "saving library poster path", "component", "api", "library_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save poster")
 		return
 	}
+	// A displaced content-addressed revision is collected once nothing
+	// references it; only the mutable per-library object this replaces has to
+	// be deleted by hand, because nothing tracks it.
+	h.deleteLegacyLibraryPoster(r.Context(), previousPath, stored.OriginalKey)
 
-	folder.PosterPath = s3Key
+	folder.PosterPath = stored.OriginalKey
 	writeJSON(w, http.StatusOK, h.toLibraryResponseWithPoster(r.Context(), folder))
+}
+
+// deleteLegacyLibraryPoster removes a mutable per-library poster object written
+// before poster uploads became content-addressed.
+//
+// Content-addressed revisions are deliberately left alone: one revision can back
+// several libraries, and deciding when it is unreferenced is the collector's
+// job, not this handler's.
+func (h *LibraryHandler) deleteLegacyLibraryPoster(ctx context.Context, previousPath, replacementPath string) {
+	previousPath = strings.TrimSpace(previousPath)
+	if h.S3Meta == nil || previousPath == "" || previousPath == replacementPath {
+		return
+	}
+	if artworkkey.IsPortableKey(previousPath) {
+		return
+	}
+	if err := h.S3Meta.DeleteObject(ctx, h.S3Meta.Bucket(), previousPath); err != nil {
+		slog.WarnContext(ctx, "deleting legacy library poster object failed",
+			"component", "api", "key", previousPath, "error", err)
+	}
 }
 
 // HandleDeletePoster handles DELETE /libraries/{id}/poster.
 func (h *LibraryHandler) HandleDeletePoster(w http.ResponseWriter, r *http.Request) {
-	if h.S3Meta == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Image storage is not configured")
-		return
-	}
-
 	id, err := parseIDParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library ID")
@@ -2015,12 +2041,12 @@ func (h *LibraryHandler) HandleDeletePoster(w http.ResponseWriter, r *http.Reque
 	}
 
 	if folder.PosterPath != "" {
-		_ = h.S3Meta.DeleteObject(r.Context(), h.S3Meta.Bucket(), folder.PosterPath)
 		if err := h.folderRepo.ClearPosterPath(r.Context(), id); err != nil {
 			slog.ErrorContext(r.Context(), "clearing library poster path", "component", "api", "library_id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear poster")
 			return
 		}
+		h.deleteLegacyLibraryPoster(r.Context(), folder.PosterPath, "")
 	}
 
 	w.WriteHeader(http.StatusNoContent)

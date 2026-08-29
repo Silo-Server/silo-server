@@ -947,7 +947,7 @@ func (s *Scanner) scanPaths(
 	// grace for this folder. Safe because the empty-root guard (above) returns
 	// early when 0 files are found on disk, so we only reach here when the
 	// root is populated.
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, _, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -1017,14 +1017,6 @@ func (s *Scanner) scanPaths(
 					"scope", scopePath,
 				)
 			}
-		}
-	}
-
-	// Best-effort S3 image cleanup for orphaned items.
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
-		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
 		}
 	}
 
@@ -1360,7 +1352,7 @@ func (s *Scanner) scanFolderByRoots(
 	// deleted once they pass the removal grace — by the very scan that
 	// noticed the outage.
 	protectedRoots := protectedScanRoots
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, _, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -1414,13 +1406,6 @@ func (s *Scanner) scanFolderByRoots(
 			"folder_id", folder.ID,
 			"scope", "folder",
 		)
-	}
-
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
-		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
-		}
 	}
 
 	switch {
@@ -2329,8 +2314,7 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 		}
 		protectedRoots = append(protectedRoots, suspectRoots...)
 	}
-	var orphanedImageDirs []string
-	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	removedMemberships, deletedItems, _, err = s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -2338,12 +2322,6 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 		trashed, err = s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
-		}
-	}
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
-		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
 		}
 	}
 	return trashed, removedMemberships, deletedItems, nil

@@ -316,6 +316,49 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}
 	cfg.Metadata.CacheImages = cacheImages
 
+	// Artwork — canonical store selection and delivery.
+	artworkBackend := strings.ToLower(strings.TrimSpace(stringOr(m, ArtworkStorageBackendKey, ArtworkBackendAuto)))
+	switch artworkBackend {
+	case ArtworkBackendAuto, ArtworkBackendLocal, ArtworkBackendS3:
+	default:
+		return nil, fmt.Errorf("invalid value for %q: must be one of %s, %s, %s",
+			ArtworkStorageBackendKey, ArtworkBackendAuto, ArtworkBackendLocal, ArtworkBackendS3)
+	}
+	cfg.Artwork.StorageBackend = artworkBackend
+
+	// NormalizeArtworkLocalPath already names the key in its error.
+	artworkLocalPath, err := NormalizeArtworkLocalPath(stringOr(m, ArtworkLocalPathKey, ""))
+	if err != nil {
+		return nil, err
+	}
+	if artworkLocalPath == "" {
+		artworkLocalPath = DefaultArtworkLocalPath
+	}
+	cfg.Artwork.LocalPath = artworkLocalPath
+
+	artworkMaterialization := strings.ToLower(strings.TrimSpace(stringOr(m, ArtworkRemoteMaterializationKey, "")))
+	if artworkMaterialization == "" {
+		artworkMaterialization = defaultArtworkMaterialization(m)
+	}
+	switch artworkMaterialization {
+	case ArtworkMaterializationSelected, ArtworkMaterializationPassthrough:
+	default:
+		return nil, fmt.Errorf("invalid value for %q: must be one of %s, %s",
+			ArtworkRemoteMaterializationKey, ArtworkMaterializationSelected, ArtworkMaterializationPassthrough)
+	}
+	cfg.Artwork.RemoteMaterialization = artworkMaterialization
+
+	// The artwork URL lifetime mirrors the S3 presign lifetime by default, so
+	// an install that tuned one does not end up with two different windows.
+	artworkURLTTL, err := durationOr(m, ArtworkURLTTLKey, cfg.S3.MetadataPresignExpiry)
+	if err != nil {
+		return nil, err
+	}
+	if artworkURLTTL <= 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be a positive duration", ArtworkURLTTLKey)
+	}
+	cfg.Artwork.URLTTL = artworkURLTTL
+
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "")
 	cfg.Playback.TranscodeDir = stringOr(m, playbackTranscodeDirSettingKey, DefaultTranscodeDir)

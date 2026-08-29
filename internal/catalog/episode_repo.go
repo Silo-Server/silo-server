@@ -1042,16 +1042,18 @@ func (r *EpisodeRepository) UpdateMetadata(ctx context.Context, contentID string
 	return nil
 }
 
-func (r *EpisodeRepository) UpdateStillIfSourceMatches(ctx context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
+func (r *EpisodeRepository) UpdateStillIfSourceMatches(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, sourcePath, cachedPath, thumbhash string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE episodes
-		SET still_path = $3,
-			still_source_path = $2,
-			still_thumbhash = $4,
+		SET still_path = $5,
+			still_source_path = $4,
+			still_thumbhash = $6,
 			updated_at = NOW()
-		WHERE content_id = $1
-		  AND still_source_path = $2
-	`, contentID, sourcePath, cachedPath, thumbhash)
+		WHERE series_id = $1
+		  AND season_number = $2
+		  AND episode_number = $3
+		  AND still_source_path = $4
+	`, seriesID, seasonNumber, episodeNumber, sourcePath, cachedPath, thumbhash)
 	if err != nil {
 		return false, fmt.Errorf("updating episode cached still: %w", err)
 	}

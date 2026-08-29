@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkstore"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 const (
@@ -26,10 +28,14 @@ const (
 	artworkRevisionDormantRecheck = 24 * time.Hour
 )
 
-// ArtworkRevisionDeleter is the object-storage surface used by revision GC.
+// ArtworkRevisionDeleter is the artwork-store surface used by revision GC. It
+// is the store's own batch-delete contract: logical keys only, no bucket, so GC
+// behaves identically on every backend. Already-absent keys count as deleted on
+// both, which is what makes the strict count check below meaningful.
 type ArtworkRevisionDeleter interface {
-	DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error)
-	Bucket() string
+	DeleteObjects(ctx context.Context, keys []string) (int, error)
+	ListPage(ctx context.Context, prefix, cursor string, limit int) ([]artworkstore.ObjectInfo, string, bool, error)
+	DeletePrefixMaintenance(ctx context.Context, prefix string) (int, error)
 }
 
 // ArtworkRevisionGCStats summarizes one bounded cleanup pass.
@@ -41,29 +47,38 @@ type ArtworkRevisionGCStats struct {
 	DormantChecked  int `json:"dormant_checked"`
 	DormantRequeued int `json:"dormant_requeued"`
 	Healed          int `json:"healed"`
+	LegacyPrefixes  int `json:"legacy_prefixes"`
 }
 
 // ArtworkRevisionGarbageCollector deletes unpublished or displaced immutable
 // revisions only after their grace period and while no catalog surface
 // references them. Work is leased with SKIP LOCKED so multiple workers are safe.
 type ArtworkRevisionGarbageCollector struct {
-	pool *pgxpool.Pool
-	s3   ArtworkRevisionDeleter
+	pool  *pgxpool.Pool
+	store ArtworkRevisionDeleter
 }
 
-func NewArtworkRevisionGarbageCollector(pool *pgxpool.Pool, s3 ArtworkRevisionDeleter) *ArtworkRevisionGarbageCollector {
-	if pool == nil || s3 == nil {
+func NewArtworkRevisionGarbageCollector(pool *pgxpool.Pool, store ArtworkRevisionDeleter) *ArtworkRevisionGarbageCollector {
+	if pool == nil || store == nil {
 		return nil
 	}
-	return &ArtworkRevisionGarbageCollector{pool: pool, s3: s3}
+	return &ArtworkRevisionGarbageCollector{pool: pool, store: store}
 }
 
 // Run processes one bounded batch. Failed deletions are retried with
 // exponential backoff; an expired lease is recoverable by another worker.
 func (g *ArtworkRevisionGarbageCollector) Run(ctx context.Context) (ArtworkRevisionGCStats, error) {
 	stats := ArtworkRevisionGCStats{}
-	if g == nil || g.pool == nil || g.s3 == nil {
+	if g == nil || g.pool == nil || g.store == nil {
 		return stats, fmt.Errorf("artwork revision GC is not configured")
+	}
+	if health, ok := g.store.(interface {
+		Health() (artworkstore.HealthState, time.Time)
+	}); ok {
+		state, _ := health.Health()
+		if state == artworkstore.HealthUnavailable || state == artworkstore.HealthWrongMount {
+			return stats, nil
+		}
 	}
 
 	workerID := uuid.NewString()
@@ -124,7 +139,62 @@ func (g *ArtworkRevisionGarbageCollector) Run(ctx context.Context) (ArtworkRevis
 	if err == nil {
 		err = sweepErr
 	}
+	legacy, legacyErr := g.sweepLegacyPrefixes(ctx, 20)
+	stats.LegacyPrefixes = legacy
+	if err == nil {
+		err = legacyErr
+	}
 	return stats, err
+}
+
+func (g *ArtworkRevisionGarbageCollector) sweepLegacyPrefixes(ctx context.Context, limit int) (int, error) {
+	rows, err := g.pool.Query(ctx, `SELECT prefix FROM artwork_legacy_prefix_gc_candidates WHERE not_before <= NOW() ORDER BY not_before LIMIT $1`, limit)
+	if err != nil {
+		return 0, err
+	}
+	var prefixes []string
+	for rows.Next() {
+		var prefix string
+		if err := rows.Scan(&prefix); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	rows.Close()
+	completed := 0
+	for _, prefix := range prefixes {
+		var referenced bool
+		if err := g.pool.QueryRow(ctx, artworkLegacyPrefixReferencedSQL(), artworkLegacyPrefixPattern(prefix)).Scan(&referenced); err != nil {
+			return completed, err
+		}
+		if referenced {
+			_, err = g.pool.Exec(ctx, `UPDATE artwork_legacy_prefix_gc_candidates SET not_before = NOW() + interval '24 hours', last_error = '', updated_at = NOW() WHERE prefix = $1`, prefix)
+			if err != nil {
+				return completed, err
+			}
+			continue
+		}
+		_, err = g.store.DeletePrefixMaintenance(ctx, prefix)
+		if err != nil {
+			_, _ = g.pool.Exec(ctx, `UPDATE artwork_legacy_prefix_gc_candidates SET attempt_count = attempt_count + 1, last_error = $2, not_before = NOW() + interval '1 hour', updated_at = NOW() WHERE prefix = $1`, prefix, err.Error())
+			continue
+		}
+		_, err = g.pool.Exec(ctx, `DELETE FROM artwork_legacy_prefix_gc_candidates WHERE prefix = $1`, prefix)
+		if err != nil {
+			return completed, err
+		}
+		completed++
+	}
+	return completed, nil
+}
+
+func artworkLegacyPrefixReferencedSQL() string {
+	return `WITH refs AS (` + artworkInventoryReferenceSQL() + `) SELECT EXISTS (SELECT 1 FROM refs WHERE path LIKE $1 ESCAPE '\')`
+}
+
+func artworkLegacyPrefixPattern(prefix string) string {
+	return pathscope.EscapeLike(prefix) + "%"
 }
 
 func processArtworkRevisionGCBatch(
@@ -189,6 +259,7 @@ func (g *ArtworkRevisionGarbageCollector) claim(ctx context.Context, workerID st
 			FROM artwork_revision_gc_candidates
 			WHERE not_before <= NOW()
 			  AND next_attempt_at <= NOW()
+			  AND NOT (seed_imported_at IS NOT NULL AND seed_expires_at IS NULL)
 			  AND (locked_at IS NULL OR locked_at < NOW() - ($3 * interval '1 second'))
 			ORDER BY next_attempt_at, id
 			FOR UPDATE SKIP LOCKED
@@ -225,6 +296,8 @@ func (g *ArtworkRevisionGarbageCollector) parkClaimed(ctx context.Context, ids [
 	_, err := g.pool.Exec(ctx, `
 		UPDATE artwork_revision_gc_candidates
 		SET next_attempt_at = NULL,
+			last_reference_check_at = NOW(),
+			deletion_started_at = NULL,
 			attempt_count = 0,
 			locked_at = NULL,
 			locked_by = '',
@@ -278,6 +351,8 @@ func (g *ArtworkRevisionGarbageCollector) processCandidate(
 			if _, err := tx.Exec(ctx, `
 				UPDATE artwork_revision_gc_candidates
 				SET next_attempt_at = NULL,
+					last_reference_check_at = NOW(),
+					deletion_started_at = NULL,
 					attempt_count = 0,
 					locked_at = NULL,
 					locked_by = '',
@@ -291,6 +366,12 @@ func (g *ArtworkRevisionGarbageCollector) processCandidate(
 			}
 			return artworkRevisionGCReferenced, nil
 		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE artwork_revision_gc_candidates
+			SET last_reference_check_at = NOW(), deletion_started_at = COALESCE(deletion_started_at, NOW()), updated_at = NOW()
+			WHERE id = $1 AND locked_by = $2`, candidate.id, workerID); err != nil {
+			return artworkRevisionGCSuperseded, fmt.Errorf("artwork revision GC: mark deleting: %w", err)
+		}
 	}
 
 	// Rows queued by the displacement triggers carry no manifest; expand the
@@ -300,7 +381,7 @@ func (g *ArtworkRevisionGarbageCollector) processCandidate(
 		objectKeys = artworkkey.ObjectKeys(originalPath, imageType)
 	}
 	if len(objectKeys) > 0 {
-		deleted, err := g.s3.DeleteObjects(ctx, g.s3.Bucket(), objectKeys)
+		deleted, err := g.store.DeleteObjects(ctx, objectKeys)
 		if err == nil && deleted != len(objectKeys) {
 			err = fmt.Errorf("deleted %d of %d artwork objects", deleted, len(objectKeys))
 		}
@@ -336,8 +417,18 @@ func (g *ArtworkRevisionGarbageCollector) processCandidate(
 	// re-registration clears deleted_at and must survive; anything else with
 	// deleted_at set is a finished deletion.
 	if _, err := g.pool.Exec(ctx, `
-		DELETE FROM artwork_revision_gc_candidates
-		WHERE id = $1 AND deleted_at IS NOT NULL`, candidate.id); err != nil {
+		UPDATE artwork_revision_gc_candidates
+		SET tombstoned_at = NOW(),
+			next_attempt_at = NULL,
+			missing_at = NULL,
+			repair_state = '',
+			repair_queued_at = NULL,
+			protected_loss_at = NULL,
+			locked_at = NULL,
+			locked_by = '',
+			last_error = '',
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NOT NULL AND tombstoned_at IS NULL`, candidate.id); err != nil {
 		return artworkRevisionGCSuperseded, fmt.Errorf("artwork revision GC: finish: %w", err)
 	}
 	if healed {
@@ -352,13 +443,124 @@ type artworkReferenceQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// artworkNoRemoteSource is the remote-source predicate for a surface whose
+// artwork cannot be re-downloaded: nothing matches it, so such a row is always
+// cleared rather than repointed.
+const artworkNoRemoteSource = "FALSE"
+
+// artworkReferenceSurface is one column that can hold a live reference to a
+// stored artwork object.
+//
+// It is a superset of the reconciler's sweep surfaces: a column can be worth
+// protecting from deletion without being worth sweeping. Profile avatars are
+// the case in point — their column holds a prefixed reference rather than a
+// bare key, so the reconciler cannot verify it row by row, but the collector
+// must still see it or it would delete avatars that are plainly in use.
+//
+// Every surface listed here is checked before an object is deleted, so an
+// omission is a data-loss bug, not a leak. The union can only see catalog
+// Postgres tables: on installs with userdb.backend=sqlite, profile and
+// personal-collection rows live in per-user database files instead, which is
+// why the upload handlers only Track user-owned revisions when the user store
+// is Postgres-backed (see api.Dependencies.UserArtworkTracked).
+type artworkReferenceSurface struct {
+	name  string
+	table string
+	// pathExpr is a SQL expression over the row yielding the object key.
+	pathExpr string
+	// filter restricts the surface to rows that actually hold a key. Empty
+	// means every row qualifies.
+	filter string
+	// resetSet repoints a row at its re-downloadable source. Empty when the
+	// surface has none.
+	resetSet string
+	// remoteSource selects rows resetSet applies to, or "FALSE".
+	remoteSource string
+	// clearSet blanks a row that cannot be reset, so its owning pipeline
+	// refills it.
+	clearSet string
+}
+
+// matchPredicate selects the rows of this surface referencing $1.
+func (s artworkReferenceSurface) matchPredicate() string {
+	predicate := s.pathExpr + " = $1"
+	if s.filter != "" {
+		predicate += " AND " + s.filter
+	}
+	return predicate
+}
+
+// artworkReferenceSurfaces lists every column the collector treats as a live
+// reference.
+func artworkReferenceSurfaces() []artworkReferenceSurface {
+	sweeps := artworkSweepSurfaces()
+	surfaces := make([]artworkReferenceSurface, 0, len(sweeps)+1)
+	for _, sweep := range sweeps {
+		surface := artworkReferenceSurface{
+			name:         sweep.name,
+			table:        sweep.table,
+			pathExpr:     sweep.pathCol,
+			remoteSource: sweep.remoteSourcePredicate(),
+			clearSet:     sweep.clearSet,
+		}
+		if sweep.sourceCol != "" {
+			surface.resetSet = sweep.resetSet()
+		}
+		surfaces = append(surfaces, surface)
+	}
+	return append(surfaces, profileAvatarReferenceSurface())
+}
+
+// profileAvatarUploadPrefix marks a profile avatar that is an uploaded object
+// rather than a bundled preset or a generated remote URL. It mirrors the
+// constant the profile handlers write; the two must not drift, which is what
+// the accompanying test pins.
+const profileAvatarUploadPrefix = "upload:"
+
+// profileAvatarReferenceSurface protects uploaded profile avatars from
+// collection. user_profiles.avatar stores "upload:<object key>", so the key is
+// recovered by dropping the prefix; presets ("preset:<id>") and DiceBear URLs
+// are excluded by the filter rather than by hoping they never collide with a
+// key.
+func profileAvatarReferenceSurface() artworkReferenceSurface {
+	return artworkReferenceSurface{
+		name:         "profile avatars",
+		table:        "user_profiles",
+		pathExpr:     fmt.Sprintf("substr(avatar, %d)", len(profileAvatarUploadPrefix)+1),
+		filter:       fmt.Sprintf("avatar LIKE '%s%%'", profileAvatarUploadPrefix),
+		remoteSource: artworkNoRemoteSource,
+		clearSet:     "avatar = '', updated_at = NOW()",
+	}
+}
+
 func artworkReferenceUnionSQL() string {
-	surfaces := artworkSweepSurfaces()
+	return artworkReferenceUnionMatchingSQL(func(pathExpr string) string {
+		return pathExpr + " = ANY($1)"
+	})
+}
+
+func artworkReferenceUnionMatchingSQL(match func(pathExpr string) string) string {
+	surfaces := artworkReferenceSurfaces()
 	parts := make([]string, 0, len(surfaces))
 	for _, surface := range surfaces {
-		parts = append(parts, fmt.Sprintf("SELECT %s AS path FROM %s WHERE %s = ANY($1)", surface.pathCol, surface.table, surface.pathCol))
+		part := "SELECT " + surface.pathExpr + " AS path FROM " + surface.table +
+			" WHERE " + match(surface.pathExpr)
+		if surface.filter != "" {
+			part += " AND " + surface.filter
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, " UNION ALL ")
+}
+
+// artworkLossReferenceUnionSQL retains the indexed candidate predicate used
+// by GC while sourcing candidates from the rebuild's loss_paths CTE. This
+// avoids repeatedly projecting every catalog artwork row while rebuilding a
+// large store.
+func artworkLossReferenceUnionSQL() string {
+	return artworkReferenceUnionMatchingSQL(func(pathExpr string) string {
+		return pathExpr + " IN (SELECT original_path FROM loss_paths)"
+	})
 }
 
 func (g *ArtworkRevisionGarbageCollector) isReferenced(ctx context.Context, q artworkReferenceQuerier, originalPath string) (bool, error) {
@@ -403,6 +605,8 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 		SELECT id, original_path
 		FROM artwork_revision_gc_candidates
 		WHERE next_attempt_at IS NULL
+		  AND tombstoned_at IS NULL
+		  AND NOT (seed_imported_at IS NOT NULL AND seed_expires_at IS NULL)
 		  AND updated_at < NOW() - ($2 * interval '1 second')
 		ORDER BY updated_at, id
 		LIMIT $1`, limit, int64(artworkRevisionDormantRecheck/time.Second))
@@ -448,6 +652,7 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 		if _, err := g.pool.Exec(ctx, `
 			UPDATE artwork_revision_gc_candidates
 			SET next_attempt_at = GREATEST(not_before, NOW()),
+				last_reference_check_at = NOW(),
 				updated_at = NOW()
 			WHERE id = ANY($1) AND next_attempt_at IS NULL`, requeue); err != nil {
 			return checked, 0, fmt.Errorf("artwork revision GC: requeue dormant revisions: %w", err)
@@ -457,7 +662,7 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 	if len(touch) > 0 {
 		if _, err := g.pool.Exec(ctx, `
 			UPDATE artwork_revision_gc_candidates
-			SET updated_at = NOW()
+			SET last_reference_check_at = NOW(), updated_at = NOW()
 			WHERE id = ANY($1) AND next_attempt_at IS NULL`, touch); err != nil {
 			return checked, requeued, fmt.Errorf("artwork revision GC: touch dormant revisions: %w", err)
 		}
@@ -471,18 +676,18 @@ func (g *ArtworkRevisionGarbageCollector) sweepDormant(ctx context.Context, limi
 // cleared for their owning pipeline to refill.
 func (g *ArtworkRevisionGarbageCollector) healDeletedReferences(ctx context.Context, originalPath string) (bool, error) {
 	healed := false
-	for _, surface := range artworkSweepSurfaces() {
-		if surface.sourceCol != "" {
-			resetSQL := fmt.Sprintf(`UPDATE %s SET %s WHERE %s = $1 AND %s`,
-				surface.table, surface.resetSet(), surface.pathCol, surface.remoteSourcePredicate())
+	for _, surface := range artworkReferenceSurfaces() {
+		if surface.resetSet != "" {
+			resetSQL := fmt.Sprintf(`UPDATE %s SET %s WHERE %s AND %s`,
+				surface.table, surface.resetSet, surface.matchPredicate(), surface.remoteSource)
 			tag, err := g.pool.Exec(ctx, resetSQL, originalPath)
 			if err != nil {
 				return healed, fmt.Errorf("artwork revision GC: heal %s: %w", surface.name, err)
 			}
 			healed = healed || tag.RowsAffected() > 0
 		}
-		clearSQL := fmt.Sprintf(`UPDATE %s SET %s WHERE %s = $1 AND NOT (%s)`,
-			surface.table, surface.clearSet, surface.pathCol, surface.remoteSourcePredicate())
+		clearSQL := fmt.Sprintf(`UPDATE %s SET %s WHERE %s AND NOT (%s)`,
+			surface.table, surface.clearSet, surface.matchPredicate(), surface.remoteSource)
 		tag, err := g.pool.Exec(ctx, clearSQL, originalPath)
 		if err != nil {
 			return healed, fmt.Errorf("artwork revision GC: heal %s: %w", surface.name, err)

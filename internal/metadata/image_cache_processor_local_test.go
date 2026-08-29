@@ -52,18 +52,6 @@ func (f *fakeLibraryRootResolver) LibraryRootsForContent(context.Context, string
 	return f.roots, f.err
 }
 
-type fakePrefixDeleter struct {
-	bucket   string
-	prefixes []string
-}
-
-func (f *fakePrefixDeleter) DeletePrefix(_ context.Context, _ string, prefix string) (int, error) {
-	f.prefixes = append(f.prefixes, prefix)
-	return 1, nil
-}
-
-func (f *fakePrefixDeleter) Bucket() string { return f.bucket }
-
 func localArtworkJob(sourcePath string) *models.MetadataImageCacheJob {
 	return &models.MetadataImageCacheJob{
 		ID:                7,
@@ -82,18 +70,16 @@ func newLocalProcessorForTest(
 	job *models.MetadataImageCacheJob,
 	roots []string,
 	currentCached string,
-) (*ImageCacheProcessor, *fakeLocalImageCacheJobs, *fakeByteImageCacher, *fakeItemArtworkUpdater, *fakePrefixDeleter) {
+) (*ImageCacheProcessor, *fakeLocalImageCacheJobs, *fakeByteImageCacher, *fakeItemArtworkUpdater) {
 	jobs := &fakeLocalImageCacheJobs{
 		fakeImageCacheJobs: fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{job}},
 		currentCached:      currentCached,
 	}
 	cacher := &fakeByteImageCacher{thumbhash: "th-new"}
 	items := &fakeItemArtworkUpdater{updated: true}
-	deleter := &fakePrefixDeleter{bucket: "images"}
 	p := NewImageCacheProcessorWithTargets(jobs, cacher, nil, ImageCacheProcessorTargets{Items: items})
 	p.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: roots})
-	p.SetImagePrefixDeleter(deleter)
-	return p, jobs, cacher, items, deleter
+	return p, jobs, cacher, items
 }
 
 func writeLocalPoster(t *testing.T, dir string) string {
@@ -109,7 +95,7 @@ func TestProcessLocalImageCachesWithinLibraryRoots(t *testing.T) {
 	root := t.TempDir()
 	posterPath := writeLocalPoster(t, root)
 	job := localArtworkJob("file://" + posterPath)
-	p, jobs, cacher, items, deleter := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, cacher, items := newLocalProcessorForTest(job, []string{root}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -135,9 +121,6 @@ func TestProcessLocalImageCachesWithinLibraryRoots(t *testing.T) {
 	if items.thumbhash != "th-new" {
 		t.Fatalf("thumbhash = %q", items.thumbhash)
 	}
-	if len(deleter.prefixes) != 0 {
-		t.Fatalf("no stale prefix to delete on first cache, got %v", deleter.prefixes)
-	}
 }
 
 func TestProcessLocalImageRejectsPathOutsideRoots(t *testing.T) {
@@ -145,7 +128,7 @@ func TestProcessLocalImageRejectsPathOutsideRoots(t *testing.T) {
 	other := t.TempDir()
 	posterPath := writeLocalPoster(t, other)
 	job := localArtworkJob("file://" + posterPath)
-	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, cacher, _ := newLocalProcessorForTest(job, []string{root}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -168,7 +151,7 @@ func TestProcessLocalImageRejectsDotDotTraversal(t *testing.T) {
 	posterPath := writeLocalPoster(t, outside)
 	traversal := root + "/../" + filepath.Base(outside) + "/" + filepath.Base(posterPath)
 	job := localArtworkJob("file://" + traversal)
-	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, cacher, _ := newLocalProcessorForTest(job, []string{root}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -196,7 +179,7 @@ func TestProcessLocalImageAcceptsLogicalPathUnderSymlinkedRoot(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	job := localArtworkJob("file://" + filepath.Join(linkedRoot, "poster.jpg"))
-	p, jobs, cacher, _, _ := newLocalProcessorForTest(job, []string{linkedRoot}, "")
+	p, jobs, cacher, _ := newLocalProcessorForTest(job, []string{linkedRoot}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -213,7 +196,7 @@ func TestProcessLocalImageAcceptsLogicalPathUnderSymlinkedRoot(t *testing.T) {
 func TestProcessLocalImageMissingFileIsStableFailure(t *testing.T) {
 	root := t.TempDir()
 	job := localArtworkJob("file://" + filepath.Join(root, "poster.jpg"))
-	p, jobs, _, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, jobs, _, _ := newLocalProcessorForTest(job, []string{root}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -235,7 +218,7 @@ func TestProcessLocalImageRejectsSymlinkedLeaf(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	job := localArtworkJob("file://" + link)
-	p, _, cacher, _, _ := newLocalProcessorForTest(job, []string{root}, "")
+	p, _, cacher, _ := newLocalProcessorForTest(job, []string{root}, "")
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -249,12 +232,12 @@ func TestProcessLocalImageRejectsSymlinkedLeaf(t *testing.T) {
 	}
 }
 
-func TestProcessLocalImageDeletesStalePrefixOnRecache(t *testing.T) {
+func TestProcessLocalImageLeavesStaleRevisionToGCOnRecache(t *testing.T) {
 	root := t.TempDir()
 	posterPath := writeLocalPoster(t, root)
 	job := localArtworkJob("file://" + posterPath)
 	stale := "local/movies/movie-1/00000000/poster/original.webp"
-	p, _, cacher, _, deleter := newLocalProcessorForTest(job, []string{root}, stale)
+	p, _, cacher, _ := newLocalProcessorForTest(job, []string{root}, stale)
 
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
@@ -266,18 +249,15 @@ func TestProcessLocalImageDeletesStalePrefixOnRecache(t *testing.T) {
 	if len(cacher.bytesReq) != 1 {
 		t.Fatal("expected one cache call")
 	}
-	if len(deleter.prefixes) != 1 || deleter.prefixes[0] != "local/movies/movie-1/00000000/poster/" {
-		t.Fatalf("stale prefixes deleted = %v", deleter.prefixes)
-	}
 }
 
-func TestProcessLocalImageSkipsPrefixDeleteWhenUnchanged(t *testing.T) {
+func TestProcessLocalImageKeepsRevisionWhenUnchanged(t *testing.T) {
 	root := t.TempDir()
 	posterPath := writeLocalPoster(t, root)
 	job := localArtworkJob("file://" + posterPath)
 
 	// First pass discovers the hash for these bytes.
-	probe, _, probeCacher, probeItems, _ := newLocalProcessorForTest(job, []string{root}, "")
+	probe, _, probeCacher, probeItems := newLocalProcessorForTest(job, []string{root}, "")
 	if _, err := probe.RunOnce(context.Background(), "w1", 10, 1); err != nil {
 		t.Fatalf("probe RunOnce: %v", err)
 	}
@@ -286,16 +266,13 @@ func TestProcessLocalImageSkipsPrefixDeleteWhenUnchanged(t *testing.T) {
 	}
 
 	// Second pass with the same stored cached path must not delete anything.
-	p, _, _, _, deleter := newLocalProcessorForTest(job, []string{root}, probeItems.cachedPath)
+	p, _, _, _ := newLocalProcessorForTest(job, []string{root}, probeItems.cachedPath)
 	stats, err := p.RunOnce(context.Background(), "w1", 10, 1)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if stats.Succeeded != 1 {
 		t.Fatalf("stats = %+v, want success", stats)
-	}
-	if len(deleter.prefixes) != 0 {
-		t.Fatalf("unchanged art must not delete prefixes, got %v", deleter.prefixes)
 	}
 }
 

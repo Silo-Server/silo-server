@@ -19,6 +19,7 @@ type fakeImageCacheJobs struct {
 	deletedCount  int
 	requeuedIDs   []int64
 	currentSource *string // when set, overrides CurrentTargetSourcePath
+	targetFound   *bool
 }
 
 type targetImageCacheJobs struct {
@@ -78,11 +79,14 @@ func (f *fakeImageCacheJobs) RequeueClaimed(_ context.Context, ids []int64, _ st
 	return nil
 }
 
-func (f *fakeImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
-	if f.currentSource != nil {
-		return *f.currentSource, nil
+func (f *fakeImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, bool, error) {
+	if f.targetFound != nil && !*f.targetFound {
+		return "", false, nil
 	}
-	return job.SourcePath, nil
+	if f.currentSource != nil {
+		return *f.currentSource, true, nil
+	}
+	return job.SourcePath, true, nil
 }
 
 func (f *fakeImageCacheJobs) EnqueueExistingProviderArtwork(context.Context, int) (int, error) {
@@ -165,12 +169,36 @@ func (f *loopingImageCacheJobs) RequeueClaimed(context.Context, []int64, string)
 	return nil
 }
 
-func (f *loopingImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, error) {
-	return job.SourcePath, nil
+func (f *loopingImageCacheJobs) CurrentTargetSourcePath(_ context.Context, job *models.MetadataImageCacheJob) (string, bool, error) {
+	return job.SourcePath, true, nil
 }
 
 func (f *loopingImageCacheJobs) DeleteSucceededBefore(context.Context, time.Time, int) (int, error) {
 	return 0, nil
+}
+
+// repairOnlyImageCacheJobs is the passthrough seam: a store that can claim
+// repair-requested jobs on their own, and that records whether the ordinary
+// materialization claim was attempted at all.
+type repairOnlyImageCacheJobs struct {
+	fakeImageCacheJobs
+	repairBatches  [][]*models.MetadataImageCacheJob
+	repairCalls    int
+	ordinaryClaims int
+}
+
+func (f *repairOnlyImageCacheJobs) ClaimDue(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
+	f.ordinaryClaims++
+	return f.claimed, nil
+}
+
+func (f *repairOnlyImageCacheJobs) ClaimDueRepairs(context.Context, string, int) ([]*models.MetadataImageCacheJob, error) {
+	var batch []*models.MetadataImageCacheJob
+	if f.repairCalls < len(f.repairBatches) {
+		batch = f.repairBatches[f.repairCalls]
+	}
+	f.repairCalls++
+	return batch, nil
 }
 
 type fakeImageCacher struct {
@@ -199,16 +227,34 @@ func (f *fakeImageResolver) ResolveImageURL(context.Context, string, string) str
 	return f.url
 }
 
+type fakeArtworkPublicationObserver struct {
+	jobs                  *fakeImageCacheJobs
+	called                int
+	publishedPath         string
+	succeededIDAtCallback int64
+}
+
+func (f *fakeArtworkPublicationObserver) ArtworkPublished(_ context.Context, _ *models.MetadataImageCacheJob, _, publishedPath string) error {
+	f.called++
+	f.publishedPath = publishedPath
+	f.succeededIDAtCallback = f.jobs.succeededID
+	return nil
+}
+
 type fakeEpisodeStillUpdater struct {
 	updated    bool
-	contentID  string
+	seriesID   string
+	season     int
+	episode    int
 	sourcePath string
 	cachedPath string
 	thumbhash  string
 }
 
-func (f *fakeEpisodeStillUpdater) UpdateStillIfSourceMatches(_ context.Context, contentID, sourcePath, cachedPath, thumbhash string) (bool, error) {
-	f.contentID = contentID
+func (f *fakeEpisodeStillUpdater) UpdateStillIfSourceMatches(_ context.Context, seriesID string, seasonNumber, episodeNumber int, sourcePath, cachedPath, thumbhash string) (bool, error) {
+	f.seriesID = seriesID
+	f.season = seasonNumber
+	f.episode = episodeNumber
 	f.sourcePath = sourcePath
 	f.cachedPath = cachedPath
 	f.thumbhash = thumbhash
@@ -273,7 +319,7 @@ func TestImageCacheProcessorUpdatesEpisodeOnSuccess(t *testing.T) {
 	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{{
 		ID:                1,
 		TargetType:        ImageCacheTargetEpisode,
-		TargetContentID:   "episode-tvdb-1-1-1",
+		TargetContentID:   "series-tvdb-1",
 		SourcePath:        "tvdb://banners/episode.jpg",
 		ProviderID:        "tvdb",
 		ProviderContentID: "1",
@@ -304,8 +350,71 @@ func TestImageCacheProcessorUpdatesEpisodeOnSuccess(t *testing.T) {
 	if episodes.sourcePath != "tvdb://banners/episode.jpg" {
 		t.Fatalf("sourcePath = %q", episodes.sourcePath)
 	}
+	if episodes.seriesID != "series-tvdb-1" || episodes.season != 1 || episodes.episode != 1 {
+		t.Fatalf("episode target = (%q, %d, %d), want (series-tvdb-1, 1, 1)", episodes.seriesID, episodes.season, episodes.episode)
+	}
 	if jobs.succeededID != 1 {
 		t.Fatalf("succeededID = %d", jobs.succeededID)
+	}
+}
+
+func TestImageCacheProcessorFailsRepairWhenTargetLookupMatchesNoRow(t *testing.T) {
+	missing := false
+	jobs := &fakeImageCacheJobs{
+		targetFound: &missing,
+		claimed: []*models.MetadataImageCacheJob{{
+			ID:              19,
+			TargetType:      ImageCacheTargetSeason,
+			TargetContentID: "series-tvdb-293088",
+			SourcePath:      "tvdb://banners/season.jpg",
+			ImageType:       ImageCacheImagePoster,
+			SeasonNumber:    intPointer(0),
+			RepairRequested: true,
+		}},
+	}
+	cacher := &fakeImageCacher{}
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, &fakeImageResolver{}, ImageCacheProcessorTargets{})
+
+	stats, err := processor.RunOnce(context.Background(), "repair-worker", 1, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Failed != 1 || stats.Succeeded != 0 || stats.Skipped != 0 {
+		t.Fatalf("stats = %+v, want one failed repair", stats)
+	}
+	if jobs.failedID != 19 || jobs.succeededID != 0 {
+		t.Fatalf("failed=%d succeeded=%d, want failed=19 succeeded=0", jobs.failedID, jobs.succeededID)
+	}
+	if !strings.Contains(jobs.failedText, "repair target not found") ||
+		!strings.Contains(jobs.failedText, "series-tvdb-293088") ||
+		!strings.Contains(jobs.failedText, "season=0") {
+		t.Fatalf("failure text = %q", jobs.failedText)
+	}
+	if len(cacher.reqs) != 0 {
+		t.Fatalf("cache requests = %d, want none for a missing repair target", len(cacher.reqs))
+	}
+}
+
+func TestImageCacheProcessorSkipsOrdinaryJobWhenTargetVanished(t *testing.T) {
+	missing := false
+	jobs := &fakeImageCacheJobs{
+		targetFound: &missing,
+		claimed: []*models.MetadataImageCacheJob{{
+			ID:              20,
+			TargetType:      ImageCacheTargetItem,
+			TargetContentID: "movie-gone",
+			SourcePath:      "tmdb://posters/gone.jpg",
+			ImageType:       ImageCacheImagePoster,
+		}},
+	}
+	processor := NewImageCacheProcessorWithTargets(jobs, &fakeImageCacher{}, &fakeImageResolver{}, ImageCacheProcessorTargets{})
+
+	stats, err := processor.RunOnce(context.Background(), "ordinary-worker", 1, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Skipped != 1 || jobs.succeededID != 20 || jobs.failedID != 0 {
+		t.Fatalf("stats=%+v succeeded=%d failed=%d, want benign skip", stats, jobs.succeededID, jobs.failedID)
 	}
 }
 
@@ -331,6 +440,8 @@ func TestImageCacheProcessorUpdatesItemArtworkOnSuccess(t *testing.T) {
 	processor := NewImageCacheProcessorWithTargets(jobs, cacher, resolver, ImageCacheProcessorTargets{
 		Items: items,
 	})
+	observer := &fakeArtworkPublicationObserver{jobs: jobs}
+	processor.SetArtworkPublicationObserver(observer)
 	stats, err := processor.RunOnce(context.Background(), "test-worker", 10, 1)
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
@@ -338,11 +449,20 @@ func TestImageCacheProcessorUpdatesItemArtworkOnSuccess(t *testing.T) {
 	if stats.Succeeded != 1 {
 		t.Fatalf("Succeeded = %d, want 1", stats.Succeeded)
 	}
+	if len(cacher.reqs) != 1 || cacher.reqs[0].SourceReference != jobs.claimed[0].SourcePath {
+		t.Fatalf("stable source reference = %#v, want original plugin path", cacher.reqs)
+	}
 	if items.imageType != ImageCacheImageBackdrop {
 		t.Fatalf("imageType = %q, want backdrop", items.imageType)
 	}
 	if items.cachedPath != "tmdb/series/1396/backdrop/original.webp" {
 		t.Fatalf("cachedPath = %q", items.cachedPath)
+	}
+	if observer.called != 1 || observer.publishedPath != items.cachedPath {
+		t.Fatalf("publication observer = %d/%q, want 1/%q", observer.called, observer.publishedPath, items.cachedPath)
+	}
+	if observer.succeededIDAtCallback != 0 || jobs.succeededID != 20 {
+		t.Fatalf("publication/completion order = %d then %d, want 0 then 20", observer.succeededIDAtCallback, jobs.succeededID)
 	}
 }
 
@@ -844,6 +964,8 @@ func TestImageCacheProcessorManualBackfillStopsDiscoveryWhenDisabledMidRun(t *te
 		ProviderContentID: "1",
 		ContentType:       "series",
 		ImageType:         ImageCacheImageStill,
+		SeasonNumber:      intPointer(1),
+		EpisodeNumber:     intPointer(1),
 	}
 	jobs := &loopingImageCacheJobs{claimedResults: [][]*models.MetadataImageCacheJob{{job}}}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
@@ -870,6 +992,8 @@ func TestImageCacheProcessorRequeuesClaimedTailWhenDisabled(t *testing.T) {
 			ProviderContentID: "1",
 			ContentType:       "series",
 			ImageType:         ImageCacheImageStill,
+			SeasonNumber:      intPointer(1),
+			EpisodeNumber:     intPointer(1),
 		})
 	}
 	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tvdb/series/1/seasons/1/episodes/1/still", Ext: ".webp"}}
@@ -991,6 +1115,102 @@ func TestImageCacheProcessorSkipsWhenTargetSourceChanged(t *testing.T) {
 	}
 	if jobs.succeededID != 40 {
 		t.Fatalf("succeededID = %d, want 40", jobs.succeededID)
+	}
+}
+
+func repairJobFixture(id int64) *models.MetadataImageCacheJob {
+	return &models.MetadataImageCacheJob{
+		ID:                id,
+		TargetType:        ImageCacheTargetItem,
+		TargetContentID:   "movie-1",
+		SourcePath:        "tmdb://poster/movie.jpg",
+		ProviderID:        "tmdb",
+		ProviderContentID: "603",
+		ContentType:       "movie",
+		ImageType:         ImageCacheImagePoster,
+		RepairRequested:   true,
+	}
+}
+
+func repairOnlyProcessorFixture(t *testing.T, batches ...[]*models.MetadataImageCacheJob) (*ImageCacheProcessor, *repairOnlyImageCacheJobs, *fakeItemArtworkUpdater) {
+	t.Helper()
+	jobs := &repairOnlyImageCacheJobs{repairBatches: batches}
+	cacher := &fakeImageCacher{result: &CacheImageResult{
+		BasePath: "tmdb/movie/603/poster", Ext: ".webp", Thumbhash: "thumb",
+	}}
+	items := &fakeItemArtworkUpdater{updated: true}
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher,
+		&fakeImageResolver{url: "https://image.tmdb.org/t/p/original/movie.jpg"},
+		ImageCacheProcessorTargets{Items: items})
+	// artwork.remote_materialization=passthrough.
+	processor.SetEnabled(false)
+	return processor, jobs, items
+}
+
+// A store switched to passthrough still has to finish an authoritative-empty
+// rebuild, and that rebuild blocks until the repair jobs it enqueued drain. A
+// disabled processor therefore claims repair work — and only repair work.
+func TestDisabledImageCacheProcessorRunsRepairJobsOnly(t *testing.T) {
+	processor, jobs, items := repairOnlyProcessorFixture(t, []*models.MetadataImageCacheJob{repairJobFixture(71)})
+
+	stats, err := processor.RunOnce(context.Background(), "repair-worker", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Succeeded != 1 || stats.Claimed != 1 {
+		t.Fatalf("stats = %+v, want one claimed and succeeded repair", stats)
+	}
+	if jobs.ordinaryClaims != 0 {
+		t.Fatalf("ordinary claims = %d, want 0 while materialization is off", jobs.ordinaryClaims)
+	}
+	if jobs.succeededID != 71 {
+		t.Fatalf("succeededID = %d, want 71", jobs.succeededID)
+	}
+	if len(jobs.requeuedIDs) != 0 {
+		t.Fatalf("requeued = %v, want the repair job processed rather than handed back", jobs.requeuedIDs)
+	}
+	if items.cachedPath != "tmdb/movie/603/poster/original.webp" {
+		t.Fatalf("cachedPath = %q, want the repaired revision published", items.cachedPath)
+	}
+}
+
+// Without a repair-scoped claim the disabled processor must stay fully off:
+// nothing else in the queue may be materialized behind passthrough's back.
+func TestDisabledImageCacheProcessorClaimsNothingWithoutRepairSupport(t *testing.T) {
+	jobs := &fakeImageCacheJobs{claimed: []*models.MetadataImageCacheJob{repairJobFixture(72)}}
+	cacher := &fakeImageCacher{result: &CacheImageResult{BasePath: "tmdb/movie/603/poster", Ext: ".webp"}}
+	processor := NewImageCacheProcessorWithTargets(jobs, cacher, &fakeImageResolver{},
+		ImageCacheProcessorTargets{Items: &fakeItemArtworkUpdater{updated: true}})
+	processor.SetEnabled(false)
+
+	stats, err := processor.RunOnce(context.Background(), "repair-worker", 10, 1)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if stats.Claimed != 0 || len(cacher.reqs) != 0 {
+		t.Fatalf("stats = %+v, cache requests = %d, want a fully disabled processor", stats, len(cacher.reqs))
+	}
+}
+
+// The scheduled drain is what actually clears the rebuild's outstanding jobs,
+// so it must reach repairs in passthrough; the explicit backfill is
+// materialization by definition and must still refuse to run.
+func TestPassthroughDrainRunsRepairsButBackfillStaysDisabled(t *testing.T) {
+	processor, jobs, _ := repairOnlyProcessorFixture(t, []*models.MetadataImageCacheJob{repairJobFixture(73)})
+
+	stats, err := processor.DrainUntilIdle(context.Background(), "repair-worker", 10, 1, 0, nil)
+	if err != nil {
+		t.Fatalf("DrainUntilIdle() error = %v", err)
+	}
+	if stats.Succeeded != 1 {
+		t.Fatalf("stats = %+v, want the queued repair drained", stats)
+	}
+	if jobs.ordinaryClaims != 0 {
+		t.Fatalf("ordinary claims = %d, want 0", jobs.ordinaryClaims)
+	}
+
+	if _, err := processor.RunUntilIdle(context.Background(), "backfill-worker", 10, 1, 0, nil); !errors.Is(err, ErrImageCachingDisabled) {
+		t.Fatalf("RunUntilIdle() error = %v, want ErrImageCachingDisabled", err)
 	}
 }
 

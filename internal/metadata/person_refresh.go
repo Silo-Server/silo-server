@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -29,12 +30,13 @@ type personRefreshRepo interface {
 }
 
 type PersonRefreshService struct {
-	pool           *pgxpool.Pool
-	pluginResolver pluginMetadataResolver
-	repo           personRefreshRepo
-	imageCacher    ImageCacher
-	imageCacheJobs ImageCacheJobEnqueuer
-	imageResolver  interface {
+	pool            *pgxpool.Pool
+	pluginResolver  pluginMetadataResolver
+	repo            personRefreshRepo
+	imageCacher     ImageCacher
+	imageCacheJobs  ImageCacheJobEnqueuer
+	autoCacheImages atomic.Bool
+	imageResolver   interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
 }
@@ -57,6 +59,12 @@ func (s *PersonRefreshService) SetImageCacher(cacher ImageCacher) {
 
 func (s *PersonRefreshService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
 	s.imageCacheJobs = enqueuer
+}
+
+// SetAutoCacheImages controls whether person refresh automatically enqueues
+// remote photos for materialization. It is safe to update during hot reload.
+func (s *PersonRefreshService) SetAutoCacheImages(enabled bool) {
+	s.autoCacheImages.Store(enabled)
 }
 
 func (s *PersonRefreshService) SetImageResolver(resolver interface {
@@ -188,7 +196,7 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 }
 
 func (s *PersonRefreshService) enqueuePersonPhoto(ctx context.Context, person models.Person, providerIDs map[string]string, photoProviderID string) {
-	if s == nil || s.imageCacheJobs == nil || !isRemoteImageSourcePath(person.PhotoSourcePath) {
+	if s == nil || !s.autoCacheImages.Load() || s.imageCacheJobs == nil || !isRemoteImageSourcePath(person.PhotoSourcePath) {
 		return
 	}
 	providerID := providerIDFromPluginURL(person.PhotoSourcePath)
@@ -258,11 +266,12 @@ func (s *PersonRefreshService) cachePersonPhoto(
 
 	contentID := personCacheContentID(person, detail.ProviderIDs, providerID)
 	result, err := s.imageCacher.CacheImage(ctx, CacheImageRequest{
-		SourceURL:   downloadURL,
-		ProviderID:  providerID,
-		ContentType: "people",
-		ContentID:   contentID,
-		ImageType:   ImagePoster,
+		SourceURL:       downloadURL,
+		SourceReference: detail.PhotoPath,
+		ProviderID:      providerID,
+		ContentType:     "people",
+		ContentID:       contentID,
+		ImageType:       ImagePoster,
 	})
 	if err != nil {
 		return "", "", err

@@ -123,10 +123,8 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	if resolver.batchCalls != 4 {
 		t.Fatalf("batch image resolver calls = %d, want 4", resolver.batchCalls)
 	}
-	for _, variant := range resolver.variants {
-		if variant != "card" {
-			t.Fatalf("batch variant = %q, want card", variant)
-		}
+	if got := slices.Clone(resolver.variants); !slices.Equal(got, []string{"card", "card", "featured", "card"}) {
+		t.Fatalf("batch variants = %v, want card/card/featured/card", got)
 	}
 	for _, path := range []string{"plug://poster-1", "plug://poster-2", "plug://backdrop-1", "plug://logo-1", "plug://still-2"} {
 		if !slices.Contains(resolver.paths, path) {

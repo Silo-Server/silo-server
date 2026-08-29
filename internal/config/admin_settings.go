@@ -6,6 +6,9 @@ import (
 	"math"
 	"net/mail"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -38,6 +41,69 @@ const (
 // edited through the administrator settings API.
 const ArtworkStorageReconcileCheckpointKey = "s3.public_storage_reconcile_checkpoint"
 
+// Canonical artwork store settings. The backend and the local root are
+// captured when the store is opened at startup, so both are restart-required;
+// the URL lifetime and the remote-materialization policy are read live.
+const (
+	ArtworkStorageBackendKey        = "artwork.storage_backend"
+	ArtworkLocalPathKey             = "artwork.local_path"
+	ArtworkRemoteMaterializationKey = "artwork.remote_materialization"
+	ArtworkURLTTLKey                = "artwork.url_ttl"
+)
+
+// Accepted artwork.storage_backend values. "auto" prefers a configured public
+// S3 bucket and otherwise selects the local filesystem, but only until the
+// first materialization pins the effective backend.
+const (
+	ArtworkBackendAuto  = "auto"
+	ArtworkBackendLocal = "local"
+	ArtworkBackendS3    = "s3"
+)
+
+// Accepted artwork.remote_materialization values. "selected" copies artwork the
+// server selects into the canonical store; "passthrough" does not copy
+// provider or plugin images into the store. Either way clients receive Silo's
+// own artwork URLs — under passthrough those URLs fetch from the source at
+// request time instead of serving stored bytes.
+const (
+	ArtworkMaterializationSelected    = "selected"
+	ArtworkMaterializationPassthrough = "passthrough"
+)
+
+// containerDataRoot is the durable application-data directory the container
+// images create and the deployment manifests mount (plugins, compat state,
+// artwork). Its presence is what distinguishes a containerized or packaged
+// Linux install from a bare native one.
+const containerDataRoot = "/var/lib/silo"
+
+// DefaultArtworkLocalPath is the filesystem artwork root for installations
+// that do not override artwork.local_path.
+//
+// Containerized installs (and Linux packages that provision /var/lib/silo)
+// keep the durable application-data root the images already mount. Native
+// installs without it — bare-metal Linux running as an unprivileged user,
+// macOS, Windows — default to the platform application-data directory
+// instead, because an artwork store the process can never create is a fatal
+// startup error, not a working default. The value is resolved once at process
+// start so it stays stable for the life of the process; the store pin and
+// marker detect a root that moves between restarts.
+var DefaultArtworkLocalPath = defaultArtworkLocalPath()
+
+func defaultArtworkLocalPath() string {
+	if runtime.GOOS == "linux" {
+		if info, err := os.Stat(containerDataRoot); err == nil && info.IsDir() {
+			return containerDataRoot + "/artwork"
+		}
+	}
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
+		return filepath.Join(dir, "silo", "artwork")
+	}
+	// Last resort (no home/config directory to derive a path from): keep the
+	// container path so the startup error names something an operator can
+	// create, rather than failing on an empty setting.
+	return containerDataRoot + "/artwork"
+}
+
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
 // readers that own each setting. The UI must never invent a second set of
@@ -68,6 +134,14 @@ var adminSettingDefaults = map[string]string{
 	"userdb.backend":             "postgres",
 	"userdb.pool_max_open":       "500",
 	"userdb.idle_timeout":        "12h",
+
+	ArtworkStorageBackendKey: ArtworkBackendAuto,
+	ArtworkLocalPathKey:      DefaultArtworkLocalPath,
+	ArtworkURLTTLKey:         "4h",
+	// artwork.remote_materialization has no static default: an installation
+	// that explicitly stored metadata.cache_images=false adopts passthrough
+	// instead. The upgrade mapping lives in LoadFromDB, and the effective
+	// value is surfaced through EffectiveAdminSettings.
 
 	"scanner.workers":                      "8",
 	"scanner.max_concurrent_libraries":     "1",
@@ -271,7 +345,32 @@ func EffectiveAdminSettings(stored map[string]string) map[string]string {
 		"ai.max_concurrent_jobs",
 		"subtitle_ai.max_concurrent_jobs",
 	)
+	// Remote materialization has no static default: its effective value
+	// depends on whether this installation ever made a decision about
+	// metadata.cache_images. Resolve it the same way the runtime reader does.
+	if effective[ArtworkRemoteMaterializationKey] == "" {
+		effective[ArtworkRemoteMaterializationKey] = defaultArtworkMaterialization(stored)
+	}
 	return effective
+}
+
+// defaultArtworkMaterialization applies the upgrade mapping for installations
+// with no artwork.remote_materialization row.
+//
+// An explicitly stored metadata.cache_images=false is an administrator's
+// decision not to copy remote artwork, so it maps to passthrough and waits for
+// an opt-in. An absent row is the old shipped default, not a decision, so it
+// adopts the new default.
+func defaultArtworkMaterialization(stored map[string]string) string {
+	raw, ok := stored["metadata.cache_images"]
+	if !ok {
+		return ArtworkMaterializationSelected
+	}
+	cacheImages, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err == nil && !cacheImages {
+		return ArtworkMaterializationPassthrough
+	}
+	return ArtworkMaterializationSelected
 }
 
 func applyLegacyAdminSettingFallback(effective, stored map[string]string, canonical, legacy string) {
@@ -459,6 +558,26 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value, "last", "all")
 	case "s3.public_url_auth":
 		return normalizeAdminEnum(key, value, "", "presigned", "public", "cloudflare_token")
+	// Clearing an artwork setting restores its effective default rather than
+	// failing, so an administrator can always get back to the shipped
+	// behavior from the settings form.
+	case ArtworkStorageBackendKey:
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, ArtworkBackendAuto, ArtworkBackendLocal, ArtworkBackendS3)
+	case ArtworkRemoteMaterializationKey:
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, ArtworkMaterializationSelected, ArtworkMaterializationPassthrough)
+	case ArtworkURLTTLKey:
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminDuration(key, value)
+	case ArtworkLocalPathKey:
+		return NormalizeArtworkLocalPath(value)
 
 	case "recommendations.embeddings_cron", "recommendations.taste_profiles_cron",
 		"recommendations.cowatch_cron", "recommendations.recommendations_cron":
@@ -655,6 +774,24 @@ func normalizeAdminDuration(key, value string) (string, error) {
 		return "", fmt.Errorf("%s must be a positive duration", key)
 	}
 	return value, nil
+}
+
+// NormalizeArtworkLocalPath canonicalizes the filesystem artwork root. The
+// store is opened relative to this path and confined to it, so it must be an
+// absolute, cleaned directory path; an empty value means "use the default".
+func NormalizeArtworkLocalPath(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(trimmed) {
+		return "", fmt.Errorf("%s must be an absolute path", ArtworkLocalPathKey)
+	}
+	cleaned := filepath.Clean(trimmed)
+	if filepath.Dir(cleaned) == cleaned {
+		return "", fmt.Errorf("%s must not be the filesystem root", ArtworkLocalPathKey)
+	}
+	return cleaned, nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
@@ -22,8 +24,40 @@ const (
 // image type this layer defaults to a hero size rather than a card size.
 const compatBackdropImageType = "Backdrop"
 
+const (
+	compatArtworkPoster   = artworkkey.ImageTypePoster
+	compatArtworkBackdrop = artworkkey.ImageTypeBackdrop
+	compatArtworkLogo     = artworkkey.ImageTypeLogo
+	compatArtworkStill    = artworkkey.ImageTypeStill
+	compatArtworkProfile  = artworkkey.ImageTypeProfile
+	compatItemEpisode     = "episode"
+	compatItemSeason      = "season"
+)
+
+func compatArtworkVariant(imageType, size string) string {
+	parsed, err := imagesize.Parse(size)
+	if err != nil || parsed == imagesize.Unset {
+		parsed = imagesize.Medium
+	}
+	return imagesize.Variant(imageType, parsed)
+}
+
 func compatPresignImage(detailSvc *catalog.DetailService, ctx context.Context, path, imageType, size string) string {
 	return compatPresignImageWithExpiry(detailSvc, ctx, path, imageType, size).URL
+}
+
+func compatPresignTargetImage(detailSvc *catalog.DetailService, ctx context.Context, target artworkurl.Target, path, imageType, size string) string {
+	if detailSvc == nil {
+		return path
+	}
+	return detailSvc.PresignArtworkTargetImageURL(ctx, target, path, imageType, size)
+}
+
+func compatPresignTargetImageWithExpiry(detailSvc *catalog.DetailService, ctx context.Context, target artworkurl.Target, path, imageType, size string) catalog.ResolvedImageURL {
+	if detailSvc == nil {
+		return catalog.ResolvedImageURL{URL: path}
+	}
+	return detailSvc.PresignArtworkTargetImageURLWithExpiry(ctx, target, path, imageType, size)
 }
 
 func compatPresignImageWithExpiry(detailSvc *catalog.DetailService, ctx context.Context, path, imageType, size string) catalog.ResolvedImageURL {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -78,12 +79,7 @@ type ImageResolver interface {
 	// ResolveImageURL resolves a single image path. Plugin-prefixed paths (e.g.,
 	// "metadb://images/abc/original.jpg") are resolved via the owning plugin's RPC.
 	// HTTP(S) URLs pass through unchanged. Empty paths return "".
-	//
-	// The variant parameter is a semantic size hint. The vocabulary is "card",
-	// "featured", "large", "full", and "original", and it is an open string:
-	// per the plugin SDK contract a resolver that does not recognize a name
-	// falls back to a usable image rather than failing, so names may be added
-	// here without gating on a plugin capability.
+	// The variant parameter is a semantic size hint: "card", "featured", "full", "original".
 	ResolveImageURL(ctx context.Context, path string, variant string) string
 
 	// ResolveImageURLs resolves multiple image paths in a single call. Returns a
@@ -102,6 +98,11 @@ type ResolvedImageURL struct {
 type expiringImageResolver interface {
 	ResolveImageURLWithExpiry(ctx context.Context, path string, variant string) ResolvedImageURL
 	ResolveImageURLsWithExpiry(ctx context.Context, paths []string, variant string) map[string]ResolvedImageURL
+}
+
+type targetImageResolver interface {
+	ResolveArtworkTargetsWithExpiry(ctx context.Context, targets []artworkurl.Target, variant string) map[string]ResolvedImageURL
+	ResolveArtworkTargetRequestsWithExpiry(ctx context.Context, requests []artworkurl.TargetRequest) map[string]ResolvedImageURL
 }
 
 type WorkSummaryProvider interface {
@@ -1032,6 +1033,16 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 	return s.localizeItemModelWith(item, language, loc), nil
 }
 
+// PresentationLanguageForItem returns the localization key used for an item.
+// Response builders use it when a localized artwork path must remain bound to
+// its localized catalog row rather than the base media_items row.
+func (s *DetailService) PresentationLanguageForItem(ctx context.Context, item *models.MediaItem, filter AccessFilter) (string, error) {
+	if s == nil || item == nil {
+		return "", nil
+	}
+	return s.resolvePresentationLanguage(ctx, filter, item.OriginalLanguage)
+}
+
 // loadItemLocalizations resolves each item's target and groups repository reads
 // by that language. The former single-language lookup was correct only while a
 // profile had one global target; source-language exceptions make the grouping
@@ -1452,17 +1463,24 @@ func (s *DetailService) buildSeriesDetailContext(ctx context.Context, seriesID s
 	if err != nil {
 		return nil, fmt.Errorf("loading parent series: %w", err)
 	}
+	baseSeries := series
 	series, err = s.LocalizeItemModel(ctx, series, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing episode series detail: %w", err)
 	}
 	castCredits, crewCredits := s.fetchCredits(ctx, seriesID, filter)
+	backdropTarget := artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{seriesID}}
+	if series.BackdropPath != baseSeries.BackdropPath {
+		if language, resolveErr := s.resolvePresentationLanguage(ctx, filter, baseSeries.OriginalLanguage); resolveErr == nil && language != "" {
+			backdropTarget = artworkurl.Target{Surface: artworkurl.SurfaceLocalizedItemBackdrops, Keys: []string{seriesID, language}}
+		}
+	}
 	return &seriesDetailContext{
 		series:      series,
 		castCredits: castCredits,
 		crewCredits: crewCredits,
 		versionPref: s.effectiveVersionDefaults(ctx, filter, seriesID),
-		backdropURL: s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize)),
+		backdropURL: s.PresignArtworkTargetImageURL(ctx, backdropTarget, series.BackdropPath, artworkkey.ImageTypeBackdrop, string(filter.ImageSize)),
 	}, nil
 }
 
@@ -1798,6 +1816,7 @@ type itemDetailPrefetch struct {
 }
 
 func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter, pf *itemDetailPrefetch) (*ItemDetail, error) {
+	baseItem := item
 	var pendingTranslation string
 	if pf != nil && pf.haveLocalization {
 		pendingTranslation = pf.pendingTranslation
@@ -1857,11 +1876,31 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Subtitles:                  []SubtitleInfo{},
 	}
 
-	// Resolve image URLs: full URLs (TVDB/TMDB) pass through; S3 cached base paths get
-	// variant-resolved and presigned.
-	detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
-	detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
-	detail.LogoURL = s.PresignImageURL(ctx, item.LogoPath, "logo", string(filter.ImageSize))
+	posterTarget := artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{contentID}}
+	backdropTarget := artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{contentID}}
+	logoTarget := artworkurl.Target{Surface: artworkurl.SurfaceItemLogos, Keys: []string{contentID}}
+	// Per slot, not all-or-nothing: a localization that overrides only the
+	// poster leaves its backdrop_path and logo_path empty, so pointing those
+	// capabilities at the localization row would dead-end on an empty selection
+	// even though the base row holds a perfectly good backdrop. Only the slots
+	// the localization actually changed move to the localized surface.
+	if baseItem != nil && (item.PosterPath != baseItem.PosterPath || item.BackdropPath != baseItem.BackdropPath || item.LogoPath != baseItem.LogoPath) {
+		if language, err := s.resolvePresentationLanguage(ctx, filter, baseItem.OriginalLanguage); err == nil && language != "" {
+			keys := []string{contentID, language}
+			if item.PosterPath != baseItem.PosterPath {
+				posterTarget = artworkurl.Target{Surface: artworkurl.SurfaceLocalizedItemPosters, Keys: keys}
+			}
+			if item.BackdropPath != baseItem.BackdropPath {
+				backdropTarget = artworkurl.Target{Surface: artworkurl.SurfaceLocalizedItemBackdrops, Keys: keys}
+			}
+			if item.LogoPath != baseItem.LogoPath {
+				logoTarget = artworkurl.Target{Surface: artworkurl.SurfaceLocalizedItemLogos, Keys: keys}
+			}
+		}
+	}
+	detail.PosterURL = s.PresignArtworkTargetImageURL(ctx, posterTarget, item.PosterPath, artworkkey.ImageTypePoster, string(filter.ImageSize))
+	detail.BackdropURL = s.PresignArtworkTargetImageURL(ctx, backdropTarget, item.BackdropPath, artworkkey.ImageTypeBackdrop, string(filter.ImageSize))
+	detail.LogoURL = s.PresignArtworkTargetImageURL(ctx, logoTarget, item.LogoPath, artworkkey.ImageTypeLogo, string(filter.ImageSize))
 
 	// File versions and subtitle aggregation only apply to movies.
 	// For series, each episode file shares the series content_id, so
@@ -2007,14 +2046,9 @@ func (s *DetailService) personCredits(ctx context.Context, people []models.ItemP
 			PlexGUID:  p.PlexGUID,
 		}
 		if p.PhotoPath != "" && p.PhotoPath != "-" {
-			// Without an explicit size the stored key is presigned as-is, which
-			// is what this has always returned. An explicit size resolves the
-			// profile ladder instead, the same as every other image on the page.
-			if filter.ImageSize == imagesize.Unset {
-				pc.PhotoURL = s.PresignURL(ctx, p.PhotoPath, imagesize.PluginVariantFeatured)
-			} else {
-				pc.PhotoURL = s.PresignImageURL(ctx, p.PhotoPath, artworkkey.ImageProfile, string(filter.ImageSize))
-			}
+			pc.PhotoURL = s.PresignArtworkTargetImageURL(ctx, artworkurl.Target{
+				Surface: artworkurl.SurfacePersonPhotos, Keys: []string{strconv.FormatInt(p.ID, 10)},
+			}, p.PhotoPath, artworkkey.ImageTypeProfile, string(filter.ImageSize))
 		}
 		if p.PhotoThumbhash != "" && p.PhotoThumbhash != "-" {
 			pc.PhotoThumbhash = p.PhotoThumbhash
@@ -2199,7 +2233,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 	}
 	defer rows.Close()
 
-	posterPaths := make([]string, 0, 16)
+	posterTargets := make([]artworkurl.Target, 0, 16)
 	for rows.Next() {
 		var (
 			ch         MangaChapter
@@ -2217,9 +2251,9 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 		}
 		ch.Progress = progress
 		ch.PosterURL = posterPath // raw path; resolved in one batch below
-		if posterPath != "" {
-			posterPaths = append(posterPaths, posterPath)
-		}
+		posterTargets = append(posterTargets, artworkurl.Target{
+			Surface: artworkurl.SurfaceItemPosters, Keys: []string{ch.ContentID}, Slot: artworkImagePoster,
+		}.WithReference(posterPath))
 		chapters = append(chapters, ch)
 	}
 	if err := rows.Err(); err != nil {
@@ -2227,9 +2261,10 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 	}
 	// Presign every chapter poster in one batch rather than per chapter — a
 	// long-running series has hundreds of chapters.
-	resolved := s.PresignImageURLs(ctx, posterPaths, "poster", string(filter.ImageSize))
+	variant := cachedImageVariantKey(artworkkey.ImageTypePoster, string(filter.ImageSize))
+	resolved := s.PresignArtworkTargetsWithExpiry(ctx, posterTargets, variant)
 	for i := range chapters {
-		chapters[i].PosterURL = resolved[chapters[i].PosterURL]
+		chapters[i].PosterURL = resolved[posterTargets[i].CacheKey()].URL
 	}
 	return chapters
 }
@@ -2259,8 +2294,17 @@ func firstNonEmptyString(values []string) string {
 	return ""
 }
 
+func (s *DetailService) presignAudiobookPosterTargetURL(ctx context.Context, contentID, posterPath string, filter AccessFilter) string {
+	return s.PresignArtworkTargetImageURL(ctx, artworkurl.Target{
+		Surface: artworkurl.SurfaceItemPosters, Keys: []string{contentID}, Slot: artworkImagePoster,
+	}, posterPath, artworkkey.ImageTypePoster, string(filter.ImageSize))
+}
+
+// presignAudiobookPosterURL remains as the targetless compatibility seam used
+// by older isolated tests. Production audiobook rows always carry contentID
+// and use presignAudiobookPosterTargetURL.
 func (s *DetailService) presignAudiobookPosterURL(ctx context.Context, posterPath string, filter AccessFilter) string {
-	return s.PresignImageURL(ctx, posterPath, "poster", string(filter.ImageSize))
+	return s.PresignImageURL(ctx, posterPath, artworkkey.ImageTypePoster, string(filter.ImageSize))
 }
 
 func appendAudiobookItemAccessConditions(
@@ -2356,7 +2400,7 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 			continue
 		}
 		seen[item.ContentID] = struct{}{}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
+		item.PosterURL = s.presignAudiobookPosterTargetURL(ctx, item.ContentID, posterPath, filter)
 		out = append(out, item)
 	}
 	return out
@@ -2423,7 +2467,7 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
 			return []AudiobookRelatedItem{}
 		}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
+		item.PosterURL = s.presignAudiobookPosterTargetURL(ctx, item.ContentID, posterPath, filter)
 		out = append(out, item)
 	}
 	return out
@@ -2497,7 +2541,7 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 				item.SeriesIndex = &n
 			}
 		}
-		item.PosterURL = s.presignAudiobookPosterURL(ctx, poster, filter)
+		item.PosterURL = s.presignAudiobookPosterTargetURL(ctx, item.ContentID, poster, filter)
 		entries = append(entries, item)
 	}
 	if len(entries) < 2 {
@@ -2621,6 +2665,7 @@ func clearSentinel(s string) string {
 }
 
 func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Season, filter AccessFilter) (*ItemDetail, error) {
+	baseSeason := season
 	series, err := s.itemRepo.GetByID(ctx, season.SeriesID)
 	if err != nil {
 		return nil, fmt.Errorf("loading parent series: %w", err)
@@ -2682,8 +2727,16 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		detail.AirDate = &airDate
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, season.PosterPath, "poster", string(filter.ImageSize))
-	detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
+	seasonTarget := artworkurl.Target{Surface: artworkurl.SurfaceSeasonPosters, Keys: []string{season.ContentID}}
+	if baseSeason != nil && season.PosterPath != baseSeason.PosterPath {
+		if language, err := s.resolvePresentationLanguage(ctx, filter, series.OriginalLanguage); err == nil && language != "" {
+			seasonTarget = artworkurl.Target{Surface: artworkurl.SurfaceLocalizedSeasonPosters, Keys: []string{season.ContentID, language}}
+		}
+	}
+	detail.PosterURL = s.PresignArtworkTargetImageURL(ctx, seasonTarget, season.PosterPath, artworkkey.ImageTypePoster, string(filter.ImageSize))
+	detail.BackdropURL = s.PresignArtworkTargetImageURL(ctx, artworkurl.Target{
+		Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{series.ContentID},
+	}, series.BackdropPath, artworkkey.ImageTypeBackdrop, string(filter.ImageSize))
 	return detail, nil
 }
 
@@ -2732,7 +2785,9 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		detail.Title = fmt.Sprintf("Episode %d", episode.EpisodeNumber)
 	}
 
-	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
+	detail.PosterURL = s.PresignArtworkTargetImageURL(ctx, artworkurl.Target{
+		Surface: artworkurl.SurfaceEpisodeStills, Keys: []string{episode.ContentID},
+	}, episode.StillPath, artworkkey.ImageTypeStill, string(filter.ImageSize))
 	detail.BackdropURL = seriesCtx.backdropURL
 
 	files, err := s.fileFetcher.GetByEpisodeID(ctx, episode.ContentID)
@@ -3840,7 +3895,11 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 			ThumbnailThumbhash: chapter.ThumbnailThumbhash,
 		}
 		if chapter.ThumbnailPath != "" {
-			ch.ThumbnailURL = s.PresignURL(ctx, strings.Replace(chapter.ThumbnailPath, "/original.", "/w300.", 1), "card")
+			ch.ThumbnailURL = s.PresignArtworkTargetImageURL(ctx, artworkurl.Target{
+				Surface: artworkurl.SurfaceChapterThumbnails,
+				Keys:    []string{strconv.Itoa(file.ID), strconv.Itoa(chapter.Index)},
+				Slot:    artworkImageStill,
+			}, chapter.ThumbnailPath, "still", "small")
 		}
 		chapters = append(chapters, ch)
 	}
@@ -3912,9 +3971,145 @@ func firstNonEmpty(values ...string) string {
 //   - Bare path (legacy) → logs warning and returns "" (no longer resolvable)
 //
 // The variant parameter is a semantic size hint forwarded to plugin resolvers:
-// "card", "featured", "large", "full", "original".
+// "card", "featured", "full", "original".
 func (s *DetailService) PresignURL(ctx context.Context, path string, variant string) string {
 	return s.PresignURLWithExpiry(ctx, path, variant).URL
+}
+
+// PresignArtworkTargetImageURL resolves one image with the owning catalog
+// target attached. Resilient delivery requires this context so a shared stored
+// revision can reload the correct retained source when its bytes disappear.
+func (s *DetailService) PresignArtworkTargetImageURL(
+	ctx context.Context,
+	target artworkurl.Target,
+	path, imageType, size string,
+) string {
+	return s.PresignArtworkTargetImageURLWithExpiry(ctx, target, path, imageType, size).URL
+}
+
+func (s *DetailService) PresignArtworkTargetImageURLWithExpiry(
+	ctx context.Context,
+	target artworkurl.Target,
+	path, imageType, size string,
+) ResolvedImageURL {
+	if path == "" || path == "-" || s.imageResolver == nil {
+		return ResolvedImageURL{}
+	}
+	resolver, ok := s.imageResolver.(targetImageResolver)
+	if !ok {
+		// Cast photos were historically presigned exactly as stored with the
+		// provider's featured hint. Preserve that byte-for-byte URL behavior
+		// when image_size is absent; target-aware delivery still binds the
+		// original variant below.
+		if imageType == artworkkey.ImageTypeProfile && strings.TrimSpace(size) == "" {
+			return s.PresignURLWithExpiry(ctx, path, artworkProviderVariantFeatured)
+		}
+		return s.PresignImageURLWithExpiry(ctx, path, imageType, size)
+	}
+	target.Slot = imageType
+	target = target.WithReference(path)
+	variant := cachedImageVariantKey(imageType, size)
+	if imageType == artworkkey.ImageTypeProfile && strings.TrimSpace(size) == "" {
+		variant = artworkkey.OriginalVariant
+	}
+	if variant == "" {
+		variant = artworkkey.OriginalVariant
+	}
+	resolved := resolver.ResolveArtworkTargetsWithExpiry(ctx, []artworkurl.Target{target}, variant)
+	return resolved[target.CacheKey()]
+}
+
+// PresignArtworkTargetsWithExpiry resolves targets in one signing batch. The
+// result is keyed by Target.CacheKey rather than logical path, because two
+// targets may select the same stored revision but retain different sources.
+func (s *DetailService) PresignArtworkTargetsWithExpiry(
+	ctx context.Context,
+	targets []artworkurl.Target,
+	variant string,
+) map[string]ResolvedImageURL {
+	if resolver, ok := s.imageResolver.(targetImageResolver); ok {
+		return resolver.ResolveArtworkTargetsWithExpiry(ctx, targets, variant)
+	}
+	requests := make([]artworkurl.TargetRequest, 0, len(targets))
+	for _, target := range targets {
+		requests = append(requests, artworkurl.TargetRequest{Target: target, Variant: variant})
+	}
+	fallback := s.presignArtworkTargetRequestsFallback(ctx, requests)
+	result := make(map[string]ResolvedImageURL, len(targets))
+	for _, target := range targets {
+		request := artworkurl.TargetRequest{Target: target, Variant: variant}
+		result[target.CacheKey()] = fallback[request.CacheKey()]
+	}
+	return result
+}
+
+// PresignArtworkTargetRequestsWithExpiry preserves target context and
+// per-image variants while making one resolver call.
+func (s *DetailService) PresignArtworkTargetRequestsWithExpiry(ctx context.Context, requests []artworkurl.TargetRequest) map[string]ResolvedImageURL {
+	if resolver, ok := s.imageResolver.(targetImageResolver); ok {
+		return resolver.ResolveArtworkTargetRequestsWithExpiry(ctx, requests)
+	}
+	return s.presignArtworkTargetRequestsFallback(ctx, requests)
+}
+
+func (s *DetailService) presignArtworkTargetRequestsFallback(ctx context.Context, requests []artworkurl.TargetRequest) map[string]ResolvedImageURL {
+	pathByTarget := make(map[string]string, len(requests))
+	providerVariantByTarget := make(map[string]string, len(requests))
+	pathsByProviderVariant := make(map[string][]string)
+	seenByProviderVariant := make(map[string]map[string]struct{})
+	for _, request := range requests {
+		path := request.Target.Reference
+		if path == "" || path == "-" {
+			continue
+		}
+		if !strings.Contains(path, "://") {
+			path = artworkkey.Variant(path, request.Variant)
+		}
+		key := request.CacheKey()
+		pathByTarget[key] = path
+		providerVariant := providerVariantForTargetVariant(request.Target.Slot, request.Variant)
+		providerVariantByTarget[key] = providerVariant
+		seen := seenByProviderVariant[providerVariant]
+		if seen == nil {
+			seen = make(map[string]struct{})
+			seenByProviderVariant[providerVariant] = seen
+		}
+		if _, ok := seen[path]; !ok {
+			seen[path] = struct{}{}
+			pathsByProviderVariant[providerVariant] = append(pathsByProviderVariant[providerVariant], path)
+		}
+	}
+	resolvedPaths := make(map[string]map[string]ResolvedImageURL, len(pathsByProviderVariant))
+	for providerVariant, variantPaths := range pathsByProviderVariant {
+		resolvedPaths[providerVariant] = s.PresignURLsWithExpiry(ctx, variantPaths, providerVariant)
+	}
+	result := make(map[string]ResolvedImageURL, len(requests))
+	for _, request := range requests {
+		key := request.CacheKey()
+		path := pathByTarget[key]
+		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+			result[key] = ResolvedImageURL{URL: path}
+		} else {
+			result[key] = resolvedPaths[providerVariantByTarget[key]][path]
+		}
+	}
+	return result
+}
+
+func providerVariantForTargetVariant(imageType, variant string) string {
+	if variant == artworkkey.OriginalVariant {
+		return imagesize.PluginVariantOriginal
+	}
+	large := imagesize.Variant(imageType, imagesize.Large)
+	medium := imagesize.Variant(imageType, imagesize.Medium)
+	if variant == large && large != medium {
+		return imagesize.PluginVariantLarge
+	}
+	small := imagesize.Variant(imageType, imagesize.Small)
+	if variant == small && small != medium {
+		return imagesize.PluginVariantCard
+	}
+	return imagesize.PluginVariantFeatured
 }
 
 // PresignURLWithExpiry resolves an image path and returns expiry metadata when
@@ -4039,15 +4234,10 @@ func (s *DetailService) PresignURLsWithExpiry(ctx context.Context, paths []strin
 
 // sizeToVariant maps the existing S3 size hints used by the frontend to
 // semantic variant names understood by plugins.
-//
-// An explicitly requested size is resolved by internal/imagesize, which owns
-// the client-facing size contract. Anything else — an absent or unparseable
-// hint — keeps the historical mapping below unchanged.
 func sizeToVariant(size string) string {
 	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
 		return imagesize.PluginVariant(parsed)
 	}
-
 	switch size {
 	case "small":
 		return "card"
@@ -4099,26 +4289,17 @@ func cachedImageVariantPath(path, imageType, size string) string {
 	return artworkkey.Variant(path, variant)
 }
 
-// imageTypeFromCachedPath returns the image type segment ("poster", "backdrop",
-// "logo", "still") encoded in a cached S3 image path of the form
-// ".../{imageType}/{variant}.{ext}". It returns "" for full URLs,
-// plugin-prefixed paths, or paths with no directory segment.
+// imageTypeFromCachedPath returns the image type ("poster", "backdrop",
+// "logo", "still") a stored artwork key belongs to, for both the portable and
+// the legacy key grammars. It returns "" for full URLs, plugin-prefixed paths,
+// or paths with no directory segment.
 func imageTypeFromCachedPath(path string) string {
-	if path == "" || strings.Contains(path, "://") {
-		return ""
-	}
-	lastSlash := strings.LastIndex(path, "/")
-	if lastSlash <= 0 {
-		return ""
-	}
-	dir := path[:lastSlash]
-	return dir[strings.LastIndex(dir, "/")+1:]
+	return artworkkey.ImageTypeFromKey(path)
 }
 
-// ImageTypeFromCachedPath returns the image type ("poster", "backdrop",
-// "logo", "still", "profile") encoded in a cached S3 image path, or "" when the
-// path is a full URL, plugin-prefixed, or has no directory segment. Callers
-// outside this package need it to pick the variant ladder that governs a path.
+// ImageTypeFromCachedPath reports the ladder encoded by a stored artwork key.
+// Response builders use it when an episode still occupies a backdrop slot, so
+// an explicit image_size cannot accidentally request a backdrop-only rung.
 func ImageTypeFromCachedPath(path string) string {
 	return imageTypeFromCachedPath(path)
 }
@@ -4144,41 +4325,16 @@ func BackdropVariantPath(path, desiredVariant string) string {
 	return strings.Replace(path, "/original.", "/"+variant+".", 1)
 }
 
-// cachedImageVariantKey picks the cached artwork variant for an image type and
-// the size hint carried on the request.
-//
-// An explicitly requested size is resolved by internal/imagesize, which owns
-// the client-facing size contract and derives its rungs from
-// artworkkey.VariantWidths. Anything else — an absent hint, which is what most
-// call sites pass, or an unparseable one — falls through to the per-type
-// defaults below, which are retained verbatim as the record of what the server
-// returned before image_size existed.
 func cachedImageVariantKey(imageType, size string) string {
 	if parsed, err := imagesize.Parse(size); err == nil && parsed != imagesize.Unset {
 		return imagesize.Variant(imageType, parsed)
 	}
+	return imagesize.Variant(imageType, imagesize.Medium)
+}
 
-	if size == "original" {
-		return "original"
-	}
-
-	switch imageType {
-	case "backdrop":
-		if size == "small" {
-			return "w300"
-		}
-		return "w1920"
-	case "logo":
-		return "w500"
-	case "poster", "still":
-		if size == "small" {
-			return "w300"
-		}
-		return "w500"
-	default:
-		if size == "small" {
-			return "w300"
-		}
-		return "w500"
-	}
+// ArtworkVariantForSize exposes the same bounded variant normalization to
+// target-aware batch callers such as jellycompat. It returns only names from
+// the frozen artwork ladders, never provider-specific size hints.
+func ArtworkVariantForSize(imageType, size string) string {
+	return cachedImageVariantKey(imageType, size)
 }

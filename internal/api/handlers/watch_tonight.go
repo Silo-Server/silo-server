@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -398,9 +399,9 @@ func (h *RecommendationsHandler) buildSectionItem(r *http.Request, mi *models.Me
 		item.Genres = []string{}
 	}
 	if h.DetailSvc != nil {
-		item.PosterURL = h.DetailSvc.PresignURL(r.Context(), featuredPosterPath(mi.PosterPath), "featured")
-		item.BackdropURL = h.DetailSvc.PresignURL(r.Context(), featuredBackdropPath(mi.BackdropPath), "featured")
-		item.LogoURL = h.DetailSvc.PresignURL(r.Context(), mi.LogoPath, "featured")
+		item.PosterURL = presignDiscoverTarget(r.Context(), h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemPosters, Keys: []string{mi.ContentID}, Slot: artworkImagePoster}, mi.PosterPath, artworkImagePoster, "", "featured")
+		item.BackdropURL = presignDiscoverTarget(r.Context(), h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemBackdrops, Keys: []string{mi.ContentID}, Slot: artworkImageBackdrop}, mi.BackdropPath, artworkImageBackdrop, "", "featured")
+		item.LogoURL = presignDiscoverTarget(r.Context(), h.DetailSvc, artworkurl.Target{Surface: artworkurl.SurfaceItemLogos, Keys: []string{mi.ContentID}, Slot: artworkImageLogo}, mi.LogoPath, artworkImageLogo, "", "featured")
 	}
 	if overlayMap != nil {
 		item.OverlaySummary = overlayMap[mi.ContentID]

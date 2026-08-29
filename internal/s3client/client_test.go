@@ -338,3 +338,73 @@ func parseQuery(raw string) url.Values {
 	}
 	return values
 }
+
+// TestListPrefixAnchorsEmptyLogicalPrefixOnTheKeyPrefixBoundary pins the one
+// case where a listing Prefix may not be prefixedKey. With an empty logical
+// prefix, prefixedKey returns the bare key prefix, which as a listing Prefix
+// also matches sibling key spaces that merely start with it — "assets" would
+// list "assets-old/..." too. stripKeyPrefix then drops those foreign keys, so a
+// truncated page can come back with no objects and an unchanged cursor, which
+// callers proving authoritative emptiness or paging an inventory read as a
+// listing that refuses to advance.
+func TestListPrefixAnchorsEmptyLogicalPrefixOnTheKeyPrefixBoundary(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		keyPrefix string
+		prefix    string
+		want      string
+	}{
+		{name: "key prefix with empty logical prefix", keyPrefix: "assets", prefix: "", want: "assets/"},
+		{name: "key prefix with slash-only logical prefix", keyPrefix: "assets", prefix: "/", want: "assets/"},
+		{name: "key prefix with logical prefix", keyPrefix: "assets", prefix: "artwork/v1/", want: "assets/artwork/v1/"},
+		{name: "no key prefix with empty logical prefix", keyPrefix: "", prefix: "", want: ""},
+		{name: "no key prefix with logical prefix", keyPrefix: "", prefix: "artwork/v1/", want: "artwork/v1/"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			client := NewClient(BucketConfig{
+				Endpoint:  "https://s3.example.invalid",
+				Region:    "us-east-1",
+				Bucket:    "silo",
+				KeyPrefix: testCase.keyPrefix,
+				AccessKey: "test",
+				SecretKey: "test",
+				PathStyle: true,
+			})
+			if got := client.listPrefix(testCase.prefix); got != testCase.want {
+				t.Fatalf("listPrefix(%q) = %q, want %q", testCase.prefix, got, testCase.want)
+			}
+		})
+	}
+}
+
+// TestListObjectInfosPageScopesEmptyPrefixToTheKeyPrefixTree checks the wiring:
+// the emitted S3 Prefix must carry the trailing separator so a neighboring
+// "silo/development/..." key space cannot leak into this client's listing.
+func TestListObjectInfosPageScopesEmptyPrefixToTheKeyPrefixTree(t *testing.T) {
+	t.Parallel()
+
+	srv := newS3TestServer(t)
+	client := NewClient(BucketConfig{
+		Endpoint:  srv.URL(),
+		Region:    "us-east-1",
+		Bucket:    "silo",
+		KeyPrefix: "silo/dev",
+		AccessKey: "test",
+		SecretKey: "test",
+		PathStyle: true,
+	})
+
+	if _, _, _, err := client.ListObjectInfosPage(context.Background(), client.Bucket(), "", "", 10); err != nil {
+		t.Fatalf("ListObjectInfosPage() returned error: %v", err)
+	}
+
+	requests := srv.Requests()
+	listReq := findRequest(requests, http.MethodGet, "/silo", "list-type=2")
+	if got := parseQuery(listReq.RawQuery).Get("prefix"); got != "silo/dev/" {
+		t.Fatalf("list prefix = %q, want silo/dev/", got)
+	}
+}

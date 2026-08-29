@@ -97,12 +97,22 @@ type SectionItemMeta struct {
 	SeriesTitle       string
 	SeasonNumber      *int
 	EpisodeNumber     *int
+	PosterOwner       SectionArtworkOwner
+	BackdropOwner     SectionArtworkOwner
+	LogoOwner         SectionArtworkOwner
 	Badges            []string
 	PositionSeconds   *float64
 	DurationSeconds   *float64
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
 	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+}
+
+// SectionArtworkOwner mirrors sections.SectionArtworkOwner without creating
+// an import cycle.
+type SectionArtworkOwner struct {
+	Kind      string
+	ContentID string
 }
 
 // ResolvedItems is the resolver's output.

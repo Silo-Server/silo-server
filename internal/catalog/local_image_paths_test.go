@@ -1,6 +1,40 @@
 package catalog
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestImageTypeFromCachedPathPortableLayout(t *testing.T) {
+	revision := strings.Repeat("ab", 32)
+	cases := map[string]string{
+		"artwork/v1/objects/poster/ab/" + revision + "/original.webp": "poster",
+		"artwork/v1/objects/backdrop/ab/" + revision + "/w1280.webp":  "backdrop",
+		"artwork/v1/objects/still/ab/" + revision + "/manifest.json":  "still",
+		"tmdb://poster/abc.jpg": "",
+	}
+	for path, want := range cases {
+		if got := imageTypeFromCachedPath(path); got != want {
+			t.Errorf("imageTypeFromCachedPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// Content-addressed artwork is shared: one revision directory can be the
+// poster of several items, people, or libraries. Deleting content must hand it
+// to reference-aware revision GC instead of sweeping the prefix, which cannot
+// tell those references apart.
+func TestImageDeletePrefixNeverSweepsPortableArtwork(t *testing.T) {
+	revision := strings.Repeat("cd", 32)
+	for _, path := range []string{
+		"artwork/v1/objects/poster/cd/" + revision + "/original.webp",
+		"artwork/v1/objects/backdrop/cd/" + revision + "/w300.webp",
+	} {
+		if got := imageDeletePrefix(path); got != "" {
+			t.Errorf("imageDeletePrefix(%q) = %q, want no sweep", path, got)
+		}
+	}
+}
 
 func TestImageTypeFromCachedPathLocalHashedLayout(t *testing.T) {
 	// Local keys interpose a content-hash segment BEFORE the image type

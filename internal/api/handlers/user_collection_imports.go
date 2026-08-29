@@ -14,11 +14,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
-	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -32,9 +32,14 @@ type UserCollectionImportHandler struct {
 	scheduler     *usercollections.Scheduler
 	registry      *templates.Registry
 	mdblist       *mdblist.Client
-	s3GP          *s3client.Client
-	frontendFS    fs.FS
-	presignTTL    time.Duration
+	uploads       *artworkupload.Materializer
+	// trackArtwork registers materialized template posters with artwork
+	// garbage collection. True only when the user store keeps personal
+	// collection rows in catalog tables (the Postgres backend); see
+	// CollectionHandler.TrackArtworkRevisions.
+	trackArtwork bool
+	artworkURLs  ArtworkURLResolver
+	frontendFS   fs.FS
 }
 
 func NewUserCollectionImportHandler(
@@ -43,9 +48,10 @@ func NewUserCollectionImportHandler(
 	scheduler *usercollections.Scheduler,
 	registry *templates.Registry,
 	mdblistClient *mdblist.Client,
-	s3GP *s3client.Client,
+	uploads *artworkupload.Materializer,
+	trackArtwork bool,
+	artworkURLs ArtworkURLResolver,
 	frontendFS fs.FS,
-	presignTTL time.Duration,
 ) *UserCollectionImportHandler {
 	if registry == nil {
 		registry = templates.Default
@@ -56,9 +62,10 @@ func NewUserCollectionImportHandler(
 		scheduler:     scheduler,
 		registry:      registry,
 		mdblist:       mdblistClient,
-		s3GP:          s3GP,
+		uploads:       uploads,
+		trackArtwork:  trackArtwork,
+		artworkURLs:   artworkURLs,
 		frontendFS:    frontendFS,
-		presignTTL:    presignTTL,
 	}
 }
 
@@ -285,13 +292,12 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 	if collection == nil {
 		return nil
 	}
-	storedPath, thumbhash, stored, err := storeBundledCollectionPosterIfS3Configured(
+	storedPath, thumbhash, stored, err := storeBundledCollectionPoster(
 		r.Context(),
-		h.s3GP,
+		h.uploads,
 		h.frontendFS,
-		collection.ID,
-		userCollectionImagePrefix,
 		posterPath,
+		h.trackArtwork,
 	)
 	if err != nil || !stored {
 		if err != nil {
@@ -325,32 +331,12 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 
 func (h *UserCollectionImportHandler) toCollectionResponse(r *http.Request, c userstore.Collection) collectionResponse {
 	resp := toCollectionResponse(c)
-	resp.PosterURL = h.presignCollectionPoster(r.Context(), c.PosterURL)
+	resp.PosterURL = h.presignCollectionPoster(r.Context(), apimw.GetUserID(r.Context()), c.ID, c.PosterURL)
 	return resp
 }
 
-func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Context, path string) string {
-	if path == "" {
-		return ""
-	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
-	}
-	if h.s3GP == nil {
-		return ""
-	}
-	ttl := h.presignTTL
-	if ttl <= 0 {
-		ttl = 4 * time.Hour
-	}
-	url, err := h.s3GP.PresignGetURL(ctx, h.s3GP.Bucket(), cardThumbnailPath(path), ttl)
-	if err != nil {
-		return ""
-	}
-	return url
+func (h *UserCollectionImportHandler) presignCollectionPoster(ctx context.Context, userID int, collectionID, path string) string {
+	return resolveTargetStoredImageURL(ctx, h.artworkURLs, userCollectionPosterTarget(userID, collectionID), path, "w300")
 }
 
 func (h *UserCollectionImportHandler) HandleSync(w http.ResponseWriter, r *http.Request) {

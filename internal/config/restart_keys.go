@@ -57,6 +57,15 @@ var restartRequiredKeys = map[string]bool{
 	downloadArtifactDirSettingKey:        true,
 	"playback.chapter_thumbnail_workers": true,
 
+	// Canonical artwork store. The backend is selected, verified against the
+	// store pin, and opened once at startup — the filesystem root becomes a
+	// confined handle held for the process lifetime — so both are frozen.
+	// artwork.url_ttl and artwork.remote_materialization are read live and
+	// stay out of this registry; note that "artwork." is deliberately NOT a
+	// restart-required prefix.
+	ArtworkStorageBackendKey: true,
+	ArtworkLocalPathKey:      true,
+
 	// Scanner / matcher toggles captured at construction. Worker counts,
 	// batch size, metadata.cache_images, and mdblist.api_key hot-reload via
 	// atomic setters wired to the config watcher.

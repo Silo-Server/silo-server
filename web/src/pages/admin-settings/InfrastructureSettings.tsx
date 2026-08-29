@@ -45,6 +45,11 @@ type SettingsForm = ReturnType<typeof useSettingsForm>;
 
 const REDIS_KEYS = ["redis.url"];
 
+// Both artwork store keys are captured when the store opens at startup and the
+// first materialization pins the effective backend, so changes are
+// restart-required and a pinned store refuses a mismatched backend.
+const ARTWORK_STORE_KEYS = ["artwork.storage_backend", "artwork.local_path"];
+
 const DATABASE_KEYS = [
   "database.max_connections",
   "userdb.backend",
@@ -95,7 +100,14 @@ const LOG_ADVANCED_KEYS = [
 
 const LOG_KEYS = [...LOG_ESSENTIAL_KEYS, ...LOG_ADVANCED_KEYS];
 
-const KEYS = [...REDIS_KEYS, ...DATABASE_KEYS, ...PUBLIC_S3_KEYS, ...PRIVATE_S3_KEYS, ...LOG_KEYS];
+const KEYS = [
+  ...REDIS_KEYS,
+  ...ARTWORK_STORE_KEYS,
+  ...DATABASE_KEYS,
+  ...PUBLIC_S3_KEYS,
+  ...PRIVATE_S3_KEYS,
+  ...LOG_KEYS,
+];
 
 function countDirty(form: SettingsForm, keys: string[]): number {
   return keys.filter((key) => form.isDirty(key)).length;
@@ -433,6 +445,43 @@ function S3Group({
           </>
         )}
       </AdvancedSection>
+    </FieldGroup>
+  );
+}
+
+function ArtworkStoreGroup({
+  form,
+  restartKeys,
+}: {
+  form: SettingsForm;
+  restartKeys: RestartKeyMatcher;
+}) {
+  return (
+    <FieldGroup
+      label="Artwork storage"
+      description="The canonical store for posters, backdrops, and other artwork. Artwork is served through Silo with verified fallbacks and background repair on either backend."
+      restartAll={allRestart(restartKeys, ARTWORK_STORE_KEYS)}
+    >
+      <SettingField
+        label="Artwork backend"
+        type="select"
+        description="Automatic mode uses your public S3 bucket when one is configured; otherwise it uses local disk. Once artwork has been stored, the backend is pinned and an explicit conflicting choice is rejected — migrate the store to switch."
+        value={form.getValue("artwork.storage_backend") || "auto"}
+        onChange={(v) => form.setValue("artwork.storage_backend", v)}
+        options={[
+          { value: "auto", label: "Automatic (recommended)" },
+          { value: "local", label: "Local storage" },
+          { value: "s3", label: "Shared S3 storage" },
+        ]}
+        restartRequired={restartKeys.has("artwork.storage_backend")}
+      />
+      <SettingField
+        label="Local artwork path"
+        description="Used when automatic mode resolves to local disk and by explicit local mode."
+        value={form.getValue("artwork.local_path")}
+        onChange={(v) => form.setValue("artwork.local_path", v)}
+        restartRequired={restartKeys.has("artwork.local_path")}
+      />
     </FieldGroup>
   );
 }
@@ -802,6 +851,7 @@ export default function InfrastructureSettings() {
 
       <div className="flex-1 space-y-5">
         <RedisGroup form={form} restartKeys={restartKeys} secrets={secrets} />
+        <ArtworkStoreGroup form={form} restartKeys={restartKeys} />
         <S3Group
           form={form}
           restartKeys={restartKeys}

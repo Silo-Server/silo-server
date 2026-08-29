@@ -7,15 +7,25 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
-// Shared artwork helpers used by both the admin library_collections handler
-// and the user collections handler. The S3 prefix differs so the two
-// namespaces don't collide.
+// Shared artwork helpers used by both the admin library_collections handler and
+// the user collections handler.
+//
+// New collection artwork is materialized through the canonical artwork store as
+// an immutable, content-addressed artwork/v1 revision, so admin and user
+// collections no longer need separate key namespaces to avoid collisions —
+// identical bytes are the same revision, and the reference-aware collector is
+// what decides when one stops being needed. The two legacy prefixes below are
+// retained only so pre-existing mutable objects stay readable and sweepable
+// until their owning row is next replaced.
 const (
 	adminCollectionImagePrefix = "collection-images"
 	userCollectionImagePrefix  = "user-collection-images"
@@ -24,17 +34,31 @@ const (
 	collectionImageMaxBytes = 10 << 20 // 10 MB
 )
 
-// storeBundledCollectionPosterIfS3Configured stores a built-in collection
-// template poster in S3 when public asset storage is configured. Non-S3
-// installs and non-template paths keep the original persisted path.
-func storeBundledCollectionPosterIfS3Configured(
+func userCollectionPosterTarget(userID int, collectionID string) artworkurl.Target {
+	return artworkurl.Target{
+		Surface: artworkurl.SurfaceUserCollectionPosters,
+		Keys:    []string{strconv.Itoa(userID), collectionID},
+		Slot:    artworkkey.ImageTypeCollectionPoster,
+	}
+}
+
+// storeBundledCollectionPoster materializes a built-in collection template
+// poster into the artwork store, so the collection keeps its artwork if the
+// bundled asset is later renamed or dropped. Non-template paths and installs
+// without artwork storage keep the original app-relative path, which the API
+// serves straight from the frontend bundle.
+//
+// track must be true only when the owning row lands in a catalog table the
+// artwork revision GC can see; see materializeCollectionImage.
+func storeBundledCollectionPoster(
 	ctx context.Context,
-	s3GP *s3client.Client,
+	uploads *artworkupload.Materializer,
 	frontendFS fs.FS,
-	collectionID, prefix, posterPath string,
+	posterPath string,
+	track bool,
 ) (storedPath, thumbhashStr string, stored bool, err error) {
 	posterPath = strings.TrimSpace(posterPath)
-	if s3GP == nil || !strings.HasPrefix(posterPath, collectionTemplateImageDir) {
+	if !uploads.Available() || !strings.HasPrefix(posterPath, collectionTemplateImageDir) {
 		return posterPath, "", false, nil
 	}
 	if frontendFS == nil {
@@ -47,7 +71,7 @@ func storeBundledCollectionPosterIfS3Configured(
 		return "", "", false, fmt.Errorf("reading bundled poster %q: %w", posterPath, err)
 	}
 
-	storedPath, thumbhashStr, err = uploadCollectionImageVariants(ctx, s3GP, prefix, collectionID, "poster", data)
+	storedPath, thumbhashStr, err = materializeCollectionImage(ctx, uploads, artworkkey.ImageTypePoster, data, track)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -118,61 +142,56 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	return data, nil
 }
 
-// uploadCollectionImageVariants generates resized variants for the given
-// image bytes, uploads them under "{prefix}/{collectionID}/{imageType}/", and
-// returns the S3 path of the original variant plus a thumbhash computed from
-// the w300 variant.
-func uploadCollectionImageVariants(
+// materializeCollectionImage stores collection artwork as an immutable
+// content-addressed revision and returns the logical key of its original
+// variant plus a thumbhash placeholder.
+//
+// slot is the collection's artwork slot ("poster" or "backdrop"); it selects
+// the upload image type, and with it the variant ladder. The returned key is
+// what the collection row is pointed at.
+//
+// track registers the revision for garbage collection before the first byte
+// is written — so an upload that fails between here and the row update cleans
+// itself up, and the revision this one displaces is collected once nothing
+// references it. It must be true only when the owning row lands in a catalog
+// table the collector's reference union can see: admin collections
+// (library_collections) always qualify, user personal collections only when
+// the user store is Postgres-backed, because rows in per-user SQLite files
+// are invisible to the union and a tracked-but-invisible revision would be a
+// live image scheduled for deletion.
+func materializeCollectionImage(
 	ctx context.Context,
-	s3GP *s3client.Client,
-	prefix, collectionID, imageType string,
+	uploads *artworkupload.Materializer,
+	slot string,
 	fileData []byte,
-) (s3Path, thumbhashStr string, err error) {
-	if s3GP == nil {
-		return "", "", fmt.Errorf("image upload requires configured S3 storage")
+	track bool,
+) (storedPath, thumbhashStr string, err error) {
+	if !uploads.Available() {
+		return "", "", fmt.Errorf("image upload requires configured artwork storage")
 	}
-	var widths []int
-	switch imageType {
-	case "poster":
-		widths = []int{500, 300}
-	case "backdrop":
-		widths = []int{1280, 300}
-	default:
-		return "", "", fmt.Errorf("invalid image type: %s", imageType)
+	imageType, ok := artworkkey.CollectionImageType(slot)
+	if !ok {
+		return "", "", fmt.Errorf("invalid image type: %s", slot)
 	}
-
-	result, err := imageutil.GenerateVariants(fileData, widths)
+	result, err := uploads.Materialize(ctx, artworkupload.Request{
+		ImageType: imageType,
+		Data:      fileData,
+		Track:     track,
+	})
 	if err != nil {
-		return "", "", fmt.Errorf("generating image variants: %w", err)
+		return "", "", err
 	}
-
-	bucket := s3GP.Bucket()
-	var w300Data []byte
-	for _, v := range result.Variants {
-		key := fmt.Sprintf("%s/%s/%s/%s%s", prefix, collectionID, imageType, v.Key, result.Ext)
-		if err := s3GP.PutObject(ctx, bucket, key, v.Data); err != nil {
-			return "", "", fmt.Errorf("uploading %s: %w", v.Key, err)
-		}
-		if v.Key == "w300" {
-			w300Data = v.Data
-		}
-		if v.Key == "original" {
-			s3Path = key
-		}
-	}
-
-	if len(w300Data) > 0 {
-		thumbhashStr, err = imageutil.Thumbhash(w300Data)
-		if err != nil {
-			return "", "", fmt.Errorf("computing thumbhash: %w", err)
-		}
-	}
-	return s3Path, thumbhashStr, nil
+	return result.OriginalKey, result.Thumbhash, nil
 }
 
-// removeCollectionImageVariants deletes every stored variant for the given
-// collection / imageType under the supplied S3 prefix.
-func removeCollectionImageVariants(
+// removeLegacyCollectionImageVariants deletes the mutable per-collection
+// objects written before collection artwork became content-addressed.
+//
+// It exists only for that migration window. New revisions must never be swept
+// by prefix: a content-addressed revision directory can back several rows at
+// once, and its lifetime belongs to the reference-aware collector. Installs
+// without a legacy S3 bucket have nothing to sweep and skip it entirely.
+func removeLegacyCollectionImageVariants(
 	ctx context.Context,
 	s3GP *s3client.Client,
 	prefix, collectionID, imageType string,

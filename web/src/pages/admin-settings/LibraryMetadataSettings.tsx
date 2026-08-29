@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 
 import type { ConnectionCheckResponse } from "@/api/types";
@@ -8,7 +8,6 @@ import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { SecretField } from "@/components/settings/SecretField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useBranding } from "@/hooks/useBranding";
 import {
   useCatalogSearchStatus,
   useCheckAdminSettingsConnection,
@@ -21,7 +20,9 @@ import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 
-const ARTWORK_KEYS = ["metadata.cache_images"];
+const REMOTE_MATERIALIZATION_KEY = "artwork.remote_materialization";
+const LEGACY_CACHE_IMAGES_KEY = "metadata.cache_images";
+const ARTWORK_KEYS = [REMOTE_MATERIALIZATION_KEY, LEGACY_CACHE_IMAGES_KEY];
 
 const SCANNER_KEYS = ["scanner.workers", "matcher.workers", "matcher.batch_size"];
 
@@ -51,24 +52,19 @@ const KEYS = [...ARTWORK_KEYS, ...SCANNER_KEYS, ...MARKER_KEYS, ...SEARCH_KEYS];
 
 export default function LibraryMetadataSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
-  const branding = useBranding();
   const restartKeys = useRestartKeys();
   const checkConnection = useCheckAdminSettingsConnection();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
 
-  // Artwork storage writes provider images into the public bucket, so the
-  // server rejects enabling it when no bucket is configured at all.
-  // `storage_available` is the process-level truth (branding uses the same
-  // flag for asset uploads); s3.public_bucket only says a bucket was saved,
-  // which is enough for the server to accept the save — the two together
-  // separate "restart pending" from "never configured". s3.public_bucket is
-  // not staged here, but getValue falls back to the full settings response.
-  const publicBucketSaved = Boolean(form.getValue("s3.public_bucket"));
-  const artworkStorageOn = form.getValue("metadata.cache_images") === "true";
-  // Never trap an admin with it on: turning it off stays available even when
-  // the bucket went away.
-  const artworkStorageLocked =
-    !branding.storageAvailable && !publicBucketSaved && !artworkStorageOn;
+  // The canonical artwork.remote_materialization value wins; installations
+  // that predate it fall back to the legacy metadata.cache_images row. The
+  // toggle writes both so the canonical key can never silently diverge from
+  // what an older client or script reads back.
+  const materialization = form.getValue(REMOTE_MATERIALIZATION_KEY);
+  const cacheImagesEnabled =
+    materialization !== ""
+      ? materialization === "selected"
+      : form.getValue(LEGACY_CACHE_IMAGES_KEY) === "true";
 
   const provider = form.getValue("catalog.search.provider") || "postgres";
   const meiliEnabled = provider === "meilisearch";
@@ -120,38 +116,22 @@ export default function LibraryMetadataSettings() {
       <div className="flex-1 space-y-5">
         <FieldGroup
           label="Artwork"
-          description="Posters and backdrops from metadata providers, copied into the public bucket and served from there."
+          description="Posters and backdrops from metadata providers, copied into the canonical artwork store and served from there."
           restartAll={allRestart(ARTWORK_KEYS)}
         >
-          {!branding.storageAvailable && (
-            <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <p className="text-muted-foreground text-[13px] leading-relaxed">
-                {publicBucketSaved ? (
-                  <>Restart the server for artwork storage to start.</>
-                ) : (
-                  <>
-                    Artwork storage needs a public S3 bucket, set in{" "}
-                    <Link
-                      to="/admin/settings/infrastructure"
-                      className="text-foreground font-medium underline-offset-2 hover:underline"
-                    >
-                      Storage &amp; Database
-                    </Link>{" "}
-                    settings.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
           <SettingField
-            label="Store artwork in your bucket"
+            label="Cache remote artwork"
             type="toggle"
-            description="When off, clients load artwork straight from the providers."
-            value={form.getValue("metadata.cache_images")}
-            onChange={(value) => form.setValue("metadata.cache_images", value)}
-            disabled={artworkStorageLocked}
-            restartRequired={restartKeys.has("metadata.cache_images")}
+            description="Clients always load artwork from Silo either way; with this off, images are not stored and each cold request fetches them from the provider. Works with either artwork storage backend, local or S3."
+            value={cacheImagesEnabled ? "true" : "false"}
+            onChange={(value) => {
+              form.setValue(
+                REMOTE_MATERIALIZATION_KEY,
+                value === "true" ? "selected" : "passthrough",
+              );
+              form.setValue(LEGACY_CACHE_IMAGES_KEY, value);
+            }}
+            restartRequired={restartKeys.has(REMOTE_MATERIALIZATION_KEY)}
           />
         </FieldGroup>
 

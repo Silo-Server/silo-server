@@ -219,7 +219,7 @@ func (h *CatalogHandler) catalogItemResponses(r *http.Request, resultItems []*mo
 	responseWG.Add(2)
 	go func() {
 		defer responseWG.Done()
-		imageURLs = h.itemsH.itemListCardImageURLs(r.Context(), localizedItems, accessFilter.ImageSize)
+		imageURLs = h.itemsH.itemListCardImageURLs(r.Context(), resultItems, localizedItems, accessFilter, accessFilter.ImageSize)
 	}()
 	go func() {
 		defer responseWG.Done()
@@ -752,11 +752,6 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 	userStates := h.itemsH.listItemUserStates(r, modelItems)
 	items := make([]itemListResponse, 0, len(modelItems))
 	for _, item := range modelItems {
-		if h.itemsH.detailSvc != nil {
-			if localized, locErr := h.itemsH.detailSvc.LocalizeItemModel(r.Context(), item, accessFilter); locErr == nil && localized != nil {
-				item = localized
-			}
-		}
 		items = append(items, h.itemsH.toItemListResponseWithOverlay(r, item, nil, userStates[item.ContentID], accessFilter.ImageSize))
 	}
 

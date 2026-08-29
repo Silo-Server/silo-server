@@ -2,24 +2,44 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/artworkupload"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const (
 	profileAvatarPresetPrefix = "preset:"
+	// profileAvatarUploadPrefix marks a stored avatar object. The value after
+	// it is a logical artwork key.
+	//
+	// The artwork revision collector recognizes the same prefix when it decides
+	// whether an avatar object is still referenced
+	// (metadata.profileAvatarReferenceSurface). Changing it here without
+	// changing it there would make live avatars collectable.
 	profileAvatarUploadPrefix = "upload:"
 	profileAvatarMaxFileSize  = 10 << 20
+
+	// avatarDisplayVariant is the ladder entry clients actually render.
+	avatarDisplayVariant = "w256"
+
+	// Avatar source labels reported to clients alongside the resolved URL.
+	avatarSourceUpload = "upload"
+	avatarSourcePreset = "preset"
+	avatarSourceNone   = "none"
 )
 
 var legacyProfileAvatarIDs = map[string]struct{}{
@@ -41,8 +61,11 @@ var supportedDiceBearAvatarStyles = map[string]struct{}{
 	"pixel-art-neutral": {},
 }
 
+// profileAvatarStore is the legacy per-profile avatar bucket. New avatars are
+// materialized into the canonical artwork store instead; this interface stays
+// so avatars uploaded before that change keep resolving and keep being cleaned
+// up when their profile replaces or deletes them.
 type profileAvatarStore interface {
-	PutObject(ctx context.Context, bucket, key string, data []byte) error
 	DeleteObject(ctx context.Context, bucket, key string) error
 	ListObjects(ctx context.Context, bucket, prefix string) ([]string, error)
 	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
@@ -86,37 +109,77 @@ func avatarRefReplacesUpload(currentRef, nextRef string) bool {
 	return isUploadedAvatarRef(currentRef) && strings.TrimSpace(currentRef) != strings.TrimSpace(nextRef)
 }
 
-func resolveProfileAvatar(ctx context.Context, store profileAvatarStore, ttl time.Duration, ref string) (source string, url string) {
+// resolveProfileAvatar turns a stored avatar reference into a source label and
+// a URL a client can load.
+//
+// Uploaded avatars live in one of two places. Avatars stored since profile
+// uploads became content-addressed are objects in the canonical artwork store
+// and resolve through the artwork resolver, so they work on every backend.
+// Anything older is a mutable per-profile object in the legacy avatar bucket
+// and keeps its presigned URL until the profile next replaces it.
+func resolveProfileAvatar(
+	ctx context.Context,
+	resolver ArtworkURLResolver,
+	legacy profileAvatarStore,
+	ttl time.Duration,
+	ref string,
+) (source string, url string) {
 	trimmed := strings.TrimSpace(ref)
 	if trimmed == "" {
-		return "none", ""
+		return avatarSourceNone, ""
 	}
 	if strings.HasPrefix(trimmed, profileAvatarPresetPrefix) {
 		presetID := strings.TrimPrefix(trimmed, profileAvatarPresetPrefix)
 		if !isKnownPresetAvatarID(presetID) {
-			return "none", ""
+			return avatarSourceNone, ""
 		}
-		return "preset", bundledProfileAvatarURL(presetID)
+		return avatarSourcePreset, bundledProfileAvatarURL(presetID)
 	}
 	if strings.HasPrefix(trimmed, profileAvatarUploadPrefix) {
-		if store == nil {
-			return "upload", ""
-		}
 		displayKey := uploadedAvatarDisplayKey(strings.TrimPrefix(trimmed, profileAvatarUploadPrefix))
+		if artworkkey.IsPortableKey(displayKey) {
+			return avatarSourceUpload, resolveStoredImageURL(ctx, resolver, displayKey)
+		}
+		if legacy == nil {
+			return avatarSourceUpload, ""
+		}
 		presignTTL := ttl
 		if presignTTL <= 0 {
 			presignTTL = 15 * time.Minute
 		}
-		presignedURL, err := store.PresignGetURL(ctx, store.Bucket(), displayKey, presignTTL)
+		presignedURL, err := legacy.PresignGetURL(ctx, legacy.Bucket(), displayKey, presignTTL)
 		if err != nil {
-			return "upload", ""
+			return avatarSourceUpload, ""
 		}
-		return "upload", presignedURL
+		return avatarSourceUpload, presignedURL
 	}
 	if isKnownPresetAvatarID(trimmed) {
-		return "preset", bundledProfileAvatarURL(trimmed)
+		return avatarSourcePreset, bundledProfileAvatarURL(trimmed)
 	}
-	return "none", ""
+	return avatarSourceNone, ""
+}
+
+func resolveProfileAvatarTarget(
+	ctx context.Context,
+	resolver ArtworkURLResolver,
+	legacy profileAvatarStore,
+	ttl time.Duration,
+	userID int,
+	profileID string,
+	ref string,
+) (source string, url string) {
+	trimmed := strings.TrimSpace(ref)
+	if strings.HasPrefix(trimmed, profileAvatarUploadPrefix) {
+		originalKey := strings.TrimPrefix(trimmed, profileAvatarUploadPrefix)
+		if artworkkey.IsPortableKey(originalKey) {
+			return avatarSourceUpload, resolveTargetStoredImageURL(ctx, resolver, artworkurl.Target{
+				Surface: artworkurl.SurfaceProfileAvatars,
+				Keys:    []string{strconv.Itoa(userID), profileID},
+				Slot:    "avatar",
+			}, originalKey, avatarDisplayVariant)
+		}
+	}
+	return resolveProfileAvatar(ctx, resolver, legacy, ttl, ref)
 }
 
 func bundledProfileAvatarURL(id string) string {
@@ -168,21 +231,28 @@ func diceBearAvatarURL(style string, seed string) string {
 	return "https://api.dicebear.com/9.x/" + style + "/svg?" + query.Encode()
 }
 
+// profileAvatarPrefix is the legacy per-profile object prefix. Nothing writes
+// there any more; it is the sweep target for avatars uploaded before profile
+// avatars became content-addressed.
 func profileAvatarPrefix(userID int, profileID string) string {
 	return fmt.Sprintf("profile-avatars/%d/%s", userID, profileID)
 }
 
-func uploadedAvatarOriginalKey(userID int, profileID string) string {
-	return profileAvatarPrefix(userID, profileID) + "/original.webp"
-}
-
+// uploadedAvatarDisplayKey maps an avatar's original-variant key to the sized
+// variant clients render. It serves both the portable and the legacy grammar.
 func uploadedAvatarDisplayKey(originalKey string) string {
-	if strings.HasSuffix(originalKey, "/original.webp") {
-		return strings.TrimSuffix(originalKey, "/original.webp") + "/w256.webp"
+	originalKey = strings.TrimSpace(originalKey)
+	if display := artworkkey.Variant(originalKey, avatarDisplayVariant); display != originalKey {
+		return display
 	}
-	return strings.TrimRight(originalKey, "/") + "/w256.webp"
+	// Legacy references that stored the prefix rather than the original object.
+	return strings.TrimRight(originalKey, "/") + "/" + avatarDisplayVariant + ".webp"
 }
 
+// deleteUploadedAvatarObjects removes the legacy mutable avatar objects for a
+// profile. Content-addressed avatar revisions are deliberately left alone: one
+// revision can back several profiles, so when it stops being needed is the
+// artwork collector's decision, not this handler's.
 func deleteUploadedAvatarObjects(ctx context.Context, store profileAvatarStore, userID int, profileID string) error {
 	if store == nil {
 		return nil
@@ -205,7 +275,7 @@ func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-	if h.AvatarStore == nil {
+	if !h.ArtworkUploads.Available() {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Avatar upload storage is not configured")
 		return
 	}
@@ -254,28 +324,45 @@ func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	result, err := imageutil.GenerateSquareVariants(data, []int{256})
-	if err != nil {
+	// Square variants, addressed by content, registered for collection before
+	// the first byte lands — but only when the profile row lives where the
+	// collector can see it (see TrackArtworkRevisions). The profile row is
+	// repointed afterwards, so a failure below leaves the previous avatar
+	// intact and a tracked revision is reclaimed once its grace period expires.
+	stored, err := h.ArtworkUploads.Materialize(r.Context(), artworkupload.Request{
+		ImageType: artworkkey.ImageTypeAvatar,
+		Data:      data,
+		Square:    true,
+		Track:     h.TrackArtworkRevisions,
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, artworkupload.ErrInvalidImage):
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid image file")
 		return
+	case errors.Is(err, artworkupload.ErrStorageUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Avatar upload storage is not configured")
+		return
+	default:
+		slog.ErrorContext(r.Context(), "storing profile avatar", "component", "api",
+			"user_id", userID, "profile_id", profileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store avatar")
+		return
 	}
 
-	bucket := h.AvatarStore.Bucket()
-	originalKey := uploadedAvatarOriginalKey(userID, profileID)
-	for _, variant := range result.Variants {
-		key := profileAvatarPrefix(userID, profileID) + "/" + variant.Key + result.Ext
-		if err := h.AvatarStore.PutObject(r.Context(), bucket, key, variant.Data); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store avatar")
-			return
-		}
-	}
-
-	avatarRef := profileAvatarUploadPrefix + originalKey
+	previousRef := profile.Avatar
+	avatarRef := profileAvatarUploadPrefix + stored.OriginalKey
 	if err := store.UpdateProfile(r.Context(), profileID, userstore.UpdateProfileInput{Avatar: &avatarRef}); err != nil {
-		// Uploaded avatar keys are stable per profile, so rolling back by deleting the
-		// prefix here can remove the avatar the profile still references after a DB failure.
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save avatar")
 		return
+	}
+	// Only the legacy mutable objects need deleting by hand; a displaced
+	// content-addressed revision is collected by reference.
+	if avatarRefReplacesUpload(previousRef, avatarRef) {
+		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
+			slog.WarnContext(r.Context(), "legacy profile avatar cleanup failed after upload", "component", "api",
+				"user_id", userID, "profile_id", profileID, "error", cleanupErr)
+		}
 	}
 
 	updatedProfile, err := store.GetProfile(r.Context(), profileID)
@@ -284,7 +371,7 @@ func (h *ProfileHandler) HandleUploadAvatar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *updatedProfile))
+	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, userID, *updatedProfile))
 }
 
 func (h *ProfileHandler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
@@ -326,5 +413,5 @@ func (h *ProfileHandler) HandleDeleteAvatar(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *updatedProfile))
+	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, userID, *updatedProfile))
 }
