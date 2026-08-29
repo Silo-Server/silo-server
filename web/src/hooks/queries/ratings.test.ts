@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setQueryData: vi.fn(),
   invalidateQueries: vi.fn(),
   useMutation: vi.fn(),
+  useQuery: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -17,6 +18,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useMutation: (...args: unknown[]) => mocks.useMutation(...args),
+    useQuery: (...args: unknown[]) => mocks.useQuery(...args),
     useQueryClient: () => ({
       cancelQueries: mocks.cancelQueries,
       getQueriesData: mocks.getQueriesData,
@@ -41,7 +43,12 @@ vi.mock("./ratingsSurfaceRefresh", () => ({
   invalidateRatingSurfaceQueries: vi.fn(),
 }));
 
-import { useDeleteRating, useSetCommunityRatingReaction, useSetRating } from "./ratings";
+import {
+  useCommunityRatings,
+  useDeleteRating,
+  useSetCommunityRatingReaction,
+  useSetRating,
+} from "./ratings";
 
 describe("rating mutations", () => {
   beforeEach(() => {
@@ -56,6 +63,37 @@ describe("rating mutations", () => {
     mocks.invalidateQueries.mockReset();
     mocks.useMutation.mockReset();
     mocks.useMutation.mockImplementation((options: unknown) => options);
+    mocks.useQuery.mockReset();
+    mocks.useQuery.mockImplementation((options: unknown) => options);
+  });
+
+  it("loads community ratings only after capability discovery enables them", () => {
+    useCommunityRatings("item-1");
+    expect(mocks.useQuery.mock.calls[0]?.[0]).toMatchObject({
+      queryKey: ratingKeys.capabilities(),
+      staleTime: Infinity,
+      gcTime: Infinity,
+    });
+    expect(mocks.useQuery.mock.calls[1]?.[0]).toMatchObject({
+      queryKey: ratingKeys.community("item-1"),
+      enabled: false,
+    });
+
+    mocks.useQuery.mockReset();
+    mocks.useQuery
+      .mockImplementationOnce((options: unknown) => ({
+        ...(options as object),
+        data: { community_ratings: true, community_rating_reactions: true },
+        isError: false,
+        isLoading: false,
+      }))
+      .mockImplementationOnce((options: unknown) => options);
+
+    useCommunityRatings("item-1");
+    expect(mocks.useQuery.mock.calls[1]?.[0]).toMatchObject({
+      queryKey: ratingKeys.community("item-1"),
+      enabled: true,
+    });
   });
 
   it.each([

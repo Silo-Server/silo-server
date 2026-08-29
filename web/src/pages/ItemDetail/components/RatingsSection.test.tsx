@@ -66,7 +66,7 @@ describe("RatingsSection", () => {
     expect(screen.getByText("S*******")).toBeInTheDocument();
     expect(screen.getByText("You")).toBeInTheDocument();
     expect(screen.getByText("August 29, 2026")).toBeInTheDocument();
-    expect(screen.getByLabelText("5 out of 5 stars")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "5 out of 5 stars" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Helpful: 3" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Not helpful: 1" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Helpful: 3" })).toHaveClass(
@@ -90,6 +90,22 @@ describe("RatingsSection", () => {
       ratingKey: "rating-viewer",
       reaction: null,
     });
+  });
+
+  it("disables reaction controls when the server capability is unavailable", () => {
+    const current = mocks.useCommunityRatings();
+    mocks.useCommunityRatings.mockReturnValue({
+      ...current,
+      capabilities: {
+        community_ratings: true,
+        community_rating_reactions: false,
+      },
+    });
+
+    render(<RatingsSection itemId="movie-1" />);
+
+    expect(screen.getByRole("button", { name: "Helpful: 3" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Not helpful: 1" })).toBeDisabled();
   });
 
   it("keeps the section visible when no one has rated the item", () => {

@@ -25,6 +25,17 @@ type testProfileUserRepo struct {
 	err  error
 }
 
+type ratingProfilePurgerStub struct {
+	userID    int
+	profileID string
+}
+
+func (s *ratingProfilePurgerStub) PurgeProfile(_ context.Context, userID int, profileID string) error {
+	s.userID = userID
+	s.profileID = profileID
+	return nil
+}
+
 func (r testProfileUserRepo) GetByID(context.Context, int) (*models.User, error) {
 	return r.user, r.err
 }
@@ -657,6 +668,8 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 		t.Fatalf("create profile: %v", err)
 	}
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	purger := &ratingProfilePurgerStub{}
+	handler.RatingProfilePurger = purger
 
 	req := newAuthorizedProfileRequestWithRole(
 		http.MethodDelete,
@@ -676,6 +689,9 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	profile, err := store.GetProfile(context.Background(), "profile-2")
 	if err == nil && profile != nil {
 		t.Fatal("expected profile to be deleted")
+	}
+	if purger.userID != 1 || purger.profileID != "profile-2" {
+		t.Fatalf("rating purge target = (%d, %q), want (1, profile-2)", purger.userID, purger.profileID)
 	}
 }
 

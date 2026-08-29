@@ -301,6 +301,16 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
+	// The reactor profile may live outside PostgreSQL, so community reactions
+	// deliberately have no reactor-side profile FK. Remove both ratings owned
+	// by this profile and reactions it made while the profile delete is atomic.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM household_rating_reactions
+		WHERE (target_user_id = $1 AND target_profile_id = $2)
+		   OR (reactor_user_id = $1 AND reactor_profile_id = $2)`, s.userID, id); err != nil {
+		return fmt.Errorf("deleting rating reactions for profile %s: %w", id, err)
+	}
+
 	// user_setting_values is listed rather than left to its composite profile
 	// FK so both backends delete identically: the per-user SQLite store has no
 	// foreign keys at all. Account-scope rows carry a NULL profile_id and are

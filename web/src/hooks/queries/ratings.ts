@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
-import type { CommunityRatingReaction, CommunityRatingsResponse, ItemDetail } from "@/api/types";
+import type {
+  CommunityRatingReaction,
+  CommunityRatingsResponse,
+  ItemDetail,
+  RatingsCapabilities,
+} from "@/api/types";
 import { invalidateRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { ratingKeys } from "./keys";
 import {
@@ -91,13 +96,29 @@ export function useDeleteRating(itemId: string) {
   });
 }
 
-export function useCommunityRatings(itemId: string) {
+export function useRatingsCapabilities() {
   return useQuery({
+    queryKey: ratingKeys.capabilities(),
+    queryFn: () => api<RatingsCapabilities>("/ratings/capabilities"),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
+
+export function useCommunityRatings(itemId: string) {
+  const capabilitiesQuery = useRatingsCapabilities();
+  const communityQuery = useQuery({
     queryKey: ratingKeys.community(itemId),
     queryFn: () => api<CommunityRatingsResponse>(`/ratings/${itemId}/community?limit=100`),
-    enabled: itemId.length > 0,
+    enabled: itemId.length > 0 && capabilitiesQuery.data?.community_ratings === true,
     staleTime: 30_000,
   });
+  return {
+    ...communityQuery,
+    capabilities: capabilitiesQuery.data,
+    isError: capabilitiesQuery.isError || communityQuery.isError,
+    isLoading: capabilitiesQuery.isLoading || communityQuery.isLoading,
+  };
 }
 
 interface CommunityReactionMutation {

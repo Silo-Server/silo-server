@@ -12,7 +12,7 @@ const ratingDateFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 export default function RatingsSection({ itemId }: { itemId: string }) {
-  const { data, isLoading, isError } = useCommunityRatings(itemId);
+  const { data, capabilities, isLoading, isError } = useCommunityRatings(itemId);
   const reactionMutation = useSetCommunityRatingReaction(itemId);
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
 
@@ -75,7 +75,10 @@ export default function RatingsSection({ itemId }: { itemId: string }) {
                 <li key={entry.key} className="embla__slide shrink-0">
                   <RatingCard
                     entry={entry}
-                    disabled={reactionMutation.isPending}
+                    disabled={
+                      reactionMutation.isPending ||
+                      capabilities?.community_rating_reactions === false
+                    }
                     onReact={(reaction) => setReaction(entry, reaction)}
                   />
                 </li>
@@ -163,6 +166,7 @@ function RatingStars({ rating }: { rating: number }) {
   return (
     <div
       className="mt-3 flex items-center justify-center gap-1"
+      role="img"
       aria-label={`${rating} out of 5 stars`}
     >
       {Array.from({ length: 5 }, (_, index) => {

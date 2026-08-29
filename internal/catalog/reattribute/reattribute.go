@@ -270,6 +270,35 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 // its destination before that delete cascades.
 func mergeRatingReactionCollisions(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
 	_, err := tx.Exec(ctx, `
+		WITH reaction_candidates AS (
+			SELECT p.to_id AS media_item_id,
+			       source_reaction.target_user_id,
+			       source_reaction.target_profile_id,
+			       source_reaction.reactor_user_id,
+			       source_reaction.reactor_profile_id,
+			       source_reaction.reaction,
+			       source_reaction.reacted_at,
+			       ROW_NUMBER() OVER (
+				       PARTITION BY p.to_id,
+				                    source_reaction.target_user_id,
+				                    source_reaction.target_profile_id,
+				                    source_reaction.reactor_user_id,
+				                    source_reaction.reactor_profile_id
+				       ORDER BY source_reaction.reacted_at DESC,
+				                p.from_id,
+				                source_reaction.reaction DESC
+			       ) AS candidate_rank
+			FROM (
+				SELECT DISTINCT p.from_id, p.to_id
+				FROM `+pairsCTE+`
+			) p
+			JOIN household_rating_reactions source_reaction
+			  ON source_reaction.media_item_id = p.from_id
+			JOIN user_ratings destination_rating
+			  ON destination_rating.media_item_id = p.to_id
+			 AND destination_rating.user_id = source_reaction.target_user_id
+			 AND destination_rating.profile_id = source_reaction.target_profile_id
+		)
 		INSERT INTO household_rating_reactions (
 			media_item_id,
 			target_user_id,
@@ -279,20 +308,15 @@ func mergeRatingReactionCollisions(ctx context.Context, tx pgx.Tx, fromIDs, toID
 			reaction,
 			reacted_at
 		)
-		SELECT p.to_id,
-		       source_reaction.target_user_id,
-		       source_reaction.target_profile_id,
-		       source_reaction.reactor_user_id,
-		       source_reaction.reactor_profile_id,
-		       source_reaction.reaction,
-		       source_reaction.reacted_at
-		FROM `+pairsCTE+`
-		JOIN household_rating_reactions source_reaction
-		  ON source_reaction.media_item_id = p.from_id
-		JOIN user_ratings destination_rating
-		  ON destination_rating.media_item_id = p.to_id
-		 AND destination_rating.user_id = source_reaction.target_user_id
-		 AND destination_rating.profile_id = source_reaction.target_profile_id
+		SELECT media_item_id,
+		       target_user_id,
+		       target_profile_id,
+		       reactor_user_id,
+		       reactor_profile_id,
+		       reaction,
+		       reacted_at
+		FROM reaction_candidates
+		WHERE candidate_rank = 1
 		ON CONFLICT (
 			media_item_id,
 			target_user_id,

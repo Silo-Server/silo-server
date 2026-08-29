@@ -8,16 +8,22 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"golang.org/x/sync/errgroup"
 )
+
+const communityProfileHydrationConcurrency = 8
 
 // ratingsRepository defines the data access interface for user ratings.
 type ratingsRepository interface {
@@ -39,6 +45,7 @@ type RatingsHandler struct {
 	AvatarStore             profileAvatarStore
 	AvatarTTL               time.Duration
 	AvatarTokenSecret       []byte
+	StoreProvider           userstore.UserStoreProvider
 }
 
 // NewRatingsHandler creates a new RatingsHandler.
@@ -247,15 +254,16 @@ func (h *RatingsHandler) HandleListCommunityRatings(w http.ResponseWriter, r *ht
 		return
 	}
 
-	limit, _ := parsePagination(r)
+	limit, offset := parsePagination(r)
 	if limit > 100 {
 		limit = 100
 	}
-	ratings, err := h.ratingsRepo.ListCommunity(r.Context(), userID, profileID, itemID, limit, 0)
+	ratings, err := h.ratingsRepo.ListCommunity(r.Context(), userID, profileID, itemID, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list community ratings")
 		return
 	}
+	h.hydrateCommunityProfiles(r.Context(), ratings)
 
 	items := make([]communityRatingListItem, 0, len(ratings))
 	for _, rating := range ratings {
@@ -285,6 +293,71 @@ func (h *RatingsHandler) HandleListCommunityRatings(w http.ResponseWriter, r *ht
 		VoteCount:     voteCount,
 		Ratings:       items,
 	})
+}
+
+// hydrateCommunityProfiles fills metadata for profiles stored in per-user
+// SQLite. PostgreSQL-backed profiles are resolved by ListCommunity's join, so
+// this fallback adds no store reads on that path. Each unresolved account is
+// loaded once, with bounded concurrency and a hard maximum of 100 cards.
+func (h *RatingsHandler) hydrateCommunityProfiles(ctx context.Context, ratings []catalog.CommunityRating) {
+	if h.StoreProvider == nil {
+		return
+	}
+
+	unresolvedUsers := make(map[int]struct{})
+	for _, rating := range ratings {
+		if !rating.ProfileResolved {
+			unresolvedUsers[rating.UserID] = struct{}{}
+		}
+	}
+	if len(unresolvedUsers) == 0 {
+		return
+	}
+
+	profilesByUser := make(map[int]map[string]userstore.Profile, len(unresolvedUsers))
+	var profilesMu sync.Mutex
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(communityProfileHydrationConcurrency)
+	for userID := range unresolvedUsers {
+		userID := userID
+		group.Go(func() error {
+			store, err := h.StoreProvider.ForUser(groupCtx, userID)
+			if err != nil || store == nil {
+				slog.WarnContext(groupCtx, "community rating profile store unavailable", "component", "api", "user_id", userID, "error", err)
+				return nil
+			}
+			profiles, err := store.ListProfiles(groupCtx)
+			if err != nil {
+				slog.WarnContext(groupCtx, "community rating profiles unavailable", "component", "api", "user_id", userID, "error", err)
+				return nil
+			}
+			byID := make(map[string]userstore.Profile, len(profiles))
+			for _, profile := range profiles {
+				byID[profile.ID] = profile
+			}
+			profilesMu.Lock()
+			profilesByUser[userID] = byID
+			profilesMu.Unlock()
+			return nil
+		})
+	}
+	_ = group.Wait()
+
+	for i := range ratings {
+		if ratings[i].ProfileResolved {
+			continue
+		}
+		profile, ok := profilesByUser[ratings[i].UserID][ratings[i].ProfileID]
+		if !ok {
+			continue
+		}
+		ratings[i].ProfileName = profile.Name
+		ratings[i].Avatar = profile.Avatar
+		if updatedAt, err := time.Parse(time.RFC3339Nano, profile.UpdatedAt); err == nil {
+			ratings[i].ProfileUpdatedAt = updatedAt
+		}
+		ratings[i].ProfileResolved = true
+	}
 }
 
 // HandleCommunityRatingAvatar serves an uploaded avatar through a short-lived,

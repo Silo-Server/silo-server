@@ -28,6 +28,7 @@ type CommunityRating struct {
 	ProfileName      string
 	Avatar           string
 	ProfileUpdatedAt time.Time
+	ProfileResolved  bool
 	Rating           int
 	RatedAt          time.Time
 	UpCount          int
@@ -89,6 +90,37 @@ func (r *RatingsRepo) Delete(ctx context.Context, userID int, profileID, mediaIt
 	)
 	if err != nil {
 		return fmt.Errorf("delete rating: %w", err)
+	}
+	return nil
+}
+
+// PurgeProfile removes ratings owned by a deleted profile and reactions made
+// by it. Profile records may live in per-user SQLite, so PostgreSQL cannot
+// enforce the reactor-side cleanup with a foreign key.
+func (r *RatingsRepo) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin profile rating purge: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM household_rating_reactions
+		WHERE (target_user_id = $1 AND target_profile_id = $2)
+		   OR (reactor_user_id = $1 AND reactor_profile_id = $2)`,
+		userID, profileID,
+	); err != nil {
+		return fmt.Errorf("purge profile rating reactions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM user_ratings
+		WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID,
+	); err != nil {
+		return fmt.Errorf("purge profile ratings: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit profile rating purge: %w", err)
 	}
 	return nil
 }
@@ -172,9 +204,10 @@ func (r *RatingsRepo) ListCommunity(
 		)
 		SELECT ur.user_id,
 		       ur.profile_id,
-		       up.name AS profile_name,
-		       up.avatar,
-		       up.updated_at AS profile_updated_at,
+		       COALESCE(up.name, '') AS profile_name,
+		       COALESCE(up.avatar, '') AS avatar,
+		       COALESCE(up.updated_at, to_timestamp(0)) AS profile_updated_at,
+		       (up.id IS NOT NULL) AS profile_resolved,
 		       ur.rating,
 		       ur.rated_at,
 		       COALESCE(rc.up_count, 0),
@@ -183,7 +216,7 @@ func (r *RatingsRepo) ListCommunity(
 		       AVG(ur.rating) OVER ()::double precision AS average_rating,
 		       COUNT(*) OVER ()::integer AS total_vote_count
 		FROM user_ratings ur
-		JOIN user_profiles up
+		LEFT JOIN user_profiles up
 		  ON up.user_id = ur.user_id
 		 AND up.id = ur.profile_id
 		LEFT JOIN reaction_counts rc
@@ -211,6 +244,7 @@ func (r *RatingsRepo) ListCommunity(
 			&rating.ProfileName,
 			&rating.Avatar,
 			&rating.ProfileUpdatedAt,
+			&rating.ProfileResolved,
 			&rating.Rating,
 			&rating.RatedAt,
 			&rating.UpCount,

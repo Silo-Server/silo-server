@@ -27,11 +27,6 @@ CREATE TABLE household_rating_reactions (
         media_item_id
     ) REFERENCES user_ratings (user_id, profile_id, media_item_id)
       ON UPDATE CASCADE
-      ON DELETE CASCADE,
-    CONSTRAINT household_rating_reactions_reactor_profile_fkey FOREIGN KEY (
-        reactor_user_id,
-        reactor_profile_id
-    ) REFERENCES user_profiles (user_id, id)
       ON DELETE CASCADE
 );
 

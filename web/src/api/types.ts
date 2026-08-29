@@ -1139,6 +1139,11 @@ export interface ItemExtra {
 
 export type CommunityRatingReaction = "up" | "down";
 
+export interface RatingsCapabilities {
+  community_ratings: boolean;
+  community_rating_reactions: boolean;
+}
+
 export interface CommunityRatingEntry {
   key: string;
   display_name: string;

@@ -24,7 +24,7 @@ Clients should check this endpoint before presenting the optional community surf
 
 `GET /api/v1/ratings/{item_id}/community?limit=100`
 
-Every explicit profile rating for the requested item is included, whether or not that profile has watch progress. The card list is capped at 100 rows per request; the average and vote count cover every explicit rating for the item.
+Every explicit profile rating is eligible for inclusion, whether or not that profile has watch progress. The response returns up to the requested card-list limit (maximum 100); the average and vote count cover every explicit rating for the item.
 
 ```json
 {

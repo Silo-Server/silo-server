@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type communityRatingsRepoStub struct {
@@ -23,6 +24,8 @@ type communityRatingsRepoStub struct {
 	setTargetID    string
 	setReactionOK  bool
 	deleteReaction bool
+	listLimit      int
+	listOffset     int
 }
 
 func (*communityRatingsRepoStub) Set(context.Context, int, string, string, int) error { return nil }
@@ -33,7 +36,9 @@ func (*communityRatingsRepoStub) Delete(context.Context, int, string, string) er
 func (*communityRatingsRepoStub) List(context.Context, int, string, int, int) ([]catalog.UserRating, error) {
 	return nil, nil
 }
-func (s *communityRatingsRepoStub) ListCommunity(context.Context, int, string, string, int, int) ([]catalog.CommunityRating, error) {
+func (s *communityRatingsRepoStub) ListCommunity(_ context.Context, _ int, _ string, _ string, limit, offset int) ([]catalog.CommunityRating, error) {
+	s.listLimit = limit
+	s.listOffset = offset
 	return s.community, nil
 }
 func (s *communityRatingsRepoStub) SetCommunityReaction(_ context.Context, _ int, _ string, _ string, targetUserID int, targetProfileID string, reaction int) (bool, error) {
@@ -84,17 +89,18 @@ func TestCommunityRatingsResponseMasksIdentityAndUsesCurrentAvatar(t *testing.T)
 	ratedAt := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
 	repo := &communityRatingsRepoStub{community: []catalog.CommunityRating{
 		{
-			UserID:         9,
-			ProfileID:      "profile-secret",
-			ProfileName:    "Samantha",
-			Avatar:         "preset:avatar-1",
-			Rating:         5,
-			RatedAt:        ratedAt,
-			UpCount:        7,
-			DownCount:      2,
-			ViewerReaction: 1,
-			AverageRating:  4.5,
-			TotalVoteCount: 2,
+			UserID:          9,
+			ProfileID:       "profile-secret",
+			ProfileName:     "Samantha",
+			Avatar:          "preset:avatar-1",
+			ProfileResolved: true,
+			Rating:          5,
+			RatedAt:         ratedAt,
+			UpCount:         7,
+			DownCount:       2,
+			ViewerReaction:  1,
+			AverageRating:   4.5,
+			TotalVoteCount:  2,
 		},
 	}}
 	handler := NewRatingsHandler(repo, communityRatingsItemRepoStub{})
@@ -121,6 +127,62 @@ func TestCommunityRatingsResponseMasksIdentityAndUsesCurrentAvatar(t *testing.T)
 		if !strings.Contains(body, want) {
 			t.Errorf("response %q does not contain %q", body, want)
 		}
+	}
+}
+
+func TestCommunityRatingsHydratesSQLiteProfileMetadata(t *testing.T) {
+	ratedAt := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
+	store := newEmptyProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{
+		ID:        "profile-secret",
+		Name:      "Samantha",
+		Avatar:    "preset:avatar-1",
+		UpdatedAt: ratedAt.Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("create SQLite profile: %v", err)
+	}
+	repo := &communityRatingsRepoStub{community: []catalog.CommunityRating{
+		{
+			UserID:          9,
+			ProfileID:       "profile-secret",
+			ProfileResolved: false,
+			Rating:          5,
+			RatedAt:         ratedAt,
+			AverageRating:   5,
+			TotalVoteCount:  1,
+		},
+	}}
+	handler := NewRatingsHandler(repo, communityRatingsItemRepoStub{})
+	handler.StoreProvider = mappedTestUserStoreProvider{stores: map[int]userstore.UserStore{9: store}}
+	req := communityRatingsRequest(http.MethodGet, "/ratings/movie-1/community", "movie-1", "", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.HandleListCommunityRatings(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, want := range []string{`"display_name":"S*******"`, `"avatar_url":"/profile-avatars/avatar-1.svg"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("response %q does not contain %q", body, want)
+		}
+	}
+}
+
+func TestCommunityRatingsPassesPaginationOffset(t *testing.T) {
+	repo := &communityRatingsRepoStub{}
+	handler := NewRatingsHandler(repo, communityRatingsItemRepoStub{})
+	req := communityRatingsRequest(http.MethodGet, "/ratings/movie-1/community?limit=17&offset=23", "movie-1", "", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.HandleListCommunityRatings(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if repo.listLimit != 17 || repo.listOffset != 23 {
+		t.Fatalf("pagination = limit %d offset %d, want 17 and 23", repo.listLimit, repo.listOffset)
 	}
 }
 

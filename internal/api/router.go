@@ -861,7 +861,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
 		profileHandler.ProfileTokens = profileTokenService
-		profileHandler.AvatarStore = deps.S3Private
+		if deps.S3Private != nil {
+			profileHandler.AvatarStore = deps.S3Private
+		}
+		if ratingsRepo != nil {
+			profileHandler.RatingProfilePurger = ratingsRepo
+		}
 		profileHandler.SessionsReader = playbackSessionsLoader
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
 		if detailSvc != nil {
@@ -949,7 +954,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
-		ratingsHandler.AvatarStore = deps.S3Private
+		if deps.S3Private != nil {
+			ratingsHandler.AvatarStore = deps.S3Private
+		}
+		if deps.UserStoreProvider != nil {
+			ratingsHandler.StoreProvider = deps.UserStoreProvider
+		}
 		if deps.Config != nil {
 			ratingsHandler.AvatarTokenSecret = []byte(deps.Config.Auth.JWTSecret)
 		}
