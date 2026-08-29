@@ -291,6 +291,7 @@ export const mediaSurfaceKeys = {
 export const ratingKeys = {
   all: ["ratings"] as const,
   item: (itemId: string) => ["ratings", itemId] as const,
+  community: (itemId: string) => ["ratings", itemId, "community"] as const,
   list: () => ["ratings", "list"] as const,
 };
 

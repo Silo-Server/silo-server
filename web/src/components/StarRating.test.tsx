@@ -33,4 +33,22 @@ describe("StarRating", () => {
     fireEvent.click(stars[2]!);
     expect(onChange).toHaveBeenLastCalledWith(null);
   });
+
+  it("layers the watched-profile average beneath the personal rating", () => {
+    render(
+      <StarRating value={2} communityAverage={3.5} communityVoteCount={4} onChange={() => {}} />,
+    );
+
+    const group = screen.getByRole("radiogroup", {
+      name: "Rating. Server average 3.5 from 4 ratings.",
+    });
+    const stars = screen.getAllByRole("radio");
+
+    expect(group).toBeInTheDocument();
+    expect(stars[2]).toHaveAttribute("data-community-fill", "1.00");
+    expect(stars[3]).toHaveAttribute("data-community-fill", "0.50");
+    expect(stars[4]).toHaveAttribute("data-community-fill", "0.00");
+    expect(stars[1]).toHaveAttribute("data-filled", "true");
+    expect(stars[2]).toHaveAttribute("data-filled", "false");
+  });
 });

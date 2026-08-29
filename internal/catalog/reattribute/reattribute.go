@@ -251,12 +251,64 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 	report.ProgressMoved += moved
 	report.ProgressConflicts += conflicts
 
+	if err := mergeRatingReactionCollisions(ctx, tx, fromIDs, toIDs); err != nil {
+		return err
+	}
 	for _, intent := range intentTables {
 		movedRows, err := moveIntentPairs(ctx, tx, intent.table, intent.idColumn, intent.keyCols, fromIDs, toIDs)
 		if err != nil {
 			return err
 		}
 		report.IntentMoved += movedRows
+	}
+	return nil
+}
+
+// mergeRatingReactionCollisions preserves reactions when both the source and
+// destination already have a rating from the same profile. The generic intent
+// mover deletes the duplicate source rating, so reactions must be copied onto
+// its destination before that delete cascades.
+func mergeRatingReactionCollisions(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO household_rating_reactions (
+			media_item_id,
+			target_user_id,
+			target_profile_id,
+			reactor_user_id,
+			reactor_profile_id,
+			reaction,
+			reacted_at
+		)
+		SELECT p.to_id,
+		       source_reaction.target_user_id,
+		       source_reaction.target_profile_id,
+		       source_reaction.reactor_user_id,
+		       source_reaction.reactor_profile_id,
+		       source_reaction.reaction,
+		       source_reaction.reacted_at
+		FROM `+pairsCTE+`
+		JOIN household_rating_reactions source_reaction
+		  ON source_reaction.media_item_id = p.from_id
+		JOIN user_ratings destination_rating
+		  ON destination_rating.media_item_id = p.to_id
+		 AND destination_rating.user_id = source_reaction.target_user_id
+		 AND destination_rating.profile_id = source_reaction.target_profile_id
+		ON CONFLICT (
+			media_item_id,
+			target_user_id,
+			target_profile_id,
+			reactor_user_id,
+			reactor_profile_id
+		) DO UPDATE
+		SET reaction = CASE
+				WHEN EXCLUDED.reacted_at >= household_rating_reactions.reacted_at
+				THEN EXCLUDED.reaction
+				ELSE household_rating_reactions.reaction
+			END,
+		    reacted_at = GREATEST(household_rating_reactions.reacted_at, EXCLUDED.reacted_at)
+	`, fromIDs, toIDs)
+	if err != nil {
+		return fmt.Errorf("reattribute: rating reaction collisions: %w", err)
 	}
 	return nil
 }

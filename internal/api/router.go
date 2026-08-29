@@ -949,6 +949,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	var recsRepoForStale *recommendations.Repo
 	if ratingsRepo != nil && itemRepo != nil {
 		ratingsHandler = handlers.NewRatingsHandler(ratingsRepo, itemRepo)
+		ratingsHandler.AvatarStore = deps.S3Private
+		if deps.Config != nil {
+			ratingsHandler.AvatarTokenSecret = []byte(deps.Config.Auth.JWTSecret)
+		}
 		if deps.DB != nil {
 			recsRepoForStale = recommendations.NewRepo(deps.DB)
 			ratingsHandler.SetProfileStaler(recsRepoForStale)
@@ -2120,6 +2124,18 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Uploaded community avatars use a short-lived signed capability because
+		// browser image requests cannot attach the selected profile's auth header.
+		// The handler proxies the object so storage keys containing private IDs
+		// never reach another household user's browser.
+		if ratingsHandler != nil && deps.S3Private != nil {
+			if deps.RateLimitMW != nil {
+				r.With(deps.RateLimitMW.Handler).Get("/ratings/community-avatar/{token}", ratingsHandler.HandleCommunityRatingAvatar)
+			} else {
+				r.Get("/ratings/community-avatar/{token}", ratingsHandler.HandleCommunityRatingAvatar)
+			}
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -2372,6 +2388,10 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Route("/ratings", func(r chi.Router) {
 							r.Use(apimw.RequireProfile)
 							r.Get("/", ratingsHandler.HandleListRatings)
+							r.Get("/capabilities", ratingsHandler.HandleCapabilities)
+							r.Get("/{item_id}/community", ratingsHandler.HandleListCommunityRatings)
+							r.Put("/{item_id}/community/{rating_key}/reaction", ratingsHandler.HandleSetCommunityRatingReaction)
+							r.Delete("/{item_id}/community/{rating_key}/reaction", ratingsHandler.HandleDeleteCommunityRatingReaction)
 							r.Get("/{item_id}", ratingsHandler.HandleGetRating)
 							r.Put("/{item_id}", ratingsHandler.HandleSetRating)
 							r.Delete("/{item_id}", ratingsHandler.HandleDeleteRating)
