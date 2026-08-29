@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,12 +29,13 @@ type testProfileUserRepo struct {
 type ratingProfilePurgerStub struct {
 	userID    int
 	profileID string
+	err       error
 }
 
 func (s *ratingProfilePurgerStub) PurgeProfile(_ context.Context, userID int, profileID string) error {
 	s.userID = userID
 	s.profileID = profileID
-	return nil
+	return s.err
 }
 
 func (r testProfileUserRepo) GetByID(context.Context, int) (*models.User, error) {
@@ -692,6 +694,33 @@ func TestHandleDeleteProfile_AllowsPrimaryToDeleteOther(t *testing.T) {
 	}
 	if purger.userID != 1 || purger.profileID != "profile-2" {
 		t.Fatalf("rating purge target = (%d, %q), want (1, profile-2)", purger.userID, purger.profileID)
+	}
+}
+
+func TestHandleDeleteProfile_PreservesProfileWhenRatingPurgeFails(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	handler.RatingProfilePurger = &ratingProfilePurgerStub{err: errors.New("database unavailable")}
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodDelete,
+		"/profiles/profile-2",
+		"",
+		"user",
+		"profile-1",
+	)
+	recorder := httptest.NewRecorder()
+
+	handler.HandleDeleteProfile(recorder, withProfileRouteParam(req, "id", "profile-2"))
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	profile, err := store.GetProfile(context.Background(), "profile-2")
+	if err != nil || profile == nil {
+		t.Fatalf("profile was removed after rating purge failure: %v", err)
 	}
 }
 
