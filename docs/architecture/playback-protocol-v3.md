@@ -237,6 +237,7 @@ body cap: 256 KiB. Body: `ReplanRequestV3`
 | `409` | `stale_playback_plan` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active |
 | `409` | `idempotency_key_reused` | This `replan_request_id` was used for a different replan |
 | `409` | `replan_in_progress` | A replan for this session holds the lease right now |
+| `409` | `output_route_unchanged` | A legacy output-route invalidation changed only opaque or non-planning state; the active plan remains mounted |
 | `503` | `replan_capacity_exhausted` | Server-wide concurrent replan limit (8) reached; retryable |
 | `500` | `internal_error` | Store outage |
 

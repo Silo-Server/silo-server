@@ -1270,6 +1270,129 @@ func TestHandleStartPlaybackV3RejectsProfileMismatch(t *testing.T) {
 	}
 }
 
+func TestHandleReplanPlaybackV3RejectsUnchangedOutputRoute(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.ClientPlaybackContext.Output = playback.OutputContextV3{
+		OutputContextID: "route-1",
+		CurrentSink:     "bluetooth",
+		SinkType:        "bluetooth",
+		AudioPassthrough: &playback.AudioPassthroughV3{
+			PassthroughCodecs:  []string{"eac3"},
+			SpatializerEnabled: false,
+			MaxChannels:        6,
+		},
+	}
+
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/playback/start",
+		strings.NewReader(marshalV3StartRequest(t, startRequest)),
+	).WithContext(newAuthorizedPlaybackContext()))
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+
+	output := startRequest.ClientPlaybackContext.Output
+	output.OutputContextID = "route-2"
+	output.AudioPassthrough = &playback.AudioPassthroughV3{
+		PassthroughCodecs:  []string{"eac3"},
+		SpatializerEnabled: true,
+		MaxChannels:        6,
+	}
+	replan := playback.ReplanRequestV3{
+		ProtocolVersion:   playback.ProtocolV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID,
+		ReplanRequestID:   "unchanged-output-route-0001",
+		FailedPlanID:      started.PlaybackPlan.PlanID,
+		PlanAttemptID:     "unchanged-output-attempt-0001",
+		PlanAttemptKey:    started.PlaybackPlan.PlanAttemptKey,
+		AttemptCount:      1,
+		Failure: playback.FailureV3{
+			Classification: "output_route_changed",
+		},
+		Capabilities: startRequest.Capabilities,
+		ClientPlaybackContext: playback.ClientPlaybackContextV3{
+			ProtocolVersion: startRequest.ClientPlaybackContext.ProtocolVersion,
+			FormFactor:      startRequest.ClientPlaybackContext.FormFactor,
+			AppVersion:      startRequest.ClientPlaybackContext.AppVersion,
+			Device:          startRequest.ClientPlaybackContext.Device,
+			Output:          output,
+			Deliveries:      startRequest.ClientPlaybackContext.Deliveries,
+		},
+	}
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replanRequest := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", bytes.NewReader(body)).WithContext(newAuthorizedPlaybackContext())
+	replanRequest = withPlaybackRouteParam(replanRequest, "session_id", started.SessionID)
+	replanRR := httptest.NewRecorder()
+	handler.HandleReplanPlaybackV3(replanRR, replanRequest)
+	if replanRR.Code != http.StatusConflict || !strings.Contains(replanRR.Body.String(), "output_route_unchanged") {
+		t.Fatalf("replan status = %d, body = %s", replanRR.Code, replanRR.Body.String())
+	}
+
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.CurrentPlanID != started.PlaybackPlan.PlanID || record.CurrentReplanRequestID != "" {
+		t.Fatalf("unchanged route replaced durable plan: %#v", record)
+	}
+	if got := record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID; got != "route-1" {
+		t.Fatalf("durable output context id = %q, want route-1", got)
+	}
+}
+
+func TestSameLegacyOutputRouteReplanV3RequiresEveryOtherInputToMatch(t *testing.T) {
+	start := v3HandlerStartRequest()
+	start.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}}
+	start.ClientPlaybackContext.Output.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}}
+	record := &playback.AttemptRecordV3{
+		NormalizedRequest: start,
+		CurrentPlan: playback.PlanV3{
+			SelectedTracks: playback.SelectedTracksV3{
+				Audio: &playback.TrackIdentityV3{ID: "audio-1"},
+			},
+		},
+	}
+	next := playback.ReplanRequestV3{
+		ClientFeatures:        append([]string(nil), start.ClientFeatures...),
+		QualityPreference:     start.QualityPreference,
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	next.ClientPlaybackContext.Output.OutputContextID = "route-2"
+	next.Capabilities.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}, SpatializerEnabled: true}
+	next.ClientPlaybackContext.Output.AudioPassthrough = &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3"}, SpatializerEnabled: true}
+	if !sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("route generation, Spatializer state, and omitted tracks should be ignored")
+	}
+	next.SelectedTracks.Audio = &playback.TrackIdentityV3{ID: "audio-2"}
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("explicit audio track change should not be suppressed")
+	}
+	next.SelectedTracks = playback.SelectedTracksV3{}
+	next.Capabilities.AudioEvidence = playback.EvidenceDeclaredV3
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("capability evidence change should not be suppressed")
+	}
+	next.Capabilities = start.Capabilities
+	bandwidth := 12_000
+	next.BandwidthEstimateKbps = &bandwidth
+	if sameLegacyOutputRouteReplanV3(record, next) {
+		t.Fatal("bandwidth change should not be suppressed")
+	}
+}
+
 func TestPreferredAudioTrackIndexV3PropagatesSeriesPreferenceReadFailure(t *testing.T) {
 	wantErr := errors.New("audio preference store unavailable")
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
