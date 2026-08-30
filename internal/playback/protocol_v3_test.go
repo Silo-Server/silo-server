@@ -3340,6 +3340,125 @@ func TestPlanPlaybackV3VideoRemuxAdaptsProgressiveWhenHLSVideoUnsupported(t *tes
 	}
 }
 
+func TestPlanPlaybackV3MatroskaAACRemuxUsesTimestampNormalizedAudio(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.CodecVideo = "h264"
+	file.Resolution = "1080p"
+	file.Bitrate = 4_244
+	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 804, FrameRate: "25", BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
+	file.AudioTracks[0] = models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", SampleRate: 48_000}
+
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	req.ClientPlaybackContext.FormFactor = "desktop"
+	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0"}}
+	req.Capabilities.CodecsVideo = []string{"h264"}
+	req.Capabilities.CodecsAudio = []string{"aac"}
+	req.Capabilities.Containers = []string{"mp4"}
+	req.Capabilities.MaxResolution = "1080p"
+	delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+	for _, delivery := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
+		capability := req.ClientPlaybackContext.Deliveries[delivery]
+		if delivery == DeliveryClassProgressiveV3 {
+			capability.Containers = []string{"mp4"}
+		} else {
+			capability.Containers = []string{"hls"}
+		}
+		capability.VideoCodecs = []string{"h264"}
+		capability.AudioDecodeCodecs = []string{"aac"}
+		req.ClientPlaybackContext.Deliveries[delivery] = capability
+	}
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.DecisionReason != decisionReasonAudioAdaptationV3 || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationAudioToAACV3 || result.Plan.Transformations[0].RecipeVersion != TransformationAudioToAACRecipeVersionV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFirefoxMatroskaAACTimingV3 {
+		t.Fatalf("normalized AAC plan = %#v", result.Plan)
+	}
+}
+
+func TestPlanPlaybackV3NativeMatroskaAACDirectPlayRemainsUnchanged(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	req := validStartRequestV3()
+	req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+	req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+	req.ClientPlaybackContext.FormFactor = "desktop"
+	req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": "Mozilla/5.0 Firefox/154.0"}}
+	original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+	original.Containers = []string{"mkv"}
+	original.VideoCodecs = []string{"hevc"}
+	original.AudioDecodeCodecs = []string{"aac"}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.Transformations) != 0 {
+		t.Fatalf("direct play changed = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3FirefoxIncompatibleAudioCodecsUseNormalizedAACRecipe(t *testing.T) {
+	for _, test := range []struct {
+		codec    string
+		channels int
+	}{
+		{codec: "dts", channels: 6},
+		{codec: "eac3", channels: 6},
+		{codec: "ac3", channels: 6},
+		{codec: "truehd", channels: 8},
+		{codec: "opus", channels: 2},
+		{codec: "vorbis", channels: 2},
+		{codec: "flac", channels: 2},
+	} {
+		t.Run(test.codec, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			file.CodecVideo = "h264"
+			file.CodecAudio = test.codec
+			file.Resolution = "1080p"
+			file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24", BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
+			file.AudioTracks[0] = models.AudioTrack{Codec: test.codec, Channels: test.channels}
+
+			req := validStartRequestV3()
+			req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+			req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+			req.ClientPlaybackContext.FormFactor = "desktop"
+			req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": "Mozilla/5.0 Firefox/154.0"}}
+			req.Capabilities.CodecsVideo = []string{"h264"}
+			req.Capabilities.CodecsAudio = []string{"aac"}
+			req.Capabilities.Containers = []string{"mp4"}
+			delete(req.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+			for _, delivery := range []string{DeliveryClassProgressiveV3, DeliveryClassHLSV3} {
+				capability := req.ClientPlaybackContext.Deliveries[delivery]
+				if delivery == DeliveryClassProgressiveV3 {
+					capability.Containers = []string{"mp4"}
+				} else {
+					capability.Containers = []string{"hls"}
+				}
+				capability.VideoCodecs = []string{"h264"}
+				capability.AudioDecodeCodecs = []string{"aac"}
+				req.ClientPlaybackContext.Deliveries[delivery] = capability
+			}
+
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].RecipeVersion != TransformationAudioToAACRecipeVersionV3 {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+		})
+	}
+}
+
 func TestPlanPlaybackV3VideoRemuxHonorsProgressiveAudioPassthrough(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.CodecAudio = "ac3"

@@ -12,6 +12,12 @@ import {
   type CatalogSearchState,
 } from "@/pages/catalogSearchParams";
 
+// Search-as-you-type creates a distinct query key for every settled input.
+// Keep enough history for a quick correction/backspace without retaining ten
+// minutes of poster-heavy responses, and never automatically replay a timed
+// out interactive search against PostgreSQL.
+const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
+
 function catalogParamsForKey(
   state: CatalogSearchState,
   limit: number,
@@ -142,12 +148,15 @@ export function useCatalogWindow(
   const limit = options.limit ?? 60;
   const includeTotal = options.includeTotal ?? true;
   const enabled = options.enabled ?? true;
+  const isInteractiveSearch = state.source === "query" && Boolean(state.q);
   const page0Params = catalogParamsForKey(state, limit, includeTotal);
   const remainingPageParams = catalogParamsForKey(state, limit, false);
   const visibleRange = options.visibleRange ?? [0, limit - 1];
   const bufferPages = state.source === "query" && state.q ? 0 : 1;
-  const startPage = Math.max(0, Math.floor(visibleRange[0] / limit) - bufferPages);
-  const endPage = Math.floor(visibleRange[1] / limit) + bufferPages;
+  const visibleStartPage = Math.max(0, Math.floor(visibleRange[0] / limit));
+  const visibleEndPage = Math.floor(visibleRange[1] / limit);
+  const startPage = Math.max(0, visibleStartPage - bufferPages);
+  const endPage = visibleEndPage + bufferPages;
 
   // Fetch page 0 separately so its snapshot timestamp is available
   // synchronously for subsequent page queries, preventing duplicate items
@@ -157,11 +166,16 @@ export function useCatalogWindow(
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       fetchCatalogPage(state, limit, 0, { signal }, includeTotal),
     staleTime: 10 * 60 * 1000,
+    ...(isInteractiveSearch
+      ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+      : {}),
     enabled,
+    placeholderData: isInteractiveSearch ? (previousData) => previousData : undefined,
   });
 
   const snapshot = page0Result.data?.snapshot;
-  const canFetchRemainingPages = enabled && page0Result.data !== undefined;
+  const canFetchRemainingPages =
+    enabled && page0Result.data !== undefined && !page0Result.isPlaceholderData;
 
   const remainingPageIndices = useMemo(() => {
     const indices = new Set<number>();
@@ -186,6 +200,9 @@ export function useCatalogWindow(
         queryFn: ({ signal }: { signal: AbortSignal }) =>
           fetchCatalogPage(state, limit, offset, { signal }, false, snapshot),
         staleTime: 10 * 60 * 1000,
+        ...(isInteractiveSearch
+          ? { gcTime: INTERACTIVE_SEARCH_GC_TIME_MS, retry: false as const }
+          : {}),
         enabled: canFetchRemainingPages,
       };
     }),
@@ -193,6 +210,16 @@ export function useCatalogWindow(
 
   const title = page0Result.data?.title ?? state.title;
   const isLoading = page0Result.isLoading;
+  const failedVisibleResults = remainingResults.filter((result, queryIndex) => {
+    const pageIndex = remainingPageIndices[queryIndex];
+    return (
+      pageIndex !== undefined &&
+      pageIndex >= visibleStartPage &&
+      pageIndex <= visibleEndPage &&
+      result.isError
+    );
+  });
+  const remainingError = failedVisibleResults[0]?.error;
 
   const pageResults = useMemo(() => {
     const map = new Map<number, CatalogResponse>();
@@ -316,6 +343,18 @@ export function useCatalogWindow(
       effectiveSort: page0Result.data?.effective_sort,
     },
     isLoading,
+    isError: page0Result.isError || failedVisibleResults.length > 0,
+    isPlaceholderData: page0Result.isPlaceholderData,
+    error: page0Result.error ?? remainingError,
+    refetch: async () => {
+      // Page 0 owns the snapshot and total, so refresh it together with every
+      // failed visible page. Retrying only page 0 leaves a timed-out later page
+      // missing from the grid and immediately recreates the same partial view.
+      await Promise.all([
+        page0Result.refetch(),
+        ...failedVisibleResults.map((result) => result.refetch()),
+      ]);
+    },
   };
 }
 

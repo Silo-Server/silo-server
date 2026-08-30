@@ -2100,6 +2100,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
   }
 
+  /* Search controls repaint on the hottest route in the app. Keep them on the
+     same opaque paint surface as the page: no backdrop sampling, alpha blend,
+     or blur layer needs to be recomposited while results replace underneath. */
+  .search-paint-surface {
+    background: var(--background);
+    border-color: color-mix(in srgb, var(--border) 72%, transparent);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
   /* Panel chrome only once there is a sidebar to enclose. Below this the
      settings detail view is already a stack of surface-panel groups, and a
      panel around them would nest a card in a card. */

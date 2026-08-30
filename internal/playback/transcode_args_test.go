@@ -1472,26 +1472,27 @@ func TestIsAudioToAACStereoDownmixV3RequiresExactRecipeShape(t *testing.T) {
 	}
 }
 
-func TestAppendAudioArgsBoostsOnlyEncodedSurroundToStereo(t *testing.T) {
-	const wantFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t *testing.T) {
+	const boostFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+	const normalizeFilter = "aresample=async=1"
 	tests := []struct {
 		name           string
 		codec          string
 		sourceChannels int
 		targetChannels int
-		wantBoost      bool
+		wantFilter     string
 	}{
-		{name: "aac 5.1 to stereo", codec: "aac", sourceChannels: 6, targetChannels: 2, wantBoost: true},
-		{name: "default aac 7.1 to stereo", sourceChannels: 8, targetChannels: 2, wantBoost: true},
-		{name: "aac default target is stereo", codec: "aac", sourceChannels: 6, wantBoost: true},
+		{name: "DTS 5.1 to AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: 2, wantFilter: boostFilter},
+		{name: "TrueHD 7.1 to default AAC stereo", sourceChannels: 8, targetChannels: 2, wantFilter: boostFilter},
+		{name: "EAC3 surround to default AAC stereo", codec: "aac", sourceChannels: 6, wantFilter: boostFilter},
 		{name: "opus has no versioned boost recipe", codec: "opus", sourceChannels: 6},
-		{name: "unknown codec fallback has no versioned boost", codec: "unknown", sourceChannels: 6, targetChannels: 2},
-		{name: "stereo aac encode", codec: "aac", sourceChannels: 2, targetChannels: 2},
-		{name: "unknown source channels", codec: "aac", targetChannels: 2},
-		{name: "surround to mono", codec: "aac", sourceChannels: 6, targetChannels: 1},
-		{name: "negative target resolves to ordinary stereo", codec: "aac", sourceChannels: 6, targetChannels: -1},
-		{name: "noncanonical target resolves to ordinary stereo", codec: "aac", sourceChannels: 6, targetChannels: 3},
-		{name: "surround preserved", codec: "aac", sourceChannels: 6, targetChannels: 6},
+		{name: "unknown codec AAC fallback", codec: "unknown", sourceChannels: 6, targetChannels: 2, wantFilter: normalizeFilter},
+		{name: "stereo AAC encode", codec: "aac", sourceChannels: 2, targetChannels: 2, wantFilter: normalizeFilter},
+		{name: "unknown source channels", codec: "aac", targetChannels: 2, wantFilter: normalizeFilter},
+		{name: "surround to AAC mono", codec: "aac", sourceChannels: 6, targetChannels: 1, wantFilter: normalizeFilter},
+		{name: "negative target resolves to ordinary AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: -1, wantFilter: normalizeFilter},
+		{name: "noncanonical target resolves to ordinary AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: 3, wantFilter: normalizeFilter},
+		{name: "surround AAC preserved", codec: "aac", sourceChannels: 6, targetChannels: 6, wantFilter: normalizeFilter},
 		{name: "copy", codec: "copy", sourceChannels: 6, targetChannels: 2},
 		{name: "ac3 preserves source layout", codec: "ac3", sourceChannels: 6, targetChannels: 2},
 		{name: "eac3 preserves source layout", codec: "eac3", sourceChannels: 6, targetChannels: 2},
@@ -1505,9 +1506,15 @@ func TestAppendAudioArgsBoostsOnlyEncodedSurroundToStereo(t *testing.T) {
 				SourceAudioChannels: tt.sourceChannels,
 				TargetAudioChannels: tt.targetChannels,
 			})
-			gotBoost := argsContainPair(args, "-af", wantFilter)
-			if gotBoost != tt.wantBoost {
-				t.Fatalf("downmix boost present=%t, want %t; args=%s", gotBoost, tt.wantBoost, strings.Join(args, " "))
+			var gotFilter string
+			for i := 0; i < len(args)-1; i++ {
+				if args[i] == "-af" {
+					gotFilter = args[i+1]
+					break
+				}
+			}
+			if gotFilter != tt.wantFilter {
+				t.Fatalf("audio filter = %q, want %q; args=%s", gotFilter, tt.wantFilter, strings.Join(args, " "))
 			}
 		})
 	}

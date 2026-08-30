@@ -59,4 +59,23 @@ describe("RequestPosterCard (discover variant)", () => {
     // its absence is the strongest signal that the button was suppressed.
     expect(markup).not.toContain("<button");
   });
+
+  it("shows the media type so same-title movies and series stay distinguishable", () => {
+    const movieMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <RequestPosterCard variant="discover" item={requestable} />
+      </MemoryRouter>,
+    );
+    const seriesMarkup = renderToStaticMarkup(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={{ ...requestable, media_type: "series", tmdb_id: 43 }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(movieMarkup).toContain(">Movie<");
+    expect(seriesMarkup).toContain(">Series<");
+  });
 });

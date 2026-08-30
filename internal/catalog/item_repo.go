@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -133,6 +134,17 @@ func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (s
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
 
+// A catalog search is interactive work. Bound the complete PostgreSQL FTS +
+// fuzzy path independently of client cancellation so a pathological query can
+// never consume a connection and CPU for minutes after the user has moved on.
+const postgresSearchTimeout = 3 * time.Second
+
+// A timed-out fuzzy query leaves its transaction needing a rollback, but the
+// request context is already unusable at that point. Give cleanup its own
+// short bound so the pool can reuse the connection instead of discarding it;
+// this is cleanup-only and cannot extend the search response deadline.
+const postgresSearchRollbackTimeout = time.Second
+
 // fuzzyFallbackThreshold is the FTS result count below which SearchPage reaches
 // for the trigram fuzzy fallback (buildFuzzySearchSQL). At or above it the FTS
 // result set is considered rich enough that a "did you mean" pass would only add
@@ -147,6 +159,19 @@ const fuzzyFallbackThreshold = 5
 // to paginate hundreds of low-similarity typo matches; when the true match count
 // exceeds this, the overflow is logged and the total is reported as inexact.
 const fuzzyMaxResults = 50
+
+// fuzzyRerankMaxAliasesPerItem bounds the only extra metadata the in-process
+// typo reranker may read. Candidate rows are already capped by fuzzyMaxResults,
+// so this makes its worst case 50 items / 200 relevant aliases regardless of
+// total library size.
+const fuzzyRerankMaxAliasesPerItem = 4
+
+const (
+	fuzzyRerankMaxQueryTokens = 16
+	fuzzyRerankMaxTitleTokens = 64
+	fuzzyRerankMaxTokenRunes  = 64
+	fuzzyRerankMaxTitleBytes  = 1024
+)
 
 // trgmWordSimilarityThreshold pins pg_trgm.strict_word_similarity_threshold
 // for the fuzzy query via SET LOCAL. The <<% operator's selectivity is
@@ -920,6 +945,8 @@ func (r *ItemRepository) SearchPage(
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, postgresSearchTimeout)
+	defer cancel()
 
 	parsed := parseSearchQuery(query)
 
@@ -1039,6 +1066,14 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	if !includeTotal && limit-len(ftsBlock) < fuzzyLimit {
 		fuzzyLimit = limit - len(ftsBlock)
 	}
+	// An exact normalized title is already the strongest possible correction.
+	// The sparse FTS block is complete here, and it already includes related
+	// prefix/title matches, so a second trigram scan can only add latency and
+	// noisy near-matches. Misspellings and alias-only hits still take the fuzzy
+	// path because their hydrated title does not equal the query.
+	if searchBlockHasExactTitle(ftsBlock, parsed.ExactTitleHint) {
+		fuzzyLimit = 0
+	}
 	minSimilarity := 0.0
 	if len(ftsBlock) > 0 {
 		minSimilarity = fuzzyAugmentSimilarityFloor
@@ -1049,7 +1084,7 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 		fuzzySQL, _, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyLimit+1, 0, filter, false, contentIDsFromMediaItems(ftsBlock), minSimilarity)
 		if fuzzySQL != "" {
 			var err error
-			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, fuzzySQL, fuzzyArgs, fuzzyLimit)
+			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, searchTextFromParsed(parsed), fuzzySQL, fuzzyArgs, fuzzyLimit)
 			if err != nil {
 				return nil, 0, false, includeTotal, err
 			}
@@ -1092,17 +1127,33 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	return page, total, hi < total, !fuzzyTruncated, nil
 }
 
+func searchBlockHasExactTitle(items []*models.MediaItem, normalizedTitle string) bool {
+	if normalizedTitle == "" {
+		return false
+	}
+	for _, item := range items {
+		if item != nil && normalizeTitleForComparison(item.Title) == normalizedTitle {
+			return true
+		}
+	}
+	return false
+}
+
 // execFuzzyBlock runs the fuzzy data query inside a transaction that pins
 // pg_trgm.strict_word_similarity_threshold, so the <<% operator's selectivity
 // cannot drift with cluster configuration (its 0.6 server default would reject
 // ordinary typos outright). The query was built with LIMIT fuzzyLimit+1; the
 // extra row only signals truncation and is trimmed from the returned block.
-func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
+func (r *ItemRepository) execFuzzyBlock(ctx context.Context, searchText, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, false, fmt.Errorf("beginning fuzzy search tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), postgresSearchRollbackTimeout)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, fmt.Errorf("pinning trigram word-similarity threshold: %w", err)
@@ -1111,10 +1162,274 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, arg
 	if err != nil {
 		return nil, false, err
 	}
+	if len(block) > 1 {
+		aliases, err := loadFuzzyRerankAliases(ctx, tx, searchText, block)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := rerankFuzzyItems(ctx, searchText, block, aliases); err != nil {
+			return nil, false, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("committing fuzzy search tx: %w", err)
 	}
 	return block, truncated, nil
+}
+
+// loadFuzzyRerankAliases reads only aliases that passed the same indexed
+// strict-word predicate as the fuzzy candidate query. ROW_NUMBER applies the
+// cap per content ID; an item with pathological alias history cannot inflate
+// the in-process relevance workload.
+func loadFuzzyRerankAliases(ctx context.Context, q searchQuerier, searchText string, items []*models.MediaItem) (map[string][]string, error) {
+	contentIDs := contentIDsFromMediaItems(items)
+	if len(contentIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, `
+		WITH matched AS (
+			SELECT
+				mia.content_id,
+				mia.normalized_title,
+				ROW_NUMBER() OVER (
+					PARTITION BY mia.content_id
+					ORDER BY
+						0.65 * similarity(public.normalize_search_text($2), mia.normalized_title)
+							+ 0.35 * strict_word_similarity(public.normalize_search_text($2), mia.normalized_title) DESC,
+						mia.normalized_title ASC
+				) AS alias_rank
+			FROM media_item_aliases mia
+			WHERE mia.content_id = ANY($1)
+			  AND public.normalize_search_text($2) <<% mia.normalized_title
+		)
+		SELECT content_id, normalized_title
+		FROM matched
+		WHERE alias_rank <= $3`, contentIDs, searchText, fuzzyRerankMaxAliasesPerItem)
+	if err != nil {
+		return nil, fmt.Errorf("loading bounded fuzzy aliases: %w", err)
+	}
+	defer rows.Close()
+
+	aliases := make(map[string][]string, len(contentIDs))
+	for rows.Next() {
+		var contentID, normalizedTitle string
+		if err := rows.Scan(&contentID, &normalizedTitle); err != nil {
+			return nil, fmt.Errorf("scanning fuzzy alias: %w", err)
+		}
+		aliases[contentID] = append(aliases[contentID], normalizedTitle)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating fuzzy aliases: %w", err)
+	}
+	return aliases, nil
+}
+
+type fuzzyTitleScore struct {
+	exact         bool
+	contiguous    bool
+	matchedTokens int
+	editDistance  int
+	extraTokens   int
+}
+
+type fuzzyRankedItem struct {
+	item  *models.MediaItem
+	score fuzzyTitleScore
+	order int
+}
+
+// rerankFuzzyItems is a deliberately tiny relevance layer over PostgreSQL's
+// indexed candidate set, not another search index. Its edit limits mirror the
+// auto-fuzziness policy used by Bleve (Apache-2.0): 0 edits for <=2 characters,
+// 1 for 3-5, and at most 2 for longer tokens. PostgreSQL still decides which
+// rows are candidates; this only prevents one strongly matching word from
+// outranking a phrase whose every token is a plausible typo correction.
+func rerankFuzzyItems(ctx context.Context, searchText string, items []*models.MediaItem, aliases map[string][]string) error {
+	query := normalizeTitleForComparison(searchText)
+	queryTokens, ok := boundedFuzzyTokens(query, fuzzyRerankMaxQueryTokens)
+	if !ok || len(queryTokens) == 0 || len(items) < 2 {
+		return nil
+	}
+
+	ranked := make([]fuzzyRankedItem, 0, len(items))
+	for i, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var variants []string
+		if item != nil {
+			variants = append(variants, aliases[item.ContentID]...)
+		}
+		if item != nil && len(item.Title) <= fuzzyRerankMaxTitleBytes {
+			variants = append(variants, item.Title)
+		}
+		score := fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
+		for _, variant := range variants {
+			candidate := scoreFuzzyTitleVariant(query, queryTokens, variant)
+			if fuzzyTitleScoreBetter(candidate, score) {
+				score = candidate
+			}
+		}
+		ranked = append(ranked, fuzzyRankedItem{item: item, score: score, order: i})
+	}
+
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if fuzzyTitleScoreBetter(ranked[i].score, ranked[j].score) {
+			return true
+		}
+		if fuzzyTitleScoreBetter(ranked[j].score, ranked[i].score) {
+			return false
+		}
+		return ranked[i].order < ranked[j].order
+	})
+	for i := range ranked {
+		items[i] = ranked[i].item
+	}
+	return nil
+}
+
+func scoreFuzzyTitleVariant(query string, queryTokens [][]rune, rawTitle string) fuzzyTitleScore {
+	title := normalizeTitleForComparison(rawTitle)
+	titleTokens, ok := boundedFuzzyTokens(title, fuzzyRerankMaxTitleTokens)
+	if !ok || len(titleTokens) == 0 {
+		return fuzzyTitleScore{editDistance: int(^uint(0) >> 1), extraTokens: int(^uint(0) >> 1)}
+	}
+	score := fuzzyTitleScore{
+		exact:       title == query,
+		contiguous:  strings.Contains(title, query),
+		extraTokens: absInt(len(titleTokens) - len(queryTokens)),
+	}
+	for _, queryToken := range queryTokens {
+		maxEdits := fuzzyAutoMaxEdits(len(queryToken))
+		best := maxEdits + 1
+		for _, titleToken := range titleTokens {
+			distance := boundedLevenshteinRunes(queryToken, titleToken, maxEdits)
+			if distance < best {
+				best = distance
+			}
+		}
+		if best <= maxEdits {
+			score.matchedTokens++
+		}
+		score.editDistance += best
+	}
+	return score
+}
+
+func fuzzyTitleScoreBetter(a, b fuzzyTitleScore) bool {
+	if a.exact != b.exact {
+		return a.exact
+	}
+	if a.matchedTokens != b.matchedTokens {
+		return a.matchedTokens > b.matchedTokens
+	}
+	if a.contiguous != b.contiguous {
+		return a.contiguous
+	}
+	if a.editDistance != b.editDistance {
+		return a.editDistance < b.editDistance
+	}
+	return a.extraTokens < b.extraTokens
+}
+
+func boundedFuzzyTokens(normalized string, maxTokens int) ([][]rune, bool) {
+	fields := strings.Fields(normalized)
+	if len(fields) > maxTokens {
+		return nil, false
+	}
+	tokens := make([][]rune, 0, len(fields))
+	for _, field := range fields {
+		runes := []rune(field)
+		if len(runes) > fuzzyRerankMaxTokenRunes {
+			return nil, false
+		}
+		tokens = append(tokens, runes)
+	}
+	return tokens, true
+}
+
+func fuzzyAutoMaxEdits(tokenRunes int) int {
+	switch {
+	case tokenRunes <= 2:
+		return 0
+	case tokenRunes <= 5:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// boundedLevenshteinRunes computes only the small edit bands used by typo
+// search. Rows that cannot finish within maxEdits return maxEdits+1 early, so
+// CPU and scratch memory are bounded by short title-token lengths.
+func boundedLevenshteinRunes(a, b []rune, maxEdits int) int {
+	if absInt(len(a)-len(b)) > maxEdits {
+		return maxEdits + 1
+	}
+	if len(a) == 0 {
+		if len(b) <= maxEdits {
+			return len(b)
+		}
+		return maxEdits + 1
+	}
+	if len(b) == 0 {
+		if len(a) <= maxEdits {
+			return len(a)
+		}
+		return maxEdits + 1
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+
+	previous := make([]int, len(a)+1)
+	current := make([]int, len(a)+1)
+	for i := range previous {
+		previous[i] = i
+	}
+	for row, right := range b {
+		current[0] = row + 1
+		rowMin := current[0]
+		for col, left := range a {
+			cost := 0
+			if left != right {
+				cost = 1
+			}
+			current[col+1] = minInt(
+				previous[col+1]+1,
+				current[col]+1,
+				previous[col]+cost,
+			)
+			if current[col+1] < rowMin {
+				rowMin = current[col+1]
+			}
+		}
+		if rowMin > maxEdits {
+			return maxEdits + 1
+		}
+		previous, current = current, previous
+	}
+	if previous[len(a)] > maxEdits {
+		return maxEdits + 1
+	}
+	return previous[len(a)]
+}
+
+func minInt(values ...int) int {
+	minimum := values[0]
+	for _, value := range values[1:] {
+		if value < minimum {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 // searchQuerier is the subset of pgxpool.Pool / pgx.Tx that execSearchBlock
@@ -1203,6 +1518,7 @@ func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, d
 //	$2               titlePrefixTsQuery (always)
 //	itemType placeholders, allowed/disabled libraries, MaxContentRating
 //	parsed.ExactTitleHint
+//	parsed.NormalizedText (leading-short title lookups only)
 //	parsed.Year (or NULL)
 //	parsed.Phrase
 //	limit, offset
@@ -1282,7 +1598,7 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 // SearchPage only when the FTS query is sparse. Unlike buildSearchSQLWithTotal,
 // the sole match predicate is the pg_trgm strict-word-similarity operator
 // (<<%) against the indexed title_normalized generated column (migration 105's
-// gin_trgm_ops index serves it), and the ranking signals are
+// gin_trgm_ops index serves it), and the ranking signal blends
 // strict_word_similarity()/similarity() on that same column. Crucially it
 // never references the title tsvectors, so the low-similarity rows the
 // operator can surface never pay a per-row tsvector rebuild — that rebuild
@@ -1326,26 +1642,19 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 	// word-boundary extent of the title instead, and at equal thresholds it is
 	// a strict superset of % (the whole string is itself a valid extent). The
 	// same gin_trgm_ops index serves both operators.
-	// The alias arm is a scalar array subquery (InitPlan) for the same reason
-	// as the FTS builder's alias arms: `= ANY(param)` keeps the outer OR a
-	// BitmapOr over the two gin_trgm_ops indexes, where an `IN (subquery)` arm
-	// would force a seq scan evaluating <<% against every media_items row.
-	conditions := []string{`(
-		public.normalize_search_text($1) <<% mi.title_normalized OR
-		mi.content_id = ANY(COALESCE((
-			SELECT array_agg(DISTINCT mia.content_id) FROM media_item_aliases mia
-			WHERE public.normalize_search_text($1) <<% mia.normalized_title
-		), '{}'::text[]))
-	)`}
+	// Title and alias candidates are independent indexed arms. They are unioned
+	// by content_id before media_items is hydrated. Do not correlate alias
+	// scoring back to each media row: PostgreSQL can turn that shape into a full
+	// alias-index filter for every candidate (observed cost >112k and a real
+	// 3-second timeout for "Gane of Throns"). This shape scans each trigram GIN
+	// index once and scores only the rows it returned.
+	var conditions []string
 	if minSimilarity > 0 {
 		// The floor is whole-title similarity, NOT word similarity: augmenting
 		// a query that already has hits must only admit near-identical titles,
 		// and word similarity rates embedded prefix words far too high (see
 		// fuzzyAugmentSimilarityFloor).
-		conditions = append(conditions, fmt.Sprintf(`GREATEST(
-			similarity(public.normalize_search_text($1), mi.title_normalized),
-			COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-		) >= $%d`, argIdx))
+		conditions = append(conditions, fmt.Sprintf("cs.fuzzy_full_rank >= $%d", argIdx))
 		args = append(args, minSimilarity)
 		argIdx++
 	}
@@ -1358,35 +1667,61 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 		argIdx++
 	}
 
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
 
-	// GROUP BY is required so the MAX(similarity(...)) ranking aggregate is legal,
-	// mirroring buildSearchSQLWithTotal; COUNT(*) OVER () then counts distinct
-	// content_ids. qualifiedItemColumns aliases the coalesced columns so the outer
-	// SELECT can re-reference them; GROUP BY uses the raw refs.
+	// candidate_scores has exactly one row per content_id, so hydration needs no
+	// wide GROUP BY over all media columns. COUNT(*) OVER () therefore counts
+	// distinct visible items directly.
 	qualifiedCols := qualifiedItemColumns("mi")
-	groupByCols := qualifiedItemColumnRefs("mi")
-	// fuzzy_rank orders by how well the query matches SOME word extent of the
-	// title; fuzzy_full_rank tie-breaks by whole-title closeness so "The
-	// Avengers" sorts above "Avengers: Endgame" for the typo "avegners". Both
-	// are computed only over the matched candidate set.
+	// Candidate recall uses strict word similarity so a typo can still reach a
+	// long title. Ranking cannot use that score alone: a single matching word
+	// can otherwise outrank the intended phrase (for example "Gane of Throns"
+	// used to rank "Justice League: Throne of Atlantis" above "Game of
+	// Thrones"). Blend mostly whole-title closeness with enough word similarity
+	// to keep long-title typo recovery useful (for example "Hary Poter" still
+	// prefers a Harry Potter title over "Miss Potter"). The whole-title score
+	// remains the deterministic first tie-break. Both signals are computed only
+	// over the indexed candidate set, never the full catalog.
 	scoredCTE := fmt.Sprintf(`
-		WITH scored AS (
+		WITH alias_candidates AS MATERIALIZED (
+			SELECT
+				mia.content_id,
+				MAX(
+					0.65 * similarity(public.normalize_search_text($1), mia.normalized_title)
+						+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)
+				) AS fuzzy_rank,
+				MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) AS fuzzy_full_rank
+			FROM media_item_aliases mia
+			WHERE public.normalize_search_text($1) <<%% mia.normalized_title
+			GROUP BY mia.content_id
+		), candidates AS (
+			SELECT
+				mi.content_id,
+				0.65 * similarity(public.normalize_search_text($1), mi.title_normalized)
+					+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_rank,
+				similarity(public.normalize_search_text($1), mi.title_normalized) AS fuzzy_full_rank
+			FROM media_items mi
+			WHERE public.normalize_search_text($1) <<%% mi.title_normalized
+			UNION ALL
+			SELECT content_id, fuzzy_rank, fuzzy_full_rank
+			FROM alias_candidates
+		), candidate_scores AS (
+			SELECT content_id, MAX(fuzzy_rank) AS fuzzy_rank, MAX(fuzzy_full_rank) AS fuzzy_full_rank
+			FROM candidates
+			GROUP BY content_id
+		), scored AS (
 			SELECT
 				%s,
-				MAX(GREATEST(
-					strict_word_similarity(public.normalize_search_text($1), mi.title_normalized),
-					COALESCE((SELECT MAX(strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-				)) AS fuzzy_rank,
-				MAX(GREATEST(
-					similarity(public.normalize_search_text($1), mi.title_normalized),
-					COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
-				)) AS fuzzy_full_rank
+				cs.fuzzy_rank,
+				cs.fuzzy_full_rank
 			FROM %s
+			JOIN candidate_scores cs ON cs.content_id = mi.content_id
 			%s
-			GROUP BY %s
 		)
-	`, qualifiedCols, fromClause, whereClause, groupByCols)
+	`, qualifiedCols, fromClause, whereClause)
 
 	totalColumn := ""
 	if includeTotal {

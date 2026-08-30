@@ -103,6 +103,71 @@ func TestEpisodeSearchPostgresAndDocumentSource(t *testing.T) {
 	}
 }
 
+func TestEpisodeSearchOverviewVectorRefreshesOnOverviewUpdate(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	suffix := time.Now().UnixNano()
+	seriesID := fmt.Sprintf("episode-overview-series-%d", suffix)
+	episodeID := fmt.Sprintf("episode-overview-episode-%d", suffix)
+	var folderID int
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`,
+		seriesID,
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres)
+		VALUES ($1, 'series', 'Overview Trigger Fixture', 'matched', '{}'::text[])
+	`, seriesID); err != nil {
+		t.Fatalf("seed series: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview)
+		VALUES ($1, $2, 1, 1, 'Overview Trigger Episode', 'A buried signal returns.')
+	`, episodeID, seriesID); err != nil {
+		t.Fatalf("seed episode: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW())
+	`, episodeID, folderID); err != nil {
+		t.Fatalf("seed episode membership: %v", err)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE episodes SET overview = 'A quartzbeacon constellation appears.' WHERE content_id = $1`, episodeID); err != nil {
+		t.Fatalf("update episode overview: %v", err)
+	}
+	var hasUpdatedOverview, hasOldOverview bool
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			search_overview_vector @@ plainto_tsquery('english', 'quartzbeacon constellation'),
+			search_overview_vector @@ plainto_tsquery('english', 'buried signal')
+		FROM episode_catalog_entries
+		WHERE episode_id = $1
+	`, episodeID).Scan(&hasUpdatedOverview, &hasOldOverview); err != nil {
+		t.Fatalf("read refreshed episode overview vector: %v", err)
+	}
+	if !hasUpdatedOverview || hasOldOverview {
+		t.Fatalf("overview vector after overview-only update = updated %v old %v", hasUpdatedOverview, hasOldOverview)
+	}
+}
+
 func TestEpisodeSearchOutboxStatementTriggers(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {

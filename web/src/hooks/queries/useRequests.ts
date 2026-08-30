@@ -169,6 +169,10 @@ export interface UseRequestSearchOptions {
   requireProfile?: boolean;
   /** Cache freshness window for this search surface. Default: existing Requests page timing. */
   staleTime?: number;
+  /** Inactive cache lifetime for rapidly changing interactive search keys. */
+  gcTime?: number;
+  /** Retry policy; interactive search surfaces should not replay expensive failures. */
+  retry?: boolean | number;
 }
 
 export function useRequestSearch(
@@ -200,6 +204,8 @@ export function useRequestSearch(
     enabled:
       enabledOverride && normalizedQuery.length > 1 && (!requireProfile || Boolean(profile?.id)),
     staleTime: options.staleTime ?? REQUESTS_STALE_TIME,
+    ...(options.gcTime !== undefined ? { gcTime: options.gcTime } : {}),
+    ...(options.retry !== undefined ? { retry: options.retry } : {}),
   });
 }
 

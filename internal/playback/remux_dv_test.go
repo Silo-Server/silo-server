@@ -41,7 +41,7 @@ func TestBuildRemuxArgsExcludesAttachedPictures(t *testing.T) {
 
 func TestBuildRemuxArgsHonorsPlannedAACOutput(t *testing.T) {
 	args := buildRemuxArgsWithAudioV3("/book.m4b", "mp4", 0, true, -1, 0, false, true, 2, 1, 96)
-	if !argsContainPair(args, "-ac", "1") || !argsContainPair(args, "-b:a", "96k") {
+	if !argsContainPair(args, "-ac", "1") || !argsContainPair(args, "-b:a", "96k") || !argsContainPair(args, "-af", aacTimestampNormalizeFilterV3) {
 		t.Fatalf("planned mono bitrate missing from remux args: %s", strings.Join(args, " "))
 	}
 }
@@ -73,12 +73,14 @@ func TestBuildRemuxArgsBoostsOnlySurroundToStereoAAC(t *testing.T) {
 			if gotBoost != tt.wantBoost {
 				t.Fatalf("downmix boost present=%t, want %t; args=%s", gotBoost, tt.wantBoost, strings.Join(args, " "))
 			}
+			if tt.transcodeAudio && !tt.wantBoost && !argsContainPair(args, "-af", aacTimestampNormalizeFilterV3) {
+				t.Fatalf("ordinary AAC encode is missing timestamp normalization: %s", strings.Join(args, " "))
+			}
 		})
 	}
 }
 
 func TestBuildRemuxArgsNormalizesAACAcrossSeekAnchors(t *testing.T) {
-	const wantFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	anchors := []struct {
 		name string
 		seek float64
@@ -91,8 +93,8 @@ func TestBuildRemuxArgsNormalizesAACAcrossSeekAnchors(t *testing.T) {
 
 	for _, anchor := range anchors {
 		t.Run(anchor.name, func(t *testing.T) {
-			args := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", anchor.seek, true, 0, 0, false, false, 6, 2, 192)
-			if !argsContainPair(args, "-af", wantFilter) {
+			args := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", anchor.seek, true, 0, 0, false, false, 2, 2, 192)
+			if !argsContainPair(args, "-af", aacTimestampNormalizeFilterV3) {
 				t.Fatalf("AAC timestamp normalization missing at seek %.3f: %s", anchor.seek, strings.Join(args, " "))
 			}
 			if strings.Contains(strings.Join(args, " "), "first_pts") {
@@ -104,7 +106,7 @@ func TestBuildRemuxArgsNormalizesAACAcrossSeekAnchors(t *testing.T) {
 		})
 	}
 
-	codecCopy := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", 600, false, 0, 0, false, false, 6, 2, 192)
+	codecCopy := buildRemuxArgsWithAudioV3("/movie.mkv", "mp4", 600, false, 0, 0, false, false, 2, 2, 192)
 	if slices.Contains(codecCopy, "-af") {
 		t.Fatalf("codec-copy remux unexpectedly received an audio filter: %s", strings.Join(codecCopy, " "))
 	}

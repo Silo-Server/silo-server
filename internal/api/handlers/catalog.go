@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -118,16 +119,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 	if groupedByWork {
 		result, entries, err := h.resolveGroupedCatalogByWork(r, req, accessFilter)
 		if err != nil {
-			if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
-				writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-				return
-			}
-			if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
-				writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
-				return
-			}
-			slog.ErrorContext(r.Context(), "catalog: resolve grouped by work failed", "component", "api", "err_msg", err.Error())
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
+			handleCatalogResolveError(w, r, err, true)
 			return
 		}
 
@@ -144,20 +136,54 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 
 	result, err := h.resolver.Resolve(r.Context(), req, accessFilter)
 	if err != nil {
-		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
-			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-			return
-		}
-		if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
-			return
-		}
-		slog.ErrorContext(r.Context(), "catalog: resolve failed", "component", "api", "err_msg", err.Error())
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
+		handleCatalogResolveError(w, r, err, false)
 		return
 	}
 	items := h.catalogItemResponses(r, result.Items, catalogSortMetricField(req, result), playableTargetLibraryIDs(req), accessFilter)
 	h.writeCatalogResponse(w, result, items, groupedByWork)
+}
+
+// handleCatalogResolveError keeps grouped and ordinary catalog resolution on
+// the same error contract. In particular, a grouped search still runs through
+// the bounded PostgreSQL path and must return search_timeout rather than hiding
+// a deadline behind the generic 500 response.
+func handleCatalogResolveError(w http.ResponseWriter, r *http.Request, err error, groupedByWork bool) {
+	if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if errors.Is(err, catalog.ErrCatalogSourceNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
+		return
+	}
+	if handleCatalogSearchContextError(w, r, err) {
+		return
+	}
+	slog.ErrorContext(
+		r.Context(),
+		"catalog: resolve failed",
+		"component", "api",
+		"grouped_by_work", groupedByWork,
+		"err_msg", err.Error(),
+	)
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
+}
+
+// handleCatalogSearchContextError translates bounded-search termination without
+// treating it as an ordinary server fault. Superseded live queries cancel their
+// request context, so there is no client left to receive a response. A server
+// deadline is different: the client is still present and gets a retryable 504
+// instead of a misleading 500 while the database work is already stopped.
+func handleCatalogSearchContextError(w http.ResponseWriter, r *http.Request, err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		slog.WarnContext(r.Context(), "catalog: search deadline exceeded", "component", "api")
+		writeError(w, http.StatusGatewayTimeout, "search_timeout", "Search took too long and was stopped")
+		return true
+	}
+	return false
 }
 
 // catalogSortMetricField is the field the returned items are actually ordered

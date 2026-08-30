@@ -2797,11 +2797,11 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	sourceProfile, sourceBitDepth := sourceVideoTranscodeFactsV3(file, result)
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	opts := playback.TranscodeOpts{InputPath: file.FilePath, OutputDir: outputDir, OutputSubdir: outputSubdir, SessionID: session.ID, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, FFmpegPath: cfg.FFmpegPath, HWAccel: cfg.HWAccel, HWDevice: cfg.HWDevice, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: sourceMetadata.DurationSeconds, FastStart: true, NodeType: playbackNodeIntegratedV3, ExecutionMode: playbackNodeIntegratedV3, FFmpegLogSink: h.FFmpegLogSink}
-	opts.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
-	opts.ToneMapDVBLCompatIDPresent = sourceMetadata.ToneMapDVBLCompatIDPresent
-	opts.ToneMapDVBLPresent = sourceMetadata.ToneMapDVBLPresent
-	opts.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
 	if opts.ToneMapMode != "" {
+		opts.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
+		opts.ToneMapDVBLCompatIDPresent = sourceMetadata.ToneMapDVBLCompatIDPresent
+		opts.ToneMapDVBLPresent = sourceMetadata.ToneMapDVBLPresent
+		opts.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
 		capabilities, capabilityErr := h.localToneMapCapabilitiesForTransportV3(r.Context())
 		if capabilityErr != nil {
 			unlock()
@@ -2997,10 +2997,12 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		// for ordinary encodes so they cannot be mistaken for partial v2 work.
 		req.SourceAudioChannels = 0
 	}
-	req.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
-	req.ToneMapDVBLCompatIDPresent = sourceMetadata.ToneMapDVBLCompatIDPresent
-	req.ToneMapDVBLPresent = sourceMetadata.ToneMapDVBLPresent
-	req.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
+	if req.ToneMapMode != "" {
+		req.ToneMapDVConfigPresent = sourceMetadata.ToneMapDVConfigPresent
+		req.ToneMapDVBLCompatIDPresent = sourceMetadata.ToneMapDVBLCompatIDPresent
+		req.ToneMapDVBLPresent = sourceMetadata.ToneMapDVBLPresent
+		req.ToneMapDVRPUPresent = sourceMetadata.ToneMapDVRPUPresent
+	}
 	remoteStartAt := time.Now()
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
 	remoteOutcome := "ready"

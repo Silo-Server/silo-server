@@ -98,7 +98,7 @@ export function formatRequestReason(reason?: string): string {
     case "blocked":
       return "Blocked";
     case "quota_exceeded":
-      return "Limit reached";
+      return "Request limit reached";
     default:
       return "Unavailable";
   }

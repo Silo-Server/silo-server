@@ -3267,6 +3267,57 @@ func TestPrepareTransportV3SendsResolvedCopyAnchorToRemoteExecutor(t *testing.T)
 	}
 }
 
+func TestPrepareRemoteTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *testing.T) {
+	var startRequest transcodenode.TranscodeStartRequest
+	var startCalled bool
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+			startCalled = true
+			if err := json.NewDecoder(r.Body).Decode(&startRequest); err != nil {
+				t.Errorf("decode remote start: %v", err)
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: startRequest.SessionID, Status: "started"})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+	file := v3HandlerFixtureFile(t)
+	file.CodecVideo = "hevc"
+	file.VideoTracks[0].Codec = "hevc"
+	file.VideoTracks[0].DVConfigPresent = true
+	file.VideoTracks[0].DVBLCompatIDPresent = true
+	file.VideoTracks[0].DVBLPresent = true
+	file.VideoTracks[0].DVRPUPresent = true
+	plan := &playback.PlanV3{PlanID: "plan:remote-dv8-remux", Delivery: playback.DeliveryRemuxHLSV3}
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-remote-dv8-remux", UserID: 7, ProfileID: "profile-1"},
+		file,
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", TargetAudioCodec: "aac"},
+		mediaAuthModeV3{},
+	)
+	if transportErr != nil {
+		t.Fatalf("prepare remote Dolby Vision remux: %v", transportErr)
+	}
+	defer transport.rollback()
+	if !startCalled {
+		t.Fatal("remote transcode start was not requested")
+	}
+	if startRequest.ToneMapDVConfigPresent || startRequest.ToneMapDVBLCompatIDPresent || startRequest.ToneMapDVBLPresent || startRequest.ToneMapDVRPUPresent {
+		t.Fatalf("remote copy/remux request carried tone-map-only Dolby Vision evidence: %#v", startRequest)
+	}
+}
+
 func TestVideoSampleEntryForPlanV3(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3536,6 +3587,117 @@ func TestPrepareLocalTransportV3ReturnsStableTerminalWhenFFmpegExitsBeforeReady(
 	}
 	if transportErr.cause == nil || !strings.Contains(transportErr.cause.Error(), "intentional startup failure") {
 		t.Fatalf("startup error lost ffmpeg cause: %#v", transportErr)
+	}
+}
+
+func TestPrepareLocalTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	file := v3HandlerFixtureFile(t)
+	file.CodecVideo = "hevc"
+	file.VideoTracks[0].Codec = "hevc"
+	file.VideoTracks[0].DVConfigPresent = true
+	file.VideoTracks[0].DVBLCompatIDPresent = true
+	file.VideoTracks[0].DVBLPresent = true
+	file.VideoTracks[0].DVRPUPresent = true
+	plan := &playback.PlanV3{PlanID: "plan:local-dv8-remux", Delivery: playback.DeliveryRemuxHLSV3}
+	result := playback.PlannerResultV3{
+		Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", TargetAudioCodec: "aac",
+		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: "session-local-dv8-remux"}, file, result)
+	if timelineErr != nil {
+		t.Fatalf("prepare timeline: %v", timelineErr)
+	}
+	transport, transportErr := handler.prepareLocalTransportV3(request, &playback.Session{ID: "session-local-dv8-remux", UserID: 7, ProfileID: "profile-1"}, file, result, timeline, mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare local Dolby Vision remux: %v", transportErr)
+	}
+	transport.commit()
+	defer handler.tm.CloseTranscodeSession("session-local-dv8-remux", "")
+	transcodeSession := handler.tm.GetTranscodeSession("session-local-dv8-remux")
+	if transcodeSession == nil {
+		t.Fatal("committed transport did not register a transcode session")
+	}
+	opts := transcodeSession.Opts()
+	if opts.ToneMapDVConfigPresent || opts.ToneMapDVBLCompatIDPresent || opts.ToneMapDVBLPresent || opts.ToneMapDVRPUPresent {
+		t.Fatalf("local copy/remux opts carried tone-map-only Dolby Vision evidence: %#v", opts)
+	}
+}
+
+func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.FilePath = writePlaybackTestMediaFile(t, "movie-dv8.mkv")
+	file.Container = "mkv"
+	file.CodecVideo = "hevc"
+	file.CodecAudio = "eac3"
+	file.Resolution = "2160p"
+	file.Bitrate = 25_108
+	file.AudioChannels = 6
+	file.VideoTracks[0] = models.VideoTrack{
+		Codec: "hevc", Profile: "main 10", Level: 153, Width: 3840, Height: 2160,
+		FrameRate: "24000/1001", Bitrate: 25_108, BitDepth: 10, PixelFormat: "yuv420p10le",
+		VideoRange: "DolbyVision", VideoRangeType: "DOVIWithHDR10", DVProfile: 8, DVLevel: 6, DVBLCompatID: 1,
+		DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true, DVRPUPresent: true,
+	}
+	file.AudioTracks[0] = models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1", Default: true}
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3(nil))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	stubCopySeekAnchorV3(handler)
+
+	start := v3HandlerStartRequest()
+	start.QualityPreference = "auto"
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
+	start.Capabilities.Containers = []string{"mp4"}
+	start.Capabilities.CodecsVideo = []string{"hevc"}
+	start.Capabilities.CodecsVideoHardware = []string{"hevc"}
+	start.Capabilities.CodecsAudio = []string{"eac3"}
+	start.Capabilities.MaxResolution = "2160p"
+	start.Capabilities.VideoDecode = []playback.VideoDecodeCapabilityV3{{
+		Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10},
+		MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true,
+	}}
+	hdr := &playback.HDRCapabilitiesV3{
+		DolbyVisionProfiles: []int{8},
+		DolbyVisionProfileLevels: []playback.DolbyVisionProfileCapabilityV3{{
+			Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1},
+		}},
+	}
+	start.Capabilities.HDRDetails = hdr
+	start.ClientPlaybackContext.Device.Platform = "safari"
+	start.ClientPlaybackContext.Output.HDRDetails = hdr
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"},
+		VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"eac3"}, HDRDetails: &playback.HDRCapabilitiesV3{},
+	}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"hevc"}, AudioDecodeCodecs: []string{"eac3"}, HDRDetails: hdr,
+	}
+
+	startRecorder := httptest.NewRecorder()
+	startRequest := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext())
+	handler.HandleStartPlayback(startRecorder, startRequest)
+	var response playback.DecisionResponseV3
+	if startRecorder.Code != http.StatusCreated || json.Unmarshal(startRecorder.Body.Bytes(), &response) != nil {
+		t.Fatalf("start status=%d body=%s", startRecorder.Code, startRecorder.Body.String())
+	}
+	if response.Terminal != nil || response.PlaybackPlan == nil || response.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 || response.PlaybackPlan.Stream.URL == "" {
+		t.Fatalf("start response = %#v, want playable HLS remux", response)
+	}
+	defer handler.tm.CloseTranscodeSession(response.SessionID, "")
+
+	manifestRequest := httptest.NewRequest(http.MethodGet, "/api/v1"+response.PlaybackPlan.Stream.URL, nil).WithContext(newAuthorizedPlaybackContext())
+	manifestRequest = withPlaybackRouteParam(manifestRequest, "session_id", response.SessionID)
+	manifestRecorder := httptest.NewRecorder()
+	handler.HandleGetTranscodeManifest(manifestRecorder, manifestRequest)
+	if manifestRecorder.Code != http.StatusOK || !strings.Contains(manifestRecorder.Body.String(), "#EXTM3U") {
+		t.Fatalf("manifest status=%d body=%s", manifestRecorder.Code, manifestRecorder.Body.String())
 	}
 }
 

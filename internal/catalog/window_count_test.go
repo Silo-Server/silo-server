@@ -292,9 +292,8 @@ func TestBuildBrowseFavoritesPlan_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T)
 
 // TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy pins the same
 // empty-page fallback contract for the Search path. The count sibling must
-// preserve the title-gate CROSS JOIN filter so the recovered total reflects
-// the post-filter row count (matching COUNT(*) OVER () semantics on the
-// data SELECT). Single-word and multi-word queries share one SQL shape.
+// preserve the title-first/overview-fallback gate so the recovered total
+// reflects the same candidate block as COUNT(*) OVER () in the data SELECT.
 func TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T) {
 	repo := &ItemRepository{}
 
@@ -304,14 +303,11 @@ func TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T) {
 			if !strings.Contains(countSQL, "WITH scored AS") {
 				t.Fatalf("countSQL must include scored CTE; got:\n%s", countSQL)
 			}
-			if !strings.Contains(countSQL, "stats AS") {
-				t.Fatalf("countSQL must include stats CTE; got:\n%s", countSQL)
+			if !strings.Contains(countSQL, "title_scored AS MATERIALIZED") {
+				t.Fatalf("countSQL must include title candidate CTE; got:\n%s", countSQL)
 			}
-			if !strings.Contains(countSQL, "CROSS JOIN stats") {
-				t.Fatalf("countSQL must CROSS JOIN stats so the recovered total reflects the post-filter set; got:\n%s", countSQL)
-			}
-			if !strings.Contains(countSQL, "has_title_match") {
-				t.Fatalf("countSQL must apply the title-gate predicate; got:\n%s", countSQL)
+			if !strings.Contains(countSQL, "NOT EXISTS (SELECT 1 FROM title_scored)") {
+				t.Fatalf("countSQL must gate overview fallback on title existence; got:\n%s", countSQL)
 			}
 			if !strings.Contains(countSQL, "SELECT COUNT(*)") {
 				t.Fatalf("expected SELECT COUNT(*); got:\n%s", countSQL)

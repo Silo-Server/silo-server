@@ -22,6 +22,7 @@ import CardPlayOverlay from "./CardPlayOverlay";
 const PREVIEW_LIMIT = 8;
 const DEBOUNCE_MS = 200;
 const TMDB_DEBOUNCE_MS = 400;
+const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
 function typeLabel(type: BrowseItem["type"]): string {
   switch (type) {
@@ -155,6 +156,8 @@ export function GlobalSearch({
     enabled: canRequest.discoveryEnabled,
     requireProfile: true,
     staleTime: 5 * 60 * 1000,
+    gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
+    retry: false,
   });
   const tmdbMissingCount =
     tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
@@ -201,6 +204,8 @@ export function GlobalSearch({
     queryFn: ({ signal }) => fetchCatalogPage(searchState, PREVIEW_LIMIT, 0, { signal }, false),
     enabled: open && debouncedQuery.length > 0,
     staleTime: 60 * 1000,
+    gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
+    retry: false,
   });
 
   useEffect(() => {
@@ -369,6 +374,7 @@ export function GlobalSearch({
                   variant="dialog"
                   query={tmdbDebouncedQuery}
                   libraryHadHits={items.length > 0}
+                  libraryResultsKnown={!previewQuery.isFetching && !previewQuery.isError}
                 />
               )}
             </div>

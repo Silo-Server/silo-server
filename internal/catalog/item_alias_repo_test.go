@@ -457,3 +457,53 @@ func TestItemRepositorySearchesPersistedAliasesAcrossExactFTSAndFuzzyPaths(t *te
 		}
 	}
 }
+
+func TestItemRepositoryFuzzySearchRanksPhraseTyposAboveSingleWordDistractors(t *testing.T) {
+	pool := newSemanticCoverageTestPool(t)
+	ctx := context.Background()
+	seedID := time.Now().UnixNano()
+
+	type seededTitle struct {
+		contentID string
+		title     string
+		mediaType string
+	}
+	seeded := []seededTitle{
+		{fmt.Sprintf("fuzzy-game-%d", seedID), "Game of Thrones", catalogTestContentTypeSeries},
+		{fmt.Sprintf("fuzzy-throne-%d", seedID), "Justice League: Throne of Atlantis", catalogTestContentTypeSeries},
+		{fmt.Sprintf("fuzzy-harry-%d", seedID), "Harry Potter and the Order of the Phoenix", "movie"},
+		{fmt.Sprintf("fuzzy-potter-%d", seedID), "Miss Potter", "movie"},
+	}
+	for _, item := range seeded {
+		seedSemanticCoverageMediaItem(t, pool, item.contentID, item.mediaType, "matched")
+		if _, err := pool.Exec(ctx, `UPDATE media_items SET title = $2, original_title = $2 WHERE content_id = $1`, item.contentID, item.title); err != nil {
+			t.Fatalf("seed fuzzy title %q: %v", item.title, err)
+		}
+		contentID := item.contentID
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		})
+	}
+
+	repo := NewItemRepository(pool)
+	for _, tc := range []struct {
+		query     string
+		itemTypes []string
+		wantID    string
+	}{
+		{"Gane of Throns", []string{catalogTestContentTypeSeries}, seeded[0].contentID}, //nolint:misspell
+		{"Hary Poter", []string{"movie"}, seeded[2].contentID},                          //nolint:misspell
+	} {
+		items, _, err := repo.Search(ctx, tc.query, tc.itemTypes, 20, 0, AccessFilter{})
+		if err != nil {
+			t.Fatalf("Search(%q): %v", tc.query, err)
+		}
+		if len(items) == 0 || items[0].ContentID != tc.wantID {
+			got := "<none>"
+			if len(items) > 0 {
+				got = fmt.Sprintf("%s (%s)", items[0].Title, items[0].ContentID)
+			}
+			t.Fatalf("Search(%q) first result = %s, want content_id %s", tc.query, got, tc.wantID)
+		}
+	}
+}

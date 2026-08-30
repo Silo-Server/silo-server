@@ -28,7 +28,7 @@
     {
       "name": "audio_to_aac",
       "executor": "server",
-      "recipe_version": "3",
+      "recipe_version": "4",
       "validated_claims": [
         "audio_decode"
       ]

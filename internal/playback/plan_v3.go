@@ -21,6 +21,7 @@ type PlannerSettingsV3 struct {
 const (
 	TerminalMessage4KTranscodeDisabledV3   = "A lower-resolution source is required because 4K transcoding is disabled."
 	containerMP4V3                         = "mp4"
+	containerMKVV3                         = "mkv"
 	mimeVideoMP4V3                         = "video/mp4"
 	degradationAudioConvertedV3            = "audio_converted"
 	audioCodecAACV3                        = "aac"
@@ -429,8 +430,15 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		progressiveAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
 		hlsAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 			deliverySupportsAudioClaimV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, audioClaims, audioOK)
-		progressiveTranscodeAudio := !progressiveAudioOK
-		hlsTranscodeAudio := !hlsAudioOK
+		// AAC frames in Matroska use a millisecond packet clock while each frame
+		// contains 1024 samples. Copying those rounded timestamps into MP4/fMP4
+		// produces real sub-frame gaps and overlaps that Firefox renders as
+		// crackle. Keep video-copy remuxing, but re-encode the selected AAC track
+		// through the versioned timestamp-normalization recipe. Native original
+		// playback above remains byte-for-byte direct play.
+		firefoxAACTimingQuirk, normalizeMatroskaAAC := firefoxMatroskaAACTimingQuirkV3(source, input.Request)
+		progressiveTranscodeAudio := !progressiveAudioOK || normalizeMatroskaAAC
+		hlsTranscodeAudio := !hlsAudioOK || normalizeMatroskaAAC
 		hlsAudioQuirk, hlsAudioQuirkOK := hlsEAC3AudioCorrectionV3(source, input.Request)
 		localAudioConvertOK := input.Registry.Available(TransformationAudioToAACV3)
 		if progressiveTranscodeAudio && hlsTranscodeAudio {
@@ -470,6 +478,9 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			progressivePlan.Transformations = append(progressivePlan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
 			progressivePlan.DegradationWarnings = append(progressivePlan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s.", audioLayoutForChannelsV3(progressiveAudioChannels))})
 			progressivePlan.DecisionReason = decisionReasonAudioAdaptationV3
+		}
+		if normalizeMatroskaAAC {
+			appendAppliedQuirkV3(&progressivePlan, *firefoxAACTimingQuirk, "")
 		}
 		if !dvStrip {
 			applyCopiedVideoQuirksV3(&progressivePlan, source, input.Request, high10Quirk)
@@ -518,6 +529,9 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: hlsAudioAdaptationReasonV3}
 				plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
 				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: "The selected audio track is converted to AAC for HLS delivery."})
+			}
+			if normalizeMatroskaAAC {
+				appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
 			}
 			if hlsAudioQuirkOK && !hlsTranscodeAudio {
 				if !input.hlsRegistry().Available(TransformationAudioToAACV3) {

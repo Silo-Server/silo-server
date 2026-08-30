@@ -29,20 +29,33 @@ function nonRequestableLabel(item: RequestMediaResult): string {
 
 const DIALOG_LIMIT = 4;
 const GRID_LIMIT = 20;
+const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
 export type RequestToAddSectionProps = {
   variant: "dialog" | "grid";
   query: string;
   /** True when the library search returned at least one hit. Drives header copy. */
   libraryHadHits: boolean;
+  /**
+   * True only after the matching local-library query completed successfully.
+   * Loading and failed searches must not be presented as confirmed absences.
+   */
+  libraryResultsKnown?: boolean;
 };
 
-export function RequestToAddSection({ variant, query, libraryHadHits }: RequestToAddSectionProps) {
+export function RequestToAddSection({
+  variant,
+  query,
+  libraryHadHits,
+  libraryResultsKnown = true,
+}: RequestToAddSectionProps) {
   const { discoveryEnabled } = useCanRequest();
   const search = useRequestSearch("all", query, 1, {
     enabled: discoveryEnabled,
     requireProfile: true,
     staleTime: 5 * 60 * 1000,
+    gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
+    retry: false,
   });
 
   if (!discoveryEnabled) return null;
@@ -55,12 +68,32 @@ export function RequestToAddSection({ variant, query, libraryHadHits }: RequestT
   const visible = filtered.slice(0, limit);
 
   if (variant === "dialog") {
-    return <DialogVariant items={visible} libraryHadHits={libraryHadHits} />;
+    return (
+      <DialogVariant
+        items={visible}
+        libraryHadHits={libraryHadHits}
+        libraryResultsKnown={libraryResultsKnown}
+      />
+    );
   }
-  return <GridVariant items={visible} libraryHadHits={libraryHadHits} />;
+  return (
+    <GridVariant
+      items={visible}
+      libraryHadHits={libraryHadHits}
+      libraryResultsKnown={libraryResultsKnown}
+    />
+  );
 }
 
-function HeaderCopy({ libraryHadHits, count }: { libraryHadHits: boolean; count: number }) {
+function HeaderCopy({
+  libraryHadHits,
+  libraryResultsKnown,
+  count,
+}: {
+  libraryHadHits: boolean;
+  libraryResultsKnown: boolean;
+  count: number;
+}) {
   if (libraryHadHits) {
     return (
       <div className="text-muted-foreground flex items-center gap-2 px-3 pt-2 pb-1 text-[10px] font-medium tracking-[0.1em] uppercase">
@@ -70,6 +103,10 @@ function HeaderCopy({ libraryHadHits, count }: { libraryHadHits: boolean; count:
         </span>
       </div>
     );
+  }
+
+  if (!libraryResultsKnown) {
+    return <div className="px-3 pt-3 pb-1 text-[12px] text-amber-300/85">Discovery matches:</div>;
   }
 
   return (
@@ -82,13 +119,19 @@ function HeaderCopy({ libraryHadHits, count }: { libraryHadHits: boolean; count:
 function DialogVariant({
   items,
   libraryHadHits,
+  libraryResultsKnown,
 }: {
   items: RequestMediaResult[];
   libraryHadHits: boolean;
+  libraryResultsKnown: boolean;
 }) {
   return (
     <div className="border-t border-white/5 pt-1">
-      <HeaderCopy libraryHadHits={libraryHadHits} count={items.length} />
+      <HeaderCopy
+        libraryHadHits={libraryHadHits}
+        libraryResultsKnown={libraryResultsKnown}
+        count={items.length}
+      />
       <ul className="px-1 py-1">
         {items.map((item) => (
           <li key={`${item.media_type}-${item.tmdb_id}`}>
@@ -151,9 +194,11 @@ function DialogRow({ item }: { item: RequestMediaResult }) {
 function GridVariant({
   items,
   libraryHadHits,
+  libraryResultsKnown,
 }: {
   items: RequestMediaResult[];
   libraryHadHits: boolean;
+  libraryResultsKnown: boolean;
 }) {
   const count = items.length;
   const createRequest = useCreateMediaRequest();
@@ -199,11 +244,19 @@ function GridVariant({
           <div className="flex items-center gap-2 text-amber-200/85">
             <Sparkles className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden />
             <span className="text-[10px] font-semibold tracking-[0.24em] uppercase">
-              {libraryHadHits ? "Discover · Outside your library" : "Outside your library"}
+              {libraryHadHits
+                ? "Discover · Outside your library"
+                : libraryResultsKnown
+                  ? "Outside your library"
+                  : "Discovery"}
             </span>
           </div>
           <h2 className="font-display text-foreground text-[clamp(1.25rem,1.6vw,1.55rem)] leading-tight font-semibold tracking-tight">
-            {libraryHadHits ? "Request to Add" : "Not in your library, but you can request"}
+            {libraryHadHits
+              ? "Request to Add"
+              : libraryResultsKnown
+                ? "Not in your library, but you can request"
+                : "More search matches"}
           </h2>
         </div>
         <span className="inline-flex items-center gap-1.5 self-end rounded-full border border-amber-400/15 bg-amber-400/[0.06] px-2.5 py-1 text-[11px] font-medium tracking-wide text-amber-100/75 tabular-nums">

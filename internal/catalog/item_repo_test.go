@@ -1,10 +1,14 @@
 package catalog
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestItemRepo_GetByIDsWithAccess_SingleQueryWithLibraryFilter verifies that
@@ -299,10 +303,9 @@ func TestItemRepo_Search_UsesWindowCount(t *testing.T) {
 }
 
 // TestItemRepo_Search_TitleGate_UsesWindowCount asserts the unified query
-// pairs the scored CTE with a stats CTE that derives has_title_match, and
-// that the window count runs on the final filtered result so the total
-// reflects the title-gate CROSS JOIN filter rather than the broader
-// pre-filter set.
+// materializes title candidates once and gates overview candidates behind a
+// one-time NOT EXISTS test. The window count runs on the selected candidate
+// block, so title hits and overview fallback rows can never mix.
 func TestItemRepo_Search_TitleGate_UsesWindowCount(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("the matrix reloaded", []string{"movie"}, 20, 0, AccessFilter{})
@@ -312,31 +315,26 @@ func TestItemRepo_Search_TitleGate_UsesWindowCount(t *testing.T) {
 	if strings.Count(sql, "WITH scored AS") != 1 {
 		t.Fatalf("expected exactly one scored CTE; got %s", sql)
 	}
-	if !strings.Contains(sql, "stats AS") {
-		t.Fatalf("expected stats CTE; got %s", sql)
+	if !strings.Contains(sql, "title_scored AS MATERIALIZED") {
+		t.Fatalf("expected materialized title candidates; got %s", sql)
 	}
-	if !strings.Contains(sql, "has_title_match") {
-		t.Fatalf("expected has_title_match predicate; got %s", sql)
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM title_scored)") {
+		t.Fatalf("expected overview fallback to be gated by title existence; got %s", sql)
 	}
 }
 
 // TestItemRepo_Search_SingleWordEnablesTitleGate pins the bug fix for the
 // "obsession returns 2000 results" report: even single-word queries must
-// route through the stats CTE + CROSS JOIN, so overview-only matches are
-// suppressed whenever any title match exists. Prior to this, single-word
-// queries skipped the stats CTE entirely and returned every row where the
-// search term appeared in the description.
+// route through the title-first candidate CTE, so overview-only matches are
+// suppressed whenever any title match exists.
 func TestItemRepo_Search_SingleWordEnablesTitleGate(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("obsession", []string{"movie"}, 20, 0, AccessFilter{})
-	if !strings.Contains(sql, "stats AS") {
-		t.Fatalf("expected single-word query to include the stats CTE; got %s", sql)
+	if !strings.Contains(sql, "title_scored AS MATERIALIZED") {
+		t.Fatalf("expected single-word query to materialize title candidates; got %s", sql)
 	}
-	if !strings.Contains(sql, "CROSS JOIN stats") {
-		t.Fatalf("expected single-word query to CROSS JOIN stats; got %s", sql)
-	}
-	if !strings.Contains(sql, "scored.title_rank > 0") {
-		t.Fatalf("expected title gate to use title_rank > 0; got %s", sql)
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM title_scored)") {
+		t.Fatalf("expected single-word overview fallback to test title candidates; got %s", sql)
 	}
 }
 
@@ -348,7 +346,7 @@ func TestItemRepo_Search_SingleWordEnablesTitleGate(t *testing.T) {
 func TestItemRepo_Search_AppliesOverviewRankFloor(t *testing.T) {
 	repo := &ItemRepository{}
 	dataSQL, countSQL, _ := repo.buildSearchSQL("obsession", []string{"movie"}, 20, 0, AccessFilter{})
-	want := fmt.Sprintf("scored.overview_rank >= %g", overviewMatchFloor)
+	want := fmt.Sprintf("overview_scored.overview_rank >= %g", overviewMatchFloor)
 	if !strings.Contains(dataSQL, want) {
 		t.Fatalf("expected %q in dataSQL; got %s", want, dataSQL)
 	}
@@ -390,14 +388,17 @@ func TestEligibleForFuzzy(t *testing.T) {
 		query string
 		want  bool
 	}{
-		{"avegners", true},   // 8-char typo
-		{"sponge bob", true}, // longest token "sponge" (6)
-		{"a vengers", true},  // judged on "vengers" (7), not "a"
-		{"dune", true},       // exactly at the floor
-		{"the", false},       // 3 chars
-		{"a b c", false},     // all short
-		{"and the", false},   // "and" normalized away, "the" is 3
-		{"   ", false},       // empty
+		{"avegners", true},         // 8-char typo
+		{"sponge bob", true},       // unquoted input retains fuzzy typo recovery
+		{"a vengers", true},        // judged on "vengers" (7), not "a"
+		{"dune", true},             // exactly at the floor
+		{"star wars", true},        // final token is long enough for normal fuzzy fallback
+		{"star w", true},           // unquoted typeahead retains fuzzy augmentation
+		{`"Star Wars" zen`, false}, // quoted remainder stays on the leading-title path
+		{"the", false},             // 3 chars
+		{"a b c", false},           // all short
+		{"and the", false},         // "and" normalized away, "the" is 3
+		{"   ", false},             // empty
 	}
 	for _, tc := range cases {
 		if got := eligibleForFuzzy(parseSearchQuery(tc.query)); got != tc.want {
@@ -424,6 +425,24 @@ func TestSearchTextFromParsed(t *testing.T) {
 	for _, tc := range cases {
 		if got := searchTextFromParsed(parseSearchQuery(tc.raw)); got != tc.want {
 			t.Errorf("searchTextFromParsed(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestSearchBlockHasExactTitle(t *testing.T) {
+	items := []*models.MediaItem{
+		{Title: "Game of Thrones"},
+		{Title: "Dune: Part Two"},
+		nil,
+	}
+	for _, query := range []string{"game of thrones", "dune part 2"} {
+		if !searchBlockHasExactTitle(items, query) {
+			t.Fatalf("expected normalized exact title %q to suppress fuzzy fallback", query)
+		}
+	}
+	for _, query := range []string{"", "game throne", "breking bad"} {
+		if searchBlockHasExactTitle(items, query) {
+			t.Fatalf("non-exact title %q must retain fuzzy fallback", query)
 		}
 	}
 }
@@ -462,10 +481,120 @@ func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
 	}
 }
 
+func TestItemRepo_Search_AliasScoresUseOneUncorrelatedPass(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQL("lanterns", nil, 20, 0, AccessFilter{})
+	for _, sql := range []string{dataSQL, countSQL} {
+		if strings.Count(sql, "alias_scores AS MATERIALIZED") != 1 {
+			t.Fatalf("expected one materialized alias scoring pass; got:\n%s", sql)
+		}
+		if !strings.Contains(sql, "LEFT JOIN alias_scores search_alias") {
+			t.Fatalf("expected media ranking to reuse alias_scores; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "FROM media_item_aliases mia WHERE mia.content_id = mi.content_id") {
+			t.Fatalf("search must not rescan every alias row per media candidate; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "title_rank") {
+			t.Fatalf("search must not retain the removed constant title_rank sort key; got:\n%s", sql)
+		}
+	}
+}
+
+func TestItemRepo_Search_ShortSingleTokenUsesExactTitlePath(t *testing.T) {
+	repo := &ItemRepository{}
+	for _, query := range []string{"x", "up", "her"} {
+		dataSQL, _, args := repo.buildSearchSQLWithTotal(query, nil, 20, 0, AccessFilter{}, false)
+		if !strings.Contains(dataSQL, "mi.title_normalized = $") {
+			t.Fatalf("short query %q must use exact normalized media titles; got:\n%s", query, dataSQL)
+		}
+		if !strings.Contains(dataSQL, "ece.search_title_normalized = $") {
+			t.Fatalf("short query %q must use the indexed exact episode title; got:\n%s", query, dataSQL)
+		}
+		if strings.Contains(dataSQL, "idx_episodes_search_overview") || args[1] != "" {
+			t.Fatalf("short query %q must not enable broad prefix search; args=%#v\n%s", query, args, dataSQL)
+		}
+	}
+}
+
+func TestItemRepo_Search_ShortFinalTokenUsesLeadingTitleIndexes(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, _, _ := repo.buildSearchSQLWithTotal("the m", nil, 20, 0, AccessFilter{}, false)
+	for _, want := range []string{
+		"mi.title_normalized LIKE $",
+		"mia.normalized_title LIKE $",
+		"ece.search_title_normalized LIKE $",
+	} {
+		if !strings.Contains(dataSQL, want) {
+			t.Fatalf("leading-title transition missing %q:\n%s", want, dataSQL)
+		}
+	}
+	if strings.Contains(dataSQL, "search_overview_vector") {
+		t.Fatalf("leading-title transition must not expand into overview FTS:\n%s", dataSQL)
+	}
+}
+
+func TestItemRepo_Search_QuotedPhraseShortRemainderUsesFullLeadingTitle(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, _, args := repo.buildSearchSQLWithTotal(`"Star Wars" z`, nil, 20, 0, AccessFilter{}, false)
+
+	lookupArg := -1
+	for i, arg := range args {
+		if arg == "star wars z" {
+			lookupArg = i + 1
+			break
+		}
+	}
+	if lookupArg < 0 {
+		t.Fatalf("leading-title lookup must bind the full normalized query; got args %#v", args)
+	}
+
+	for _, want := range []string{
+		fmt.Sprintf("mi.title_normalized LIKE $%d || '%%'", lookupArg),
+		fmt.Sprintf("mia.normalized_title LIKE $%d || '%%'", lookupArg),
+		fmt.Sprintf("ece.search_title_normalized LIKE $%d || '%%'", lookupArg),
+	} {
+		if !strings.Contains(dataSQL, want) {
+			t.Fatalf("quoted leading-title transition missing %q:\n%s", want, dataSQL)
+		}
+	}
+}
+
+// TestItemRepo_Search_NarrowTitlePathTypesSearchTextParameter guards a
+// prepare-time failure that only appeared after the user finished a short
+// final token: "breaking" used the regular FTS path, while "Breaking Bad"
+// suppressed the overview arm and therefore left the still-bound $1 without a
+// PostgreSQL type (SQLSTATE 42P18). Every physical source and both page/count
+// statements must carry the explicit, parameter-only type guard.
+func TestItemRepo_Search_NarrowTitlePathTypesSearchTextParameter(t *testing.T) {
+	repo := &ItemRepository{}
+	for _, test := range []struct {
+		name      string
+		query     string
+		itemTypes []string
+	}{
+		{name: "mixed multiword", query: "Breaking Bad"},
+		{name: "media multiword", query: "Breaking Bad", itemTypes: []string{"movie", "series"}},
+		{name: "episode multiword", query: "Who Are You?", itemTypes: []string{"episode"}},
+		{name: "mixed short title", query: "Up"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dataSQL, countSQL, args := repo.buildSearchSQLWithTotal(test.query, test.itemTypes, 20, 0, AccessFilter{}, true)
+			if len(args) < 2 || args[0] != test.query {
+				t.Fatalf("unexpected fixed search arguments: %#v", args)
+			}
+			for _, sql := range []string{dataSQL, countSQL} {
+				if !strings.Contains(sql, "$1::text IS NOT NULL") {
+					t.Fatalf("narrow search must type bound $1 in both statements; got:\n%s", sql)
+				}
+			}
+		})
+	}
+}
+
 // TestItemRepo_BuildFuzzySearchSQL asserts that the fuzzy fallback query scores
 // only on indexed normalized title/alias columns (no title tsvector rebuild),
 // matches via strict word similarity so long titles stay reachable, ranks by
-// descending word similarity with whole-title closeness as tie-break, excludes
+// a whole-title-weighted blend (rather than one matching word alone), excludes
 // already-seen content_ids, and applies the same scope filters (type, manga
 // exclusion) as the FTS query.
 func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
@@ -477,14 +606,24 @@ func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 	if !strings.Contains(dataSQL, "public.normalize_search_text($1) <<% mi.title_normalized") {
 		t.Fatalf("expected strict-word-similarity arm against title_normalized; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)") || !strings.Contains(dataSQL, "AS fuzzy_rank") {
-		t.Fatalf("expected strict word similarity ranking on title_normalized; got:\n%s", dataSQL)
+	if !strings.Contains(dataSQL, "0.65 * similarity(public.normalize_search_text($1), mi.title_normalized)") ||
+		!strings.Contains(dataSQL, "+ 0.35 * strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)") ||
+		!strings.Contains(dataSQL, "AS fuzzy_rank") {
+		t.Fatalf("expected whole-title-weighted fuzzy ranking on title_normalized; got:\n%s", dataSQL)
 	}
 	if !strings.Contains(dataSQL, "similarity(public.normalize_search_text($1), mi.title_normalized)") || !strings.Contains(dataSQL, "AS fuzzy_full_rank") {
 		t.Fatalf("expected whole-title similarity tie-break rank; got:\n%s", dataSQL)
 	}
 	if !strings.Contains(dataSQL, "<<% mia.normalized_title") {
 		t.Fatalf("expected alias trigram candidates; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "WITH alias_candidates AS MATERIALIZED") ||
+		!strings.Contains(dataSQL, "candidate_scores AS") ||
+		!strings.Contains(dataSQL, "JOIN candidate_scores cs ON cs.content_id = mi.content_id") {
+		t.Fatalf("expected independently indexed title/alias candidate arms before hydration; got:\n%s", dataSQL)
+	}
+	if strings.Contains(dataSQL, "FROM media_item_aliases mia WHERE mia.content_id = mi.content_id") {
+		t.Fatalf("fuzzy ranking must not rescan the alias index per media candidate; got:\n%s", dataSQL)
 	}
 	// The whole point of the separate query: it must never rebuild the title
 	// tsvectors that made the fused query slow.
@@ -531,7 +670,7 @@ func TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount(t *testing.T) {
 }
 
 // TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor asserts the augment floor
-// contract: minSimilarity > 0 adds an explicit similarity() >= $n predicate
+// contract: minSimilarity > 0 adds an explicit fuzzy_full_rank >= $n predicate
 // (used when the FTS block had real hits, so augmentation only admits
 // near-certain corrections), and minSimilarity == 0 omits it so zero-hit typo
 // queries keep the base pinned threshold's recall.
@@ -542,7 +681,7 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	// Whole-title similarity, not word similarity: the augment floor must not
 	// admit embedded prefix words ("coral" scores 0.5 word-similarity to
 	// "coraline").
-	if !strings.Contains(floorSQL, ") >= $2") || !strings.Contains(floorSQL, "mia.normalized_title") {
+	if !strings.Contains(floorSQL, "cs.fuzzy_full_rank >= $2") {
 		t.Fatalf("expected explicit whole-title similarity floor predicate as $2; got:\n%s", floorSQL)
 	}
 	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
@@ -554,7 +693,7 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	}
 
 	baseSQL, _, baseArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
-	if strings.Contains(baseSQL, ") >= $2") {
+	if strings.Contains(baseSQL, "cs.fuzzy_full_rank >= $2") {
 		t.Fatalf("zero floor must not add a similarity predicate; got:\n%s", baseSQL)
 	}
 	if len(baseArgs) != len(floorArgs)-1 {
@@ -630,18 +769,16 @@ func TestItemRepo_Search_UsesTitleNormalizedColumn(t *testing.T) {
 }
 
 // TestItemRepo_Search_NormalizesTsqueryInput asserts that the user's search
-// text is wrapped in public.normalize_search_text() before being handed to
-// websearch_to_tsquery on the title arm, and to phraseto_tsquery for the
-// phrase rank. The tsvector side of @@ applies the same normalization, so
-// title normalization stays symmetric end-to-end. The overview arm is
+// text is normalized in Go before being bound to the prefix to_tsquery, and
+// that quoted phrase ranking normalizes its input in SQL. The overview arm is
 // intentionally left unwrapped — the 'english' config already treats "and"
 // as a stop word.
 func TestItemRepo_Search_NormalizesTsqueryInput(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("law and order", []string{"movie"}, 20, 0, AccessFilter{})
 
-	if !strings.Contains(sql, "websearch_to_tsquery('simple', public.normalize_search_text($1))") {
-		t.Fatalf("title arm must normalize the query input; got:\n%s", sql)
+	if !strings.Contains(sql, "to_tsquery('simple', $2)") {
+		t.Fatalf("title arm must use the normalized prefix query argument; got:\n%s", sql)
 	}
 	if !strings.Contains(sql, "public.normalize_search_text(COALESCE(mi.title, ''))") {
 		t.Fatalf("title tsvector must normalize mi.title to match the GIN index expression; got:\n%s", sql)
@@ -727,7 +864,10 @@ func TestItemRepo_Search_ScoredCTEIsLean(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dataSQL, countSQL, _ := repo.buildSearchSQL("avatar", test.itemTypes, 20, 0, AccessFilter{})
 			for _, sql := range []string{dataSQL, countSQL} {
-				end := strings.Index(sql, "), stats AS")
+				end := strings.Index(sql, "), page AS")
+				if countEnd := strings.Index(sql, ")\nSELECT COUNT(*)"); end < 0 || (countEnd >= 0 && countEnd < end) {
+					end = countEnd
+				}
 				if end < 0 {
 					t.Fatalf("expected scored CTE boundary; got:\n%s", sql)
 				}
@@ -746,9 +886,9 @@ func TestItemRepo_Search_UnscopedIncludesEpisodeCandidateBranch(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("Who Are You?", nil, 20, 0, AccessFilter{})
 	for _, want := range []string{
-		"FROM episodes e JOIN media_items si",
+		"FROM episode_catalog_entries ece JOIN media_items si",
 		"si.type = 'series'",
-		"FROM episode_libraries available_el",
+		"ece.search_title_vector",
 		"UNION ALL",
 	} {
 		if !strings.Contains(sql, want) {
@@ -760,7 +900,7 @@ func TestItemRepo_Search_UnscopedIncludesEpisodeCandidateBranch(t *testing.T) {
 func TestItemRepo_Search_EpisodeScopeOmitsMediaItemCandidateBranch(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("Who Are You?", []string{"episode"}, 20, 0, AccessFilter{})
-	scoredEnd := strings.Index(sql, "), stats AS")
+	scoredEnd := strings.Index(sql, "), page AS")
 	if scoredEnd < 0 {
 		t.Fatalf("expected scored CTE boundary; got:\n%s", sql)
 	}
@@ -768,7 +908,7 @@ func TestItemRepo_Search_EpisodeScopeOmitsMediaItemCandidateBranch(t *testing.T)
 	if strings.Contains(scored, "FROM media_items mi") {
 		t.Fatalf("episode-only candidate set must not scan media_items directly:\n%s", scored)
 	}
-	if !strings.Contains(scored, "FROM episodes e JOIN media_items si") {
+	if !strings.Contains(scored, "FROM episode_catalog_entries ece JOIN media_items si") {
 		t.Fatalf("episode-only candidate set missing episode branch:\n%s", scored)
 	}
 }
@@ -779,15 +919,15 @@ func TestItemRepo_Search_EpisodeAccessUsesIndependentMembershipPredicates(t *tes
 		AllowedLibraryIDs:  []int{1},
 		DisabledLibraryIDs: []int{2},
 	})
-	if !strings.Contains(sql, "FROM episode_libraries allowed_el") {
-		t.Fatalf("episode search missing allowed-library EXISTS:\n%s", sql)
+	if !strings.Contains(sql, "ece.media_folder_id = ANY($") {
+		t.Fatalf("episode search missing direct allowed-library catalog filter:\n%s", sql)
 	}
-	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM episode_libraries disabled_el") {
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM episode_catalog_entries disabled_ece") {
 		t.Fatalf("episode search missing independent disabled-library NOT EXISTS:\n%s", sql)
 	}
-	assertEpisodeParentDisabledAccess(t, sql, "e.series_id")
-	if strings.Contains(sql, "WHERE e_parent.content_id = e.content_id") {
-		t.Fatalf("episode candidate branch must use e.series_id without an episode lookup:\n%s", sql)
+	assertEpisodeParentDisabledAccess(t, sql, "ece.series_id")
+	if strings.Contains(sql, "WHERE e_parent.content_id = ece.episode_id") {
+		t.Fatalf("episode candidate branch must use ece.series_id without an episode lookup:\n%s", sql)
 	}
 }
 
@@ -816,5 +956,106 @@ func TestItemRepo_ListUnmatchedByFolderAndPathPrefix_ExcludesMangaChapters(t *te
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args with limit; got %v", args)
+	}
+}
+
+func TestRerankFuzzyItemsUsesTokenEditCoverage(t *testing.T) {
+	items := []*models.MediaItem{
+		{ContentID: "throne", Title: "Justice League: Throne of Atlantis"},
+		{ContentID: "game", Title: "Game of Thrones"},
+		{ContentID: "last-watch", Title: "Game of Thrones: The Last Watch"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Gane of Throns", items, nil); err != nil { //nolint:misspell
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "game" {
+		t.Fatalf("first result = %q (%s), want Game of Thrones", items[0].Title, items[0].ContentID)
+	}
+
+	items = []*models.MediaItem{
+		{ContentID: "miss", Title: "Miss Potter"},
+		{ContentID: "harry", Title: "Harry Potter and the Order of the Phoenix"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Hary Poter", items, nil); err != nil { //nolint:misspell
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "harry" {
+		t.Fatalf("first result = %q (%s), want Harry Potter title", items[0].Title, items[0].ContentID)
+	}
+}
+
+func TestRerankFuzzyItemsUsesBoundedAliases(t *testing.T) {
+	items := []*models.MediaItem{
+		{ContentID: "distractor", Title: "Tokyo Ghoul"},
+		{ContentID: "localized", Title: "倒凶十将伝"},
+	}
+	aliases := map[string][]string{
+		"localized": {"10 tokyo warriors"},
+	}
+	if err := rerankFuzzyItems(context.Background(), "Tokyo Warriros", items, aliases); err != nil { //nolint:misspell
+		t.Fatalf("rerank: %v", err)
+	}
+	if items[0].ContentID != "localized" {
+		t.Fatalf("first result = %q (%s), want alias-backed localized item", items[0].Title, items[0].ContentID)
+	}
+}
+
+func TestRerankFuzzyItemsHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	items := []*models.MediaItem{{ContentID: "one", Title: "One"}, {ContentID: "two", Title: "Two"}}
+	if err := rerankFuzzyItems(ctx, "three", items, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("rerank error = %v, want context.Canceled", err)
+	}
+}
+
+func TestFuzzyAutoMaxEditsMirrorsBoundedSearchEnginePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		length int
+		want   int
+	}{{1, 0}, {2, 0}, {3, 1}, {5, 1}, {6, 2}, {20, 2}} {
+		if got := fuzzyAutoMaxEdits(tc.length); got != tc.want {
+			t.Fatalf("fuzzyAutoMaxEdits(%d) = %d, want %d", tc.length, got, tc.want)
+		}
+	}
+}
+
+func TestBoundedLevenshteinRunes(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		max  int
+		want int
+	}{
+		{"game", "gane", 1, 1},
+		{"breaking", "breking", 2, 1},
+		{"furious", "furios", 2, 1},
+		{"thrones", "throns", 2, 1},
+		{"game", "throne", 2, 3},
+	} {
+		if got := boundedLevenshteinRunes([]rune(tc.a), []rune(tc.b), tc.max); got != tc.want {
+			t.Fatalf("boundedLevenshteinRunes(%q, %q, %d) = %d, want %d", tc.a, tc.b, tc.max, got, tc.want)
+		}
+	}
+}
+
+func BenchmarkRerankFuzzyItemsCappedCandidateSet(b *testing.B) {
+	items := make([]*models.MediaItem, fuzzyMaxResults)
+	aliases := make(map[string][]string, fuzzyMaxResults)
+	for i := range items {
+		contentID := fmt.Sprintf("item-%d", i)
+		items[i] = &models.MediaItem{ContentID: contentID, Title: fmt.Sprintf("Related Fantasy Title %d", i)}
+		for alias := 0; alias < fuzzyRerankMaxAliasesPerItem; alias++ {
+			aliases[contentID] = append(aliases[contentID], fmt.Sprintf("Alternate Fantasy Title %d %d", i, alias))
+		}
+	}
+	items[len(items)-1].Title = "Game of Thrones"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		working := append([]*models.MediaItem(nil), items...)
+		if err := rerankFuzzyItems(context.Background(), "Gane of Throns", working, aliases); err != nil { //nolint:misspell
+			b.Fatal(err)
+		}
 	}
 }

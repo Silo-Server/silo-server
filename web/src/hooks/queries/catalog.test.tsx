@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -105,6 +106,119 @@ describe("useCatalogWindow", () => {
 
     expect(markup).toContain('data-page6="missing"');
     expect(markup).toContain('data-page7="missing"');
+  });
+
+  it("keeps the previous search grid mounted while page 0 is replacing", () => {
+    const state = createCatalogSearchState("query", { q: "heater" });
+    const limit = 60;
+    let page0Query:
+      | {
+          placeholderData?: (previous: CatalogResponse) => CatalogResponse;
+          gcTime?: number;
+          retry?: boolean;
+        }
+      | undefined;
+    let pageQueries: Array<{ enabled?: boolean; gcTime?: number; retry?: boolean }> | undefined;
+
+    mocks.useQuery.mockImplementation((query) => {
+      page0Query = query;
+      return {
+        data: makePage(0, limit),
+        isLoading: true,
+        isPlaceholderData: true,
+      };
+    });
+    mocks.useQueries.mockImplementation(({ queries }) => {
+      pageQueries = queries;
+      return queries.map(() => ({ data: undefined, isLoading: false }));
+    });
+
+    function Harness() {
+      useCatalogWindow(state, { limit, visibleRange: [60, 119] });
+      return null;
+    }
+
+    renderToStaticMarkup(<Harness />);
+
+    const previous = makePage(0, limit);
+    expect(page0Query?.placeholderData?.(previous)).toBe(previous);
+    expect(page0Query).toMatchObject({ gcTime: 30_000, retry: false });
+    expect(pageQueries?.every((query) => query.enabled === false)).toBe(true);
+    expect(pageQueries?.every((query) => query.gcTime === 30_000 && query.retry === false)).toBe(
+      true,
+    );
+  });
+
+  it("surfaces and retries a failed visible follow-on page", async () => {
+    const state = createCatalogSearchState("query", { q: "star" });
+    const limit = 60;
+    const pageError = new Error("search_timeout");
+    const page0Refetch = vi.fn().mockResolvedValue(undefined);
+    const failedPageRefetch = vi.fn().mockResolvedValue(undefined);
+
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0, limit), snapshot: "2026-01-01T00:00:00Z" },
+      isLoading: false,
+      isError: false,
+      isPlaceholderData: false,
+      error: null,
+      refetch: page0Refetch,
+    });
+    mocks.useQueries.mockReturnValue([
+      {
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: pageError,
+        refetch: failedPageRefetch,
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useCatalogWindow(state, { limit, visibleRange: [60, 119] }),
+    );
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error).toBe(pageError);
+
+    await result.current.refetch();
+    expect(page0Refetch).toHaveBeenCalledOnce();
+    expect(failedPageRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a successful visible page when only its off-screen buffer fails", async () => {
+    const state = createCatalogSearchState("favorites");
+    const limit = 60;
+    const page0Refetch = vi.fn().mockResolvedValue(undefined);
+    const failedBufferRefetch = vi.fn().mockResolvedValue(undefined);
+
+    mocks.useQuery.mockReturnValue({
+      data: { ...makePage(0, limit), snapshot: "2026-01-01T00:00:00Z" },
+      isLoading: false,
+      isError: false,
+      isPlaceholderData: false,
+      error: null,
+      refetch: page0Refetch,
+    });
+    mocks.useQueries.mockReturnValue([
+      {
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error("buffer failed"),
+        refetch: failedBufferRefetch,
+      },
+    ]);
+
+    const { result } = renderHook(() =>
+      useCatalogWindow(state, { limit, visibleRange: [0, limit - 1] }),
+    );
+    expect(result.current.data.pages.get(0)).toHaveLength(limit);
+    expect(result.current.isError).toBe(false);
+    expect(result.current.error).toBeUndefined();
+
+    await result.current.refetch();
+    expect(page0Refetch).toHaveBeenCalledOnce();
+    expect(failedBufferRefetch).not.toHaveBeenCalled();
   });
 
   it("estimates window size from has_more when total is omitted", () => {

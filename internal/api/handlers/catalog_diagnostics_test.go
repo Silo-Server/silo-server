@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -119,5 +122,55 @@ func TestWriteCatalogResponse_GroupedByWorkOmitsDiagnostics(t *testing.T) {
 	// Grouped responses force total_exact false regardless of result.TotalExact.
 	if body["total_exact"].(bool) != false {
 		t.Fatalf("grouped total_exact = %v, want false", body["total_exact"])
+	}
+}
+
+func TestHandleCatalogSearchContextError_DeadlineReturnsRetryableTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=slow", nil)
+	if !handleCatalogSearchContextError(rec, req, errors.Join(errors.New("search failed"), context.DeadlineExceeded)) {
+		t.Fatal("deadline error was not handled")
+	}
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusGatewayTimeout, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode timeout body: %v; body=%s", err, rec.Body.String())
+	}
+	if body["error"] != "search_timeout" {
+		t.Fatalf("error = %v, want search_timeout; body=%v", body["error"], body)
+	}
+}
+
+func TestHandleCatalogSearchContextError_CanceledRequestWritesNothing(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=replaced", nil)
+	if !handleCatalogSearchContextError(rec, req, context.Canceled) {
+		t.Fatal("canceled request was not handled")
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("canceled request wrote a response body: %q", rec.Body.String())
+	}
+}
+
+func TestHandleCatalogResolveError_GroupedDeadlineReturnsRetryableTimeout(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/catalog?source=query&q=slow&group=work", nil)
+	handleCatalogResolveError(
+		rec,
+		req,
+		errors.Join(errors.New("grouped search failed"), context.DeadlineExceeded),
+		true,
+	)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusGatewayTimeout, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode grouped timeout body: %v; body=%s", err, rec.Body.String())
+	}
+	if body["error"] != "search_timeout" {
+		t.Fatalf("error = %v, want search_timeout; body=%v", body["error"], body)
 	}
 }

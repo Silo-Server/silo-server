@@ -175,8 +175,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_original",
-        "plan_id": "plan:a8beff7df33c6ca6776a093b840cdea3",
-        "plan_attempt_key": "v3:2cdebc939dc3cf22",
+        "plan_id": "plan:176744988a004fd5f2230c221961c41a",
+        "plan_attempt_key": "v3:d1ecc0d9511b83b8",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -218,7 +218,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -1862,8 +1862,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:c2695f5ba02dba71753615a263d2367e",
-        "plan_attempt_key": "v3:4b72643d8afc4436",
+        "plan_id": "plan:f12311eb7ac696c8bbeeab6c135b4225",
+        "plan_attempt_key": "v3:315d40199ceb0333",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -1905,7 +1905,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -2573,8 +2573,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:01ff67650a0ef2592ce739121de6d99a",
-        "plan_attempt_key": "v3:adc66f1d69acda72",
+        "plan_id": "plan:1aae8ad82720984fbc14c38de3a5485b",
+        "plan_attempt_key": "v3:78825f13a334a7ed",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -2616,7 +2616,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3602,8 +3602,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "quality_fixed_rung",
-        "plan_id": "plan:5fb510747d6b4314346fc53132de7fe3",
-        "plan_attempt_key": "v3:00106a7fb5f5abfd",
+        "plan_id": "plan:e302dcdd4f94f3c3027c7603de66c0a5",
+        "plan_attempt_key": "v3:b1ff9bc2e47e341e",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3645,7 +3645,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -3927,8 +3927,8 @@
         "outcome": "playable",
         "delivery": "server_remux_progressive",
         "decision_reason": "audio_adaptation",
-        "plan_id": "plan:acf3864ca5f5b39a7bcbf6133eea24f4",
-        "plan_attempt_key": "v3:be9bbd478b33b39e",
+        "plan_id": "plan:4f78d95e9fdd6e085ec79506894da894",
+        "plan_attempt_key": "v3:4979cff59d1f3068",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -3962,7 +3962,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]
@@ -4901,8 +4901,8 @@
         "outcome": "playable",
         "delivery": "server_transcode_hls",
         "decision_reason": "subtitle_burn_in_required",
-        "plan_id": "plan:ffc560da5dd89610e4e672299601c0f2",
-        "plan_attempt_key": "v3:2156e83ea26e40a0",
+        "plan_id": "plan:c42d17216c7049e49c5453bc2f21cfe5",
+        "plan_attempt_key": "v3:7ec0846b12cc97a6",
         "selected_tracks": {
           "audio": {
             "id": "file:42:audio:0",
@@ -4963,7 +4963,7 @@
           {
             "name": "audio_to_aac",
             "executor": "server",
-            "recipe_version": "3",
+            "recipe_version": "4",
             "validated_claims": [
               "audio_decode"
             ]

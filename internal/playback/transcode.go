@@ -1372,7 +1372,10 @@ func IsAudioToAACStereoDownmixV3(sourceChannels int, targetCodecAudio string, ta
 		(targetAudioChannels == 0 || targetAudioChannels == 2)
 }
 
-const stereoDownmixBoostFilterV3 = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+const (
+	aacTimestampNormalizeFilterV3 = "aresample=async=1"
+	stereoDownmixBoostFilterV3    = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
+)
 
 // appendStereoDownmixBoostArgs applies the playback downmix policy only after
 // the source is explicitly rematrixed to stereo. The order matters: limiting
@@ -1388,6 +1391,20 @@ func appendStereoDownmixBoostArgs(args []string, sourceChannels, outputChannels 
 		return args
 	}
 	return append(args, "-af", stereoDownmixBoostFilterV3)
+}
+
+// appendAACEncodeFilterArgs gives every AAC encode a continuous sample clock.
+// Matroska commonly represents fixed 1024-sample AAC frames on a millisecond
+// timebase, so their packet PTS alternate between rounded 21 ms and 22 ms
+// steps. Carrying those timestamps into fragmented MP4 leaves sub-frame gaps
+// that Firefox renders as audible crackle. The resampler corrects only the
+// timestamp jitter; surround-to-stereo conversions retain the existing
+// rematrix and limiter policy.
+func appendAACEncodeFilterArgs(args []string, sourceChannels int, targetCodec string, targetChannels, outputChannels int) []string {
+	if IsAudioToAACStereoDownmixV3(sourceChannels, targetCodec, targetChannels) && outputChannels == 2 {
+		return appendStereoDownmixBoostArgs(args, sourceChannels, outputChannels)
+	}
+	return append(args, "-af", aacTimestampNormalizeFilterV3)
 }
 
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
@@ -1418,9 +1435,7 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	default:
 		channels, bitrateKbps := resolvedAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))
-		if IsAudioToAACStereoDownmixV3(opts.SourceAudioChannels, opts.TargetCodecAudio, opts.TargetAudioChannels) {
-			args = appendStereoDownmixBoostArgs(args, opts.SourceAudioChannels, channels)
-		}
+		args = appendAACEncodeFilterArgs(args, opts.SourceAudioChannels, opts.TargetCodecAudio, opts.TargetAudioChannels, channels)
 	}
 
 	return args

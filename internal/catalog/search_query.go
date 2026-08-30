@@ -13,8 +13,8 @@ type parsedSearchQuery struct {
 	ExactTitleHint string
 	// NormalizedText is normalizeTitleForComparison(Text) computed once at parse
 	// time. Text already folds phrase + remainder together, so this is the full
-	// normalized query used by eligibleForFuzzy's token gate (which would
-	// otherwise re-normalize on every sparse search).
+	// normalized query used by the fuzzy gate and leading-title lookup (which
+	// would otherwise re-normalize on every sparse search).
 	NormalizedText string
 	Year           *int
 }
@@ -55,9 +55,21 @@ func parseSearchQuery(raw string) parsedSearchQuery {
 // short token ("a vengers") is judged on "vengers", not "a".
 const fuzzyMinTokenLen = 4
 
-// eligibleForFuzzy reports whether a parsed query clears the min-token gate for
-// the trigram fuzzy title fallback.
+// Single-token inputs shorter than this stay on the exact whole-title path.
+// Even a non-prefix FTS lexeme such as "la" or "the" can match a large share
+// of a multilingual catalog; ranking that set while the user is still typing
+// is both wasteful and visibly slow. Multi-word input with a short final token
+// uses the separate leading-title B-tree transition path below.
+const searchPrefixMinTokenLen = 4
+
+// eligibleForFuzzy reports whether a parsed query should use the trigram fuzzy
+// title fallback. A quoted phrase with a short remainder stays exclusively on
+// the indexed leading-title path so fuzzy matching cannot reintroduce results
+// that satisfy only the phrase and omit the remainder.
 func eligibleForFuzzy(parsed parsedSearchQuery) bool {
+	if parsed.Phrase != "" && useLeadingShortTitleSearch(parsed) {
+		return false
+	}
 	longest := 0
 	for _, tok := range strings.Fields(parsed.NormalizedText) {
 		if n := len([]rune(tok)); n > longest {
@@ -65,6 +77,21 @@ func eligibleForFuzzy(parsed parsedSearchQuery) bool {
 		}
 	}
 	return longest >= fuzzyMinTokenLen
+}
+
+func useExactShortTitleSearch(parsed parsedSearchQuery) bool {
+	fields := strings.Fields(parsed.NormalizedText)
+	return len(fields) == 1 && len([]rune(fields[0])) < searchPrefixMinTokenLen
+}
+
+// useLeadingShortTitleSearch handles the brief typeahead state where the user
+// has completed at least one word but the final word is still too short for a
+// selective catalog-wide lexeme expansion (for example, "the m"). A normalized
+// leading-title B-tree lookup is deterministic and cheap during those few
+// keystrokes; regular word-prefix FTS resumes at searchPrefixMinTokenLen.
+func useLeadingShortTitleSearch(parsed parsedSearchQuery) bool {
+	fields := strings.Fields(parsed.NormalizedText)
+	return len(fields) > 1 && len([]rune(fields[len(fields)-1])) < searchPrefixMinTokenLen
 }
 
 func extractBalancedPhrase(input string) (string, string) {
@@ -132,6 +159,15 @@ func buildTitlePrefixTsQuery(input string) string {
 
 	fields := strings.Fields(normalized)
 	if len(fields) == 0 {
+		return ""
+	}
+	// A one- to three-character prefix over the whole catalog is not selective:
+	// it can expand to a large fraction of episode titles and aliases while the
+	// user is still typing. Keep exact FTS available for genuinely short titles,
+	// but wait for four characters before enabling an unconstrained prefix.
+	// Multi-word queries remain safe because their completed terms constrain the
+	// final partial token (for example, "star w:*").
+	if len(fields) == 1 && len([]rune(fields[0])) < searchPrefixMinTokenLen {
 		return ""
 	}
 

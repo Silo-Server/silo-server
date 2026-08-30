@@ -325,8 +325,16 @@ function CardMeta({
       {hasMeta && (
         <div className="text-muted-foreground mt-1 flex items-center gap-1.5 text-[11px]">
           {mediaType && (
-            <Icon className="h-3 w-3 shrink-0 opacity-60" strokeWidth={2} aria-hidden />
+            <>
+              <Icon className="h-3 w-3 shrink-0 opacity-60" strokeWidth={2} aria-hidden />
+              <span>{mediaType === "series" ? "Series" : "Movie"}</span>
+            </>
           )}
+          {mediaType && year ? (
+            <span aria-hidden className="text-muted-foreground/40">
+              ·
+            </span>
+          ) : null}
           {year ? <span className="tabular-nums">{year}</span> : null}
           {(year || mediaType) && rating ? (
             <span aria-hidden className="text-muted-foreground/40">

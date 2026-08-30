@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CheckSquare, Search, Trash2, X } from "lucide-react";
+import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
@@ -35,6 +35,7 @@ import {
 import type { CatalogSearchState } from "./catalogSearchParams";
 
 const REQUEST_SEARCH_DEBOUNCE_MS = 100;
+const INTERACTIVE_SEARCH_GC_TIME_MS = 30_000;
 
 function defaultCatalogTitle(source: string, searchQuery?: string) {
   if (source === "favorites") return "Favorites";
@@ -232,11 +233,15 @@ function CatalogResults({
     enabled: canRequest.discoveryEnabled && isQuerySource,
     requireProfile: true,
     staleTime: 5 * 60 * 1000,
+    gcTime: INTERACTIVE_SEARCH_GC_TIME_MS,
+    retry: false,
   });
   const tmdbMissingCount =
     tmdbQuery.data?.results?.filter((result) => result.availability !== "available").length ?? 0;
-  const libraryHasResults = (catalogQuery.data?.totalItems ?? 0) > 0;
-  const libraryEmpty = !catalogQuery.isLoading && !libraryHasResults;
+  const libraryResultsKnown =
+    !catalogQuery.isLoading && !catalogQuery.isPlaceholderData && !catalogQuery.isError;
+  const libraryHasResults = libraryResultsKnown && (catalogQuery.data?.totalItems ?? 0) > 0;
+  const libraryEmpty = libraryResultsKnown && !libraryHasResults;
   // When the library is empty and the request section will (or might) render,
   // hide ItemGrid entirely. The previous approach pinned ItemGrid's `loading`
   // prop to true, which renders 24 skeleton tiles forever above the section.
@@ -416,7 +421,27 @@ function CatalogResults({
         </section>
       )}
 
-      {tmdbMayRescueLibrary ? null : (
+      {catalogQuery.isError ? (
+        <div
+          className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
+          role="alert"
+        >
+          <p className="font-medium">
+            {isQuerySource
+              ? "Search stopped before it could finish."
+              : "Catalog stopped before it could finish."}
+          </p>
+          <p className="text-muted-foreground max-w-md text-sm">
+            {isQuerySource
+              ? "The server ended the lookup so it could not keep using CPU in the background. Try a more specific title or retry once."
+              : "The server could not load every requested result. Retry the catalog once."}
+          </p>
+          <Button variant="outline" size="sm" onClick={() => void catalogQuery.refetch()}>
+            <RefreshCw className="size-4" />
+            {isQuerySource ? "Retry search" : "Retry catalog"}
+          </Button>
+        </div>
+      ) : tmdbMayRescueLibrary ? null : (
         <ItemGrid
           totalItems={catalogQuery.data?.totalItems ?? 0}
           pages={catalogQuery.data?.pages ?? new Map()}
@@ -435,6 +460,7 @@ function CatalogResults({
           variant="grid"
           query={tmdbDebouncedQ}
           libraryHadHits={libraryHasResults}
+          libraryResultsKnown={libraryResultsKnown}
         />
       ) : null}
 
