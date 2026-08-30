@@ -3121,6 +3121,51 @@ func TestPlanPlaybackV3AudioOnlyPlansOriginalHTTP(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3WindowsWebAudioOnlyNormalizesAudio(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		codec     string
+		channels  int
+		container string
+		userAgent string
+		quirkID   string
+	}{
+		{name: "Edge EAC3", codec: "eac3", channels: 6, container: "mkv", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/151.0.0.0", quirkID: QuirkWindowsWebAudioNormalizeV3},
+		{name: "Firefox Matroska AAC", codec: "aac", channels: 2, container: "mkv", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0", quirkID: QuirkFirefoxMatroskaAACTimingV3},
+		{name: "Firefox MP4 AAC", codec: "aac", channels: 2, container: "mp4", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0", quirkID: QuirkWindowsWebAudioNormalizeV3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := audioOnlyFixtureFileV3()
+			file.FilePath = "/media/audiobook." + test.container
+			file.Container = test.container
+			file.CodecAudio = test.codec
+			file.AudioChannels = test.channels
+			file.AudioTracks[0] = models.AudioTrack{Codec: test.codec, Channels: test.channels, SampleRate: 48_000, Default: true}
+			req := validStartRequestV3()
+			req.FileID = file.ID
+			req.Capabilities.CodecsAudio = []string{test.codec, "aac"}
+			req.Capabilities.Containers = []string{test.container, "mp4"}
+			req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": test.userAgent}}
+			original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+			original.Containers = []string{test.container}
+			original.AudioDecodeCodecs = []string{test.codec}
+			req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+			progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+			progressive.Containers = []string{"mp4"}
+			progressive.AudioDecodeCodecs = []string{"aac"}
+			req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+
+			result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 2 {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != test.quirkID {
+				t.Fatalf("applied quirks = %#v", result.Plan.AppliedQuirks)
+			}
+		})
+	}
+}
+
 func TestPlanPlaybackV3AudioOnlyHonorsBandwidthCap(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -3455,6 +3500,291 @@ func TestPlanPlaybackV3VideoRemuxAdaptsProgressiveWhenHLSVideoUnsupported(t *tes
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
+}
+
+func TestPlanPlaybackV3WindowsWebAudioNormalizationMatrix(t *testing.T) {
+	newInput := func(codec string, channels int, userAgent string) PlannerInputV3 {
+		file := detailedFixtureFileV3()
+		file.CodecVideo = "h264"
+		file.CodecAudio = codec
+		file.Resolution = "1080p"
+		file.Bitrate = 12_000
+		file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 11_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
+		file.AudioTracks[0] = models.AudioTrack{Codec: codec, Channels: channels, SampleRate: 48_000, Default: true}
+
+		req := validStartRequestV3()
+		req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+		req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+		req.Capabilities.CodecsVideo = []string{"h264"}
+		req.Capabilities.CodecsAudio = []string{codec, "aac"}
+		req.Capabilities.Containers = []string{"mkv", "mp4"}
+		req.Capabilities.MaxResolution = "1080p"
+		req.ClientPlaybackContext.FormFactor = "desktop"
+		req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": userAgent}}
+		original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+		original.Containers = []string{"mkv"}
+		original.VideoCodecs = []string{"h264"}
+		original.AudioDecodeCodecs = []string{codec}
+		req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+		progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+		progressive.Containers = []string{"mp4"}
+		progressive.VideoCodecs = []string{"h264"}
+		progressive.AudioDecodeCodecs = []string{"aac"}
+		req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+		return PlannerInputV3{
+			Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+			Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+		}
+	}
+
+	browsers := map[string]string{
+		"Edge":    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+		"Chrome":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36",
+		"Firefox": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0",
+	}
+	codecs := []struct {
+		name     string
+		channels int
+	}{
+		{name: "mp3", channels: 2},
+		{name: "ac3", channels: 6},
+		{name: "eac3", channels: 6},
+		{name: "dts", channels: 6},
+		{name: "truehd", channels: 8},
+		{name: "opus", channels: 2},
+		{name: "vorbis", channels: 2},
+		{name: "flac", channels: 2},
+		{name: "alac", channels: 2},
+		{name: "pcm_s16le", channels: 2},
+	}
+	for browser, userAgent := range browsers {
+		for _, codec := range codecs {
+			t.Run(browser+"/"+codec.name, func(t *testing.T) {
+				result := PlanPlaybackV3(newInput(codec.name, codec.channels, userAgent))
+				if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+				if result.Plan.EffectiveRecipe.VideoCodec != "h264" || result.Plan.EffectiveRecipe.AudioCodec != "aac" || result.TargetAudioChannels != 2 {
+					t.Fatalf("adapted recipe = %#v", result.Plan.EffectiveRecipe)
+				}
+				if result.Plan.DecisionReason != decisionReasonAudioAdaptationV3 || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationAudioToAACV3 || result.Plan.Transformations[0].RecipeVersion != TransformationAudioToAACRecipeVersionV3 {
+					t.Fatalf("audio-only adaptation = %#v", result.Plan)
+				}
+				if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+					t.Fatalf("applied quirks = %#v", result.Plan.AppliedQuirks)
+				}
+			})
+		}
+	}
+
+	t.Run("Firefox Matroska AAC", func(t *testing.T) {
+		result := PlanPlaybackV3(newInput("aac", 2, browsers["Firefox"]))
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFirefoxMatroskaAACTimingV3 {
+			t.Fatalf("applied quirks = %#v", result.Plan.AppliedQuirks)
+		}
+	})
+
+	t.Run("Firefox MP4 AAC", func(t *testing.T) {
+		input := newInput("aac", 2, browsers["Firefox"])
+		input.RequestedFile.FilePath = "/media/movie.mp4"
+		input.RequestedFile.Container = "mp4"
+		original := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+		original.Containers = []string{"mp4"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("applied quirks = %#v", result.Plan.AppliedQuirks)
+		}
+	})
+
+	t.Run("Edge AAC remains native", func(t *testing.T) {
+		result := PlanPlaybackV3(newInput("aac", 2, browsers["Edge"]))
+		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
+			t.Fatalf("native AAC route changed = %s", ExplainPlannerResultV3(result))
+		}
+	})
+
+	t.Run("macOS non-AAC remains native", func(t *testing.T) {
+		result := PlanPlaybackV3(newInput("eac3", 6, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0"))
+		if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.AppliedQuirks) != 0 {
+			t.Fatalf("non-Windows route changed = %s", ExplainPlannerResultV3(result))
+		}
+	})
+
+	t.Run("HLS fallback keeps video copied and audio normalized", func(t *testing.T) {
+		input := newInput("eac3", 6, browsers["Firefox"])
+		delete(input.Request.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+		hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.Containers = []string{"hls"}
+		hls.VideoCodecs = []string{"h264"}
+		hls.AudioDecodeCodecs = []string{"aac"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != "copy" || result.TargetAudioCodec != "aac" || !result.TranscodeAudio {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationAudioToAACV3 || result.Plan.Transformations[0].RecipeVersion != TransformationAudioToAACRecipeVersionV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("HLS audio normalization = %#v", result.Plan)
+		}
+	})
+
+	t.Run("HLS-only non-native surround stays on AAC stereo contract", func(t *testing.T) {
+		input := newInput("dts", 6, browsers["Edge"])
+		delete(input.Request.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
+		hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.Containers = []string{"hls"}
+		hls.VideoCodecs = []string{"h264"}
+		hls.AudioDecodeCodecs = []string{"aac"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		result := PlanPlaybackV3(input)
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !result.TranscodeAudio || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 2 {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if result.Plan.EffectiveRecipe.VideoCodec != "h264" || result.Plan.EffectiveRecipe.AudioChannels == nil || *result.Plan.EffectiveRecipe.AudioChannels != 2 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("HLS Windows recipe = %#v", result.Plan)
+		}
+	})
+
+	t.Run("full video transcode cannot reintroduce Windows audio path", func(t *testing.T) {
+		for _, test := range []struct {
+			name      string
+			codec     string
+			userAgent string
+			quirkID   string
+		}{
+			{name: "Edge EAC3", codec: "eac3", userAgent: browsers["Edge"], quirkID: QuirkWindowsWebAudioNormalizeV3},
+			{name: "Firefox Matroska AAC", codec: "aac", userAgent: browsers["Firefox"], quirkID: QuirkFirefoxMatroskaAACTimingV3},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				input := newInput(test.codec, 6, test.userAgent)
+				input.Request.QualityPreference = QualityRung720pHighV3
+				hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+				hls.Containers = []string{"hls"}
+				hls.VideoCodecs = []string{"h264"}
+				hls.AudioDecodeCodecs = []string{"aac"}
+				input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+				result := PlanPlaybackV3(input)
+				if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 || result.PlayMethod != PlayTranscode || !result.TranscodeAudio || result.TargetVideoCodec != "h264" || result.TargetAudioCodec != "aac" || result.TargetAudioChannels != 2 {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+				if result.Plan.EffectiveRecipe.AudioChannels == nil || *result.Plan.EffectiveRecipe.AudioChannels != 2 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != test.quirkID {
+					t.Fatalf("transcode Windows recipe = %#v", result.Plan)
+				}
+			})
+		}
+	})
+
+	t.Run("missing AAC toolchain never falls back to crackling direct play", func(t *testing.T) {
+		for _, test := range []struct {
+			name      string
+			codec     string
+			userAgent string
+		}{
+			{name: "Edge EAC3", codec: "eac3", userAgent: browsers["Edge"]},
+			{name: "Firefox AAC", codec: "aac", userAgent: browsers["Firefox"]},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				input := newInput(test.codec, 2, test.userAgent)
+				input.Registry = NewTransformationRegistryV3(nil)
+				result := PlanPlaybackV3(input)
+				if result.Plan != nil || result.Terminal == nil || result.Terminal.Reason != TerminalAudioConversionUnsupportedV3 || !result.Terminal.Retryable {
+					t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+				}
+			})
+		}
+	})
+
+	t.Run("failed progressive retry keeps normalized AAC on HLS", func(t *testing.T) {
+		input := newInput("eac3", 6, browsers["Edge"])
+		hls := input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		hls.Containers = []string{"hls"}
+		hls.VideoCodecs = []string{"h264"}
+		hls.AudioDecodeCodecs = []string{"aac"}
+		input.Request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+		first := PlanPlaybackV3(input)
+		if first.Plan == nil || first.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+			t.Fatalf("first = %s", ExplainPlannerResultV3(first))
+		}
+		input.AttemptedKeys = []string{first.Plan.PlanAttemptKey}
+		second := PlanPlaybackV3(input)
+		if second.Plan == nil || second.Plan.Delivery != DeliveryRemuxHLSV3 || second.TargetAudioCodec != "aac" || !second.TranscodeAudio {
+			t.Fatalf("second = %s", ExplainPlannerResultV3(second))
+		}
+		if len(second.Plan.AppliedQuirks) != 1 || second.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("fallback quirks = %#v", second.Plan.AppliedQuirks)
+		}
+	})
+
+	t.Run("DV8 EAC3 keeps copied 4K HEVC", func(t *testing.T) {
+		file := detailedFixtureFileV3()
+		file.CodecAudio = "eac3"
+		file.AudioChannels = 6
+		file.AudioTracks[0] = models.AudioTrack{Codec: "eac3", Channels: 6, Layout: "5.1", SampleRate: 48_000, Default: true}
+		file.VideoTracks[0].DVProfile = 8
+		file.VideoTracks[0].DVLevel = 6
+		file.VideoTracks[0].DVBLCompatID = 1
+		file.VideoTracks[0].ColorTransfer = "smpte2084"
+		file.VideoTracks[0].VideoRange = "DolbyVision"
+		file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+		dv := &HDRCapabilitiesV3{
+			DolbyVisionProfiles:      []int{8},
+			DolbyVisionProfileLevels: []DolbyVisionProfileCapabilityV3{{Profile: 8, MaxLevel: 6, BLCompatibilityIDs: []int{1}}},
+		}
+		req := validStartRequestV3()
+		req.Capabilities.VideoEvidence = EvidenceDeclaredV3
+		req.Capabilities.AudioEvidence = EvidenceDeclaredV3
+		req.Capabilities.CodecsVideo = []string{"hevc"}
+		req.Capabilities.CodecsAudio = []string{"eac3", "aac"}
+		req.Capabilities.Containers = []string{"mkv", "mp4"}
+		req.Capabilities.HDRDetails = dv
+		req.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": browsers["Edge"]}}
+		req.ClientPlaybackContext.Output.HDRDetails = dv
+		original := req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3]
+		original.Containers = []string{"mkv"}
+		original.VideoCodecs = []string{"hevc"}
+		original.AudioDecodeCodecs = []string{"eac3"}
+		original.HDRDetails = dv
+		req.ClientPlaybackContext.Deliveries[DeliveryClassOriginalHTTPV3] = original
+		progressive := req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+		progressive.Containers = []string{"mp4"}
+		progressive.VideoCodecs = []string{"hevc"}
+		progressive.AudioDecodeCodecs = []string{"aac"}
+		progressive.HDRDetails = dv
+		req.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+
+		result := PlanPlaybackV3(PlannerInputV3{
+			Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+			Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+		})
+		if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux || !result.TranscodeAudio || result.TargetAudioCodec != "aac" {
+			t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+		}
+		if result.Plan.EffectiveRecipe.VideoCodec != "hevc" || result.Plan.EffectiveRecipe.DynamicRange != DynamicRangeDolbyVisionV3 {
+			t.Fatalf("copied Dolby Vision recipe = %#v", result.Plan.EffectiveRecipe)
+		}
+		if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != TransformationAudioToAACV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("audio-only workaround plan = %#v", result.Plan)
+		}
+
+		firefoxRequest := req
+		firefoxRequest.ClientPlaybackContext.Device.PlatformDetails = map[string]string{"user_agent": browsers["Firefox"]}
+		firefoxResult := PlanPlaybackV3(PlannerInputV3{
+			Request: firefoxRequest, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+			Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+		})
+		if firefoxResult.Plan == nil || firefoxResult.Plan.Delivery != DeliveryRemuxProgressiveV3 || !firefoxResult.TranscodeAudio {
+			t.Fatalf("Firefox result = %s", ExplainPlannerResultV3(firefoxResult))
+		}
+		if len(firefoxResult.Plan.AppliedQuirks) != 1 || firefoxResult.Plan.AppliedQuirks[0].ID != QuirkWindowsWebAudioNormalizeV3 {
+			t.Fatalf("Firefox copied-video quirks = %#v", firefoxResult.Plan.AppliedQuirks)
+		}
+	})
 }
 
 func TestPlanPlaybackV3MatroskaAACRemuxUsesTimestampNormalizedAudio(t *testing.T) {
