@@ -23,6 +23,70 @@ func withFastDeadlockRetry(t *testing.T, maxAttempts int) {
 	})
 }
 
+// withFastFolderCollectionLockSetRetry shrinks stabilization timing/attempts
+// for tests and restores the originals on cleanup. Tests using it must not call
+// t.Parallel().
+func withFastFolderCollectionLockSetRetry(t *testing.T, maxAttempts int) {
+	t.Helper()
+	oldMax, oldBackoff := folderCollectionLockSetMaxAttempts, folderCollectionLockSetBaseBackoff
+	folderCollectionLockSetMaxAttempts = maxAttempts
+	folderCollectionLockSetBaseBackoff = time.Millisecond
+	t.Cleanup(func() {
+		folderCollectionLockSetMaxAttempts = oldMax
+		folderCollectionLockSetBaseBackoff = oldBackoff
+	})
+}
+
+func TestRetryFolderCollectionLockSetStabilizes(t *testing.T) {
+	withFastFolderCollectionLockSetRetry(t, 3)
+	calls := 0
+	deletedIDs, err := retryFolderCollectionLockSet(context.Background(), 42, func() (bool, []string, error) {
+		calls++
+		if calls == 1 {
+			return true, nil, nil
+		}
+		return false, []string{"collection-1"}, nil
+	})
+	if err != nil {
+		t.Fatalf("retryFolderCollectionLockSet: %v", err)
+	}
+	if calls != 2 || len(deletedIDs) != 1 || deletedIDs[0] != "collection-1" {
+		t.Fatalf("calls = %d, deleted IDs = %v", calls, deletedIDs)
+	}
+}
+
+func TestRetryFolderCollectionLockSetStopsWhenUnstable(t *testing.T) {
+	withFastFolderCollectionLockSetRetry(t, 3)
+	calls := 0
+	_, err := retryFolderCollectionLockSet(context.Background(), 42, func() (bool, []string, error) {
+		calls++
+		return true, nil, nil
+	})
+	if !errors.Is(err, errFolderCollectionLockSetNeverStable) {
+		t.Fatalf("error = %v, want unstable collection-set error", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+}
+
+func TestRetryFolderCollectionLockSetStopsOnCanceledContext(t *testing.T) {
+	withFastFolderCollectionLockSetRetry(t, 3)
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	_, err := retryFolderCollectionLockSet(ctx, 42, func() (bool, []string, error) {
+		calls++
+		cancel()
+		return true, nil, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls = %d, want 1", calls)
+	}
+}
+
 func TestRetryOnDeadlockRetriesThenSucceeds(t *testing.T) {
 	withFastDeadlockRetry(t, 5)
 	calls := 0

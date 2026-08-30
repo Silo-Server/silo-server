@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import type { CreateLibraryCollectionRequest, Library, LibraryCollection } from "@/api/types";
+import type {
+  CreateLibraryCollectionRequest,
+  Library,
+  LibraryCollection,
+  UpdateLibraryCollectionRequest,
+} from "@/api/types";
 import { normalizeQueryDefinition } from "@/api/types";
 import {
   COLLECTION_MAX_ITEMS,
@@ -20,6 +25,7 @@ import { ImageUploadField } from "@/components/ImageUploadField";
 import { CollectionDefaultSortField } from "@/components/collections/CollectionDefaultSortField";
 import {
   COLLECTION_SOURCE_ORDER,
+  changedSortConfig,
   selectValueToSortConfig,
   sortConfigToSelectValue,
 } from "@/lib/collectionSortConfig";
@@ -147,6 +153,76 @@ export function parseOptionalPositiveInteger(value: string): number | undefined 
 function getMDBListLimitValue(collection: LibraryCollection | null): string {
   const limit = collection?.source_config?.limit;
   return typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? String(limit) : "";
+}
+
+export function changedCollectionLibraryIDs(
+  initialLibraryIDs: number[],
+  currentLibraryIDs: number[],
+): number[] | undefined {
+  if (initialLibraryIDs.length !== currentLibraryIDs.length) {
+    return currentLibraryIDs;
+  }
+  const initial = [...initialLibraryIDs].sort((a, b) => a - b);
+  const current = [...currentLibraryIDs].sort((a, b) => a - b);
+  return initial.every((libraryID, index) => libraryID === current[index])
+    ? undefined
+    : currentLibraryIDs;
+}
+
+export function buildAdminCollectionPartialUpdate({
+  collection,
+  initialLibraryIds,
+  libraryIds,
+  title,
+  description,
+  featured,
+  visibility,
+  sourceDirty,
+  sourceUrl,
+  sourceConfig,
+  syncSchedule,
+  initialDefaultSort,
+  defaultSort,
+  posterSourceUrl,
+  backdropSourceUrl,
+}: {
+  collection: LibraryCollection;
+  initialLibraryIds: number[];
+  libraryIds: number[];
+  title: string;
+  description: string;
+  featured: boolean;
+  visibility: "visible" | "hidden";
+  sourceDirty: boolean;
+  sourceUrl?: string;
+  sourceConfig?: Record<string, unknown>;
+  syncSchedule: string;
+  initialDefaultSort: string;
+  defaultSort: string;
+  posterSourceUrl: string;
+  backdropSourceUrl: string;
+}): UpdateLibraryCollectionRequest {
+  const body: UpdateLibraryCollectionRequest = {};
+  const nextLibraryIDs = changedCollectionLibraryIDs(initialLibraryIds, libraryIds);
+  if (nextLibraryIDs !== undefined) body.library_ids = nextLibraryIDs;
+  if (title !== collection.title) body.title = title;
+  if (description !== (collection.description ?? "")) body.description = description;
+  if (featured !== collection.featured) body.featured = featured;
+  if (visibility !== collection.visibility) body.visibility = visibility;
+  if (sourceDirty) {
+    body.source_url = sourceUrl;
+    body.source_config = sourceConfig;
+  }
+  if (syncSchedule.trim() !== (collection.sync_schedule ?? "")) {
+    body.sync_schedule = syncSchedule.trim();
+  }
+  const nextSortConfig = changedSortConfig(initialDefaultSort, defaultSort);
+  if (nextSortConfig !== undefined) body.sort_config = nextSortConfig;
+  const nextPosterSourceURL = posterSourceUrl.trim();
+  if (nextPosterSourceURL) body.poster_source_url = nextPosterSourceURL;
+  const nextBackdropSourceURL = backdropSourceUrl.trim();
+  if (nextBackdropSourceURL) body.backdrop_source_url = nextBackdropSourceURL;
+  return body;
 }
 
 function getTMDBPresetLabel(preset: TMDBPreset): string {
@@ -1390,17 +1466,17 @@ export function CollectionEditForm({
   initialLibraryId: number | null;
   onClose: () => void;
 }) {
-  const [libraryIds, setLibraryIds] = useState<number[]>(() => {
+  const initialLibraryIds = (() => {
     if (collection.library_ids && collection.library_ids.length > 0) return collection.library_ids;
     if (collection.library_id) return [collection.library_id];
     if (initialLibraryId) return [initialLibraryId];
     return libraries[0]?.id ? [libraries[0].id] : [];
-  });
+  })();
+  const [libraryIds, setLibraryIds] = useState<number[]>(initialLibraryIds);
   const [title, setTitle] = useState(collection.title ?? "");
   const [description, setDescription] = useState(collection.description ?? "");
-  const [defaultSort, setDefaultSort] = useState<string>(() =>
-    sortConfigToSelectValue(collection.sort_config),
-  );
+  const initialDefaultSort = sortConfigToSelectValue(collection.sort_config);
+  const [defaultSort, setDefaultSort] = useState<string>(initialDefaultSort);
   const [featured, setFeatured] = useState(collection.featured ?? false);
   const [visibility, setVisibility] = useState<"visible" | "hidden">(collection.visibility);
   const [posterFile, setPosterFile] = useState<File | null>(null);
@@ -1467,15 +1543,24 @@ export function CollectionEditForm({
 
     let sourceConfig: Record<string, unknown> | undefined = collection.source_config;
     let sourceUrlValue: string | undefined;
+    let sourceDirty = false;
 
     if (isMDBListCollection) {
       sourceUrlValue = sourceUrl;
+      sourceDirty =
+        sourceUrl !== (collection.source_url ?? "") ||
+        sourceLimit !== getMDBListLimitValue(collection);
       sourceConfig = {
         mode: "mdblist_json",
         url: sourceUrl,
         ...(parsedSourceLimit ? { limit: parsedSourceLimit } : {}),
       };
     } else if (isTMDBCollection) {
+      sourceDirty =
+        tmdbPreset !== tmdbDefaults.preset ||
+        normalizedTMDBMediaType !== tmdbDefaults.mediaType ||
+        tmdbTimeWindow !== tmdbDefaults.timeWindow ||
+        tmdbLimit !== tmdbDefaults.limit;
       const tmdbSource = buildTMDBPresetSourceInput({
         preset: tmdbPreset,
         mediaType: normalizedTMDBMediaType,
@@ -1485,6 +1570,13 @@ export function CollectionEditForm({
       sourceUrlValue = tmdbSource.source_url;
       sourceConfig = tmdbSource.source_config;
     } else if (isTraktCollection) {
+      sourceDirty =
+        traktSourceKind !== traktDefaults.sourceKind ||
+        traktListUrl !== traktDefaults.listUrl ||
+        traktPreset !== traktDefaults.preset ||
+        traktMediaType !== traktDefaults.mediaType ||
+        traktProfileId !== traktDefaults.profileId ||
+        traktLimit !== traktDefaults.limit;
       if (isTraktListMode) {
         const traktListSource = buildTraktListSourceInput({
           listUrl: traktListUrl,
@@ -1508,20 +1600,23 @@ export function CollectionEditForm({
       }
     }
 
-    const body: CreateLibraryCollectionRequest = {
-      library_ids: libraryIds,
+    const body = buildAdminCollectionPartialUpdate({
+      collection,
+      initialLibraryIds,
+      libraryIds,
       title,
       description,
       featured,
       visibility,
-      collection_type: collection.collection_type,
-      poster_source_url: posterSourceUrl.trim() || undefined,
-      backdrop_source_url: backdropSourceUrl.trim() || undefined,
-      source_url: sourceUrlValue,
-      source_config: sourceConfig,
-      sync_schedule: editSyncSchedule.trim(),
-      sort_config: selectValueToSortConfig(defaultSort),
-    };
+      sourceDirty,
+      sourceUrl: sourceUrlValue,
+      sourceConfig,
+      syncSchedule: editSyncSchedule,
+      initialDefaultSort,
+      defaultSort,
+      posterSourceUrl,
+      backdropSourceUrl,
+    });
 
     updateMutation.mutate(
       { id: collection.id, body, poster: posterFile, backdrop: backdropFile },

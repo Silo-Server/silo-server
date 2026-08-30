@@ -15,13 +15,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// Retry parameters for transient serialization/deadlock failures. They are
-// package vars (not consts) only so tests can shrink them; production code
-// never mutates them.
+// Retry parameters are package vars (not consts) only so tests can shrink
+// them; production code never mutates them.
 var (
-	deadlockMaxAttempts = 5
-	deadlockBaseBackoff = 50 * time.Millisecond
+	deadlockMaxAttempts                = 5
+	deadlockBaseBackoff                = 50 * time.Millisecond
+	folderCollectionLockSetMaxAttempts = 5
+	folderCollectionLockSetBaseBackoff = 10 * time.Millisecond
 )
+
+var errFolderCollectionLockSetNeverStable = errors.New("library collection set kept changing during folder delete")
 
 const (
 	// orphanDeleteBatch is small because each media_items row cascades across
@@ -690,17 +693,155 @@ func (r *FolderRepository) DeleteWithStats(
 
 	// Phase 4: delete the now-lightweight folder row. Tolerate 0 rows so a
 	// resumed run that already removed it still succeeds.
+	var deletedCollectionIDs []string
 	if err := retryOnDeadlock(ctx, func() error {
-		_, e := r.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id)
+		var e error
+		deletedCollectionIDs, e = r.deleteFolderRowWithCollectionPosterLocks(ctx, id)
 		return e
 	}); err != nil {
 		return nil, fmt.Errorf("deleting folder: %w", err)
+	}
+	for _, collectionID := range deletedCollectionIDs {
+		stats.OrphanedImageDirs = append(stats.OrphanedImageDirs, fmt.Sprintf("collection-images/%s/", collectionID))
 	}
 
 	if progress != nil {
 		progress(orphanTotal, orphanTotal, "Library deletion completed")
 	}
 	return stats, nil
+}
+
+// deleteFolderRowWithCollectionPosterLocks serializes the final folder
+// cascade with collection creation/reparenting and every deterministic poster
+// writer. The initial read lets us take process-local poster locks before
+// holding a pooled connection; after the lifecycle lock makes the child set
+// stable, the set is re-read and the attempt is retried if a new child appeared.
+func (r *FolderRepository) deleteFolderRowWithCollectionPosterLocks(ctx context.Context, folderID int) ([]string, error) {
+	return retryFolderCollectionLockSet(ctx, folderID, func() (bool, []string, error) {
+		collectionIDs, err := r.listOwnedLibraryCollectionIDs(ctx, folderID)
+		if err != nil {
+			return false, nil, err
+		}
+		unlockLocal := make([]func(), 0, len(collectionIDs))
+		for _, collectionID := range collectionIDs {
+			unlockLocal = append(unlockLocal, LockLibraryCollectionPosterMutation(collectionID))
+		}
+
+		retry, deletedIDs, err := r.deleteFolderRowWithCollectionPosterLocksAttempt(ctx, folderID, collectionIDs)
+		for i := len(unlockLocal) - 1; i >= 0; i-- {
+			unlockLocal[i]()
+		}
+		if err != nil {
+			return false, nil, err
+		}
+		return retry, deletedIDs, nil
+	})
+}
+
+// retryFolderCollectionLockSet bounds stabilization when concurrent creates or
+// reparents change the child set between its initial read and lifecycle-lock
+// acquisition. It never permits deletion without every discovered poster lock.
+func retryFolderCollectionLockSet(
+	ctx context.Context,
+	folderID int,
+	attempt func() (retry bool, deletedIDs []string, err error),
+) ([]string, error) {
+	backoff := folderCollectionLockSetBaseBackoff
+	for attemptNumber := 1; ; attemptNumber++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		retry, deletedIDs, err := attempt()
+		if err != nil {
+			return nil, err
+		}
+		if !retry {
+			return deletedIDs, nil
+		}
+		if attemptNumber >= folderCollectionLockSetMaxAttempts {
+			return nil, fmt.Errorf("folder %d: %w after %d attempts", folderID, errFolderCollectionLockSetNeverStable, attemptNumber)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+}
+
+func (r *FolderRepository) listOwnedLibraryCollectionIDs(ctx context.Context, folderID int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id
+		FROM library_collections
+		WHERE library_id = $1
+		ORDER BY id`, folderID)
+	if err != nil {
+		return nil, fmt.Errorf("listing library collections before folder delete: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting library collections before folder delete: %w", err)
+	}
+	return ids, nil
+}
+
+func (r *FolderRepository) deleteFolderRowWithCollectionPosterLocksAttempt(
+	ctx context.Context,
+	folderID int,
+	lockedCollectionIDs []string,
+) (bool, []string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// All poster writers use poster -> lifecycle -> row/FK order. Match that
+	// order here so a concurrent collection update cannot hold its poster lock
+	// while waiting on a folder row this transaction already owns.
+	lockedIDs := make(map[string]struct{}, len(lockedCollectionIDs))
+	for _, collectionID := range lockedCollectionIDs {
+		if _, err := tx.Exec(ctx, libraryCollectionPosterAdvisoryLockSQL, collectionID); err != nil {
+			return false, nil, fmt.Errorf("locking collection poster before folder delete: %w", err)
+		}
+		lockedIDs[collectionID] = struct{}{}
+	}
+	if _, err := tx.Exec(ctx, libraryCollectionLifecycleLockSQL, folderID); err != nil {
+		return false, nil, fmt.Errorf("locking library collection lifecycle before folder delete: %w", err)
+	}
+	var existingFolderID int
+	if err := tx.QueryRow(ctx, `SELECT id FROM media_folders WHERE id = $1 FOR UPDATE`, folderID).Scan(&existingFolderID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil, nil
+		}
+		return false, nil, fmt.Errorf("locking folder before delete: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id
+		FROM library_collections
+		WHERE library_id = $1
+		ORDER BY id`, folderID)
+	if err != nil {
+		return false, nil, fmt.Errorf("relisting library collections before folder delete: %w", err)
+	}
+	currentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return false, nil, fmt.Errorf("collecting stable library collections before folder delete: %w", err)
+	}
+	for _, collectionID := range currentIDs {
+		if _, ok := lockedIDs[collectionID]; !ok {
+			return true, nil, nil
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID); err != nil {
+		return false, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, nil, err
+	}
+	return false, currentIDs, nil
 }
 
 // collectOrphanBatch returns up to limit content IDs whose only library

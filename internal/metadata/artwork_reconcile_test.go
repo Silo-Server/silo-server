@@ -24,6 +24,14 @@ type fakeObjectChecker struct {
 	checked  map[string]int
 }
 
+type failingCollectionPosterMutationLocker struct {
+	err error
+}
+
+func (f failingCollectionPosterMutationLocker) AcquirePosterMutationLock(context.Context, string) (func(), error) {
+	return nil, f.err
+}
+
 func (f *fakeObjectChecker) Bucket() string { return "test-bucket" }
 
 func (f *fakeObjectChecker) ObjectExists(_ context.Context, _ string, key string) (bool, error) {
@@ -68,6 +76,152 @@ func TestArtworkSweepSurfacesUseIndexablePaginationKeys(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestCollectionPosterSurfaceUsesCoordinatedRevalidation(t *testing.T) {
+	var collectionPoster artworkSweepSurface
+	for _, surface := range artworkSweepSurfaces() {
+		if surface.name == artworkCollectionPostersName {
+			collectionPoster = surface
+			break
+		}
+	}
+	if collectionPoster.name == "" {
+		t.Fatal("collection poster surface is missing")
+	}
+	if !collectionPoster.alwaysVerify {
+		t.Fatal("collection posters must not use a blind bulk reset")
+	}
+	if !collectionPoster.coordinatePosterMutation {
+		t.Fatal("collection posters must revalidate under the shared poster mutation locks")
+	}
+	if got := keyEqualityPredicate(collectionPoster.keyCols); got != "id = $1" {
+		t.Fatalf("collection poster reset predicate = %q, want id guard", got)
+	}
+	if collectionPoster.pathCol != "poster_url" {
+		t.Fatalf("collection poster path guard = %q, want poster_url", collectionPoster.pathCol)
+	}
+}
+
+func TestVerifyAndResetContinuesAfterCollectionPosterLockFailure(t *testing.T) {
+	var surface artworkSweepSurface
+	for _, candidate := range artworkSweepSurfaces() {
+		if candidate.name == artworkCollectionPostersName {
+			surface = candidate
+			break
+		}
+	}
+	if surface.name == "" {
+		t.Fatal("collection poster surface is missing")
+	}
+
+	const posterPath = "collection-images/collection-1/poster/original.webp"
+	const presentPath = "collection-images/collection-2/poster/original.webp"
+	lockErr := errors.New("simulated lock failure")
+	reconciler := &ArtworkCacheReconciler{}
+	reconciler.s3 = &fakeObjectChecker{missing: map[string]bool{posterPath: true}}
+	reconciler.collectionRepo = failingCollectionPosterMutationLocker{err: lockErr}
+	stats := ArtworkReconcileStats{}
+	err := reconciler.verifyAndReset(context.Background(), surface, []sweptRow{
+		{keys: []string{"collection-1"}, path: posterPath},
+		{keys: []string{"collection-2"}, path: presentPath},
+	}, &stats)
+	if err != nil {
+		t.Fatalf("verifyAndReset returned a batch error: %v", err)
+	}
+	if stats.Checked != 2 || stats.Verified != 1 || stats.Errors != 1 || stats.SweepErrors != 1 {
+		t.Fatalf("stats = %+v, want one verified row and one row-level sweep error", stats)
+	}
+}
+
+func TestResetCollectionPosterIfStillMissingRevalidates(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	collectionID := fmt.Sprintf("arc-lock-%d", suffix)
+	oldPath := fmt.Sprintf("collection-images/%s/poster/original.webp", collectionID)
+	newPath := fmt.Sprintf("collection-images/%s/poster/custom.webp", collectionID)
+	var libraryID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+		collectionID,
+	).Scan(&libraryID); err != nil {
+		t.Fatalf("seed library: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO library_collections (id, library_id, slug, title, collection_type, poster_url)
+		VALUES ($1, $2, $1, 'ARC Locked Collection', 'manual', $3)
+	`, collectionID, libraryID, oldPath); err != nil {
+		t.Fatalf("seed collection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM library_collections WHERE id = $1`, collectionID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, libraryID)
+	})
+
+	var surface artworkSweepSurface
+	for _, candidate := range artworkSweepSurfaces() {
+		if candidate.name == artworkCollectionPostersName {
+			surface = candidate
+			break
+		}
+	}
+	if surface.name == "" {
+		t.Fatal("collection poster surface is missing")
+	}
+	row := sweptRow{keys: []string{collectionID}, path: oldPath}
+
+	t.Run("replacement now present", func(t *testing.T) {
+		reconciler := NewArtworkCacheReconciler(pool, &fakeObjectChecker{})
+		result, err := reconciler.resetCollectionPosterIfStillMissing(ctx, surface, row)
+		if err != nil {
+			t.Fatalf("revalidate present poster: %v", err)
+		}
+		if !result.present || result.reset || result.storageErr != nil {
+			t.Fatalf("result = %+v, want present without reset", result)
+		}
+	})
+
+	t.Run("recheck error fails closed", func(t *testing.T) {
+		reconciler := NewArtworkCacheReconciler(pool, &fakeObjectChecker{erroring: map[string]bool{oldPath: true}})
+		result, err := reconciler.resetCollectionPosterIfStillMissing(ctx, surface, row)
+		if err != nil {
+			t.Fatalf("revalidate errored poster: %v", err)
+		}
+		if result.storageErr == nil || result.reset {
+			t.Fatalf("result = %+v, want storage error without reset", result)
+		}
+	})
+
+	t.Run("changed path predicate preserves replacement", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `UPDATE library_collections SET poster_url = $2 WHERE id = $1`, collectionID, newPath); err != nil {
+			t.Fatalf("replace poster path: %v", err)
+		}
+		reconciler := NewArtworkCacheReconciler(pool, &fakeObjectChecker{missing: map[string]bool{oldPath: true}})
+		result, err := reconciler.resetCollectionPosterIfStillMissing(ctx, surface, row)
+		if err != nil {
+			t.Fatalf("revalidate changed poster: %v", err)
+		}
+		if result.present || result.reset || result.storageErr != nil {
+			t.Fatalf("result = %+v, want guarded no-op", result)
+		}
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT poster_url FROM library_collections WHERE id = $1`, collectionID).Scan(&got); err != nil {
+			t.Fatalf("read changed poster: %v", err)
+		}
+		if got != newPath {
+			t.Fatalf("poster URL = %q, want preserved %q", got, newPath)
+		}
+	})
 }
 
 func TestBuildSweepBatchQueryUsesNativeNumericKeys(t *testing.T) {
