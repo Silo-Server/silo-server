@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginSettingsSummary } from "@/api/types";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 
 import AppSidebar from "./AppSidebar";
 import {
@@ -197,6 +198,12 @@ describe("AppSidebar", () => {
 
     expect(markup).toContain("text-sidebar-accent-foreground bg-sidebar-accent");
     expect(markup).not.toContain("text-sidebar-primary-foreground bg-sidebar-accent");
+  });
+
+  it("uses the shared platform-aware label for the search shortcut", () => {
+    const markup = renderSidebar("/");
+
+    expect(markup).toContain(`>${SEARCH_SHORTCUT_LABEL}</kbd>`);
   });
 
   it("renders the Silo brand mark instead of the old play glyph", () => {

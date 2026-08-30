@@ -44,6 +44,29 @@ func TestDecodeDeviceProfileKeepsCodecProfiles(t *testing.T) {
 	}
 }
 
+func TestMatchesCodecProfileContainerUsesJellyfinLiteralTokens(t *testing.T) {
+	tests := []struct {
+		name              string
+		profileContainers string
+		inputContainers   string
+		want              bool
+	}{
+		{name: "asterisk is a literal", profileContainers: "*", inputContainers: "mkv", want: false},
+		{name: "ts does not alias mpegts", profileContainers: "ts", inputContainers: "mpegts", want: false},
+		{name: "negative ts allows mpegts", profileContainers: "-ts", inputContainers: "mpegts", want: true},
+		{name: "case insensitive literal", profileContainers: "MKV", inputContainers: "mkv", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesCodecProfileContainer(tt.profileContainers, tt.inputContainers); got != tt.want {
+				t.Fatalf("matchesCodecProfileContainer(%q, %q) = %v, want %v",
+					tt.profileContainers, tt.inputContainers, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
 	baseVersion := catalog.FileVersion{

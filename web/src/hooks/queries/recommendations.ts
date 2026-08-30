@@ -13,6 +13,8 @@ interface RecommendationResponse {
   items: ScoredItem[];
 }
 
+const SIMILAR_ITEMS_LIMIT = 12;
+
 interface ForYouRow {
   type: string;
   label: string;
@@ -40,7 +42,10 @@ export type { ScoredItem, ForYouRow, ForYouResponse };
 export function useSimilarItems(itemId: string) {
   return useQuery({
     queryKey: recKeys.similar(itemId),
-    queryFn: () => api<RecommendationResponse>(`/recommendations/similar/${itemId}`),
+    queryFn: () =>
+      api<RecommendationResponse>(
+        `/recommendations/similar/${encodeURIComponent(itemId)}?limit=${SIMILAR_ITEMS_LIMIT}`,
+      ),
     staleTime: 3600_000,
     enabled: !!itemId,
   });

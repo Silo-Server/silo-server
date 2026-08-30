@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
 import RecommendationGrid from "./RecommendationGrid";
 
@@ -19,6 +19,10 @@ vi.mock("@/components/CardPlayOverlay", () => ({
 }));
 
 describe("RecommendationGrid", () => {
+  beforeEach(() => {
+    mocks.useCatalogItemDetail.mockReset();
+  });
+
   it("encodes item IDs in detail links", () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: {
@@ -38,7 +42,7 @@ describe("RecommendationGrid", () => {
     expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("ebook 1");
   });
 
-  it("uses the selected density and omits artwork-only caption rows", () => {
+  it("uses the shared Embla carousel at the selected density and omits artwork-only captions", () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: {
         content_id: "ebook 1",
@@ -67,8 +71,27 @@ describe("RecommendationGrid", () => {
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("grid-cols-3 sm:grid-cols-5");
-    expect(markup).not.toContain(">A Reader</p>");
+    expect(markup).toContain("embla__viewport");
+    expect(markup).toContain("w-[120px] shrink-0 sm:w-[140px] lg:w-[160px]");
+    expect(markup).not.toContain("mt-1.5 block truncate");
+  });
+
+  it("renders at most 12 recommendation cards", () => {
+    mocks.useCatalogItemDetail.mockImplementation((itemId: string) => ({
+      data: { content_id: itemId, title: itemId, poster_url: "" },
+    }));
+    const items = Array.from({ length: 14 }, (_, index) => ({
+      media_item_id: `item-${index + 1}`,
+    }));
+
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <RecommendationGrid items={items} maxItems={50} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useCatalogItemDetail).toHaveBeenCalledTimes(12);
+    expect(mocks.useCatalogItemDetail).not.toHaveBeenCalledWith("item-13");
   });
 
   it("keeps recommendation details and playback as independent links", () => {

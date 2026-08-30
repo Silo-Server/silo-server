@@ -17,6 +17,7 @@ func TestSkipCompatMediaCompression(t *testing.T) {
 		{http.MethodGet, "/Videos/i1/audio-v2/stream", true},
 		{http.MethodHead, "/Videos/i1/audio-v2/stream.mkv", true},
 		{http.MethodGet, "/Videos/i1/audio-v2/hls/p1/000.ts", true},
+		{http.MethodGet, "/Videos/i1/remux-v1/hls/p1/000.m4s", true},
 		{http.MethodGet, "/Items/i1/Download", true},
 		{http.MethodGet, "/Videos/i1/master.m3u8", false},
 		{http.MethodGet, "/Videos/i1/hls/p1/stream.m3u8", false},

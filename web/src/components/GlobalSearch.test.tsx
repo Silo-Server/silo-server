@@ -221,6 +221,23 @@ describe("GlobalSearch", () => {
     expect(lastCall.enabled).toBe(false);
   });
 
+  it("opens global search with Ctrl+K", () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId("dialog")).toBeNull();
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    expect(screen.getByTestId("dialog")).toBeInTheDocument();
+  });
+
   it("encodes picked item IDs before navigating", async () => {
     mocks.useQuery.mockReturnValue({
       data: {

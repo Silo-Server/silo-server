@@ -864,7 +864,7 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 		"",
 	}, "\n")
 
-	got := string(rewriteManifest([]byte(manifest), "item-1", "play-1", "source-1", false))
+	got := string(rewriteManifest([]byte(manifest), "item-1", "play-1", "source-1", ""))
 
 	if !strings.Contains(got, "#EXT-X-MAP:URI=\"/Videos/item-1/hls/play-1/init.mp4?MediaSourceId=source-1&PlaySessionId=play-1\"") {
 		t.Fatalf("expected init segment to include media and playback session ids, got:\n%s", got)
@@ -876,7 +876,7 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 		t.Fatalf("expected nested manifest to include media and playback session ids, got:\n%s", got)
 	}
 
-	audioV2 := string(rewriteManifest([]byte(manifest), "item-1", "play-1", "source-1", true))
+	audioV2 := string(rewriteManifest([]byte(manifest), "item-1", "play-1", "source-1", compatAudioV2PathSegment))
 	for _, want := range []string{
 		`#EXT-X-MAP:URI="/Videos/item-1/audio-v2/hls/play-1/init.mp4?MediaSourceId=source-1&PlaySessionId=play-1"`,
 		"/Videos/item-1/audio-v2/hls/play-1/seg_00000.m4s?MediaSourceId=source-1&PlaySessionId=play-1",
@@ -884,6 +884,16 @@ func TestRewriteManifest_PreservesPlaybackAndMediaSourceIDs(t *testing.T) {
 	} {
 		if !strings.Contains(audioV2, want) {
 			t.Fatalf("v2 manifest missing %q:\n%s", want, audioV2)
+		}
+	}
+
+	remuxV1 := string(rewriteManifest([]byte(manifest), "item-1", "play-1", "source-1", compatRemuxV1PathSegment))
+	for _, want := range []string{
+		`#EXT-X-MAP:URI="/Videos/item-1/remux-v1/hls/play-1/init.mp4?MediaSourceId=source-1&PlaySessionId=play-1"`,
+		"/Videos/item-1/remux-v1/hls/play-1/seg_00000.m4s?MediaSourceId=source-1&PlaySessionId=play-1",
+	} {
+		if !strings.Contains(remuxV1, want) {
+			t.Fatalf("remux-v1 manifest missing %q:\n%s", want, remuxV1)
 		}
 	}
 }

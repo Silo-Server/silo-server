@@ -24,7 +24,8 @@ describe("RecommendationGridSkeleton", () => {
       </UICustomizationContext.Provider>,
     );
 
-    expect(markup).toContain("grid-cols-3 sm:grid-cols-5");
+    expect(markup).toContain("flex gap-4 overflow-hidden");
+    expect(markup).toContain("w-[120px] shrink-0 sm:w-[140px] lg:w-[160px]");
     expect(markup).not.toContain("mt-1.5 h-4 w-3/4");
   });
 });

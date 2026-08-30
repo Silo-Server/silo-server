@@ -18,7 +18,7 @@ import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { resolveAdminDocumentTitle } from "@/lib/documentTitle";
-import { searchShortcutLabel } from "@/lib/keyboardShortcut";
+import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { cn } from "@/lib/utils";
 import { Menu, Search, X } from "lucide-react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -187,16 +187,12 @@ function AdminSearchButton({
   className?: string;
   showShortcut?: boolean;
 }) {
-  // Advertised, not hardcoded: the dialog opens on either modifier, so the hint
-  // has to name the one this keyboard actually has.
-  const shortcut = searchShortcutLabel();
-
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label="Search admin sections"
-      title={`Search admin sections (${shortcut})`}
+      title={`Search admin sections (${SEARCH_SHORTCUT_LABEL})`}
       className={cn(
         "text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 border-border/70 bg-surface/70 flex h-9 items-center justify-center gap-2 rounded-xl border px-2.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
         className,
@@ -207,7 +203,7 @@ function AdminSearchButton({
         <>
           <span className="hidden text-[13px] font-medium xl:inline">Search</span>
           <kbd className="border-border/70 pointer-events-none rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
-            {shortcut}
+            {SEARCH_SHORTCUT_LABEL}
           </kbd>
         </>
       ) : null}

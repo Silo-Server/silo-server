@@ -1182,6 +1182,21 @@ surround, because an in-player track switch does not request a new playlist URL.
 Direct-file and subtitle routes are unchanged because they never execute this
 audio recipe.
 
+Jellyfin HLS remuxes that copy both video and audio use the literal `remux-v1`
+path segment instead (`/Videos/{id}/remux-v1/...`). The segment freezes copy
+semantics for the life of the negotiation: old routers do not match it, current
+handlers reject a copy session on an unversioned or `audio-v2` path and any
+other session on the `remux-v1` path, and an audio switch to a track outside
+the negotiated copy allowlist (same codec, same channel layout, accepted by the
+device profile for fMP4) is rejected before any local, remote, or durable state
+changes — the playlist and `EXT-X-MAP` URLs never change, so a switch that
+alters the copied bytes' shape would require a new PlaybackInfo negotiation.
+Because compat sessions are shared as one durable JSON document that every
+mutation rewrites whole, the compat session structs preserve JSON fields they
+do not declare; a binary that predates that envelope can still erase
+newer-generation fields (such as the remux flags) during the single rolling
+deploy that introduces them.
+
 A remote start carrying source-channel facts is valid only for the exact AAC
 stereo shape and must echo recipe version 2 after FFmpeg reaches readiness. The
 caller stops a job that omits or contradicts that receipt. Shared reconstruction

@@ -270,6 +270,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/audio-v2/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", playbackHandler.HandleAudioV2MasterManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", playbackHandler.HandleAudioV2HLSManifest))
 		r.Get("/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleAudioV2HLSSegment))
+		r.Get("/Videos/{id}/remux-v1/master.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", playbackHandler.HandleRemuxV1MasterManifest))
+		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxV1HLSManifest))
+		r.Get("/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
 		// Infuse probes external subtitles with an extra numeric path component before stream.{format}.
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
@@ -285,7 +288,6 @@ func NewRouter(deps Dependencies) chi.Router {
 func skipCompatMediaCompression(r *http.Request) bool {
 	const (
 		videosSegment = "Videos"
-		hlsSegment    = "hls"
 		hlsManifest   = "stream.m3u8"
 	)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -297,9 +299,11 @@ func skipCompatMediaCompression(r *http.Request) bool {
 		return p[2] == "stream" || len(strings.TrimPrefix(p[2], "stream.")) > 0
 	case len(p) == 4 && p[0] == videosSegment && p[1] != "" && p[2] == compatAudioV2PathSegment && (p[3] == "stream" || strings.HasPrefix(p[3], "stream.")):
 		return p[3] == "stream" || len(strings.TrimPrefix(p[3], "stream.")) > 0
-	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == hlsSegment && p[3] != "" && p[4] != "":
+	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == compatHLSPathSegment && p[3] != "" && p[4] != "":
 		return p[4] != hlsManifest && strings.Contains(p[4], ".")
-	case len(p) == 6 && p[0] == videosSegment && p[1] != "" && p[2] == compatAudioV2PathSegment && p[3] == hlsSegment && p[4] != "" && p[5] != "":
+	case len(p) == 6 && p[0] == videosSegment && p[1] != "" &&
+		(p[2] == compatAudioV2PathSegment || p[2] == compatRemuxV1PathSegment) &&
+		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
 		return true

@@ -343,12 +343,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           <RecommendationGridSkeleton />
         ) : (
           similarData?.items &&
-          similarData.items.length > 0 && (
-            <div>
-              <h2 className="mb-5 text-xl font-semibold tracking-tight">More Like This</h2>
-              <RecommendationGrid items={similarData.items} />
-            </div>
-          )
+          similarData.items.length > 0 && <RecommendationGrid items={similarData.items} />
         )}
       </div>
       {canCurateMetadata && (

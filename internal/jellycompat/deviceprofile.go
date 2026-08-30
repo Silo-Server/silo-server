@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // DeviceProfile captures the subset of Jellyfin client capabilities the
@@ -39,6 +40,8 @@ type TranscodingProfile struct {
 type CodecProfile struct {
 	Type            string             `json:"Type,omitempty"`
 	Codec           string             `json:"Codec,omitempty"`
+	Container       string             `json:"Container,omitempty"`
+	SubContainer    string             `json:"SubContainer,omitempty"`
 	Conditions      []ProfileCondition `json:"Conditions,omitempty"`
 	ApplyConditions []ProfileCondition `json:"ApplyConditions,omitempty"`
 }
@@ -186,6 +189,66 @@ func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+// SupportsHLSRemuxForAudioStream reports whether the client accepts the
+// source codecs in an HLS fragmented-MP4 stream. Codec-profile conditions are
+// evaluated against the sample entry Silo will write, not against an unknown
+// source-container tag.
+func (p DeviceProfile) SupportsHLSRemuxForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	if len(p.TranscodingProfiles) == 0 {
+		return false
+	}
+	audioCodec := compatAudioCodec(version, audioStreamIndex)
+	for _, profile := range p.TranscodingProfiles {
+		if !matchesVideoType(profile.Type) {
+			continue
+		}
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+			continue
+		}
+		if !matchesCSV(profile.Container, "mp4") ||
+			!matchesCSV(profile.VideoCodec, version.CodecVideo) ||
+			!matchesCSV(profile.AudioCodec, audioCodec) {
+			continue
+		}
+		return p.hlsRemuxCodecProfileCompatibility(version, audioStreamIndex).supportsDirectPlay()
+	}
+	return false
+}
+
+func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeForAudioStream(version catalog.FileVersion, audioStreamIndex *int) bool {
+	if len(p.TranscodingProfiles) == 0 {
+		return false
+	}
+	for _, profile := range p.TranscodingProfiles {
+		if !matchesVideoType(profile.Type) {
+			continue
+		}
+		if protocol := strings.ToLower(strings.TrimSpace(profile.Protocol)); protocol != "" && protocol != "hls" {
+			continue
+		}
+		if !matchesCSV(profile.Container, "mp4") ||
+			!matchesCSV(profile.VideoCodec, version.CodecVideo) ||
+			!matchesCSV(profile.AudioCodec, compatTargetAudioCodec) {
+			continue
+		}
+
+		outputVersion := version
+		outputAudio := compatAudioTrack(version, audioStreamIndex)
+		outputAudio.Codec = compatTargetAudioCodec
+		outputAudio.Profile = ""
+		outputAudio.Bitrate = 192_000
+		if outputAudio.Channels > 0 {
+			outputAudio.Channels = 2
+		}
+		outputAudio.Default = true
+		outputVersion.CodecAudio = compatTargetAudioCodec
+		outputVersion.AudioTracks = []models.AudioTrack{outputAudio}
+		outputAudioStreamIndex := len(outputVersion.VideoTracks)
+		return p.hlsRemuxCodecProfileCompatibility(outputVersion, &outputAudioStreamIndex).supportsDirectPlay()
 	}
 	return false
 }

@@ -1,14 +1,12 @@
 /**
  * How the search shortcut is spelled on this machine: the ⌘ glyph on Apple
- * keyboards, "Ctrl" everywhere else. Every surface that advertises the
- * ⌘K / Ctrl-K search shortcut reads it from here, so a Windows or Linux admin
- * is never told to press a key their keyboard does not have.
+ * keyboards, "Ctrl" everywhere else. This is resolved once when the module
+ * loads; rendering a shortcut hint does no platform detection or extra work.
  *
  * The handlers themselves accept either modifier — this is a label, not the
  * binding.
  */
-export function searchShortcutLabel(): string {
-  const isApple =
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
-  return isApple ? "⌘ K" : "Ctrl K";
-}
+export const SEARCH_SHORTCUT_LABEL =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent)
+    ? "⌘ K"
+    : "Ctrl K";

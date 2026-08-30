@@ -25,6 +25,9 @@ var jellycompatMediaRoutes = []streamtelemetry.MediaRoute{
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/master.m3u8", streamtelemetry.ClassManifest, true),
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
 	compatRoute(http.MethodGet, "/Videos/{id}/audio-v2/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/master.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/stream.m3u8", streamtelemetry.ClassManifest, true),
+	compatRoute(http.MethodGet, "/Videos/{id}/remux-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", streamtelemetry.ClassPlayback, true),
 	compatRoute(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", streamtelemetry.ClassPlayback, true),
 	compatRoute(http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeDeliveryIndex}/stream.{routeFormat}", streamtelemetry.ClassPlayback, true),
 }

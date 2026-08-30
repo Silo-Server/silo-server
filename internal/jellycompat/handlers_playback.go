@@ -734,7 +734,7 @@ func (h *PlaybackHandler) applyCompatToneMapAvailability(ctx context.Context, so
 }
 
 func applyCompatToneMapAvailabilityWithPolicy(source PlaybackMediaSource, capabilities tonemap.Capabilities, policy tonemap.Policy) PlaybackMediaSource {
-	if !source.SupportsTranscoding || source.TranscodeAudio {
+	if !source.SupportsTranscoding || compatHLSCopiesVideo(source) {
 		return source
 	}
 	file := &models.MediaFile{
@@ -1060,15 +1060,21 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 	}
 
 	sourceAudioChannels := 0
-	if method == string(playback.PlayTranscode) || (method == string(playback.PlayRemux) && source.TranscodeAudio) {
+	if method == string(playback.PlayTranscode) {
+		sourceAudioChannels = compatHLSRecipeSourceAudioChannels(source)
+	} else if method == string(playback.PlayRemux) && source.TranscodeAudio {
 		sourceAudioChannels = compatSourceAudioChannels(source)
+	}
+	targetAudioCodec := compatTargetAudioCodec
+	if method == string(playback.PlayTranscode) && !compatHLSTranscodesAudio(source) {
+		targetAudioCodec = compatCopyCodec
 	}
 	claims := streamtoken.Claims{
 		SessionID:           upstreamSessionID,
 		MediaPath:           file.FilePath,
 		PlayMethod:          method,
 		TranscodeAudio:      source.TranscodeAudio,
-		TargetCodecAudio:    compatTargetAudioCodec,
+		TargetCodecAudio:    targetAudioCodec,
 		AudioTrackIndex:     audioTrackIndex,
 		SourceAudioChannels: sourceAudioChannels,
 		AudioOnly:           file.IsAudioOnly(),
@@ -1091,7 +1097,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		// Keep ordinary tokens safe for mixed-generation proxy fleets.
 		claims.SourceAudioChannels = 0
 	}
-	if claims.SourceAudioChannels == 0 && method == string(playback.PlayTranscode) && !source.TranscodeAudio && compatVersionRequiresToneMap(source.Version) {
+	if claims.SourceAudioChannels == 0 && method == string(playback.PlayTranscode) && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(source.Version) {
 		// Older binaries do not understand the frozen tone-map claims. Give them
 		// a method they reject rather than let a proxy serve HDR bytes the plan
 		// promised as tone-mapped SDR.
@@ -1210,7 +1216,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 	}
 	if h.playbackStore != nil {
-		expectedSourceAudioChannels := compatSourceAudioChannels(source)
+		expectedSourceAudioChannels := compatHLSRecipeSourceAudioChannels(source)
 		expectedAudioTrackIndex := compatAudioTrackIndexOrDefault(source)
 		if current, ok := h.playbackStore.Get(playSessionID); ok && current.TranscodeStarted && current.Recipe != nil && current.Recipe.TranscodeNodeURL != "" &&
 			current.Recipe.MediaFileID == source.FileID &&
@@ -1222,7 +1228,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			}
 		}
 	}
-	if compatSourceAudioChannels(source) > 0 {
+	if sourceAudioChannels := compatHLSRecipeSourceAudioChannels(source); sourceAudioChannels > 0 {
 		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
 		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
 		cancelCapabilityFetch()
@@ -1238,7 +1244,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return fmt.Errorf("bind transcode node: %w", err)
 		}
 	}
-	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
+	if !compatHLSCopiesVideo(source) && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
 		return errTranscode4KDisallowed
 	}
 	if d := float64(source.Version.Duration); d > 0 && initialSeekSeconds > d {
@@ -1256,7 +1262,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	toneMapRecipe := compatToneMapRecipe{}
 	var toneMapCapabilities tonemap.Capabilities
 	nodeProbeTimeoutMillis := int64(0)
-	if !source.TranscodeAudio {
+	if !compatHLSCopiesVideo(source) {
 		metadata := tonemap.MetadataForFile(file)
 		var requiredPolicy tonemap.Policy
 		if requiredToneMapMode != "" {
@@ -1319,7 +1325,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SegmentDuration:     segmentDuration,
 		HWAccel:             h.remoteDispatchHWAccel(transcodeNodeURL),
 		AudioTrackIndex:     compatAudioTrackIndexOrDefault(source),
-		SourceAudioChannels: compatSourceAudioChannels(source),
+		SourceAudioChannels: compatHLSRecipeSourceAudioChannels(source),
 		TotalDuration:       float64(source.Version.Duration),
 		RequireReady:        toneMapRecipe.mode != "",
 	}
@@ -1347,9 +1353,12 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	if autoVideoToolboxBitrate > 0 {
 		reqBody.TargetBitrateKbps = autoVideoToolboxBitrate
 	}
-	if source.TranscodeAudio {
-		reqBody.TargetCodecVideo = "copy"
+	if compatHLSCopiesVideo(source) {
+		reqBody.TargetCodecVideo = compatCopyCodec
 		reqBody.VideoSampleEntry = playback.VideoSampleEntryForDVCopy(file.PrimaryDVProfile())
+	}
+	if !compatHLSTranscodesAudio(source) {
+		reqBody.TargetCodecAudio = compatCopyCodec
 	}
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
@@ -1542,8 +1551,8 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	toneMapRecipe.apply(&opts)
 	opts.HWAccel = strings.TrimSpace(nodeResponse.HWAccel)
 	opts.ToneMapMode = nodeResponse.ToneMapMode
-	if source.TranscodeAudio {
-		opts.TargetCodecVideo = "copy"
+	if compatHLSCopiesVideo(source) {
+		opts.TargetCodecVideo = compatCopyCodec
 	}
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
@@ -1780,7 +1789,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
-		if source.SupportsTranscoding && !source.TranscodeAudio && compatVersionRequiresToneMap(version) {
+		if source.SupportsTranscoding && !compatHLSCopiesVideo(source) && compatVersionRequiresToneMap(version) {
 			if !toneMapPolicyLoaded {
 				var policyErr error
 				toneMapPolicy, policyErr = h.toneMapPolicyResult(r.Context())
@@ -1963,18 +1972,44 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
 	audioSupported := profile.SupportsAudioCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
 	videoSupported := profile.SupportsVideoCodecForDirectStreamForAudioStream(version, selectedAudioIndex)
-	transcodeAudio := enableDirectStream && allowVideoCopy && videoSupported && !audioSupported
-	supportsDirectStream := !transcodeAudio &&
+	enableTranscoding := boolDefault(req.EnableTranscoding, true)
+	hlsAudioCopy := enableTranscoding &&
+		enableDirectStream &&
+		allowVideoCopy &&
+		allowAudioCopy &&
+		!supportsDirectPlay &&
+		profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
+	hlsAudioTranscode := !hlsAudioCopy &&
+		enableTranscoding &&
+		!supportsDirectPlay &&
+		(!allowAudioCopy || !audioSupported) &&
+		profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex)
+	transcodeAudio := !hlsAudioCopy &&
+		enableDirectStream &&
+		allowVideoCopy &&
+		videoSupported &&
+		(!audioSupported || hlsAudioTranscode)
+	hlsRemux := hlsAudioCopy || transcodeAudio
+	var hlsRemuxAudioStreamIndexes []int
+	if hlsRemux && !transcodeAudio {
+		hlsRemuxAudioStreamIndexes = supportedHLSRemuxAudioStreamIndexes(version, profile, selectedAudioIndex)
+	}
+	supportsDirectStream := !hlsRemux &&
 		enableDirectStream &&
 		allowVideoCopy &&
 		videoSupported &&
 		allowAudioCopy &&
 		audioSupported
-	supportsTranscoding := boolDefault(req.EnableTranscoding, true) && profile.SupportsTranscoding(version)
+	// A remux route is only advertised when some transcoding profile vouched
+	// for it: the copy and AAC legs each verified the fMP4 HLS output above,
+	// and the legacy audio-transcode leg keeps the pre-remux SupportsTranscoding
+	// gate rather than minting a TranscodingURL no profile ever matched.
+	supportsTranscoding := enableTranscoding &&
+		(hlsAudioCopy || (transcodeAudio && hlsAudioTranscode) || profile.SupportsTranscoding(version))
 	// Don't offer full video encodes of 4K sources when allow_4k_transcode is
-	// off. Audio-only transcodes (transcodeAudio) stream-copy the video and
-	// stay available.
-	if supportsTranscoding && !transcodeAudio && !allow4KTranscode && is4KResolution(version.Resolution) {
+	// off. HLS remuxes stream-copy the video and stay available regardless of
+	// whether their audio is copied or encoded.
+	if supportsTranscoding && !hlsRemux && !allow4KTranscode && is4KResolution(version.Resolution) {
 		supportsTranscoding = false
 	}
 
@@ -1985,6 +2020,8 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		SupportsDirectPlay:         supportsDirectPlay,
 		SupportsDirectStream:       supportsDirectStream,
 		SupportsTranscoding:        supportsTranscoding,
+		HLSRemux:                   hlsRemux,
+		HLSRemuxAudioStreamIndexes: hlsRemuxAudioStreamIndexes,
 		TranscodeAudio:             transcodeAudio,
 		DefaultAudioStreamIndex:    audioIndex,
 		SelectedAudioStreamIndex:   selectedAudioIndex,
@@ -1993,9 +2030,28 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	}
 }
 
+// supportedHLSRemuxAudioStreamIndexes freezes the copy-safe switch targets. A
+// copy playlist reuses the same playlist and EXT-X-MAP URLs across a track
+// switch, so the client's SourceBuffer keeps the init segment negotiated for
+// the initial track; only tracks whose fMP4 init is interchangeable with it
+// (same codec and channel layout) are safe to switch without renegotiation.
+func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile DeviceProfile, selectedAudioIndex *int) []int {
+	selected := compatAudioTrack(version, selectedAudioIndex)
+	indexes := make([]int, 0, len(version.AudioTracks))
+	for audioTrackIndex, track := range version.AudioTracks {
+		if !strings.EqualFold(track.Codec, selected.Codec) || track.Channels != selected.Channels {
+			continue
+		}
+		streamIndex := len(version.VideoTracks) + audioTrackIndex
+		if profile.SupportsHLSRemuxForAudioStream(version, &streamIndex) {
+			indexes = append(indexes, streamIndex)
+		}
+	}
+	return indexes
+}
+
 func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken string, source PlaybackMediaSource) mediaSourceDTO {
 	selectedAudioStreamIndex := effectiveCompatAudioStreamIndex(source)
-	hlsAudioV2 := compatHLSRequiresAudioV2(source)
 	dto := mediaSourceDTO{
 		Protocol:                            "File",
 		ID:                                  source.ID,
@@ -2044,8 +2100,12 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 	}
 	dto.TranscodingSubProtocol = "hls"
 	if source.SupportsTranscoding {
-		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s", compatVideoPath(routeItemID, hlsAudioV2), playSessionID, source.ID)
-		if source.TranscodeAudio {
+		basePath := compatVideoPath(routeItemID, false)
+		if routePathSegment := compatHLSRoutePathSegment(source); routePathSegment != "" {
+			basePath += "/" + routePathSegment
+		}
+		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s", basePath, playSessionID, source.ID)
+		if compatHLSCopiesVideo(source) {
 			dto.TranscodingContainer = "mp4"
 		} else {
 			dto.TranscodingContainer = "ts"

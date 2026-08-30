@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
@@ -59,22 +60,35 @@ type PlaybackSession struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	ExpiresAt time.Time
+
+	// preservedJSON carries fields written by a newer binary through this
+	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
+	preservedJSON map[string]json.RawMessage
 }
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
 type PlaybackMediaSource struct {
-	ID                          string
-	FileID                      int
-	Version                     catalog.FileVersion
-	SupportsDirectPlay          bool
-	SupportsDirectStream        bool
-	SupportsTranscoding         bool
+	ID                   string
+	FileID               int
+	Version              catalog.FileVersion
+	SupportsDirectPlay   bool
+	SupportsDirectStream bool
+	SupportsTranscoding  bool
+	// HLSRemux selects fragmented MP4 with video copy. TranscodeAudio remains
+	// the independent audio-encode decision, so a compatible audio codec can
+	// stay bit-for-bit copied.
+	HLSRemux                    bool
+	HLSRemuxAudioStreamIndexes  []int
 	TranscodeAudio              bool
 	DefaultAudioStreamIndex     *int
 	SelectedAudioStreamIndex    *int
 	DefaultSubtitleStreamIndex  *int
 	SelectedSubtitleStreamIndex *int
 	ETag                        string
+
+	// preservedJSON carries fields written by a newer binary through this
+	// binary's durable read-modify-write cycle. See playback_sessions_json.go.
+	preservedJSON map[string]json.RawMessage
 }
 
 // CompatPlaybackStore persists compat playback negotiation sessions (the

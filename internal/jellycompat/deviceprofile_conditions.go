@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type codecProfileCompatibility struct {
@@ -77,15 +78,42 @@ func stringifyConditionValue(value any) (string, error) {
 }
 
 func (p DeviceProfile) codecProfileCompatibility(version catalog.FileVersion, audioStreamIndex *int) codecProfileCompatibility {
+	return p.codecProfileCompatibilityWithValues(
+		version,
+		audioStreamIndex,
+		buildConditionValues(version, audioStreamIndex),
+		version.Container,
+		false,
+	)
+}
+
+func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVersion, audioStreamIndex *int) codecProfileCompatibility {
+	values := buildConditionValues(version, audioStreamIndex)
+	// Derive the promised sample entry from the same value the serve paths use
+	// (PrimaryDVProfile, the probed integer field) — not from
+	// compatDolbyVisionProfile's descriptive-string fallback — so negotiation
+	// can never promise a dvh1 tag the muxer will not write.
+	if tag := playback.VideoSampleEntryForDVCopy(compatPrimaryVideoTrack(version).DVProfile); tag != "" {
+		values["videocodectag"] = conditionValue{text: tag}
+	}
+	return p.codecProfileCompatibilityWithValues(version, audioStreamIndex, values, "mp4", true)
+}
+
+func (p DeviceProfile) codecProfileCompatibilityWithValues(
+	version catalog.FileVersion,
+	audioStreamIndex *int,
+	values conditionValues,
+	container string,
+	useSubContainer bool,
+) codecProfileCompatibility {
 	compat := codecProfileCompatibility{VideoSupported: true, AudioSupported: true}
 	if len(p.CodecProfiles) == 0 {
 		return compat
 	}
 
-	values := buildConditionValues(version, audioStreamIndex)
 	for _, profile := range p.CodecProfiles {
 		target := codecProfileTarget(profile)
-		if target == "" || !codecProfileApplies(profile, version, audioStreamIndex) {
+		if target == "" || !codecProfileApplies(profile, version, audioStreamIndex, container, useSubContainer) {
 			continue
 		}
 		if !conditionsMatch(profile.ApplyConditions, values) {
@@ -116,7 +144,23 @@ func codecProfileTarget(profile CodecProfile) string {
 	}
 }
 
-func codecProfileApplies(profile CodecProfile, version catalog.FileVersion, audioStreamIndex *int) bool {
+func codecProfileApplies(
+	profile CodecProfile,
+	version catalog.FileVersion,
+	audioStreamIndex *int,
+	container string,
+	useSubContainer bool,
+) bool {
+	profileContainers := profile.Container
+	// Jellyfin's CodecProfile substitutes SubContainer only when Container is
+	// exactly "hls" (ordinal, case-insensitive) — a multi-token list such as
+	// "hls,dash" keeps the literal Container list.
+	if useSubContainer && strings.EqualFold(strings.TrimSpace(profile.Container), "hls") {
+		profileContainers = profile.SubContainer
+	}
+	if !matchesCodecProfileContainer(profileContainers, container) {
+		return false
+	}
 	if strings.TrimSpace(profile.Codec) == "" {
 		return true
 	}
@@ -128,6 +172,39 @@ func codecProfileApplies(profile CodecProfile, version catalog.FileVersion, audi
 	default:
 		return false
 	}
+}
+
+// matchesCodecProfileContainer mirrors Jellyfin's ContainerHelper semantics:
+// a leading '-' makes the comma-separated list an exclusion list, while an
+// empty list applies to every container.
+func matchesCodecProfileContainer(profileContainers, inputContainers string) bool {
+	profileContainers = strings.TrimSpace(profileContainers)
+	negative := strings.HasPrefix(profileContainers, "-")
+	if negative {
+		profileContainers = strings.TrimSpace(strings.TrimPrefix(profileContainers, "-"))
+	}
+	if profileContainers == "" {
+		return true
+	}
+
+	matched := false
+	for input := range strings.SplitSeq(inputContainers, ",") {
+		for profile := range strings.SplitSeq(profileContainers, ",") {
+			input = strings.TrimSpace(input)
+			profile = strings.TrimSpace(profile)
+			if input != "" && profile != "" && strings.EqualFold(input, profile) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			break
+		}
+	}
+	if negative {
+		return !matched
+	}
+	return matched
 }
 
 func conditionsOnlyTargetAudio(conditions []ProfileCondition) bool {

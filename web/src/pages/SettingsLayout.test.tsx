@@ -224,6 +224,19 @@ describe("SettingsLayout", () => {
     expect(searchBox).toHaveFocus();
   });
 
+  it("focuses personal settings search with Ctrl+K", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+
+    expect(searchBox).toHaveFocus();
+  });
+
   it("does not consume Cmd+K when the detail search is hidden", () => {
     vi.stubGlobal(
       "matchMedia",
