@@ -544,7 +544,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 			// recipe token. Tone-mapped cards may back a provisional capability
 			// reconstruction; plain cards just respawn the encode. Either way the
 			// atomic playback+runtime operation is the same front door.
-			card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+			card, claims := verifiedStreamCardFromRequest(r, sessionID, h.JWTSecret)
 			if card != nil {
 				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
 					return nil, playback.SessionMissing, nil, nil, nil
@@ -560,7 +560,7 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	}
 	// Genuine miss (e.g. after a restart): now — and only now — pay for the token
 	// decode so the recipe is available for reconstruction.
-	card, claims := verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	card, claims := verifiedStreamCardFromRequest(r, sessionID, h.JWTSecret)
 	// The copy-safety verdict gates the revival before it happens, not after.
 	// Reconstruction registers the playback session against the user's stream
 	// caps, so a refusal that ran later would leave a session nobody serves
@@ -581,10 +581,23 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	return session, status, card, claims, nil
 }
 
-// streamCardFromToken verifies a stream token and decodes its reconstruction
-// recipe, returning nil when the token is absent, unparseable/expired, or bound
-// to a different session id. Shared by the native serve handlers (PlaybackHandler
-// and StreamHandler).
+// verifiedStreamCardFromRequest returns the reconstruction recipe already
+// verified by route-scoped transport auth, or falls back to the legacy query
+// token. Shared by the native serve handlers.
+func verifiedStreamCardFromRequest(r *http.Request, sessionID, secret string) (*playback.RecipeCard, *streamtoken.Claims) {
+	if r != nil {
+		if claims := apimw.GetTransportStreamClaims(r.Context()); claims != nil && claims.SessionID == sessionID {
+			card := playback.RecipeCardFromClaims(claims)
+			return &card, claims
+		}
+		return verifiedStreamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, secret)
+	}
+	return nil, nil
+}
+
+// verifiedStreamCardFromToken verifies a query-carried stream token and
+// decodes its reconstruction recipe, returning nil when it is absent,
+// unparseable, expired, or bound to a different session id.
 func verifiedStreamCardFromToken(tokenStr, sessionID, secret string) (*playback.RecipeCard, *streamtoken.Claims) {
 	if tokenStr == "" || secret == "" {
 		return nil, nil

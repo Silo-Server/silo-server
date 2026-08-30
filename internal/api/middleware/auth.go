@@ -8,9 +8,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // contextKey is an unexported type for context keys in this package.
@@ -18,6 +22,10 @@ type contextKey string
 
 // claimsKey is the context key for storing JWT claims.
 const claimsKey contextKey = "claims"
+
+// transportStreamClaimsKey stores the verified playback recipe carried by a
+// route-scoped stream capability. Only RequireTransportAuth sets it.
+const transportStreamClaimsKey contextKey = "transport_stream_claims"
 
 // SessionValidator checks whether a session is still valid (not revoked/expired).
 type SessionValidator interface {
@@ -150,6 +158,66 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// RequireTransportAuth authenticates a playback byte-delivery request. A
+// signed, unexpired stream capability bound to the path's session id is checked
+// first; ordinary access-token/API-key auth remains the fallback for older
+// clients and manually constructed requests.
+//
+// This middleware must only be mounted on playback transport routes. Stream
+// capabilities are deliberately narrower than account auth: they establish the
+// signed user/profile/media identity for one playback session, and downstream
+// handlers still compare that identity with the live session before serving.
+func (am *AuthMiddleware) RequireTransportAuth(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		regularAuth := am.RequireAuth(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := r.URL.Query().Get(streamtoken.QueryParameter)
+			if token == "" {
+				token = r.Header.Get(streamtoken.Header)
+			}
+			sessionID := chi.URLParam(r, "session_id")
+			if secret != "" && token != "" {
+				claims, err := streamtoken.Verify(token, secret)
+				if err == nil && validTransportStreamClaims(claims, sessionID) {
+					authClaims := &auth.Claims{
+						UserID:    claims.UserID,
+						ProfileID: claims.ProfileID,
+						TokenType: auth.TokenTypeStream,
+					}
+					if lc := activitylog.GetLogContext(r.Context()); lc != nil {
+						uid := claims.UserID
+						lc.UserID = &uid
+					}
+					ctx := context.WithValue(r.Context(), claimsKey, authClaims)
+					ctx = context.WithValue(ctx, transportStreamClaimsKey, claims)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+
+			regularAuth.ServeHTTP(w, r)
+		})
+	}
+}
+
+func validTransportStreamClaims(claims *streamtoken.Claims, sessionID string) bool {
+	if claims == nil || sessionID == "" || claims.SessionID != sessionID || claims.UserID <= 0 || claims.MediaFileID <= 0 {
+		return false
+	}
+	switch claims.PlayMethod {
+	case "",
+		string(playback.PlayDirect),
+		string(playback.PlayRemux),
+		string(playback.PlayTranscode),
+		streamtoken.PlayMethodToneMapTranscode,
+		streamtoken.PlayMethodAudioDownmixTranscode,
+		streamtoken.PlayMethodAudioDownmixRemux:
+		return true
+	default:
+		return false
+	}
+}
+
 // RequireAdmin is a standalone HTTP middleware that checks if the authenticated
 // user has the "admin" role. It expects RequireAuth to have already placed
 // claims in the request context.
@@ -261,6 +329,13 @@ func GetClaims(ctx context.Context) *auth.Claims {
 	if !ok {
 		return nil
 	}
+	return claims
+}
+
+// GetTransportStreamClaims returns the verified recipe carried by a playback
+// transport capability. It is nil for ordinary account-authenticated requests.
+func GetTransportStreamClaims(ctx context.Context) *streamtoken.Claims {
+	claims, _ := ctx.Value(transportStreamClaimsKey).(*streamtoken.Claims)
 	return claims
 }
 
