@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http/httptest"
 	"net/url"
