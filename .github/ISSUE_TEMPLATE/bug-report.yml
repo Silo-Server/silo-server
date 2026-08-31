@@ -71,6 +71,13 @@ body:
       label: Technical notes
       description: Optional suspected root cause, relevant files, SQL output, or stack traces. Keep this separate from the observed reproduction above.
   - type: input
+    id: ai-harness
+    attributes:
+      label: AI harness
+      description: Enter the exact agent harness or application, or "none".
+    validations:
+      required: true
+  - type: input
     id: ai-tools
     attributes:
       label: AI tool(s)
