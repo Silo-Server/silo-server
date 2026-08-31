@@ -157,15 +157,27 @@ output to include findings that are not yours and that CI will not fail on. Do n
 
 Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 
-## Skills
+## Development environment
 
-Task-specific guides live in `.claude/skills/`, also reachable as `.agents/skills/` for agents
-that look there. Read the one that matches the task instead of working from this file alone.
-
-They share one config file: copy `.silo-dev.env.example` to `.silo-dev.env` and fill in how to
+Copy `.silo-dev.env.example` to `.silo-dev.env` and fill in how to
 reach your Silo deployment — URL, SSH target, database, an account to debug with. That file is
 gitignored and is the only place hosts, passwords, and tokens belong. `scripts/silo-dev doctor`
 checks it end to end.
+
+## Writing
+
+Run a final readability pass on every human-facing issue, pull request,
+document, or status update.
+
+- Lead with the outcome.
+- Use concrete, plain language and active voice.
+- Cut filler, stock framing, repetition, and promotional claims.
+- Preserve meaning, evidence, citations, uncertainty, and established
+  terminology.
+- Never rewrite exact quotations, commands, logs, identifiers, API names, or
+  contractual language.
+- Match the tone to the audience and use only formatting that improves
+  readability.
 
 ## v1 API rules
 
@@ -190,13 +202,31 @@ Design new endpoints today so they can live under that regime tomorrow.
 
 ## Pull requests
 
-Conventional Commit subjects (`feat(playback): add realtime session hub`). One concern per PR.
-Explain the problem, why this approach, the linked issue/spec/plan, and risks or follow-up work.
-Include screenshots or recordings for UI changes. Link the capability epic or sub-issue the PR
-serves (`Related issue: #NNN`); write `Related issue: N/A — narrow fix` only when no prior
-coordination was needed, otherwise an unlinked PR gets questioned at review. For non-trivial
-work, open an issue or discussion first; this codebase moves quickly.
+Never create a pull request unless the developer explicitly asks for one.
 
-AI-use disclosure is required in the PR body. If you are an AI agent contributing on behalf of a
-non-maintainer, follow [docs/ai-contributions.md](docs/ai-contributions.md) — it has the required
-disclosure block and the evidence standard.
+Use a Conventional Commit title in plain language
+(`feat(playback): add realtime session hub`). Start the body with the problem,
+explain the solution and why this approach next, and end with the required AI
+disclosure, including the exact model identifier, agent harness, and any other
+AI tooling. Include the linked issue, spec, or plan, actual validation evidence,
+risks, and follow-up work.
+
+- Keep one concern per pull request. If an honest description needs the word
+  "also," split the work.
+- Include before-and-after images for UI changes. Include a short video when
+  motion or timing matters.
+- Upload pull request evidence to GitHub. Never commit PR-only assets such as
+  `.github/pr-assets/`.
+- Link the capability epic or sub-issue the pull request serves with
+  `Related issue: #NNN`. Use `Related issue: N/A — narrow fix` only when no prior
+  coordination was needed. For non-trivial work, open an issue or discussion
+  first.
+- When babysitting a pull request, poll checks and review comments created
+  after the last push. Verify bot findings against the source, fix real issues,
+  and dismiss false positives with a written reason. Remain quiet when nothing
+  new has appeared. Stop when the latest commit is green.
+
+AI-use disclosure is required in the pull request body. If you are an AI agent
+contributing on behalf of a non-maintainer, follow
+[docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure
+block and evidence standard.
