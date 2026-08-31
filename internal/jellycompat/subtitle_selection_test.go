@@ -291,6 +291,67 @@ func TestHandlePlaybackInfo_DefaultsToEmbeddedDefaultSubtitle(t *testing.T) {
 	}
 }
 
+func TestHandlePlaybackInfo_DeliversEmbeddedTextAsProfileRequestedExternalVTT(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	resp := postPlaybackInfo(t, handler, routeID, `{
+		"SubtitleStreamIndex": 2,
+		"DeviceProfile": {
+			"SubtitleProfiles": [
+				{"Format": "vtt", "Method": "External"}
+			]
+		}
+	}`)
+
+	for _, stream := range resp.MediaSources[0].MediaStreams {
+		if stream.Type != "Subtitle" || stream.Index != 2 {
+			continue
+		}
+		if stream.DeliveryMethod != "External" {
+			t.Fatalf("DeliveryMethod = %q, want External", stream.DeliveryMethod)
+		}
+		if !stream.SupportsExternalStream {
+			t.Fatal("SupportsExternalStream = false, want true")
+		}
+		if !strings.Contains(stream.DeliveryURL, "/Subtitles/2/stream.vtt?") {
+			t.Fatalf("DeliveryURL = %q, want VTT subtitle route", stream.DeliveryURL)
+		}
+		return
+	}
+	t.Fatal("embedded subtitle stream 2 not found")
+}
+
+func TestHandlePlaybackInfo_DeliversExternalSRTAsProfileRequestedVTT(t *testing.T) {
+	handler, routeID := newSubtitleSelectionHandler(t)
+	resp := postPlaybackInfo(t, handler, routeID, `{
+		"SubtitleStreamIndex": 3,
+		"DeviceProfile": {
+			"SubtitleProfiles": [
+				{"Format": "vtt", "Method": "External"}
+			]
+		}
+	}`)
+
+	for _, stream := range resp.MediaSources[0].MediaStreams {
+		if stream.Type != "Subtitle" || stream.Index != 3 {
+			continue
+		}
+		if stream.DeliveryMethod != "External" {
+			t.Fatalf("DeliveryMethod = %q, want External", stream.DeliveryMethod)
+		}
+		if !stream.SupportsExternalStream {
+			t.Fatal("SupportsExternalStream = false, want true")
+		}
+		if !strings.Contains(stream.DeliveryURL, "/Subtitles/3/stream.vtt?") {
+			t.Fatalf("DeliveryURL = %q, want VTT subtitle route", stream.DeliveryURL)
+		}
+		if !strings.HasSuffix(stream.Path, "/Subtitles/3/stream.vtt") {
+			t.Fatalf("Path = %q, want VTT subtitle path", stream.Path)
+		}
+		return
+	}
+	t.Fatal("external subtitle stream 3 not found")
+}
+
 func TestHandlePlaybackInfo_HonorsSelectedExternalSubtitle(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":3}`)

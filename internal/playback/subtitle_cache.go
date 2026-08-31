@@ -16,11 +16,11 @@ import (
 	"time"
 )
 
-// SubtitleCache stores full-track PGS (.sup) subtitle extracts on disk so
-// repeat selections of the same embedded track don't re-run a whole-file
-// ffmpeg demux (minutes for a large remux). Only complete, unwindowed .sup
-// extracts are cached — VTT extracts are already windowed and fast, and ASS
-// extracts are small; neither pays the full-demux cost PGS does.
+// SubtitleCache stores full-track subtitle extracts on disk so repeat
+// selections of the same embedded track don't re-run a whole-file ffmpeg
+// demux (minutes for a large remux). It caches native PGS (.sup) streams and
+// text artifacts used by compatibility clients; windowed extracts are never
+// cached because their content depends on the requested playback position.
 //
 // Entries are keyed by the source file path, subtitle stream ordinal, and the
 // source's mtime+size, all encoded in the cache filename. Invalidation is
@@ -55,7 +55,11 @@ type SubtitleCache struct {
 }
 
 const (
-	subtitleCacheDirName = "subtitle-cache"
+	subtitleCacheDirName      = "subtitle-cache"
+	subtitleCacheFormatASS    = "ass"
+	subtitleCacheFormatSRT    = "srt"
+	subtitleCacheFormatSSA    = "ssa"
+	subtitleCacheFormatSubRip = "subrip"
 	// defaultSubtitleCacheMaxBytes caps the cache at 2 GiB — PGS tracks run
 	// 15-80 MB, so this holds a few dozen tracks.
 	// TODO: expose as a config knob following the download.artifact_max_bytes
@@ -262,6 +266,10 @@ func subtitleCacheKey(inputPath string, trackIndex int, mtime time.Time, size in
 	return fmt.Sprintf("%s%d-%d.sup", subtitleCacheKeyPrefix(inputPath, trackIndex), mtime.UnixNano(), size)
 }
 
+func subtitleTextCacheKey(inputPath string, trackIndex int, mtime time.Time, size int64, format string) string {
+	return fmt.Sprintf("%s%d-%d.%s", subtitleCacheKeyPrefix(inputPath, trackIndex), mtime.UnixNano(), size, format)
+}
+
 // Lookup opens the cached full-track .sup extract for the given source file
 // and subtitle stream ordinal. The source is stat'ed on every lookup: an
 // mtime or size mismatch means the entry (if any) is stale and reads as a
@@ -279,6 +287,63 @@ func (c *SubtitleCache) Lookup(inputPath string, trackIndex int) (f *os.File, mo
 		return nil, time.Time{}, false
 	}
 	return f, modTime, true
+}
+
+// LookupText returns a complete cached text subtitle artifact. The cache key
+// includes the source path, mtime, size, stream ordinal, and output format.
+func (c *SubtitleCache) LookupText(inputPath string, trackIndex int, format string) ([]byte, bool) {
+	format = normalizeCachedTextSubtitleFormat(format)
+	if format == "" {
+		return nil, false
+	}
+	dir := c.dir()
+	if dir == "" {
+		return nil, false
+	}
+	src, err := os.Stat(inputPath)
+	if err != nil {
+		return nil, false
+	}
+	path := filepath.Join(dir, subtitleTextCacheKey(inputPath, trackIndex, src.ModTime(), src.Size(), format))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	now := time.Now()
+	if err := os.Chtimes(path, now, now); err != nil {
+		slog.Debug("subtitle cache recency bump failed", "path", path, "error", err)
+	}
+	return data, true
+}
+
+// StoreText atomically publishes a complete embedded text subtitle extract.
+// A disabled or temporarily busy cache is a no-op: the caller can still serve
+// the bytes it already extracted.
+func (c *SubtitleCache) StoreText(inputPath string, trackIndex int, format string, data []byte) error {
+	format = normalizeCachedTextSubtitleFormat(format)
+	if format == "" {
+		return fmt.Errorf("unsupported cached subtitle format")
+	}
+	fill := c.beginFill(inputPath, trackIndex, format)
+	if fill == nil {
+		return nil
+	}
+	if _, err := fill.Tee(io.Discard).Write(data); err != nil {
+		fill.Discard()
+		return err
+	}
+	return fill.Commit()
+}
+
+func normalizeCachedTextSubtitleFormat(format string) string {
+	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), ".")) {
+	case subtitleCacheFormatSRT, subtitleCacheFormatSubRip:
+		return subtitleCacheFormatSRT
+	case subtitleCacheFormatASS, subtitleCacheFormatSSA:
+		return subtitleCacheFormatASS
+	default:
+		return ""
+	}
 }
 
 // cachedEntryPath reports whether a committed entry exists for the given
@@ -318,6 +383,7 @@ type SubtitleCacheFill struct {
 	key        string
 	inputPath  string
 	trackIndex int
+	format     string
 	srcMtime   time.Time
 	srcSize    int64
 	tmp        *os.File
@@ -332,6 +398,10 @@ type SubtitleCacheFill struct {
 // cache directory can't be created, or another fill for the same track is
 // already in flight.
 func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCacheFill {
+	return c.beginFill(inputPath, trackIndex, "sup")
+}
+
+func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format string) *SubtitleCacheFill {
 	dir := c.dir()
 	if dir == "" {
 		return nil
@@ -344,7 +414,7 @@ func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCac
 		slog.Warn("subtitle cache dir create failed", "dir", dir, "error", err)
 		return nil
 	}
-	key := subtitleCacheKey(inputPath, trackIndex, src.ModTime(), src.Size())
+	key := subtitleTextCacheKey(inputPath, trackIndex, src.ModTime(), src.Size(), format)
 
 	c.mu.Lock()
 	if _, busy := c.inflight[key]; busy {
@@ -365,6 +435,7 @@ func (c *SubtitleCache) BeginFill(inputPath string, trackIndex int) *SubtitleCac
 		key:        key,
 		inputPath:  inputPath,
 		trackIndex: trackIndex,
+		format:     format,
 		srcMtime:   src.ModTime(),
 		srcSize:    src.Size(),
 		tmp:        tmp,
@@ -442,7 +513,7 @@ func (f *SubtitleCacheFill) Commit() error {
 		return fmt.Errorf("publish subtitle cache entry: %w", err)
 	}
 
-	f.c.removeStaleSiblings(dir, f.inputPath, f.trackIndex, f.key)
+	f.c.removeStaleSiblings(dir, f.inputPath, f.trackIndex, f.format, f.key)
 	f.c.evict(dir)
 	return nil
 }
@@ -465,7 +536,7 @@ func (f *SubtitleCacheFill) closeAndRemoveTmp() {
 // removeStaleSiblings deletes committed entries for the same source+track
 // with a different mtime/size suffix — the source was replaced, so those can
 // never be served again.
-func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, keepKey string) {
+func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex int, format, keepKey string) {
 	prefix := subtitleCacheKeyPrefix(inputPath, trackIndex)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -473,7 +544,7 @@ func (c *SubtitleCache) removeStaleSiblings(dir, inputPath string, trackIndex in
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if name == keepKey || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".sup") {
+		if name == keepKey || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, "."+format) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
@@ -514,7 +585,7 @@ func (c *SubtitleCache) evict(dir string) {
 			}
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".sup") {
+		if !strings.HasSuffix(e.Name(), ".sup") && !strings.HasSuffix(e.Name(), ".srt") && !strings.HasSuffix(e.Name(), ".ass") {
 			continue
 		}
 		ents = append(ents, cacheEnt{path: path, size: info.Size(), mtime: info.ModTime()})

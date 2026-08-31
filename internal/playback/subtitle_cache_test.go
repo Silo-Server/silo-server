@@ -117,6 +117,49 @@ func TestSubtitleCacheMissThenHit(t *testing.T) {
 	}
 }
 
+func TestSubtitleCacheTextRoundTripAndFormatIsolation(t *testing.T) {
+	c, source := newTestCache(t)
+	if _, ok := c.LookupText(source, 0, "srt"); ok {
+		t.Fatal("expected text miss on empty cache")
+	}
+	if err := c.StoreText(source, 0, "subrip", []byte("SRT DATA")); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "SRT DATA" {
+		t.Fatalf("SRT lookup = %q, %t", got, ok)
+	}
+	if _, ok := c.LookupText(source, 0, "ass"); ok {
+		t.Fatal("SRT cache entry must not satisfy ASS lookup")
+	}
+	if _, ok := c.LookupText(source, 1, "srt"); ok {
+		t.Fatal("text cache entry must not satisfy another track")
+	}
+}
+
+func TestSubtitleCacheTextInvalidatedBySourceChange(t *testing.T) {
+	c, source := newTestCache(t)
+	if err := c.StoreText(source, 0, "srt", []byte("old extract")); err != nil {
+		t.Fatal(err)
+	}
+
+	newTime := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(source, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.LookupText(source, 0, "srt"); ok {
+		t.Fatal("expected text miss after source mtime changed")
+	}
+	if err := c.StoreText(source, 0, "srt", []byte("new extract")); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := c.LookupText(source, 0, "srt"); !ok || string(got) != "new extract" {
+		t.Fatalf("refilled SRT lookup = %q, %t", got, ok)
+	}
+	if n := countMatching(t, c, func(name string) bool { return strings.HasSuffix(name, ".srt") }); n != 1 {
+		t.Fatalf("stale text sibling not removed: %d entries", n)
+	}
+}
+
 func TestSubtitleCacheInvalidatedBySourceMtime(t *testing.T) {
 	c, source := newTestCache(t)
 	fillEntry(t, c, source, 0, "old extract")

@@ -228,11 +228,12 @@ func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
 				AND compat_token = $2
 				AND data->>'ClientDeviceID' = $3
 				AND data->>'RouteItemID' = $4
+				AND COALESCE(data->>'NegotiationVariant', '') = $6
 				AND COALESCE(data->>'UpstreamSessionID', '') = ''
 				AND COALESCE((data->>'Terminal')::boolean, false) = false
 				AND expires_at > $5
 			RETURNING id
-		`, session.ID, session.CompatToken, session.ClientDeviceID, session.RouteItemID, d.now())
+		`, session.ID, session.CompatToken, session.ClientDeviceID, session.RouteItemID, d.now(), session.NegotiationVariant)
 		if err != nil {
 			return nil, err
 		}
