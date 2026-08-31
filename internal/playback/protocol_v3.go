@@ -76,6 +76,14 @@ const (
 	DeviceQuirkRegistryRevisionV3    = "2026-07-13.1"
 )
 
+// Worker transport features are protocol capabilities rather than media
+// transformations. They let route planning exclude an older worker before a
+// client is handed a URL that worker cannot serve.
+const (
+	TransportFeatureProgressiveRemuxExecutionV1 = "progressive_remux_execution_v1"
+	TransportFeatureProgressiveRemuxRelayV1     = "progressive_remux_relay_v1"
+)
+
 // Degradation warning codes reported by playback plans.
 const DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
 

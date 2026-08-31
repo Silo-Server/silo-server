@@ -626,6 +626,10 @@ func (h *PlaybackHandler) resolveCompatIdentityRouteWithPolicy(
 		},
 		SessionID: sessionID, EstimatedBitrateKbps: bitrateKbps,
 		ProxyEligible: h.compatProxyEligibility(ctx, requiresAudioBoost),
+		// The progressive transcode-to-proxy relay is a native-v3 token/grant
+		// contract. Compatibility redirects keep their existing proxy/API remux
+		// executor until that protocol can describe the two-node route.
+		ExcludedShapeIDs: map[string]struct{}{"progressive_remux_transcode_proxy": {}},
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "compile Jellyfin-compatible playback route", "component", "noderouting", "error", err)

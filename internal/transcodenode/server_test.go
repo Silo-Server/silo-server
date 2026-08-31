@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -120,12 +121,14 @@ func newTestServer(t *testing.T) *Server {
 	cfg.Download.ArtifactDir = filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName)
 	w.SetConfigForTest(cfg)
 	return &Server{
-		watcher:      w,
-		inputPaths:   allowInputPaths{},
-		transcodeDir: cfg.Playback.TranscodeDir,
-		artifactRoot: filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
-		sessions:     make(map[string]*playback.TranscodeSession),
-		lastAccess:   make(map[string]time.Time),
+		watcher:                   w,
+		inputPaths:                allowInputPaths{},
+		transcodeDir:              cfg.Playback.TranscodeDir,
+		artifactRoot:              filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
+		sessions:                  make(map[string]*playback.TranscodeSession),
+		progressiveRemuxes:        make(map[string]map[uint64]context.CancelFunc),
+		stoppedProgressiveRemuxes: make(map[string]time.Time),
+		lastAccess:                make(map[string]time.Time),
 	}
 }
 
@@ -1820,6 +1823,141 @@ func signCard(t *testing.T, card playback.RecipeCard) string {
 		t.Fatalf("sign card: %v", err)
 	}
 	return tok
+}
+
+func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
+	server := newTestServer(t)
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1?seek=2", nil)
+	req.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleRemux(rr, req)
+
+	if rr.Code != http.StatusOK || rr.Body.String() != "node-remux-bytes" {
+		t.Fatalf("response = %d %q, want remux bytes", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs after response = %d, want 0", got)
+	}
+}
+
+func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
+	server := newTestServer(t)
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: "/media/movie.mkv", PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionProxy),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
+	req.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleRemux(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := server.activeJobs.Load(); got != 0 {
+		t.Fatalf("active jobs = %d, want no FFmpeg start", got)
+	}
+}
+
+func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
+	server := newTestServer(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	server.progressiveRemuxes["transport-1"] = map[uint64]context.CancelFunc{1: cancel}
+	req := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+	rr := httptest.NewRecorder()
+
+	server.handleStop(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("progressive remux was not canceled")
+	}
+}
+
+func TestHandleProgressiveRemuxRefusesStoppedTransport(t *testing.T) {
+	server := newTestServer(t)
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegLog := filepath.Join(t.TempDir(), "ffmpeg.log")
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf invoked > \""+ffmpegLog+"\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+
+	stopRequest := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
+	stopRouteContext := chi.NewRouteContext()
+	stopRouteContext.URLParams.Add("session_id", "transport-1")
+	stopRequest = stopRequest.WithContext(context.WithValue(stopRequest.Context(), chi.RouteCtxKey, stopRouteContext))
+	server.handleStop(httptest.NewRecorder(), stopRequest)
+
+	claims := streamtoken.Claims{
+		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/transport-1", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-1")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+
+	server.handleRemux(recorder, request)
+
+	if recorder.Code != http.StatusGone {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(ffmpegLog); !os.IsNotExist(err) {
+		t.Fatalf("stopped transport invoked ffmpeg: %v", err)
+	}
 }
 
 func requestWithToken(sessionID, token string) *http.Request {

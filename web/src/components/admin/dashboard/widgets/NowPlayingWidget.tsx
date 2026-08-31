@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { Pause, Play } from "lucide-react";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import {
@@ -185,11 +186,7 @@ function StreamCard({ session }: { session: AdminSession }) {
               <span className="truncate">{clientLabel}</span>
             </span>
           ) : null}
-          {session.reporting_node && (
-            <span className="border-primary/10 bg-primary/5 text-primary inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold">
-              {session.node_display_name || session.reporting_node}
-            </span>
-          )}
+          <PlaybackRouteBadges session={session} />
           {(session.profile_name || session.profile_id) && (
             <SessionProfilePill label={session.profile_name || session.profile_id} />
           )}

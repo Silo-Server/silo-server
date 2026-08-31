@@ -153,6 +153,7 @@ func legalShapes(workload Workload, delivery Delivery) []Shape {
 		return []Shape{
 			shape("progressive_remux_api", ExecutionAPI, EgressAPI),
 			shape("progressive_remux_proxy", ExecutionProxy, EgressProxy),
+			shape("progressive_remux_transcode_proxy", ExecutionTranscode, EgressProxy),
 		}
 	case DeliveryHLSRemux:
 		return []Shape{
@@ -222,6 +223,15 @@ func rank(shape Shape, execution config.PlaybackExecutionPreference, egress conf
 	case config.PlaybackExecutionPreferWorker:
 		if !isWorker(shape.Execution) {
 			executionMiss = 1
+		}
+	case config.PlaybackExecutionPreferTranscode:
+		switch shape.Execution {
+		case ExecutionTranscode:
+			executionMiss = 0
+		case ExecutionProxy:
+			executionMiss = 1
+		default:
+			executionMiss = 2
 		}
 	case config.PlaybackExecutionPreferAPI:
 		if shape.Execution != ExecutionAPI {

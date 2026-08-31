@@ -183,6 +183,8 @@ func TestProxyPlaybackEndpointStatusV3BindsRecipeFamily(t *testing.T) {
 		RoutingExecution: string(noderouting.ExecutionProxy), RoutingEgress: string(noderouting.EgressProxy),
 		RoutingEgressNodeID: 11,
 	}
+	remoteRemux := remux
+	remoteRemux.RoutingExecution = string(noderouting.ExecutionTranscode)
 	transcodeRemux := streamtoken.Claims{
 		PlayMethod: string(playback.PlayTranscode), RoutingWorkload: string(noderouting.WorkloadRemux),
 		RoutingExecution: string(noderouting.ExecutionTranscode), RoutingEgress: string(noderouting.EgressProxy),
@@ -200,6 +202,8 @@ func TestProxyPlaybackEndpointStatusV3BindsRecipeFamily(t *testing.T) {
 		{name: "direct", claims: direct, endpoint: proxyPlaybackEndpointDirectV3},
 		{name: "direct on remux", claims: direct, endpoint: proxyPlaybackEndpointRemuxV3, want: http.StatusServiceUnavailable},
 		{name: "remux", claims: remux, endpoint: proxyPlaybackEndpointRemuxV3},
+		{name: "remote remux", claims: remoteRemux, endpoint: proxyPlaybackEndpointRemuxV3},
+		{name: "remote remux identity", claims: remoteRemux, endpoint: proxyPlaybackEndpointIdentityV3},
 		{name: "versioned remux", claims: func() streamtoken.Claims {
 			claims := remux
 			claims.PlayMethod = streamtoken.PlayMethodAudioDownmixRemux

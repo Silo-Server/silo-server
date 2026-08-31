@@ -344,8 +344,8 @@ func TestPrepareTransportV3AuthorizedOriginsDoNotFallBackToAnIncapableAPI(t *tes
 	if transportErr.reason != string(noderouting.OutcomeCapacityUnavailable) || !transportErr.retryable {
 		t.Fatalf("transport error = %#v, want a retryable proxy-egress capacity failure", transportErr)
 	}
-	if len(planner.released) != 1 {
-		t.Fatalf("planner releases = %v, want the unusable proxy reservation released", planner.released)
+	if len(planner.released) != 2 {
+		t.Fatalf("planner releases = %v, want the unusable transcode and proxy reservations released", planner.released)
 	}
 }
 

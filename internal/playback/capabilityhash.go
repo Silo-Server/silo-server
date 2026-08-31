@@ -54,6 +54,7 @@ type canonicalCapability struct {
 	ProbeRequestTimeout int64                      `json:"probe_request_timeout_ms"`
 	DetectedBackends    []canonicalDetectedBackend `json:"detected_backends"`
 	Transformations     []canonicalTransformation  `json:"transformations"`
+	TransportFeatures   []string                   `json:"transport_features"`
 	ToneMapCapabilities []canonicalToneMap         `json:"tone_map_capabilities"`
 }
 
@@ -100,6 +101,7 @@ func canonicalCapabilities(info HWAccelInfo) canonicalCapability {
 		ProbeRequestTimeout: info.ProbeRequestTimeoutMillis,
 		DetectedBackends:    canonicalDetectedBackends(info.DetectedBackends),
 		Transformations:     canonicalTransformations(info.Transformations),
+		TransportFeatures:   sortedStrings(info.TransportFeatures),
 		ToneMapCapabilities: canonicalToneMaps(info.ToneMapCapabilities),
 	}
 }

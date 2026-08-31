@@ -540,6 +540,22 @@ execute that recipe while the API remains the media origin. A progressive-only
 client receives a non-retryable `local_transcode_disabled` terminal because
 retrying cannot create a legal route.
 
+In routing policy, **worker** means either a proxy node or a transcode node.
+Progressive remux has proxy-worker, API, and transcode-node-to-proxy execution
+shapes; HLS remux has transcode-worker and API execution shapes. Consequently,
+`remux_execution=prefer_transcode` ranks the transcode-node shape first without
+changing the delivery selected for the client. A progressive remux can run
+FFmpeg on the transcode node and relay its single chunked response through the
+selected proxy. The execution choice remains independent of egress—a proxy
+origin can serve bytes produced by a transcode node without becoming the
+executor itself.
+
+Both halves advertise this transport contract through `/hw-capabilities`:
+transcode nodes publish `progressive_remux_execution_v1`, and proxies publish
+`progressive_remux_relay_v1`. Route selection requires both markers. During a
+rolling upgrade, an older node is therefore excluded before a client receives
+a URL rather than failing the stream on its first request.
+
 **Authorized media origins.** A client that also sends
 `authorized_media_origins_v1` promises something further: it will fetch media
 from absolute URLs the plan returns on origins the server designates, attaching
@@ -559,7 +575,7 @@ playback immediately, exactly as it stops API playback. A server with no proxy
 pool, or one that cannot record the handoff, simply keeps the attempt on the API
 origin — the URLs above are an addition a plan may make, never one a client may
 assume. The escalation described just above therefore applies only when no proxy
-origin is available to run the remux.
+origin is available to serve the remux.
 
 Only the primary audio/video transport moves. Start, replan, route events,
 progress and every other control-plane call stay on the API origin, and the

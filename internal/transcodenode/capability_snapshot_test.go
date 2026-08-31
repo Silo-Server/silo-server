@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -93,6 +94,9 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	}
 	if info.CapabilityHash == "" {
 		t.Fatal("served capability report carries no capability_hash")
+	}
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
+		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
 	}
 	// The hash must describe this payload, not some earlier one.
 	served := info

@@ -5185,6 +5185,49 @@ func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t
 	}
 }
 
+func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxyServer := capableProxyStubV3(t)
+	transcodeServer := progressiveRemuxExecutionStubV3(t)
+	proxy := &nodepool.Node{ID: 42, URL: proxyServer.URL}
+	transcode := &nodepool.Node{ID: 84, URL: transcodeServer.URL}
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: proxy, TranscodeNode: transcode}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3)
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-remote-remux", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetAudioCodec: "aac"}, mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	prefix := proxy.URL + "/stream/remux/"
+	if !strings.HasPrefix(transport.url, prefix) {
+		t.Fatalf("stream URL = %q, want proxy remux URL", transport.url)
+	}
+	if transport.nodeURL != transcode.URL || transport.transportID == "" ||
+		transport.routingExecution != noderouting.ExecutionTranscode || transport.routingExecutorID != transcode.ID ||
+		transport.routingEgress != noderouting.EgressProxy || transport.routingEgressID != proxy.ID {
+		t.Fatalf("prepared route = %#v, want transcode execution through proxy", transport)
+	}
+	claims, err := streamtoken.Verify(strings.TrimPrefix(transport.url, prefix), handler.JWTSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.TranscodeNode != transcode.URL || claims.TranscodeTransportID != transport.transportID ||
+		claims.RoutingExecution != string(noderouting.ExecutionTranscode) || claims.RoutingEgressNodeID != proxy.ID {
+		t.Fatalf("claims = %#v, want bound transcode-to-proxy route", claims)
+	}
+}
+
 func TestIdentityStreamURLV3VersionsOnlyBoostedRemuxRoutes(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
@@ -5318,6 +5361,13 @@ func TestPrepareTransportV3RefusesLocalRemuxWhenFallbackDisabled(t *testing.T) {
 	}
 }
 
+func TestSessionStartErrorV3PreservesAudioTranscodingReason(t *testing.T) {
+	got := sessionStartErrorV3(playback.ErrAudioTranscodingDisabled)
+	if got.reason != "audio_transcoding_disabled" {
+		t.Fatalf("reason = %q, want audio_transcoding_disabled", got.reason)
+	}
+}
+
 func TestPrepareTransportV3AllowsLocalDirectPlayWhenFallbackDisabled(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
@@ -5367,10 +5417,28 @@ func capableProxyStubV3(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
-			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-			{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
-		}})
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+			TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxRelayV1},
+			Transformations: []playback.TransformationV3{
+				{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
+				{Name: playback.TransformationServerDV7HDR10V3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"},
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func progressiveRemuxExecutionStubV3(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hw-capabilities" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+			TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+		})
 	}))
 	t.Cleanup(server.Close)
 	return server
@@ -5415,10 +5483,11 @@ func TestPrepareTransportV3KeepsBoostedDownmixLocalWhenProxyHasOldRecipe(t *test
 	if strings.HasPrefix(transport.url, proxy.URL) {
 		t.Fatalf("stream url = %q, want local fallback when the proxy only has audio recipe v1", transport.url)
 	}
-	// Narrowing happens before selection, so no reservation is made against an
-	// incapable proxy in the first place and none needs releasing.
-	if len(planner.released) != 0 {
-		t.Fatalf("released = %v, want no reservation taken on an incapable proxy", planner.released)
+	// The proxy-execution shape is narrowed before selection. The legacy planner
+	// double then returns that same proxy as a partial transcode+proxy plan; the
+	// adapter must release the unusable half-reservation before falling local.
+	if len(planner.released) != 1 || planner.released[0] != "session-incapable-proxy" {
+		t.Fatalf("released = %v, want the partial legacy route released", planner.released)
 	}
 }
 

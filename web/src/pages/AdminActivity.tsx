@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { usePageActivity } from "@/hooks/usePageActivity";
@@ -31,10 +32,12 @@ import {
   formatTranscodeModeSummary,
   getSessionClientLabel,
   getSessionClientLabelFull,
+  getSessionRouteNodes,
   formatVideoDetail,
   formatVideoSummary,
   normalizeContainerDecision,
   normalizeStreamDecision,
+  type ActivityRouteNode,
   type ToneMapSummary,
 } from "@/pages/adminActivityPresentation";
 import {
@@ -64,6 +67,12 @@ type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+
+function routeSortValue(session: AdminSession): string {
+  return getSessionRouteNodes(session)
+    .map((node) => `${node.label} ${node.name}`)
+    .join(" ");
+}
 
 export default function AdminActivity() {
   const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
@@ -134,11 +143,18 @@ export default function AdminActivity() {
     return counts;
   }, [sessions]);
 
-  const nodes = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const s of sessions)
-      counts[s.reporting_node || "unknown"] = (counts[s.reporting_node || "unknown"] || 0) + 1;
-    return counts;
+  const routeNodes = useMemo(() => {
+    const counts = new Map<string, ActivityRouteNode & { count: number }>();
+    for (const session of sessions) {
+      for (const node of getSessionRouteNodes(session)) {
+        const current = counts.get(node.key);
+        counts.set(node.key, {
+          ...node,
+          count: (current?.count ?? 0) + 1,
+        });
+      }
+    }
+    return [...counts.values()];
   }, [sessions]);
 
   // Filter + sort
@@ -157,11 +173,18 @@ export default function AdminActivity() {
           // compact label deliberately omits the build.
           getSessionClientLabelFull(s).toLowerCase().includes(q) ||
           s.client_user_agent?.toLowerCase().includes(q) ||
-          s.client_ip?.toLowerCase().includes(q),
+          s.client_ip?.toLowerCase().includes(q) ||
+          getSessionRouteNodes(s).some((node) =>
+            `${node.label} ${node.name}`.toLowerCase().includes(q),
+          ),
       );
     }
     if (methodFilter) result = result.filter((s) => classifyActivityMethod(s) === methodFilter);
-    if (nodeFilter) result = result.filter((s) => s.reporting_node === nodeFilter);
+    if (nodeFilter) {
+      result = result.filter((s) =>
+        getSessionRouteNodes(s).some((node) => node.key === nodeFilter),
+      );
+    }
     if (typeFilter) result = result.filter((s) => s.media_type === typeFilter);
 
     return [...result].sort((a, b) => {
@@ -177,7 +200,7 @@ export default function AdminActivity() {
           cmp = compareActivityMethods(classifyActivityMethod(a), classifyActivityMethod(b));
           break;
         case "node":
-          cmp = (a.reporting_node || "").localeCompare(b.reporting_node || "");
+          cmp = routeSortValue(a).localeCompare(routeSortValue(b));
           break;
         case "started":
           cmp = new Date(a.started_at).getTime() - new Date(b.started_at).getTime();
@@ -231,7 +254,7 @@ export default function AdminActivity() {
           <p className="page-subtitle text-sm sm:text-base">
             {sessions.length === 0
               ? "No active streams"
-              : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${Object.keys(nodes).length} node${Object.keys(nodes).length !== 1 ? "s" : ""}`}
+              : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -373,28 +396,31 @@ export default function AdminActivity() {
           </div>
 
           {/* Node breakdown */}
-          {Object.keys(nodes).length > 1 && (
+          {routeNodes.length > 1 && (
             <div className="border-border border-t pt-3">
               <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-                By Node
+                By Routing Node
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {Object.entries(nodes)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([node, count]) => (
+                {[...routeNodes]
+                  .sort((a, b) => b.count - a.count)
+                  .map((node) => (
                     <button
-                      key={node}
-                      onClick={() => setNodeFilter(nodeFilter === node ? null : node)}
+                      key={node.key}
+                      onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
                       className={`bg-surface border-border hover:border-primary/20 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-all ${
-                        nodeFilter === node
+                        nodeFilter === node.key
                           ? "border-primary/40 bg-primary/10 text-primary"
                           : nodeFilter
                             ? "opacity-30"
                             : ""
                       }`}
                     >
-                      {node}
-                      <span className="text-muted-foreground ml-1.5 tabular-nums">{count}</span>
+                      <span className="text-muted-foreground mr-1">{node.label}</span>
+                      {node.name}
+                      <span className="text-muted-foreground ml-1.5 tabular-nums">
+                        {node.count}
+                      </span>
                     </button>
                   ))}
               </div>
@@ -408,7 +434,7 @@ export default function AdminActivity() {
         <div className="relative min-w-[200px] flex-1">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
-            placeholder="Filter by user or media..."
+            placeholder="Filter by user, media, client, or node..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 pl-9 text-[13px]"
@@ -476,7 +502,7 @@ export default function AdminActivity() {
               Playback
             </SortHeader>
             <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Node
+              Route
             </SortHeader>
             <SortHeader
               field="started"
@@ -704,8 +730,8 @@ function StreamRow({
 
         {/* Node */}
         <div className="min-w-0">
-          <div className="text-muted-foreground truncate text-[12px]">
-            {session.node_display_name || session.reporting_node || "—"}
+          <div className="flex min-w-0 flex-wrap gap-1">
+            <PlaybackRouteBadges session={session} />
           </div>
         </div>
 
@@ -855,6 +881,9 @@ function StreamRow({
               {session.is_paused ? "Paused" : "Playing"}
             </span>
             <span className="font-mono tabular-nums">{playbackPosition}</span>
+          </div>
+          <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
+            <PlaybackRouteBadges session={session} />
           </div>
           <div className="mt-2 rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">

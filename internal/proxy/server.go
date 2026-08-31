@@ -288,10 +288,9 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	// Hardware acceleration is not probed here, and the report says so rather
 	// than leaving the fields unset by accident. A proxy relays streams and runs
 	// identity/remux recipes on ffmpeg; it never executes a hardware transcode,
-	// and the only field anything reads off this report is Transformations —
-	// planIdentityProxySessionV3 filters proxies by their advertised
-	// transformations and consults nothing else. So there is no inventory to
-	// report and nothing a GPU smoke-encode matrix could tell the planner.
+	// and the only fields planning reads off this report are Transformations and
+	// TransportFeatures. So there is no hardware inventory to report and nothing
+	// a GPU smoke-encode matrix could tell the planner.
 	//
 	// The consequence worth stating: the hash now tracks only what this proxy
 	// can *do*. A reboot, a renumbered render node, or a card appearing on the
@@ -321,6 +320,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -554,8 +554,10 @@ func proxyPlaybackEndpointStatusV3(claims *streamtoken.Claims, endpoint proxyPla
 		claims.RoutingExecution == string(noderouting.ExecutionNone) &&
 		claims.RoutingEgress == string(noderouting.EgressProxy) &&
 		claims.PlayMethod == string(playback.PlayDirect)
+	remuxExecution := claims.RoutingExecution == string(noderouting.ExecutionProxy) ||
+		claims.RoutingExecution == string(noderouting.ExecutionTranscode)
 	remux := claims.RoutingWorkload == string(noderouting.WorkloadRemux) &&
-		claims.RoutingExecution == string(noderouting.ExecutionProxy) &&
+		remuxExecution &&
 		claims.RoutingEgress == string(noderouting.EgressProxy) &&
 		proxyRemuxPlayMethodV3(claims.PlayMethod)
 	transcode := (claims.RoutingWorkload == string(noderouting.WorkloadRemux) ||
@@ -805,6 +807,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if remuxRunsOnTranscodeNodeV3(claims) {
+		s.relayProgressiveRemux(w, r, claims, chi.URLParam(r, "token"))
+		return
+	}
 	s.serveRemuxClaims(w, r, claims)
 }
 
@@ -820,7 +826,23 @@ func (s *Server) handleAudioV2Remux(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if remuxRunsOnTranscodeNodeV3(claims) {
+		s.relayProgressiveRemux(w, r, claims, chi.URLParam(r, "token"))
+		return
+	}
 	s.serveRemuxClaims(w, r, claims)
+}
+
+func remuxRunsOnTranscodeNodeV3(claims *streamtoken.Claims) bool {
+	return claims != nil && claims.RoutingExecution == string(noderouting.ExecutionTranscode)
+}
+
+func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, forwardToken string) {
+	attachStream(r.Context(), claims)
+	info := sessionInfo(s.tracker, claims, "remux")
+	s.tracker.Track(r.Context(), info)
+	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	s.proxyToTranscodeNode(w, r, claims, "/remux/"+transcodeTransportIDFromClaims(claims), forwardToken)
 }
 
 // validAudioV2RemuxClaims proves the complete shape consumed by the proxy's

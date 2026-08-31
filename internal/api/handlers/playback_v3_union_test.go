@@ -664,6 +664,33 @@ func TestProgressivePlanningCapabilitiesV3RequireAddressableProxy(t *testing.T) 
 	}
 }
 
+func TestProgressivePlanningCapabilitiesV3RequireRelayForTranscodeExecutor(t *testing.T) {
+	transcode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+			TransportFeatures: []string{playback.TransportFeatureProgressiveRemuxExecutionV1},
+			Transformations: []playback.TransformationV3{{
+				Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+				RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+			}},
+		})
+	}))
+	t.Cleanup(transcode.Close)
+
+	local := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
+		Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+	}})
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{transcode.URL}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	registry := handler.progressiveRemuxPlanningRegistryWithInputsV3(t.Context(), local, true)
+	if registry.Available(playback.TransformationAudioToAACV3) {
+		t.Fatal("transcode capability without a relay-capable proxy widened progressive planning")
+	}
+}
+
 func TestHandlePlaybackCapabilityV3UnionsWorkloadRegistries(t *testing.T) {
 	var remoteProbes atomic.Int32
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

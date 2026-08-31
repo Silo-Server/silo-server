@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -199,14 +200,17 @@ type sessionTracker interface {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher      *nodeconfig.Watcher
-	tracker      sessionTracker
-	ffmpegSink   playback.FFmpegLogSink
-	inputPaths   InputPathAuthorizer
-	transcodeDir string
-	artifactRoot string
-	telemetry    *streamtelemetry.Registry
-	sessions     map[string]*playback.TranscodeSession
+	watcher                   *nodeconfig.Watcher
+	tracker                   sessionTracker
+	ffmpegSink                playback.FFmpegLogSink
+	inputPaths                InputPathAuthorizer
+	transcodeDir              string
+	artifactRoot              string
+	telemetry                 *streamtelemetry.Registry
+	sessions                  map[string]*playback.TranscodeSession
+	progressiveRemuxes        map[string]map[uint64]context.CancelFunc
+	stoppedProgressiveRemuxes map[string]time.Time
+	progressiveRemuxSequence  atomic.Uint64
 	// lastAccess records, per registered session id, when a manifest or segment
 	// request last touched the job (registration counts as the first access).
 	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
@@ -412,12 +416,14 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		artifactRoot = config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 	}
 	s := &Server{
-		watcher:      watcher,
-		tracker:      trackerImpl,
-		transcodeDir: transcodeDir,
-		artifactRoot: artifactRoot,
-		sessions:     make(map[string]*playback.TranscodeSession),
-		lastAccess:   make(map[string]time.Time),
+		watcher:                   watcher,
+		tracker:                   trackerImpl,
+		transcodeDir:              transcodeDir,
+		artifactRoot:              artifactRoot,
+		sessions:                  make(map[string]*playback.TranscodeSession),
+		progressiveRemuxes:        make(map[string]map[uint64]context.CancelFunc),
+		stoppedProgressiveRemuxes: make(map[string]time.Time),
+		lastAccess:                make(map[string]time.Time),
 	}
 	return s
 }
@@ -711,6 +717,8 @@ func (s *Server) Handler() http.Handler {
 		r.Delete("/downloads/artifacts/{artifact_id}", s.handleDeleteDownloadArtifact)
 		r.Post("/transcode/start", s.handleStart)
 		r.Delete("/transcode/{session_id}", s.handleStop)
+		r.Head("/remux/{session_id}", observeNode(s.telemetry, http.MethodHead, "/remux/{session_id}", s.handleRemux))
+		r.Get("/remux/{session_id}", observeNode(s.telemetry, http.MethodGet, "/remux/{session_id}", s.handleRemux))
 		r.Get("/transcode/{session_id}/master.m3u8", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/master.m3u8", s.handleManifest))
 		r.Get("/transcode/{session_id}/segment/{name}", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/segment/{name}", s.handleSegment))
 		r.Post("/transcode/{session_id}/segment/{name}/downloaded", s.handleSegmentDownloaded)
@@ -1153,6 +1161,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxExecutionV1}
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1840,6 +1849,130 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 	}
 }
 
+// handleRemux executes a progressive remux on demand. The static bearer
+// authenticates the proxy process; the independently verified stream token
+// binds the media recipe and the exact transcode-execution/proxy-egress route.
+func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
+	cfg := s.watcher.Config()
+	if cfg == nil || cfg.Auth.JWTSecret == "" {
+		http.Error(w, "node not configured", http.StatusServiceUnavailable)
+		return
+	}
+	token := strings.TrimSpace(r.Header.Get("X-Silo-Stream-Token"))
+	claims, err := streamtoken.Verify(token, cfg.Auth.JWTSecret)
+	if err != nil {
+		http.Error(w, "invalid stream token", http.StatusUnauthorized)
+		return
+	}
+	transportID := claims.TranscodeTransportID
+	if transportID == "" {
+		transportID = claims.SessionID
+	}
+	if transportID == "" || transportID != chi.URLParam(r, "session_id") ||
+		claims.TranscodeNode == "" ||
+		claims.RoutingWorkload != string(noderouting.WorkloadRemux) ||
+		claims.RoutingExecution != string(noderouting.ExecutionTranscode) ||
+		claims.RoutingEgress != string(noderouting.EgressProxy) ||
+		!transcodeNodeRemuxPlayMethod(claims.PlayMethod) {
+		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
+		return
+	}
+	if s.tracker != nil && strings.TrimRight(claims.TranscodeNode, "/") != strings.TrimRight(s.tracker.NodeURL(), "/") {
+		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
+		return
+	}
+	if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux &&
+		(!claims.TranscodeAudio || claims.TargetAudioChannels != 2 ||
+			!playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels)) {
+		http.NotFound(w, r)
+		return
+	}
+	if !s.requireApprovedInputPath(w, r, claims.MediaPath) {
+		return
+	}
+	seekSeconds := 0.0
+	if rawSeek := r.URL.Query().Get("seek"); rawSeek != "" {
+		parsed, parseErr := strconv.ParseFloat(rawSeek, 64)
+		if parseErr != nil || parsed < 0 {
+			http.Error(w, "invalid seek", http.StatusBadRequest)
+			return
+		}
+		seekSeconds = parsed
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	requestID := s.progressiveRemuxSequence.Add(1)
+	unlock := s.lockSessionLifecycle(transportID)
+	s.mu.Lock()
+	now := time.Now()
+	s.pruneStoppedProgressiveRemuxesLocked(now)
+	if s.stoppedProgressiveRemuxes[transportID].After(now) {
+		s.mu.Unlock()
+		unlock()
+		cancel()
+		http.Error(w, "session stopped", http.StatusGone)
+		return
+	}
+	requests := s.progressiveRemuxes[transportID]
+	if requests == nil {
+		requests = make(map[uint64]context.CancelFunc)
+		s.progressiveRemuxes[transportID] = requests
+	}
+	requests[requestID] = cancel
+	s.mu.Unlock()
+	unlock()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		if current := s.progressiveRemuxes[transportID]; current != nil {
+			delete(current, requestID)
+			if len(current) == 0 {
+				delete(s.progressiveRemuxes, transportID)
+			}
+		}
+		s.mu.Unlock()
+	}()
+
+	s.activeJobs.Add(1)
+	defer s.activeJobs.Add(-1)
+	if s.tracker != nil {
+		startedAt, source := claims.StartedAt()
+		if source == streamtoken.StartedAtSourceNone {
+			startedAt = time.Now().UTC()
+		}
+		s.tracker.Track(ctx, nodesessions.SessionInfo{
+			SessionID: transportID, NodeURL: s.tracker.NodeURL(), NodeName: s.tracker.NodeName(), Type: "remux",
+			CodecAudio: claims.TargetCodecAudio, StartedAt: startedAt.Format(time.RFC3339), StartedAtUnixNano: startedAt.UnixNano(),
+			StartedAtSource: string(source), AuthUserID: claims.UserID, ProfileID: claims.ProfileID, MediaFileID: claims.MediaFileID,
+		})
+		defer s.tracker.Remove(context.WithoutCancel(ctx), transportID)
+	}
+
+	request := r.WithContext(ctx)
+	s.attachTelemetrySession(request, transportID)
+	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
+		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
+		ContentType: playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
+		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
+		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
+	}); err != nil && !errors.Is(err, context.Canceled) {
+		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
+			"session", transportID, "playback_session_id", claims.SessionID)
+	}
+}
+
+func transcodeNodeRemuxPlayMethod(method string) bool {
+	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
+}
+
+func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
+	for id, expiresAt := range s.stoppedProgressiveRemuxes {
+		if !expiresAt.After(now) {
+			delete(s.stoppedProgressiveRemuxes, id)
+		}
+	}
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
@@ -1853,22 +1986,39 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	defer unlock()
 
 	s.mu.Lock()
+	if s.stoppedProgressiveRemuxes == nil {
+		s.stoppedProgressiveRemuxes = make(map[string]time.Time)
+	}
+	now := time.Now()
+	s.pruneStoppedProgressiveRemuxesLocked(now)
+	s.stoppedProgressiveRemuxes[sessionID] = now.Add(playback.MaxTokenTTL)
+	progressive := s.progressiveRemuxes[sessionID]
+	delete(s.progressiveRemuxes, sessionID)
 	session, ok := s.sessions[sessionID]
-	if !ok {
+	if !ok && len(progressive) == 0 {
 		s.mu.Unlock()
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	delete(s.sessions, sessionID)
-	delete(s.lastAccess, sessionID)
+	if ok {
+		delete(s.sessions, sessionID)
+		delete(s.lastAccess, sessionID)
+	}
 	s.mu.Unlock()
-
-	if err := s.closeSessionOffGPU(session); err != nil {
-		slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
+	for _, cancel := range progressive {
+		cancel()
 	}
 
-	if err := os.RemoveAll(s.sessionOutputDir(sessionID)); err != nil {
-		slog.WarnContext(r.Context(), "remove transcode session directory", "component", "transcodenode", "session", sessionID, "error", err)
+	if ok {
+		if err := s.closeSessionOffGPU(session); err != nil {
+			slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		}
+	}
+
+	if ok {
+		if err := os.RemoveAll(s.sessionOutputDir(sessionID)); err != nil {
+			slog.WarnContext(r.Context(), "remove transcode session directory", "component", "transcodenode", "session", sessionID, "error", err)
+		}
 	}
 
 	// Drop the recipe so a buffered/retrying request after a node restart cannot
@@ -1880,7 +2030,9 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.tracker.Remove(r.Context(), sessionID)
+	if s.tracker != nil {
+		s.tracker.Remove(r.Context(), sessionID)
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2193,9 +2345,14 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
-	sessionIDs := make([]string, 0, len(s.sessions))
+	sessionIDs := make([]string, 0, len(s.sessions)+len(s.progressiveRemuxes))
 	for id := range s.sessions {
 		sessionIDs = append(sessionIDs, id)
+	}
+	for id := range s.progressiveRemuxes {
+		if _, exists := s.sessions[id]; !exists {
+			sessionIDs = append(sessionIDs, id)
+		}
 	}
 	s.mu.RUnlock()
 

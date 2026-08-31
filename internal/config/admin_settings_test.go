@@ -303,7 +303,7 @@ func TestNormalizeAdminSettingAcceptsVideoToolbox(t *testing.T) {
 
 func TestNormalizeAdminSettingAcceptsPlaybackRoutingEnums(t *testing.T) {
 	tests := map[string]string{
-		PlaybackRoutingRemuxExecutionSettingKey:          "worker_only",
+		PlaybackRoutingRemuxExecutionSettingKey:          "prefer_transcode",
 		PlaybackRoutingVideoTranscodeExecutionSettingKey: "prefer_api",
 		PlaybackRoutingDirectPlayEgressSettingKey:        "proxy_only",
 		PlaybackRoutingRemuxEgressSettingKey:             "api_only",
@@ -326,14 +326,23 @@ func TestNormalizeAdminSettingAcceptsPlaybackRoutingEnums(t *testing.T) {
 	}
 }
 
-func TestPlaybackRoutingDefaultsMatchCurrentClusterBehavior(t *testing.T) {
+func TestPlaybackRoutingDefaultsPreferTranscodeExecutionAndProxyEgress(t *testing.T) {
 	cfg, err := LoadFromDB(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := DefaultPlaybackRoutingPolicy()
+	want := PlaybackRoutingPolicy{
+		DirectPlayEgress:        PlaybackEgressPreferProxy,
+		RemuxExecution:          PlaybackExecutionPreferTranscode,
+		RemuxEgress:             PlaybackEgressPreferProxy,
+		VideoTranscodeExecution: PlaybackExecutionPreferTranscode,
+		VideoTranscodeEgress:    PlaybackEgressPreferProxy,
+	}
 	if cfg.Playback.Routing != want {
 		t.Fatalf("routing = %#v, want %#v", cfg.Playback.Routing, want)
+	}
+	if defaults := DefaultPlaybackRoutingPolicy(); defaults != want {
+		t.Fatalf("runtime defaults = %#v, want %#v", defaults, want)
 	}
 }
 
