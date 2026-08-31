@@ -595,7 +595,7 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
-		return -1, fmt.Errorf("create mdblist request: %w", err)
+		return -1, fmt.Errorf("create mdblist request: %w", sanitizeAPIKeyError(err, target))
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -604,7 +604,7 @@ func (p *Provider) doOnce(ctx context.Context, method, path, target string, payl
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return -1, fmt.Errorf("send mdblist request: %w", err)
+		return -1, fmt.Errorf("send mdblist request: %w", sanitizeAPIKeyError(err, target))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusTooManyRequests {
@@ -1299,4 +1299,29 @@ func stringFromJSON(value any) string {
 		return s
 	}
 	return ""
+}
+
+func sanitizeAPIKeyError(err error, target string) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		sanitized := *urlErr
+		if parsed, parseErr := url.Parse(sanitized.URL); parseErr == nil {
+			q := parsed.Query()
+			if q.Has("apikey") {
+				q.Set("apikey", "[REDACTED]")
+				parsed.RawQuery = q.Encode()
+				sanitized.URL = parsed.String()
+			}
+		}
+		return &sanitized
+	}
+	if parsedTarget, parseErr := url.Parse(target); parseErr == nil {
+		if key := parsedTarget.Query().Get("apikey"); key != "" && strings.Contains(err.Error(), key) {
+			return errors.New(strings.ReplaceAll(err.Error(), key, "[REDACTED]"))
+		}
+	}
+	return err
 }
