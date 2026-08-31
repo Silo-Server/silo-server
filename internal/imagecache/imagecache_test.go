@@ -8,8 +8,10 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -25,6 +27,76 @@ const (
 	testTMDBProviderID    = "tmdb"
 	testMoviesContentType = "movies"
 )
+
+func TestPublicImageDestinations(t *testing.T) {
+	for _, host := range []string{
+		"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost",
+		"10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "fe80::1", "fd00::1",
+		"100.64.0.0", "100.127.255.255", "::ffff:100.100.100.100",
+		"64:ff9b::7f00:1", "64:ff9b:1::7f00:1",
+	} {
+		t.Run(host, func(t *testing.T) {
+			if addr, err := resolvePublicAddr(t.Context(), host); err == nil {
+				t.Fatalf("accepted non-public destination %s", addr)
+			}
+		})
+	}
+	for _, host := range []string{"1.1.1.1", "2606:4700:4700::1111", "100.63.255.255", "100.128.0.0"} {
+		if _, err := resolvePublicAddr(t.Context(), host); err != nil {
+			t.Fatalf("rejected public address %s: %v", host, err)
+		}
+	}
+}
+
+func TestPublicImageClientRedirects(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if target := r.URL.Query().Get("target"); target != "" {
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	client := NewPublicHTTPClient()
+	t.Cleanup(client.CloseIdleConnections)
+	if client.Timeout <= 0 {
+		t.Fatal("public image requests must have a timeout")
+	}
+	transport := client.Transport.(*http.Transport)
+	dial := transport.DialContext
+	// Only the initial public-origin fixture is local. Redirect destinations
+	// still pass through the real DNS/address guard without external requests.
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address == "poster.example.test:80" {
+			return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+		}
+		return dial(ctx, network, address)
+	}
+	for _, tc := range []struct {
+		name, target string
+		wantError    bool
+	}{
+		{"public image", "", false},
+		{"public redirect", "http://poster.example.test/image.jpg", false},
+		{"loopback redirect", server.URL, true},
+		{"hostname redirect", strings.Replace(server.URL, "127.0.0.1", "localhost", 1), true},
+		{"mapped IPv6 redirect", "http://[::ffff:127.0.0.1]/image.jpg", true},
+		{"non-HTTP redirect", "file:///image.jpg", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := client.Get("http://poster.example.test/?target=" + url.QueryEscape(tc.target))
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if (err != nil) != tc.wantError {
+				t.Fatalf("request error = %v, want error = %t", err, tc.wantError)
+			}
+			if err == nil && resp.StatusCode != http.StatusOK {
+				t.Fatalf("public image status = %d, want 200", resp.StatusCode)
+			}
+		})
+	}
+}
 
 // makeTestJPEG generates a minimal solid-color JPEG for use in tests.
 func makeTestJPEG(t *testing.T) []byte {

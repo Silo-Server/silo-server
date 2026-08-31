@@ -1,6 +1,8 @@
 package jellycompat
 
 import (
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -46,6 +48,50 @@ func TestLegacyNumericContentIDRoundTrips(t *testing.T) {
 	got, err := NewResourceIDCodec().DecodeStringID(EncodedIDItem, u)
 	if err != nil || got != legacy {
 		t.Fatalf("legacy numeric round trip = (%q, %v), want (%q, nil)", got, err, legacy)
+	}
+}
+
+func TestUserCollectionIDDecodesWithoutSharedState(t *testing.T) {
+	for _, id := range []string{
+		"731d3da2-4f4b-4a71-8f2f-38e1d34775b0",
+		"02c40000-0000-4000-8000-000000000000",
+		"04c40000-0000-4000-8000-000000000000",
+		"00000000-0000-4000-8000-000000000000",
+		"ffffffff-ffff-4fff-bfff-ffffffffffff",
+	} {
+		t.Run(id, func(t *testing.T) {
+			encoded := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, id)
+			if encoded == id {
+				t.Fatal("personal route ID must carry a source marker")
+			}
+			if adminID := NewResourceIDCodec().EncodeStringID(EncodedIDCollection, id); adminID == encoded {
+				t.Fatal("personal and admin collections must have distinct route IDs")
+			}
+			for _, route := range []string{encoded, strings.ReplaceAll(encoded, "-", "")} {
+				codec := NewResourceIDCodec()
+				got, err := codec.DecodeStringID(EncodedIDUserCollection, route)
+				if err != nil || got != id {
+					t.Fatalf("user collection round trip = (%q, %v), want (%q, nil)", got, err, id)
+				}
+				for kind := EncodedIDLibrary; kind < EncodedIDUserCollection; kind++ {
+					if _, err := codec.DecodeStringID(kind, route); err == nil {
+						t.Errorf("personal collection route decoded as kind %d", kind)
+					}
+				}
+				query := parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+route+"&Ids="+route, nil), codec)
+				if query.parentPersonalCollectionID != id || len(query.specificPersonalCollectionIDs) != 1 || query.specificPersonalCollectionIDs[0] != id {
+					t.Errorf("personal route was misclassified: %+v", query)
+				}
+			}
+		})
+	}
+	for _, id := range []string{"movie-tmdb-228064", "local-00000000b0000000000000000000"} {
+		for _, kind := range []EncodedIDType{EncodedIDItem, EncodedIDSeason} {
+			contentRoute := NewResourceIDCodec().EncodeStringID(kind, id)
+			if _, ok := unpackUserCollectionUUID(contentRoute); ok {
+				t.Errorf("content route %q decoded as a personal collection", contentRoute)
+			}
+		}
 	}
 }
 

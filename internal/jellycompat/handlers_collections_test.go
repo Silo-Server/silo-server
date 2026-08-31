@@ -146,10 +146,14 @@ func collectionsTestSession() *Session {
 	return &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 }
 
-func performItemsRequest(t *testing.T, h *ItemsHandler, target string) queryResultDTO {
+func performItemsRequest(t *testing.T, h *ItemsHandler, target string, sessions ...*Session) queryResultDTO {
 	t.Helper()
+	session := collectionsTestSession()
+	if len(sessions) > 0 {
+		session = sessions[0]
+	}
 	req := httptest.NewRequest("GET", target, nil)
-	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, collectionsTestSession()))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, session))
 	rec := httptest.NewRecorder()
 	h.HandleItems(rec, req)
 	if rec.Code != 200 {

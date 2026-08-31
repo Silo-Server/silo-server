@@ -93,7 +93,7 @@ type Cacher struct {
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), enforcePublicURLs: true}
+	return &Cacher{s3: s3, httpClient: NewPublicHTTPClient(), enforcePublicURLs: true}
 }
 
 // SetArtworkRevisionTracker wires durable revision lifecycle tracking. The
@@ -509,7 +509,7 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 
 	client := c.httpClient
 	if client == nil {
-		client = newSecureHTTPClient()
+		client = NewPublicHTTPClient()
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -533,13 +533,18 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 	return data, nil
 }
 
-func newSecureHTTPClient() *http.Client {
+// NewPublicHTTPClient fetches untrusted image URLs without accessing private
+// networks or environment proxies. DNS is checked at dial time, including redirects.
+func NewPublicHTTPClient() *http.Client {
 	transport := &http.Transport{
 		Proxy:               nil,
 		DialContext:         secureImageDialContext,
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 	}
 	return &http.Client{
+		Timeout:   downloadTimeout,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
@@ -603,6 +608,13 @@ func resolvePublicAddr(ctx context.Context, host string) (netip.Addr, error) {
 func isPublicAddr(addr netip.Addr) bool {
 	if addr.Is4In6() {
 		addr = addr.Unmap()
+	}
+	// IsPrivate excludes shared address space and IPv4 translation prefixes;
+	// those can still reach private hosts (including tailnets and NAT64).
+	if netip.MustParsePrefix("100.64.0.0/10").Contains(addr) ||
+		netip.MustParsePrefix("64:ff9b::/96").Contains(addr) ||
+		netip.MustParsePrefix("64:ff9b:1::/48").Contains(addr) {
+		return false
 	}
 	return addr.IsGlobalUnicast() &&
 		!addr.IsPrivate() &&

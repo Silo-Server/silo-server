@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
 // NewRouter builds the Jellyfin-compatibility router.
@@ -79,6 +80,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	itemsHandler.recommender = deps.Recommender
 	if deps.DB != nil {
 		itemsHandler.collections = catalog.NewLibraryCollectionRepository(deps.DB)
+		// Personal collections the owner opted into their server collections are
+		// exposed alongside the library ones, scoped to that owner's session.
+		itemsHandler.userCollections = usercollections.NewStore(deps.DB)
+		if deps.BrowseRepo != nil && deps.ItemRepo != nil && deps.UserStoreProvider != nil {
+			itemsHandler.collectionResolver = catalog.NewCatalogResolver(deps.BrowseRepo, deps.ItemRepo).
+				WithUserStoreProvider(deps.UserStoreProvider).
+				WithEpisodeRepository(deps.EpisodeRepo).
+				WithSearchProvider(deps.CatalogSearchProvider)
+		}
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
@@ -145,6 +155,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
+	imagesHandler.userCollections = itemsHandler.userCollections
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)

@@ -12,9 +12,13 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+var personalCollectionImageClient = imagecache.NewPublicHTTPClient()
 
 // ImagesHandler serves Jellyfin-compatible image routes.
 type ImagesHandler struct {
@@ -36,6 +40,9 @@ type ImagesHandler struct {
 	// collections is optional; when set, BoxSet (library collection) artwork
 	// resolves durably instead of depending on the in-memory image cache.
 	collections collectionSource
+	// userCollections is optional; when set, personal-collection BoxSets resolve
+	// their artwork too, for their owner only.
+	userCollections userCollectionSource
 	// frontendFS is optional; when set, app-relative artwork references (bundled
 	// collection-template posters like "/images/collection-templates/x.jpg") are
 	// served straight from the embedded frontend assets. Without it those paths
@@ -117,7 +124,11 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if collectionID, err := h.codec.DecodeStringID(EncodedIDCollection, routeID); err == nil {
-		h.serveCollectionImage(w, r, routeID, imageType, tag, collectionID)
+		h.serveCollectionImage(w, r, h.codec.EncodeStringID(EncodedIDCollection, collectionID), imageType, tag, collectionID, false)
+		return
+	}
+	if collectionID, err := h.codec.DecodeStringID(EncodedIDUserCollection, routeID); err == nil {
+		h.serveCollectionImage(w, r, h.codec.EncodeStringID(EncodedIDUserCollection, collectionID), imageType, tag, collectionID, true)
 		return
 	}
 
@@ -361,21 +372,13 @@ func collectionImageTagSeed(routeID, imageType string, c *models.LibraryCollecti
 // via an authenticated session whose libraries include the collection. Stored
 // artwork is presigned/served as before; collections without a usable poster
 // fall back to a generated gradient poster captioned with the title.
-func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, tag, collectionID string) {
-	if h.collections == nil {
-		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-		return
-	}
-	collection, err := h.collections.GetByID(r.Context(), collectionID)
+func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Request, routeID, imageType, tag, collectionID string, personalRoute bool) {
+	collection, personal, err := h.loadImageCollection(r, routeID, imageType, tag, collectionID, personalRoute)
 	if err != nil {
-		if errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
-			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
-			return
-		}
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	if collection == nil || !strings.EqualFold(collection.Visibility, "visible") {
+	if collection == nil {
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
@@ -386,7 +389,10 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	authorized := tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag)
+	// Personal collections resolve only through their owner session or a valid
+	// signed capability; library collections still need their library visibility
+	// checked when no signed tag authorizes the fetch.
+	authorized := personal || (tag != "" && h.imageTags != nil && h.imageTags.Equal(seed, "", tag))
 	if !authorized {
 		ok, err := h.collectionVisibleToRequest(r, collection)
 		if err != nil {
@@ -399,7 +405,15 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	if key := collectionArtworkKey(collection, imageType); key != "" {
+	if key := strings.TrimSpace(collectionArtworkKey(collection, imageType)); key != "" {
+		if _, err := parseRemoteImageURL(key); personal && err == nil {
+			// Personal poster URLs are user-controlled. Only object-store keys
+			// presigned below may use the trusted (possibly private) image client.
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Security-Policy", branding.AssetContentSecurityPolicy)
+			h.proxyImageURL(w, r, key, personalCollectionImageClient)
+			return
+		}
 		if imageURL := h.presignCollectionArtwork(r.Context(), key); imageURL != "" {
 			h.serveImageURL(w, r, imageURL)
 			return
@@ -413,16 +427,73 @@ func (h *ImagesHandler) serveCollectionImage(w http.ResponseWriter, r *http.Requ
 	h.serveGeneratedPoster(w, collection.Title)
 }
 
-// collectionVisibleToRequest reports whether the request's session may see the
-// collection. A missing session resolves to not-visible (anonymous image GETs
-// without a valid tag get a clean 404).
-func (h *ImagesHandler) collectionVisibleToRequest(r *http.Request, collection *models.LibraryCollection) (bool, error) {
+// loadImageCollection resolves a BoxSet route ID for artwork: a library
+// collection, or — when the request's session owns it — one of that user's
+// personal collections. personal reports which of the two it found, since only
+// library collections need a further visibility check. Returns (nil, false, nil)
+// when neither is visible to the request.
+func (h *ImagesHandler) loadImageCollection(r *http.Request, routeID, imageType, tag, collectionID string, personalRoute bool) (*models.LibraryCollection, bool, error) {
+	if !personalRoute && h.collections != nil {
+		collection, err := h.collections.GetByID(r.Context(), collectionID)
+		if err != nil && !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
+			return nil, false, err
+		}
+		if collection != nil && strings.EqualFold(collection.Visibility, "visible") {
+			return collection, false, nil
+		}
+	}
+
+	if !personalRoute || h.userCollections == nil {
+		return nil, false, nil
+	}
+	session := h.requestSession(r)
+	if session != nil {
+		visible, err := visibleLibraryIDSet(r.Context(), h.content, session)
+		if err != nil {
+			return nil, false, err
+		}
+		personal, err := h.userCollections.Get(r.Context(), session.StreamAppUserID, session.ProfileID, collectionID, libraryIDSlice(visible))
+		if err != nil {
+			return nil, false, err
+		}
+		if personal != nil {
+			return libraryCollectionFromUser(*personal), true, nil
+		}
+	}
+	if tag == "" || h.imageTags == nil {
+		return nil, false, nil
+	}
+	candidates, err := h.userCollections.ImageCandidates(r.Context(), collectionID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, candidate := range candidates {
+		collection := libraryCollectionFromUser(candidate)
+		seed, served := collectionImageTagSeed(routeID, imageType, collection)
+		if served && h.imageTags.Equal(seed, "", tag) {
+			return collection, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// requestSession resolves the request's session, falling back to the bearer
+// token so anonymous-looking image GETs still resolve their caller.
+func (h *ImagesHandler) requestSession(r *http.Request) *Session {
 	session := SessionFromContext(r.Context())
 	if session == nil && h.sessions != nil {
 		if token, ok := ExtractToken(r); ok {
 			session, _ = h.sessions.Get(token)
 		}
 	}
+	return session
+}
+
+// collectionVisibleToRequest reports whether the request's session may see the
+// collection. A missing session resolves to not-visible (anonymous image GETs
+// without a valid tag get a clean 404).
+func (h *ImagesHandler) collectionVisibleToRequest(r *http.Request, collection *models.LibraryCollection) (bool, error) {
+	session := h.requestSession(r)
 	if session == nil {
 		return false, nil
 	}
@@ -635,7 +706,7 @@ func (h *ImagesHandler) serveImageURL(w http.ResponseWriter, r *http.Request, im
 		return
 	}
 	if shouldProxyCompatImageRequest(r) {
-		h.proxyImageURL(w, r, imageURL)
+		h.proxyImageURL(w, r, imageURL, h.httpClient)
 		return
 	}
 	h.redirectImageURL(w, r, imageURL)
@@ -682,7 +753,7 @@ func (h *ImagesHandler) redirectImageURL(w http.ResponseWriter, r *http.Request,
 	http.Redirect(w, r, imageURL, http.StatusFound)
 }
 
-func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string) {
+func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, imageURL string, client *http.Client) {
 	target, err := parseRemoteImageURL(imageURL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "UpstreamError", "Failed to load image")
@@ -696,7 +767,6 @@ func (h *ImagesHandler) proxyImageURL(w http.ResponseWriter, r *http.Request, im
 	}
 	copyConditionalImageRequestHeaders(req.Header, r.Header)
 
-	client := h.httpClient
 	if client == nil {
 		client = http.DefaultClient
 	}
