@@ -2451,12 +2451,15 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	}
 	proxyNode := decision.Plan.ProxyNode
 	transcodeNode := decision.Plan.TranscodeNode
+	releaseReservation := func() {
+		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+			releaser.ReleaseSession(session.ID)
+		}
+	}
 	if transcodeNode != nil {
 		transcodeCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), transcodeNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(transcodeCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
-			if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-				releaser.ReleaseSession(session.ID)
-			}
+			releaseReservation()
 			return preparedTransportV3{}, &transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected transcode node cannot execute a progressive remux.",
 				retryable: true, cause: capabilityErr,
@@ -2466,9 +2469,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	if transcodeNode != nil && proxyNode != nil {
 		proxyCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), proxyNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(proxyCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
-			if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-				releaser.ReleaseSession(session.ID)
-			}
+			releaseReservation()
 			return preparedTransportV3{}, &transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected proxy cannot relay a progressive remux from a transcode node.",
 				retryable: true, cause: capabilityErr,
@@ -2488,9 +2489,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			capabilityErr = validateAdvertisedTransformationsV3(result.Plan, advertised)
 		}
 		if capabilityErr != nil {
-			if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-				releaser.ReleaseSession(session.ID)
-			}
+			releaseReservation()
 			return preparedTransportV3{}, &transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected node cannot execute the progressive-remux recipe.",
 				retryable: true, cause: capabilityErr,
@@ -2512,6 +2511,18 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		routeSession.TranscodeNodeURL = transcodeNode.URL
 		routeSession.TranscodeTransportID = transportID
 	}
+	if transcodeNode != nil {
+		card := identityRecipeCard(&routeSession)
+		card.InputPath = file.FilePath
+		card.DVProfile = file.PrimaryDVProfile()
+		card.AudioOnly = file.IsAudioOnly()
+		if err := h.putRequiredNodeRecipeV3(r.Context(), transportID, card); err != nil {
+			releaseReservation()
+			return preparedTransportV3{}, &transportErrorV3{
+				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode remux authority is temporarily unavailable.", retryable: true, cause: err,
+			}
+		}
+	}
 	streamURL := fmt.Sprintf("/stream/%s", routeSession.ID)
 	servedByProxy := false
 	// priorGrant is the egress authority this attempt overwrote, if any. A
@@ -2524,11 +2535,6 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		streamURL, servedByProxy = h.identityStreamURLV3(&routeSession, file, proxyNode)
 	case mode.proxyEgress:
 		streamURL, servedByProxy, priorGrant = h.identityGrantStreamURLV3(r.Context(), &routeSession, file, proxyNode)
-	}
-	releaseProxyReservation := func() {
-		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
-			releaser.ReleaseSession(session.ID)
-		}
 	}
 	reservationReleased := false
 	if proxyNode != nil && !servedByProxy {
@@ -2548,9 +2554,10 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		// it is reported as such: the HLS path classifies the identical
 		// proxy-authority failure retryable, and a non-retryable answer would
 		// make a client give up on a route the next attempt can take.
-		releaseProxyReservation()
+		releaseReservation()
 		reservationReleased = true
 		if transcodeNode != nil {
+			h.deleteNodeRecipeV3(r.Context(), transportID)
 			return preparedTransportV3{}, &transportErrorV3{
 				reason: string(noderouting.OutcomeCapacityUnavailable), message: "The transcode-to-proxy remux route is temporarily unavailable.", retryable: true,
 			}
@@ -2643,9 +2650,10 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 			// reservation ages out — nor keep an egress grant for a transport
 			// that was never committed.
 			if servedByProxy && !reservationReleased {
-				releaseProxyReservation()
+				releaseReservation()
 				h.restoreProxyGrantV3(r.Context(), session.ID, priorGrant)
 			}
+			h.deleteNodeRecipeV3(r.Context(), transportID)
 			unlock()
 		},
 	}, nil
@@ -2786,6 +2794,20 @@ func (h *PlaybackHandler) putNodeRecipeV3(ctx context.Context, transportID strin
 	}
 }
 
+// putRequiredNodeRecipeV3 persists the active authority for a progressive
+// remux executed by a transcode node. Unlike the reconstruction-only write
+// above, this one is part of route admission: the node checks the record before
+// every new remux request, and stop deletes it, so a still-valid stream token
+// cannot resurrect FFmpeg after a node replacement.
+func (h *PlaybackHandler) putRequiredNodeRecipeV3(ctx context.Context, transportID string, card playback.RecipeCard) error {
+	if h == nil || h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() || transportID == "" {
+		return errors.New("node recipe store unavailable")
+	}
+	putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodeRecipeWriteTimeoutV3)
+	defer cancel()
+	return h.NodeRecipeStore.Put(putCtx, transportID, card)
+}
+
 // deleteNodeRecipeV3 drops a transport's stored recipe so a buffered or retrying
 // request cannot resurrect a transcode the server has replaced or ended. The
 // store's TTL is only the backstop for the paths that never run (a crashed API
@@ -2812,7 +2834,14 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	excludedShapes := make(map[string]struct{})
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 &&
 		h.validateLocalProgressiveCapabilitiesV3(r.Context(), result) != nil {
-		excludedShapes["progressive_remux_api"] = struct{}{}
+		excludedShapes[noderouting.ShapeProgressiveRemuxAPI] = struct{}{}
+	}
+	if delivery == noderouting.DeliveryProgressiveRemux &&
+		(h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled()) {
+		// A signed stream token can outlive a transcode-node process by 24 hours.
+		// Without durable active-transport authority, a stopped remux could be
+		// replayed after that node restarts and start FFmpeg again.
+		excludedShapes[noderouting.ShapeProgressiveRemuxTranscodeProxy] = struct{}{}
 	}
 	var relayEligible func(*nodepool.Node) bool
 	if delivery == noderouting.DeliveryProgressiveRemux {

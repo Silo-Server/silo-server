@@ -339,14 +339,19 @@ export function getSessionRouteNodes(session: AdminSession): ActivityRouteNode[]
     session.routing_execution_node_name?.trim() || session.node_display_name;
   if (execution === "transcode") {
     nodes.push(namedRouteNode("transcode", executionNodeName, session.routing_execution_node_id));
-  } else if (execution === "proxy" && egress !== "proxy") {
+  } else if (execution === "proxy") {
     nodes.push(namedRouteNode("proxy", executionNodeName, session.routing_execution_node_id));
   }
 
   if (egress === "proxy") {
-    nodes.push(
-      namedRouteNode("proxy", session.routing_egress_node_name, session.routing_egress_node_id),
+    const egressNode = namedRouteNode(
+      "proxy",
+      session.routing_egress_node_name,
+      session.routing_egress_node_id,
     );
+    if (!nodes.some((node) => node.key === egressNode.key)) {
+      nodes.push(egressNode);
+    }
   }
 
   return nodes.length > 0 ? nodes : [reportingServerRouteNode(session)];

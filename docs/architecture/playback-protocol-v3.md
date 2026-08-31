@@ -550,11 +550,20 @@ selected proxy. The execution choice remains independent of egress—a proxy
 origin can serve bytes produced by a transcode node without becoming the
 executor itself.
 
-Both halves advertise this transport contract through `/hw-capabilities`:
-transcode nodes publish `progressive_remux_execution_v1`, and proxies publish
-`progressive_remux_relay_v1`. Route selection requires both markers. During a
-rolling upgrade, an older node is therefore excluded before a client receives
-a URL rather than failing the stream on its first request.
+Both halves of the transcode-node-to-proxy transport advertise their contract
+through `/hw-capabilities`: transcode nodes publish
+`progressive_remux_execution_v1`, and proxies publish
+`progressive_remux_relay_v1`. That route requires both markers. A
+proxy-executed progressive remux requires only the proxy's execution capability
+and remains eligible when relay capability is absent. During a rolling upgrade,
+an older node is therefore excluded from only the shapes it cannot serve before
+a client receives a URL rather than failing the stream on its first request.
+The transcode-executed shape also requires the shared node-recipe store. The API
+writes the plan-scoped transport record before publishing the proxy URL; the
+transcode node validates it before starting each progressive response, and stop
+or force reload deletes it. This durable authority prevents a signed URL whose
+token remains valid after a node replacement from resurrecting stopped FFmpeg
+work. When the store is unavailable, route selection excludes only this shape.
 
 **Authorized media origins.** A client that also sends
 `authorized_media_origins_v1` promises something further: it will fetch media

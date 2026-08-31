@@ -203,11 +203,10 @@ type PlaybackHandler struct {
 	ProxyGrantStore recipeCardStoreV3
 	// NodeRecipeStore hands a transcode node the recipe it rebuilds a
 	// header-authenticated remote transcode from after its own restart, keyed by
-	// the transport id the node serves it under. A legacy attempt needs none —
-	// its client URL carries the recipe in a stream token — but a tokenless
-	// relayed request has nothing to reconstruct from. Optional and best effort:
-	// without it (or without Redis behind it) such a session replans instead of
-	// recovering, exactly as before.
+	// the transport id the node serves it under. It is also the active authority
+	// for transcode-executed progressive remuxes, whose signed tokens otherwise
+	// outlive a node's in-memory stop fence. Without a usable store those remuxes
+	// use another legal route; tokenless HLS sessions replan instead of recovering.
 	NodeRecipeStore    recipeCardStoreV3
 	ItemAccess         PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup      PlaybackEpisodeLookup     // optional; resolves episode files to their series

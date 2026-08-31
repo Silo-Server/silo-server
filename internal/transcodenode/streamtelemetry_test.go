@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -120,8 +121,12 @@ func TestMountedTranscodeNodeProgressiveRemuxTelemetry(t *testing.T) {
 	claims := streamtoken.Claims{
 		SessionID: "viewer-session", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-session",
-		RoutingWorkload: "remux", RoutingExecution: "transcode", RoutingEgress: "proxy",
+		RoutingWorkload:  string(noderouting.WorkloadRemux),
+		RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress:    string(noderouting.EgressProxy),
 	}
+	card := playback.RecipeCardFromClaims(&claims)
+	srv.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Hour)
 	if err != nil {
 		t.Fatal(err)

@@ -13,8 +13,10 @@
 // This store bridges that gap over the same shared Redis the offload topology
 // already relies on (the node-session tracker): central writes the recipe keyed
 // by the upstream session id when it starts a remote transcode, and the
-// transcode node reads it on a reconstruct miss. It is
-// off the hot path — written once at start, read only after a node restart.
+// transcode node reads it on a reconstruct miss. Transcode-executed progressive
+// remuxes also use the record as durable active authority: central writes it
+// before publishing the route, the node checks it before each remux response,
+// and deliberate teardown deletes it so a surviving token cannot restart work.
 //
 // The same central→node recipe handoff serves a second, independent purpose
 // under its own key space: a proxy grant. When an attempt negotiates

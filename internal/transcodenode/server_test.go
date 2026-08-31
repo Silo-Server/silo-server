@@ -1842,6 +1842,8 @@ func TestHandleProgressiveRemuxExecutesSignedTranscodeRoute(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingEgress: string(noderouting.EgressProxy),
 	}
+	card := playback.RecipeCardFromClaims(&claims)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1914,7 +1916,7 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	}
 }
 
-func TestHandleProgressiveRemuxRefusesStoppedTransport(t *testing.T) {
+func TestHandleProgressiveRemuxRefusesStoppedTransportAfterRestart(t *testing.T) {
 	server := newTestServer(t)
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
@@ -1925,20 +1927,26 @@ func TestHandleProgressiveRemuxRefusesStoppedTransport(t *testing.T) {
 	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf invoked > \""+ffmpegLog+"\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
-
-	stopRequest := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
-	stopRouteContext := chi.NewRouteContext()
-	stopRouteContext.URLParams.Add("session_id", "transport-1")
-	stopRequest = stopRequest.WithContext(context.WithValue(stopRequest.Context(), chi.RouteCtxKey, stopRouteContext))
-	server.handleStop(httptest.NewRecorder(), stopRequest)
-
 	claims := streamtoken.Claims{
 		SessionID: "playback-1", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
 		TranscodeNode: "http://node", TranscodeTransportID: "transport-1",
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingEgress: string(noderouting.EgressProxy),
 	}
+	card := playback.RecipeCardFromClaims(&claims)
+	store := &stubRecipeStore{card: &card, ok: true}
+	server.SetRecipeStore(store)
+	stopRequest := httptest.NewRequest(http.MethodDelete, "/transcode/transport-1", nil)
+	stopRouteContext := chi.NewRouteContext()
+	stopRouteContext.URLParams.Add("session_id", "transport-1")
+	stopRequest = stopRequest.WithContext(context.WithValue(stopRequest.Context(), chi.RouteCtxKey, stopRouteContext))
+	server.handleStop(httptest.NewRecorder(), stopRequest)
+
+	// A replacement process has no in-memory stop fence. The deleted durable
+	// authority must still reject the old token before FFmpeg can start.
+	restarted := newTestServer(t)
+	restarted.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	restarted.SetRecipeStore(store)
 	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -1950,13 +1958,107 @@ func TestHandleProgressiveRemuxRefusesStoppedTransport(t *testing.T) {
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 	recorder := httptest.NewRecorder()
 
-	server.handleRemux(recorder, request)
+	restarted.handleRemux(recorder, request)
 
 	if recorder.Code != http.StatusGone {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 	if _, err := os.Stat(ffmpegLog); !os.IsNotExist(err) {
 		t.Fatalf("stopped transport invoked ffmpeg: %v", err)
+	}
+}
+
+func TestHandleProgressiveRemuxWaitsForForceReloadGate(t *testing.T) {
+	server := newTestServer(t)
+	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ffmpegPath := filepath.Join(t.TempDir(), "ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nprintf node-remux-bytes\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	claims := streamtoken.Claims{
+		SessionID: "playback-reload-gate", MediaPath: mediaPath, PlayMethod: string(playback.PlayRemux),
+		TranscodeNode: "http://node", TranscodeTransportID: "transport-reload-gate",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingEgress: string(noderouting.EgressProxy),
+	}
+	card := playback.RecipeCardFromClaims(&claims)
+	storeHit := make(chan struct{}, 1)
+	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true, getHit: storeHit})
+	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/remux/transport-reload-gate", nil)
+	request.Header.Set("X-Silo-Stream-Token", token)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("session_id", "transport-reload-gate")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer waitCancel()
+
+	server.reloadMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			server.reloadMu.Unlock()
+		}
+	}()
+	go func() {
+		server.handleRemux(recorder, request)
+		close(done)
+	}()
+	select {
+	case <-storeHit:
+	case <-waitCtx.Done():
+		t.Fatal("remux did not reach durable authority validation")
+	}
+	select {
+	case <-done:
+		t.Fatal("remux completed while force-reload gate was held")
+	default:
+	}
+	server.reloadMu.Unlock()
+	locked = false
+	select {
+	case <-done:
+	case <-waitCtx.Done():
+		t.Fatal("remux did not resume after force-reload gate was released")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestForceReloadTeardownCancelsProgressiveRemux(t *testing.T) {
+	server := newTestServer(t)
+	const transportID = "transport-force-reload"
+	ctx, cancel := context.WithCancel(t.Context())
+	server.progressiveRemuxes[transportID] = map[uint64]context.CancelFunc{1: cancel}
+	store := &stubRecipeStore{ok: true, card: &playback.RecipeCard{TranscodeTransportID: transportID}}
+	server.SetRecipeStore(store)
+
+	server.teardownForForceReload(t.Context())
+
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("force reload did not cancel the progressive remux")
+	}
+	server.mu.RLock()
+	_, active := server.progressiveRemuxes[transportID]
+	fenced := server.stoppedProgressiveRemuxes[transportID].After(time.Now())
+	server.mu.RUnlock()
+	if active || !fenced {
+		t.Fatalf("force-reload state = active %t, fenced %t; want removed and fenced", active, fenced)
+	}
+	if len(store.deletes) != 1 || store.deletes[0] != transportID {
+		t.Fatalf("durable authority deletes = %v, want [%q]", store.deletes, transportID)
 	}
 }
 
@@ -2076,16 +2178,28 @@ type stubRecipeStore struct {
 	hits    int
 	deletes []string
 	delErr  error
+	getHit  chan struct{}
 }
 
 func (s *stubRecipeStore) Get(context.Context, string) (*playback.RecipeCard, bool) {
 	s.hits++
+	if s.getHit != nil {
+		select {
+		case s.getHit <- struct{}{}:
+		default:
+		}
+	}
 	return s.card, s.ok
 }
 
 func (s *stubRecipeStore) Delete(_ context.Context, sessionID string) error {
 	s.deletes = append(s.deletes, sessionID)
-	return s.delErr
+	if s.delErr != nil {
+		return s.delErr
+	}
+	s.card = nil
+	s.ok = false
+	return nil
 }
 
 // When the forwarded token is recipe-less (jellycompat), the node consults the

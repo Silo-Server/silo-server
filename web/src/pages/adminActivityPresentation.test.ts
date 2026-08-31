@@ -402,6 +402,25 @@ describe("adminActivityPresentation", () => {
     ).toEqual([{ key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-02" }]);
   });
 
+  it("preserves distinct proxy execution and egress nodes", () => {
+    expect(
+      getSessionRouteNodes(
+        makeSession({
+          routing_workload: "remux",
+          routing_execution: "proxy",
+          routing_execution_node_id: 34,
+          routing_execution_node_name: "silo-proxy-executor",
+          routing_egress: "proxy",
+          routing_egress_node_id: 35,
+          routing_egress_node_name: "silo-proxy-egress",
+        }),
+      ),
+    ).toEqual([
+      { key: "proxy:34", kind: "proxy", label: "Proxy", name: "silo-proxy-executor" },
+      { key: "proxy:35", kind: "proxy", label: "Proxy", name: "silo-proxy-egress" },
+    ]);
+  });
+
   it("keeps the reporting server identity for API-local routes", () => {
     expect(
       getSessionRouteNodes(

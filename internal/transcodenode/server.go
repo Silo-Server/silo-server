@@ -658,16 +658,17 @@ func (s *Server) retireGPUSession(close func() error) error {
 	return close()
 }
 
-// recipeStore reads a remote transcode's reconstruction recipe written by central
-// at transcode start, keyed by the transport id this node serves the job under.
-// It is the reconstruct source for every flow whose request cannot carry a
-// complete recipe itself: the jellycompat node-hop token is identity-only by
+// recipeStore reads a remote transport record written by central, keyed by the
+// transport id this node serves the job under. It is the reconstruct source for
+// every flow whose request cannot carry a complete recipe itself: the
+// jellycompat node-hop token is identity-only by
 // design — not because a Jellyfin client can't round-trip it, but because the
 // recipe is mutated in place and the client can't be driven to refresh a stale
 // token — and a header-authenticated (tokenless) attempt publishes no credential
 // at all, so the relayed request carries nothing to rebuild from (see
 // internal/noderecipe). On a node restart the node fetches the recipe here
-// instead of 404ing. *noderecipe.Store implements it.
+// instead of 404ing. Progressive remux uses the same record as durable active
+// authority before spawning FFmpeg. *noderecipe.Store implements it.
 type recipeStore interface {
 	Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool)
 	// Delete drops a session's recipe so a buffered/retrying request after a node
@@ -677,9 +678,9 @@ type recipeStore interface {
 }
 
 // SetRecipeStore wires the control-plane recipe store so this node can rebuild a
-// jellycompat or header-authenticated transcode after its own restart. Optional;
-// without it a request that carries no complete recipe of its own cannot
-// reconstruct and 404s as before.
+// jellycompat or header-authenticated transcode after its own restart and
+// validate active progressive-remux transports. Optional for reconstruction;
+// transcode-executed progressive remux is not routed to a node without it.
 func (s *Server) SetRecipeStore(store recipeStore) {
 	s.recipeStore = store
 }
@@ -1881,6 +1882,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "routing policy unsatisfied", http.StatusServiceUnavailable)
 		return
 	}
+	if !s.progressiveRemuxAuthorityActive(r.Context(), transportID, claims) {
+		http.Error(w, "session stopped", http.StatusGone)
+		return
+	}
 	if claims.PlayMethod == streamtoken.PlayMethodAudioDownmixRemux &&
 		(!claims.TranscodeAudio || claims.TargetAudioChannels != 2 ||
 			!playback.IsAudioToAACStereoDownmixV3(claims.SourceAudioChannels, claims.TargetCodecAudio, claims.TargetAudioChannels)) {
@@ -1900,6 +1905,17 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		seekSeconds = parsed
 	}
 
+	// Admit against one stable configuration generation. Force reload takes the
+	// exclusive side, then cancels every request registered below before it
+	// returns; a request that waited through a reload must retry with a fresh
+	// route instead of starting FFmpeg from the stale cfg pointer above.
+	s.reloadMu.RLock()
+	if s.watcher.Config() != cfg {
+		s.reloadMu.RUnlock()
+		http.Error(w, "node configuration changed", http.StatusServiceUnavailable)
+		return
+	}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	requestID := s.progressiveRemuxSequence.Add(1)
 	unlock := s.lockSessionLifecycle(transportID)
@@ -1909,6 +1925,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if s.stoppedProgressiveRemuxes[transportID].After(now) {
 		s.mu.Unlock()
 		unlock()
+		s.reloadMu.RUnlock()
 		cancel()
 		http.Error(w, "session stopped", http.StatusGone)
 		return
@@ -1921,6 +1938,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	requests[requestID] = cancel
 	s.mu.Unlock()
 	unlock()
+	s.reloadMu.RUnlock()
 	defer func() {
 		cancel()
 		s.mu.Lock()
@@ -1965,6 +1983,30 @@ func transcodeNodeRemuxPlayMethod(method string) bool {
 	return method == string(playback.PlayRemux) || method == streamtoken.PlayMethodAudioDownmixRemux
 }
 
+// progressiveRemuxAuthorityActive checks the durable transport record written
+// before central publishes this node route. Stop and force reload delete the
+// record, so a signed token that remains cryptographically valid cannot start a
+// new FFmpeg process after this node's in-memory stop fence is lost on restart.
+func (s *Server) progressiveRemuxAuthorityActive(ctx context.Context, transportID string, claims *streamtoken.Claims) bool {
+	if s.recipeStore == nil || claims == nil {
+		return false
+	}
+	card, ok := s.recipeStore.Get(ctx, transportID)
+	if !ok || card == nil {
+		return false
+	}
+	stored := card.ToClaims()
+	return stored.SessionID == claims.SessionID &&
+		stored.MediaPath == claims.MediaPath &&
+		stored.PlayMethod == claims.PlayMethod &&
+		stored.TranscodeNode == claims.TranscodeNode &&
+		stored.TranscodeTransportID == transportID &&
+		stored.RoutingWorkload == claims.RoutingWorkload &&
+		stored.RoutingExecution == claims.RoutingExecution &&
+		stored.RoutingEgress == claims.RoutingEgress &&
+		stored.RoutingEgressNodeID == claims.RoutingEgressNodeID
+}
+
 func (s *Server) pruneStoppedProgressiveRemuxesLocked(now time.Time) {
 	for id, expiresAt := range s.stoppedProgressiveRemuxes {
 		if !expiresAt.After(now) {
@@ -1995,11 +2037,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	progressive := s.progressiveRemuxes[sessionID]
 	delete(s.progressiveRemuxes, sessionID)
 	session, ok := s.sessions[sessionID]
-	if !ok && len(progressive) == 0 {
-		s.mu.Unlock()
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
+	found := ok || len(progressive) > 0
 	if ok {
 		delete(s.sessions, sessionID)
 		delete(s.lastAccess, sessionID)
@@ -2032,6 +2070,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	if s.tracker != nil {
 		s.tracker.Remove(r.Context(), sessionID)
+	}
+	if !found {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -2292,6 +2334,13 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.teardownForForceReload(r.Context())
+
+	slog.InfoContext(r.Context(), "transcode force reload completed", slog.String("component", "transcodenode"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) teardownForForceReload(ctx context.Context) {
 	type forceReloadVictim struct {
 		id      string
 		session *playback.TranscodeSession
@@ -2318,7 +2367,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 
 		_ = s.closeSessionOffGPU(victim.session)
 		if err := os.RemoveAll(s.sessionOutputDir(victim.id)); err != nil {
-			slog.WarnContext(r.Context(), "remove transcode session directory during reload", "component", "transcodenode", "session", victim.id, "error", err)
+			slog.WarnContext(ctx, "remove transcode session directory during reload", "component", "transcodenode", "session", victim.id, "error", err)
 		}
 
 		// A force-reload tears this session down for good, so drop its recipe too:
@@ -2327,20 +2376,48 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		// concurrent same-ID start cannot have its newly written recipe removed.
 		if s.recipeStore != nil {
 			id := victim.id
-			if err := s.recipeStore.Delete(r.Context(), id); err != nil {
-				slog.WarnContext(r.Context(), "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
+			if err := s.recipeStore.Delete(ctx, id); err != nil {
+				slog.WarnContext(ctx, "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
 			}
 		}
 
 		// Drop only this victim from the tracker. A blanket Cleanup here would
 		// also wipe unrelated tracker-only work, such as an active download
 		// preparation, even though force reload does not stop that job.
-		s.tracker.Remove(r.Context(), victim.id)
+		if s.tracker != nil {
+			s.tracker.Remove(ctx, victim.id)
+		}
 		unlock()
 	}
 
-	slog.InfoContext(r.Context(), "transcode force reload completed", slog.String("component", "transcodenode"))
-	w.WriteHeader(http.StatusNoContent)
+	s.mu.Lock()
+	now := time.Now()
+	s.pruneStoppedProgressiveRemuxesLocked(now)
+	progressiveVictims := make(map[string][]context.CancelFunc, len(s.progressiveRemuxes))
+	for id, requests := range s.progressiveRemuxes {
+		cancels := make([]context.CancelFunc, 0, len(requests))
+		for _, cancel := range requests {
+			cancels = append(cancels, cancel)
+		}
+		progressiveVictims[id] = cancels
+		s.stoppedProgressiveRemuxes[id] = now.Add(playback.MaxTokenTTL)
+		delete(s.progressiveRemuxes, id)
+	}
+	s.mu.Unlock()
+
+	for id, cancels := range progressiveVictims {
+		for _, cancel := range cancels {
+			cancel()
+		}
+		if s.recipeStore != nil {
+			if err := s.recipeStore.Delete(ctx, id); err != nil {
+				slog.WarnContext(ctx, "delete progressive remux authority on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
+			}
+		}
+		if s.tracker != nil {
+			s.tracker.Remove(ctx, id)
+		}
+	}
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

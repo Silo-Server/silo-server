@@ -325,6 +325,7 @@ func TestPrepareTransportV3AuthorizedOriginsDoNotFallBackToAnIncapableAPI(t *tes
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
 	handler.NodePlanner = planner
 	handler.ProxyGrantStore = &recordingRecipeCardStoreV3{putErr: errors.New("redis is down")}
+	handler.NodeRecipeStore = &recordingRecipeCardStoreV3{}
 
 	transport, transportErr := handler.prepareTransportV3(
 		httptest.NewRequest(http.MethodPost, "/", nil),

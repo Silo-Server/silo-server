@@ -5194,6 +5194,8 @@ func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *te
 	proxy := &nodepool.Node{ID: 42, URL: proxyServer.URL}
 	transcode := &nodepool.Node{ID: 84, URL: transcodeServer.URL}
 	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: proxy, TranscodeNode: transcode}}
+	recipes := &recordingRecipeCardStoreV3{}
+	handler.NodeRecipeStore = recipes
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
 	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
@@ -5225,6 +5227,38 @@ func TestPrepareTransportV3RunsProgressiveRemuxOnTranscodeNodeThroughProxy(t *te
 	if claims.TranscodeNode != transcode.URL || claims.TranscodeTransportID != transport.transportID ||
 		claims.RoutingExecution != string(noderouting.ExecutionTranscode) || claims.RoutingEgressNodeID != proxy.ID {
 		t.Fatalf("claims = %#v, want bound transcode-to-proxy route", claims)
+	}
+	stored, ok := recipes.cards[transport.transportID]
+	if !ok || stored.TranscodeTransportID != transport.transportID || stored.InputPath == "" {
+		t.Fatalf("durable remux authority = %#v, want active transport %q", stored, transport.transportID)
+	}
+}
+
+func TestPrepareTransportV3ExcludesTranscodeRemuxWithoutDurableAuthority(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	stubCopySeekAnchorV3(handler)
+	proxyServer := capableProxyStubV3(t)
+	transcodeServer := progressiveRemuxExecutionStubV3(t)
+	proxy := &nodepool.Node{ID: 42, URL: proxyServer.URL}
+	transcode := &nodepool.Node{ID: 84, URL: transcodeServer.URL}
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: proxy, TranscodeNode: transcode}}
+	policy := config.DefaultPlaybackRoutingPolicy()
+	policy.RemuxExecution = config.PlaybackExecutionPreferTranscode
+	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
+
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-remux-no-authority", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3), PlayMethod: playback.PlayRemux}, mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	if transport.routingExecution == noderouting.ExecutionTranscode || transport.nodeURL != "" || transport.transportID != "" {
+		t.Fatalf("prepared route = %#v, want no transcode execution without a durable node authority store", transport)
 	}
 }
 
@@ -5463,6 +5497,7 @@ func TestPrepareTransportV3KeepsBoostedDownmixLocalWhenProxyHasOldRecipe(t *test
 	}}))
 	planner := &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{URL: proxy.URL}}}
 	handler.NodePlanner = planner
+	handler.NodeRecipeStore = &recordingRecipeCardStoreV3{}
 
 	transport, transportErr := handler.prepareTransportV3(
 		httptest.NewRequest(http.MethodPost, "/", nil),
