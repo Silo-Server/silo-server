@@ -501,16 +501,16 @@ var fieldsRequiringDetail = map[string]struct{}{
 // Keep aligned with mapping.go itemFromList. When you add a new
 // `fields[X]`-gated branch there, add the lowercase key here too.
 var fieldsServedByList = map[string]struct{}{
-	"overview":               {},
-	"genres":                 {},
-	"etag":                   {},
-	"sortname":               {},
-	"studios":                {},
-	"taglines":               {},
-	"tags":                   {},
-	fieldProductionLocations: {},
-	"mediasourcecount":       {},
-	"providerids":            {},
+	"overview":            {},
+	"genres":              {},
+	"etag":                {},
+	"sortname":            {},
+	"studios":             {},
+	"taglines":            {},
+	"tags":                {},
+	"productionlocations": {}, // = fieldProductionLocations (kept literal here so gofmt doesn't realign every line above)
+	"mediasourcecount":    {},
+	"providerids":         {},
 }
 
 func requestedFieldsNeedDetail(fields map[string]bool) bool {
