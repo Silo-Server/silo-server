@@ -789,6 +789,7 @@ func (s *Scanner) scanPaths(
 		reconcileRoots,
 		rootInference.Snapshots,
 		pruneUnseen,
+		allowEmptyRootGuard,
 	); err != nil {
 		return nil, fmt.Errorf("reconciling scanned roots: %w", err)
 	}
@@ -1387,6 +1388,16 @@ func (s *Scanner) scanFolderByRoots(
 	}
 	result.FilesDeleted += deletedOutsideRoots
 
+	if len(protectedScanRoots) == 0 && s.rootSnapshotRepo != nil {
+		allSeenRoots := make([]string, 0, len(result.RootObservations))
+		for _, obs := range result.RootObservations {
+			allSeenRoots = append(allSeenRoots, obs.RootPath)
+		}
+		if err := s.rootSnapshotRepo.DeleteMissingByFolder(ctx, folder.ID, allSeenRoots); err != nil {
+			return nil, fmt.Errorf("deleting missing scanned roots for folder %d: %w", folder.ID, err)
+		}
+	}
+
 	if s.seriesQueueSyncer != nil {
 		reportProgress(ctx, ProgressUpdate{
 			Phase:        "queue_sync",
@@ -1817,6 +1828,7 @@ func (s *Scanner) applyScopedScan(
 		scope.reconcileRoots,
 		scope.rootInference.Snapshots,
 		pruneUnseen,
+		false,
 	); err != nil {
 		return fmt.Errorf("reconciling scanned roots for scope %q: %w", scope.reconcileRoots[0], err)
 	}
@@ -2540,6 +2552,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		nil,
 		rootInference.Snapshots,
 		true,
+		false,
 	); err != nil {
 		return fmt.Errorf("reconciling scanned root for file: %w", err)
 	}
@@ -3499,7 +3512,9 @@ func filterGroupLocationsByScope(locations []models.MediaGroupLocation, scopePat
 }
 
 // reconcileScannedRoots upserts the root snapshots this scan observed and,
-// when pruneUnseen is set, deletes the snapshots in scope that it did not.
+// when pruneUnseen is set, deletes the snapshots that it did not.
+// When isFullScan is true, unobserved snapshots across the entire folder are pruned.
+// Otherwise, only snapshots under the scoped roots are pruned.
 // Callers must pass pruneUnseen=false when the walk could not read part of the
 // tree: the observed set is then a lower bound, and pruning against it drops
 // snapshots for media that is still there.
@@ -3509,9 +3524,26 @@ func (s *Scanner) reconcileScannedRoots(
 	scopeRoots []string,
 	roots []models.ScannedMediaRoot,
 	pruneUnseen bool,
+	isFullScan bool,
 ) error {
 	if s == nil || s.rootSnapshotRepo == nil {
 		return nil
+	}
+
+	if err := s.rootSnapshotRepo.UpsertMany(ctx, roots); err != nil {
+		return err
+	}
+
+	if !pruneUnseen {
+		return nil
+	}
+
+	if isFullScan {
+		seenAllRoots := make([]string, 0, len(roots))
+		for _, root := range roots {
+			seenAllRoots = append(seenAllRoots, root.RootPath)
+		}
+		return s.rootSnapshotRepo.DeleteMissingByFolder(ctx, folderID, seenAllRoots)
 	}
 
 	seenByScope := make(map[string][]string, len(scopeRoots))
@@ -3526,13 +3558,7 @@ func (s *Scanner) reconcileScannedRoots(
 			}
 		}
 	}
-	if err := s.rootSnapshotRepo.UpsertMany(ctx, roots); err != nil {
-		return err
-	}
 
-	if !pruneUnseen {
-		return nil
-	}
 	for scope, seenRoots := range seenByScope {
 		if err := s.rootSnapshotRepo.DeleteMissingInScope(ctx, folderID, scope, seenRoots); err != nil {
 			return err
