@@ -2,6 +2,8 @@ package usercollections
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"testing"
 
@@ -137,7 +139,8 @@ func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 		sharedWith: []string{storeTestOwnerProfile}, sourceConfig: `{"library_ids":[9]}`,
 	})
 
-	got, err := store.Get(ctx, f.userID, storeTestOwnerProfile, storeTestIDPrefix+"visible", []int{7})
+	sum := sha256.Sum256([]byte(storeTestIDPrefix + "visible"))
+	got, err := store.Get(ctx, f.userID, storeTestOwnerProfile, hex.EncodeToString(sum[:14]), []int{7})
 	if err != nil {
 		t.Fatalf("get visible collection: %v", err)
 	}
@@ -161,7 +164,8 @@ func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 		{"unknown id", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := store.Get(ctx, tc.userID, tc.profileID, tc.id, []int{7})
+			sum := sha256.Sum256([]byte(tc.id))
+			got, err := store.Get(ctx, tc.userID, tc.profileID, hex.EncodeToString(sum[:14]), []int{7})
 			if err != nil {
 				t.Fatalf("get: %v", err)
 			}
@@ -199,6 +203,36 @@ func TestStoreAnyVisible(t *testing.T) {
 	}
 	if visible, err := store.AnyVisible(ctx, f.userID+10_000, storeTestOtherProfile, []int{7}); err != nil || visible {
 		t.Fatalf("expected another user's probe to be empty, got visible=%v err=%v", visible, err)
+	}
+}
+
+func TestStoreCompatKeys(t *testing.T) {
+	t.Parallel()
+	f := newStoreTestFixture(t)
+	store := NewStore(f.pool)
+	for _, id := range []string{
+		"01K3M9K0R7D6Y9T7F1P6W2H8ZX", uuid.NewString(), "legacy-collection", "123", `test-å-\-集合`,
+	} {
+		t.Run(id, func(t *testing.T) {
+			f.insert(t, storeTestCollection{id: id, name: "Test collection", optIn: true, sharedWith: []string{storeTestOwnerProfile}})
+			sum := sha256.Sum256([]byte(id))
+			key := hex.EncodeToString(sum[:14])
+			got, err := store.Get(t.Context(), f.userID, storeTestOwnerProfile, key, nil)
+			if err != nil || got == nil || got.ID != id {
+				t.Fatalf("lookup key must resolve the unchanged native ID: got=%+v err=%v", got, err)
+			}
+			candidates, err := store.ImageCandidates(t.Context(), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, c := range candidates {
+				found = found || c.ID == id
+			}
+			if !found {
+				t.Fatal("signed-image candidates did not resolve the native ID")
+			}
+		})
 	}
 }
 

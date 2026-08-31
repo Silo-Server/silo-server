@@ -609,9 +609,10 @@ func isPublicAddr(addr netip.Addr) bool {
 	if addr.Is4In6() {
 		addr = addr.Unmap()
 	}
-	// IsPrivate excludes shared address space and IPv4 translation prefixes;
-	// those can still reach private hosts (including tailnets and NAT64).
+	// IsPrivate excludes shared/benchmarking space and IPv4 translation
+	// prefixes; those can still reach private hosts (including tailnets and NAT64).
 	if netip.MustParsePrefix("100.64.0.0/10").Contains(addr) ||
+		netip.MustParsePrefix("198.18.0.0/15").Contains(addr) ||
 		netip.MustParsePrefix("64:ff9b::/96").Contains(addr) ||
 		netip.MustParsePrefix("64:ff9b:1::/48").Contains(addr) {
 		return false

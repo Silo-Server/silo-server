@@ -1,7 +1,9 @@
 package jellycompat
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"sync"
@@ -31,14 +33,13 @@ const (
 var (
 	pseudoUserNamespace = uuid.MustParse("3dfcc388-bf95-5572-bc16-7f1a375992dd")
 	stringIDNamespaces  = map[EncodedIDType]uuid.UUID{
-		EncodedIDItem:           uuid.MustParse("0b6716ca-1f61-5987-b17b-f592f04fd6b3"),
-		EncodedIDSeason:         uuid.MustParse("29831b2b-dad5-5a85-b506-4d1fb2da01ed"),
-		EncodedIDPlaySession:    uuid.MustParse("75a69ca8-f95f-5e9d-ac0a-d34a37b93eb4"),
-		EncodedIDGenre:          uuid.MustParse("c0cbb8ea-8331-52c0-b160-15e7cf899fb0"),
-		EncodedIDStudio:         uuid.MustParse("23712982-b769-592d-9360-b4d3f39654db"),
-		EncodedIDPerson:         uuid.MustParse("a4e7c1d6-3b8f-5a2e-9c01-7d6f4e8b2a13"),
-		EncodedIDCollection:     uuid.MustParse("7f3c2a91-5b64-5c1d-8e07-9a2f4d6b1c35"),
-		EncodedIDUserCollection: uuid.MustParse("92825e52-6e8a-5a5f-93a1-07f48e10e80b"),
+		EncodedIDItem:        uuid.MustParse("0b6716ca-1f61-5987-b17b-f592f04fd6b3"),
+		EncodedIDSeason:      uuid.MustParse("29831b2b-dad5-5a85-b506-4d1fb2da01ed"),
+		EncodedIDPlaySession: uuid.MustParse("75a69ca8-f95f-5e9d-ac0a-d34a37b93eb4"),
+		EncodedIDGenre:       uuid.MustParse("c0cbb8ea-8331-52c0-b160-15e7cf899fb0"),
+		EncodedIDStudio:      uuid.MustParse("23712982-b769-592d-9360-b4d3f39654db"),
+		EncodedIDPerson:      uuid.MustParse("a4e7c1d6-3b8f-5a2e-9c01-7d6f4e8b2a13"),
+		EncodedIDCollection:  uuid.MustParse("7f3c2a91-5b64-5c1d-8e07-9a2f4d6b1c35"),
 	}
 )
 
@@ -92,9 +93,16 @@ func EncodeNumericID(kind EncodedIDType, value uint64) uuid.UUID {
 // a hashed UUID recorded in the reverse map.
 func (c *ResourceIDCodec) EncodeStringID(kind EncodedIDType, value string) string {
 	if kind == EncodedIDUserCollection {
-		if packed, ok := packUserCollectionUUID(value); ok {
-			return packed.String()
-		}
+		// A typed 112-bit lookup key, like local content IDs. The store resolves
+		// it through an index, including ULIDs/legacy IDs, without a reverse map.
+		// Keep this hash in sync with jellycompat_user_collection_key in SQL.
+		sum := sha256.Sum256([]byte(value))
+		var id uuid.UUID
+		// The marker occupies the variant byte, outside RFC 4122 hashes.
+		id[0], id[8] = byte(kind), 1
+		copy(id[1:8], sum[:7])
+		copy(id[9:], sum[7:14])
+		return id.String()
 	}
 	if numeric, err := strconv.ParseUint(value, 10, 64); err == nil {
 		return EncodeNumericID(kind, numeric).String()
@@ -133,7 +141,8 @@ func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
 	return EncodeNumericID(kind, uint64(value)).String()
 }
 
-// DecodeStringID decodes a compat UUID back to the original native string ID.
+// DecodeStringID decodes a compat UUID to its native ID, or an indexed lookup
+// key for personal collections (whose native IDs may be arbitrary strings).
 //
 // A reversibly packed content_id is decoded first (and re-packed to confirm the
 // UUID genuinely came from the packer, so an opaque id whose bytes merely happen
@@ -141,9 +150,10 @@ func (c *ResourceIDCodec) EncodeIntID(kind EncodedIDType, value int64) string {
 // map for hashed ids.
 func (c *ResourceIDCodec) DecodeStringID(kind EncodedIDType, raw string) (string, error) {
 	if kind == EncodedIDUserCollection {
-		if id, ok := unpackUserCollectionUUID(raw); ok {
-			return id, nil
+		if id, err := uuid.Parse(raw); err == nil && id[0] == byte(kind) && id[8] == 1 {
+			return hex.EncodeToString(id[1:8]) + hex.EncodeToString(id[9:]), nil
 		}
+		return "", fmt.Errorf("unknown personal collection id %q", raw)
 	}
 	if isContentIDKind(kind) {
 		if id, ok := unpackContentIDUUID(kind, raw); ok {
@@ -162,31 +172,6 @@ func (c *ResourceIDCodec) DecodeStringID(kind EncodedIDType, raw string) (string
 		return "", fmt.Errorf("unknown compat id %q", raw)
 	}
 	return registered.value, nil
-}
-
-// Personal UUIDv4 IDs use a high first-nibble marker, outside the numeric and
-// packed content ID kinds. Save that nibble in the fixed version bits and clear
-// the variant bits to distinguish hashed UUIDs. No reverse map is needed.
-func packUserCollectionUUID(value string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(value)
-	if err != nil || id.Version() != 4 || id.Variant() != uuid.RFC4122 {
-		return uuid.UUID{}, false
-	}
-	id[6] = id[0]&0xf0 | id[6]&0x0f
-	id[0] = byte(EncodedIDUserCollection)<<4 | id[0]&0x0f
-	id[8] &= 0x3f
-	return id, true
-}
-
-func unpackUserCollectionUUID(raw string) (string, bool) {
-	id, err := uuid.Parse(raw)
-	if err != nil || id[0]>>4 != byte(EncodedIDUserCollection) || id[8]>>6 != 0 {
-		return "", false
-	}
-	id[0] = id[6]&0xf0 | id[0]&0x0f
-	id[6] = 0x40 | id[6]&0x0f
-	id[8] = 0x80 | id[8]&0x3f
-	return id.String(), true
 }
 
 // isContentIDKind reports whether a compat id kind carries a Silo content_id (as

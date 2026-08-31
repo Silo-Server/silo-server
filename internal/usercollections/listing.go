@@ -140,11 +140,11 @@ func (s *Store) List(ctx context.Context, userID int, profileID string, visibleL
 	return listServerVisible(ctx, s.pool, userID, profileID, visibleLibraryIDs, true)
 }
 
-// Get returns one server-visible video collection by ID, intersected with the
-// viewer's Jellyfin-visible libraries. Returns (nil, nil) for missing,
+// Get returns one server-visible video collection by its Jellyfin lookup key,
+// intersected with the viewer's Jellyfin-visible libraries. Returns (nil, nil) for missing,
 // unauthorized, hidden-scope or non-opted-in rows so callers cannot distinguish
 // those cases.
-func (s *Store) Get(ctx context.Context, userID int, profileID, id string, visibleLibraryIDs []int) (*ServerVisibleCollection, error) {
+func (s *Store) Get(ctx context.Context, userID int, profileID, key string, visibleLibraryIDs []int) (*ServerVisibleCollection, error) {
 	var (
 		c                    ServerVisibleCollection
 		createdAt, updatedAt time.Time
@@ -156,14 +156,14 @@ func (s *Store) Get(ctx context.Context, userID int, profileID, id string, visib
 			       `+scopeConfigExpr+` AS scope_config
 			FROM user_personal_collections upc
 			WHERE `+serverVisibleWhere+`
-			  AND upc.id = $3
+			  AND jellycompat_user_collection_key(upc.id) = $3
 			  AND upc.collection_type <> 'playlist'
 		)
 		 SELECT id, creator_profile_id, name, description, collection_type, item_count,
 		        poster_url, poster_thumbhash, created_at, updated_at
 		 FROM visible_collection
 		 WHERE `+scopeMatchesLibraries("scope_config", "$4"),
-		userID, profileID, id, visibleLibraryIDs,
+		userID, profileID, key, visibleLibraryIDs,
 	).Scan(
 		&c.ID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType,
 		&c.ItemCount, &c.PosterPath, &c.PosterThumbhash, &createdAt, &updatedAt,
@@ -203,7 +203,7 @@ func (s *Store) AnyVisible(ctx context.Context, userID int, profileID string, vi
 	return exists, nil
 }
 
-// ImageCandidates returns opted-in personal collection metadata by native ID.
+// ImageCandidates returns opted-in personal collection metadata by Jellyfin lookup key.
 //
 // This is the one read that deliberately skips serverVisibleWhere: it has no
 // owning user or viewing profile to scope by. Jellyfin clients load artwork
@@ -215,12 +215,13 @@ func (s *Store) AnyVisible(ctx context.Context, userID int, profileID string, vi
 // Callers MUST verify the signature before serving bytes, and MUST NOT use this
 // for a browse read — it can return another user's collection.
 // TestServeCollectionImage_PersonalCollectionOwnerOnly pins both halves.
-func (s *Store) ImageCandidates(ctx context.Context, id string) ([]ServerVisibleCollection, error) {
+func (s *Store) ImageCandidates(ctx context.Context, key string) ([]ServerVisibleCollection, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, creator_profile_id, name, description, collection_type, item_count,
 		        poster_url, poster_thumbhash, created_at, updated_at
 		 FROM user_personal_collections
-		 WHERE id = $1 AND include_in_server_collections = TRUE AND collection_type <> 'playlist'`, id)
+		 WHERE jellycompat_user_collection_key(id) = $1
+		   AND include_in_server_collections = TRUE AND collection_type <> 'playlist'`, key)
 	if err != nil {
 		return nil, fmt.Errorf("loading signed-image collection candidates: %w", err)
 	}

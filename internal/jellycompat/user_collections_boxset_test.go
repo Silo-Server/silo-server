@@ -2,11 +2,13 @@ package jellycompat
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,7 +17,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/oklog/ulid/v2"
 
+	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -78,7 +83,8 @@ func (f *fakeUserCollectionSource) List(_ context.Context, userID int, profileID
 func (f *fakeUserCollectionSource) Get(_ context.Context, userID int, profileID, id string, libraryIDs []int) (*usercollections.ServerVisibleCollection, error) {
 	f.gotUserID, f.gotProfileID = userID, profileID
 	for _, row := range f.rows {
-		if row.ID == id && f.visible(userID, profileID, row) &&
+		sum := sha256.Sum256([]byte(row.ID))
+		if fmt.Sprintf("%x", sum[:14]) == id && f.visible(userID, profileID, row) &&
 			(len(row.libraryIDs) == 0 || slices.ContainsFunc(row.libraryIDs, func(id int) bool { return slices.Contains(libraryIDs, id) })) {
 			found := row.ServerVisibleCollection
 			return &found, nil
@@ -101,7 +107,8 @@ func (f *fakeUserCollectionSource) AnyVisible(_ context.Context, userID int, pro
 func (f *fakeUserCollectionSource) ImageCandidates(_ context.Context, id string) ([]usercollections.ServerVisibleCollection, error) {
 	var out []usercollections.ServerVisibleCollection
 	for _, row := range f.rows {
-		if row.ID == id {
+		sum := sha256.Sum256([]byte(row.ID))
+		if fmt.Sprintf("%x", sum[:14]) == id {
 			out = append(out, row.ServerVisibleCollection)
 		}
 	}
@@ -237,7 +244,7 @@ func TestHandleItem_PersonalCollectionResolvesForOwnerOnly(t *testing.T) {
 
 func requestBoxSetItem(t *testing.T, h *ItemsHandler, collectionID string) *httptest.ResponseRecorder {
 	t.Helper()
-	routeID := h.codec.EncodeStringID(EncodedIDUserCollection, collectionID)
+	routeID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
 	req := httptest.NewRequest("GET", "/Items/"+routeID, nil)
 	ctx := context.WithValue(req.Context(), compatSessionKey, collectionsTestSession())
 	rctx := chi.NewRouteContext()
@@ -291,20 +298,125 @@ func TestHandleItems_PersonalBoxSetChildrenUseCatalogResolver(t *testing.T) {
 }
 
 func TestHandleItems_PersonalBoxSetRouteSurvivesFreshCodec(t *testing.T) {
-	const collectionID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
-	list := ownedUserCollection(collectionID, "Restart Safe")
-	h := newUserCollectionsTestHandler(&fakeCollectionSource{},
-		&fakeUserCollectionSource{rows: []fakeUserCollection{list}},
-		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
-	h.collectionResolver = &fakePersonalCollectionResolver{result: &catalog.CatalogResult{
-		Items: []*models.MediaItem{{ContentID: "m-1", Type: "movie", Title: "Still Here"}},
-		Total: 1,
-	}}
+	for _, collectionID := range []string{
+		"731d3da2-4f4b-4a71-8f2f-38e1d34775b0",
+		"01K3M9K0R7D6Y9T7F1P6W2H8ZX", // ABS creates ULIDs, including after migration 156.
+		"731d3da2-4f4b-5a71-8f2f-38e1d34775b0",
+		"legacy-collection",
+	} {
+		t.Run(collectionID, func(t *testing.T) {
+			list := ownedUserCollection(collectionID, "Restart Safe")
+			h := newUserCollectionsTestHandler(&fakeCollectionSource{},
+				&fakeUserCollectionSource{rows: []fakeUserCollection{list}},
+				[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+			h.collectionResolver = &fakePersonalCollectionResolver{result: &catalog.CatalogResult{
+				Items: []*models.MediaItem{{ContentID: "m-1", Type: "movie", Title: "Still Here"}},
+				Total: 1,
+			}}
 
-	parentID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
-	result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
-	if len(result.Items) != 1 || result.Items[0].Name != "Still Here" {
-		t.Fatalf("fresh codec failed to resolve cached personal route: %+v", result.Items)
+			parentID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
+			result := performItemsRequest(t, h, "/Items?ParentId="+parentID)
+			if len(result.Items) != 1 || result.Items[0].Name != "Still Here" {
+				t.Fatalf("fresh codec failed to resolve cached personal route: %+v", result.Items)
+			}
+		})
+	}
+}
+
+func TestPersonalBoxSetABSCollectionSurvivesFreshCodec(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-test-"+uuid.NewString()).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID) })
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: session.ProfileID, Name: "Test profile"}); err != nil {
+		t.Fatal(err)
+	}
+	// Use the current ABS write path, not just a hand-inserted legacy row.
+	id := ulid.Make().String()
+	if err := (&audiobooks.ABSCollectionStore{Pool: pool}).CreateCollection(ctx, abs.Collection{
+		ID: id, UserID: strconv.Itoa(userID), ProfileID: session.ProfileID, Name: "Test collection",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	optIn := true
+	profiles := []string{session.ProfileID}
+	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
+		ID: id, RequestProfileID: session.ProfileID, IncludeInServerCollections: &optIn, AllowedProfileIDs: &profiles,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	source := usercollections.NewStore(pool)
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
+	h.userCollections = source
+	h.mapper.imageTagSigner = newImageTagSigner("image-secret")
+	listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", session)
+	if len(listing.Items) != 1 || listing.Items[0].Name != "Test collection" {
+		t.Fatalf("ABS collection not listed: %+v", listing)
+	}
+	routeID, tag := listing.Items[0].ID, listing.Items[0].ImageTags["Primary"]
+	if tag == "" {
+		t.Fatal("listed collection has no signed artwork tag")
+	}
+	resolver := &fakePersonalCollectionResolver{result: &catalog.CatalogResult{
+		Items: []*models.MediaItem{{ContentID: "movie-tmdb-123", Type: "movie", Title: "Test movie"}}, Total: 1,
+	}}
+	h.collectionResolver = resolver
+	for _, raw := range []string{routeID, strings.ReplaceAll(routeID, "-", ""), strings.ToUpper(routeID)} {
+		t.Run(raw, func(t *testing.T) {
+			for _, path := range []string{"/Items?Ids=" + raw, "/Items?ParentId=" + raw} {
+				h.codec = NewResourceIDCodec()
+				result := performItemsRequest(t, h, path, session)
+				if len(result.Items) != 1 {
+					t.Fatalf("cold %s: %+v", path, result)
+				}
+				if strings.Contains(path, "?Ids=") && (result.Items[0].ID != routeID || result.Items[0].Type != "BoxSet") {
+					t.Fatalf("cold Ids resolved the wrong item: %+v", result.Items[0])
+				}
+				if strings.Contains(path, "?ParentId=") && (result.Items[0].Name != "Test movie" || result.Items[0].ParentID != routeID) {
+					t.Fatalf("cold ParentId resolved the wrong children: %+v", result.Items[0])
+				}
+			}
+			if resolver.gotReq.CollectionID != id {
+				t.Fatalf("resolver received %q, want original ULID %q", resolver.gotReq.CollectionID, id)
+			}
+			for _, viewer := range []*Session{session, {StreamAppUserID: userID, ProfileID: "unshared"}, {StreamAppUserID: userID + 10000, ProfileID: session.ProfileID}} {
+				h.codec = NewResourceIDCodec()
+				req := httptest.NewRequest(http.MethodGet, "/Items/"+raw, nil)
+				rctx := chi.NewRouteContext()
+				rctx.URLParams.Add("id", raw)
+				req = req.WithContext(context.WithValue(context.WithValue(req.Context(), compatSessionKey, viewer), chi.RouteCtxKey, rctx))
+				rec := httptest.NewRecorder()
+				h.HandleItem(rec, req)
+				want := http.StatusNotFound
+				if viewer == session {
+					want = http.StatusOK
+				}
+				if rec.Code != want {
+					t.Fatalf("cold detail: status=%d, want=%d, body=%s", rec.Code, want, rec.Body.String())
+				}
+			}
+			for _, imageTag := range []string{tag, "0123456789abcdef", ""} {
+				images := &ImagesHandler{codec: NewResourceIDCodec(), userCollections: source, imageTags: h.mapper.imageTagSigner}
+				req := httptest.NewRequest(http.MethodGet, "/Items/"+raw+"/Images/Primary?tag="+imageTag, nil)
+				rec := httptest.NewRecorder()
+				images.HandleItemImage(rec, withImageRouteParams(req, raw, "Primary"))
+				want := http.StatusNotFound
+				if imageTag == tag {
+					want = http.StatusOK
+				}
+				if rec.Code != want {
+					t.Fatalf("cold signed image: status=%d, want=%d, body=%s", rec.Code, want, rec.Body.String())
+				}
+			}
+		})
 	}
 }
 

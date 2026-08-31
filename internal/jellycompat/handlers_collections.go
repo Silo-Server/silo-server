@@ -35,9 +35,9 @@ type collectionSource interface {
 // is used only behind a signed image capability check.
 type userCollectionSource interface {
 	List(ctx context.Context, userID int, profileID string, visibleLibraryIDs []int) ([]usercollections.ServerVisibleCollection, error)
-	Get(ctx context.Context, userID int, profileID, id string, visibleLibraryIDs []int) (*usercollections.ServerVisibleCollection, error)
+	Get(ctx context.Context, userID int, profileID, key string, visibleLibraryIDs []int) (*usercollections.ServerVisibleCollection, error)
 	AnyVisible(ctx context.Context, userID int, profileID string, visibleLibraryIDs []int) (bool, error)
-	ImageCandidates(ctx context.Context, id string) ([]usercollections.ServerVisibleCollection, error)
+	ImageCandidates(ctx context.Context, key string) ([]usercollections.ServerVisibleCollection, error)
 }
 
 // compatCollection is one collection on the BoxSet surface. Personal

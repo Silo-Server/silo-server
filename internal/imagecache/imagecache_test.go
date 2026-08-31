@@ -34,14 +34,20 @@ func TestPublicImageDestinations(t *testing.T) {
 		"10.0.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "fe80::1", "fd00::1",
 		"100.64.0.0", "100.127.255.255", "::ffff:100.100.100.100",
 		"64:ff9b::7f00:1", "64:ff9b:1::7f00:1",
+		"198.18.0.0", "198.18.0.1", "198.19.255.255",
+		"::ffff:198.18.0.0", "::ffff:198.18.0.1", "::ffff:198.19.255.255",
 	} {
 		t.Run(host, func(t *testing.T) {
 			if addr, err := resolvePublicAddr(t.Context(), host); err == nil {
-				t.Fatalf("accepted non-public destination %s", addr)
+				t.Errorf("accepted non-public destination %s", addr)
+			}
+			u := &url.URL{Scheme: "http", Host: net.JoinHostPort(host, "80"), Path: "/poster.jpg"}
+			if err := validatePublicImageURL(u); net.ParseIP(host) != nil && err == nil {
+				t.Error("accepted non-public image URL")
 			}
 		})
 	}
-	for _, host := range []string{"1.1.1.1", "2606:4700:4700::1111", "100.63.255.255", "100.128.0.0"} {
+	for _, host := range []string{"1.1.1.1", "2606:4700:4700::1111", "100.63.255.255", "100.128.0.0", "198.17.255.255", "198.20.0.0", "::ffff:198.17.255.255", "::ffff:198.20.0.0"} {
 		if _, err := resolvePublicAddr(t.Context(), host); err != nil {
 			t.Fatalf("rejected public address %s: %v", host, err)
 		}

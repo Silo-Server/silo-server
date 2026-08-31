@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -128,7 +130,10 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if collectionID, err := h.codec.DecodeStringID(EncodedIDUserCollection, routeID); err == nil {
-		h.serveCollectionImage(w, r, h.codec.EncodeStringID(EncodedIDUserCollection, collectionID), imageType, tag, collectionID, true)
+		// DecodeStringID validated the UUID and returned a lookup key, not the
+		// native ID. Canonicalize the original route for the signed image tag.
+		canonicalID, _ := uuid.Parse(routeID)
+		h.serveCollectionImage(w, r, canonicalID.String(), imageType, tag, collectionID, true)
 		return
 	}
 
