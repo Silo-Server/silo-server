@@ -41,10 +41,32 @@ export function useKeyboardShortcuts(
         case "f":
         case "F":
           e.preventDefault();
-          if (document.fullscreenElement) {
-            document.exitFullscreen().catch(() => {});
-          } else {
-            containerRef.current?.requestFullscreen().catch(() => {});
+          {
+            const webkitVideo = video as HTMLVideoElement & {
+              webkitSupportsFullscreen?: boolean;
+              webkitDisplayingFullscreen?: boolean;
+              webkitEnterFullscreen?: () => void;
+              webkitExitFullscreen?: () => void;
+            };
+            if (document.fullscreenElement) {
+              document.exitFullscreen().catch(() => {});
+            } else if (webkitVideo.webkitDisplayingFullscreen) {
+              webkitVideo.webkitExitFullscreen?.();
+            } else if (containerRef.current?.requestFullscreen) {
+              containerRef.current.requestFullscreen().catch(() => {
+                if (
+                  webkitVideo.webkitSupportsFullscreen !== false &&
+                  typeof webkitVideo.webkitEnterFullscreen === "function"
+                ) {
+                  webkitVideo.webkitEnterFullscreen();
+                }
+              });
+            } else if (
+              webkitVideo.webkitSupportsFullscreen !== false &&
+              typeof webkitVideo.webkitEnterFullscreen === "function"
+            ) {
+              webkitVideo.webkitEnterFullscreen();
+            }
           }
           break;
 

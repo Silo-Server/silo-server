@@ -24,6 +24,8 @@ const controls = vi.hoisted(() => ({
     subtitleTracks: PlayerSubtitleInfo[];
     visible: boolean;
     onSurfaceTap?: (event: React.MouseEvent<HTMLElement>) => void;
+    isFullscreen?: boolean;
+    onFullscreenToggle?: () => void;
   },
 }));
 const playerSeek = vi.hoisted(() => vi.fn());
@@ -100,6 +102,8 @@ vi.mock("./PlayerControls", () => ({
       subtitleTracks: PlayerSubtitleInfo[];
       visible: boolean;
       onSurfaceTap?: (event: React.MouseEvent<HTMLElement>) => void;
+      isFullscreen?: boolean;
+      onFullscreenToggle?: () => void;
     }) => {
       controls.current = props;
       return null;
@@ -904,5 +908,62 @@ describe("VideoPlayer translation handoff", () => {
     await waitFor(() => expect(onSubtitleChanged).toHaveBeenCalledWith(4, undefined));
     expect(controls.current?.activeSubtitleIndex).toBe(4);
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
+  });
+
+  it("falls back to webkitEnterFullscreen when requestFullscreen fails on iPhone Safari", async () => {
+    const webkitEnterFullscreen = vi.fn();
+    const webkitExitFullscreen = vi.fn();
+
+    const { container } = render(
+      <VideoPlayer plan={directPlan} planRevision={1} sessionId="session-1" />,
+      { wrapper },
+    );
+
+    const video = container.querySelector("video") as HTMLVideoElement & {
+      webkitSupportsFullscreen?: boolean;
+      webkitDisplayingFullscreen?: boolean;
+      webkitEnterFullscreen?: () => void;
+      webkitExitFullscreen?: () => void;
+    };
+    video.webkitSupportsFullscreen = true;
+    video.webkitEnterFullscreen = webkitEnterFullscreen;
+    video.webkitExitFullscreen = webkitExitFullscreen;
+
+    // Simulate container requestFullscreen rejecting (as WebKit on iPhone does)
+    const playerContainer = container.querySelector('[data-testid="player-container"]') as HTMLElement;
+    if (playerContainer) {
+      playerContainer.requestFullscreen = vi.fn().mockRejectedValue(new Error("Not supported"));
+    }
+
+    act(() => {
+      controls.current?.onFullscreenToggle?.();
+    });
+
+    await waitFor(() => expect(webkitEnterFullscreen).toHaveBeenCalledOnce());
+  });
+
+  it("tracks WebKit fullscreen events on the video element", async () => {
+    const { container } = render(
+      <VideoPlayer plan={directPlan} planRevision={1} sessionId="session-1" />,
+      { wrapper },
+    );
+
+    const video = container.querySelector("video") as HTMLVideoElement & {
+      webkitDisplayingFullscreen?: boolean;
+    };
+
+    video.webkitDisplayingFullscreen = true;
+    act(() => {
+      video.dispatchEvent(new Event("webkitbeginfullscreen"));
+    });
+
+    expect(controls.current?.isFullscreen).toBe(true);
+
+    video.webkitDisplayingFullscreen = false;
+    act(() => {
+      video.dispatchEvent(new Event("webkitendfullscreen"));
+    });
+
+    expect(controls.current?.isFullscreen).toBe(false);
   });
 });
