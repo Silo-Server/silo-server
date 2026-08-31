@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -57,6 +58,32 @@ func TestMediaRouteManifest(t *testing.T) {
 		if !route.Enrolled {
 			t.Fatalf("native route not enrolled: %s %s", route.Method, route.Pattern)
 		}
+	}
+}
+
+func TestNewRouterRegistersTranscodeShutdownWork(t *testing.T) {
+	registered := make(chan (<-chan struct{}), 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	NewRouter(Dependencies{
+		Config:     &config.Config{},
+		AppContext: ctx,
+		SessionMgr: playback.NewSessionManager(0, 0),
+		RegisterShutdownWork: func(done <-chan struct{}) {
+			registered <- done
+		},
+	})
+
+	select {
+	case done := <-registered:
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("registered transcode cleanup did not finish after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("router did not register transcode shutdown work")
 	}
 }
 

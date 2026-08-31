@@ -45,7 +45,7 @@ func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeT
 	threshold := 300
 	if raw, _ := settings.Get(ctx, "transcode_throttle_seconds"); raw != "" {
 		if configured, err := strconv.Atoi(raw); err == nil && configured > 0 {
-			threshold = configured
+			threshold = max(configured, minThresholdSeconds)
 		}
 	}
 	return threshold

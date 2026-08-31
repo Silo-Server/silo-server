@@ -207,7 +207,7 @@ func (r *ebmlFileReader) readMatroskaInfo(container ebmlElement) (uint64, float6
 	if err != nil {
 		return 0, 0, fmt.Errorf("read Matroska Info: %w", err)
 	}
-	if duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
+	if timestampScale == 0 || duration <= 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
 		return 0, 0, fmt.Errorf("matroska Info has invalid duration %v", duration)
 	}
 	return timestampScale, duration, nil

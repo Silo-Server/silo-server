@@ -3302,7 +3302,11 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 				return
 			}
 			committed = true
-			previous := h.tm.SwapTranscodeSession(session.ID, ts)
+			previous, accepted := h.tm.SwapTranscodeSession(session.ID, ts)
+			if !accepted {
+				unlock()
+				return
+			}
 			// A local transcode is never proxy-served, so an authorized-origins
 			// replan landing here has to revoke the grant it is replacing.
 			h.revokeStaleProxyGrantOnCommitV3(r.Context(), session.ID, mode, false)

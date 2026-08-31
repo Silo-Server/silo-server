@@ -51,6 +51,34 @@ func TestConfigureS3Clients_SetsCORSOnPublicAssetsBucket(t *testing.T) {
 	}
 }
 
+func TestWaitForShutdownWorkWaitsForEveryCleanup(t *testing.T) {
+	one := make(chan struct{})
+	two := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- waitForShutdownWork(context.Background(), []<-chan struct{}{one, two})
+	}()
+
+	close(one)
+	select {
+	case err := <-done:
+		t.Fatalf("wait returned before every cleanup completed: %v", err)
+	default:
+	}
+	close(two)
+	if err := <-done; err != nil {
+		t.Fatalf("waitForShutdownWork: %v", err)
+	}
+}
+
+func TestWaitForShutdownWorkHonorsDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitForShutdownWork(ctx, []<-chan struct{}{make(chan struct{})}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForShutdownWork error = %v, want context cancellation", err)
+	}
+}
+
 func TestConfigureS3Clients_PassesPublicKeyPrefix(t *testing.T) {
 	publicServer := newS3BucketRecorder(t)
 

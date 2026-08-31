@@ -31,6 +31,9 @@ type Dependencies struct {
 	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
 	// the sweep a single boot-time run instead of a long-lived ticker.
 	AppContext context.Context
+	// RegisterShutdownWork retains asynchronous cleanup completion until the
+	// owning process's graceful-shutdown deadline. Nil is valid for embeddings.
+	RegisterShutdownWork func(<-chan struct{})
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig       func() *config.Config

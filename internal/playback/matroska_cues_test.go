@@ -90,6 +90,32 @@ func TestProbeMatroskaCueTimeline_UsesSeekHeadPastClusters(t *testing.T) {
 	}
 }
 
+func TestProbeMatroskaCueTimeline_RejectsZeroTimestampScale(t *testing.T) {
+	info := testEBMLElement([]byte{0x15, 0x49, 0xa9, 0x66}, append(
+		testEBMLElement([]byte{0x2a, 0xd7, 0xb1}, testEBMLUint(0)),
+		testEBMLElement([]byte{0x44, 0x89}, testEBMLFloat64(10_000))...,
+	))
+	trackEntry := testEBMLElement([]byte{0xae}, append(
+		testEBMLElement([]byte{0xd7}, testEBMLUint(1)),
+		testEBMLElement([]byte{0x83}, testEBMLUint(1))...,
+	))
+	tracks := testEBMLElement([]byte{0x16, 0x54, 0xae, 0x6b}, trackEntry)
+	positions := testEBMLElement([]byte{0xb7}, testEBMLElement([]byte{0xf7}, testEBMLUint(1)))
+	point := append(testEBMLElement([]byte{0xb3}, testEBMLUint(1)), positions...)
+	cues := testEBMLElement([]byte{0x1c, 0x53, 0xbb, 0x6b}, testEBMLElement([]byte{0xbb}, point))
+	segmentPayload := append(append(info, tracks...), cues...)
+	data := append(testEBMLElement([]byte{0x1a, 0x45, 0xdf, 0xa3}, nil),
+		testEBMLElement([]byte{0x18, 0x53, 0x80, 0x67}, segmentPayload)...)
+	path := filepath.Join(t.TempDir(), "zero-scale.mkv")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := probeMatroskaCueTimeline(context.Background(), path); err == nil {
+		t.Fatal("zero TimestampScale was accepted")
+	}
+}
+
 func TestProbeMatroskaCueTimeline_FFmpegFixture(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {

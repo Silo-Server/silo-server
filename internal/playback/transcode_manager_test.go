@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -132,6 +134,41 @@ func TestStartShutdownCleanup_ClosesEveryLocalTranscode(t *testing.T) {
 		if got := m.GetTranscodeSession(id); got != nil {
 			t.Fatalf("transcode %q survived shutdown cleanup", id)
 		}
+	}
+}
+
+func TestStartShutdownCleanup_RejectsLaterRegistrationAndSwap(t *testing.T) {
+	m := NewTranscodeManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := m.StartShutdownCleanup(ctx)
+	cancel()
+	<-done
+
+	for _, test := range []struct {
+		name    string
+		publish func(*TranscodeSession) bool
+	}{
+		{name: "register", publish: func(session *TranscodeSession) bool {
+			return m.RegisterTranscodeSession("late-register", session)
+		}},
+		{name: "swap", publish: func(session *TranscodeSession) bool {
+			_, accepted := m.SwapTranscodeSession("late-swap", session)
+			return accepted
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "session")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			session := NewTranscodeSessionForTest(dir)
+			if test.publish(session) {
+				t.Fatal("session was published after shutdown")
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("rejected session cache still exists: %v", err)
+			}
+		})
 	}
 }
 

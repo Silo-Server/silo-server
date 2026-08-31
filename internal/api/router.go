@@ -97,21 +97,25 @@ type Dependencies struct {
 	BootstrapSensitiveValues     map[string]string
 	RedisBootstrapAvailable      bool
 	AppContext                   context.Context
-	DB                           *pgxpool.Pool
-	SecretCipher                 *secret.Cipher // at-rest credential cipher (required when DB is set)
-	FrontendFS                   fs.FS
-	S3Public                     *s3client.Client              // public assets bucket client (may be nil)
-	S3Private                    *s3client.Client              // private internal bucket client (may be nil)
-	S3UserDB                     *s3client.Client              // user-db bucket client (may be nil)
-	BrandingService              *branding.Service             // white-label branding (nil when DB unavailable)
-	FolderRepo                   *catalog.FolderRepository     // media folder repository (may be nil)
-	FileRepo                     *scanner.FileRepository       // media file repository (may be nil)
-	Scanner                      *scanner.Scanner              // scanner instance (may be nil)
-	LibraryIngester              *libraryingest.Executor       // shared library ingest executor (may be nil)
-	ProbeEnsurer                 handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
-	UserStoreProvider            userstore.UserStoreProvider   // user store provider (may be nil)
-	SessionMgr                   *playback.SessionManager      // playback session manager (may be nil)
-	StreamTelemetry              *streamtelemetry.Registry     // local observation-only stream telemetry (may be nil)
+	// RegisterShutdownWork retains asynchronous cleanup completion until main's
+	// graceful-shutdown deadline. Nil is valid in tests and embedded routers.
+	RegisterShutdownWork func(<-chan struct{})
+
+	DB                *pgxpool.Pool
+	SecretCipher      *secret.Cipher // at-rest credential cipher (required when DB is set)
+	FrontendFS        fs.FS
+	S3Public          *s3client.Client              // public assets bucket client (may be nil)
+	S3Private         *s3client.Client              // private internal bucket client (may be nil)
+	S3UserDB          *s3client.Client              // user-db bucket client (may be nil)
+	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
+	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	Scanner           *scanner.Scanner              // scanner instance (may be nil)
+	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
+	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
+	UserStoreProvider userstore.UserStoreProvider   // user store provider (may be nil)
+	SessionMgr        *playback.SessionManager      // playback session manager (may be nil)
+	StreamTelemetry   *streamtelemetry.Registry     // local observation-only stream telemetry (may be nil)
 	// StreamTelemetryViewCache serves the merged global view with bounded
 	// staleness so the admin parity endpoint never rebuilds it per request.
 	StreamTelemetryViewCache *streamtelemetry.ViewCache
@@ -1063,7 +1067,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			// from its token/recipe, so the worst case is a wasted rebuild. A shared
 			// active-set source across both managers would remove even that.
 			playback.StartPeriodicOrphanCleanup(deps.AppContext, "api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes, playback.OrphanCleanupInterval)
-			playbackHandler.TranscodeManager().StartShutdownCleanup(deps.AppContext)
+			cleanupDone := playbackHandler.TranscodeManager().StartShutdownCleanup(deps.AppContext)
+			if deps.RegisterShutdownWork != nil {
+				deps.RegisterShutdownWork(cleanupDone)
+			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer

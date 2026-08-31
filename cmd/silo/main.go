@@ -1112,6 +1112,10 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	var shutdownWork []<-chan struct{}
+	registerShutdownWork := func(done <-chan struct{}) {
+		shutdownWork = append(shutdownWork, done)
+	}
 	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
 	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
 		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
@@ -1124,6 +1128,7 @@ func main() {
 		BootstrapSensitiveValues:     bootstrapSensitiveValues,
 		RedisBootstrapAvailable:      redisBootstrapAvailable,
 		AppContext:                   appCtx,
+		RegisterShutdownWork:         registerShutdownWork,
 		StreamTelemetry:              streamTelemetryRegistry,
 		StreamTelemetryViewCache:     streamTelemetryViewCache,
 		DB:                           pool,
@@ -2948,17 +2953,18 @@ func main() {
 	var compatSrv *http.Server
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
-			Config:           cfg,
-			AppContext:       appCtx,
-			LiveConfig:       configWatcher.Config,
-			DB:               deps.DB,
-			SecretCipher:     dataCipher,
-			ClientIPResolver: ipResolver,
-			StreamTelemetry:  streamTelemetryRegistry,
-			NodePlanner:      deps.NodePlanner,
-			JWTSecret:        cfg.Auth.JWTSecret,
-			RecWorker:        recWorker,
-			FrontendFS:       deps.FrontendFS,
+			Config:               cfg,
+			AppContext:           appCtx,
+			RegisterShutdownWork: registerShutdownWork,
+			LiveConfig:           configWatcher.Config,
+			DB:                   deps.DB,
+			SecretCipher:         dataCipher,
+			ClientIPResolver:     ipResolver,
+			StreamTelemetry:      streamTelemetryRegistry,
+			NodePlanner:          deps.NodePlanner,
+			JWTSecret:            cfg.Auth.JWTSecret,
+			RecWorker:            recWorker,
+			FrontendFS:           deps.FrontendFS,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
@@ -3162,7 +3168,6 @@ func main() {
 			}
 		}()
 	}
-
 	// Step 11: Wait for termination signal.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -3198,6 +3203,9 @@ func main() {
 		if shutdownErr := absSrv.Shutdown(shutdownCtx); shutdownErr != nil {
 			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
+	}
+	if err := waitForShutdownWork(shutdownCtx, shutdownWork); err != nil {
+		slog.Error("playback cleanup did not finish before shutdown deadline", "error", err)
 	}
 	if stopErr := streamTelemetryRegistry.Stop(shutdownCtx); stopErr != nil {
 		slog.Error("stream telemetry shutdown error", "error", stopErr)
@@ -3236,6 +3244,22 @@ func main() {
 	_ = adminJobRunner
 
 	slog.Info("server stopped")
+}
+
+// waitForShutdownWork waits for registered cleanup tasks within the process's
+// existing graceful-shutdown deadline.
+func waitForShutdownWork(ctx context.Context, work []<-chan struct{}) error {
+	for _, done := range work {
+		if done == nil {
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // startStandaloneServer runs a standalone HTTP server for proxy/transcode modes.

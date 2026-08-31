@@ -83,6 +83,10 @@ type TranscodeManager struct {
 
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
+	// shuttingDown is set under transcodeMu before the shutdown drain takes the
+	// live map. Every publication path checks it under the same lock so a late
+	// FFmpeg process cannot escape the drain and leave its cache behind.
+	shuttingDown bool
 
 	// inFlightMu guards reconstructInFlight, the set of session ids whose ffmpeg
 	// is mid-reconstruct. Cleanup unions it with the live map so a dir being
@@ -192,24 +196,40 @@ func (m *TranscodeManager) GetTranscodeSession(sessionID string) *TranscodeSessi
 }
 
 // RegisterTranscodeSession inserts a freshly started transcode session into the
-// live map. Used by the normal (non-reconstruct) start paths.
-func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) {
+// live map. It returns false and closes the session when shutdown has begun.
+func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *TranscodeSession) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if ts != nil {
+			_ = ts.Close()
+		}
+		return false
+	}
 	m.transcodes[sessionID] = ts
 	m.transcodeMu.Unlock()
+	return true
 }
 
 // SwapTranscodeSession atomically publishes a prepared successor and returns
-// the predecessor without closing it. Protocol-v3 replans use plan-scoped
+// the predecessor without closing it. The boolean is false when shutdown has
+// begun; in that case the successor is closed. Protocol-v3 replans use plan-scoped
 // output directories, so the caller can commit state first, publish the new
 // process, and only then reap the old process without either process writing to
 // the other's directory.
-func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) *TranscodeSession {
+func (m *TranscodeManager) SwapTranscodeSession(sessionID string, successor *TranscodeSession) (*TranscodeSession, bool) {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return nil, false
+	}
 	predecessor := m.transcodes[sessionID]
 	m.transcodes[sessionID] = successor
 	m.transcodeMu.Unlock()
-	return predecessor
+	return predecessor, true
 }
 
 // SwapTranscodeSessionIf publishes successor only while the live map still
@@ -221,6 +241,13 @@ func (m *TranscodeManager) SwapTranscodeSessionIf(
 	successor *TranscodeSession,
 ) bool {
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		if successor != nil {
+			_ = successor.Close()
+		}
+		return false
+	}
 	defer m.transcodeMu.Unlock()
 	if m.transcodes[sessionID] != expected {
 		return false
@@ -890,6 +917,11 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// belt-and-braces, closing only the duplicate ffmpeg process (never the shared
 	// output dir the winner serves) on the should-be-impossible race.
 	m.transcodeMu.Lock()
+	if m.shuttingDown {
+		m.transcodeMu.Unlock()
+		_ = transcodeSession.Close()
+		return nil, context.Canceled
+	}
 	if existing := m.transcodes[sessionID]; existing != nil {
 		m.transcodeMu.Unlock()
 		_ = transcodeSession.CloseProcess()
@@ -1011,6 +1043,7 @@ func (m *TranscodeManager) StartShutdownCleanup(ctx context.Context) <-chan stru
 		<-ctx.Done()
 
 		m.transcodeMu.Lock()
+		m.shuttingDown = true
 		transcodes := m.transcodes
 		m.transcodes = make(map[string]*TranscodeSession)
 		m.transcodeMu.Unlock()

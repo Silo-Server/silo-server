@@ -2603,7 +2603,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		unlock()
 		return nil, err
 	}
-	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+	if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+		unlock()
+		return nil, context.Canceled
+	}
 	unlock()
 
 	if opts.ToneMapMode != "" {
@@ -2633,7 +2636,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				replaceUnlock()
 				return nil, err
 			}
-			h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+			if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
+				replaceUnlock()
+				return nil, context.Canceled
+			}
 			replaceUnlock()
 			fallbackManifestDeadline := time.Now().Add(compatManifestStartupTimeout)
 			if _, fallbackErr := transcodeSession.WaitForManifest(time.Until(fallbackManifestDeadline)); fallbackErr != nil {
