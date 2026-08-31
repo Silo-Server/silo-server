@@ -810,7 +810,6 @@ func TestHandleEpisodes_UnknownSeasonIDReturnsNotFound(t *testing.T) {
 	}
 }
 
-
 // TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404 — same contract for
 // undecodable IDs. Decode failure must NOT 404 for the same reason.
 func TestHandleUpcoming_InvalidSeriesId_ReturnsEmptyNot404(t *testing.T) {

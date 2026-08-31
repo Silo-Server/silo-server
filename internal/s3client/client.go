@@ -349,7 +349,7 @@ func (c *Client) UsesExternalAuth() bool {
 // separately configured public or token-authenticated endpoint. An auth mode
 // without its endpoint still falls back to standard S3 presigning.
 func (c *Client) UsesExternalDelivery() bool {
-	return c.publicEndpoint != "" && c.UsesExternalAuth()
+	return c.publicEndpoint != ""
 }
 
 // PublicURL returns the deterministic public URL for an object based on the
