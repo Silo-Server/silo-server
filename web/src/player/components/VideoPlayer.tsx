@@ -2030,9 +2030,11 @@ export function VideoPlayer({
 
   // -- Fullscreen tracking --
   useEffect(() => {
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitDisplayingFullscreen?: boolean;
-    }) | null;
+    const video = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitDisplayingFullscreen?: boolean;
+        })
+      | null;
 
     const onChange = () => {
       const isDocFullscreen = !!document.fullscreenElement;
@@ -2453,12 +2455,14 @@ export function VideoPlayer({
   }, []);
 
   const handleFullscreenToggle = useCallback(() => {
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitSupportsFullscreen?: boolean;
-      webkitDisplayingFullscreen?: boolean;
-      webkitEnterFullscreen?: () => void;
-      webkitExitFullscreen?: () => void;
-    }) | null;
+    const video = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitSupportsFullscreen?: boolean;
+          webkitDisplayingFullscreen?: boolean;
+          webkitEnterFullscreen?: () => void;
+          webkitExitFullscreen?: () => void;
+        })
+      | null;
 
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});

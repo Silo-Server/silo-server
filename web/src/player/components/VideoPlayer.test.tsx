@@ -930,7 +930,9 @@ describe("VideoPlayer translation handoff", () => {
     video.webkitExitFullscreen = webkitExitFullscreen;
 
     // Simulate container requestFullscreen rejecting (as WebKit on iPhone does)
-    const playerContainer = container.querySelector('[data-testid="player-container"]') as HTMLElement;
+    const playerContainer = container.querySelector(
+      '[data-testid="player-container"]',
+    ) as HTMLElement;
     if (playerContainer) {
       playerContainer.requestFullscreen = vi.fn().mockRejectedValue(new Error("Not supported"));
     }
