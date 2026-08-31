@@ -21,7 +21,7 @@ The pull request template contains this block; copy it into every issue:
 - Tool(s): exact tool name(s), or "none"
 - Model(s): exact model identifier(s) reported by each tool, or "n/a"
 - Involvement: Fully AI-generated, human verified | AI-assisted | Human-written, AI-reviewed | No AI used
-- Adversarial review: scope, method, findings, and resolutions, or "n/a" only when no AI or implementation change was involved
+- Adversarial review: scope, method, findings, and resolutions, or "n/a" when this change does not require independent or adversarial review
 ```
 
 Disclosure is about provenance, not judgment. AI use is never by itself a reason
